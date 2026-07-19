@@ -203,12 +203,17 @@ describe("useLayoutSettings built-in editing", () => {
     act(() => result.current.updateLayout(layout));
 
     expect(result.current).toMatchObject({
-      selection: { kind: "custom", id: result.current.selection.id },
-      selectedName: "Default custom",
+      selection: { kind: "built-in", id: "default" },
+      selectedName: "Default",
       selectedIsDefault: true,
+      defaultActionLabel: "Default",
       isDirty: true,
     });
-    expect(result.current.selectedCustom?.is_default).toBe(true);
+    expect(result.current.selectedBuiltInOverride).toMatchObject({
+      name: "Default",
+      is_default: true,
+    });
+    expect(result.current.profiles).toHaveLength(1);
     expect(
       result.current.editorLayout?.columns
         .flatMap((column) => column.groups)
@@ -216,9 +221,55 @@ describe("useLayoutSettings built-in editing", () => {
         .map((panel) => panel.id),
     ).not.toContain("terminal-default");
   });
+
+  it("resets a built-in override without affecting custom profiles", () => {
+    const custom = profile({ id: SECOND_PROFILE_ID, name: "Custom" });
+    const { result } = renderLayoutSettings([custom]);
+    const layout = getBuiltInLayoutProfile("default").layout;
+    layout.columns[1].groups = layout.columns[1].groups.slice(0, 1);
+
+    act(() => result.current.updateLayout(layout));
+    expect(result.current.selectedBuiltInOverride).not.toBeNull();
+
+    act(() => result.current.resetBuiltIn());
+
+    expect(result.current.selectedBuiltInOverride).toBeNull();
+    expect(result.current.profiles).toEqual([custom]);
+    expect(result.current.editorLayout).toEqual(getBuiltInLayoutProfile("default").layout);
+  });
+
+  it("preserves a non-Default built-in override as default when editing it", () => {
+    const { result } = renderLayoutSettings();
+
+    act(() => result.current.setSelection({ kind: "built-in", id: "plan" }));
+    act(() => result.current.setDefault());
+    const layout = getBuiltInLayoutProfile("plan").layout;
+    layout.columns[0].width = 640;
+
+    act(() => result.current.updateLayout(layout));
+
+    expect(result.current.selectedBuiltInOverride?.is_default).toBe(true);
+    expect(result.current.selectedIsDefault).toBe(true);
+  });
 });
 
 describe("useLayoutSettings persistence", () => {
+  it("keeps a customized built-in selected after a successful save", async () => {
+    const { result } = renderLayoutSettings();
+    const layout = getBuiltInLayoutProfile("plan").layout;
+    layout.columns[0].width = 640;
+
+    act(() => result.current.setSelection({ kind: "built-in", id: "plan" }));
+    act(() => result.current.updateLayout(layout));
+    updateUserSettings.mockResolvedValueOnce(
+      responseWith(structuredClone(result.current.profiles)),
+    );
+    await act(async () => result.current.save());
+
+    expect(result.current.selection).toEqual({ kind: "built-in", id: "plan" });
+    expect(result.current.editorLayout?.columns[0].width).toBe(640);
+  });
+
   it("adopts the successful PATCH response as the authoritative baseline", async () => {
     const authoritative = profile({ name: "Server name", is_default: true });
     updateUserSettings.mockResolvedValueOnce(responseWith([authoritative]));
@@ -249,7 +300,9 @@ describe("useLayoutSettings persistence", () => {
 
     act(() => result.current.setSelection({ kind: "custom", id: PROFILE_ID }));
     act(() => result.current.updateSelected({ name: DRAFT_NAME }));
-    await act(async () => result.current.save());
+    await act(async () => {
+      await expect(result.current.save()).rejects.toThrow("save failed");
+    });
 
     expect(result.current).toMatchObject({
       profiles: [profile({ name: DRAFT_NAME })],

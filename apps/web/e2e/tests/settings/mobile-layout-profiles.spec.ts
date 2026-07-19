@@ -6,6 +6,7 @@ import {
 import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 
 type SavedProfile = {
+  id: string;
   name: string;
   is_default: boolean;
   layout: {
@@ -27,7 +28,6 @@ test.describe("Mobile layout profiles", () => {
 
     await layouts.selectPanel("Files");
     await layouts.moveSelectedTabRight();
-    await layouts.renameSelected("Mobile focused layout");
     await layouts.save();
 
     await expect
@@ -38,7 +38,7 @@ test.describe("Mobile layout profiles", () => {
       .toHaveLength(1);
     const response = await apiClient.getUserSettings();
     const profile = (response.settings.saved_layouts as SavedProfile[])[0];
-    expect(profile.name).toBe("Mobile focused layout");
+    expect(profile).toMatchObject({ id: "layout-override-default", name: "Default" });
     expect(profile).toMatchObject({ is_default: true });
     const filesGroup = profile.layout.columns
       .flatMap((column) => column.groups)

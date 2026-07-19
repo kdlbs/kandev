@@ -3,12 +3,12 @@ import { expect, type Locator, type Page } from "@playwright/test";
 export class LayoutSettingsPage {
   readonly root: Locator;
   readonly editor: Locator;
-  readonly toolbar: Locator;
+  readonly actions: Locator;
 
   constructor(private readonly page: Page) {
     this.root = page.getByTestId("layout-settings");
     this.editor = page.getByTestId("layout-editor");
-    this.toolbar = page.getByTestId("layout-editor-toolbar");
+    this.actions = page.getByTestId("layout-editor-context-actions");
   }
 
   async open(): Promise<void> {
@@ -32,20 +32,20 @@ export class LayoutSettingsPage {
     const nameInput = this.page.getByRole("textbox", { name: "Layout profile name" });
     await expect(nameInput).toBeVisible();
     await nameInput.fill(name);
-    await expect(this.toolbar.getByRole("combobox", { name: "Selected panel" })).toBeEnabled();
+    await expect(this.actions).toBeVisible();
   }
 
   async selectPanel(name: string): Promise<void> {
-    await this.toolbar.getByRole("combobox", { name: "Selected panel" }).click();
-    await this.page.getByRole("option", { name, exact: true }).click();
+    await this.editor.locator(".dv-tab", { hasText: name }).click();
+    await expect(this.actions).toHaveAccessibleName(`Actions for ${name}`);
   }
 
   async removePanel(name: string): Promise<void> {
     await this.selectPanel(name);
-    const button = this.toolbar.getByRole("button", { name: "Remove panel" });
+    const button = this.actions.getByRole("button", { name: "Remove panel" });
     await expect(button).toBeEnabled();
     await button.click();
-    await expect(this.page.getByRole("textbox", { name: "Layout profile name" })).toBeVisible();
+    await expect(this.page.getByText("Customized", { exact: true }).first()).toBeVisible();
   }
 
   async renameSelected(name: string): Promise<void> {
@@ -55,7 +55,7 @@ export class LayoutSettingsPage {
   }
 
   async moveSelectedTabRight(): Promise<void> {
-    const button = this.toolbar.getByRole("button", { name: "Move tab right" });
+    const button = this.actions.getByRole("button", { name: "Move tab right" });
     await expect(button).toBeEnabled();
     await button.click();
   }
@@ -66,7 +66,7 @@ export class LayoutSettingsPage {
         candidate.url().includes("/api/v1/user/settings") &&
         candidate.request().method() === "PATCH",
     );
-    await this.root.getByRole("button", { name: "Save", exact: true }).click();
+    await this.page.getByRole("button", { name: "Save changes" }).click();
     expect((await response).ok()).toBe(true);
   }
 }

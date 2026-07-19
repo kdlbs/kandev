@@ -4,14 +4,17 @@ import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from
 import { useAppStore } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import {
-  createLayoutProfile,
   createLayoutProfileId,
   deleteLayoutProfile,
   duplicateLayoutProfile,
+  getBuiltInLayoutOverride,
+  getBuiltInLayoutOverrideSourceId,
   getBuiltInLayoutProfile,
   getLayoutProfileCompatibility,
+  resetBuiltInLayoutOverride,
   resolveEffectiveDefaultLayout,
   setDefaultLayoutProfile,
+  upsertBuiltInLayoutOverride,
   validateReusableLayout,
 } from "@/lib/layout/layout-profiles";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
@@ -23,17 +26,19 @@ export type SaveStatus = "idle" | "loading" | "success" | "error";
 
 function defaultSelection(profiles: SavedLayout[]): LayoutProfileSelection {
   const effective = resolveEffectiveDefaultLayout(profiles);
-  return effective.source === "custom"
-    ? { kind: "custom", id: effective.profile.id }
-    : { kind: "built-in", id: "default" };
+  if (effective.source === "built-in") return { kind: "built-in", id: "default" };
+  const builtInId = getBuiltInLayoutOverrideSourceId(effective.profile);
+  return builtInId
+    ? { kind: "built-in", id: builtInId }
+    : { kind: "custom", id: effective.profile.id };
 }
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Failed to save layout profiles";
 }
 
-function getDefaultActionLabel(selectedCustom: SavedLayout | null, selectedIsDefault: boolean) {
-  if (selectedCustom?.is_default) return "Use built-in Default";
+function getDefaultActionLabel(isCustomDefault: boolean, selectedIsDefault: boolean) {
+  if (isCustomDefault) return "Use built-in Default";
   if (selectedIsDefault) return "Default";
   return "Use as default";
 }
@@ -88,11 +93,13 @@ function useLayoutProfileDrafts(savedLayouts: SavedLayout[]) {
     error,
     editorReset,
     isDirty,
+    profilesKey,
     setBaseline,
     setProfiles,
     setSelection,
     setSaveStatus,
     setError,
+    setEditorReset,
     replaceProfiles,
     cancel,
   };
@@ -107,18 +114,48 @@ function selectedState(drafts: Drafts) {
       : null;
   const selectedBuiltIn =
     drafts.selection.kind === "built-in" ? getBuiltInLayoutProfile(drafts.selection.id) : null;
-  const compatibility = selectedCustom ? getLayoutProfileCompatibility(selectedCustom) : null;
+  const selectedBuiltInOverride = selectedBuiltIn
+    ? getBuiltInLayoutOverride(drafts.profiles, selectedBuiltIn.id)
+    : null;
+  const editableProfile = selectedCustom ?? selectedBuiltInOverride;
+  const compatibility = editableProfile ? getLayoutProfileCompatibility(editableProfile) : null;
   const editorLayout =
-    selectedBuiltIn?.layout ?? (compatibility?.status === "editable" ? compatibility.layout : null);
-  return { selectedCustom, selectedBuiltIn, compatibility, editorLayout };
+    compatibility?.status === "editable" ? compatibility.layout : (selectedBuiltIn?.layout ?? null);
+  return {
+    selectedCustom,
+    selectedBuiltIn,
+    selectedBuiltInOverride,
+    compatibility,
+    editorLayout,
+  };
 }
 
-function useProfileActions(drafts: Drafts, selected: ReturnType<typeof selectedState>) {
+type SelectedState = ReturnType<typeof selectedState>;
+
+function updateBuiltInDefault(drafts: Drafts, selected: SelectedState) {
+  if (!selected.selectedBuiltIn) return false;
+  if (selected.selectedBuiltIn.id === "default" || selected.selectedBuiltInOverride?.is_default) {
+    drafts.replaceProfiles(setDefaultLayoutProfile(drafts.profiles, null));
+    return true;
+  }
+  drafts.replaceProfiles(
+    upsertBuiltInLayoutOverride(
+      drafts.profiles,
+      selected.selectedBuiltIn.id,
+      selected.editorLayout ?? selected.selectedBuiltIn.layout,
+      { createdAt: new Date().toISOString(), isDefault: true },
+    ),
+  );
+  return true;
+}
+
+function useProfileActions(drafts: Drafts, selected: SelectedState) {
   const selectedName = selected.selectedBuiltIn?.name ?? selected.selectedCustom?.name ?? "Layout";
   const duplicate = () =>
     attempt(drafts.setError, () => {
       const id = createLayoutProfileId();
-      const source = selected.selectedBuiltIn ?? drafts.selection.id;
+      const source =
+        selected.selectedBuiltInOverride ?? selected.selectedBuiltIn ?? drafts.selection.id;
       drafts.replaceProfiles(
         duplicateLayoutProfile(drafts.profiles, source, {
           id,
@@ -162,26 +199,21 @@ function useProfileActions(drafts: Drafts, selected: ReturnType<typeof selectedS
     const builtIn = selected.selectedBuiltIn;
     if (!builtIn) return;
     attempt(drafts.setError, () => {
-      const id = createLayoutProfileId();
       drafts.replaceProfiles(
-        createLayoutProfile(drafts.profiles, {
-          id,
-          name: `${builtIn.name} custom`,
-          layout: nextLayout,
+        upsertBuiltInLayoutOverride(drafts.profiles, builtIn.id, nextLayout, {
           createdAt: new Date().toISOString(),
-          isDefault: builtIn.id === "default",
+          isDefault: builtIn.id === "default" ? true : undefined,
         }),
       );
-      drafts.setSelection({ kind: "custom", id });
     });
   };
   const setDefault = () =>
     attempt(drafts.setError, () => {
+      if (updateBuiltInDefault(drafts, selected)) return;
       const profileId =
         drafts.selection.kind === "custom" && !selected.selectedCustom?.is_default
           ? drafts.selection.id
           : null;
-      if (drafts.selection.kind === "built-in" && drafts.selection.id !== "default") return;
       drafts.replaceProfiles(setDefaultLayoutProfile(drafts.profiles, profileId));
     });
   const deleteSelected = () =>
@@ -190,6 +222,13 @@ function useProfileActions(drafts: Drafts, selected: ReturnType<typeof selectedS
       drafts.replaceProfiles(deleteLayoutProfile(drafts.profiles, selected.selectedCustom.id));
       drafts.setSelection({ kind: "built-in", id: "default" });
     });
+  const resetBuiltIn = () => {
+    if (!selected.selectedBuiltInOverride || !selected.selectedBuiltIn) return;
+    drafts.replaceProfiles(
+      resetBuiltInLayoutOverride(drafts.profiles, selected.selectedBuiltIn.id),
+    );
+    drafts.setEditorReset((value) => value + 1);
+  };
   return {
     selectedName,
     duplicate,
@@ -198,6 +237,7 @@ function useProfileActions(drafts: Drafts, selected: ReturnType<typeof selectedS
     updateLayout,
     setDefault,
     deleteSelected,
+    resetBuiltIn,
   };
 }
 
@@ -220,7 +260,7 @@ function useSaveProfiles(drafts: Drafts) {
       drafts.setBaseline(next);
       drafts.setProfiles(structuredClone(next));
       drafts.setSelection((current) =>
-        current.kind === "custom" && next.some((profile) => profile.id === current.id)
+        current.kind === "built-in" || next.some((profile) => profile.id === current.id)
           ? current
           : defaultSelection(next),
       );
@@ -228,8 +268,38 @@ function useSaveProfiles(drafts: Drafts) {
     } catch (error) {
       drafts.setSaveStatus("error");
       drafts.setError(errorMessage(error));
+      throw error;
     }
   };
+}
+
+function isSelectedEffectiveDefault(
+  selection: LayoutProfileSelection,
+  effectiveDefault: ReturnType<typeof resolveEffectiveDefaultLayout>,
+) {
+  if (effectiveDefault.source === "built-in") {
+    return selection.kind === "built-in" && selection.id === "default";
+  }
+  if (selection.kind === "custom") return effectiveDefault.profile.id === selection.id;
+  return getBuiltInLayoutOverrideSourceId(effectiveDefault.profile) === selection.id;
+}
+
+function getDefaultActionState(drafts: Drafts, selected: SelectedState) {
+  const effectiveDefault = resolveEffectiveDefaultLayout(drafts.profiles);
+  const selectedIsDefault = isSelectedEffectiveDefault(drafts.selection, effectiveDefault);
+  const selectedSavedDefault = Boolean(
+    selected.selectedCustom?.is_default || selected.selectedBuiltInOverride?.is_default,
+  );
+  const disabled =
+    (drafts.selection.kind === "built-in" && selectedIsDefault) ||
+    (selected.compatibility?.status === "legacy" && !selectedSavedDefault);
+  const builtInDefaultSelected =
+    drafts.selection.kind === "built-in" && drafts.selection.id === "default";
+  const label =
+    builtInDefaultSelected && selectedIsDefault
+      ? "Default"
+      : getDefaultActionLabel(selectedSavedDefault, selectedIsDefault);
+  return { disabled, label, selectedIsDefault };
 }
 
 export function useLayoutSettings() {
@@ -238,31 +308,14 @@ export function useLayoutSettings() {
   const selected = selectedState(drafts);
   const actions = useProfileActions(drafts, selected);
   const save = useSaveProfiles(drafts);
-  const effectiveDefault = resolveEffectiveDefaultLayout(drafts.profiles);
-  const defaultActionVisible =
-    drafts.selection.kind === "custom" || drafts.selection.id === "default";
-  const selectedIsDefault =
-    (effectiveDefault.source === "custom" &&
-      drafts.selection.kind === "custom" &&
-      effectiveDefault.profile.id === drafts.selection.id) ||
-    (effectiveDefault.source === "built-in" &&
-      drafts.selection.kind === "built-in" &&
-      drafts.selection.id === "default");
-  const defaultActionDisabled =
-    (drafts.selection.kind === "built-in" && Boolean(selectedIsDefault)) ||
-    (selected.compatibility?.status === "legacy" && !selected.selectedCustom?.is_default);
-  const defaultActionLabel = getDefaultActionLabel(
-    selected.selectedCustom,
-    Boolean(selectedIsDefault),
-  );
+  const defaultAction = getDefaultActionState(drafts, selected);
   return {
     ...drafts,
     ...selected,
     ...actions,
     save,
-    defaultActionVisible,
-    defaultActionDisabled,
-    defaultActionLabel,
-    selectedIsDefault: Boolean(selectedIsDefault),
+    defaultActionDisabled: defaultAction.disabled,
+    defaultActionLabel: defaultAction.label,
+    selectedIsDefault: defaultAction.selectedIsDefault,
   };
 }

@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { DockviewApi } from "dockview-react";
 import {
   addReusablePanel,
-  activatePanel,
   mergeGroup,
   moveGroup,
   movePanelToGroup,
@@ -27,7 +26,6 @@ type FakePanel = {
   id: string;
   group: FakeGroup;
   api: {
-    setActive: ReturnType<typeof vi.fn>;
     moveTo: ReturnType<typeof vi.fn>;
   };
 };
@@ -41,7 +39,7 @@ function fakeApi(panelIds = ["chat", "files", "changes"]) {
   group.panels = panelIds.map((id) => ({
     id,
     group,
-    api: { setActive: vi.fn(), moveTo: vi.fn() },
+    api: { moveTo: vi.fn() },
   }));
   const second = {
     id: "group-two",
@@ -82,12 +80,10 @@ describe("layout editor actions", () => {
     expect(api.removePanel).toHaveBeenCalledWith(panels[1]);
   });
 
-  it("activates and reorders tabs within their group", () => {
+  it("reorders tabs within their group", () => {
     const { api, panels, group } = fakeApi();
 
-    expect(activatePanel(api, "files")).toBe(true);
     expect(reorderTab(api, "files", 1)).toBe(true);
-    expect(panels[1].api.setActive).toHaveBeenCalledOnce();
     expect(panels[1].api.moveTo).toHaveBeenCalledWith({
       group,
       position: "center",

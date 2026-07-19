@@ -13,11 +13,12 @@ Users can arrange and save the desktop task workbench only while a task is open,
 ## What
 
 - `Settings > General > Layouts` is the central manager for reusable desktop task-layout profiles and is reachable on desktop and mobile settings navigation.
-- The page lists the built-in Default, Plan Mode, Preview Mode, and VS Code layouts as stable templates. A user can edit a selected template directly; the first edit transparently creates an editable custom draft, and saving does not mutate the code-defined template.
+- The page lists the built-in Default, Plan Mode, Preview Mode, and VS Code layouts as stable rows. A user edits a built-in directly; Kandev stores a hidden override while keeping the built-in row selected and marks it `Customized`. Reset removes the override and restores the code-defined layout.
 - A user can create, rename, duplicate, edit, delete, and select the default custom profile. Names must be non-empty; profile IDs must be unique.
 - Exactly one layout is effective as the user default. A custom profile marked `is_default` wins; when none is marked, the built-in Default layout is effective.
 - The visual editor supports one instance of each reusable panel: Agent, Files, Changes, Terminal, Plan, Browser, and VS Code. Agent is required and cannot be removed.
-- Users can reorder tabs within a group, move panels between groups, choose the active tab, create or remove splits, and reorder or resize splits. The saved preview matches the initial desktop workbench arrangement.
+- Selecting a tab makes it active and shows contextual controls next to its split. Users can reorder or remove the tab, move it between groups, create splits, and move, merge, or resize the selected split. Adding a missing panel remains a separate floating action. Every editor action provides a hover/focus description.
+- Layout changes use the shared Settings floating save control and navigation guard. The page does not render its own Save or Cancel buttons.
 - Removing Terminal from the effective default prevents the default terminal panel and its backing user shell from being created when a fresh task environment is first opened.
 - A changed default applies to task environments that have no saved task-specific layout and to an explicit Reset Layout action. It does not overwrite an existing task-specific layout merely because the setting changed.
 - The existing workbench layout menu continues to apply built-in and custom profiles and save the current workbench as a custom profile. Profile mutations from either surface remain consistent after the user-settings response is received.
@@ -38,7 +39,7 @@ Layout profiles remain in the backend-owned `users.settings.saved_layouts` JSON 
 | `layout` | JSON object | Reusable `LayoutState` payload |
 | `created_at` | ISO-8601 string | Preserved when editing; newly assigned when creating or duplicating |
 
-The built-in layouts are code-defined templates and are not stored in `saved_layouts`. If no saved profile has `is_default: true`, the built-in Default template is the effective default.
+The built-in layouts are code-defined templates. A customization is stored in `saved_layouts` under the reserved stable ID `layout-override-<built-in-id>`, but is hidden from the Custom list and presented as the same built-in row. If no saved profile has `is_default: true`, the built-in Default template is the effective default. Resetting a built-in removes only its reserved override.
 
 The editor persists the existing declarative `LayoutState`: ordered columns contain ordered groups, groups contain ordered panels and an active panel, and captured tree/size data preserves split placement and proportions. New editor-created profiles use only the reusable panel registry. A legacy profile with an unreadable layout remains listed for rename, duplication, deletion, or default removal, but cannot enter the visual editor or become a new default until replaced with a valid reusable layout.
 
@@ -71,7 +72,8 @@ The frontend treats the returned settings payload as authoritative after each su
 ## Scenarios
 
 - **GIVEN** the user opens General settings on desktop or mobile, **WHEN** they select Layouts, **THEN** the built-in templates, custom profiles, and effective default are visible.
-- **GIVEN** the built-in Default template, **WHEN** the user removes Terminal, places Files and Changes in one right-side tab group, and saves, **THEN** a custom default profile persists with that arrangement without requiring a duplicate step.
+- **GIVEN** the built-in Default layout, **WHEN** the user removes Terminal and saves with the shared floating control, **THEN** the same Default row is marked `Customized` and its hidden default override persists without requiring a duplicate step.
+- **GIVEN** a customized built-in layout, **WHEN** the user chooses Reset and saves, **THEN** its hidden override is removed and the original code-defined layout is restored.
 - **GIVEN** a valid custom profile, **WHEN** the user reorders tabs or moves a panel into a new split and saves, **THEN** reopening the profile shows the same tab order, active tab, split order, and proportions.
 - **GIVEN** a default profile without Terminal and a task environment with no saved layout, **WHEN** the user first opens that task, **THEN** the workbench has no Terminal tab and no default user shell is created.
 - **GIVEN** an existing task with a task-specific layout, **WHEN** the user changes the default profile and returns to that task, **THEN** the task-specific layout is unchanged.
@@ -86,5 +88,5 @@ The frontend treats the returned settings payload as authoritative after each su
 - Customizing mobile or tablet task-detail layouts.
 - Forcing a changed default onto existing task-specific layouts without Reset Layout.
 - Configuring task-specific panels such as individual files, diffs, commits, pull requests, extra sessions, or extra terminals.
-- Mutating the code-defined built-in templates; direct edits are persisted as custom profiles.
+- Mutating the code-defined built-in definitions; direct edits are persisted as hidden user overrides.
 - Sharing profiles between users or scoping profiles to a workspace, repository, agent, or executor.

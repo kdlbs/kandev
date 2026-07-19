@@ -87,7 +87,13 @@ export type DuplicateLayoutProfileInput = {
   createdAt: string;
 };
 
+export type UpsertBuiltInLayoutOverrideOptions = {
+  createdAt: string;
+  isDefault?: boolean;
+};
+
 const REUSABLE_PANEL_ID_SET = new Set<string>(REUSABLE_PANEL_IDS);
+const BUILT_IN_OVERRIDE_PREFIX = "layout-override-";
 
 export function createLayoutProfileId(): string {
   return `layout-${globalThis.crypto.randomUUID()}`;
@@ -97,6 +103,31 @@ export function getBuiltInLayoutProfile(id: BuiltInLayoutProfileId): BuiltInLayo
   const descriptor = BUILT_IN_LAYOUT_PROFILES.find((profile) => profile.id === id);
   if (!descriptor) throw new Error(`Unknown built-in layout profile: ${id}`);
   return { ...descriptor, layout: getPresetLayout(id) };
+}
+
+export function getBuiltInLayoutOverrideId(id: BuiltInLayoutProfileId): string {
+  return `${BUILT_IN_OVERRIDE_PREFIX}${id}`;
+}
+
+export function getBuiltInLayoutOverrideSourceId(
+  profile: Pick<SavedLayout, "id">,
+): BuiltInLayoutProfileId | null {
+  return (
+    BUILT_IN_LAYOUT_PROFILES.find(({ id }) => profile.id === getBuiltInLayoutOverrideId(id))?.id ??
+    null
+  );
+}
+
+export function isBuiltInLayoutOverride(profile: Pick<SavedLayout, "id">): boolean {
+  return getBuiltInLayoutOverrideSourceId(profile) !== null;
+}
+
+export function getBuiltInLayoutOverride(
+  profiles: SavedLayout[],
+  id: BuiltInLayoutProfileId,
+): SavedLayout | null {
+  const overrideId = getBuiltInLayoutOverrideId(id);
+  return profiles.find((profile) => profile.id === overrideId) ?? null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -337,6 +368,44 @@ export function createLayoutProfile(
       created_at: input.createdAt,
     },
   ];
+}
+
+export function upsertBuiltInLayoutOverride(
+  profiles: SavedLayout[],
+  id: BuiltInLayoutProfileId,
+  layout: Record<string, unknown>,
+  options: UpsertBuiltInLayoutOverrideOptions,
+): SavedLayout[] {
+  const builtIn = getBuiltInLayoutProfile(id);
+  const overrideId = getBuiltInLayoutOverrideId(id);
+  const existing = getBuiltInLayoutOverride(profiles, id);
+  const isDefault = options.isDefault ?? existing?.is_default ?? false;
+  if (!existing) {
+    return createLayoutProfile(profiles, {
+      id: overrideId,
+      name: builtIn.name,
+      layout,
+      createdAt: options.createdAt,
+      isDefault,
+    });
+  }
+  if (!validateReusableLayout(layout).valid) {
+    throw new Error("Only a valid reusable layout can override a built-in layout");
+  }
+  return profiles.map((profile) => {
+    if (profile.id === overrideId) {
+      return { ...profile, name: builtIn.name, layout: cloneLayout(layout), is_default: isDefault };
+    }
+    return isDefault && profile.is_default ? { ...profile, is_default: false } : profile;
+  });
+}
+
+export function resetBuiltInLayoutOverride(
+  profiles: SavedLayout[],
+  id: BuiltInLayoutProfileId,
+): SavedLayout[] {
+  const overrideId = getBuiltInLayoutOverrideId(id);
+  return profiles.filter((profile) => profile.id !== overrideId);
 }
 
 function findProfile(profiles: SavedLayout[], profileId: string): SavedLayout {

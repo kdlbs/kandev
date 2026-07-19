@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { IconAlertTriangle, IconLayoutDashboard, IconTrash } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconLayoutDashboard,
+  IconRestore,
+  IconTrash,
+} from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import {
   AlertDialog,
@@ -14,51 +19,61 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { Button } from "@kandev/ui/button";
+import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { LayoutEditor } from "./layout-editor";
 import { LayoutProfileList } from "./layout-profile-list";
 import { useLayoutSettings } from "./use-layout-settings";
 
 type Controller = ReturnType<typeof useLayoutSettings>;
 
-function LayoutSettingsHeader({ controller }: { controller: Controller }) {
+function defaultActionHelp(label: string) {
+  if (label === "Default") return "This layout is used as the starting layout for new tasks.";
+  if (label === "Use built-in Default") {
+    return "Make the original Default layout the starting layout for new tasks.";
+  }
+  return "Use this layout as the starting layout for new tasks.";
+}
+
+function LayoutSettingsHeader() {
   return (
     <>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-2xl font-bold">
-            <IconLayoutDashboard className="h-5 w-5" />
-            Layouts
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Configure the initial desktop task workbench.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {controller.isDirty && <UnsavedChangesBadge />}
-          <Button
-            type="button"
-            variant="outline"
-            className="min-h-11 cursor-pointer sm:min-h-9"
-            disabled={!controller.isDirty || controller.saveStatus === "loading"}
-            onClick={controller.cancel}
-          >
-            Cancel
-          </Button>
-          <UnsavedSaveButton
-            isDirty={controller.isDirty}
-            isLoading={controller.saveStatus === "loading"}
-            status={controller.saveStatus}
-            onClick={() => void controller.save()}
-            disabled={!controller.isDirty}
-          />
-        </div>
+      <div className="min-w-0">
+        <h2 className="flex items-center gap-2 text-2xl font-bold">
+          <IconLayoutDashboard className="h-5 w-5" />
+          Layouts
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Configure the initial desktop task workbench.
+        </p>
       </div>
       <Separator />
     </>
+  );
+}
+
+function ResetBuiltInButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="min-h-11 cursor-pointer sm:min-h-8"
+          aria-label="Reset built-in layout"
+          onClick={onClick}
+        >
+          <IconRestore className="h-4 w-4" /> Reset
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        Restore the original built-in layout and discard its override.
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -77,7 +92,7 @@ function DeleteProfileButton({ onClick }: { onClick: () => void }) {
           <IconTrash className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Delete layout profile</TooltipContent>
+      <TooltipContent>Delete this custom layout after confirmation.</TooltipContent>
     </Tooltip>
   );
 }
@@ -100,24 +115,33 @@ function SelectedLayoutHeader({
             className="min-h-11 max-w-md sm:min-h-9"
           />
         ) : (
-          <div>
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-lg font-semibold">{controller.selectedName}</h3>
-            <p className="text-sm text-muted-foreground">Built-in template</p>
+            <Badge variant="outline">Built-in</Badge>
+            {controller.selectedBuiltInOverride && <Badge variant="secondary">Customized</Badge>}
           </div>
         )}
       </div>
       <div className="flex flex-wrap gap-2">
-        {controller.defaultActionVisible && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="min-h-11 cursor-pointer sm:min-h-8"
-            disabled={controller.defaultActionDisabled}
-            onClick={controller.setDefault}
-          >
-            {controller.defaultActionLabel}
-          </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span tabIndex={controller.defaultActionDisabled ? 0 : -1} className="inline-flex">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="min-h-11 cursor-pointer sm:min-h-8"
+                disabled={controller.defaultActionDisabled}
+                onClick={controller.setDefault}
+              >
+                {controller.defaultActionLabel}
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{defaultActionHelp(controller.defaultActionLabel)}</TooltipContent>
+        </Tooltip>
+        {controller.selectedBuiltInOverride && (
+          <ResetBuiltInButton onClick={controller.resetBuiltIn} />
         )}
         {controller.selectedCustom && <DeleteProfileButton onClick={onDelete} />}
       </div>
@@ -188,9 +212,19 @@ function DeleteProfileDialog({
 export function LayoutSettings() {
   const controller = useLayoutSettings();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const invalidName = controller.profiles.some((profile) => !profile.name.trim());
+  useSettingsSaveContributor({
+    id: "layout-profiles",
+    revision: controller.profilesKey,
+    isDirty: controller.isDirty,
+    canSave: !invalidName,
+    invalidReason: invalidName ? "Layout profile names must not be empty" : undefined,
+    save: controller.save,
+    discard: controller.cancel,
+  });
   return (
     <div className="min-w-0 space-y-6" data-testid="layout-settings">
-      <LayoutSettingsHeader controller={controller} />
+      <LayoutSettingsHeader />
       {controller.error && (
         <Alert variant="destructive">
           <IconAlertTriangle className="h-4 w-4" />

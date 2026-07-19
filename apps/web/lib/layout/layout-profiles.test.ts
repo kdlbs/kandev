@@ -7,13 +7,21 @@ import {
   createLayoutProfileId,
   deleteLayoutProfile,
   duplicateLayoutProfile,
+  getBuiltInLayoutOverride,
+  getBuiltInLayoutOverrideId,
   getBuiltInLayoutProfile,
   getLayoutProfileCompatibility,
+  isBuiltInLayoutOverride,
   renameLayoutProfile,
+  resetBuiltInLayoutOverride,
   resolveEffectiveDefaultLayout,
   setDefaultLayoutProfile,
+  upsertBuiltInLayoutOverride,
   validateReusableLayout,
 } from "./layout-profiles";
+
+const DEFAULT_LAYOUT_ID = "default";
+const CREATED_AT = "2026-07-19T11:00:00.000Z";
 
 const FIRST_LAYOUT_ID = "layout-one";
 const SECOND_LAYOUT_ID = "layout-two";
@@ -51,7 +59,7 @@ function savedLayout(overrides: Partial<SavedLayout> = {}): SavedLayout {
 describe("built-in layout profiles", () => {
   it("exposes the four reusable built-in templates", () => {
     expect(BUILT_IN_LAYOUT_PROFILES.map(({ id, name }) => ({ id, name }))).toEqual([
-      { id: "default", name: "Default" },
+      { id: DEFAULT_LAYOUT_ID, name: "Default" },
       { id: "plan", name: "Plan Mode" },
       { id: "preview", name: "Preview Mode" },
       { id: "vscode", name: "VS Code" },
@@ -65,10 +73,12 @@ describe("built-in layout profiles", () => {
   });
 
   it("returns a fresh template layout for each request", () => {
-    const first = getBuiltInLayoutProfile("default");
+    const first = getBuiltInLayoutProfile(DEFAULT_LAYOUT_ID);
     first.layout.columns[0].groups[0].panels.length = 0;
 
-    expect(getBuiltInLayoutProfile("default").layout.columns[0].groups[0].panels).toHaveLength(1);
+    expect(
+      getBuiltInLayoutProfile(DEFAULT_LAYOUT_ID).layout.columns[0].groups[0].panels,
+    ).toHaveLength(1);
   });
 });
 
@@ -208,7 +218,7 @@ describe("layout profile defaults", () => {
     const resolved = resolveEffectiveDefaultLayout([invalid]);
 
     expect(resolved.source).toBe("built-in");
-    expect(resolved.profile.id).toBe("default");
+    expect(resolved.profile.id).toBe(DEFAULT_LAYOUT_ID);
     expect(validateReusableLayout(resolved.layout).valid).toBe(true);
   });
 
@@ -243,6 +253,44 @@ describe("layout profile IDs", () => {
   });
 });
 
+describe("built-in layout overrides", () => {
+  it("creates one stable hidden override and updates it in place", () => {
+    const firstLayout = reusableLayout(["chat", "files"]);
+    const secondLayout = reusableLayout(["chat", "changes"]);
+
+    const created = upsertBuiltInLayoutOverride([], DEFAULT_LAYOUT_ID, firstLayout, {
+      createdAt: CREATED_AT,
+      isDefault: true,
+    });
+    const updated = upsertBuiltInLayoutOverride(created, DEFAULT_LAYOUT_ID, secondLayout, {
+      createdAt: "2026-07-19T12:00:00.000Z",
+    });
+
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({
+      id: getBuiltInLayoutOverrideId(DEFAULT_LAYOUT_ID),
+      name: "Default",
+      is_default: true,
+      layout: secondLayout,
+      created_at: CREATED_AT,
+    });
+    expect(isBuiltInLayoutOverride(updated[0])).toBe(true);
+    expect(getBuiltInLayoutOverride(updated, DEFAULT_LAYOUT_ID)).toBe(updated[0]);
+  });
+
+  it("resets only the selected built-in override", () => {
+    const defaultOverride = upsertBuiltInLayoutOverride([], DEFAULT_LAYOUT_ID, reusableLayout(), {
+      createdAt: CREATED_AT,
+      isDefault: true,
+    });
+    const withCustom = [...defaultOverride, savedLayout({ id: SECOND_LAYOUT_ID })];
+
+    expect(resetBuiltInLayoutOverride(withCustom, DEFAULT_LAYOUT_ID)).toEqual([
+      savedLayout({ id: SECOND_LAYOUT_ID }),
+    ]);
+  });
+});
+
 describe("immutable layout profile mutations", () => {
   it("creates a trimmed profile and clears an earlier default", () => {
     const original = [savedLayout({ is_default: true })];
@@ -251,7 +299,7 @@ describe("immutable layout profile mutations", () => {
       id: SECOND_LAYOUT_ID,
       name: "  Focused  ",
       layout: reusableLayout(["chat", "files"]),
-      createdAt: "2026-07-19T11:00:00.000Z",
+      createdAt: CREATED_AT,
       isDefault: true,
     });
 
@@ -262,7 +310,7 @@ describe("immutable layout profile mutations", () => {
         name: "Focused",
         is_default: true,
         layout: reusableLayout(["chat", "files"]),
-        created_at: "2026-07-19T11:00:00.000Z",
+        created_at: CREATED_AT,
       }),
     ]);
     expect(original[0].is_default).toBe(true);
@@ -276,7 +324,7 @@ describe("immutable layout profile mutations", () => {
         id: FIRST_LAYOUT_ID,
         name: "Duplicate",
         layout: reusableLayout(),
-        createdAt: "2026-07-19T11:00:00.000Z",
+        createdAt: CREATED_AT,
       }),
     ).toThrow("unique");
     expect(() => renameLayoutProfile(original, FIRST_LAYOUT_ID, "  ")).toThrow("name");

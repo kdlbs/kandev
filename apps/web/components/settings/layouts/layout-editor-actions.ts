@@ -39,13 +39,6 @@ export function removeReusablePanel(api: DockviewApi, panelId: string): boolean 
   return true;
 }
 
-export function activatePanel(api: DockviewApi, panelId: string): boolean {
-  const panel = api.getPanel(panelId);
-  if (!panel) return false;
-  panel.api.setActive();
-  return true;
-}
-
 export function reorderTab(api: DockviewApi, panelId: string, delta: -1 | 1): boolean {
   const panel = api.getPanel(panelId);
   if (!panel) return false;

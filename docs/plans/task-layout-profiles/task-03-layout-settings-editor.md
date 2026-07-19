@@ -12,7 +12,9 @@ spec: "../../specs/ui/task-layout-profiles.md"
 
 ## Acceptance
 
-- `Settings > General > Layouts` manages built-in templates and custom profiles with explicit save/cancel and error states.
+- `Settings > General > Layouts` manages built-in layouts and custom profiles through the shared floating save coordinator, navigation guard, and page-level error state.
+- Built-in edits remain on one visible row, create a hidden override marked `Customized`, and can be restored with Reset.
+- Selecting a tab exposes contextual split/tab actions with hover/focus descriptions; adding panels remains a separate floating action.
 - The isolated preview supports reusable panel add/remove, tab reorder, active-tab choice, and split create/move/resize without mounting runtime task panels.
 - Every operation is reachable by pointer, keyboard, and touch; the mobile page has no horizontal page scroll.
 

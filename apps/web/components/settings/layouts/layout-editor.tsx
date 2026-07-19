@@ -1,19 +1,12 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type RefObject,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import {
   DockviewDefaultTab,
   DockviewReact,
   type DockviewApi,
   type DockviewReadyEvent,
+  type IDockviewPanel,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview-react";
@@ -23,15 +16,13 @@ import {
   toSerializedDockview,
   type LayoutState,
 } from "@/lib/state/layout-manager";
-import { LayoutEditorToolbar } from "./layout-editor-toolbar";
+import { LayoutEditorActions, type LayoutEditorActionAnchor } from "./layout-editor-toolbar";
 
 type LayoutEditorProps = {
   layout: LayoutState;
   editable: boolean;
   onChange: (layout: LayoutState) => void;
 };
-
-const EditorContext = createContext({ editable: false });
 
 function PlaceholderPanel({ api }: IDockviewPanelProps) {
   return (
@@ -45,8 +36,7 @@ function PlaceholderPanel({ api }: IDockviewPanelProps) {
 }
 
 function EditorTab(props: IDockviewPanelHeaderProps) {
-  const { editable } = useContext(EditorContext);
-  return <DockviewDefaultTab {...props} hideClose={!editable || props.api.id === "chat"} />;
+  return <DockviewDefaultTab {...props} hideClose />;
 }
 
 const placeholderComponents = {
@@ -68,6 +58,20 @@ const placeholderTabs = {
 
 function activePanelId(panel: { id: string } | undefined, api: DockviewApi) {
   return panel?.id ?? api.panels[0]?.id ?? null;
+}
+
+function getActionAnchor(root: HTMLDivElement, selected: IDockviewPanel): LayoutEditorActionAnchor {
+  const rootBounds = root.getBoundingClientRect();
+  const groupBounds = selected.group.element.getBoundingClientRect();
+  const groupTop = groupBounds.top - rootBounds.top;
+  const groupBottom = groupBounds.bottom - rootBounds.top;
+  const actionWidth = Math.min(360, rootBounds.width - 16);
+  const centeredLeft = groupBounds.left - rootBounds.left + groupBounds.width / 2 - actionWidth / 2;
+  return {
+    left: Math.max(8, Math.min(centeredLeft, rootBounds.width - actionWidth - 8)),
+    top: Math.max(groupTop + 8, Math.min(groupTop + 42, groupBottom - 54)),
+    width: actionWidth,
+  };
 }
 
 function EditorDock({
@@ -104,7 +108,22 @@ export function LayoutEditor({ layout, editable, onChange }: LayoutEditorProps) 
   const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
-  const [, setRevision] = useState(0);
+  const [revision, setRevision] = useState(0);
+  const [actionAnchor, setActionAnchor] = useState<LayoutEditorActionAnchor | null>(null);
+
+  const updateActionAnchor = useCallback(() => {
+    const root = rootRef.current;
+    const selected = selectedPanelId ? apiRef.current?.getPanel(selectedPanelId) : null;
+    if (!root || !selected) {
+      setActionAnchor(null);
+      return;
+    }
+    setActionAnchor(getActionAnchor(root, selected));
+  }, [selectedPanelId]);
+
+  useLayoutEffect(() => {
+    updateActionAnchor();
+  }, [revision, updateActionAnchor]);
 
   const capture = useCallback(() => {
     const current = apiRef.current;
@@ -160,6 +179,7 @@ export function LayoutEditor({ layout, editable, onChange }: LayoutEditorProps) 
       if (width <= 0 || height <= 0) return;
       applyingRef.current = true;
       api.layout(width, height, true);
+      setRevision((revision) => revision + 1);
       if (releaseTimerRef.current) clearTimeout(releaseTimerRef.current);
       releaseTimerRef.current = setTimeout(() => {
         applyingRef.current = false;
@@ -174,17 +194,15 @@ export function LayoutEditor({ layout, editable, onChange }: LayoutEditorProps) 
   }, [api]);
 
   return (
-    <EditorContext.Provider value={{ editable }}>
-      <div className="min-w-0 overflow-hidden rounded-md border" data-testid="layout-editor">
-        <LayoutEditorToolbar
-          api={api}
-          editable={editable}
-          selectedPanelId={selectedPanelId}
-          onSelectedPanelChange={setSelectedPanelId}
-          onCommand={capture}
-        />
-        <EditorDock rootRef={rootRef} editable={editable} onReady={onReady} />
-      </div>
-    </EditorContext.Provider>
+    <div className="relative min-w-0 overflow-hidden rounded-md border" data-testid="layout-editor">
+      <LayoutEditorActions
+        api={api}
+        anchor={actionAnchor}
+        editable={editable}
+        selectedPanelId={selectedPanelId}
+        onCommand={capture}
+      />
+      <EditorDock rootRef={rootRef} editable={editable} onReady={onReady} />
+    </div>
   );
 }

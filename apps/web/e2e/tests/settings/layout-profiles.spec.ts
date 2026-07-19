@@ -141,18 +141,62 @@ test.describe("Task layout profile defaults", () => {
   test("edits and saves the built-in Default without duplicating it first", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
+    test.setTimeout(120_000);
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.open();
+    await testPage.getByRole("button", { name: "Add panel" }).hover();
+    await expect(
+      testPage.getByRole("tooltip", {
+        name: "Add a missing tool tab beside the selected split.",
+      }),
+    ).toBeVisible();
+
+    await layouts.selectPanel("Terminal");
+    await layouts.actions.getByRole("button", { name: "Remove panel" }).hover();
+    await expect(
+      testPage.getByRole("tooltip", { name: "Remove this tab from the saved layout." }),
+    ).toBeVisible();
     await layouts.removePanel("Terminal");
-    await layouts.renameSelected("Focused default");
+    await expect(testPage.getByRole("textbox", { name: "Layout profile name" })).toHaveCount(0);
+    await expect(testPage.getByText("No custom profiles", { exact: true })).toBeVisible();
     await layouts.save();
 
     const response = await apiClient.getUserSettings();
     const saved = response.settings.saved_layouts;
     expect(saved).toHaveLength(1);
-    expect(saved[0]).toMatchObject({ name: "Focused default", is_default: true });
+    expect(saved[0]).toMatchObject({
+      id: "layout-override-default",
+      name: "Default",
+      is_default: true,
+    });
     expect(JSON.stringify(saved[0].layout)).not.toContain("terminal-default");
+
+    const task = await createTaskWithSession(apiClient, seedData, "Hidden Layout Override Task");
+    await openTask(testPage, task.id);
+    await testPage.getByTestId("layout-preset-trigger").click();
+    await expect(
+      testPage.locator(
+        '[data-testid="layout-saved-delete"][data-layout-id="layout-override-default"]',
+      ),
+    ).toHaveCount(0);
+  });
+
+  test("resets a customized built-in layout to its original definition", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    await layouts.removePanel("Terminal");
+    await layouts.save();
+    await testPage.getByRole("button", { name: "Reset built-in layout" }).click();
+    await expect(testPage.getByText("Customized", { exact: true })).toHaveCount(0);
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "Terminal" })).toBeVisible();
+    await layouts.save();
+
+    expect((await apiClient.getUserSettings()).settings.saved_layouts).toEqual([]);
   });
 
   test("fresh tasks use the no-terminal default while existing tasks wait for Reset Layout", async ({
@@ -194,10 +238,11 @@ test.describe("Task layout profile defaults", () => {
     await testPage.getByTestId("layout-reset-item").click();
     await expectNoTerminalDefault(testPage);
 
+    await openTask(testPage, taskA.id);
     await testPage.getByTestId("layout-preset-trigger").click();
     await testPage
       .locator('[data-testid="layout-saved-delete"][data-layout-id="focused-default"]')
-      .click();
+      .dispatchEvent("click");
     await expect(testPage.getByRole("alertdialog")).toContainText(
       "The built-in Default layout will become the default.",
     );

@@ -52,6 +52,7 @@ import {
   createLayoutProfile,
   createLayoutProfileId,
   deleteLayoutProfile,
+  isBuiltInLayoutOverride,
   type BuiltInLayoutProfileId,
 } from "@/lib/layout/layout-profiles";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -404,7 +405,7 @@ export function LayoutPresetSelector() {
           <DropdownMenuGroup>
             <DropdownMenuLabel className="text-xs">Saved Layouts</DropdownMenuLabel>
             <SavedLayoutItems
-              layouts={savedLayouts}
+              layouts={savedLayouts.filter((layout) => !isBuiltInLayoutOverride(layout))}
               onApply={handleApplyCustom}
               onDelete={setDeleteCandidate}
             />

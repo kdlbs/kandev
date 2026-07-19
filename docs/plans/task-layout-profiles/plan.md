@@ -30,8 +30,9 @@ No schema, repository, DTO, or endpoint changes are required; `users.settings.sa
 ### Settings page and editor
 
 - Add `apps/web/app/settings/general/layouts/page.tsx` with the existing user-settings hydration pattern.
-- Add `apps/web/components/settings/layouts/layout-settings.tsx` for profile selection, create/duplicate/rename/delete/default commands, dirty-state handling, save/cancel behavior, error feedback, and narrow-viewport composition.
-- Add focused editor components under `apps/web/components/settings/layouts/` that render lightweight panel placeholders, use the existing Dockview layout engine for pointer/touch split and tab manipulation, and expose explicit keyboard/touch commands for every required operation. Agent is permanent; reusable panels are single-instance.
+- Add `apps/web/components/settings/layouts/layout-settings.tsx` for profile selection, create/duplicate/rename/delete/default/reset commands, dirty-state handling through the shared Settings floating save coordinator, error feedback, and narrow-viewport composition.
+- Add focused editor components under `apps/web/components/settings/layouts/` that render lightweight panel placeholders, use the existing Dockview layout engine for pointer/touch split and tab manipulation, and expose contextual keyboard/touch commands beside the selected split. Every command has hover/focus help. Agent is permanent; reusable panels are single-instance.
+- Represent direct built-in edits as reserved hidden overrides so each built-in remains one visible row with `Built-in` and optional `Customized` status. Reset removes the reserved override and restores the code-defined layout.
 - The preview is isolated from `useDockviewStore` and runtime panel components so Browser, VS Code, and Terminal have no runtime side effects in Settings.
 - Add `Layouts` to `apps/web/components/settings/general-nav.ts` and the settings tree; register `/settings/general/layouts` in `apps/web/src/settings-routes.tsx` and cover route resolution.
 
@@ -52,9 +53,9 @@ No schema, repository, DTO, or endpoint changes are required; `users.settings.sa
 
 ## E2E Tests
 
-- **Desktop profile workflow:** `apps/web/e2e/tests/settings/layout-profiles.spec.ts`; edit built-in Default directly, remove Terminal, combine/reorder Files and Changes, save as default, reload Settings, and verify the editor restores the profile.
+- **Desktop profile workflow:** `apps/web/e2e/tests/settings/layout-profiles.spec.ts`; edit built-in Default directly, remove Terminal with contextual controls, verify action help, save through the shared floating control, and reset the built-in override.
 - **Fresh task and reset behavior:** the same desktop spec creates and opens a fresh task, verifies no Terminal tab/default shell, proves an existing customized task is unchanged after a default update, then verifies Reset Layout applies the latest default.
-- **Mobile settings parity:** `apps/web/e2e/tests/settings/mobile-layout-profiles.spec.ts`; navigate through the settings drawer, edit a built-in directly, rename and reorder its custom draft with touch-accessible commands, and verify there is no horizontal page scroll.
+- **Mobile settings parity:** `apps/web/e2e/tests/settings/mobile-layout-profiles.spec.ts`; navigate through the settings drawer, select and reorder a built-in tab with the contextual touch controls, save its hidden override, and verify there is no horizontal page scroll.
 - **Existing layout regressions:** run `apps/web/e2e/tests/task/task-default-layout.spec.ts` and `apps/web/e2e/tests/layout/saved-layout-session-isolation.spec.ts` with the new specs.
 
 ## Public Documentation
