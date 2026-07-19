@@ -47,7 +47,7 @@ Read [capture-pipeline.md](references/capture-pipeline.md) before recording and 
 - Exact profiles: desktop source `3840x2400` at 25 fps delivers `1920x1200` at 25 fps; native mobile source and delivery are `1290x2796` at 25 fps.
 - Raw master is one continuous take at 1x with no internal cuts, speed ramps, or audio. It also has no body transform, camera, crop, or concat.
 - Disable OS cursor in X11 capture; show one intentional high-contrast DOM cursor/touch treatment.
-- Use real UI input and retain dense semantic cursor/touch samples, target bounds, target glyph bounds, rendered glyph bounds, and visibility intervals for camera design and audit.
+- Use real UI input and retain dense semantic cursor/touch samples, target bounds, independently measured target and pointer glyph bounds, and motion-inclusive visibility intervals for camera design and audit.
 - Browser chrome absent; product fills the physical frame.
 - Any responsive/product defect remains visible or blocks capture. Do not hide it with capture CSS.
 

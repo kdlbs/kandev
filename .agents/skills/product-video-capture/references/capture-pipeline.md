@@ -79,6 +79,8 @@ Move real input and the overlay together. Keep the complete rendered glyph insid
 
 Record dense semantic pointer/touch metadata for every intentional movement: previous settled point, motion start, 10-12 timed intermediate samples or an equally dense tested easing contract, arrival, next motion start, and visibility interval. Click-only timestamps cannot prove containment. Each event records target bounds, target glyph bounds, pointer/touch glyph bounds, hotspot, label, and coordinates in CSS pixels:
 
+Target glyph bounds measure the rendered visual content inside the semantic target or control; pointer glyph bounds measure the separate rendered cursor/touch overlay. Never reuse pointer or cursor geometry as target glyph bounds. The visibility interval starts at motion start, not arrival, and ends only at the next movement or final settled hold.
+
 ```json
 {
   "action": "cursor-arrive",

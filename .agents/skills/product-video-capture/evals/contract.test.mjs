@@ -40,6 +40,21 @@ test("records dense semantic pointer and target geometry", () => {
   assert.match(bundle, /visibility interval/i);
 });
 
+test("keeps target and pointer glyph geometry distinct over the full movement", () => {
+  assert.match(
+    bundle,
+    /target glyph bounds[^\n]{0,140}(?:rendered|visual)[^\n]{0,80}(?:content|glyph)[^\n]{0,80}(?:inside|within)[^\n]{0,40}(?:target|control)/i,
+  );
+  assert.match(
+    bundle,
+    /never[^\n]{0,120}(?:reuse|alias|copy)[^\n]{0,100}(?:pointer|cursor)[^\n]{0,80}target glyph bounds/i,
+  );
+  assert.match(
+    bundle,
+    /visibility interval[^\n]{0,120}(?:begins|starts)[^\n]{0,60}motion start[^\n]{0,80}(?:not|rather than)[^\n]{0,40}arrival/i,
+  );
+});
+
 test("uses center-biased widen-pan-tighten camera choreography", () => {
   assert.match(bundle, /center-biased/i);
   assert.match(bundle, /widen[^\n]{0,100}pan[^\n]{0,100}tighten/i);

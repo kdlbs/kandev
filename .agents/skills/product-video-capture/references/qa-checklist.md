@@ -12,7 +12,7 @@
 - [ ] Mobile source and delivery are native `1290x2796` at 25 fps.
 - [ ] Each raw master is one continuous take at 1x: no internal cuts, concat, camera, crop, speed ramps, or audio.
 - [ ] OS cursor is disabled and exactly one DOM cursor/touch treatment is visible.
-- [ ] Dense semantic metadata includes timestamps, intermediate samples, target bounds, target glyph bounds, pointer glyph bounds, and visibility intervals.
+- [ ] Dense semantic metadata includes timestamps, intermediate samples, target bounds, target glyph bounds, pointer glyph bounds, and visibility intervals. Target and pointer geometry are independently measured, never aliases; every interval begins at departure and includes motion, arrival, and settle.
 
 ## 2. Technical And Codec Probe
 
