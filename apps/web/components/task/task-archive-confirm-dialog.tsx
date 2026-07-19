@@ -15,7 +15,9 @@ import {
 import { Checkbox } from "@kandev/ui/checkbox";
 import { useAppStore } from "@/components/state-provider";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
+import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
+import { StillWorkingWarning } from "./task-still-working-warning";
 
 type TaskArchiveConfirmDialogProps = {
   open: boolean;
@@ -101,6 +103,7 @@ export function TaskArchiveConfirmDialog({
     onOpenChange,
   );
   const subtaskCount = useSubtaskCount(open && requiresConfirmation, taskId, taskIds);
+  const isInFlight = useTaskInFlight(taskId, taskIds);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setCascade(false);
@@ -125,6 +128,7 @@ export function TaskArchiveConfirmDialog({
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {isInFlight && <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />}
         {subtaskCount > 0 && (
           <label className="flex items-start gap-2 text-sm cursor-pointer">
             <Checkbox
