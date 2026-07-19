@@ -1257,6 +1257,7 @@ func externalMCPOpenMiddleware() gin.HandlerFunc {
 // runGracefulShutdown gracefully stops all services and runs cleanups.
 func runGracefulShutdown(
 	server *http.Server,
+	listeners *serverListeners,
 	orchestratorSvc *orchestrator.Service,
 	lifecycleMgr *lifecycle.Manager,
 	runCleanups func(),
@@ -1268,6 +1269,10 @@ func runGracefulShutdown(
 		zap.Int("http_timeout_seconds", int(httpShutdownTimeout/time.Second)),
 		zap.Int("agent_timeout_seconds", int(agentShutdownTimeout/time.Second)),
 		zap.Int("tracing_timeout_seconds", int(tracingShutdownTimeout/time.Second)))
+
+	// Stop the background bind-retry loop before Shutdown so no new listener
+	// can be created after the server begins closing its listeners.
+	listeners.Stop()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 	defer shutdownCancel()

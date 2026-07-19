@@ -1,40 +1,9 @@
 package backendapp
 
 import (
-	"context"
 	"net"
-	"net/http"
 	"testing"
-
-	"github.com/kandev/kandev/internal/common/logger"
-	"go.uber.org/zap"
 )
-
-func TestStartHTTPServerUsesServerAddr(t *testing.T) {
-	log, err := logger.NewFromZap(zap.NewNop())
-	if err != nil {
-		t.Fatalf("NewFromZap: %v", err)
-	}
-
-	blocked := listenOnFreePort(t)
-	t.Cleanup(func() {
-		if err := blocked.Close(); err != nil {
-			t.Errorf("close blocked listener: %v", err)
-		}
-	})
-
-	server := &http.Server{
-		Addr:    "127.0.0.1:0",
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
-	}
-	defer func() {
-		_ = server.Shutdown(context.Background())
-	}()
-
-	if !startHTTPServer(server, listenerPort(t, blocked), log) {
-		t.Fatalf("expected server to listen on configured Addr %q", server.Addr)
-	}
-}
 
 func TestServerListenAddr(t *testing.T) {
 	tests := []struct {

@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -82,13 +83,161 @@ func (c *Config) ResolvedDataDir() string {
 	return filepath.Join(c.ResolvedHomeDir(), "data")
 }
 
+// defaultServerHost is the wildcard host the server binds to when no host is
+// configured — every interface.
+const defaultServerHost = "0.0.0.0"
+
 // ServerConfig holds HTTP server configuration.
 type ServerConfig struct {
-	Host           string `mapstructure:"host"`
-	Port           int    `mapstructure:"port"`
-	ReadTimeout    int    `mapstructure:"readTimeout"`  // in seconds
-	WriteTimeout   int    `mapstructure:"writeTimeout"` // in seconds
-	WebInternalURL string `mapstructure:"webInternalUrl"`
+	// Host is the bind address. A single value (e.g. "127.0.0.1") behaves as
+	// it always has; a comma-separated list (e.g. "127.0.0.1,100.64.0.1")
+	// binds one listener per address. Empty means the wildcard default.
+	Host string `mapstructure:"host"`
+	// Hosts is the YAML-array form of Host. When non-empty it takes precedence
+	// over Host, letting config files express the bind set without commas.
+	Hosts          []string `mapstructure:"hosts"`
+	Port           int      `mapstructure:"port"`
+	ReadTimeout    int      `mapstructure:"readTimeout"`  // in seconds
+	WriteTimeout   int      `mapstructure:"writeTimeout"` // in seconds
+	WebInternalURL string   `mapstructure:"webInternalUrl"`
+}
+
+// splitHosts splits a comma-separated host string, trimming whitespace and
+// dropping empty entries.
+func splitHosts(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// isWildcardHost reports whether h binds every interface. Any wildcard entry
+// collapses the whole bind set, since it already covers everything.
+func isWildcardHost(h string) bool {
+	switch h {
+	case "", "0.0.0.0", "::":
+		return true
+	}
+	return false
+}
+
+// isValidHostname reports whether h is a syntactically valid RFC 1123 hostname.
+func isValidHostname(h string) bool {
+	if len(h) == 0 || len(h) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(strings.TrimSuffix(h, "."), ".") {
+		if !isValidHostnameLabel(label) {
+			return false
+		}
+	}
+	return true
+}
+
+// isValidHostnameLabel reports whether label is a valid single hostname label
+// (letters, digits, and interior hyphens, 1–63 chars).
+func isValidHostnameLabel(label string) bool {
+	if len(label) == 0 || len(label) > 63 {
+		return false
+	}
+	if label[0] == '-' || label[len(label)-1] == '-' {
+		return false
+	}
+	for i := 0; i < len(label); i++ {
+		c := label[i]
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') &&
+			(c < '0' || c > '9') && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// validateHost checks that h is a valid IP address or hostname.
+func validateHost(h string) error {
+	if net.ParseIP(h) != nil || isValidHostname(h) {
+		return nil
+	}
+	return fmt.Errorf("server bind host %q is not a valid IP address or hostname", h)
+}
+
+// IsLoopbackHost reports whether h refers only to the local loopback
+// interface. A wildcard (empty/0.0.0.0/::) is NOT loopback because it also
+// binds routable interfaces. Unresolvable hostnames are treated as
+// non-loopback (fail-closed) so callers gating on "any non-loopback bind"
+// don't under-report exposure.
+func IsLoopbackHost(h string) bool {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return false
+	}
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// ResolvedBinds returns the de-duplicated, validated list of hosts the HTTP
+// server should bind to. server.hosts (YAML array) takes precedence over
+// server.host (comma-separated string) when non-empty. Whitespace is trimmed
+// and empty/duplicate entries dropped. If any entry is a wildcard
+// (empty/0.0.0.0/::) the whole set collapses to that single wildcard, since it
+// already binds every interface. An empty result falls back to the wildcard
+// default.
+func (c *ServerConfig) ResolvedBinds() ([]string, error) {
+	var raw []string
+	if len(c.Hosts) > 0 {
+		for _, h := range c.Hosts {
+			raw = append(raw, splitHosts(h)...)
+		}
+	} else {
+		raw = splitHosts(c.Host)
+	}
+
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]string, 0, len(raw))
+	for _, h := range raw {
+		if isWildcardHost(h) {
+			return []string{h}, nil
+		}
+		if err := validateHost(h); err != nil {
+			return nil, err
+		}
+		if _, dup := seen[h]; dup {
+			continue
+		}
+		seen[h] = struct{}{}
+		out = append(out, h)
+	}
+	if len(out) == 0 {
+		return []string{defaultServerHost}, nil
+	}
+	return out, nil
+}
+
+// NonLoopbackBinds returns the resolved bind hosts that are not loopback-only.
+// The sibling app-auth work uses this to decide whether to require auth (fail
+// closed when the server is reachable off-box). A wildcard bind counts as
+// non-loopback.
+func (c *ServerConfig) NonLoopbackBinds() ([]string, error) {
+	binds, err := c.ResolvedBinds()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(binds))
+	for _, h := range binds {
+		if !IsLoopbackHost(h) {
+			out = append(out, h)
+		}
+	}
+	return out, nil
 }
 
 // DatabaseConfig holds database connection configuration.
@@ -289,7 +438,7 @@ func detectDefaultLogFormat() string {
 // setDefaults configures default values for all configuration options.
 func setDefaults(v *viper.Viper) {
 	// Server defaults
-	v.SetDefault("server.host", "0.0.0.0")
+	v.SetDefault("server.host", defaultServerHost)
 	v.SetDefault("server.port", ports.Backend)
 	v.SetDefault("server.readTimeout", 30)
 	v.SetDefault("server.writeTimeout", 30)
@@ -496,6 +645,9 @@ func validate(cfg *Config) error {
 	// Server validation - always required
 	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
 		errs = append(errs, "server.port must be between 1 and 65535")
+	}
+	if _, err := cfg.Server.ResolvedBinds(); err != nil {
+		errs = append(errs, err.Error())
 	}
 
 	// Database validation. Normalize the driver in place so downstream

@@ -218,6 +218,100 @@ func TestServerHostFromEnv(t *testing.T) {
 	}
 }
 
+func TestResolvedBinds(t *testing.T) {
+	tests := []struct {
+		name    string
+		host    string
+		hosts   []string
+		want    []string
+		wantErr bool
+	}{
+		{name: "single host", host: "127.0.0.1", want: []string{"127.0.0.1"}},
+		{name: "empty falls back to wildcard default", host: "", want: []string{"0.0.0.0"}},
+		{name: "comma separated list", host: "127.0.0.1,100.64.0.1", want: []string{"127.0.0.1", "100.64.0.1"}},
+		{name: "whitespace trimmed", host: " 127.0.0.1 , 100.64.0.1 ", want: []string{"127.0.0.1", "100.64.0.1"}},
+		{name: "duplicates dropped", host: "127.0.0.1,127.0.0.1,::1", want: []string{"127.0.0.1", "::1"}},
+		{name: "wildcard collapses set", host: "127.0.0.1,0.0.0.0", want: []string{"0.0.0.0"}},
+		{name: "ipv6 wildcard collapses set", host: "::,127.0.0.1", want: []string{"::"}},
+		{name: "hostname allowed", host: "my-tailnet-host", want: []string{"my-tailnet-host"}},
+		{name: "hosts array wins over default host", host: "0.0.0.0", hosts: []string{"127.0.0.1", "100.64.0.1"}, want: []string{"127.0.0.1", "100.64.0.1"}},
+		{name: "invalid entry errors", host: "127.0.0.1,not a host!!", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := ServerConfig{Host: tt.host, Hosts: tt.hosts}
+			got, err := sc.ResolvedBinds()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ResolvedBinds() expected error, got %v", got)
+				}
+				if !strings.Contains(err.Error(), "not a host!!") {
+					t.Fatalf("ResolvedBinds() error = %q, want it to name the bad entry", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolvedBinds() unexpected error: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("ResolvedBinds() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("ResolvedBinds() = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestIsLoopbackHost(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"127.0.0.1", true},
+		{"127.0.0.53", true},
+		{"::1", true},
+		{"localhost", true},
+		{"LocalHost", true},
+		{"0.0.0.0", false},
+		{"::", false},
+		{"", false},
+		{"100.64.0.1", false},
+		{"my-tailnet-host", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			if got := IsLoopbackHost(tt.host); got != tt.want {
+				t.Fatalf("IsLoopbackHost(%q) = %v, want %v", tt.host, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNonLoopbackBinds(t *testing.T) {
+	sc := ServerConfig{Host: "127.0.0.1,100.64.0.1,::1"}
+	got, err := sc.NonLoopbackBinds()
+	if err != nil {
+		t.Fatalf("NonLoopbackBinds() error: %v", err)
+	}
+	if len(got) != 1 || got[0] != "100.64.0.1" {
+		t.Fatalf("NonLoopbackBinds() = %v, want [100.64.0.1]", got)
+	}
+
+	loopOnly := ServerConfig{Host: "127.0.0.1"}
+	if got, err := loopOnly.NonLoopbackBinds(); err != nil || len(got) != 0 {
+		t.Fatalf("NonLoopbackBinds() = %v (err %v), want empty", got, err)
+	}
+
+	wildcard := ServerConfig{Host: "0.0.0.0"}
+	if got, err := wildcard.NonLoopbackBinds(); err != nil || len(got) != 1 || got[0] != "0.0.0.0" {
+		t.Fatalf("NonLoopbackBinds() = %v (err %v), want [0.0.0.0]", got, err)
+	}
+}
+
 // TestFeaturesConfig_JSONShape pins the wire format of GET /api/v1/features.
 // The handler in helpers.go serializes FeaturesConfig directly so new
 // fields flow through without an extra edit; this test guarantees the

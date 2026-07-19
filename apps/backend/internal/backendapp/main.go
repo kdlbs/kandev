@@ -764,7 +764,13 @@ func startGatewayAndServe(
 	if port == 0 {
 		port = ports.Backend
 	}
-	if !startHTTPServer(server, port, log) {
+	hosts, err := cfg.Server.ResolvedBinds()
+	if err != nil {
+		log.Error("Invalid server bind configuration", zap.Error(err))
+		return false
+	}
+	listeners, ok := startHTTPServers(server, hosts, port, log)
+	if !ok {
 		return false
 	}
 
@@ -776,33 +782,12 @@ func startGatewayAndServe(
 
 	// Flip the readiness flag once the HTTP listener is actually
 	// accepting connections, not just "spawned". Serve runs in a goroutine
-	// after we bind the socket above; probe the local listener with a short
-	// retry loop — once a single connect succeeds, the kernel queue is up and
-	// any subsequent /health call will land on a wired route.
-	go waitListenerThenMarkReady(server.Addr, log)
+	// after we bind the socket above; probe a reachable local listener with a
+	// short retry loop — once a single connect succeeds, the kernel queue is up
+	// and any subsequent /health call will land on a wired route.
+	go waitListenerThenMarkReady(listeners.probeAddr(), log)
 
-	awaitShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
-	return true
-}
-
-func startHTTPServer(server *http.Server, port int, log *logger.Logger) bool {
-	addr := strings.TrimSpace(server.Addr)
-	if addr == "" {
-		addr = serverListenAddr("", port)
-	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		log.Error("Server listen error", zap.Error(err))
-		return false
-	}
-
-	go func() {
-		log.Info("WebSocket server listening", zap.String("addr", ln.Addr().String()), zap.Int("port", port))
-		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Error("Server serve error", zap.Error(err))
-		}
-	}()
-
+	awaitShutdown(server, listeners, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
 }
 
@@ -1693,8 +1678,11 @@ func buildHTTPServer(
 		log:                     log,
 	})
 
+	// Addr is intentionally left unset: bind addresses are resolved from
+	// cfg.Server.ResolvedBinds() and served via startHTTPServers, which may
+	// create several listeners on one shared handler. server.Shutdown closes
+	// all of them regardless of Addr.
 	return &http.Server{
-		Addr:         serverListenAddr(cfg.Server.Host, port),
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
 		WriteTimeout: cfg.Server.WriteTimeoutDuration(),
@@ -1704,6 +1692,7 @@ func buildHTTPServer(
 // awaitShutdown waits for an OS signal then performs graceful shutdown.
 func awaitShutdown(
 	server *http.Server,
+	listeners *serverListeners,
 	orchestratorSvc *orchestrator.Service,
 	lifecycleMgr *lifecycle.Manager,
 	runCleanups func(),
@@ -1730,5 +1719,5 @@ func awaitShutdown(
 	log.Info("Received shutdown signal",
 		zap.String("signal", sig.String()),
 		zap.Int("pid", os.Getpid()))
-	runGracefulShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
+	runGracefulShutdown(server, listeners, orchestratorSvc, lifecycleMgr, runCleanups, log)
 }
