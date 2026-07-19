@@ -44,7 +44,7 @@ Save machine-readable probe output per slug under staged `qa/codec/`. Container 
 
 ## 3. Camera And Pointer Audit
 
-- [ ] Desktop config uses `formFactor: "landing"`; maximum zoom is 2.0x.
+- [ ] Semantic desktop config uses `formFactor: "landing"` with `cameraProfile: "landing-editorial"`, `focusTrack`, and `pointerTrack`; maximum zoom is 2.0x.
 - [ ] Mobile config uses `formFactor: "mobile"`; its tested cap is respected and never exceeds 2.0x.
 - [ ] Camera keyframes derive from semantic metadata rather than guessed click positions.
 - [ ] Camera stays center-biased toward the active pointer/target and never moves away from an active pointer journey.

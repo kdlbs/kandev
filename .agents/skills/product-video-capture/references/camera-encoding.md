@@ -29,7 +29,7 @@ Authoritative product-film contract:
 
 - 25 fps constant cadence;
 - general desktop delivery 2560x1600 from at least 3840x2400 source;
-- when the checked-out landing tests recognize `formFactor: "landing"`, editorial delivery 1920x1200 from at least 3840x2400 source, with a 2x focused camera, VP9 CRF 26, and H.264 CRF 18;
+- when the checked-out landing tests recognize `cameraProfile: "landing-editorial"` with `formFactor: "landing"`, editorial delivery 1920x1200 from at least 3840x2400 source, with a 2x focused camera, VP9 CRF 26, and H.264 CRF 18;
 - mobile delivery 1290x2796 from native 1290x2796 source;
 - general desktop and focused documentation clips reach 1.50x; editorial landing clips reach 2x; native mobile reaches 1.18x;
 - a wide loop starts, settles, and ends at centered 1x;
@@ -41,7 +41,7 @@ Authoritative product-film contract:
 
 Treat the landing tests as executable source of truth. If a requested output differs, change those tests first; do not revive a legacy desktop profile in an ad hoc config.
 
-Before using the editorial landing profile, confirm the focused tests recognize `formFactor: "landing"`; do not encode against an older landing checkout that lacks this profile.
+Before using the editorial landing profile, confirm the focused tests recognize `cameraProfile: "landing-editorial"`; do not encode against an older landing checkout that lacks this profile. `landing-editorial` requires both `focusTrack` and `pointerTrack`, so every delivery carries explicit semantic framing evidence.
 
 ## Semantic Camera Design
 
@@ -96,6 +96,7 @@ Minimal editorial-landing config shape. Replace the placeholder coordinates with
   "outputWidth": 1920,
   "outputHeight": 1200,
   "camera": {
+    "cameraProfile": "landing-editorial",
     "durationMs": 8000,
     "formFactor": "landing",
     "loopFrame": "focused",
@@ -130,6 +131,7 @@ Use a landing slug with the required desktop prefix. Replace `<capture-root>` wi
   "outputWidth": 1920,
   "outputHeight": 1200,
   "camera": {
+    "cameraProfile": "landing-editorial",
     "durationMs": 12000,
     "formFactor": "landing",
     "loopFrame": "focused",

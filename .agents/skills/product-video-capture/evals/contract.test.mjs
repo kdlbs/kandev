@@ -45,6 +45,12 @@ test("uses center-biased widen-pan-tighten camera choreography", () => {
   assert.match(bundle, /full (?:dialog|menu)[^\n]{0,80}(?:priority|visible|inside|frame)/i);
 });
 
+test("requires semantic evidence for the landing editorial profile", () => {
+  assert.match(bundle, /cameraProfile[^\n]{0,40}landing-editorial/i);
+  assert.match(bundle, /landing-editorial[^\n]{0,120}requires?[^\n]{0,80}focusTrack/i);
+  assert.match(bundle, /landing-editorial[^\n]{0,120}requires?[^\n]{0,80}pointerTrack/i);
+});
+
 test("explicitly rejects bad editorial shortcuts", () => {
   assert.match(bundle, /reject[^\n]{0,100}lazy global zoom/i);
   assert.match(bundle, /reject[^\n]{0,120}(?:zoom|camera)[^\n]{0,80}away from[^\n]{0,40}(?:active )?(?:cursor|pointer)/i);

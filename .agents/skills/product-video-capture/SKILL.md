@@ -53,7 +53,7 @@ Read [capture-pipeline.md](references/capture-pipeline.md) before recording and 
 
 ## Camera And Delivery
 
-Use `$LANDING_REPO/scripts/product-loop-camera.mjs` and `$LANDING_REPO/scripts/product-loop-encoder.mjs`. Their tests define dimensions, frame rate, maximum zoom, smoothness, loop reset, codecs, and poster quality. For landing desktop, use `formFactor: "landing"` and cap maximum zoom at 2.0x. Native mobile stays native-size and uses the tested mobile cap, never more than 2.0x. Change these contracts test-first when the user requests a genuinely different delivery format.
+Use `$LANDING_REPO/scripts/product-loop-camera.mjs` and `$LANDING_REPO/scripts/product-loop-encoder.mjs`. Their tests define dimensions, frame rate, maximum zoom, smoothness, loop reset, codecs, and poster quality. For semantic landing desktop stories, use `formFactor: "landing"` with `cameraProfile: "landing-editorial"` and cap maximum zoom at 2.0x. The `landing-editorial` profile requires both `focusTrack` and `pointerTrack`; configs without either are invalid. Native mobile stays native-size and uses the tested mobile cap, never more than 2.0x. Change these contracts test-first when the user requests a genuinely different delivery format.
 
 Do not remove waits with cuts or speed changes. Improve the source choreography or recapture. One trim at the beginning/end is acceptable; time skips are not.
 
