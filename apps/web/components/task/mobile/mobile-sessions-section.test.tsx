@@ -43,7 +43,12 @@ vi.mock("@/hooks/domains/session/use-session-actions", () => ({
   isSessionResumable: () => false,
 }));
 
-function session(id: string, profileId: string, startedAt: string): TaskSession {
+function session(
+  id: string,
+  profileId: string,
+  startedAt: string,
+  overrides: Partial<TaskSession> = {},
+): TaskSession {
   return {
     id,
     task_id: "task-1",
@@ -51,6 +56,7 @@ function session(id: string, profileId: string, startedAt: string): TaskSession 
     state: "WAITING_FOR_INPUT",
     started_at: startedAt,
     updated_at: startedAt,
+    ...overrides,
   } as TaskSession;
 }
 
@@ -102,5 +108,51 @@ describe("MobileSessionsPicker", () => {
     const pill = screen.getByTestId("mobile-sessions-pill");
     expect(within(pill).getByTestId("mobile-session-agent-icon")).toBeTruthy();
     expect(within(pill).getByTestId("agent-logo-codex")).toBeTruthy();
+  });
+
+  it("renders background-running distinctly — matching desktop, not a done check", () => {
+    // §spec:session-level-truth / §spec:state-vocabulary: a session whose
+    // foreground turn is idle while spawned background work runs (RUNNING +
+    // `background`) must read as background-running on mobile too — the shared
+    // getSessionStateIcon spinner — distinct from generating and never a done
+    // check. Tabler renders the icon shape into the svg class
+    // (`tabler-icon-<name>`), so asserting the class proves the distinction is
+    // carried by SHAPE (survives a grayscale scan), not hue alone.
+    mocks.activeSessionId = "session-bg";
+    mocks.sessions = [
+      session("session-bg", "profile-a", "2026-01-01T00:00:00Z", {
+        state: "RUNNING",
+        foreground_activity: "background",
+      }),
+      session("session-gen", "profile-b", "2026-01-01T00:01:00Z", {
+        state: "RUNNING",
+        foreground_activity: "generating",
+      }),
+      session("session-done", "profile-a", "2026-01-01T00:02:00Z", {
+        state: "COMPLETED",
+      }),
+    ];
+    render(<MobileSessionsPicker taskId="task-1" sessionId="session-bg" fullWidth />);
+    fireEvent.click(screen.getByTestId("mobile-sessions-pill"));
+
+    const bg = screen.getByTestId("mobile-session-state-session-bg");
+    const gen = screen.getByTestId("mobile-session-state-session-gen");
+    const done = screen.getByTestId("mobile-session-state-session-done");
+    const svgClass = (el: HTMLElement) => el.querySelector("svg")?.getAttribute("class") ?? "";
+
+    // background-running: the shared spinner, in motion, and a label that says so.
+    expect(svgClass(bg)).toContain("tabler-icon-loader-2");
+    expect(svgClass(bg)).toContain("animate-spin");
+    expect(bg.textContent).toMatch(/background/i);
+
+    // Distinct from generating: a static solid dot, no spin — a different SHAPE,
+    // so the two read apart even desaturated.
+    expect(svgClass(gen)).toContain("tabler-icon-circle-filled");
+    expect(svgClass(gen)).not.toContain("animate-spin");
+    expect(svgClass(bg)).not.toContain("tabler-icon-circle-filled");
+
+    // Never a done check: distinct from a finished session, which shows the check.
+    expect(svgClass(bg)).not.toContain("tabler-icon-circle-check");
+    expect(svgClass(done)).toContain("tabler-icon-circle-check");
   });
 });
