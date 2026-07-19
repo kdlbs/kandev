@@ -83,10 +83,6 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 	if err != nil {
 		return "", err
 	}
-	worktreePath, err := s.resolveSessionPath(ctx, session, input.WorktreeID)
-	if err != nil {
-		return "", err
-	}
 
 	settings, err := s.userSettings.GetUserSettings(ctx)
 	if err != nil {
@@ -97,6 +93,17 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 	}
 
 	editor, err := s.resolveEditor(ctx, input.EditorID, input.EditorType, settings.DefaultEditorID)
+	if err != nil {
+		return "", err
+	}
+	// Opening the embedded editor at folder level only needs a valid session.
+	// Repository-less sessions still have an executor workspace where code-server
+	// can run, but they intentionally have no task worktree to resolve here.
+	if editor.Kind == editorKindInternalVscode && input.FilePath == "" {
+		return buildInternalVscodeURL("", "", input.Line, input.Column), nil
+	}
+
+	worktreePath, err := s.resolveSessionPath(ctx, session, input.WorktreeID)
 	if err != nil {
 		return "", err
 	}

@@ -33,6 +33,7 @@ async function seedTaskWithSession(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
+  repositoryIds: string[] = [seedData.repositoryId],
 ): Promise<{ session: SessionPage; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -42,7 +43,7 @@ async function seedTaskWithSession(
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
+      repository_ids: repositoryIds,
     },
   );
 
@@ -56,6 +57,26 @@ async function seedTaskWithSession(
 
   return { session, sessionId: task.session_id };
 }
+
+test.describe("VS Code toolbar open", () => {
+  test("adds the embedded editor tab for a repository-less session", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { session } = await seedTaskWithSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Repository-less VSCode Open Test",
+      [],
+    );
+
+    await testPage.getByTestId("editors-menu-open").click();
+
+    await expect(session.vscodeTab()).toBeVisible({ timeout: 10_000 });
+  });
+});
 
 test.describe("VS Code open panel", () => {
   test.describe.configure({ retries: 1 });
