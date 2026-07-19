@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -51,6 +52,20 @@ func (r listTaskSessionsErrorRepo) ListTaskSessions(context.Context, string) ([]
 
 type failSetSessionMetadataRepo struct {
 	repoStore
+}
+
+type failSessionStateUpdateRepo struct {
+	repoStore
+	err error
+}
+
+func (r failSessionStateUpdateRepo) UpdateTaskSessionState(
+	context.Context,
+	string,
+	models.TaskSessionState,
+	string,
+) error {
+	return r.err
 }
 
 type failSetBaselineRepo struct {
@@ -235,6 +250,53 @@ func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
 	session, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
 	require.Equal(t, session.UpdatedAt.UTC().Format(time.RFC3339Nano), data["updated_at"])
+}
+
+func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+
+	changed, finalState, err := svc.transitionTaskSessionState(
+		ctx,
+		"t1",
+		"s1",
+		models.TaskSessionStateCancelled,
+		"coordinator stop",
+	)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, models.TaskSessionStateCancelled, finalState)
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
+}
+
+func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	writeFailure := errors.New("database is read-only")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.repo = failSessionStateUpdateRepo{repoStore: repo, err: writeFailure}
+	svc.eventBus = eb
+
+	changed, finalState, err := svc.transitionTaskSessionState(
+		ctx,
+		"t1",
+		"s1",
+		models.TaskSessionStateCancelled,
+		"coordinator stop",
+	)
+
+	require.ErrorIs(t, err, writeFailure)
+	require.False(t, changed)
+	require.Equal(t, models.TaskSessionStateRunning, finalState)
+	require.Empty(t, eb.events)
 }
 
 func TestHandleSessionModeEvent(t *testing.T) {
@@ -1219,6 +1281,142 @@ func TestWriteTaskInProgressForRuntimeSkipsArchivedTask(t *testing.T) {
 		"runtime reconciliation must not promote archived tasks to IN_PROGRESS")
 }
 
+func TestWriteTaskInProgressForRuntimeSkipsCancelledSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"s1",
+		models.TaskSessionStateCancelled,
+		"stopped by parent task via MCP",
+	))
+	task, err := repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateReview)
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskInProgressForRuntime(ctx, "t1", "s1")
+
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"cancelled session must not promote task from REVIEW to IN_PROGRESS")
+	require.Equal(t, v1.TaskStateReview, taskRepo.tasks["t1"].State)
+}
+
+func TestHandleAgentCompleted_CancelledSessionDoesNotForceCleanup(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"s1",
+		models.TaskSessionStateCancelled,
+		"stopped by parent task via MCP",
+	))
+
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-completed", nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	cleanupRead := make(chan struct{})
+	allowCleanupRead := make(chan struct{})
+	var readMu sync.Mutex
+	reads := 0
+	svc.repo = &coordinatorStopRepoHooks{
+		repoStore: repo,
+		getSessionFunc: func(readCtx context.Context, sessionID string) (*models.TaskSession, error) {
+			readMu.Lock()
+			reads++
+			readNumber := reads
+			readMu.Unlock()
+			if readNumber == 2 {
+				close(cleanupRead)
+				<-allowCleanupRead
+			}
+			return repo.GetTaskSession(readCtx, sessionID)
+		},
+	}
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-completed",
+	})
+	coordinatorStopAwaitSignal(t, cleanupRead, "cancelled completion cleanup state read")
+	close(allowCleanupRead)
+	coordinatorStopWaitForGuardReleased(t, svc, "s1")
+
+	agentManager.mu.Lock()
+	calls := append([]stopAgentCall(nil), agentManager.stopAgentWithReasonArgs...)
+	agentManager.mu.Unlock()
+	require.Empty(t, calls, "cancelled completion must not replace graceful teardown with force cleanup")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, session.State)
+}
+
+func TestHandleAgentCompleted_CoordinatorCancellationWinsWhileEventWaits(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-completion-stop-race", "session-completion-stop-race", "step-1")
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-1"] = &wfmodels.WorkflowStep{
+		ID: "step-1", WorkflowID: "wf1", Name: "Work", Position: 0,
+		Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+			Type: wfmodels.OnTurnCompleteMoveToNext,
+		}}},
+	}
+	stepGetter.steps["step-2"] = &wfmodels.WorkflowStep{
+		ID: "step-2", WorkflowID: "wf1", Name: "Review", Position: 1,
+	}
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-completion-stop-race", nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), manager)
+
+	guard, release := svc.acquireCancelInFlightGuard("session-completion-stop-race")
+	guard.Lock()
+	eventDone := make(chan struct{})
+	go func() {
+		svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+			TaskID:           "task-completion-stop-race",
+			SessionID:        "session-completion-stop-race",
+			AgentExecutionID: "execution-completion-stop-race",
+		})
+		close(eventDone)
+	}()
+	coordinatorStopWaitForGuardRefs(t, svc, "session-completion-stop-race", 2)
+	changed, _, err := repo.CancelActiveTaskSession(
+		ctx,
+		"session-completion-stop-race",
+		coordinatorMCPStopReason,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	guard.Unlock()
+	release()
+	coordinatorStopAwaitSignal(t, eventDone, "guarded completion event")
+
+	session, err := repo.GetTaskSession(ctx, "session-completion-stop-race")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, session.State)
+	task, err := repo.GetTask(ctx, "task-completion-stop-race")
+	require.NoError(t, err)
+	require.Equal(t, "step-1", task.WorkflowStepID, "stale completion advanced workflow after cancellation")
+	manager.mu.Lock()
+	stopCalls := append([]stopAgentCall(nil), manager.stopAgentWithReasonArgs...)
+	manager.mu.Unlock()
+	require.Empty(t, stopCalls, "stale completion replaced graceful teardown with force cleanup")
+}
+
 // TestWriteTaskInProgressForRuntimeUsesArchiveAwareCAS is the TOCTOU
 // companion to TestWriteTaskInProgressForRuntimeSkipsArchivedTask
 // (carlosflorencio review on PR #1706): the earlier taskArchived() guard is
@@ -1953,6 +2151,26 @@ func TestPersistSessionModel(t *testing.T) {
 	preserved, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.4", preserved.AgentProfileSnapshot["model"])
+}
+
+func TestPersistSessionModelDoesNotRestoreStaleActiveStateAfterCancellation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	stale, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, stale.State)
+	changed, _, err := repo.CancelActiveTaskSession(ctx, "s1", "coordinator stop")
+	require.NoError(t, err)
+	require.True(t, changed)
+	svc := &Service{logger: testLogger(), repo: repo}
+
+	svc.persistSessionModelOnSession(ctx, "s1", stale, "gpt-after-stop")
+
+	stored, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, stored.State)
+	require.Equal(t, "gpt-after-stop", stored.AgentProfileSnapshot["model"])
 }
 
 func TestPersistSessionRuntimeConfigFromSessionModels(t *testing.T) {

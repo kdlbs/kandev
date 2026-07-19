@@ -39,6 +39,10 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 	if !s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
 		return
 	}
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
 
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
@@ -46,6 +50,13 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
+		return
+	}
+	if isTerminalSessionState(session.State) {
+		s.logger.Debug("ignoring agent running event for terminal session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("session_state", string(session.State)))
 		return
 	}
 	s.processOnTurnStartViaEngine(ctx, data.TaskID, session)
@@ -584,17 +595,29 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 
 // handleAgentCompleted handles agent completion events
 func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEventData) {
+	if data.SessionID == "" {
+		s.handleAgentCompletedLocked(ctx, data)
+		return
+	}
+
+	// Completion owns workflow advancement only while serialized with every
+	// cancel/interrupt decision for this session. If coordinator stop won while
+	// the event waited, the guarded state reload below observes CANCELLED and
+	// suppresses all workflow/on_enter side effects.
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	s.handleAgentCompletedLocked(ctx, data)
+}
+
+func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Info("handling agent completed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID))
 
-	// A successful completion clears any transient retry budget for the session.
-	s.resetTransientRetry(data.SessionID)
-
-	// Update scheduler and remove from queue
-	s.scheduler.HandleTaskCompleted(data.TaskID, true)
-	s.scheduler.RemoveTask(data.TaskID)
 	s.markExecutionCompleted(data.SessionID, data.AgentExecutionID)
 
 	// Check for workflow transition based on session's current step.
@@ -604,6 +627,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
+		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 		return
 	}
 
@@ -638,6 +662,12 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 		return
 	}
+
+	// A successful, still-live completion clears retry state and scheduler
+	// ownership only after the guarded terminal/rotation checks above.
+	s.resetTransientRetry(data.SessionID)
+	s.scheduler.HandleTaskCompleted(data.TaskID, true)
+	s.scheduler.RemoveTask(data.TaskID)
 
 	s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 
@@ -683,12 +713,34 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 
 // handleAgentFailed handles agent failure events
 func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEventData) {
+	if data.SessionID == "" {
+		s.handleAgentFailedLocked(ctx, data)
+		return
+	}
+
+	// Linearize every session-backed failure decision with coordinator stop,
+	// interrupt, and queued-dispatch ownership. The state is re-read inside
+	// handleAgentFailedLocked after this lock is held: if stop won, failure
+	// recovery must not create messages, arm retries, or force-clean the
+	// execution that graceful teardown now owns.
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	s.handleAgentFailedLocked(ctx, data)
+}
+
+func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
 
+	if s.shouldDropSessionFailure(ctx, data, "agent.failed", true) {
+		return
+	}
 	s.markExecutionFailed(data.SessionID, data.AgentExecutionID)
 
 	// Transient provider errors (529 Overloaded) get a paced, visible
@@ -736,6 +788,119 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+}
+
+func (s *Service) shouldDropSessionFailure(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	source string,
+	dropWhenUnavailable bool,
+) bool {
+	if data.SessionID == "" {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil || session == nil {
+		s.logger.Warn("dropping session failure because current state is unavailable",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("failure_source", source),
+			zap.Error(err))
+		if dropWhenUnavailable {
+			// The workflow state is unavailable, but the execution ID is still
+			// authoritative enough for bounded runtime cleanup. Leaving it alive
+			// here leaks agentctl/port state until restart reconciliation.
+			go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+		}
+		return dropWhenUnavailable
+	}
+	if isTerminalSessionState(session.State) {
+		s.resetTransientRetry(data.SessionID)
+		s.logger.Debug("dropping session failure for terminal session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("failure_source", source),
+			zap.String("session_state", string(session.State)))
+		if session.State != models.TaskSessionStateCancelled {
+			go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+		}
+		return true
+	}
+	liveExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, data.SessionID)
+	if data.AgentExecutionID != "" && liveExecutionID != "" && liveExecutionID != data.AgentExecutionID {
+		s.logger.Debug("dropping session failure for rotated execution",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("failure_source", source),
+			zap.String("event_execution_id", data.AgentExecutionID),
+			zap.String("live_execution_id", liveExecutionID))
+		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+		return true
+	}
+	return false
+}
+
+type executionTeardownIntent uint8
+
+const (
+	executionTeardownIntentGraceful executionTeardownIntent = iota + 1
+	executionTeardownIntentForce
+)
+
+type executionTeardownClaim struct {
+	intent    executionTeardownIntent
+	expiresAt time.Time
+}
+
+// claimExecutionTeardown accepts the first teardown intent for one concrete
+// execution. Callers with a session ID must invoke it while holding that
+// session's cancelInFlight guard, making the decision atomic with the state
+// read/write that justified the intent. The blocking teardown itself happens
+// only after that guard is released.
+func (s *Service) claimExecutionTeardown(
+	sessionID, executionID string,
+	intent executionTeardownIntent,
+) bool {
+	if sessionID == "" || executionID == "" {
+		return false
+	}
+	key := terminalExecutionKey(sessionID, executionID)
+	for {
+		now := time.Now()
+		claim := executionTeardownClaim{
+			intent:    intent,
+			expiresAt: now.Add(completedExecutionRetention),
+		}
+		value, loaded := s.executionTeardownClaims.LoadOrStore(key, claim)
+		if !loaded {
+			time.AfterFunc(completedExecutionRetention, func() {
+				s.deleteExecutionTeardownClaimIfExpired(key, claim.expiresAt)
+			})
+			return true
+		}
+		current, ok := value.(executionTeardownClaim)
+		if !ok {
+			s.executionTeardownClaims.Delete(key)
+			continue
+		}
+		if now.Before(current.expiresAt) {
+			return false
+		}
+		if s.executionTeardownClaims.CompareAndDelete(key, current) {
+			continue
+		}
+	}
+}
+
+func (s *Service) deleteExecutionTeardownClaimIfExpired(key string, expiresAt time.Time) {
+	value, ok := s.executionTeardownClaims.Load(key)
+	if !ok {
+		return
+	}
+	claim, ok := value.(executionTeardownClaim)
+	if !ok || !claim.expiresAt.After(expiresAt) {
+		s.executionTeardownClaims.Delete(key)
+	}
 }
 
 // wasResumeAttempt checks whether the session's last execution used a resume token.
@@ -958,6 +1123,25 @@ func (s *Service) isOfficeSession(ctx context.Context, sessionID string) bool {
 // error on focus / auto-resume.
 // Returns true if the failure was handled (caller should skip default FAILED logic).
 func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) bool {
+	if sessionID != "" {
+		lock, release := s.acquireCancelInFlightGuard(sessionID)
+		defer release()
+		lock.Lock()
+		defer lock.Unlock()
+
+		if s.shouldDropSessionFailure(ctx, watcher.AgentEventData{
+			TaskID:           taskID,
+			SessionID:        sessionID,
+			AgentExecutionID: agentExecutionID,
+			ErrorMessage:     err.Error(),
+		}, "agent process start", false) {
+			// Tell the executor that the failure is fully owned. In particular,
+			// a concurrent CANCELLED transition must skip its default FAILED
+			// transition and forced cleanup after this callback returns.
+			return true
+		}
+	}
+
 	if !isAuthError(err.Error()) {
 		if fromResume {
 			s.logger.Info("suppressing toast for resume bootstrap failure",
@@ -1121,6 +1305,37 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
 	if executionID == "" {
 		return
+	}
+	if sessionID != "" {
+		lock, release := s.acquireCancelInFlightGuard(sessionID)
+		lock.Lock()
+
+		// Coordinator stop persists CANCELLED before launching its graceful,
+		// detached teardown. A generic completion/failure cleanup racing after
+		// that commit must not replace it with force=true teardown.
+		session, sessionErr := s.repo.GetTaskSession(context.Background(), sessionID)
+		cancelled := sessionErr == nil && session != nil && session.State == models.TaskSessionStateCancelled
+		claimed := !cancelled && s.claimExecutionTeardown(
+			sessionID,
+			executionID,
+			executionTeardownIntentForce,
+		)
+		lock.Unlock()
+		release()
+		if cancelled {
+			s.logger.Debug("skipping forced cleanup for cancelled session",
+				zap.String("execution_id", executionID),
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return
+		}
+		if !claimed {
+			s.logger.Debug("skipping duplicate execution teardown",
+				zap.String("execution_id", executionID),
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return
+		}
 	}
 	ctx := context.Background()
 	if err := s.executor.StopExecution(ctx, executionID, "agent completed", true); err != nil {

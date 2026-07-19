@@ -106,6 +106,58 @@ func TestTransientFailedExecutionToolUpdateDoesNotCreateMessage(t *testing.T) {
 	}
 }
 
+func TestHandleAgentFailed_CancelledSessionDisarmsRetryWithoutRecovery(t *testing.T) {
+	ctx := context.Background()
+	svc, mc := newTransientTestService(t)
+	if err := svc.repo.UpdateTaskSessionState(
+		ctx,
+		"s1",
+		models.TaskSessionStateCancelled,
+		"stopped by parent task via MCP",
+	); err != nil {
+		t.Fatalf("cancel session: %v", err)
+	}
+	cancelled := make(chan struct{}, 1)
+	svc.transientRetries.Store("s1", &transientRetryEntry{
+		attempt: 1,
+		cancel: func() {
+			cancelled <- struct{}{}
+		},
+	})
+	svc.rememberTurnPrompt("s1", "retry me", "", false, nil)
+
+	svc.handleAgentFailed(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "stale-execution",
+		ErrorMessage:     overloaded529,
+	})
+
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("cancelled session did not disarm transient retry")
+	}
+	_, retryArmed := svc.transientRetries.Load("s1")
+	if retryArmed {
+		t.Fatal("cancelled session retained transient retry")
+	}
+	_, promptCached := svc.lastTurnPrompt.Load("s1")
+	if promptCached {
+		t.Fatal("cancelled session retained cached prompt")
+	}
+	session, err := svc.repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get cancelled session: %v", err)
+	}
+	if session.State != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %q, want %q", session.State, models.TaskSessionStateCancelled)
+	}
+	if len(mc.sessionMessages) != 0 {
+		t.Fatalf("stale failure emitted %d retry or recovery messages", len(mc.sessionMessages))
+	}
+}
+
 func TestHandleTransientFailure_NonTransientReturnsFalse(t *testing.T) {
 	svc, mc := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)

@@ -1313,6 +1313,165 @@ verified:
 	}
 }
 
+func TestHandleAgentProcessStartFailure_CancelledSessionOwnsTeardown(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateCancelled,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateReview}
+
+	var stopCalls atomic.Int32
+	var recoveryCalls atomic.Int32
+	var sessionStateCalls atomic.Int32
+	var taskStateCalls atomic.Int32
+	exec := newTestExecutor(t, &mockAgentManager{
+		stopAgentFunc: func(context.Context, string, bool) error {
+			stopCalls.Add(1)
+			return nil
+		},
+	}, repo)
+	exec.SetOnAgentStartFailed(func(context.Context, string, string, string, error, bool) bool {
+		recoveryCalls.Add(1)
+		return false
+	})
+	exec.SetOnSessionStateChange(func(context.Context, string, string, models.TaskSessionState, string) error {
+		sessionStateCalls.Add(1)
+		return nil
+	})
+	exec.SetOnTaskRuntimeStateReconcile(func(context.Context, string, string, v1.TaskState) error {
+		taskStateCalls.Add(1)
+		return nil
+	})
+
+	exec.handleAgentProcessStartFailure(
+		context.Background(),
+		"task-123",
+		"session-123",
+		"exec-456",
+		errors.New("start failed after stop"),
+		true,
+		false,
+	)
+
+	if got := stopCalls.Load(); got != 0 {
+		t.Fatalf("StopAgent calls = %d, want 0", got)
+	}
+	if got := recoveryCalls.Load(); got != 0 {
+		t.Fatalf("start-failure recovery calls = %d, want 0", got)
+	}
+	if got := sessionStateCalls.Load(); got != 0 {
+		t.Fatalf("session-state calls = %d, want 0", got)
+	}
+	if got := taskStateCalls.Load(); got != 0 {
+		t.Fatalf("task-state calls = %d, want 0", got)
+	}
+}
+
+func TestCleanupUnstartedExecutionAfterPersistError_CancelledOwnsTeardown(t *testing.T) {
+	tests := []struct {
+		name      string
+		state     models.TaskSessionState
+		wantStops int32
+	}{
+		{name: "cancelled", state: models.TaskSessionStateCancelled, wantStops: 0},
+		{name: "failed", state: models.TaskSessionStateFailed, wantStops: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stopCalls atomic.Int32
+			exec := newTestExecutor(t, &mockAgentManager{
+				stopAgentFunc: func(_ context.Context, executionID string, force bool) error {
+					if executionID != "exec-456" {
+						t.Fatalf("execution ID = %q, want exec-456", executionID)
+					}
+					if !force {
+						t.Fatal("cleanup must force a non-cancelled unstarted execution")
+					}
+					stopCalls.Add(1)
+					return nil
+				},
+			}, newMockRepository())
+
+			exec.cleanupUnstartedExecutionAfterPersistError(
+				context.Background(),
+				"session-123",
+				"exec-456",
+				&SessionStateSupersededError{SessionID: "session-123", State: tt.state},
+			)
+
+			if got := stopCalls.Load(); got != tt.wantStops {
+				t.Fatalf("StopAgent calls = %d, want %d", got, tt.wantStops)
+			}
+		})
+	}
+}
+
+func TestStartAgentProcessAsync_StopWinningStartRacePreservesReview(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
+
+	startEntered := make(chan struct{})
+	releaseStart := make(chan struct{})
+	reconcileDone := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(context.Context, string) error {
+			close(startEntered)
+			<-releaseStart
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetOnTaskRuntimeStateReconcile(func(
+		ctx context.Context,
+		taskID, sessionID string,
+		state v1.TaskState,
+	) error {
+		defer close(reconcileDone)
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if isRuntimeWorkingSessionState(session.State) {
+			_, _, err = repo.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+		}
+		return err
+	})
+
+	exec.startAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456")
+	select {
+	case <-startEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for process start")
+	}
+	if err := repo.UpdateTaskSessionState(
+		context.Background(),
+		"session-123",
+		models.TaskSessionStateCancelled,
+		"stopped by parent task via MCP",
+	); err != nil {
+		t.Fatalf("cancel session: %v", err)
+	}
+	repo.mu.Lock()
+	repo.tasks["task-123"].State = v1.TaskStateReview
+	repo.mu.Unlock()
+	close(releaseStart)
+
+	select {
+	case <-reconcileDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime task reconcile")
+	}
+	repo.mu.Lock()
+	gotTaskState := repo.tasks["task-123"].State
+	repo.mu.Unlock()
+	if gotTaskState != v1.TaskStateReview {
+		t.Fatalf("task state = %q, want REVIEW", gotTaskState)
+	}
+}
+
 // runAgentProcessAsyncFailureFixture builds an Executor configured to fail
 // StartAgentProcess, with task/session-state-change recorders for assertions.
 // stopCh is closed when StopAgent is invoked — since the failure path calls
@@ -2068,6 +2227,55 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 			t.Errorf("expected state WAITING_FOR_INPUT, got %s", session.State)
 		}
 	})
+
+	t.Run("prepare-only resume cannot overwrite coordinator cancellation", func(t *testing.T) {
+		stale := &models.TaskSession{
+			ID:        "session-resume-stop-race",
+			TaskID:    "task-1",
+			State:     models.TaskSessionStateWaitingForInput,
+			UpdatedAt: now,
+		}
+		cancelled := *stale
+		cancelled.State = models.TaskSessionStateCancelled
+		cancelled.ErrorMessage = "stopped by parent task via MCP"
+		repo.sessions[stale.ID] = &cancelled
+
+		err := executor.persistResumeState(context.Background(), "task-1", stale, false)
+		if !errors.Is(err, ErrSessionStateSuperseded) {
+			t.Fatalf("persistResumeState error = %v, want ErrSessionStateSuperseded", err)
+		}
+		stored := repo.sessions[stale.ID]
+		if stored.State != models.TaskSessionStateCancelled {
+			t.Fatalf("session state = %q, want CANCELLED", stored.State)
+		}
+	})
+}
+
+func TestPersistLaunchState_PrepareOnlyCannotOverwriteCoordinatorCancellation(t *testing.T) {
+	repo := newMockRepository()
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	now := time.Now().UTC()
+	stale := &models.TaskSession{
+		ID:        "session-launch-stop-race",
+		TaskID:    "task-launch-stop-race",
+		State:     models.TaskSessionStateCreated,
+		UpdatedAt: now,
+	}
+	cancelled := *stale
+	cancelled.State = models.TaskSessionStateCancelled
+	cancelled.ErrorMessage = "stopped by parent task via MCP"
+	repo.sessions[stale.ID] = &cancelled
+
+	err := executor.persistLaunchState(
+		context.Background(), stale.TaskID, stale.ID, stale, &LaunchAgentResponse{}, false, now,
+	)
+	if !errors.Is(err, ErrSessionStateSuperseded) {
+		t.Fatalf("persistLaunchState error = %v, want ErrSessionStateSuperseded", err)
+	}
+	stored := repo.sessions[stale.ID]
+	if stored.State != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %q, want CANCELLED", stored.State)
+	}
 }
 
 // Regression: PrepareTaskSession launches the workspace in a background

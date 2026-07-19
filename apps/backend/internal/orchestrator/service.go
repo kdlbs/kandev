@@ -165,6 +165,7 @@ type sessionExecutorStore interface {
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	RenameTaskSession(ctx context.Context, id, name string) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
+	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
@@ -425,6 +426,14 @@ type Service struct {
 	// guard does not grow without bound in long-running backend processes.
 	completedExecutions sync.Map
 
+	// executionTeardownClaims arbitrates detached runtime teardown by
+	// "<session_id>::<execution_id>". Coordinator stop requests graceful
+	// teardown while terminal-event cleanup requests force teardown; the first
+	// intent accepted under the session's cancelInFlight guard owns that
+	// execution. Claims expire with the same bounded grace period used for
+	// completed-execution stream markers.
+	executionTeardownClaims sync.Map
+
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
@@ -570,10 +579,12 @@ func NewService(
 		s.processParentChildrenCompletedForTaskState(ctx, taskID, state)
 		return nil
 	})
+	exec.SetOnTaskRuntimeStateReconcile(s.reconcileTaskStateForRuntime)
 	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil
 	})
+	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
 	exec.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
 		return s.setSessionStarting(ctx, taskID, session, promoteTask)
 	})

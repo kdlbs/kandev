@@ -894,6 +894,55 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	return task, nil
 }
 
+type taskMessageRollbackRepository interface {
+	RestoreTaskMessageRollbackIfSessionState(
+		ctx context.Context,
+		task *models.Task,
+		sessionID string,
+		expectedSessionState models.TaskSessionState,
+	) (bool, error)
+}
+
+// RestoreTaskMessageRollback restores message_task's task-state/workflow-step
+// snapshot only while ownerSessionID still has expectedSessionState. It is a
+// narrow compensation API: the repository predicate and both task-field
+// writes share one SQL statement, so coordinator cancellation cannot be
+// overwritten between a state check and the rollback write.
+func (s *Service) RestoreTaskMessageRollback(
+	ctx context.Context,
+	taskID, ownerSessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+	workflowStepID string,
+) (*models.Task, bool, error) {
+	repo, ok := s.tasks.(taskMessageRollbackRepository)
+	if !ok {
+		return nil, false, errors.New("task repository does not support guarded message rollback")
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	oldState := task.State
+	task.State = state
+	task.WorkflowStepID = workflowStepID
+	updated, err := repo.RestoreTaskMessageRollbackIfSessionState(
+		ctx,
+		task,
+		ownerSessionID,
+		expectedSessionState,
+	)
+	if err != nil || !updated {
+		return task, updated, err
+	}
+
+	if task.State != oldState {
+		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	return task, true, nil
+}
+
 // ArchiveTask archives a task by setting its archived_at timestamp.
 // The task remains in the DB but is excluded from active board views.
 // Active agent sessions are stopped and worktrees cleaned up in background.

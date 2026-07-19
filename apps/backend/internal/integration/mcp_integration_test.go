@@ -70,15 +70,29 @@ func setupMCPTestServer(t *testing.T) (*TestServer, string, string, string, stri
 	return ts, parentTaskID, workspaceID, workflowID, workflowStepID
 }
 
+// dispatchTrustedMCP exercises the in-process dispatcher path used by the
+// authenticated agent stream. Raw /ws intentionally rejects the internal
+// mcp.* namespace (ADR-2026-07-19-reject-mcp-actions-on-raw-websocket).
+func dispatchTrustedMCP(
+	t *testing.T,
+	ts *TestServer,
+	requestID, action string,
+	payload map[string]interface{},
+) (*ws.Message, error) {
+	t.Helper()
+	request, err := ws.NewRequest(requestID, action, payload)
+	if err != nil {
+		return nil, err
+	}
+	return ts.Gateway.Dispatcher.Dispatch(context.Background(), request)
+}
+
 func TestMCPCreateTask_SubtaskInheritsFromParent(t *testing.T) {
 	ts, parentTaskID, workspaceID, workflowID, _ := setupMCPTestServer(t)
 	defer ts.Close()
 
-	client := NewWSClient(t, ts.Server.URL)
-	defer client.Close()
-
 	// Create subtask with title, description, and parent_id — workspace/workflow/step should be inherited
-	resp, err := client.SendRequest("subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := dispatchTrustedMCP(t, ts, "subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
 		"parent_id":   parentTaskID,
 		"title":       "Subtask via MCP",
 		"description": "Implement the subtask feature",
@@ -118,7 +132,7 @@ func TestMCPCreateTask_SubtaskVisibleInListTasks(t *testing.T) {
 	workflowID := parentPayload["workflow_id"].(string)
 
 	// Create subtask
-	resp, err := client.SendRequest("subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := dispatchTrustedMCP(t, ts, "subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
 		"parent_id":   parentTaskID,
 		"title":       "Visible Subtask",
 		"description": "Implement the visible subtask feature",
@@ -127,7 +141,7 @@ func TestMCPCreateTask_SubtaskVisibleInListTasks(t *testing.T) {
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 
 	// List tasks — should contain both parent and subtask
-	listResp, err := client.SendRequest("list-1", ws.ActionMCPListTasks, map[string]interface{}{
+	listResp, err := dispatchTrustedMCP(t, ts, "list-1", ws.ActionMCPListTasks, map[string]interface{}{
 		"workflow_id": workflowID,
 	})
 	require.NoError(t, err)
@@ -153,11 +167,8 @@ func TestMCPCreateTask_TopLevelWithoutParent(t *testing.T) {
 	ts, _, workspaceID, workflowID, workflowStepID := setupMCPTestServer(t)
 	defer ts.Close()
 
-	client := NewWSClient(t, ts.Server.URL)
-	defer client.Close()
-
 	// Create top-level task (no parent_id, all IDs provided)
-	resp, err := client.SendRequest("top-1", ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := dispatchTrustedMCP(t, ts, "top-1", ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":     workspaceID,
 		"workflow_id":      workflowID,
 		"workflow_step_id": workflowStepID,
@@ -180,11 +191,8 @@ func TestMCPCreateTask_NoParentNoIDs_ReturnsError(t *testing.T) {
 	ts, _, _, _, _ := setupMCPTestServer(t)
 	defer ts.Close()
 
-	client := NewWSClient(t, ts.Server.URL)
-	defer client.Close()
-
 	// No parent_id and no workspace/workflow -> should fail
-	resp, err := client.SendRequest("fail-1", ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := dispatchTrustedMCP(t, ts, "fail-1", ws.ActionMCPCreateTask, map[string]interface{}{
 		"title": "Orphan Task",
 	})
 	require.NoError(t, err)
@@ -195,10 +203,7 @@ func TestMCPCreateTask_InvalidParentID_ReturnsError(t *testing.T) {
 	ts, _, _, _, _ := setupMCPTestServer(t)
 	defer ts.Close()
 
-	client := NewWSClient(t, ts.Server.URL)
-	defer client.Close()
-
-	resp, err := client.SendRequest("bad-parent", ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := dispatchTrustedMCP(t, ts, "bad-parent", ws.ActionMCPCreateTask, map[string]interface{}{
 		"parent_id": "nonexistent-task-id",
 		"title":     "Bad Parent",
 	})
@@ -210,11 +215,8 @@ func TestMCPCreateTask_StartAgentFalse_DoesNotRequireDescription(t *testing.T) {
 	ts, parentTaskID, _, _, _ := setupMCPTestServer(t)
 	defer ts.Close()
 
-	client := NewWSClient(t, ts.Server.URL)
-	defer client.Close()
-
 	// With start_agent=false, description should NOT be required for subtasks
-	resp, err := client.SendRequest("subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := dispatchTrustedMCP(t, ts, "subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
 		"parent_id":   parentTaskID,
 		"title":       "Subtask without description",
 		"start_agent": false, // Don't auto-start, so no description needed
@@ -229,11 +231,8 @@ func TestMCPCreateTask_StartAgentTrue_RequiresDescription(t *testing.T) {
 	ts, parentTaskID, _, _, _ := setupMCPTestServer(t)
 	defer ts.Close()
 
-	client := NewWSClient(t, ts.Server.URL)
-	defer client.Close()
-
 	// With start_agent=true (default), description IS required for subtasks
-	resp, err := client.SendRequest("subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := dispatchTrustedMCP(t, ts, "subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
 		"parent_id": parentTaskID,
 		"title":     "Subtask without description",
 		// start_agent defaults to true, description is required
@@ -248,12 +247,9 @@ func TestMCPCreateTask_SourceTaskID_TopLevel_Succeeds(t *testing.T) {
 	ts, parentTaskID, workspaceID, workflowID, _ := setupMCPTestServer(t)
 	defer ts.Close()
 
-	client := NewWSClient(t, ts.Server.URL)
-	defer client.Close()
-
 	// source_task_id is set by agentctl to the current task; verify the path succeeds
 	// and the task is created (even though parentTaskID has no repositories).
-	resp, err := client.SendRequest("top-source", ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := dispatchTrustedMCP(t, ts, "top-source", ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":   workspaceID,
 		"workflow_id":    workflowID,
 		"title":          "Top Level with Source Task",
@@ -271,13 +267,10 @@ func TestMCPCreateTask_SourceTaskID_NotFound_StillCreatesTask(t *testing.T) {
 	ts, _, workspaceID, workflowID, _ := setupMCPTestServer(t)
 	defer ts.Close()
 
-	client := NewWSClient(t, ts.Server.URL)
-	defer client.Close()
-
 	// Non-existent source_task_id must silently fall through (Warn log only),
 	// not cause a validation error. This covers the error-swallow branch at
 	// resolveTaskRepositories:422.
-	resp, err := client.SendRequest("top-notfound", ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := dispatchTrustedMCP(t, ts, "top-notfound", ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":   workspaceID,
 		"workflow_id":    workflowID,
 		"title":          "Top Level with Missing Source Task",

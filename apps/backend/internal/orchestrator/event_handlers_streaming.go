@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -471,8 +472,8 @@ func (s *Service) shouldDropCompletedExecutionStreamEvent(payload *lifecycle.Age
 // updateTaskSessionState transitions a session to nextState with guard checks.
 // When a preloadedSession is provided, its State is used for guard conditions (terminal-state
 // check, same-state check). This is an optimistic fast-path: between load and check another
-// goroutine may have changed the state in the DB. The guards are best-effort to avoid
-// unnecessary writes; the DB update via UpdateTaskSessionState is the atomic source of truth.
+// goroutine may have changed the state in the DB. Production repositories use
+// an expected-state compare-and-set so a delayed writer cannot revive a terminal session.
 // Returns the session row after a successful write (refreshed from DB when possible); callers
 // that need authoritative UpdatedAt should use the return value, not the preloaded input.
 func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool, preloadedSession ...*models.TaskSession) *models.TaskSession {
@@ -497,20 +498,11 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 	if session.State == nextState {
 		return session
 	}
-	if err := s.repo.UpdateTaskSessionState(ctx, sessionID, nextState, errorMessage); err != nil {
-		s.logger.Error("failed to update task session state",
-			zap.String("session_id", sessionID),
-			zap.String("state", string(nextState)),
-			zap.Error(err))
+	session, authoritativeUpdatedAt, changed := s.persistTaskSessionState(
+		ctx, sessionID, session, nextState, errorMessage,
+	)
+	if !changed {
 		return session
-	}
-	var authoritativeUpdatedAt *time.Time
-	if refreshed, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && refreshed != nil {
-		session = refreshed
-		if !refreshed.UpdatedAt.IsZero() {
-			t := refreshed.UpdatedAt.UTC()
-			authoritativeUpdatedAt = &t
-		}
 	}
 	if authoritativeUpdatedAt == nil {
 		s.logger.Warn("skipping session state_changed publish; could not read authoritative updated_at",
@@ -529,6 +521,236 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
 	return session
+}
+
+func (s *Service) persistTaskSessionState(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	nextState models.TaskSessionState,
+	errorMessage string,
+) (*models.TaskSession, *time.Time, bool) {
+	if updater, ok := s.repo.(conditionalTaskSessionStateUpdater); ok {
+		changed, updatedAt, err := updater.UpdateTaskSessionStateIfCurrent(
+			ctx, sessionID, session.State, nextState, errorMessage,
+		)
+		if err != nil {
+			s.logTaskSessionStateWriteError(sessionID, nextState, err)
+			return session, nil, false
+		}
+		if !changed {
+			return s.refreshTaskSessionOr(ctx, sessionID, session), nil, false
+		}
+		persisted := taskSessionAfterStateWrite(session, nextState, errorMessage, updatedAt)
+		persisted = s.refreshTaskSessionOr(ctx, sessionID, persisted)
+		t := updatedAt.UTC()
+		return persisted, &t, true
+	}
+
+	if err := s.repo.UpdateTaskSessionState(ctx, sessionID, nextState, errorMessage); err != nil {
+		s.logTaskSessionStateWriteError(sessionID, nextState, err)
+		return session, nil, false
+	}
+	refreshed := s.refreshTaskSessionOr(ctx, sessionID, session)
+	if refreshed.UpdatedAt.IsZero() {
+		return refreshed, nil, true
+	}
+	t := refreshed.UpdatedAt.UTC()
+	return refreshed, &t, true
+}
+
+func (s *Service) refreshTaskSessionOr(
+	ctx context.Context,
+	sessionID string,
+	fallback *models.TaskSession,
+) *models.TaskSession {
+	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || refreshed == nil {
+		return fallback
+	}
+	return refreshed
+}
+
+func (s *Service) logTaskSessionStateWriteError(
+	sessionID string,
+	nextState models.TaskSessionState,
+	err error,
+) {
+	s.logger.Error("failed to update task session state",
+		zap.String("session_id", sessionID),
+		zap.String("state", string(nextState)),
+		zap.Error(err))
+}
+
+// transitionTaskSessionState performs the strict state transition used by
+// coordinator stop. It always reads current state, surfaces persistence/read
+// failures, and publishes the accepted transition before returning.
+func (s *Service) transitionTaskSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	nextState models.TaskSessionState,
+	errorMessage string,
+) (bool, models.TaskSessionState, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, "", fmt.Errorf("get session before state transition: %w", err)
+	}
+	if session == nil {
+		return false, "", fmt.Errorf("get session before state transition: session %q is nil", sessionID)
+	}
+	if isTerminalSessionState(session.State) || session.State == nextState {
+		return false, session.State, nil
+	}
+
+	oldState := session.State
+	changed, refreshed, authoritativeUpdatedAt, err := s.persistStrictTaskSessionState(
+		ctx, sessionID, session, nextState, errorMessage,
+	)
+	if err != nil {
+		return false, oldState, err
+	}
+	if !changed {
+		return false, refreshed.State, nil
+	}
+	s.publishTaskSessionStateChanged(
+		ctx,
+		taskID,
+		sessionID,
+		oldState,
+		nextState,
+		errorMessage,
+		authoritativeUpdatedAt,
+		refreshed,
+	)
+	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
+	return true, nextState, nil
+}
+
+func (s *Service) persistStrictTaskSessionState(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	nextState models.TaskSessionState,
+	errorMessage string,
+) (bool, *models.TaskSession, *time.Time, error) {
+	if canceller, ok := s.repo.(activeTaskSessionCanceller); ok && nextState == models.TaskSessionStateCancelled {
+		return s.cancelActiveTaskSessionState(ctx, canceller, sessionID, session, errorMessage)
+	}
+	if updater, ok := s.repo.(conditionalTaskSessionStateUpdater); ok {
+		return s.persistConditionalTaskSessionState(ctx, updater, sessionID, session, nextState, errorMessage)
+	}
+	if err := s.repo.UpdateTaskSessionState(ctx, sessionID, nextState, errorMessage); err != nil {
+		return false, session, nil, err
+	}
+	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, session, nil, fmt.Errorf("get session after state transition: %w", err)
+	}
+	if refreshed == nil {
+		return false, session, nil, fmt.Errorf("get session after state transition: session %q is nil", sessionID)
+	}
+	if refreshed.State != nextState {
+		return false, refreshed, nil, nil
+	}
+	var authoritativeUpdatedAt *time.Time
+	if !refreshed.UpdatedAt.IsZero() {
+		t := refreshed.UpdatedAt.UTC()
+		authoritativeUpdatedAt = &t
+	}
+	return true, refreshed, authoritativeUpdatedAt, nil
+}
+
+func (s *Service) persistConditionalTaskSessionState(
+	ctx context.Context,
+	updater conditionalTaskSessionStateUpdater,
+	sessionID string,
+	session *models.TaskSession,
+	nextState models.TaskSessionState,
+	errorMessage string,
+) (bool, *models.TaskSession, *time.Time, error) {
+	changed, updatedAt, err := updater.UpdateTaskSessionStateIfCurrent(
+		ctx,
+		sessionID,
+		session.State,
+		nextState,
+		errorMessage,
+	)
+	if err != nil {
+		return false, session, nil, err
+	}
+	if !changed {
+		refreshed, readErr := s.repo.GetTaskSession(ctx, sessionID)
+		if readErr != nil {
+			return false, session, nil, fmt.Errorf("get session after rejected state transition: %w", readErr)
+		}
+		if refreshed == nil {
+			return false, session, nil, fmt.Errorf("get session after rejected state transition: session %q is nil", sessionID)
+		}
+		return false, refreshed, nil, nil
+	}
+	persisted := taskSessionAfterStateWrite(session, nextState, errorMessage, updatedAt)
+	persisted = s.refreshTaskSessionOr(ctx, sessionID, persisted)
+	t := updatedAt.UTC()
+	return true, persisted, &t, nil
+}
+
+func (s *Service) cancelActiveTaskSessionState(
+	ctx context.Context,
+	canceller activeTaskSessionCanceller,
+	sessionID string,
+	session *models.TaskSession,
+	errorMessage string,
+) (bool, *models.TaskSession, *time.Time, error) {
+	changed, updatedAt, err := canceller.CancelActiveTaskSession(ctx, sessionID, errorMessage)
+	if err != nil {
+		return false, session, nil, err
+	}
+	if !changed {
+		refreshed, readErr := s.repo.GetTaskSession(ctx, sessionID)
+		if readErr != nil {
+			return false, session, nil, fmt.Errorf("get session after rejected cancellation: %w", readErr)
+		}
+		if refreshed == nil {
+			return false, session, nil, fmt.Errorf("get session after rejected cancellation: session %q is nil", sessionID)
+		}
+		return false, refreshed, nil, nil
+	}
+	refreshed := taskSessionAfterStateWrite(session, models.TaskSessionStateCancelled, errorMessage, updatedAt)
+	refreshed = s.refreshTaskSessionOr(ctx, sessionID, refreshed)
+	t := updatedAt.UTC()
+	return true, refreshed, &t, nil
+}
+
+type activeTaskSessionCanceller interface {
+	CancelActiveTaskSession(ctx context.Context, sessionID, reason string) (bool, time.Time, error)
+}
+
+type conditionalTaskSessionStateUpdater interface {
+	UpdateTaskSessionStateIfCurrent(
+		ctx context.Context,
+		sessionID string,
+		expected, next models.TaskSessionState,
+		errorMessage string,
+	) (bool, time.Time, error)
+}
+
+func taskSessionAfterStateWrite(
+	session *models.TaskSession,
+	nextState models.TaskSessionState,
+	errorMessage string,
+	updatedAt time.Time,
+) *models.TaskSession {
+	updated := *session
+	updated.State = nextState
+	updated.ErrorMessage = errorMessage
+	updated.UpdatedAt = updatedAt
+	if isTerminalSessionState(nextState) {
+		t := updatedAt
+		updated.CompletedAt = &t
+	} else {
+		updated.CompletedAt = nil
+	}
+	return &updated
 }
 
 func (s *Service) publishTaskSessionStateChanged(
@@ -750,11 +972,11 @@ func (s *Service) setSessionStarting(ctx context.Context, taskID string, session
 			session.State == models.TaskSessionStateStarting &&
 			current.State == models.TaskSessionStateFailed
 		if isTerminalSessionState(current.State) && !allowedTerminalRecovery {
-			return fmt.Errorf("session %s is %s; cannot mark STARTING", session.ID, current.State)
+			return &executor.SessionStateSupersededError{SessionID: session.ID, State: current.State}
 		}
 
 		oldState = current.State
-		if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		if err := s.persistFullTaskSessionIfCurrent(ctx, session, current.State); err != nil {
 			return err
 		}
 
@@ -768,18 +990,48 @@ func (s *Service) setSessionStarting(ctx context.Context, taskID string, session
 			}
 		}
 
-		if promoteTask {
-			s.writeTaskInProgressForRuntime(ctx, taskID, session.ID)
-		}
 		return nil
 	}(); err != nil {
 		return err
+	}
+	if promoteTask {
+		s.writeTaskInProgressForRuntime(ctx, taskID, session.ID)
 	}
 
 	if publishSession != nil {
 		s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, publishSession)
 	}
 	return nil
+}
+
+func (s *Service) persistFullTaskSessionIfCurrent(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) error {
+	changed, err := s.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return nil
+	}
+	latest, err := s.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	if latest == nil {
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, session.ID)
+	}
+	if isTerminalSessionState(latest.State) {
+		return &executor.SessionStateSupersededError{SessionID: session.ID, State: latest.State}
+	}
+	return fmt.Errorf(
+		"session %s state changed from %s to %s before full-row persistence",
+		session.ID,
+		expected,
+		latest.State,
+	)
 }
 
 func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
@@ -1032,71 +1284,83 @@ func (s *Service) setSessionRunningForExecution(ctx context.Context, taskID, ses
 		return
 	}
 
-	s.writeTaskInProgressForRuntime(ctx, taskID, sessionID)
+	if err := s.reconcileTaskStateForRuntimeLocked(
+		ctx,
+		taskID,
+		sessionID,
+		v1.TaskStateInProgress,
+	); err != nil {
+		s.logger.Error("failed to update task state to IN_PROGRESS",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
 }
 
 func (s *Service) writeTaskInProgressForRuntime(ctx context.Context, taskID, sessionID string) {
-	// Task lookup errors fail closed so office/archived guards cannot be bypassed
-	// by a transient repository failure.
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		s.logger.Warn("skipping IN_PROGRESS transition because task lookup failed",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return
-	}
-	if taskArchived(task) {
-		s.logger.Debug("skipping IN_PROGRESS transition for archived task",
-			zap.String("task_id", taskID))
-		return
-	}
-	// Office tasks do NOT transition to IN_PROGRESS when their agent's
-	// session enters RUNNING. The user-facing task status (todo /
-	// in_review / done / blocked) reflects workflow position, not the
-	// agent's runtime cycle — that's surfaced via the topbar Working
-	// spinner and the inline session timeline entry instead. Skipping
-	// the transition prevents the REVIEW → IN_PROGRESS → REVIEW flicker
-	// across follow-up comment turns.
-	if task != nil && task.AssigneeAgentProfileID != "" {
-		s.logger.Debug("skipping IN_PROGRESS transition for office task",
-			zap.String("task_id", taskID))
-		return
-	}
-	if sessionID != "" {
-		session, sessionErr := s.repo.GetTaskSession(ctx, sessionID)
-		if sessionErr != nil {
-			s.logger.Warn("skipping IN_PROGRESS transition because session lookup failed",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.Error(sessionErr))
-			return
-		}
-		if session == nil || !sessionstate.IsWorking(session.State) {
-			state := ""
-			if session != nil {
-				state = string(session.State)
-			}
-			s.logger.Debug("skipping IN_PROGRESS transition because session is no longer active",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("session_state", state))
-			return
-		}
-	}
-
-	// UpdateTaskStateIfNotArchived (not the unconditional UpdateTaskState) so
-	// the write is atomic against archived_at: the taskArchived guard above
-	// reads the row before this call, and ArchiveTask can commit in that
-	// window without changing task.State, so only an archive-aware
-	// conditional write closes the race (PR #1706 review).
-	updated, err := s.taskRepo.UpdateTaskStateIfNotArchived(ctx, taskID, v1.TaskStateInProgress)
+	err := s.reconcileTaskStateForRuntime(ctx, taskID, sessionID, v1.TaskStateInProgress)
 	if err != nil {
 		s.logger.Error("failed to update task state to IN_PROGRESS",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-	} else if updated {
-		s.logger.Info("task moved to IN_PROGRESS state",
-			zap.String("task_id", taskID))
+	}
+}
+
+func (s *Service) reconcileTaskStateForRuntime(
+	ctx context.Context,
+	taskID, sessionID string,
+	state v1.TaskState,
+) error {
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
+	return s.reconcileTaskStateForRuntimeLocked(ctx, taskID, sessionID, state)
+}
+
+func (s *Service) reconcileTaskStateForRuntimeLocked(
+	ctx context.Context,
+	taskID, sessionID string,
+	state v1.TaskState,
+) error {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if taskArchived(task) {
+		return nil
+	}
+	if state == v1.TaskStateInProgress && task != nil && task.AssigneeAgentProfileID != "" {
+		return nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !runtimeSessionOwnsTaskState(session, state) {
+		return nil
+	}
+	updated, err := s.taskRepo.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+	if err != nil {
+		return err
+	}
+	if updated {
+		s.logger.Info("task state reconciled from active runtime",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("state", string(state)))
+	}
+	return nil
+}
+
+func runtimeSessionOwnsTaskState(session *models.TaskSession, state v1.TaskState) bool {
+	if session == nil {
+		return false
+	}
+	switch state {
+	case v1.TaskStateInProgress:
+		return sessionstate.IsWorking(session.State)
+	case v1.TaskStateFailed:
+		return session.State == models.TaskSessionStateFailed
+	default:
+		return false
 	}
 }
 
@@ -1935,11 +2199,23 @@ func (s *Service) persistSessionModelOnSession(ctx context.Context, sessionID st
 		return
 	}
 	session.AgentProfileSnapshot["model"] = model
-	_ = s.repo.UpdateTaskSession(ctx, session)
+	if updater, ok := s.repo.(taskSessionAgentProfileSnapshotUpdater); ok {
+		_ = updater.UpdateTaskSessionAgentProfileSnapshot(ctx, sessionID, session.AgentProfileSnapshot)
+	} else {
+		_ = s.repo.UpdateTaskSession(ctx, session)
+	}
 	// Invalidate the message creator's model cache so subsequent messages use the new model.
 	if s.messageCreator != nil {
 		s.messageCreator.InvalidateModelCache(sessionID)
 	}
+}
+
+type taskSessionAgentProfileSnapshotUpdater interface {
+	UpdateTaskSessionAgentProfileSnapshot(
+		ctx context.Context,
+		sessionID string,
+		snapshot map[string]interface{},
+	) error
 }
 
 func applySessionRuntimeConfigUpdate(cfg *models.SessionRuntimeConfig, model, mode string, options []streams.ConfigOption) {

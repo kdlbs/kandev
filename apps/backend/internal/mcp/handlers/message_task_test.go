@@ -1528,6 +1528,85 @@ func TestHandleMessageTask_DispatchErrorRollsBackTurnStartOutsideReview(t *testi
 	assert.Equal(t, "original queued", status.Entries[0].Content)
 }
 
+func TestHandleMessageTask_DispatchRollbackDoesNotOverwriteCoordinatorStop(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _ := newTestTaskServiceWithEventBus(t)
+	sender, target, session := seedTaskWithSession(
+		t,
+		svc,
+		repo,
+		models.TaskSessionStateWaitingForInput,
+	)
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-before-message"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	_, err = orch.queue.QueueMessageWithMetadata(
+		ctx,
+		session.ID,
+		target.ID,
+		"queued before dispatch",
+		"",
+		"agent",
+		false,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	orch.onTurnStart = func(ctx context.Context, taskID, sessionID string) error {
+		// The rollback snapshot is already captured when this callback runs.
+		// Model a complete coordinator stop before dispatch reports failure.
+		changed, _, cancelErr := repo.CancelActiveTaskSession(
+			ctx,
+			sessionID,
+			"stopped by parent task via MCP",
+		)
+		require.NoError(t, cancelErr)
+		require.True(t, changed)
+		stoppedTask, loadErr := svc.GetTask(ctx, taskID)
+		require.NoError(t, loadErr)
+		stoppedTask.State = v1.TaskStateReview
+		stoppedTask.WorkflowStepID = "step-owned-by-stop"
+		require.NoError(t, repo.UpdateTask(ctx, stoppedTask))
+		_, queueErr := orch.queue.QueueMessageWithMetadata(
+			ctx,
+			sessionID,
+			taskID,
+			"queued after stop",
+			"",
+			"agent",
+			false,
+			nil,
+			nil,
+		)
+		return queueErr
+	}
+
+	msg := makeWSMessage(
+		t,
+		ws.ActionMCPMessageTask,
+		senderPayload(target.ID, "dispatch races stop", sender.ID),
+	)
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	stoppedSession, err := svc.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateCancelled, stoppedSession.State)
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-owned-by-stop", updatedTask.WorkflowStepID)
+	queueStatus := orch.queue.GetStatus(ctx, session.ID)
+	require.Equal(t, 2, queueStatus.Count)
+	assert.Equal(t, "queued before dispatch", queueStatus.Entries[0].Content)
+	assert.Equal(t, "queued after stop", queueStatus.Entries[1].Content)
+}
+
 func TestHandleMessageTask_OfficeReviewDoesNotTransitionTaskState(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)

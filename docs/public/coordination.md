@@ -116,9 +116,27 @@ For predictable top-level creation, pass `repository_url`, `repository_id`, or `
 
 The default delivery mode is queued. Each session accepts 10 queued messages by default; operators can change it with `KANDEV_QUEUE_MAX_PER_SESSION`, and a value of `0` or less disables the limit. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after a target turn completes.
 
-`delivery_mode: "interrupt"` cancels current work and prioritizes the message, but only a direct parent task may interrupt its child. Other senders receive an error. If immediate dispatch cannot proceed safely, the response can still report the message as queued.
+Choose the control by intent:
 
-Additional boundaries:
+| Intent | Operation | Result |
+|---|---|---|
+| Send information that can wait | `message_task_kandev` with queued delivery or no `delivery_mode` | The current turn continues and the message waits FIFO. |
+| Stop the current approach and give replacement work now | `message_task_kandev` with `delivery_mode: "interrupt"` | The direct parent requests immediate cancellation and redispatch. If that cannot proceed safely, the response reports the message as queued. |
+| Halt all current work with no replacement prompt | `stop_task_kandev` | The direct parent requests logical cancellation and graceful teardown without creating or dispatching a message. |
+
+Only a direct parent may interrupt its child. Halt-only stop is stricter: it accepts only a same-workspace direct child, while self, siblings, ancestors other than the parent, deeper descendants, unrelated tasks, and cross-workspace callers are rejected. Use interrupt for stop-and-steer work. Reserve stop for halt-only intent.
+
+### Stop a direct child's work
+
+`stop_task_kandev` accepts the full ID of one direct child and has no session-specific option. Kandev inspects that child's active-session candidates and requests a graceful stop for every execution still observed as live, including non-primary sibling sessions. It does not recurse into descendants.
+
+For each accepted execution, Kandev persists the session as `CANCELLED` before scheduling runtime teardown. A `status: "stopped"` response confirms that logical state and scheduled teardown; cleanup continues asynchronously and the process may not have exited yet. When no live execution is accepted, the call succeeds idempotently with `status: "not_running"` and changes no task or session state.
+
+After at least one accepted stop, Kandev attempts to move a regular, unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`, provided no session remains working. Office, archived, and already non-active tasks keep their state, and a failed secondary `REVIEW` reconciliation does not undo accepted session stops.
+
+Stopping preserves the task record, worktrees, environments, commits, descendants, and existing queued messages. It sends no prompt, creates no replacement turn, and does not create a durable pause: a later user or workflow action can start the task again.
+
+Additional messaging boundaries:
 
 - A task cannot message its own primary session through the default route, and a session cannot message itself.
 - Normal targeted messages can cross workspaces when the sender has the exact task ID. Session spawning cannot.
@@ -217,6 +235,8 @@ When Office is enabled, it prototypes **Blocked by** and **Blocking** properties
 - **Inherited subtask sees unexpected changes:** it intentionally shares the parent's materialized files and branch.
 - **Message remains queued:** the target is busy and only one queued message drains per turn. Check for `queue_full` before retrying.
 - **Interrupt is rejected:** only the target's direct parent may use interrupt delivery.
+- **Stop is rejected:** `stop_task_kandev` is task-mode only and accepts only a same-workspace direct child of the caller.
+- **Stop reports `stopped` but a process is still visible:** the response confirms logical cancellation and scheduled graceful teardown, not process exit.
 - **Agent cannot spawn on another task:** `spawn_session_kandev` is same-workspace only; create a task or use a normal targeted message instead.
 - **Parent does not advance after children finish:** the parent needs an active session in `CREATED`, `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT` in addition to terminal direct children.
 - **A multi-repository executor is disabled:** multi-repository tasks require **git-worktree**.

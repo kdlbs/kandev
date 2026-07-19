@@ -52,8 +52,26 @@
       "audiences": ["user"],
       "stability": "stable",
       "docs": ["tasks-and-workflows", "coordination", "git-operations"],
-      "sources": ["apps/backend/internal/orchestrator/task_operations.go", "apps/backend/internal/mcp/handlers/config_task_handlers.go"],
-      "tests": ["apps/backend/internal/orchestrator/task_operations_test.go", "apps/backend/internal/mcp/handlers/handlers_test.go"],
+      "sources": [
+        "apps/backend/internal/orchestrator/task_operations.go",
+        "apps/backend/internal/mcp/handlers/config_task_handlers.go",
+        "apps/backend/internal/mcp/handlers/stop_task.go",
+        "apps/backend/internal/mcp/server/handlers.go",
+        "apps/backend/internal/mcp/server/server.go",
+        "apps/backend/internal/gateway/websocket/client.go"
+      ],
+      "tests": [
+        "apps/backend/internal/orchestrator/task_operations_test.go",
+        "apps/backend/internal/orchestrator/coordinator_stop_test.go",
+        "apps/backend/internal/mcp/handlers/handlers_test.go",
+        "apps/backend/internal/mcp/handlers/stop_task_test.go",
+        "apps/backend/internal/mcp/server/handlers_test.go",
+        "apps/backend/internal/mcp/server/server_test.go",
+        "apps/backend/internal/mcp/server/sysprompt_sync_test.go",
+        "apps/backend/internal/backendapp/mcp_stop_composition_test.go",
+        "apps/backend/internal/integration/mcp_stop_task_test.go",
+        "apps/backend/internal/gateway/websocket/client_mcp_actions_test.go"
+      ],
       "mcpTools": [
         "add_branch_to_task_kandev",
         "archive_task_kandev",
@@ -62,6 +80,7 @@
         "list_tasks_kandev",
         "move_task_kandev",
         "step_complete_kandev",
+        "stop_task_kandev",
         "update_repository_base_branch_kandev",
         "update_task_kandev",
         "update_task_state_kandev"

@@ -70,9 +70,35 @@ type SessionRepository interface {
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 }
 
+// conditionalSessionStateUpdater is implemented by repositories that can
+// reject stale session-state writers. Keeping it optional preserves existing
+// handler fakes and alternate repositories while production SQLite gets CAS
+// protection against coordinator stops.
+type conditionalSessionStateUpdater interface {
+	UpdateTaskSessionStateIfCurrent(
+		ctx context.Context,
+		sessionID string,
+		expected, state models.TaskSessionState,
+		errorMessage string,
+	) (bool, time.Time, error)
+}
+
 // TaskRepository interface for updating task state.
 type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
+}
+
+// sessionOwnedTaskStateUpdater atomically guards a task-state write with the
+// current state of its owning session. Production SQLite implements this so a
+// clarification answer cannot restore IN_PROGRESS after coordinator stop has
+// already committed CANCELLED.
+type sessionOwnedTaskStateUpdater interface {
+	UpdateTaskStateIfSessionState(
+		ctx context.Context,
+		taskID, sessionID string,
+		expectedSessionState models.TaskSessionState,
+		state v1.TaskState,
+	) (bool, error)
 }
 
 // EventBus interface for publishing events.
@@ -103,6 +129,13 @@ type SessionLauncher interface {
 	// RenameSession sets the user-visible session tab label and broadcasts
 	// the change. Used by spawn_session_kandev's optional name parameter.
 	RenameSession(ctx context.Context, sessionID, name string) error
+}
+
+// TaskStopper exposes the narrow coordinator halt operation used by
+// stop_task_kandev. The MCP layer owns authorization; lifecycle semantics stay
+// in the orchestrator.
+type TaskStopper interface {
+	StopTaskForCoordinator(ctx context.Context, taskID string) (orchestrator.CoordinatorTaskStopResult, error)
 }
 
 // MessageQueuer queues a prompt message for delivery to a session on its next turn.
@@ -136,6 +169,8 @@ type Handlers struct {
 	planService        *service.PlanService
 	walkthroughService *service.WalkthroughService
 	sessionLauncher    SessionLauncher
+	taskStopper        TaskStopper
+	stopTaskGetter     func(context.Context, string) (*models.Task, error)
 	messageQueue       MessageQueuer
 	promptResolver     PromptReferenceResolver
 	logger             *logger.Logger
@@ -171,7 +206,7 @@ func NewHandlers(
 	messageQueue MessageQueuer,
 	log *logger.Logger,
 ) *Handlers {
-	return &Handlers{
+	h := &Handlers{
 		taskSvc:            taskSvc,
 		workflowCtrl:       workflowCtrl,
 		clarificationSvc:   clarificationSvc,
@@ -186,6 +221,13 @@ func NewHandlers(
 		messageQueue:       messageQueue,
 		logger:             log.WithFields(zap.String("component", "mcp-handlers")),
 	}
+	if taskSvc != nil {
+		h.stopTaskGetter = taskSvc.GetTask
+	}
+	if stopper, ok := sessionLauncher.(TaskStopper); ok {
+		h.taskStopper = stopper
+	}
+	return h
 }
 
 // SetClarificationInputPauser wires the orchestrator-owned hard pause used when
@@ -196,6 +238,11 @@ func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) 
 
 func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) {
 	h.promptResolver = resolver
+}
+
+// SetTaskStopper wires the orchestrator-owned halt operation.
+func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
+	h.taskStopper = stopper
 }
 
 // SetConfigDeps sets the config-mode dependencies for agent-native configuration handlers.
@@ -224,6 +271,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
+	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
@@ -240,7 +288,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskWalkthroughGet, h.handleGetWalkthrough)
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 24
+	count := 25
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -2016,11 +2064,17 @@ type taskMessageQueueRollback struct {
 type taskMessageSessionRollbackRepository interface {
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
-	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
+	UpdateTaskSessionIfCurrentState(
+		ctx context.Context,
+		session *models.TaskSession,
+		expected models.TaskSessionState,
+	) (bool, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	DeleteTaskSession(ctx context.Context, id string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 }
+
+var errTaskMessageRollbackSuperseded = errors.New("task message rollback superseded by coordinator cancellation")
 
 type taskMessageExecutorReader interface {
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
@@ -2399,22 +2453,61 @@ func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID s
 		h.logger.Warn("failed to restore task session after task message dispatch failure",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-	}
-	if !rollback.restoreTask {
+		// A coordinator cancellation owns the terminal session/task state and
+		// intentionally preserves the current queue. Never continue into task
+		// or queue snapshot restoration after that ownership is observed.
 		return
 	}
-	taskState := rollback.taskState
-	if taskState == "" {
-		taskState = v1.TaskStateReview
+	if rollback.restoreTask {
+		ownerID, ownerState, ok := rollback.taskRestoreOwner()
+		if !ok {
+			h.logger.Warn("skipping task message rollback without an owning session",
+				zap.String("task_id", taskID))
+			return
+		}
+		taskState := rollback.taskState
+		if taskState == "" {
+			taskState = v1.TaskStateReview
+		}
+		_, restored, err := h.taskSvc.RestoreTaskMessageRollback(
+			ctx,
+			taskID,
+			ownerID,
+			ownerState,
+			taskState,
+			rollback.workflowStepID,
+		)
+		if err != nil {
+			h.logger.Warn("failed to restore task after task message dispatch failure",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+			return
+		}
+		if !restored {
+			h.logger.Info("skipping task and queue rollback because session ownership changed",
+				zap.String("task_id", taskID),
+				zap.String("session_id", ownerID))
+			return
+		}
 	}
-	if _, err := h.taskSvc.UpdateTask(ctx, taskID, &service.UpdateTaskRequest{
-		State:          &taskState,
-		WorkflowStepID: &rollback.workflowStepID,
-	}); err != nil {
-		h.logger.Warn("failed to restore task to REVIEW after task message dispatch failure",
+	if err := h.restoreTaskMessageQueues(ctx, rollback); err != nil {
+		h.logger.Warn("failed to restore task message queue after dispatch failure",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 	}
+}
+
+func (r taskMessageReviewRollback) taskRestoreOwner() (string, models.TaskSessionState, bool) {
+	primaryID := r.primarySessionID()
+	for _, snapshot := range r.sessions {
+		if snapshot.sessionID == primaryID {
+			return snapshot.sessionID, snapshot.state, true
+		}
+	}
+	if len(r.sessions) == 0 {
+		return "", "", false
+	}
+	return r.sessions[0].sessionID, r.sessions[0].state, true
 }
 
 func (h *Handlers) restoreTaskMessageSessions(ctx context.Context, rollback taskMessageReviewRollback) error {
@@ -2430,9 +2523,6 @@ func (h *Handlers) restoreTaskMessageSessions(ctx context.Context, rollback task
 			return err
 		}
 	}
-	if err := h.restoreTaskMessageQueues(ctx, rollback); err != nil {
-		return err
-	}
 	return h.restoreSelectedTaskMessageSession(ctx, repo, rollback)
 }
 
@@ -2443,6 +2533,13 @@ func (h *Handlers) restoreSelectedTaskMessageSession(ctx context.Context, repo t
 	primaryID := rollback.primarySessionID()
 	if _, ok := rollback.sessionIDs[rollback.selectedID]; ok {
 		return nil
+	}
+	selected, err := repo.GetTaskSession(ctx, rollback.selectedID)
+	if err != nil {
+		return err
+	}
+	if selected != nil && selected.State == models.TaskSessionStateCancelled {
+		return errTaskMessageRollbackSuperseded
 	}
 	if primaryID != "" && rollback.selectedID != primaryID {
 		h.clearTaskMessageQueue(ctx, rollback.selectedID)
@@ -2501,6 +2598,13 @@ func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSess
 	if err != nil {
 		return err
 	}
+	if session == nil {
+		return fmt.Errorf("task message rollback session %q is nil", rollback.sessionID)
+	}
+	if session.State == models.TaskSessionStateCancelled {
+		return errTaskMessageRollbackSuperseded
+	}
+	expectedState := session.State
 	session.State = rollback.state
 	session.ErrorMessage = rollback.error
 	session.CompletedAt = rollback.completedAt
@@ -2508,8 +2612,19 @@ func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSess
 	session.AgentProfileID = rollback.agentProfileID
 	session.ExecutorProfileID = rollback.executorProfileID
 	session.AgentProfileSnapshot = cloneTaskMessageMetadataMap(rollback.agentProfileSnapshot)
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+	changed, err := repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+	if err != nil {
 		return err
+	}
+	if !changed {
+		latest, loadErr := repo.GetTaskSession(ctx, rollback.sessionID)
+		if loadErr != nil {
+			return loadErr
+		}
+		if latest != nil && latest.State == models.TaskSessionStateCancelled {
+			return errTaskMessageRollbackSuperseded
+		}
+		return fmt.Errorf("task message rollback lost session %q state ownership", rollback.sessionID)
 	}
 	if rollback.isPrimary {
 		if err := repo.SetSessionPrimary(ctx, rollback.sessionID); err != nil {
@@ -2750,17 +2865,34 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 
 // setSessionRunning restores the session state to running after a clarification is answered.
 func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID string) {
-	if err := h.sessionRepo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateRunning, ""); err != nil {
+	changed, updatedAt, err := h.updateClarificationSessionState(
+		ctx,
+		sessionID,
+		models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateRunning,
+	)
+	if err != nil {
 		h.logger.Warn("failed to update session state to RUNNING",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return
 	}
+	if !changed {
+		return
+	}
 	if taskID != "" {
-		if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+		taskStateChanged, err := h.setTaskInProgressForClarification(ctx, taskID, sessionID)
+		if err != nil {
 			h.logger.Warn("failed to update task state to IN_PROGRESS",
 				zap.String("task_id", taskID),
 				zap.Error(err))
+			return
+		}
+		if !taskStateChanged {
+			h.logger.Debug("skipping stale clarification resume after session state changed",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return
 		}
 	}
 
@@ -2771,8 +2903,10 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 			"session_id": sessionID,
 			"new_state":  string(models.TaskSessionStateRunning),
 		}
-		if updatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
-			eventData["updated_at"] = updatedAt
+		if !updatedAt.IsZero() {
+			eventData["updated_at"] = updatedAt.UTC().Format(time.RFC3339Nano)
+		} else if persistedUpdatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
+			eventData["updated_at"] = persistedUpdatedAt
 		} else {
 			h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
 				zap.String("session_id", sessionID))
@@ -2786,13 +2920,40 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 	}
 }
 
+func (h *Handlers) setTaskInProgressForClarification(
+	ctx context.Context,
+	taskID, sessionID string,
+) (bool, error) {
+	if updater, ok := h.taskRepo.(sessionOwnedTaskStateUpdater); ok {
+		return updater.UpdateTaskStateIfSessionState(
+			ctx,
+			taskID,
+			sessionID,
+			models.TaskSessionStateRunning,
+			v1.TaskStateInProgress,
+		)
+	}
+	if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // setSessionWaitingForInput updates the session and task states to waiting for input
 func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string) {
-	// Update session state to WAITING_FOR_INPUT
-	if err := h.sessionRepo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+	changed, updatedAt, err := h.updateClarificationSessionState(
+		ctx,
+		sessionID,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput,
+	)
+	if err != nil {
 		h.logger.Warn("failed to update session state to WAITING_FOR_INPUT",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
+	}
+	if !changed {
 		return
 	}
 
@@ -2812,8 +2973,10 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			"session_id": sessionID,
 			"new_state":  string(models.TaskSessionStateWaitingForInput),
 		}
-		if updatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
-			eventData["updated_at"] = updatedAt
+		if !updatedAt.IsZero() {
+			eventData["updated_at"] = updatedAt.UTC().Format(time.RFC3339Nano)
+		} else if persistedUpdatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
+			eventData["updated_at"] = persistedUpdatedAt
 		} else {
 			h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
 				zap.String("session_id", sessionID))
@@ -2825,6 +2988,20 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			eventData,
 		))
 	}
+}
+
+func (h *Handlers) updateClarificationSessionState(
+	ctx context.Context,
+	sessionID string,
+	expected, state models.TaskSessionState,
+) (bool, time.Time, error) {
+	if updater, ok := h.sessionRepo.(conditionalSessionStateUpdater); ok {
+		return updater.UpdateTaskSessionStateIfCurrent(ctx, sessionID, expected, state, "")
+	}
+	if err := h.sessionRepo.UpdateTaskSessionState(ctx, sessionID, state, ""); err != nil {
+		return false, time.Time{}, err
+	}
+	return true, time.Time{}, nil
 }
 
 func (h *Handlers) sessionUpdatedAtForStateEvent(ctx context.Context, sessionID string) (string, bool) {

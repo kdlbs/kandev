@@ -20,6 +20,24 @@ func officeTestTask() *v1.Task {
 	}
 }
 
+type officeRebindRaceRepository struct {
+	*mockRepository
+	beforeGuardedUpdate func()
+}
+
+func (r *officeRebindRaceRepository) UpdateTaskSessionIfCurrentState(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) (bool, error) {
+	if r.beforeGuardedUpdate != nil {
+		hook := r.beforeGuardedUpdate
+		r.beforeGuardedUpdate = nil
+		hook()
+	}
+	return r.mockRepository.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+}
+
 func TestEnsureSessionForAgent_CreatesWhenMissing(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -71,6 +89,53 @@ func TestEnsureSessionForAgent_RebindsExecutionProfileOnReuse(t *testing.T) {
 	}
 	if got.ExecutionProfileID != "claude-profile" {
 		t.Fatalf("execution profile = %q, want claude-profile", got.ExecutionProfileID)
+	}
+}
+
+func TestEnsureSessionForAgent_RebindDoesNotOverwriteConcurrentCancellation(t *testing.T) {
+	baseRepo := newMockRepository()
+	existing := &models.TaskSession{
+		ID:                 "sess-existing",
+		TaskID:             "task-office",
+		AgentProfileID:     "agent-1",
+		ExecutionProfileID: "codex-profile",
+		State:              models.TaskSessionStateIdle,
+		StartedAt:          time.Now().UTC(),
+	}
+	baseRepo.sessions[existing.ID] = existing
+	raceRepo := &officeRebindRaceRepository{mockRepository: baseRepo}
+	raceRepo.beforeGuardedUpdate = func() {
+		baseRepo.mu.Lock()
+		cancelled := *baseRepo.sessions[existing.ID]
+		cancelled.State = models.TaskSessionStateCancelled
+		cancelled.ErrorMessage = "stopped by parent task via MCP"
+		baseRepo.sessions[existing.ID] = &cancelled
+		baseRepo.mu.Unlock()
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, baseRepo)
+	exec.repo = raceRepo
+
+	got, err := exec.EnsureSessionForAgent(
+		context.Background(), officeTestTask(), "agent-1", "claude-profile", "exec-1", "",
+	)
+	if err != nil {
+		t.Fatalf("EnsureSessionForAgent: %v", err)
+	}
+	if got.ID == existing.ID {
+		t.Fatalf("cancelled session %q was reused", existing.ID)
+	}
+
+	baseRepo.mu.Lock()
+	stored := baseRepo.sessions[existing.ID]
+	baseRepo.mu.Unlock()
+	if stored.State != models.TaskSessionStateCancelled {
+		t.Fatalf("existing session state = %q, want CANCELLED", stored.State)
+	}
+	if stored.ErrorMessage != "stopped by parent task via MCP" {
+		t.Fatalf("existing session error = %q, want coordinator stop reason", stored.ErrorMessage)
+	}
+	if stored.ExecutionProfileID != "codex-profile" {
+		t.Fatalf("cancelled session profile = %q, want original profile", stored.ExecutionProfileID)
 	}
 }
 

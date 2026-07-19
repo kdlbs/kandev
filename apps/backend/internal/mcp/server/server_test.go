@@ -44,6 +44,7 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "update_task_kandev")
 	assert.Contains(t, tools, "move_task_kandev")
 	assert.Contains(t, tools, "message_task_kandev")
+	assert.Contains(t, tools, "stop_task_kandev")
 	assert.Contains(t, tools, "get_task_conversation_kandev")
 
 	// Task mode should have plan tools
@@ -158,6 +159,7 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	// Config mode should NOT have task-mode kanban create/update tools
 	assert.NotContains(t, tools, "create_task_kandev")
 	assert.NotContains(t, tools, "update_task_kandev")
+	assert.NotContains(t, tools, "stop_task_kandev")
 }
 
 func TestServerModeDefault_DefaultsToTask(t *testing.T) {
@@ -172,6 +174,7 @@ func TestServerModeDefault_DefaultsToTask(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	assert.Contains(t, tools, "create_task_kandev")
 	assert.Contains(t, tools, "create_task_plan_kandev")
+	assert.Contains(t, tools, "stop_task_kandev")
 	assert.NotContains(t, tools, "create_workflow_step_kandev")
 }
 
@@ -210,15 +213,15 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
-	// 14 kanban (incl. delete + archive task + spawn_session) +
+	// 15 kanban (incl. delete + archive task + stop_task + spawn_session) +
 	// 1 add_branch_to_task + 1 update_repository_base_branch +
 	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
-	// 1 related-tasks = 26.
+	// 1 related-tasks = 27.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
 	assert.Contains(t, tools, "spawn_session_kandev", "spawn_session must be registered in task mode")
-	assert.Equal(t, 26, len(tools))
+	assert.Equal(t, 27, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {
@@ -286,6 +289,7 @@ func TestServerModeOffice_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "list_workflow_steps_kandev")
 	assert.NotContains(t, tools, "list_agents_kandev")
 	assert.NotContains(t, tools, "list_executor_profiles_kandev")
+	assert.NotContains(t, tools, "stop_task_kandev")
 
 	// Office mode should NOT have config tools
 	assert.NotContains(t, tools, "create_workflow_kandev")
@@ -365,6 +369,7 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 
 	// External mode does NOT include message_task_kandev (no live session context)
 	assert.NotContains(t, tools, "message_task_kandev")
+	assert.NotContains(t, tools, "stop_task_kandev")
 }
 
 func TestServerModeExternal_ToolCount(t *testing.T) {

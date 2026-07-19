@@ -284,6 +284,63 @@ func TestHandleClarificationStaleDismissed(t *testing.T) {
 			t.Fatalf("expected task state %q, got %q (ok=%v)", v1.TaskStateReview, state, ok)
 		}
 	})
+
+	t.Run("coordinator cancellation wins while stale-dismiss event waits", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		requireNoError(t, repo.UpdateTaskSessionState(
+			ctx,
+			"s1",
+			models.TaskSessionStateWaitingForInput,
+			"",
+		))
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Plan", Position: 0,
+			Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+				Type: wfmodels.OnTurnCompleteMoveToNext,
+			}}},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Implement", Position: 1,
+		}
+		svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+		event := bus.NewEvent("clarification.stale_dismissed", "test", map[string]any{
+			"session_id": "s1",
+			"task_id":    "t1",
+			"pending_id": "pending-1",
+		})
+
+		guard, release := svc.acquireCancelInFlightGuard("s1")
+		guard.Lock()
+		done := make(chan error, 1)
+		go func() { done <- svc.handleClarificationStaleDismissed(ctx, event) }()
+		coordinatorStopWaitForGuardRefs(t, svc, "s1", 2)
+		changed, _, err := repo.CancelActiveTaskSession(ctx, "s1", coordinatorMCPStopReason)
+		requireNoError(t, err)
+		if !changed {
+			t.Fatal("coordinator cancellation did not change the waiting session")
+		}
+		guard.Unlock()
+		release()
+		select {
+		case handlerErr := <-done:
+			requireNoError(t, handlerErr)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for stale-dismiss handler")
+		}
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		requireNoError(t, err)
+		if session.State != models.TaskSessionStateCancelled {
+			t.Fatalf("expected cancelled session, got %q", session.State)
+		}
+		task, err := repo.GetTask(ctx, "t1")
+		requireNoError(t, err)
+		if task.WorkflowStepID != "step1" {
+			t.Fatalf("stale-dismiss advanced workflow after cancellation: %q", task.WorkflowStepID)
+		}
+	})
 }
 
 func TestPauseForClarificationInput_SilentlyCancelsTurnWithoutWorkflowTransition(t *testing.T) {
@@ -681,6 +738,60 @@ func TestRetryClarificationAfterCancel_DoesNotStarveUserCancel(t *testing.T) {
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 2 {
 		t.Fatalf("user cancel was starved by a leaked guard: expected 2 agent cancel calls, got %d", got)
+	}
+}
+
+func TestRetryClarificationAfterCancel_CoordinatorCancellationWinsWhileRetryWaits(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-retry-stop", "session-retry-stop", models.TaskSessionStateRunning)
+	manager := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+
+	guard, release := svc.acquireCancelInFlightGuard("session-retry-stop")
+	guard.Lock()
+	done := make(chan bool, 1)
+	go func() {
+		done <- svc.retryClarificationAfterCancel(
+			ctx,
+			clarificationAnsweredData{TaskID: "task-retry-stop", SessionID: "session-retry-stop"},
+			"clarification answer",
+			fmt.Errorf("wrapped: %w", ErrAgentPromptInProgress),
+		)
+	}()
+	coordinatorStopWaitForGuardRefs(t, svc, "session-retry-stop", 2)
+	changed, _, err := repo.CancelActiveTaskSession(
+		ctx,
+		"session-retry-stop",
+		coordinatorMCPStopReason,
+	)
+	if err != nil || !changed {
+		t.Fatalf("cancel running session: changed=%v err=%v", changed, err)
+	}
+	guard.Unlock()
+	release()
+
+	select {
+	case recovered := <-done:
+		if recovered {
+			t.Fatal("clarification retry reported recovery after coordinator cancellation")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for guarded clarification retry")
+	}
+	if got := manager.cancelAgentCalls.Load(); got != 0 {
+		t.Fatalf("clarification retry cancelled agent after stop won: %d calls", got)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "session-retry-stop").Count; got != 0 {
+		t.Fatalf("clarification retry queued replacement after stop won: %d messages", got)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-retry-stop")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateCancelled {
+		t.Fatalf("expected cancelled session, got %q", session.State)
 	}
 }
 

@@ -48,7 +48,7 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 |---|---|
 | **Rename** | Changes the session's display name |
 | **Set as Primary** | Makes a stoppable session the task's primary target |
-| **Stop** | Cancels the active agent turn |
+| **Stop** | Cancels the active agent turn for this session |
 | **Resume** | Attempts to continue a completed, failed, or cancelled session |
 | **Delete** | Permanently removes the conversation; if it was primary, another session is promoted when possible |
 | **Share** | Opens the publishing preview for an eligible session |
@@ -63,10 +63,11 @@ A CLI-passthrough profile displays the agent's native terminal interface in a PT
 
 ## Let agents coordinate sessions
 
-Task MCP gives an agent two coordination operations:
+Task MCP gives an agent three session-coordination operations:
 
 - `spawn_session_kandev` starts another session on the current task by default. It can select a profile and name, and can target another task in the same workspace. The new session shares the target task's environment; its supplied prompt is its initial context.
 - `message_task_kandev` sends work to a task's primary session or to an explicit session ID. A same-task sibling must be addressed by session ID, and a session cannot message itself.
+- `stop_task_kandev` asks the current task to halt all live sessions on one same-workspace direct child. It sends no prompt and has no session-specific option.
 
 Delivery follows the target state:
 
@@ -76,6 +77,8 @@ Delivery follows the target state:
 - a failed or cancelled session rejects the message.
 
 The default pending-message limit is 10 per session. Operators can change it with `KANDEV_QUEUE_MAX_PER_SESSION`; a value of `0` or less removes the cap, so the queue can grow without that bound. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders must queue.
+
+For urgent replacement work, the parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; this cancels the current approach and immediately tries to dispatch the new prompt, with a safe queued fallback. Use `stop_task_kandev` only for halt-only intent. A successful stop marks every accepted live child session `CANCELLED` and schedules graceful teardown asynchronously. Kandev then attempts to move an eligible unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states remain unchanged. A child with no live execution returns idempotent `not_running`, and its worktrees, environment, commits, task record, descendants, and queued messages are preserved. See [Coordination](coordination.md) for the complete authority and lifecycle contract.
 
 Messages show peer attribution, and Kandev gives the receiving agent hidden reply instructions. The receiver can still decline the request. A full task UUID is sufficient for cross-workspace messaging, so treat task IDs as sensitive routing identifiers when untrusted agents share one deployment. See [Coordination](coordination.md) and [Automation and MCP](automation-and-mcp.md).
 

@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -33,6 +34,247 @@ type recordingSessionCanceller struct {
 func (c *recordingSessionCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) int {
 	c.sessions = append(c.sessions, sessionID)
 	return c.count
+}
+
+type immediateClarificationService struct {
+	response *clarification.Response
+	waitErr  error
+}
+
+func (s *immediateClarificationService) CreateRequest(*clarification.Request) (string, bool) {
+	return "pending-race", true
+}
+
+func (s *immediateClarificationService) WaitForResponse(context.Context, string) (*clarification.Response, error) {
+	return s.response, s.waitErr
+}
+
+func (s *immediateClarificationService) CancelRequest(string) bool { return true }
+
+// clarificationCoordinatorStopRaceRepo simulates the coordinator committing a
+// stop immediately before one clarification state write. The legacy
+// unconditional method demonstrates the stale-writer bug by restoring the
+// target state; the conditional method preserves CANCELLED.
+type clarificationCoordinatorStopRaceRepo struct {
+	SessionRepository
+	taskRepo    TaskRepository
+	targetState models.TaskSessionState
+	stopped     bool
+}
+
+func (r *clarificationCoordinatorStopRaceRepo) stopBeforeTarget(
+	ctx context.Context,
+	sessionID string,
+	state models.TaskSessionState,
+) error {
+	if r.stopped || state != r.targetState {
+		return nil
+	}
+	r.stopped = true
+	session, err := r.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := r.SessionRepository.UpdateTaskSessionState(
+		ctx,
+		sessionID,
+		models.TaskSessionStateCancelled,
+		"stopped by parent task via MCP",
+	); err != nil {
+		return err
+	}
+	return r.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateReview)
+}
+
+func (r *clarificationCoordinatorStopRaceRepo) UpdateTaskSessionState(
+	ctx context.Context,
+	sessionID string,
+	state models.TaskSessionState,
+	errorMessage string,
+) error {
+	if err := r.stopBeforeTarget(ctx, sessionID, state); err != nil {
+		return err
+	}
+	return r.SessionRepository.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+}
+
+func (r *clarificationCoordinatorStopRaceRepo) UpdateTaskSessionStateIfCurrent(
+	ctx context.Context,
+	sessionID string,
+	expected, state models.TaskSessionState,
+	errorMessage string,
+) (bool, time.Time, error) {
+	if err := r.stopBeforeTarget(ctx, sessionID, state); err != nil {
+		return false, time.Time{}, err
+	}
+	updater := r.SessionRepository.(interface {
+		UpdateTaskSessionStateIfCurrent(
+			context.Context,
+			string,
+			models.TaskSessionState,
+			models.TaskSessionState,
+			string,
+		) (bool, time.Time, error)
+	})
+	return updater.UpdateTaskSessionStateIfCurrent(ctx, sessionID, expected, state, errorMessage)
+}
+
+// clarificationTaskStateRaceRepo commits coordinator cancellation after the
+// clarification session CAS has restored RUNNING but before its task-state
+// write. The underlying session-owned task CAS must reject IN_PROGRESS.
+type clarificationTaskStateRaceRepo struct {
+	TaskRepository
+	sessionRepo SessionRepository
+	stopped     bool
+}
+
+func (r *clarificationTaskStateRaceRepo) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	if !r.stopped {
+		r.stopped = true
+		if err := r.sessionRepo.UpdateTaskSessionState(
+			ctx,
+			sessionID,
+			models.TaskSessionStateCancelled,
+			"stopped by parent task via MCP",
+		); err != nil {
+			return false, err
+		}
+		if err := r.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+			return false, err
+		}
+	}
+	updater := r.TaskRepository.(sessionOwnedTaskStateUpdater)
+	return updater.UpdateTaskStateIfSessionState(
+		ctx,
+		taskID,
+		sessionID,
+		expectedSessionState,
+		state,
+	)
+}
+
+func askUserQuestionRaceMessage(t *testing.T, taskID, sessionID string) *ws.Message {
+	t.Helper()
+	return makeWSMessage(t, ws.ActionMCPAskUserQuestion, map[string]interface{}{
+		"session_id": sessionID,
+		"task_id":    taskID,
+		"questions": []map[string]interface{}{
+			{
+				"prompt": "What colour?",
+				"options": []map[string]interface{}{
+					{"label": "Red", "description": "R"},
+					{"label": "Blue", "description": "B"},
+				},
+			},
+		},
+	})
+}
+
+func TestHandleAskUserQuestion_CoordinatorStopWinsWaitingTransition(t *testing.T) {
+	_, repo := newTestTaskService(t)
+	const taskID = "task-clarification-wait-race"
+	const sessionID = "session-clarification-wait-race"
+	seedMCPHandlerSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+
+	racingRepo := &clarificationCoordinatorStopRaceRepo{
+		SessionRepository: repo,
+		taskRepo:          repo,
+		targetState:       models.TaskSessionStateWaitingForInput,
+	}
+	eventBus := &mcpRecordingEventBus{}
+	h := &Handlers{
+		clarificationSvc: &immediateClarificationService{waitErr: errors.New("wait cancelled")},
+		sessionRepo:      racingRepo,
+		taskRepo:         repo,
+		eventBus:         eventBus,
+		logger:           testLogger(t).WithFields(),
+	}
+
+	_, err := h.handleAskUserQuestion(context.Background(), askUserQuestionRaceMessage(t, taskID, sessionID))
+	require.NoError(t, err)
+
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, session.State)
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	require.Equal(t, "REVIEW", string(task.State))
+	require.Empty(t, eventBus.events, "rejected WAITING_FOR_INPUT transition must not publish")
+}
+
+func TestHandleAskUserQuestion_CoordinatorStopWinsRunningTransition(t *testing.T) {
+	_, repo := newTestTaskService(t)
+	const taskID = "task-clarification-resume-race"
+	const sessionID = "session-clarification-resume-race"
+	seedMCPHandlerSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+
+	racingRepo := &clarificationCoordinatorStopRaceRepo{
+		SessionRepository: repo,
+		taskRepo:          repo,
+		targetState:       models.TaskSessionStateRunning,
+	}
+	eventBus := &mcpRecordingEventBus{}
+	h := &Handlers{
+		clarificationSvc: &immediateClarificationService{response: &clarification.Response{}},
+		sessionRepo:      racingRepo,
+		taskRepo:         repo,
+		eventBus:         eventBus,
+		logger:           testLogger(t).WithFields(),
+	}
+
+	_, err := h.handleAskUserQuestion(context.Background(), askUserQuestionRaceMessage(t, taskID, sessionID))
+	require.NoError(t, err)
+
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, session.State)
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	require.Equal(t, "REVIEW", string(task.State))
+	require.Len(t, eventBus.events, 1, "only accepted WAITING_FOR_INPUT transition may publish")
+	eventData := eventBus.events[0].Data.(map[string]interface{})
+	require.Equal(t, string(models.TaskSessionStateWaitingForInput), eventData["new_state"])
+}
+
+func TestHandleAskUserQuestion_CoordinatorStopWinsAfterRunningTransition(t *testing.T) {
+	_, repo := newTestTaskService(t)
+	const taskID = "task-clarification-task-race"
+	const sessionID = "session-clarification-task-race"
+	seedMCPHandlerSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+
+	racingTaskRepo := &clarificationTaskStateRaceRepo{
+		TaskRepository: repo,
+		sessionRepo:    repo,
+	}
+	eventBus := &mcpRecordingEventBus{}
+	h := &Handlers{
+		clarificationSvc: &immediateClarificationService{response: &clarification.Response{}},
+		sessionRepo:      repo,
+		taskRepo:         racingTaskRepo,
+		eventBus:         eventBus,
+		logger:           testLogger(t).WithFields(),
+	}
+
+	_, err := h.handleAskUserQuestion(
+		context.Background(),
+		askUserQuestionRaceMessage(t, taskID, sessionID),
+	)
+	require.NoError(t, err)
+
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, session.State)
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	require.Equal(t, v1.TaskStateReview, task.State)
+	require.Len(t, eventBus.events, 1, "stale RUNNING transition must not publish")
+	eventData := eventBus.events[0].Data.(map[string]interface{})
+	require.Equal(t, string(models.TaskSessionStateWaitingForInput), eventData["new_state"])
 }
 
 func TestHandleClarificationTimeout_UsesHardPauser(t *testing.T) {

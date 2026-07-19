@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -468,8 +469,12 @@ func TestMessageTask_ForwardsToBackend(t *testing.T) {
 	s := newTaskModeServer(t, backend, "task-current")
 
 	result := callTool(t, s, "message_task_kandev", map[string]interface{}{
-		"task_id": "task-target",
-		"prompt":  "follow up",
+		"task_id":           "task-target",
+		"session_id":        "sess-target",
+		"prompt":            "follow up",
+		"delivery_mode":     "interrupt",
+		"sender_task_id":    "spoofed-task",
+		"sender_session_id": "spoofed-session",
 	})
 
 	assert.False(t, result.IsError)
@@ -478,7 +483,26 @@ func TestMessageTask_ForwardsToBackend(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-target", payload["task_id"])
+	assert.Equal(t, "sess-target", payload["session_id"])
 	assert.Equal(t, "follow up", payload["prompt"])
+	assert.Equal(t, "interrupt", payload["delivery_mode"])
+	assert.Equal(t, "task-current", payload["sender_task_id"])
+	assert.Equal(t, "test-session", payload["sender_session_id"])
+}
+
+func TestMessageTask_DescriptionExplainsQueueInterruptAndStop(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	tools := s.mcpServer.ListTools()
+	messageTool, ok := tools["message_task_kandev"]
+	require.True(t, ok)
+	description := messageTool.Tool.Description
+
+	assert.Contains(t, description, `delivery_mode="queued"`)
+	assert.Contains(t, description, `delivery_mode="interrupt"`)
+	assert.Contains(t, description, "stop_task_kandev")
+	assert.Contains(t, description, `safely falls back to "queued"`)
 }
 
 func TestMessageTask_MissingTaskID_ReturnsError(t *testing.T) {
@@ -501,6 +525,105 @@ func TestMessageTask_MissingPrompt_ReturnsError(t *testing.T) {
 	})
 
 	assert.True(t, result.IsError)
+}
+
+func TestStopTask_ToolSchemaIsMinimalAndDescriptionIsAccurate(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	tools := s.mcpServer.ListTools()
+	stopTool, ok := tools["stop_task_kandev"]
+	require.True(t, ok, "stop_task_kandev must be registered in task mode")
+
+	schema, err := json.Marshal(stopTool.Tool.InputSchema)
+	require.NoError(t, err)
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(schema, &parsed))
+
+	properties, ok := parsed["properties"].(map[string]interface{})
+	require.True(t, ok, "stop schema must declare properties")
+	require.Len(t, properties, 1, "stop schema must not expose sender, session, reason, or force controls")
+	assert.Contains(t, properties, "task_id")
+	for _, forbidden := range []string{"sender_task_id", "sender_session_id", "session_id", "reason", "force"} {
+		assert.NotContains(t, properties, forbidden)
+	}
+
+	required, ok := parsed["required"].([]interface{})
+	require.True(t, ok, "stop schema must declare task_id as required")
+	assert.Equal(t, []interface{}{"task_id"}, required)
+
+	description := stopTool.Tool.Description
+	for _, phrase := range []string{
+		"direct child",
+		"all live sessions",
+		"halt-only",
+		"does not send a prompt or start a replacement turn",
+		"CANCELLED",
+		"REVIEW",
+		"asynchronously",
+		"not_running",
+		"message_task_kandev",
+		`delivery_mode="interrupt"`,
+	} {
+		assert.Contains(t, description, phrase)
+	}
+}
+
+func TestStopTask_ForwardsTrustedSenderToBackend(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{
+			"task_id": "task-target",
+			"status":  "stopped",
+		},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "stop_task_kandev", map[string]interface{}{
+		"task_id":           "task-target",
+		"sender_task_id":    "spoofed-task",
+		"sender_session_id": "spoofed-session",
+		"session_id":        "spoofed-target-session",
+		"reason":            "unsafe caller-controlled reason",
+		"force":             true,
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, "mcp.stop_task", backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	require.Len(t, payload, 2, "forwarder must build a fresh trusted payload")
+	assert.Equal(t, "task-target", payload["task_id"])
+	assert.Equal(t, "task-current", payload["sender_task_id"])
+	assert.NotContains(t, payload, "sender_session_id")
+	assert.NotContains(t, payload, "session_id")
+	assert.NotContains(t, payload, "reason")
+	assert.NotContains(t, payload, "force")
+}
+
+func TestStopTask_MissingTaskIDReturnsErrorWithoutForwarding(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "stop_task_kandev", map[string]interface{}{})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+	assert.Nil(t, backend.lastPayload)
+}
+
+func TestStopTask_BackendErrorReturnsToolError(t *testing.T) {
+	backend := &testBackend{err: errors.New("stop refused")}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "stop_task_kandev", map[string]interface{}{
+		"task_id": "task-target",
+	})
+
+	assert.True(t, result.IsError)
+	require.NotEmpty(t, result.Content)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, "stop refused")
 }
 
 func TestGetTaskConversation_ForwardsToBackend(t *testing.T) {

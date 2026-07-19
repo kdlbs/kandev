@@ -362,7 +362,7 @@ func (s *Server) registerTools() {
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
-		count += 14
+		count += 15
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -480,8 +480,13 @@ func (s *Server) registerKanbanTools() {
 
 Use this to communicate with a sibling task, a parent task, or any task you know the ID of — for example to ask a delegated subtask for clarification, hand it new context, or nudge a paused task forward. Pass session_id to target a specific session — including a sibling session on your OWN task (e.g. one you spawned with spawn_session_kandev).
 
+Choose the control by intent:
+- Information that can wait: use delivery_mode="queued" (the default). The current turn continues and the message waits FIFO.
+- Urgent replacement work for a running/starting direct child: use delivery_mode="interrupt". This requests immediate cancel-and-redispatch. Only the target task's direct parent may request it; non-parent requests fail. If immediate cancellation and dispatch cannot be confirmed safely, the message safely falls back to "queued".
+- Halt-only work with no replacement prompt: use stop_task_kandev instead.
+
 Behaviour by session state:
-- Running/starting: the message is queued and delivered when the current turn ends. Pass delivery_mode="interrupt" to instead interrupt the target's current turn immediately so the message is delivered without waiting — keeps a parent's steering/stop messages from piling up behind a long-running child's turn. Only honored when you are the target task's direct parent; a non-parent sender requesting "interrupt" gets a hard error instead of being silently downgraded to "queued".
+- Running/starting: queued delivery waits for turn-end; interrupt delivery follows the direct-parent behavior and safe fallback above.
 - Idle (waiting for input or completed): the message is sent immediately as a new turn (delivery_mode has no effect).
 - Created (not yet started): the agent is started with this message as its first prompt (delivery_mode has no effect).
 - Failed/cancelled: an error is returned (use create_task_kandev to start fresh).
@@ -497,6 +502,19 @@ Returns the dispatch status: "queued", "sent", or "started".`),
 			),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("stop_task_kandev",
+			mcp.WithDescription(`Stop all live sessions Kandev observes for a direct child task. Only the target task's direct parent may use this tool; self, sibling, child-to-parent, grandparent, unrelated, and cross-workspace requests are rejected. The operation has no session-specific option.
+
+This is halt-only: it does not send a prompt or start a replacement turn. For urgent stop-and-steer work, use message_task_kandev with delivery_mode="interrupt". For ordinary information that can wait, use message_task_kandev with delivery_mode="queued" or omit delivery_mode.
+
+For every accepted live execution, Kandev first marks its session CANCELLED, then schedules graceful runtime teardown. An eligible active, unarchived, non-Office task is also moved to REVIEW through the normal guarded transition; other task states are preserved. Runtime teardown continues asynchronously, so status="stopped" confirms logical cancellation and scheduled teardown, not process exit.
+
+If the child has no live execution, the call succeeds idempotently with status="not_running" and changes no task or session state. Worktrees, environments, commits, task records, descendants, and queued messages are preserved.`),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The direct child task's full UUID (not a truncated prefix)")),
+		),
+		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
 	)
 	s.registerSpawnSessionTool()
 	s.mcpServer.AddTool(

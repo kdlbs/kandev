@@ -1233,6 +1233,87 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 	return nil
 }
 
+// UpdateTaskStateIfSessionState atomically ties a task-state write to the
+// current state of one owning session. It closes the clarification-resume
+// race where WAITING_FOR_INPUT -> RUNNING succeeds, coordinator stop commits
+// CANCELLED, then a delayed independent task write restores IN_PROGRESS.
+func (r *Repository) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks
+		SET state = ?, updated_at = ?
+		WHERE id = ?
+		  AND EXISTS (
+			SELECT 1
+			FROM task_sessions
+			WHERE task_sessions.id = ?
+			  AND task_sessions.task_id = tasks.id
+			  AND task_sessions.state = ?
+		  )
+	`), state, time.Now().UTC(), taskID, sessionID, expectedSessionState)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// RestoreTaskMessageRollbackIfSessionState atomically restores the two task
+// fields changed by message_task's on-turn-start preparation, but only while
+// the owning session remains in the state restored by the same rollback. A
+// coordinator cancellation therefore prevents a late dispatch-failure
+// rollback from moving the task out of REVIEW or rewinding its workflow step.
+func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
+	ctx context.Context,
+	task *models.Task,
+	sessionID string,
+	expectedSessionState models.TaskSessionState,
+) (bool, error) {
+	if task == nil {
+		return false, errors.New("restore task message rollback: task is nil")
+	}
+	task.UpdatedAt = time.Now().UTC()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks
+		SET state = ?, workflow_step_id = ?, updated_at = ?
+		WHERE id = ?
+		  AND EXISTS (
+			SELECT 1
+			FROM task_sessions
+			WHERE task_sessions.id = ?
+			  AND task_sessions.task_id = tasks.id
+			  AND task_sessions.state = ?
+		  )
+	`), task.State, task.WorkflowStepID, task.UpdatedAt, task.ID, sessionID, expectedSessionState)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows == 0 {
+		return false, tx.Commit()
+	}
+	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
 // UpdateTaskStateIfCurrentIn transitions state inside a transaction, re-checking
 // the current state on write so concurrent handlers cannot clobber a task that
 // moved out of allowed between read and update. The write is also scoped to
