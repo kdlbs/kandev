@@ -71,6 +71,7 @@ ui:                                           # optional native frontend plugin
 | `description` | no | string | Shown in Settings > Plugins. |
 | `author` | no | string | Free-form. |
 | `categories` | no | string[] | Each entry must be one of `connector`, `automation`, `tools`, `analytics`. Unknown values are rejected. |
+| `icon` | no | string | Package-relative path (e.g. `icon.svg`) to an image the package ships, rendered on the [marketplace](plugins-marketplace.md) card and in plugin lists. The registry index-build resolves it to an absolute `icon_url`; for an installed plugin it is served from the extracted package. Omit it and the card falls back to a letter tile. |
 | `runtime.type` | conditionally | string | `"binary"` is the only supported value. Setting it (vs. leaving it empty) makes the manifest **runtime-managed** — see "Managed vs. legacy" below. |
 | `runtime.executables` | required when `runtime.type: binary` | map\<string,string\> | Key is `<goos>-<goarch>` (e.g. `linux-amd64`, `darwin-arm64`, `windows-amd64`); value is a clean, package-relative path under `server/` (no leading `/`, no `..` segments). At least one entry required; the running host's key must be present at install time. Windows values end in `.exe`. |
 | `min_kandev_version` | no | string | Optional advisory; not currently enforced by the installer. |

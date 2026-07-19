@@ -480,6 +480,18 @@ Install the resulting tarball via **Settings > Plugins** (upload) or:
 curl -F "package=@my-plugin-1.0.0.tar.gz" http://localhost:38429/api/plugins/install
 ```
 
+To show a custom card icon in the marketplace, ship an image in the package
+(e.g. `assets/icon.svg`) and point the manifest's [`icon`
+field](plugins-manifest.md#field-reference) at its package-relative path.
+
+## Publishing to the marketplace
+
+To make your plugin discoverable and one-click installable from inside kandev,
+publish the `<id>-<version>.tar.gz` + `checksums.txt` as a GitHub **Release**
+asset and either open a PR listing your repo in the official catalog or host
+your own source. See [Plugin marketplace →
+Publishing](plugins-marketplace.md#publishing-a-plugin).
+
 ## Iterate loop
 
 - **UI-only or backend-only change:** edit the source, repackage

@@ -274,6 +274,14 @@
       "tests": ["apps/backend/internal/plugins/service_test.go", "apps/backend/internal/plugins/manifest/manifest_test.go", "apps/web/lib/plugins/host-api.test.ts"]
     },
     {
+      "id": "plugin-marketplace",
+      "audiences": ["operator", "contributor"],
+      "stability": "experimental",
+      "docs": ["plugins-marketplace"],
+      "sources": ["apps/backend/internal/plugins/marketplace/catalog.go", "apps/backend/internal/plugins/marketplace/sourcestore.go", "apps/web/lib/api/domains/marketplace-api.ts"],
+      "tests": ["apps/backend/internal/plugins/marketplace/catalog_test.go", "apps/backend/internal/plugins/marketplace/sourcestore_test.go", "apps/web/hooks/domains/plugins/use-marketplace.test.ts"]
+    },
+    {
       "id": "websocket-protocol",
       "audiences": ["contributor", "integrator"],
       "stability": "stable",
