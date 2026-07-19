@@ -69,9 +69,13 @@ func (i *storageInventory) activeWorkspaceRows(ctx context.Context) ([]activeWor
 	rows := make([]activeWorkspaceRow, 0)
 	query := "SELECT te.task_id AS taskid, COALESCE(t.workspace_id, '') AS workspaceid, " +
 		"te.workspace_path AS workspacepath FROM task_environments te " +
-		"INNER JOIN tasks t ON t.id = te.task_id " +
-		"WHERE t.archived_at IS NULL AND te.status IN ('creating', 'ready') " +
-		"AND te.workspace_path <> ''"
+		"LEFT JOIN tasks t ON t.id = te.task_id " +
+		"WHERE te.status IN ('creating', 'ready') AND te.workspace_path <> '' AND (" +
+		"(t.id IS NOT NULL AND t.archived_at IS NULL) OR EXISTS (" +
+		"SELECT 1 FROM task_sessions borrower " +
+		"INNER JOIN tasks borrower_task ON borrower_task.id = borrower.task_id " +
+		"WHERE borrower.task_environment_id = te.id AND borrower_task.archived_at IS NULL " +
+		"AND borrower.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')))"
 	if err := i.reader.SelectContext(ctx, &rows, query); err != nil {
 		return nil, err
 	}

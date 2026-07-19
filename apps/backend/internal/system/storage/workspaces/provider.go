@@ -57,7 +57,11 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 	for index := range roots {
 		size, sizeErr := directorySizeNoFollow(roots[index].path)
 		if sizeErr != nil {
-			return Analysis{}, fmt.Errorf("measure workspace %s: %w", roots[index].path, sizeErr)
+			analysis.Warnings = append(
+				analysis.Warnings,
+				fmt.Sprintf("measure workspace %s: %v", roots[index].path, sizeErr),
+			)
+			continue
 		}
 		roots[index].size = size
 		roots[index].measured = true
@@ -721,7 +725,34 @@ func writeJSONFile(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, encoded, 0o600)
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("unsafe JSON control file: %s", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect JSON control file %s: %w", path, err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".kandev-control-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(encoded); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("install JSON control file %s: %w", path, err)
+	}
+	return nil
 }
 
 func readQuarantineManifest(root string) (quarantineManifest, error) {

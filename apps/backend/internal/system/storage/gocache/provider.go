@@ -125,7 +125,7 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 	if !ok || unmanagedPath == cachePath {
 		return analysis, nil
 	}
-	unmanagedSize, err := directorySize(unmanagedPath)
+	unmanagedSize, err := directorySizeNoFollow(unmanagedPath)
 	if err != nil {
 		return Analysis{}, err
 	}
@@ -427,6 +427,14 @@ func rejectSymlink(path string) error {
 }
 
 func directorySize(root string) (int64, error) {
+	return directorySizeWithSymlinkPolicy(root, false)
+}
+
+func directorySizeNoFollow(root string) (int64, error) {
+	return directorySizeWithSymlinkPolicy(root, true)
+}
+
+func directorySizeWithSymlinkPolicy(root string, skipSymlinks bool) (int64, error) {
 	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
 		return 0, nil
 	} else if err != nil {
@@ -438,6 +446,9 @@ func directorySize(root string) (int64, error) {
 			return walkErr
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
+			if skipSymlinks {
+				return nil
+			}
 			return fmt.Errorf("symlink found in Go cache: %s", entry.Name())
 		}
 		if path == markerPath(root) {

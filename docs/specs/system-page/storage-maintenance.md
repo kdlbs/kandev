@@ -84,9 +84,10 @@ Decision: [ADR-2026-07-19-workspace-symlink-entries](../../decisions/2026-07-19-
   configured orphan grace period.
 - The authoritative inventory covers both task layouts:
   `tasks/<semantic-task-dir>/<repo>` and `tasks/<workspace-id>/<task-id>`.
-- Ready environment rows and active worktree rows protect files only while their owning task exists
-  and is not archived. Rows retained for archived-task branch recovery are historical metadata, not
-  live workspace references; deleted-task rows with no owning task are also not live references.
+- Ready environment rows and active worktree rows protect files while their owning task exists and
+  is not archived. A ready environment owned by an archived or deleted task remains protected while
+  a live session of an unarchived task borrows it. Other rows retained for archived-task branch
+  recovery are historical metadata, not live workspace references.
 - New task roots contain a Kandev ownership marker with the task ID, workspace ID, task directory
   name, layout version, and creation time. Legacy unmarked directories remain eligible only when
   the authoritative inventory and grace-period checks positively classify them as unreferenced.
@@ -410,7 +411,8 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
   while active and reclaimable bytes remain separate subsets.
 - **GIVEN** archived or deleted tasks retain ready environment or active worktree rows for recovery,
   **WHEN** storage analysis or cleanup classifies their old directories, **THEN** those historical
-  rows do not protect the directories from normal orphan grace and quarantine rules.
+  rows do not protect the directories from normal orphan grace and quarantine rules unless a live
+  session of an unarchived task still borrows the environment.
 - **GIVEN** the worktree inventory query fails, **WHEN** workspace cleanup runs, **THEN** no task
   directory moves and the run reports the inventory error.
 - **GIVEN** a multi-repository task has one active descendant worktree, **WHEN** workspace cleanup

@@ -149,6 +149,13 @@ func TestAnalyzeReportsUnmanagedDefaultGoCacheReadOnly(t *testing.T) {
 	if err := os.WriteFile(artifact, []byte("user cache bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	externalArtifact := filepath.Join(t.TempDir(), "external")
+	if err := os.WriteFile(externalArtifact, []byte("external bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(externalArtifact, filepath.Join(userCache, "external-link")); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("GOCACHE", userCache)
 	provider := New(Config{
 		HomeDir: home, TrashDir: filepath.Join(home, "trash"),
@@ -165,6 +172,9 @@ func TestAnalyzeReportsUnmanagedDefaultGoCacheReadOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(artifact); err != nil {
 		t.Fatalf("Analyze modified unmanaged cache: %v", err)
+	}
+	if _, err := os.Stat(externalArtifact); err != nil {
+		t.Fatalf("Analyze followed or modified unmanaged cache symlink: %v", err)
 	}
 }
 

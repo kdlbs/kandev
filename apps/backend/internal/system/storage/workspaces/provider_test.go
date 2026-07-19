@@ -366,6 +366,39 @@ func TestCleanupQuarantinesWorkspaceWithoutFollowingNestedSymlink(t *testing.T) 
 	}
 }
 
+func TestCleanupRejectsSymlinkedQuarantineManifestWithoutFollowingTarget(t *testing.T) {
+	provider, root, _ := newProviderFixture(t, Inventory{Complete: true}, nil)
+	candidate := createOwnedCandidate(t, root, "linked-manifest_abc", OwnershipMarker{
+		TaskID: "linked-manifest", TaskDirName: "linked-manifest_abc", LayoutVersion: LayoutVersionSemantic,
+	})
+	externalArtifact := filepath.Join(t.TempDir(), "keep")
+	const original = "external"
+	if err := os.WriteFile(externalArtifact, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(externalArtifact, filepath.Join(candidate, quarantineManifestName)); err != nil {
+		t.Fatalf("Symlink quarantine manifest: %v", err)
+	}
+	old := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(candidate, old, old); err != nil {
+		t.Fatalf("Chtimes candidate: %v", err)
+	}
+
+	if _, err := provider.Cleanup(context.Background()); err == nil {
+		t.Fatal("Cleanup succeeded with a symlinked quarantine manifest")
+	}
+	if _, err := os.Stat(candidate); err != nil {
+		t.Fatalf("candidate moved after manifest validation failed: %v", err)
+	}
+	contents, err := os.ReadFile(externalArtifact)
+	if err != nil {
+		t.Fatalf("read external target: %v", err)
+	}
+	if string(contents) != original {
+		t.Fatalf("quarantine manifest write followed symlink target: %q", contents)
+	}
+}
+
 func TestCleanupRejectsSymlinkedTrashPathsBeforeAnyMutation(t *testing.T) {
 	for _, test := range []struct {
 		name       string

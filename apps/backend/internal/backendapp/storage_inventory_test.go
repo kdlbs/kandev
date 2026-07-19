@@ -18,12 +18,15 @@ func TestWorkspaceInventoryOnlyProtectsActiveTaskEnvironments(t *testing.T) {
 	database := newContainerInventoryDatabase(t)
 	insertContainerInventoryTask(t, database, "active", v1.TaskStateInProgress, false)
 	insertContainerInventoryTask(t, database, "archived", v1.TaskStateInProgress, true)
+	insertContainerInventoryTask(t, database, "borrowed-owner", v1.TaskStateInProgress, true)
+	insertContainerInventoryTask(t, database, "borrower", v1.TaskStateInProgress, false)
 	for _, item := range []struct {
 		taskID string
 		path   string
 	}{
 		{taskID: "active", path: "/tasks/active_abc"},
 		{taskID: "archived", path: "/tasks/archived_def"},
+		{taskID: "borrowed-owner", path: "/tasks/borrowed_jkl"},
 		{taskID: "deleted", path: "/tasks/deleted_ghi"},
 	} {
 		if _, err := database.Exec(
@@ -33,14 +36,24 @@ func TestWorkspaceInventoryOnlyProtectsActiveTaskEnvironments(t *testing.T) {
 			t.Fatalf("insert task environment for %q: %v", item.taskID, err)
 		}
 	}
+	if _, err := database.Exec(
+		"INSERT INTO task_sessions (id, task_id, state, task_environment_id) VALUES (?, ?, ?, ?)",
+		"session-borrower", "borrower", models.TaskSessionStateRunning, "env-borrowed-owner",
+	); err != nil {
+		t.Fatalf("insert borrowed environment session: %v", err)
+	}
 
 	rows, err := (&storageInventory{reader: database}).activeWorkspaceRows(context.Background())
 	if err != nil {
 		t.Fatalf("activeWorkspaceRows: %v", err)
 	}
-	want := []activeWorkspaceRow{{
-		TaskID: "active", WorkspaceID: "workspace-active", WorkspacePath: "/tasks/active_abc",
-	}}
+	want := []activeWorkspaceRow{
+		{TaskID: "active", WorkspaceID: "workspace-active", WorkspacePath: "/tasks/active_abc"},
+		{
+			TaskID: "borrowed-owner", WorkspaceID: "workspace-borrowed-owner",
+			WorkspacePath: "/tasks/borrowed_jkl",
+		},
+	}
 	if !reflect.DeepEqual(rows, want) {
 		t.Fatalf("active workspace rows = %#v, want %#v", rows, want)
 	}
@@ -214,7 +227,9 @@ func newContainerInventoryDatabase(t *testing.T) *sqlx.DB {
 		);
 		CREATE TABLE task_sessions (
 			id TEXT PRIMARY KEY,
-			task_id TEXT NOT NULL
+			task_id TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'CREATED',
+			task_environment_id TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE task_session_worktrees (
 			id TEXT PRIMARY KEY,
