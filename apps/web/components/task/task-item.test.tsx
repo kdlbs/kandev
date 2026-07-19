@@ -174,13 +174,16 @@ describe("TaskItem actions", () => {
 });
 
 describe("TaskItem background-running indicator", () => {
-  it("shows the background-running affordance (spinner, not a check) for a background-running session", () => {
-    // The session's foreground turn is idle but spawned background work is live.
+  // The sidebar row reads the task record's most-active-wins aggregate
+  // (`foregroundActivity`), not the single most-active client session's substate,
+  // so it agrees with the board/kanban card and open-task header (§spec:task-level-truth).
+  it("shows the background-running affordance (spinner, not a check) when the aggregate is background", () => {
+    // The task's foreground turns are idle but spawned background work is live.
     // It must read distinctly from generating and never as the review/done check.
     renderTaskItem({
       state: "IN_PROGRESS",
       sessionState: "RUNNING",
-      sessionForegroundActivity: "background",
+      foregroundActivity: "background",
     });
 
     const icon = screen.getByTestId(BACKGROUND_ICON_TEST_ID);
@@ -189,26 +192,44 @@ describe("TaskItem background-running indicator", () => {
     expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
   });
 
-  it("never reads done for a background-running session even in a REVIEW column", () => {
-    // §req: no surface shows done while background work runs. RUNNING classifies
-    // as in_progress, so the background branch wins over the review check.
+  it("reads background from the task aggregate even when the most-active client session is done", () => {
+    // Multi-session task: the client store holds only the finished primary
+    // (sessionState COMPLETED), but the backend aggregate says a secondary session
+    // still runs background work. The aggregate wins — never a false done check.
+    // This is the exact case the old session-substate derivation missed.
     renderTaskItem({
       state: "REVIEW",
-      sessionState: "RUNNING",
-      sessionForegroundActivity: "background",
+      sessionState: "COMPLETED",
+      foregroundActivity: "background",
     });
 
     expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).not.toBeNull();
     expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
   });
 
-  it("falls back to the generating spinner when the RUNNING substate is unknown", () => {
-    // Safe default: an unknown/null substate must render generating, never done
-    // and never the background spinner.
+  it("drives the generating spinner from a generating aggregate even when the coarse session reads done", () => {
+    // Multi-session most-active-wins: a generating secondary session keeps the row
+    // on the gold generating spinner though the primary session finished.
+    renderTaskItem({
+      state: "REVIEW",
+      sessionState: "COMPLETED",
+      foregroundActivity: "generating",
+    });
+
+    const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
+    expect(icon.getAttribute(DATA_LOADING_PHASE)).toBe(RUNNING_PHASE);
+    expect(icon.classList.contains(YELLOW_SPINNER_CLASS)).toBe(true);
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("falls back to the generating spinner when the aggregate substate is unknown", () => {
+    // Safe default: an unknown/null aggregate on a live turn must render generating,
+    // never done and never the background spinner (§spec:live-and-durable).
     renderTaskItem({
       state: "IN_PROGRESS",
       sessionState: "RUNNING",
-      sessionForegroundActivity: null,
+      foregroundActivity: null,
     });
 
     expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
@@ -217,14 +238,48 @@ describe("TaskItem background-running indicator", () => {
     expect(icon.classList.contains(YELLOW_SPINNER_CLASS)).toBe(true);
   });
 
-  it("keeps the generating spinner for a foreground-generating session", () => {
-    renderTaskItem({
+  it("reflects the full generating → background → done sequence from the aggregate", () => {
+    // A single-session task driven through all three states reads each on the sidebar
+    // without opening the task.
+    const { rerender } = renderTaskItem({
       state: "IN_PROGRESS",
       sessionState: "RUNNING",
-      sessionForegroundActivity: "generating",
+      foregroundActivity: "generating",
     });
-
+    expect(screen.getByTestId(RUNNING_ICON_TEST_ID).classList.contains(YELLOW_SPINNER_CLASS)).toBe(
+      true,
+    );
     expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
-    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).not.toBeNull();
+
+    rerender(
+      <StateProvider>
+        <TooltipProvider>
+          <TaskItem
+            title="Needs answer"
+            state="IN_PROGRESS"
+            sessionState="RUNNING"
+            foregroundActivity="background"
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
+
+    rerender(
+      <StateProvider>
+        <TooltipProvider>
+          <TaskItem
+            title="Needs answer"
+            state="REVIEW"
+            sessionState="COMPLETED"
+            foregroundActivity={null}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
   });
 });

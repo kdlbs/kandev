@@ -41,8 +41,13 @@ type TaskItemProps = {
   title: string;
   state?: TaskState;
   sessionState?: TaskSessionState;
-  /** Fine-grained busy substate (ADR-0046) of the session `sessionState` reflects. */
-  sessionForegroundActivity?: ForegroundActivity | null;
+  /**
+   * Task-level most-active-wins busy aggregate (ADR-0046) carried on the task
+   * record. Drives the sidebar row's generating/background tiers so it agrees
+   * with the board card and open-task header instead of re-deriving from a
+   * single session's substate (§spec:task-level-truth).
+   */
+  foregroundActivity?: ForegroundActivity | null;
   isArchived?: boolean;
   isSelected?: boolean;
   /** Whether this row is part of an active multi-selection (distinct from the active-task highlight). */
@@ -168,14 +173,14 @@ function taskItemRowClick(
 function TaskStateIcon({
   sessionState,
   state,
-  sessionForegroundActivity,
+  foregroundActivity,
   isInProgress,
   hasPendingClarification,
   hasPendingPermission,
 }: {
   sessionState?: TaskSessionState;
   state?: TaskState;
-  sessionForegroundActivity?: ForegroundActivity | null;
+  foregroundActivity?: ForegroundActivity | null;
   isInProgress: boolean;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
@@ -205,20 +210,28 @@ function TaskStateIcon({
       />
     );
   }
-  // Background-running: the session is live (RUNNING) but its foreground turn is
-  // idle, held open only by spawned background work. Render the shared
-  // background affordance — distinct by shape from this surface's generating
-  // spinner (IconCircleDashed) and never the review/done check. RUNNING always
-  // classifies as in_progress, so this can never fall through to a done icon; an
-  // unknown/generating substate falls through to the generating spinner below.
-  if (sessionState === "RUNNING" && sessionForegroundActivity === "background") {
+  // Background-running: the task's foreground turns are idle, held open only by
+  // spawned background work. Driven by the task-level most-active-wins aggregate
+  // (`foregroundActivity`) carried on the task record, so a background-running
+  // secondary session is caught even when the client store only holds the
+  // finished primary — matching the board card and open-task header
+  // (§spec:task-level-truth). Render the shared background affordance — distinct
+  // by shape from this surface's generating spinner (IconCircleDashed) and never
+  // the review/done check. The aggregate is backend truth, so an unknown/
+  // generating substate falls through to the generating spinner below (never done).
+  if (foregroundActivity === "background") {
     return (
       <span data-testid="task-state-background-running" className="mt-[1px] flex shrink-0">
         {getSessionStateIcon("RUNNING", "h-3.5 w-3.5", "background")}
       </span>
     );
   }
-  if (isInProgress) {
+  // Generating: the established gold spinner (§req:success-criteria #9, left
+  // unchanged). `isInProgress` keeps a live turn spinning when the aggregate is
+  // unknown (safe default, never done); `foregroundActivity === "generating"`
+  // additionally catches a generating secondary session on a task whose coarse
+  // state/primary already reads done.
+  if (isInProgress || foregroundActivity === "generating") {
     return (
       <IconCircleDashed
         data-testid="task-state-running"
@@ -420,7 +433,7 @@ export const TaskItem = memo(function TaskItem({
   title,
   state,
   sessionState,
-  sessionForegroundActivity,
+  foregroundActivity,
   isArchived,
   isSelected = false,
   isMultiSelected = false,
@@ -471,7 +484,7 @@ export const TaskItem = memo(function TaskItem({
       <TaskStateIcon
         sessionState={sessionState}
         state={state}
-        sessionForegroundActivity={sessionForegroundActivity}
+        foregroundActivity={foregroundActivity}
         isInProgress={isInProgress}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}

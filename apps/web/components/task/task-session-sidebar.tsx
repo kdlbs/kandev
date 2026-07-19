@@ -134,9 +134,13 @@ function toSidebarItem(
     title: task.title,
     state: task.state as TaskState | undefined,
     sessionState: resolvedSessionState,
-    // Substate of the same session `resolvedSessionState` came from; undefined
-    // when no client session is loaded (safe fallback → generating, never done).
-    sessionForegroundActivity: sessionInfo.foregroundActivity,
+    // Task-level most-active-wins busy aggregate from the task record — the same
+    // authoritative value the board card, list rows, graph nodes, and open-task
+    // header read via getTaskStateIcon. Reading it here (instead of the single
+    // most-active client session's substate) makes the sidebar agree with those
+    // surfaces for multi-session tasks and off-screen rows (§spec:task-level-truth).
+    // Optional field: an absent aggregate reads the same as null (safe → not-background).
+    foregroundActivity: task.foregroundActivity,
     description: task.description,
     workflowId: task._workflowId,
     workflowName: ctx.workflowNameById.get(task._workflowId),

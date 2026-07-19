@@ -18,8 +18,8 @@ export type TaskSwitcherItem = {
   title: string;
   state?: TaskState;
   sessionState?: TaskSessionState;
-  /** Fine-grained busy substate (ADR-0046) of the session `sessionState` reflects. */
-  sessionForegroundActivity?: ForegroundActivity | null;
+  /** Task-level most-active-wins busy aggregate (ADR-0046) from the task record. */
+  foregroundActivity?: ForegroundActivity | null;
   description?: string;
   workflowId?: string;
   workflowName?: string;
@@ -263,7 +263,7 @@ function TaskRow({
         title={task.title}
         state={task.state}
         sessionState={task.sessionState}
-        sessionForegroundActivity={task.sessionForegroundActivity}
+        foregroundActivity={task.foregroundActivity}
         isArchived={task.isArchived}
         isSelected={isSelected}
         diffStats={task.diffStats}
