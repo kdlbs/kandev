@@ -54,6 +54,7 @@ Save machine-readable probe output per slug under staged `qa/codec/`. Container 
 - [ ] Full menus, provider panels, sheets, dialogs, and diffs remain visible as framing priority.
 - [ ] Frame-by-frame containment includes the full cursor/touch glyph and edge-safe margin for every visibility interval; the cursor never leaves the frame.
 - [ ] Wide shots remain readable at actual display size.
+- [ ] Every meaningful glyph measures at least 9px in the actual landing stage.
 - [ ] Loop starts/settles/ends on its tested identical frame and holds at least 240ms.
 - [ ] Raw master plus config can reproduce the delivery, proving a reversible camera.
 

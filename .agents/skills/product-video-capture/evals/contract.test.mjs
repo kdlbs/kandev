@@ -114,6 +114,7 @@ test("rejects camera breathing and abrupt semantic travel", () => {
 test("audits readability at the production landing theater size", () => {
   assert.match(bundle, /964[^\n]{0,20}602/i);
   assert.match(bundle, /actual (?:landing )?(?:player|theater|stage)/i);
+  assert.match(bundle, /meaningful glyph[^\n]{0,100}(?:at least|minimum)[^\n]{0,20}9 ?px/i);
   assert.match(bundle, /reject[^\n]{0,140}(?:artifact|compression)[^\n]{0,100}(?:text|glyph|label)/i);
 });
 

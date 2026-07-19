@@ -69,7 +69,7 @@ Pass normalized dense `pointerTrack` waypoints and `pointerSafeMargin` to `creat
 
 Use `loopFrame: "focused"` only with the `docs` or `landing` form factor. The opening, settled penultimate, and final camera keyframes must be identical, and the crop must still show enough context to identify the feature. This is an editorial framing tool, not a way to hide a product defect or misleading state. Native mobile media keeps its standard loop contract.
 
-For a landing film, compose for the real theater rather than the master canvas. The current actual landing player is 964x602 CSS pixels at the primary desktop review viewport; also review important frames around 760-950 CSS pixels wide. Labels, code, comments, and results must remain readable there. Start on the first meaningful subject, widen around that subject before a long cursor journey, pan while wide, and tighten at the destination. Do not repeatedly return to a full-workspace view merely to prove the product has navigation chrome.
+For a landing film, compose for the real theater rather than the master canvas. The current actual landing player is 964x602 CSS pixels at the primary desktop review viewport; also review important frames around 760-950 CSS pixels wide. Every meaningful glyph must measure at least 9px in the actual stage. Labels, code, comments, and results must remain readable there. Start on the first meaningful subject, widen around that subject before a long cursor journey, pan while wide, and tighten at the destination. Do not repeatedly return to a full-workspace view merely to prove the product has navigation chrome.
 
 ## Explicit Camera Rejections
 
