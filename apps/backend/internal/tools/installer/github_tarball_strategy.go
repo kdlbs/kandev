@@ -55,11 +55,19 @@ func (s *GithubTarballStrategy) Install(ctx context.Context) (*InstallResult, er
 	}
 
 	binaryPath := s.resolveBinaryPath(target)
+	completionMarker := binaryPath + ".install-complete"
 
-	// Skip download if the binary already exists from a previous install.
-	if _, err := os.Stat(binaryPath); err == nil {
+	// The archive's entrypoint can be extracted before its runtime dependencies.
+	// Only a marker written after the full extraction proves the install is usable.
+	if fileExists(binaryPath) && fileExists(completionMarker) {
 		s.logger.Info("binary already installed, skipping download", zap.String("binary", binaryPath))
 		return &InstallResult{BinaryPath: binaryPath}, nil
+	}
+	if fileExists(binaryPath) {
+		s.logger.Warn("incomplete binary install found, reinstalling", zap.String("binary", binaryPath))
+	}
+	if err := os.Remove(completionMarker); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to clear install completion marker: %w", err)
 	}
 
 	url := s.buildURL(target)
@@ -74,9 +82,17 @@ func (s *GithubTarballStrategy) Install(ctx context.Context) (*InstallResult, er
 	if _, err := os.Stat(binaryPath); err != nil {
 		return nil, fmt.Errorf("binary not found after extraction: %s", binaryPath)
 	}
+	if err := os.WriteFile(completionMarker, nil, 0o644); err != nil {
+		return nil, fmt.Errorf("failed to write install completion marker: %w", err)
+	}
 
 	s.logger.Info("tarball install completed", zap.String("binary", binaryPath))
 	return &InstallResult{BinaryPath: binaryPath}, nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func (s *GithubTarballStrategy) resolveTarget() (string, error) {
