@@ -30,6 +30,19 @@ test.describe("Quick Chat entry points on mobile", () => {
     await expect(dialog).not.toBeVisible();
   });
 
+  test("chooses configuration mode from the setup panel", async ({ testPage }) => {
+    await testPage.goto("/");
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
+
+    const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    const setup = dialog.getByTestId("quick-chat-setup");
+    await expect(setup.getByText(/quick chats stay outside your task board/i)).toBeVisible();
+    await setup.getByRole("switch", { name: "Configuration chat" }).tap();
+
+    await expect(dialog.getByTestId("config-chat-setup")).toBeVisible();
+    await assertNoDocumentHorizontalOverflow(testPage);
+  });
+
   test("opens from the task switcher sheet on a session page", async ({
     testPage,
     apiClient,
@@ -53,6 +66,26 @@ test.describe("Quick Chat entry points on mobile", () => {
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
     // Opening quick chat dismisses the task switcher sheet.
     await expect(sheet).not.toBeVisible();
+    await assertNoDocumentHorizontalOverflow(testPage);
+  });
+
+  test("returns to the selected workspace home from the Tasks header", async ({
+    testPage,
+    seedData,
+  }) => {
+    await testPage.goto(`/tasks?workspace=${seedData.workspaceId}`);
+    await testPage.waitForLoadState("networkidle");
+
+    const homeLink = testPage.getByRole("link", { name: "Kandev home" });
+    await expect(homeLink).toHaveAttribute("href", `/?workspaceId=${seedData.workspaceId}`);
+
+    await homeLink.click();
+
+    await expect(testPage).toHaveURL((url) => {
+      return url.pathname === "/" && url.searchParams.get("workspaceId") === seedData.workspaceId;
+    });
+    const homeHeader = testPage.getByRole("link", { name: "Kandev home" }).locator("..");
+    await expect(homeHeader.getByText("Home", { exact: true })).toHaveCount(0);
     await assertNoDocumentHorizontalOverflow(testPage);
   });
 });

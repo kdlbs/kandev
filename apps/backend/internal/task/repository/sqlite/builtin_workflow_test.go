@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -73,6 +74,21 @@ func loadStepsForWorkflow(t *testing.T, repo *Repository, workflowID string) []*
 	return out
 }
 
+func assertBuiltinWorkflowHidden(t *testing.T, repo *Repository, workflowID string) {
+	t.Helper()
+	var hidden int
+	if err := repo.db.QueryRowContext(
+		context.Background(),
+		repo.db.Rebind(`SELECT hidden FROM workflows WHERE id = ?`),
+		workflowID,
+	).Scan(&hidden); err != nil {
+		t.Fatalf("query workflow visibility: %v", err)
+	}
+	if hidden != 1 {
+		t.Errorf("workflow %q hidden = %d, want 1", workflowID, hidden)
+	}
+}
+
 func TestEnsureOfficeDefaultWorkflow_CreatesFiveSteps(t *testing.T) {
 	repo := newRepoForBuiltinWorkflowTests(t)
 	ctx := context.Background()
@@ -84,6 +100,7 @@ func TestEnsureOfficeDefaultWorkflow_CreatesFiveSteps(t *testing.T) {
 	if id == "" {
 		t.Fatalf("expected non-empty workflow id")
 	}
+	assertBuiltinWorkflowHidden(t, repo, id)
 
 	steps := loadStepsForWorkflow(t, repo, id)
 	if len(steps) != 5 {
@@ -201,6 +218,7 @@ func TestEnsureOfficeDefaultWorkflow_Idempotent(t *testing.T) {
 	if first != second {
 		t.Errorf("expected idempotent id, got %q vs %q", first, second)
 	}
+	assertBuiltinWorkflowHidden(t, repo, first)
 	steps := loadStepsForWorkflow(t, repo, first)
 	if len(steps) != 5 {
 		t.Errorf("expected 5 steps after idempotent ensure, got %d", len(steps))
@@ -226,6 +244,7 @@ func TestEnsureRoutineWorkflow_AutoCompletingShape(t *testing.T) {
 	if first != second {
 		t.Errorf("expected idempotent id, got %q vs %q", first, second)
 	}
+	assertBuiltinWorkflowHidden(t, repo, first)
 
 	steps := loadStepsForWorkflow(t, repo, first)
 	if len(steps) != 2 {
@@ -243,6 +262,102 @@ func TestEnsureRoutineWorkflow_AutoCompletingShape(t *testing.T) {
 	}
 	if findStepByNameLocal(steps, "Done") == nil {
 		t.Fatal("missing Done step")
+	}
+}
+
+func TestEnsureRoutineWorkflow_HealsExistingWorkflowVisibility(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO workflows (
+			id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
+		) VALUES (
+			'stale-routine', 'ws-1', 'Routine', 'routine', 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		t.Fatalf("insert stale routine workflow: %v", err)
+	}
+
+	id, err := repo.EnsureRoutineWorkflow(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ensure routine: %v", err)
+	}
+	if id != "stale-routine" {
+		t.Fatalf("EnsureRoutineWorkflow() id = %q, want stale-routine", id)
+	}
+	assertBuiltinWorkflowHidden(t, repo, id)
+}
+
+func TestEnsureRoutineWorkflow_KeepsUserWorkflowVisible(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO workflows (
+			id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
+		) VALUES (
+			'user-routine', 'ws-1', 'My Routine', 'routine', 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		t.Fatalf("insert user routine workflow: %v", err)
+	}
+
+	id, err := repo.EnsureRoutineWorkflow(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ensure routine: %v", err)
+	}
+	if id == "user-routine" {
+		t.Fatal("EnsureRoutineWorkflow() reused a user workflow")
+	}
+
+	var hidden int
+	if err := repo.db.QueryRowContext(ctx, `SELECT hidden FROM workflows WHERE id = 'user-routine'`).Scan(&hidden); err != nil {
+		t.Fatalf("query user routine visibility: %v", err)
+	}
+	if hidden != 0 {
+		t.Errorf("user routine hidden = %d, want 0", hidden)
+	}
+}
+
+func TestRepositoryInitialization_HealsBuiltinWorkflowVisibility(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+	legacyTime := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+	for _, workflow := range []struct {
+		id         string
+		templateID string
+	}{
+		{id: "stale-office", templateID: "office-default"},
+		{id: "stale-routine", templateID: "routine"},
+	} {
+		_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+			INSERT INTO workflows (
+				id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
+			) VALUES (?, 'ws-1', 'System workflow', ?, 1, 0, ?, ?)
+		`), workflow.id, workflow.templateID, legacyTime, legacyTime)
+		if err != nil {
+			t.Fatalf("insert stale %s workflow: %v", workflow.templateID, err)
+		}
+	}
+
+	if err := repo.initSchema(); err != nil {
+		t.Fatalf("reinitialize repository: %v", err)
+	}
+	assertBuiltinWorkflowHidden(t, repo, "stale-office")
+	assertBuiltinWorkflowHidden(t, repo, "stale-routine")
+
+	for _, workflowID := range []string{"stale-office", "stale-routine"} {
+		var updatedAt time.Time
+		if err := repo.db.QueryRowContext(ctx, `SELECT updated_at FROM workflows WHERE id = ?`, workflowID).Scan(&updatedAt); err != nil {
+			t.Fatalf("query workflow updated_at: %v", err)
+		}
+		if !updatedAt.After(legacyTime) {
+			t.Errorf("workflow %q updated_at = %v, want after %v", workflowID, updatedAt, legacyTime)
+		}
 	}
 }
 

@@ -11,6 +11,7 @@ import type {
   LogFileInfo,
   UpdatesResponse,
   SystemJob,
+  StorageOverviewResponse,
 } from "@/lib/types/system";
 
 const TS = "2026-05-18T00:00:00Z";
@@ -88,6 +89,56 @@ const JOB: SystemJob = {
   state: "running",
   started_at: TS,
 };
+
+describe("system storage slice", () => {
+  it("stores storage overview, runs, and quarantine state", () => {
+    const store = makeStore();
+    const overview = {
+      settings: {
+        enabled: false,
+        check_interval_hours: 24,
+        idle_for_minutes: 10,
+        orphan_grace_hours: 168,
+        quarantine_retention_hours: 168,
+        workspaces: { enabled: true },
+        kandev_containers: { enabled: true },
+        go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
+        docker: {
+          dedicated_daemon_acknowledged: false,
+          build_cache_enabled: false,
+          build_cache_keep_bytes: 10737418240,
+          build_cache_unused_hours: 168,
+          unused_images_enabled: false,
+          unused_images_hours: 168,
+        },
+      },
+      capabilities: {
+        managed_go_cache_path: "/data/cache/go-build",
+        go_cache_adoption_available: true,
+        docker_available: false,
+        docker_host: "",
+        host_global_docker_cleanup_allowed: false,
+      },
+      summary: {
+        workspaces: { active_bytes: 1, candidate_bytes: 2 },
+        go_cache: { path: "/data/cache/go-build", size_bytes: 3, owned: true, enabled: false },
+        quarantine: { count: 0, size_bytes: 0 },
+        docker: {
+          available: false,
+          build_cache_bytes: 0,
+          unused_image_bytes: 0,
+          managed_container_count: 0,
+          managed_container_bytes: 0,
+        },
+      },
+      last_run: null,
+    } satisfies StorageOverviewResponse;
+    store.getState().setSystemStorageOverview(overview);
+    store.getState().setSystemStorageRuns([]);
+    store.getState().setSystemStorageQuarantine([]);
+    expect(store.getState().system.storage).toEqual({ overview, runs: [], quarantine: [] });
+  });
+});
 
 describe("system slice", () => {
   it("starts with empty defaults", () => {

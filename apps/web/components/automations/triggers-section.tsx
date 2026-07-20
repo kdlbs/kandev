@@ -10,6 +10,7 @@ import { TriggerPicker } from "./trigger-picker";
 
 type TriggersSectionProps = {
   triggers: AutomationTrigger[];
+  savedTriggers: AutomationTrigger[];
   automationId: string | null;
   workspaceId: string;
   triggerTypes: TriggerTypeInfo[];
@@ -21,6 +22,7 @@ type TriggersSectionProps = {
 
 export function TriggersSection({
   triggers,
+  savedTriggers,
   automationId,
   workspaceId,
   triggerTypes,
@@ -30,12 +32,24 @@ export function TriggersSection({
   onDeleteTrigger,
 }: TriggersSectionProps) {
   const webhookTrigger = useMemo(() => triggers.find((t) => t.type === "webhook"), [triggers]);
+  const savedWebhookTrigger = useMemo(
+    () => savedTriggers.find((t) => t.type === "webhook"),
+    [savedTriggers],
+  );
   const isWebhookMode = !!webhookTrigger;
 
   const scheduleTrigger = useMemo(() => triggers.find((t) => t.type === "scheduled"), [triggers]);
+  const savedScheduleTrigger = useMemo(
+    () => savedTriggers.find((t) => t.type === "scheduled"),
+    [savedTriggers],
+  );
   const conditionTrigger = useMemo(
     () => triggers.find((t) => t.type !== "scheduled" && t.type !== "webhook"),
     [triggers],
+  );
+  const savedConditionTrigger = useMemo(
+    () => savedTriggers.find((t) => t.type !== "scheduled" && t.type !== "webhook"),
+    [savedTriggers],
   );
 
   const handleScheduleChange = (config: Record<string, unknown>) => {
@@ -64,6 +78,7 @@ export function TriggersSection({
       <div className="space-y-3">
         <TriggerCard
           trigger={webhookTrigger}
+          savedTrigger={savedWebhookTrigger}
           automationId={automationId}
           workspaceId={workspaceId}
           onUpdate={(config) => onUpdateTrigger(webhookTrigger.id, config)}
@@ -77,9 +92,14 @@ export function TriggersSection({
 
   return (
     <div className="space-y-4">
-      <ScheduleArea scheduleTrigger={scheduleTrigger} onScheduleChange={handleScheduleChange} />
+      <ScheduleArea
+        scheduleTrigger={scheduleTrigger}
+        savedScheduleTrigger={savedScheduleTrigger}
+        onScheduleChange={handleScheduleChange}
+      />
       <ConditionArea
         trigger={conditionTrigger}
+        savedTrigger={savedConditionTrigger}
         automationId={automationId}
         workspaceId={workspaceId}
         triggerTypes={triggerTypes}
@@ -95,21 +115,31 @@ export function TriggersSection({
 
 function ScheduleArea({
   scheduleTrigger,
+  savedScheduleTrigger,
   onScheduleChange,
 }: {
   scheduleTrigger: AutomationTrigger | undefined;
+  savedScheduleTrigger: AutomationTrigger | undefined;
   onScheduleChange: (config: Record<string, unknown>) => void;
 }) {
   return (
     <div className="space-y-2">
       <Label className="text-xs font-medium">Schedule</Label>
-      <ScheduleSelector config={scheduleTrigger?.config ?? null} onChange={onScheduleChange} />
+      <ScheduleSelector
+        config={scheduleTrigger?.config ?? null}
+        isDirty={
+          JSON.stringify(scheduleTrigger?.config ?? null) !==
+          JSON.stringify(savedScheduleTrigger?.config ?? null)
+        }
+        onChange={onScheduleChange}
+      />
     </div>
   );
 }
 
 function ConditionArea({
   trigger,
+  savedTrigger,
   automationId,
   workspaceId,
   triggerTypes,
@@ -119,6 +149,7 @@ function ConditionArea({
   onDeleteTrigger,
 }: {
   trigger: AutomationTrigger | undefined;
+  savedTrigger: AutomationTrigger | undefined;
   automationId: string | null;
   workspaceId: string;
   triggerTypes: TriggerTypeInfo[];
@@ -134,6 +165,7 @@ function ConditionArea({
         <div className="space-y-2">
           <TriggerCard
             trigger={trigger}
+            savedTrigger={savedTrigger?.id === trigger.id ? savedTrigger : undefined}
             automationId={automationId}
             workspaceId={workspaceId}
             onUpdate={(config) => onUpdateTrigger(trigger.id, config)}

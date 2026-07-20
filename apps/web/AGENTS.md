@@ -20,6 +20,13 @@ import { Dialog } from "@kandev/ui/dialog";
 - For data tables, use `@kandev/ui/table` with TanStack Table; use shadcn Pagination components.
 - Only create custom components when shadcn doesn't provide what's needed.
 
+### Responsive and touch surfaces
+
+- Use `hooks/use-responsive-breakpoint.ts` for application layout decisions. Its phone boundary is 640px and it also models tablet, compact desktop, full desktop, and pointer precision; do not substitute the UI package's generic `useIsMobile` hook.
+- Use `useTouchDrawer` when a hover/popover disclosure needs a coarse-pointer `Drawer` alternative. Width-based phone composition and pointer-based disclosure behavior are related but not interchangeable.
+- Existing Radix DropdownMenu and ContextMenu surfaces receive inset, safe-area-aware bottom-sheet treatment below 640px in `app/globals.css`. Reuse those primitives for contextual actions and add focused coverage for long or nested menus instead of creating a parallel mobile menu.
+- Mobile capability parity does not require desktop layout parity. Load `/mobile-parity` for the Kandev surface decision guide, mobile design contract, and verification requirements.
+
 ## Data Flow Pattern (Critical)
 
 ```text
@@ -92,6 +99,16 @@ surface.
 - Components: <200 lines, extract to domain components, composition over props.
 - Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
+- **Self-documenting settings:** every setting must explain in visible, plain-language copy what
+  changes, when the setting applies, and when the user should choose each non-obvious option. State
+  important exclusions, precedence, cost, or destructive consequences next to the control when they
+  can affect the decision. Do not rely on tooltips, external documentation, or implementation terms
+  alone to teach the setting.
+- **Settings save coordination:** settings surfaces with local unsaved state must register a
+  contributor with `useSettingsSaveContributor` (or use `SettingsPageTemplate`) so the shared
+  floating **Save changes** control, navigation guard, and discard flow own persistence. Do not add
+  page-local Save/Cancel controls. Contributor `save` callbacks must reject on failure so the
+  coordinator can report an error; `discard` must restore the contributor's authoritative baseline.
 - **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
   activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`),
   so per-dialog "submit on Enter" input handlers are unnecessary — let the base own it.
@@ -119,6 +136,14 @@ surface.
   </Tooltip>
   ```
   Keep the wrapper focusable only while disabled; when enabled, the button itself owns focus.
+- **Interactive help inside Radix tooltips:** do not nest a `Tooltip` root inside
+  another `TooltipContent` when the inner trigger must remain interactive.
+  Tooltip roots under one provider coordinate open state, so the inner tooltip
+  can close and unmount its parent before the pointer reaches it. Render the
+  secondary help inline in the existing content or use a disclosure primitive
+  with independent open state. Touch-pinned help must close on a second trigger
+  tap, outside interaction, and Escape; verify desktop pointer and mobile-sized
+  touch flows.
 - **Renaming a `data-testid`:** set the new id as `data-testid="<new>"` and keep
   the old id as `data-legacy-testid="<old>"`, then migrate e2e specs to the new
   id in the same PR. JSX rejects two `data-testid` attributes on one element,
@@ -173,5 +198,10 @@ When you hit a limit, extract a helper function, custom hook, or sub-component. 
 ## Testing notes
 
 - jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after.
+- jsdom synthetic mouse events do not reliably open Radix Tooltip. In component
+  tests, render under `TooltipProvider` and assert the keyboard-focus path with
+  `fireEvent.focus`. Cover pointer hover in Playwright with `locator.hover()` and
+  assert the visible portaled `role="tooltip"`; do not remove a hover regression
+  solely because `mouseenter` or `pointerMove` failed in jsdom.
 - In Playwright tests, avoid strict locators that assume only one `terminal-panel` or `.xterm` exists. Mobile and dockview layouts can mount multiple terminal instances; scope to the active panel or use `.first()` / `.last()` deliberately with a comment or helper.
 - Shared E2E helpers that inspect mounted React/DOM internals must be scoped to the active panel/container, not global selectors, because hidden or stale mounted panels can coexist in dock/mobile layouts.

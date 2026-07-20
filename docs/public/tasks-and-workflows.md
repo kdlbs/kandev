@@ -21,11 +21,6 @@ A task is the unit of work. A workflow is the ordered process that task follows.
 
 Workflow position and runtime state are different. Moving a card changes its workflow step; it does not prove that an agent ran, code was committed, review passed, or a pull request merged.
 
-## Office status
-
-> [!EXPERIMENTAL]
-> Office is in progress and feature-flagged. Its persistent agents, arbitrary-depth task trees, blocker and label properties, named task documents, reviewer/approver quorum, routines, and budgets are not stable features of the regular Kanban task experience.
-
 ## Prepare a workspace
 
 A new workspace created by a user does not automatically receive a workflow.
@@ -73,6 +68,15 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
 Kandev remembers draft or recently used repository, branch, executor, and profile choices. Review the restored values before submitting, especially after changing workspace.
 
+### Choose the profile for tasks created by agents
+
+Open **Settings → General → Task Actions → Profile for Tasks Created by Agents** to choose which agent profile Kandev assigns when an agent calls a Kandev MCP tool that creates a task without choosing `agent_profile_id`. The profile determines the agent, model, and setup used when the new task starts:
+
+- **Current task profile** is useful when follow-up work needs the same model and agent setup as the task creating it. It preserves compatibility with existing behavior and is selected by default. Kandev first inherits the parent or calling task profile, then checks the workflow step or workflow default, and finally checks the target workspace's **Default Agent Profile**. This option can unintentionally reuse a more expensive profile.
+- **Workspace default profile** is useful when you want agent-created tasks to use your standard workspace model and cost policy. It skips the parent and calling task profiles. Kandev still uses the workflow step or workflow default first, then the **Default Agent Profile** from the workspace that will own the new task.
+
+Select an option, then choose **Save changes**. The only affected Kandev MCP tool is `create_task_kandev`; the preference covers both new tasks and subtasks when the call omits `agent_profile_id`. It does not affect `spawn_session_kandev`, because that tool adds a session to the current task instead of creating a task. It also does not affect tasks you create in the UI. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. An explicit `agent_profile_id` in the tool call always overrides the saved preference. If **Workspace default profile** is selected and neither the workflow nor the target workspace supplies a profile, task creation fails without creating the task, including when `start_agent=false`.
+
 ### Multiple repositories
 
 A task can include several local or remote repository rows. Multi-repository task creation currently requires the **git-worktree** executor; the dialog leaves incompatible executors visible but disables them with `Multi-repo tasks only support the git-worktree executor.` Each remote needs credentials that can clone and fetch its selected base branch.
@@ -101,7 +105,7 @@ If the selected profile is unhealthy or incompatible with the executor, fix that
 
 ## Find and organize tasks
 
-The header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts.
+On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.
 
 - Search matches tasks without changing their state.
 - The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**.
@@ -110,6 +114,9 @@ The header switches between **Kanban**, **Pipeline**, and **List**. Kanban and P
 - **Show archived** reveals archived tasks in List.
 - List page sizes are 10, 25, or 50; the default is 25.
 - Parent tasks and direct subtasks are indented as a tree.
+- A subtask's action menu can detach it into a top-level task. Detaching preserves its workflow position and descendants; an inherited workspace remains shared with the former parent.
+
+On phones, Kanban focuses one workflow and one step at a time. The board navigator always names both; open it to choose either level, or use the previous/next controls and horizontal swipe to move between steps. Choosing a workflow makes it the active workflow for board actions and task creation. Tap a card to open that task directly. Its **More options** menu opens as a touch-sized bottom surface; **Move to** changes the task's workflow or step. **Edit** can still rename a task after work starts, while its original prompt remains locked.
 
 Regular Kanban does not currently expose label editing or label filters. Do not design a supported Kanban process around labels.
 
@@ -196,7 +203,10 @@ Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_
 
 Revision history is not an immutable record of every autosave. Consecutive writes from the same author name and author kind coalesce into the latest revision for five minutes by default. Operators can set `KANDEV_PLAN_COALESCE_WINDOW_MS`; `0` disables coalescing, while an invalid or negative value falls back to five minutes.
 
-### Current availability of documents, labels, and blockers
+## Office documents, labels, and blockers
+
+> [!EXPERIMENTAL]
+> Office is feature-flagged, disabled in the production profile by default, and still in progress. Its named documents, labels, and blocker controls are not stable regular-Kanban features.
 
 | Capability | Regular Kanban | Office |
 |---|---|---|

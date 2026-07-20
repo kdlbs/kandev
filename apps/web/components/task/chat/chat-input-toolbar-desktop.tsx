@@ -13,6 +13,7 @@ import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
 import { cn } from "@/lib/utils";
 import { ResetContextButton } from "./reset-context-button";
 import { ImplementPlanButton } from "./implement-plan-button";
+import { ChatInputPluginActions } from "./chat-input-plugin-actions";
 import { VoiceInputButton } from "./voice-input-button";
 import { ContextPopover } from "./context-popover";
 import {
@@ -135,6 +136,9 @@ function DesktopRightSection(props: {
   showCollapsed: boolean;
   rightItems: ToolbarItemConfig[];
   sessionId: string | null;
+  taskId: string | null;
+  taskTitle?: string;
+  hideAgentControls: boolean;
   planModeEnabled: boolean;
   isAgentBusy: boolean;
   hasContent: boolean;
@@ -156,6 +160,13 @@ function DesktopRightSection(props: {
       <TokenUsageDisplay sessionId={props.sessionId} />
       {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
         <ImplementPlanButton onClick={props.onImplementPlan} />
+      )}
+      {!props.hideAgentControls && (
+        <ChatInputPluginActions
+          sessionId={props.sessionId}
+          taskId={props.taskId}
+          taskTitle={props.taskTitle}
+        />
       )}
       <div className="ml-1 flex items-center gap-1">
         {props.onVoiceTranscript && (
@@ -245,6 +256,9 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
         showCollapsed={showCollapsed}
         rightItems={rightItems}
         sessionId={props.sessionId}
+        taskId={props.taskId}
+        taskTitle={props.taskTitle}
+        hideAgentControls={props.hideAgentControls}
         planModeEnabled={props.planModeEnabled}
         isAgentBusy={props.isAgentBusy}
         hasContent={props.hasContent ?? false}

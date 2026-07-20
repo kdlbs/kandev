@@ -67,7 +67,7 @@ export function AboutCard() {
           </Button>
           <Button asChild variant="outline" size="sm" className="cursor-pointer">
             <a
-              href="https://github.com/kdlbs/kandev#readme"
+              href="https://kandev.ai/docs"
               target="_blank"
               rel="noreferrer"
               data-testid="system-about-docs-link"

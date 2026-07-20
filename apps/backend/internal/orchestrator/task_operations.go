@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +31,22 @@ import (
 type PromptResult struct {
 	StopReason   string // The reason the agent stopped (e.g., "end_turn")
 	AgentMessage string // The agent's accumulated response message
+}
+
+// CoordinatorTaskStopStatus is the idempotent product result returned to a
+// parent task that asks to halt a direct child.
+type CoordinatorTaskStopStatus string
+
+const (
+	CoordinatorTaskStopStatusStopped    CoordinatorTaskStopStatus = "stopped"
+	CoordinatorTaskStopStatusNotRunning CoordinatorTaskStopStatus = "not_running"
+	coordinatorMCPStopReason                                      = "stopped by parent task via MCP"
+)
+
+// CoordinatorTaskStopResult reports whether at least one live child session
+// accepted logical cancellation. Runtime teardown continues asynchronously.
+type CoordinatorTaskStopResult struct {
+	Status CoordinatorTaskStopStatus `json:"status"`
 }
 
 // resumeReasonErrorRecovery is the resume reason returned when a session is in
@@ -309,14 +327,12 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// If the workflow step overrode the profile, update the session record in DB
 	// so the frontend tab displays the correct agent (it reads session.agent_profile_id).
 	if effectiveProfileID != session.AgentProfileID {
+		observedState := session.State
 		s.logger.Info("updating session agent profile for workflow step override",
 			zap.String("session_id", sessionID),
 			zap.String("old_profile", session.AgentProfileID),
 			zap.String("new_profile", effectiveProfileID))
 		session.AgentProfileID = effectiveProfileID
-		// Tag as workflow-spawned provenance: the in-place profile mutation
-		// came from a workflow step override, not direct user selection.
-		s.tagSessionAsWorkflowSwitched(ctx, sessionID)
 		// Re-resolve the agent profile snapshot so the tab shows the correct agent logo/name.
 		// Set a minimal snapshot first so stale data is never persisted if resolution fails.
 		session.AgentProfileSnapshot = map[string]interface{}{"id": effectiveProfileID}
@@ -327,19 +343,22 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 				zap.Error(err))
 		} else if profileInfo != nil {
 			session.AgentProfileSnapshot = map[string]interface{}{
-				"id":         profileInfo.ProfileID,
-				"name":       profileInfo.ProfileName,
-				"agent_id":   profileInfo.AgentID,
-				"agent_name": profileInfo.AgentName,
-				"model":      profileInfo.Model,
+				"id":             profileInfo.ProfileID,
+				"name":           profileInfo.ProfileName,
+				"agent_id":       profileInfo.AgentID,
+				"agent_name":     profileInfo.AgentName,
+				"model":          profileInfo.Model,
+				"mode":           profileInfo.Mode,
+				"config_options": maps.Clone(profileInfo.ConfigOptions),
 			}
 		}
-		s.promoteSessionIfTaskHasNoPrimary(ctx, taskID, session)
-		if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
-			s.logger.Warn("failed to update session agent profile",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
+		if err := s.persistFullTaskSessionIfCurrent(ctx, session, observedState); err != nil {
+			return nil, fmt.Errorf("persist workflow session profile: %w", err)
 		}
+		// Tag as workflow-spawned provenance only after the guarded profile
+		// write succeeds; a concurrent stop owns a rejected session.
+		s.tagSessionAsWorkflowSwitched(ctx, sessionID)
+		s.promoteSessionIfTaskHasNoPrimary(ctx, taskID, session)
 	}
 
 	// Transition task state: CREATED → SCHEDULING → (IN_PROGRESS via executor).
@@ -351,10 +370,11 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	if isOfficeTask {
 		s.logger.Debug("skipping SCHEDULING transition for office task",
 			zap.String("task_id", taskID))
-	} else if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+	} else if err := s.scheduleTaskForSession(ctx, taskID, sessionID); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
 			zap.String("task_id", taskID),
 			zap.Error(err))
+		return nil, err
 	}
 
 	task, err := s.scheduler.GetTask(ctx, taskID)
@@ -405,7 +425,9 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID, planMode, task.IsEphemeral)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
+	configMode := false
 	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
+		configMode = true
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
 
@@ -418,7 +440,10 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
 	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !session.IsPassthrough {
-		effectivePrompt = sysprompt.InjectKandevContext(taskID, sessionID, effectivePrompt, s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID))
+		effectivePrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
+			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+			IncludeCoordinatorTaskControls: !isOfficeTask && !configMode,
+		})
 	}
 
 	executorID := session.ExecutorID
@@ -427,7 +452,11 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// re-drive this first turn — initial launches bypass PromptTask.
 	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, Attachments: attachments})
+	mcpMode := ""
+	if isOfficeTask {
+		mcpMode = executor.McpModeOffice
+	}
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments})
 	if err != nil {
 		return nil, err
 	}
@@ -443,6 +472,27 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
+}
+
+func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID string) error {
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
+
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, sessionID)
+	}
+	if session.State != models.TaskSessionStateCreated &&
+		session.State != models.TaskSessionStateWaitingForInput {
+		if isTerminalSessionState(session.State) {
+			return &executor.SessionStateSupersededError{SessionID: session.ID, State: session.State}
+		}
+		return fmt.Errorf("session %s is %s; cannot schedule task", session.ID, session.State)
+	}
+	return s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling)
 }
 
 func (s *Service) promoteSessionIfTaskHasNoPrimary(ctx context.Context, taskID string, session *models.TaskSession) {
@@ -513,12 +563,8 @@ func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProf
 	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, env, nil)
 }
 
-// StartTaskWithRoute launches a task with a fully resolved provider
-// override resolved by the office routing dispatcher. Workspace, executor
-// selection, instruction files, system prompt, and ACP session settings
-// are inherited from the base AgentProfile referenced by agentProfileID;
-// only the provider-scoped fields (agent_id, model, mode, flags, env,
-// permissions) are overridden via route.
+// StartTaskWithRoute launches a stable Office identity through a complete
+// concrete execution profile selected by the routing dispatcher.
 //
 // launch carries the Office-built launch context (prompt, env, workflow
 // step, attachments, plan-mode flag) so routed launches behave
@@ -526,43 +572,17 @@ func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProf
 // selection. Without launch, routed runs would fall back to
 // task.Description and drop role framing / AGENTS.md / wake context.
 //
-// Env merging: launch.Env carries the office-built env vars (token,
-// KANDEV_*); route.Env carries provider-scoped overrides. The route
-// env wins on key collisions because per-provider env is the more
-// specific authority.
-//
 // Office-routed launches use autoStart=false: the user kicked off the
 // task; the office layer only chose the provider.
 func (s *Service) StartTaskWithRoute(
 	ctx context.Context, taskID, agentProfileID string,
 	launch executor.LaunchContext, route executor.RouteOverride,
 ) error {
-	merged := mergeRouteEnv(launch.Env, route.Env)
 	_, err := s.startTask(ctx, taskID, agentProfileID,
 		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority,
 		launch.Prompt, launch.WorkflowStepID, launch.PlanMode, false,
-		launch.Attachments, merged, &route)
+		launch.Attachments, launch.Env, &route)
 	return err
-}
-
-// mergeRouteEnv combines the office-built launch env with the
-// per-provider route env. Route entries win on key collisions.
-func mergeRouteEnv(launchEnv, routeEnv map[string]string) map[string]string {
-	if len(launchEnv) == 0 && len(routeEnv) == 0 {
-		return nil
-	}
-	// The size hint is unused intentionally: CodeQL flags
-	// `len(a)+len(b)` as a potential overflow for the make() capacity
-	// argument. Map literals re-grow themselves; the hint was an
-	// optimization, not a correctness requirement.
-	out := make(map[string]string)
-	for k, v := range launchEnv {
-		out[k] = v
-	}
-	for k, v := range routeEnv {
-		out[k] = v
-	}
-	return out
 }
 
 //nolint:cyclop,funlen // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
@@ -603,12 +623,20 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 
 	s.moveTaskToWorkflowStep(ctx, taskID, workflowStepID)
 
+	officeAgentProfileID := ""
+	if isOfficeTask {
+		officeAgentProfileID = agentProfileID
+	}
+
 	// Resolve the workflow step's agent profile override.
 	// The frontend may pass the workspace default profile, but the step may
 	// require a different agent (e.g., Codex on "In Progress", Auggie on "Review").
 	callerProfileID := agentProfileID
 	agentProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
 	overrideApplied := agentProfileID != callerProfileID
+	if route != nil && route.ExecutionProfileID != "" {
+		agentProfileID = route.ExecutionProfileID
+	}
 
 	// Fetch the task from the repository to get complete task info
 	task, err := s.scheduler.GetTask(ctx, taskID)
@@ -688,7 +716,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// directly is wrong because it can be empty on manual user-initiated starts
 	// while the task is already bound to a signal-gated step in the DB.
 	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !skipKandevMCPWrap {
-		effectivePrompt = sysprompt.InjectKandevContext(task.ID, sessionID, effectivePrompt, s.StepRequiresCompletionSignal(ctx, task.ID))
+		effectivePrompt = sysprompt.InjectKandevContextWithOptions(task.ID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
+			RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, task.ID),
+			IncludeCoordinatorTaskControls: !isOfficeTask && !configMode,
+		})
 	}
 
 	// Office tasks restrict the MCP toolset: kanban tools (move/update/list
@@ -704,15 +735,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
-		AgentProfileID: agentProfileID,
-		ExecutorID:     executorID,
-		Prompt:         effectivePrompt,
-		WorkflowStepID: workflowStepID,
-		StartAgent:     true,
-		McpMode:        mcpMode,
-		Attachments:    attachments,
-		Env:            env,
-		RouteOverride:  route,
+		AgentProfileID:       agentProfileID,
+		OfficeAgentProfileID: officeAgentProfileID,
+		ExecutorID:           executorID,
+		Prompt:               effectivePrompt,
+		WorkflowStepID:       workflowStepID,
+		StartAgent:           true,
+		McpMode:              mcpMode,
+		Attachments:          attachments,
+		Env:                  env,
+		RouteOverride:        route,
 	})
 	if err != nil {
 		return nil, err
@@ -777,15 +809,6 @@ func (s *Service) createStartSession(
 		)
 		if ensureErr != nil {
 			return "", ensureErr
-		}
-		// The office/assignee path bypasses StartCreatedSession's override
-		// mutation: the session is created directly with the assignee
-		// profile (which falls back to the step's agent_profile_id via the
-		// runner projection). If that profile differs from the caller's,
-		// the assignment was workflow-driven, so keep that provenance on
-		// the session metadata.
-		if agentProfileID != "" && session.AgentProfileID != "" && session.AgentProfileID != agentProfileID {
-			s.tagSessionAsWorkflowSwitched(ctx, session.ID)
 		}
 		return session.ID, nil
 	}
@@ -1427,6 +1450,13 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 		}
 		return fmt.Errorf("execution id for session %s not found", sessionID)
 	}
+	if !s.claimForcedExecutionCleanup(sessionID, executionID) {
+		return fmt.Errorf(
+			"execution %s teardown is already owned for session %s",
+			executionID,
+			sessionID,
+		)
+	}
 
 	s.logger.Warn("stopping prompt-unready agent execution before resume",
 		zap.String("session_id", sessionID),
@@ -1434,6 +1464,19 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 		zap.Error(cause))
 	if err := s.executor.StopExecution(ctx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
 		return err
+	}
+	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("reload session after prompt-readiness teardown: %w", err)
+	}
+	if refreshed == nil {
+		return fmt.Errorf("reload session after prompt-readiness teardown: session %s not found", sessionID)
+	}
+	if isTerminalSessionState(refreshed.State) {
+		return &executor.SessionStateSupersededError{
+			SessionID: refreshed.ID,
+			State:     refreshed.State,
+		}
 	}
 	return nil
 }
@@ -1843,6 +1886,136 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 	}
 
 	return nil
+}
+
+// StopTaskForCoordinator gracefully halts every currently-observed live
+// execution for taskID without accepting caller-controlled lifecycle options.
+// The operation is idempotent: no accepted cancellation is not_running.
+func (s *Service) StopTaskForCoordinator(ctx context.Context, taskID string) (CoordinatorTaskStopResult, error) {
+	if s.executor == nil {
+		return CoordinatorTaskStopResult{}, errors.New("coordinator stop: executor is not configured")
+	}
+	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		return CoordinatorTaskStopResult{}, fmt.Errorf("coordinator stop: list active sessions for task %q: %w", taskID, err)
+	}
+
+	// Repository ordering is launch-oriented. Coordinator control uses stable
+	// identity ordering so partial failures and retries are deterministic.
+	sort.SliceStable(sessions, func(i, j int) bool {
+		return coordinatorStopSessionID(sessions[i]) < coordinatorStopSessionID(sessions[j])
+	})
+
+	accepted := 0
+	failures := make([]error, 0)
+	for _, candidate := range sessions {
+		if candidate == nil || candidate.ID == "" {
+			failures = append(failures, errors.New("coordinator stop: active session candidate is nil or has an empty ID"))
+			continue
+		}
+		changed, stopErr := s.stopTaskSessionForCoordinator(ctx, taskID, candidate.ID)
+		if stopErr != nil {
+			failures = append(failures, stopErr)
+			continue
+		}
+		if changed {
+			accepted++
+		}
+	}
+	if accepted > 0 {
+		// This helper owns Office/archive/active-state guards and publishes
+		// through the task-service adapter. Remaining working sessions still
+		// block REVIEW on a partial stop.
+		s.writeTaskReviewState(ctx, taskID, "")
+	}
+	if len(failures) > 0 {
+		s.logger.Warn("coordinator stop partially failed",
+			zap.String("task_id", taskID),
+			zap.Int("accepted", accepted),
+			zap.Int("failed", len(failures)))
+		return CoordinatorTaskStopResult{}, errors.Join(failures...)
+	}
+	if accepted == 0 {
+		return CoordinatorTaskStopResult{Status: CoordinatorTaskStopStatusNotRunning}, nil
+	}
+	return CoordinatorTaskStopResult{Status: CoordinatorTaskStopStatusStopped}, nil
+}
+
+func coordinatorStopSessionID(session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	return session.ID
+}
+
+func (s *Service) stopTaskSessionForCoordinator(ctx context.Context, taskID, sessionID string) (bool, error) {
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	lock.Lock()
+
+	result, teardownClaimed, err := s.stopTaskSessionForCoordinatorLocked(ctx, taskID, sessionID)
+	lock.Unlock()
+	release()
+	if err != nil {
+		return false, err
+	}
+	if result.Changed && teardownClaimed {
+		result.ScheduleTeardown()
+	}
+	return result.Changed, nil
+}
+
+// stopTaskSessionForCoordinatorLocked commits cancellation and claims teardown
+// ownership while sessionID's cancelInFlight guard is held. The caller must
+// release that guard before scheduling the returned teardown.
+func (s *Service) stopTaskSessionForCoordinatorLocked(
+	ctx context.Context,
+	taskID, sessionID string,
+) (executor.SessionStopResult, bool, error) {
+
+	// Re-read after acquiring the shared cancel/ready/queue guard. A candidate
+	// may have become terminal while this call waited for another decision.
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return executor.SessionStopResult{}, false, fmt.Errorf("coordinator stop: reload session %q: %w", sessionID, err)
+	}
+	if session == nil {
+		return executor.SessionStopResult{}, false, fmt.Errorf("coordinator stop: reload session %q returned nil", sessionID)
+	}
+	if session.TaskID != taskID {
+		return executor.SessionStopResult{}, false, fmt.Errorf("coordinator stop: session %q belongs to task %q, not %q", sessionID, session.TaskID, taskID)
+	}
+	if !isCoordinatorStoppableSessionState(session.State) {
+		return executor.SessionStopResult{FinalState: session.State}, false, nil
+	}
+
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
+	// Halt-only intent also disarms any provider-backoff retry. This must run
+	// even when the failed execution has already disappeared and the result is
+	// therefore not_running; otherwise its timer can launch replacement work.
+	s.resetTransientRetry(sessionID)
+	result, err := s.executor.StopSessionDetailed(ctx, session, coordinatorMCPStopReason, false)
+	if err != nil {
+		return result, false, fmt.Errorf("coordinator stop: session %q: %w", sessionID, err)
+	}
+	teardownClaimed := result.Changed && s.claimExecutionTeardown(
+		sessionID,
+		result.ExecutionID,
+		executionTeardownIntentGraceful,
+	)
+	return result, teardownClaimed, nil
+}
+
+func isCoordinatorStoppableSessionState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCreated,
+		models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput:
+		return true
+	default:
+		return false
+	}
 }
 
 // CancelTaskExecution stops active sessions for a task without mutating task state.
@@ -2436,10 +2609,10 @@ func (s *Service) effectivePromptForSession(sessionID, prompt string, planMode b
 // promptTask dispatches to the agent, and returns the session to use for
 // the rest of the call (possibly reloaded).
 //
-// When claimEntryID is empty (a direct, non-queued prompt) this is a bare,
-// unguarded transition — preserving PromptTask's pre-existing direct-call
-// behavior as-is; this branch takes no guard and makes no claim about
-// races with a concurrent queued-dispatch decision on the same session.
+// Direct and queued prompts both claim RUNNING under the per-session
+// cancelInFlight guard. This makes the final "still promptable, now owned by
+// this turn" decision atomic with coordinator stop; the potentially blocking
+// executor.Prompt call remains outside the guard.
 //
 // When claimEntryID is set (a queued dispatch claiming its reserved token —
 // see the Service.dispatchingQueued field doc comment), the claim happens
@@ -2455,17 +2628,12 @@ func (s *Service) effectivePromptForSession(sessionID, prompt string, planMode b
 // checkSessionPromptable here makes "is it actually still safe to mark this
 // session RUNNING right now" an atomic fact, not a stale read.
 func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sessionID, claimEntryID string, session *models.TaskSession) (*models.TaskSession, error) {
-	if claimEntryID == "" {
-		s.setSessionRunning(ctx, taskID, sessionID, session)
-		return session, nil
-	}
-
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
 
-	if !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
+	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
 		return nil, errQueuedDispatchSuperseded
 	}
 	freshSession, sessErr := s.repo.GetTaskSession(ctx, sessionID)
@@ -2479,6 +2647,15 @@ func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sess
 		return nil, promptErr
 	}
 	s.setSessionRunning(ctx, taskID, sessionID, freshSession)
+	// setSessionRunning refreshes freshSession in place when its guarded write
+	// loses, so a cancellation landing after the promptability check is visible
+	// here as a terminal state.
+	if isTerminalSessionState(freshSession.State) && freshSession.State != models.TaskSessionStateCompleted {
+		return nil, &executor.SessionStateSupersededError{
+			SessionID: freshSession.ID,
+			State:     freshSession.State,
+		}
+	}
 	// Clear the token now, inside the same lock, rather than deferring to
 	// executeQueuedMessage's cleanup after this entire (potentially
 	// long-blocking) call returns: from this point session.State is the
@@ -2486,7 +2663,9 @@ func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sess
 	// any longer would only risk the natural agent.ready firing when *this*
 	// turn completes seeing it still set and skipping the *next* queued
 	// entry — see the Service.dispatchingQueued field doc comment.
-	s.clearQueuedDispatchInFlightIfCurrent(sessionID, claimEntryID)
+	if claimEntryID != "" {
+		s.clearQueuedDispatchInFlightIfCurrent(sessionID, claimEntryID)
+	}
 	return freshSession, nil
 }
 
@@ -2871,30 +3050,11 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// concurrent agent.complete event having already closed the turn.
 	s.completeTurnForSession(ctx, sessionID)
 
-	// Deliver any message the operator queued while the turn was running
-	// (#1597 pause→resume recovery) *while still holding the guard* — this
-	// used to release the guard early and drain unguarded, which let a
-	// concurrent QueueAndInterruptForPeerMessage (or another drain) race
-	// this exact take-and-dispatch decision for the same session; every
-	// take-and-dispatch decision must serialize through this one guard
-	// (see the Service.cancelInFlight field doc comment). On a normal
-	// cancel the agent emits complete(cancelled) → handleAgentReady →
-	// on_turn_complete, which drains the queue. But an escalated cancel
-	// (agent hung) or a dead-process cancel fires no agent.ready event, so
-	// nothing would drain it — leaving the operator's queued message
-	// stranded until a second manual send. Draining here after the turn is
-	// completed covers those paths. It is idempotent with the event-driven
-	// drain: drainQueuedMessageForPromptableSessionLocked pops via
-	// TakeQueued atomically, so a normal cancel that also fires
-	// handleAgentReady cannot double-deliver.
-	if session != nil {
-		s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
-	}
-
-	// Release the cancel/interrupt guard now that this session's
-	// cancel-and-drain decision is fully resolved. Both unlockGuard and
-	// release are idempotent, so the deferred calls above become safe
-	// no-op error-path safety nets once this fires.
+	// Release the cancel/interrupt guard now that this session's cancel is
+	// fully resolved. Do not drain here: a user cancellation must not itself
+	// start the next queued message. Both unlockGuard and release are
+	// idempotent, so the deferred calls above become safe no-op error-path
+	// safety nets once this fires.
 	unlockGuard()
 	release()
 
@@ -3029,8 +3189,8 @@ func (s *Service) cancelAndTakeForPeerMessage(ctx context.Context, taskID, sessi
 // only for the later interrupt's cancel to land on and kill that very turn,
 // orphaning the parent's message mid-delivery. Taking the lock before the
 // queue insert closes that: handleAgentReady and handleAgentBootReady's
-// take-decision claims (TryLock, not a passive peek) the exact same lock
-// before their own take, so neither can ever observe — and steal — an
+// take decisions claim the exact same lock before their own take, so neither
+// can ever observe — and steal — an
 // entry this call is still in the process of queueing-and-claiming.
 //
 // The lock is a genuine, blocking claim (Lock, mirroring

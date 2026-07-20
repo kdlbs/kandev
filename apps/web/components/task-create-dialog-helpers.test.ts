@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { autoSelectBranch } from "./task-create-dialog-helpers";
+import { autoSelectBranch, shouldShowTaskTitleField } from "./task-create-dialog-helpers";
 const STORAGE_KEYS = { LAST_BRANCH: "kandev.dialog.lastBranch" } as const;
 
 beforeEach(() => {
@@ -87,4 +87,42 @@ describe("autoSelectBranch", () => {
 
     expect(setBranch).not.toHaveBeenCalled();
   });
+});
+
+describe("shouldShowTaskTitleField", () => {
+  it.each([
+    {
+      name: "started edit",
+      isCreateMode: false,
+      isEditMode: true,
+      isTaskStarted: true,
+      expected: true,
+    },
+    {
+      name: "new task",
+      isCreateMode: true,
+      isEditMode: false,
+      isTaskStarted: false,
+      expected: true,
+    },
+    {
+      name: "create from running task",
+      isCreateMode: true,
+      isEditMode: false,
+      isTaskStarted: true,
+      expected: false,
+    },
+    {
+      name: "session",
+      isCreateMode: false,
+      isEditMode: false,
+      isTaskStarted: false,
+      expected: false,
+    },
+  ])(
+    "returns $expected for $name mode",
+    ({ isCreateMode, isEditMode, isTaskStarted, expected }) => {
+      expect(shouldShowTaskTitleField(isCreateMode, isEditMode, isTaskStarted)).toBe(expected);
+    },
+  );
 });

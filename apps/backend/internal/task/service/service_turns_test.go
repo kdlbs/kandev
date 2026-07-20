@@ -3,17 +3,140 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/stretchr/testify/require"
 )
 
 type nilTaskSessionRepo struct {
 	repository.SessionRepository
+}
+
+func TestStartTurnPersistsImmutableEffectiveRuntimeConfigSnapshot(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	options := []streams.ConfigOption{
+		{
+			Type: "select", ID: "collaboration_mode", Name: "Collaboration mode", CurrentValue: "default",
+			Options: []streams.ConfigOptionValue{{Value: "default", Name: "Default"}},
+		},
+		{
+			Type: "select", ID: "reasoning_effort", Name: "Reasoning effort", CurrentValue: "medium",
+			Options: []streams.ConfigOptionValue{
+				{Value: "medium", Name: "Medium"},
+				{Value: "high", Name: "High"},
+				{Value: "low", Name: "Low"},
+			},
+		},
+	}
+	session := &models.TaskSession{
+		ID:        "session-turn-config",
+		TaskID:    "task-123",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now,
+		UpdatedAt: now,
+		AgentProfileSnapshot: map[string]interface{}{
+			"model": "profile-model",
+			"mode":  "default",
+		},
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{
+				Model: "gpt-5.6-sol", Mode: "agent",
+				ConfigOptions: map[string]string{
+					"collaboration_mode": "default",
+					"reasoning_effort":   "medium",
+				},
+			},
+			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{
+				ConfigOptions: map[string]string{"reasoning_effort": "high"},
+			},
+			models.SessionMetaKeyACPConfigBaseline: map[string]string{
+				"collaboration_mode": "default",
+				"reasoning_effort":   "medium",
+			},
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModelID: "gpt-5.6-sol",
+				ConfigOptions:  options,
+			},
+		},
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	first, err := svc.StartTurn(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("StartTurn first: %v", err)
+	}
+	if err := svc.CompleteTurn(ctx, first.ID); err != nil {
+		t.Fatalf("CompleteTurn first: %v", err)
+	}
+	if err := svc.PersistSessionRuntimeConfigOption(ctx, session.ID, "reasoning_effort", "low"); err != nil {
+		t.Fatalf("PersistSessionRuntimeConfigOption: %v", err)
+	}
+	second, err := svc.StartTurn(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("StartTurn second: %v", err)
+	}
+
+	storedFirst, err := repo.GetTurn(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("GetTurn first: %v", err)
+	}
+	storedSecond, err := repo.GetTurn(ctx, second.ID)
+	if err != nil {
+		t.Fatalf("GetTurn second: %v", err)
+	}
+	firstSnapshot, ok := models.LoadTurnRuntimeConfigSnapshot(storedFirst.Metadata)
+	if !ok {
+		t.Fatal("first turn metadata does not contain a runtime config snapshot")
+	}
+	secondSnapshot, ok := models.LoadTurnRuntimeConfigSnapshot(storedSecond.Metadata)
+	if !ok {
+		t.Fatal("second turn metadata does not contain a runtime config snapshot")
+	}
+
+	if firstSnapshot.Model != "gpt-5.6-sol" || firstSnapshot.Mode != "agent" {
+		t.Fatalf("first model/mode = %q/%q", firstSnapshot.Model, firstSnapshot.Mode)
+	}
+	wantFirstOptions := []models.TurnRuntimeConfigOption{
+		{ID: "collaboration_mode", Name: "Collaboration mode", Value: "default", ValueName: "Default"},
+		{ID: "reasoning_effort", Name: "Reasoning effort", Value: "high", ValueName: "High"},
+	}
+	require.Equal(t, wantFirstOptions, firstSnapshot.ConfigOptions, "first turn config options")
+	if firstSnapshot.ConfigBaseline["reasoning_effort"] != "medium" {
+		t.Fatalf("first baseline = %#v", firstSnapshot.ConfigBaseline)
+	}
+	if secondSnapshot.ConfigOptions[1].Value != "low" || secondSnapshot.ConfigOptions[1].ValueName != "Low" {
+		t.Fatalf("second reasoning option = %#v", secondSnapshot.ConfigOptions[1])
+	}
+	if firstSnapshot.ConfigOptions[1].Value != "high" {
+		t.Fatalf("first turn was relabeled after later override: %#v", firstSnapshot.ConfigOptions[1])
+	}
+}
+
+func TestBuildTurnRuntimeConfigSnapshotFallsBackToSelectorModel(t *testing.T) {
+	snapshot := buildTurnRuntimeConfigSnapshot(&models.TaskSession{
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModelID: "selector-model",
+			},
+		},
+	})
+
+	if snapshot.Model != "selector-model" {
+		t.Fatalf("snapshot model = %q, want selector-model", snapshot.Model)
+	}
 }
 
 func (nilTaskSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
@@ -32,11 +155,12 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	now := time.Now().UTC()
 
 	session := &models.TaskSession{
-		ID:                "session-1",
-		TaskID:            "task-123",
-		TaskEnvironmentID: "env-123",
-		AgentProfileID:    "profile-1",
-		State:             models.TaskSessionStateCompleted,
+		ID:                 "session-1",
+		TaskID:             "task-123",
+		TaskEnvironmentID:  "env-123",
+		AgentProfileID:     "profile-1",
+		ExecutionProfileID: "claude-opus",
+		State:              models.TaskSessionStateCompleted,
 		AgentProfileSnapshot: map[string]interface{}{
 			"agent_name": "auggie",
 		},
@@ -83,6 +207,9 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	if info.AgentProfileID != "profile-1" {
 		t.Errorf("expected AgentProfileID 'profile-1', got %q", info.AgentProfileID)
 	}
+	if info.ExecutionProfileID != "claude-opus" {
+		t.Errorf("expected ExecutionProfileID 'claude-opus', got %q", info.ExecutionProfileID)
+	}
 	if info.AgentID != "auggie" {
 		t.Errorf("expected AgentID 'auggie', got %q", info.AgentID)
 	}
@@ -128,6 +255,11 @@ func TestGetWorkspaceInfoForSession_RuntimeConfigOptionsSetOnlyWhenOptionsPresen
 		Metadata: map[string]interface{}{
 			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{
 				Model:         "gpt-5.3-codex-spark",
+				ConfigOptions: map[string]string{"reasoning_effort": "medium"},
+			},
+			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{
+				Model:         "gpt-5.4",
+				Mode:          "acceptEdits",
 				ConfigOptions: map[string]string{"reasoning_effort": "low"},
 			},
 		},
@@ -141,6 +273,86 @@ func TestGetWorkspaceInfoForSession_RuntimeConfigOptionsSetOnlyWhenOptionsPresen
 	}
 	if !optionsInfo.RuntimeConfigOptionsSet {
 		t.Fatal("runtime config with options should mark config options as set")
+	}
+	if optionsInfo.RuntimeModel != "gpt-5.4" || optionsInfo.RuntimeConfigOptions["reasoning_effort"] != "low" {
+		t.Fatalf("explicit overrides not applied last: %#v", optionsInfo)
+	}
+	if optionsInfo.SessionMode != "acceptEdits" {
+		t.Fatalf("explicit mode override not applied: %#v", optionsInfo)
+	}
+}
+
+func TestPersistSessionRuntimeConfigOptionWritesExplicitOverride(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID: "session-override", TaskID: "task-123",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := svc.PersistSessionRuntimeConfigOption(ctx, session.ID, "reasoning_effort", "low"); err != nil {
+		t.Fatalf("PersistSessionRuntimeConfigOption: %v", err)
+	}
+
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(stored.Metadata)
+	if !ok || overrides.ConfigOptions["reasoning_effort"] != "low" {
+		t.Fatalf("runtime overrides = %#v, %v", overrides, ok)
+	}
+	if _, ok := models.LoadSessionRuntimeConfig(stored.Metadata); ok {
+		t.Fatal("explicit selection should not synthesize a provider snapshot")
+	}
+}
+
+func TestPersistSessionRuntimeOverridesMergeConcurrentSelections(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID: "session-concurrent-overrides", TaskID: "task-123",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		errs <- svc.PersistSessionRuntimeModel(ctx, session.ID, "mock-smart")
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		errs <- svc.PersistSessionRuntimeConfigOption(ctx, session.ID, "effort", "low")
+	}()
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("persist override: %v", err)
+		}
+	}
+
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(stored.Metadata)
+	if !ok || overrides.Model != "mock-smart" || overrides.ConfigOptions["effort"] != "low" {
+		t.Fatalf("merged overrides = %#v, %v", overrides, ok)
 	}
 }
 

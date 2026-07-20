@@ -73,6 +73,21 @@ func (a *taskRepositoryAdapter) UpdateTaskStateIfCurrentIn(
 	return a.svc.UpdateTaskStateIfCurrentIn(ctx, taskID, state, allowed)
 }
 
+func (a *taskRepositoryAdapter) UpdateTaskStateIfNotArchived(
+	ctx context.Context, taskID string, state v1.TaskState,
+) (bool, error) {
+	return a.svc.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+}
+
+func (a *taskRepositoryAdapter) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	return a.svc.UpdateTaskStateIfSessionState(ctx, taskID, sessionID, expectedSessionState, state)
+}
+
 // testMessageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface for tests
 type testMessageCreatorAdapter struct {
 	svc *taskservice.Service

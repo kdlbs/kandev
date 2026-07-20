@@ -7,15 +7,12 @@ import (
 
 // Plugin is the interface a plugin author implements. It is delivered RPCs
 // from kandev over the go-plugin gRPC transport (§3 of
-// docs/plans/plugins/GRPC-CONTRACT.md): DeliverEvent -> OnEvent, InvokeTool
-// -> InvokeTool, HandleWebhook -> HandleWebhook.
+// docs/plans/plugins/GRPC-CONTRACT.md): DeliverEvent -> OnEvent,
+// HandleWebhook -> HandleWebhook.
 type Plugin interface {
 	// OnEvent handles a single bus event delivery. A non-nil error causes
 	// kandev's delivery subsystem to retry per §5 (3 retries, 5s/15s/45s).
 	OnEvent(ctx context.Context, e *Event) error
-
-	// InvokeTool handles a tool call routed to this plugin.
-	InvokeTool(ctx context.Context, req *ToolRequest) (*ToolResponse, error)
 
 	// HandleWebhook handles an inbound webhook relayed by kandev's
 	// POST /api/plugins/{id}/webhooks/{key} endpoint.
@@ -55,11 +52,6 @@ var (
 // check even though this method never touches it.
 func (*UnimplementedPlugin) OnEvent(context.Context, *Event) error {
 	return nil
-}
-
-// InvokeTool is a no-op default: it returns an empty successful response.
-func (*UnimplementedPlugin) InvokeTool(context.Context, *ToolRequest) (*ToolResponse, error) {
-	return &ToolResponse{}, nil
 }
 
 // HandleWebhook is a no-op default: it returns 404, since an unhandled

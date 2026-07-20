@@ -311,6 +311,73 @@ func (r *messageAddSwitchRepo) CreateTurn(_ context.Context, turn *models.Turn) 
 	return nil
 }
 
+func TestWSAddMessage_CreatedOfficeSessionOmitsCoordinatorTaskControls(t *testing.T) {
+	now := time.Now().UTC()
+	content := runCreatedMessageContextTest(t, &models.Task{
+		ID:                     "t1",
+		State:                  v1.TaskStateInProgress,
+		AssigneeAgentProfileID: "office-agent",
+		UpdatedAt:              now,
+	}, &models.TaskSession{
+		ID:             "s1",
+		TaskID:         "t1",
+		State:          models.TaskSessionStateCreated,
+		AgentProfileID: "profile-1",
+		UpdatedAt:      now,
+	})
+	assert.NotContains(t, content, "stop_task_kandev",
+		"Office pre-wrap must not persist a task-mode-only tool")
+}
+
+func TestWSAddMessage_CreatedConfigSessionOmitsCoordinatorTaskControls(t *testing.T) {
+	now := time.Now().UTC()
+	content := runCreatedMessageContextTest(t, &models.Task{
+		ID:        "t1",
+		State:     v1.TaskStateInProgress,
+		UpdatedAt: now,
+	}, &models.TaskSession{
+		ID:             "s1",
+		TaskID:         "t1",
+		State:          models.TaskSessionStateCreated,
+		AgentProfileID: "profile-1",
+		Metadata:       map[string]interface{}{"config_mode": true},
+		UpdatedAt:      now,
+	})
+	assert.NotContains(t, content, "stop_task_kandev",
+		"Config pre-wrap must not persist a task-mode-only tool")
+}
+
+func runCreatedMessageContextTest(t *testing.T, task *models.Task, session *models.TaskSession) string {
+	t.Helper()
+	repo := &messageAddSwitchRepo{
+		tasks:     map[string]*models.Task{task.ID: task},
+		sessions:  map[string]*models.TaskSession{session.ID: session},
+		primaryID: session.ID,
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := NewMessageHandlers(svc, nil, log)
+
+	req, err := ws.NewRequest("req-office", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id":    task.ID,
+		"session_id": session.ID,
+		"content":    "Do the work",
+	})
+	require.NoError(t, err)
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Len(t, repo.messages, 1)
+	return repo.messages[0].Content
+}
+
 type switchingTurnStartOrchestrator struct {
 	mu               sync.Mutex
 	startOnce        sync.Once

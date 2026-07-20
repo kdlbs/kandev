@@ -29,6 +29,7 @@ export async function validatePublicDocs(docsDir = defaultDocsDir) {
 
     assertFrontmatter(file, markdown);
     assertDocumentStructure(file, markdown);
+    assertExperimentalCalloutPlacement(file, markdown);
 
     const slug = file.replace(/\.mdx?$/, "").replace(/\/index$/, "");
     const existing = pagesBySlug.get(slug);
@@ -832,6 +833,61 @@ function assertDocumentStructure(file, markdown) {
     throw new Error(
       `${file} must begin with exactly one level-one heading after frontmatter`,
     );
+  }
+}
+
+/**
+ * Keep experimental callouts attached to an explicit feature section.
+ * A section-level indicator is the first content under its heading, followed
+ * by the documentation it qualifies.
+ *
+ * @param {string} file Relative page path used in validation errors.
+ * @param {string} markdown Page source.
+ * @returns {void}
+ */
+function assertExperimentalCalloutPlacement(file, markdown) {
+  const source = stripMarkdownCode(markdown);
+  const headings = [...source.matchAll(/^(#{2,6})\s+([^\n]+?)\s*$/gm)];
+  const callouts = [...source.matchAll(/^>\s*\[!EXPERIMENTAL\]\s*$/gim)];
+
+  for (const callout of callouts) {
+    const headingIndex = headings.findLastIndex(
+      (candidate) => candidate.index < callout.index,
+    );
+    const heading = headings[headingIndex];
+    if (
+      !heading ||
+      source
+        .slice(heading.index + heading[0].length, callout.index)
+        .trim()
+    ) {
+      throw new Error(
+        `${file} experimental callouts must immediately follow a descriptive heading`,
+      );
+    }
+
+    const title = heading[2].trim();
+    const level = heading[1].length;
+    const nextHeading = headings
+      .slice(headingIndex + 1)
+      .find((candidate) => candidate[1].length <= level);
+    const sectionEnd = nextHeading?.index ?? source.length;
+    const calloutBlock = source
+      .slice(callout.index)
+      .match(
+        /^>\s*\[!EXPERIMENTAL\]\s*\r?\n(?:^>.*(?:\r?\n|$))*/im,
+      )?.[0];
+    const sectionContent = source
+      .slice(
+        callout.index + (calloutBlock?.length ?? callout[0].length),
+        sectionEnd,
+      )
+      .trim();
+    if (!sectionContent) {
+      throw new Error(
+        `${file} has an experimental callout without substantive section content: ${title}`,
+      );
+    }
   }
 }
 

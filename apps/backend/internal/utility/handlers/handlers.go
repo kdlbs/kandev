@@ -403,14 +403,16 @@ func inferenceAgentDTOFromCaps(ia lifecycle.InferenceAgentInfo, caps hostutility
 		choices := make([]dto.ConfigOptionChoiceDTO, 0, len(opt.Options))
 		for _, choice := range opt.Options {
 			choices = append(choices, dto.ConfigOptionChoiceDTO{
-				Value: choice.Value,
-				Name:  choice.Name,
+				Value:       choice.Value,
+				Name:        choice.Name,
+				Description: choice.Description,
 			})
 		}
 		configOptions = append(configOptions, dto.ConfigOptionDTO{
 			Type:         opt.Type,
 			ID:           opt.ID,
 			Name:         opt.Name,
+			Description:  opt.Description,
 			CurrentValue: opt.CurrentValue,
 			Category:     opt.Category,
 			Options:      choices,

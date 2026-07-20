@@ -11,6 +11,7 @@ display_name: "Kandev E2E Fixture Plugin"
 description: "SDK-based plugin backend used by backend integration tests and Playwright e2e tests"
 author: "kandev"
 categories: ["tools"]
+repo_url: "https://github.com/kdlbs/kandev-plugin-template"
 
 runtime:
   type: binary
@@ -24,11 +25,7 @@ runtime:
 capabilities:
   events: ["task.created"]
   state: true
-
-tools:
-  - name: "echo"
-    display_name: "Echo"
-    description: "Returns its input unchanged, for e2e tool-invocation coverage"
+  secrets: true
 
 webhooks:
   - key: "test-hook"
@@ -37,3 +34,16 @@ webhooks:
 
 ui:
   bundle: "/ui/bundle.js"
+
+config_schema:
+  type: object
+  required: ["api_token"]
+  properties:
+    api_token:
+      type: string
+      title: "API token"
+      description: "Secret token; masked on the operator API, delivered to the plugin via the Host GetConfig RPC."
+      secret: true
+    greeting:
+      type: string
+      title: "Greeting"

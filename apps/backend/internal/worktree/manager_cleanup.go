@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,71 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/system/storage"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
+
+func (m *Manager) PruneQuarantinedWorkspace(ctx context.Context, entry storage.QuarantineEntry) error {
+	worktrees, err := m.GetAllByTaskID(ctx, entry.TaskID)
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]struct{})
+	var errs []error
+	for _, wt := range worktrees {
+		if wt == nil || wt.RepositoryPath == "" || wt.Path == "" {
+			continue
+		}
+		key := wt.RepositoryPath + "\x00" + filepath.Clean(wt.Path)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		if err := m.pruneQuarantinedWorktree(ctx, wt); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (m *Manager) pruneQuarantinedWorktree(ctx context.Context, wt *Worktree) error {
+	repoLock := m.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
+
+	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", wt.Path)
+	cmd.Dir = wt.RepositoryPath
+	if _, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
+		present, inspectErr := worktreeRegistrationExists(ctx, wt.RepositoryPath, wt.Path)
+		if inspectErr != nil {
+			return fmt.Errorf("verify worktree registration for %s: %w", wt.Path, inspectErr)
+		}
+		if present {
+			return fmt.Errorf("remove worktree registration for %s: %w", wt.Path, err)
+		}
+	}
+	return nil
+}
+
+func worktreeRegistrationExists(ctx context.Context, repoPath, worktreePath string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain", "-z")
+	cmd.Dir = repoPath
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
+	if err != nil {
+		return false, err
+	}
+	want := filepath.Clean(worktreePath)
+	for _, field := range strings.Split(string(output), "\x00") {
+		if path, ok := strings.CutPrefix(field, "worktree "); ok && filepath.Clean(path) == want {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 // RemoveByID removes a specific worktree by its ID and optionally its branch.
 func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranch bool) error {
@@ -30,6 +95,20 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		repoLock.Unlock()
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
+	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, []string{wt.SessionID})
+	if err != nil {
+		return fmt.Errorf("count active references for worktree %s: %w", wt.ID, err)
+	}
+	if activeReferences > 0 {
+		if err := m.ReleaseWorktreeReference(ctx, wt); err != nil {
+			return fmt.Errorf("release shared worktree reference %s: %w", wt.ID, err)
+		}
+		m.logger.Info("preserved worktree still referenced by another active session",
+			zap.String("worktree_id", wt.ID),
+			zap.String("session_id", wt.SessionID),
+			zap.Int("active_references", activeReferences))
+		return nil
+	}
 
 	// Execute cleanup script BEFORE removing directory
 	m.runWorktreeCleanupScript(ctx, wt)
@@ -64,11 +143,7 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 
 	// Update store
 	if m.store != nil {
-		now := time.Now()
-		wt.Status = StatusDeleted
-		wt.DeletedAt = &now
-		wt.UpdatedAt = now
-		if err := m.store.UpdateWorktree(ctx, wt); err != nil {
+		if err := m.ReleaseWorktreeReference(ctx, wt); err != nil {
 			// Record may already be deleted by another cleanup path (e.g. task deletion).
 			// This is expected and harmless - only log at debug level.
 			m.logger.Debug("failed to update worktree status (may already be deleted)",
@@ -91,6 +166,25 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		zap.String("path", wt.Path),
 		zap.Bool("branch_removed", removeBranch))
 
+	return nil
+}
+
+// ReleaseWorktreeReference marks one session's association deleted without
+// removing the shared directory or branch.
+func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) error {
+	if wt == nil || wt.SessionID == "" {
+		return fmt.Errorf("session ID is required to release worktree reference")
+	}
+	now := time.Now().UTC()
+	wt.Status = StatusDeleted
+	wt.DeletedAt = &now
+	wt.UpdatedAt = now
+	if err := m.store.UpdateWorktree(ctx, wt); err != nil && !errors.Is(err, ErrWorktreeNotFound) {
+		return err
+	}
+	m.mu.Lock()
+	delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
+	m.mu.Unlock()
 	return nil
 }
 
@@ -128,6 +222,7 @@ func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree) {
 		Script:       repo.SetupScript,
 		WorkingDir:   wt.Path,
 		ScriptType:   "setup",
+		Env:          m.managedScriptEnvironment(ctx),
 	}
 	if err := m.scriptMsgHandler.ExecuteSetupScript(ctx, scriptReq); err != nil {
 		// Non-fatal: keep the worktree and surface a warning. The detailed
@@ -168,6 +263,7 @@ func (m *Manager) runWorktreeCleanupScript(ctx context.Context, wt *Worktree) {
 		Script:       repo.CleanupScript,
 		WorkingDir:   wt.Path,
 		ScriptType:   "cleanup",
+		Env:          m.managedScriptEnvironment(ctx),
 	}
 	if err := m.scriptMsgHandler.ExecuteCleanupScript(ctx, scriptReq); err != nil {
 		m.logger.Warn("cleanup script failed, proceeding with deletion",
@@ -177,6 +273,22 @@ func (m *Manager) runWorktreeCleanupScript(ctx context.Context, wt *Worktree) {
 		m.logger.Info("cleanup script completed successfully",
 			zap.String("worktree_id", wt.ID))
 	}
+}
+
+func (m *Manager) managedScriptEnvironment(ctx context.Context) map[string]string {
+	if m.scriptEnvProvider == nil {
+		return nil
+	}
+	env, err := m.scriptEnvProvider.ExecutionEnvironment(ctx)
+	if err != nil {
+		m.logger.Warn("failed to resolve managed script environment", zap.Error(err))
+		return nil
+	}
+	cachePath := env["GOCACHE"]
+	if cachePath == "" || !filepath.IsAbs(cachePath) {
+		return nil
+	}
+	return map[string]string{"GOCACHE": filepath.Clean(cachePath)}
 }
 
 // CleanupWorktrees removes provided worktrees without re-fetching from the store.
@@ -270,6 +382,13 @@ func (m *Manager) tryRemoveEmptyTaskDir(worktreePath string) {
 	// tasksBase itself or any deeper / unrelated location.
 	if filepath.Dir(parent) != tasksBase {
 		return
+	}
+	entries, readErr := os.ReadDir(parent)
+	if readErr == nil && len(entries) == 1 && entries[0].Name() == storageworkspaces.OwnershipMarkerFilename && entries[0].Type().IsRegular() {
+		if err := os.Remove(filepath.Join(parent, storageworkspaces.OwnershipMarkerFilename)); err != nil && !os.IsNotExist(err) {
+			m.logger.Debug("task ownership marker not removed", zap.String("path", parent), zap.Error(err))
+			return
+		}
 	}
 	if err := os.Remove(parent); err != nil && !os.IsNotExist(err) {
 		m.logger.Debug("task dir not removed (likely non-empty)",

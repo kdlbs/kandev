@@ -79,6 +79,7 @@ help:
 	@echo "  start            Install deps, build, and start backend + web in production mode"
 	@echo "  start-verbose    Start in production mode with info logs from backend + web"
 	@echo "  start VERBOSE=1  Same as start-verbose"
+	@echo "  start-windows    cmd.exe-safe start for native Windows (no printf/find/cp/exec)"
 	@echo ""
 	@echo "Service Commands:"
 	@echo "  service-install          Install deps, build current checkout, install user service"
@@ -252,6 +253,26 @@ start-verbose:
 start-debug:
 	@$(MAKE) start DEBUG=1
 
+# Windows-native production start. Mirrors `start` but avoids the Unix-only
+# tooling that target relies on (printf, find, cp, exec) and would break under
+# cmd.exe. Run it from a shell where GNU Make invokes cmd.exe — the default on
+# Windows when sh.exe is not on PATH — because the backend build uses cmd's
+# `set VAR=VAL&` env-var syntax. Skips the Playwright browser install (only
+# needed for e2e, not to run the server).
+.PHONY: start-windows
+start-windows:
+	@echo Installing backend dependencies...
+	@$(MAKE) -s -C $(BACKEND_DIR) deps
+	@echo Installing web dependencies...
+	@cd $(APPS_DIR) && $(PNPM) install
+	@echo Building web app...
+	@cd $(APPS_DIR) && set "VITE_KANDEV_API_PORT=" && set "VITE_KANDEV_DEBUG=" && $(PNPM) --filter @kandev/web build
+	@$(MAKE) -s sync-embedded-web-windows
+	@echo Building backend...
+	@$(MAKE) -s -C $(BACKEND_DIR) build
+	@echo Starting server...
+	@"$(subst /,\,$(BACKEND_DIR)/bin/kandev.exe)" start $(if $(filter 1 true yes,$(VERBOSE)),--verbose,) $(if $(filter 1 true yes,$(DEBUG)),--debug,)
+
 #
 # Service
 #
@@ -358,6 +379,17 @@ sync-embedded-web:
 	@cp -R "$(WEB_DIR)/dist/." "$(EMBEDDED_WEB_DIR)/"
 	@printf "  $(DIM)Embedded web assets$(RESET)\n"
 
+# cmd.exe-safe counterpart of sync-embedded-web (used by start-windows).
+# robocopy /MIR mirrors the Vite dist into the embedded dir; /XF keeps the
+# committed .gitignore and keep.txt while purging stale generated assets.
+# robocopy exit codes below 8 all mean success, so normalize them to 0 —
+# otherwise make reads robocopy's "files copied" code (1) as a failure.
+.PHONY: sync-embedded-web-windows
+sync-embedded-web-windows:
+	@if not exist "$(subst /,\,$(WEB_DIR)/dist/index.html)" (echo Missing $(WEB_DIR)/dist/index.html - run 'make start-windows' to build everything. & exit /b 1)
+	@robocopy "$(subst /,\,$(WEB_DIR)/dist)" "$(subst /,\,$(EMBEDDED_WEB_DIR))" /MIR /XF .gitignore keep.txt /NFL /NDL /NJH /NJS /NC /NS >nul & if errorlevel 8 (exit /b 1) else (exit /b 0)
+	@echo   Embedded web assets synced.
+
 #
 # Installation
 #
@@ -431,6 +463,7 @@ test-scripts:
 	@printf "$(CYAN)Running script tests...$(RESET)\n"
 	@python3 .github/scripts/lint-action-pinning_test.py
 	@bash scripts/pr-state.test.sh
+	@bash scripts/run-quiet.test.sh
 	@bash scripts/opencode-code-review.test.sh
 	@python3 scripts/opencode-code-review.test.py
 	@python3 scripts/lint-harness-files.test.py

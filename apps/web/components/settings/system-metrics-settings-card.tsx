@@ -1,18 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Checkbox } from "@kandev/ui/checkbox";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import {
-  fetchSystemMetricsSettings,
-  updateSystemMetricsSettings,
-  updateUserSettings,
-} from "@/lib/api";
+import { fetchSystemMetricsSettings, updateSystemMetricsSettings } from "@/lib/api";
 import type { SystemMetricId, SystemMetricsGlobalSettings } from "@/lib/types/system";
+import { useSettingsSaveContributor } from "./settings-save-provider";
+import { SettingsCard } from "./settings-card";
 
 const METRIC_OPTIONS: Array<{ id: SystemMetricId; label: string }> = [
   { id: "cpu_percent", label: "CPU %" },
@@ -29,66 +26,63 @@ const DEFAULT_METRICS_SETTINGS: SystemMetricsGlobalSettings = {
   collect_execution: false,
 };
 
-export function SystemMetricsSettingsCard() {
-  const storeApi = useAppStoreApi();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
+export function SystemMetricsSettingsCard({
+  showInTopbar,
+  isShowInTopbarDirty,
+  onShowInTopbarChange,
+}: {
+  showInTopbar: boolean;
+  isShowInTopbarDirty?: boolean;
+  onShowInTopbarChange: (checked: boolean) => void;
+}) {
   const [settings, setSettings] = useState<SystemMetricsGlobalSettings>(DEFAULT_METRICS_SETTINGS);
-  const [isSaving, setIsSaving] = useState(false);
-  const saveSeqRef = useRef(0);
+  const [savedSettings, setSavedSettings] =
+    useState<SystemMetricsGlobalSettings>(DEFAULT_METRICS_SETTINGS);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     fetchSystemMetricsSettings()
       .then((res) => {
-        if (!cancelled) setSettings(res.settings);
+        if (!cancelled) {
+          setSettings(res.settings);
+          setSavedSettings(res.settings);
+          setLoaded(true);
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setLoaded(false);
+      });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const saveGlobal = async (next: SystemMetricsGlobalSettings) => {
-    const previous = settings;
-    const seq = saveSeqRef.current + 1;
-    saveSeqRef.current = seq;
-    setSettings(next);
-    setIsSaving(true);
-    try {
-      const res = await updateSystemMetricsSettings(next);
-      if (seq === saveSeqRef.current) setSettings(res.settings);
-    } catch {
-      if (seq === saveSeqRef.current) setSettings(previous);
-    } finally {
-      if (seq === saveSeqRef.current) setIsSaving(false);
-    }
-  };
+  const revision = JSON.stringify(settings);
+  const isDirty = loaded && revision !== JSON.stringify(savedSettings);
+  useSettingsSaveContributor({
+    id: "general-appearance-metrics",
+    order: 20,
+    revision,
+    isDirty,
+    save: async () => {
+      const submitted = settings;
+      const response = await updateSystemMetricsSettings(submitted);
+      setSavedSettings(response.settings);
+      setSettings((current) => (current === submitted ? response.settings : current));
+    },
+    discard: () => setSettings(savedSettings),
+  });
 
   const toggleMetric = (metric: SystemMetricId, checked: boolean) => {
     const nextMetrics = checked
       ? Array.from(new Set([...settings.metrics, metric]))
       : settings.metrics.filter((id) => id !== metric);
-    if (nextMetrics.length > 0) void saveGlobal({ ...settings, metrics: nextMetrics });
-  };
-
-  const toggleDisplay = async (checked: boolean) => {
-    const current = storeApi.getState().userSettings;
-    const previous = current.systemMetricsDisplay;
-    try {
-      setUserSettings({ ...current, systemMetricsDisplay: { showInTopbar: checked } });
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        system_metrics_display: { show_in_topbar: checked },
-      });
-    } catch {
-      setUserSettings({ ...storeApi.getState().userSettings, systemMetricsDisplay: previous });
-    }
+    if (nextMetrics.length > 0) setSettings({ ...settings, metrics: nextMetrics });
   };
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty || Boolean(isShowInTopbarDirty)}>
       <CardHeader>
         <CardTitle className="text-base">Resource Metrics</CardTitle>
       </CardHeader>
@@ -98,33 +92,36 @@ export function SystemMetricsSettingsCard() {
           the machine resources from the kanban or task topbar.
         </p>
         <MetricsDisplayToggle
-          checked={userSettings.systemMetricsDisplay.showInTopbar}
-          onCheckedChange={toggleDisplay}
+          checked={showInTopbar}
+          isDirty={Boolean(isShowInTopbarDirty)}
+          onCheckedChange={onShowInTopbarChange}
         />
         <MetricsSamplerControls
           settings={settings}
-          isSaving={isSaving}
+          savedSettings={savedSettings}
+          isSaving={!loaded}
           onToggleMetric={toggleMetric}
-          onChangeSettings={(next) => void saveGlobal(next)}
+          onChangeSettings={setSettings}
           onDraftSettings={setSettings}
         />
         <ExecutionMetricsToggle
           checked={settings.collect_execution}
-          disabled={isSaving}
-          onCheckedChange={(checked) =>
-            void saveGlobal({ ...settings, collect_execution: checked })
-          }
+          isDirty={settings.collect_execution !== savedSettings.collect_execution}
+          disabled={!loaded}
+          onCheckedChange={(checked) => setSettings({ ...settings, collect_execution: checked })}
         />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
 function MetricsDisplayToggle({
   checked,
+  isDirty,
   onCheckedChange,
 }: {
   checked: boolean;
+  isDirty: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
@@ -135,19 +132,26 @@ function MetricsDisplayToggle({
           Collection starts only while at least one client displays metrics.
         </p>
       </div>
-      <Switch id="show-system-metrics" checked={checked} onCheckedChange={onCheckedChange} />
+      <Switch
+        id="show-system-metrics"
+        checked={checked}
+        data-settings-dirty={isDirty}
+        onCheckedChange={onCheckedChange}
+      />
     </div>
   );
 }
 
 function MetricsSamplerControls({
   settings,
+  savedSettings,
   isSaving,
   onToggleMetric,
   onChangeSettings,
   onDraftSettings,
 }: {
   settings: SystemMetricsGlobalSettings;
+  savedSettings: SystemMetricsGlobalSettings;
   isSaving: boolean;
   onToggleMetric: (metric: SystemMetricId, checked: boolean) => void;
   onChangeSettings: (settings: SystemMetricsGlobalSettings) => void;
@@ -155,7 +159,12 @@ function MetricsSamplerControls({
 }) {
   return (
     <div className="grid gap-4 md:grid-cols-[1fr_180px_180px]">
-      <MetricCheckboxes settings={settings} isSaving={isSaving} onToggleMetric={onToggleMetric} />
+      <MetricCheckboxes
+        settings={settings}
+        savedSettings={savedSettings}
+        isSaving={isSaving}
+        onToggleMetric={onToggleMetric}
+      />
       <div className="space-y-2">
         <Label htmlFor="metrics-interval">Frequency (seconds)</Label>
         <Input
@@ -164,6 +173,7 @@ function MetricsSamplerControls({
           min={1}
           max={300}
           value={settings.interval_seconds}
+          data-settings-dirty={settings.interval_seconds !== savedSettings.interval_seconds}
           disabled={isSaving}
           onChange={(event) =>
             onChangeSettings({ ...settings, interval_seconds: clampInterval(event.target.value) })
@@ -175,6 +185,7 @@ function MetricsSamplerControls({
         <Input
           id="metrics-disk-path"
           value={settings.backend_disk_path}
+          data-settings-dirty={settings.backend_disk_path !== savedSettings.backend_disk_path}
           disabled={isSaving}
           onChange={(event) =>
             onDraftSettings({ ...settings, backend_disk_path: event.target.value })
@@ -188,10 +199,12 @@ function MetricsSamplerControls({
 
 function MetricCheckboxes({
   settings,
+  savedSettings,
   isSaving,
   onToggleMetric,
 }: {
   settings: SystemMetricsGlobalSettings;
+  savedSettings: SystemMetricsGlobalSettings;
   isSaving: boolean;
   onToggleMetric: (metric: SystemMetricId, checked: boolean) => void;
 }) {
@@ -203,6 +216,9 @@ function MetricCheckboxes({
           <label key={metric.id} className="flex items-center gap-2 text-sm">
             <Checkbox
               checked={settings.metrics.includes(metric.id)}
+              data-settings-dirty={
+                settings.metrics.includes(metric.id) !== savedSettings.metrics.includes(metric.id)
+              }
               disabled={isSaving}
               onCheckedChange={(checked) => onToggleMetric(metric.id, checked === true)}
             />
@@ -216,10 +232,12 @@ function MetricCheckboxes({
 
 function ExecutionMetricsToggle({
   checked,
+  isDirty,
   disabled,
   onCheckedChange,
 }: {
   checked: boolean;
+  isDirty: boolean;
   disabled: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
@@ -234,6 +252,7 @@ function ExecutionMetricsToggle({
       <Switch
         id="collect-execution-metrics"
         checked={checked}
+        data-settings-dirty={isDirty}
         disabled={disabled}
         onCheckedChange={onCheckedChange}
       />

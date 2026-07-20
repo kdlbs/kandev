@@ -10,6 +10,7 @@ import type {
   NotificationProvider,
   SavedLayout,
   ToolStatus,
+  MCPTaskAgentProfileDefault,
 } from "@/lib/types/http";
 import type {
   VoiceInputActivationMode,
@@ -153,6 +154,7 @@ export type UserSettingsState = {
   chatSubmitKey: "enter" | "cmd_enter";
   reviewAutoMarkOnScroll: boolean;
   confirmTaskArchive: boolean;
+  mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];

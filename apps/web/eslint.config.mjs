@@ -18,6 +18,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "dist/**",
+    "dist-browser-demo/**",
     // Test artifacts (Playwright):
     "**/test-results/**",
     "**/playwright-report/**",

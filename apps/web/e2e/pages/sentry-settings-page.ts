@@ -20,7 +20,7 @@ export class SentrySettingsPage {
     this.addUrlInput = page.getByTestId("sentry-add-url-input");
     this.addSecretInput = page.getByTestId("sentry-add-secret-input");
     this.addTestButton = page.getByTestId("sentry-add-test-button");
-    this.addSaveButton = page.getByTestId("sentry-add-save-button");
+    this.addSaveButton = page.getByRole("button", { name: "Save changes" });
   }
 
   async goto() {

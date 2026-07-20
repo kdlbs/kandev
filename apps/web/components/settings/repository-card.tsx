@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { IconEdit, IconGitBranch, IconPlus, IconTrash, IconX } from "@tabler/icons-react";
+import { IconEdit, IconGitBranch, IconTrash, IconX } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
-import { Card, CardContent } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Input } from "@kandev/ui/input";
@@ -11,11 +11,14 @@ import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { UnsavedChangesBadge } from "@/components/settings/unsaved-indicator";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { EditableCard } from "@/components/settings/editable-card";
 import { RepositoryBranchTemplateHelp } from "@/components/settings/repository-branch-template-help";
 import { DeleteRepositoryDialog } from "@/components/settings/repository-delete-dialog";
 import { CopyFilesField } from "@/components/settings/repository-copy-files-help";
+import { RepositoryCustomScripts } from "@/components/settings/repository-custom-scripts";
 import { getRepositoryActiveSessionCountAction } from "@/app/actions/workspaces";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
@@ -28,6 +31,7 @@ type RepoFieldsBaseProps = {
 };
 
 type RepositoryBasicFieldsProps = RepoFieldsBaseProps & {
+  savedRepository?: RepositoryWithScripts;
   repositoryName: string;
   repositoryLocalPath: string;
   sourceType: string;
@@ -37,6 +41,7 @@ type RepositoryBasicFieldsProps = RepoFieldsBaseProps & {
 
 function RepositoryBasicFields({
   repositoryId,
+  savedRepository,
   onUpdate,
   repositoryName,
   repositoryLocalPath,
@@ -53,6 +58,7 @@ function RepositoryBasicFields({
             value={repositoryName}
             onChange={(e) => onUpdate(repositoryId, { name: e.target.value })}
             placeholder="my-repo"
+            data-settings-dirty={repositoryName !== (savedRepository?.name ?? "")}
           />
         </div>
         <div className="space-y-2">
@@ -62,6 +68,7 @@ function RepositoryBasicFields({
             onChange={(e) => onUpdate(repositoryId, { local_path: e.target.value })}
             placeholder="/path/to/repository"
             disabled={sourceType !== "local"}
+            data-settings-dirty={repositoryLocalPath !== (savedRepository?.local_path ?? "")}
           />
         </div>
       </div>
@@ -75,6 +82,10 @@ function RepositoryBasicFields({
             value={worktreeBranchTemplate}
             onChange={(e) => onUpdate(repositoryId, { worktree_branch_template: e.target.value })}
             placeholder={defaultWorktreeBranchTemplate}
+            data-settings-dirty={
+              worktreeBranchTemplate !==
+              (savedRepository?.worktree_branch_template ?? defaultWorktreeBranchTemplate)
+            }
           />
         </div>
         <div className="space-y-2">
@@ -85,6 +96,9 @@ function RepositoryBasicFields({
               checked={pullBeforeWorktree}
               onCheckedChange={(checked) =>
                 onUpdate(repositoryId, { pull_before_worktree: checked === true })
+              }
+              data-settings-dirty={
+                pullBeforeWorktree !== (savedRepository?.pull_before_worktree ?? true)
               }
             />
             <div className="space-y-1">
@@ -103,6 +117,7 @@ function RepositoryBasicFields({
 }
 
 type RepositoryScriptFieldsProps = RepoFieldsBaseProps & {
+  savedRepository?: RepositoryWithScripts;
   setupScript: string;
   cleanupScript: string;
   devScript: string;
@@ -111,6 +126,7 @@ type RepositoryScriptFieldsProps = RepoFieldsBaseProps & {
 
 function RepositoryScriptFields({
   repositoryId,
+  savedRepository,
   onUpdate,
   setupScript,
   cleanupScript,
@@ -128,6 +144,7 @@ function RepositoryScriptFields({
             placeholder="#!/bin/bash&#10;# any manual setup you need"
             rows={3}
             className="font-mono text-sm"
+            data-settings-dirty={setupScript !== (savedRepository?.setup_script ?? "")}
           />
           <p className="text-xs text-muted-foreground">
             Runs when the repo is cloned or a git worktree is created.
@@ -141,6 +158,7 @@ function RepositoryScriptFields({
             placeholder="#!/bin/bash&#10;# any manual clean up you need"
             rows={3}
             className="font-mono text-sm"
+            data-settings-dirty={cleanupScript !== (savedRepository?.cleanup_script ?? "")}
           />
           <p className="text-xs text-muted-foreground">
             Runs when the task is completed to clean up the workspace.
@@ -156,6 +174,7 @@ function RepositoryScriptFields({
           placeholder="#!/bin/bash&#10;npm run dev -- --port $PORT"
           rows={3}
           className="font-mono text-sm"
+          data-settings-dirty={devScript !== (savedRepository?.dev_script ?? "")}
         />
         <p className="text-xs text-muted-foreground">
           Used to start the preview dev server for this repository. Use{" "}
@@ -163,90 +182,25 @@ function RepositoryScriptFields({
         </p>
       </div>
 
-      <CopyFilesField repositoryId={repositoryId} copyFiles={copyFiles} onUpdate={onUpdate} />
+      <CopyFilesField
+        repositoryId={repositoryId}
+        copyFiles={copyFiles}
+        isDirty={copyFiles !== (savedRepository?.copy_files ?? "")}
+        onUpdate={onUpdate}
+      />
     </>
-  );
-}
-
-type RepositoryCustomScriptsProps = {
-  repositoryId: string;
-  scripts: RepositoryScript[];
-  areScriptsDirty: boolean;
-  onAddScript: (repoId: string) => void;
-  onUpdateScript: (repoId: string, scriptId: string, updates: Partial<RepositoryScript>) => void;
-  onDeleteScript: (repoId: string, scriptId: string) => void;
-};
-
-function RepositoryCustomScripts({
-  repositoryId,
-  scripts,
-  areScriptsDirty,
-  onAddScript,
-  onUpdateScript,
-  onDeleteScript,
-}: RepositoryCustomScriptsProps) {
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <Label className="flex items-center gap-2">
-          <span>Custom Scripts</span>
-          {areScriptsDirty && <UnsavedChangesBadge />}
-        </Label>
-        <Button type="button" variant="outline" size="sm" onClick={() => onAddScript(repositoryId)}>
-          <IconPlus className="h-4 w-4 mr-1" />
-          Add Script
-        </Button>
-      </div>
-      <div className="space-y-3">
-        {scripts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No scripts yet.</p>
-        ) : (
-          scripts.map((script) => (
-            <div key={script.id} className="grid gap-2">
-              <div className="flex items-center gap-2">
-                <Input
-                  value={script.name ?? ""}
-                  onChange={(e) =>
-                    onUpdateScript(repositoryId, script.id, { name: e.target.value })
-                  }
-                  placeholder="Script name"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => onDeleteScript(repositoryId, script.id)}
-                >
-                  <IconX className="h-4 w-4" />
-                </Button>
-              </div>
-              <Textarea
-                value={script.command ?? ""}
-                onChange={(e) =>
-                  onUpdateScript(repositoryId, script.id, { command: e.target.value })
-                }
-                placeholder="#!/bin/bash&#10;npm run dev"
-                rows={3}
-                className="font-mono text-sm"
-              />
-            </div>
-          ))
-        )}
-      </div>
-    </div>
   );
 }
 
 type RepositoryEditViewProps = {
   repository: RepositoryWithScripts;
+  savedRepository?: RepositoryWithScripts;
   isDirty: boolean;
   areScriptsDirty: boolean;
-  saveRequest: { isLoading: boolean; status: "idle" | "loading" | "success" | "error" };
   onUpdate: (repoId: string, updates: Partial<Repository>) => void;
   onAddScript: (repoId: string) => void;
   onUpdateScript: (repoId: string, scriptId: string, updates: Partial<RepositoryScript>) => void;
   onDeleteScript: (repoId: string, scriptId: string) => void;
-  onSave: (close: () => void) => void;
   onOpenDelete: () => void;
   deleteLoading: boolean;
   close: () => void;
@@ -254,20 +208,19 @@ type RepositoryEditViewProps = {
 
 function RepositoryEditView({
   repository,
+  savedRepository,
   isDirty,
   areScriptsDirty,
-  saveRequest,
   onUpdate,
   onAddScript,
   onUpdateScript,
   onDeleteScript,
-  onSave,
   onOpenDelete,
   deleteLoading,
   close,
 }: RepositoryEditViewProps) {
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardContent className="pt-6">
         <div className="space-y-5">
           <div className="flex items-start justify-between gap-3">
@@ -278,17 +231,21 @@ function RepositoryEditView({
                 {isDirty && <UnsavedChangesBadge />}
               </Label>
             </div>
-            <UnsavedSaveButton
-              isDirty={isDirty}
-              isLoading={saveRequest.isLoading}
-              status={saveRequest.status}
-              cleanLabel="Close"
-              onClick={isDirty ? () => onSave(close) : close}
-            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="cursor-pointer"
+              aria-label="Close repository editor"
+              onClick={close}
+            >
+              <IconX className="h-4 w-4" />
+            </Button>
           </div>
 
           <RepositoryBasicFields
             repositoryId={repository.id}
+            savedRepository={savedRepository}
             onUpdate={onUpdate}
             repositoryName={repository.name ?? ""}
             repositoryLocalPath={repository.local_path ?? ""}
@@ -301,6 +258,7 @@ function RepositoryEditView({
 
           <RepositoryScriptFields
             repositoryId={repository.id}
+            savedRepository={savedRepository}
             onUpdate={onUpdate}
             setupScript={repository.setup_script ?? ""}
             cleanupScript={repository.cleanup_script ?? ""}
@@ -311,6 +269,7 @@ function RepositoryEditView({
           <RepositoryCustomScripts
             repositoryId={repository.id}
             scripts={repository.scripts}
+            savedScripts={savedRepository?.scripts}
             areScriptsDirty={areScriptsDirty}
             onAddScript={onAddScript}
             onUpdateScript={onUpdateScript}
@@ -330,7 +289,7 @@ function RepositoryEditView({
           </div>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -402,7 +361,7 @@ function RepositoryPreview({
   } = buildRepoPreviewData(repository);
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardContent className="py-4 cursor-pointer" onClick={open}>
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3 min-w-0">
@@ -459,12 +418,13 @@ function RepositoryPreview({
           </div>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
 type RepositoryCardProps = {
   repository: RepositoryWithScripts;
+  savedRepository?: RepositoryWithScripts;
   isRepositoryDirty: boolean;
   areScriptsDirty: boolean;
   autoOpen?: boolean;
@@ -541,6 +501,7 @@ function useRepositoryDelete(
 
 export function RepositoryCard({
   repository,
+  savedRepository,
   isRepositoryDirty,
   areScriptsDirty,
   autoOpen = false,
@@ -557,18 +518,25 @@ export function RepositoryCard({
   const isDirty = isRepositoryDirty || areScriptsDirty;
   const deleteState = useRepositoryDelete(repository.id, onDelete, () => setIsEditing(false));
 
-  const handleSave = async (close: () => void) => {
+  const handleSave = async () => {
     try {
       await saveRequest.run();
-      close();
     } catch (error) {
       toast({
         title: "Failed to save repository",
         description: error instanceof Error ? error.message : "Request failed",
         variant: "error",
       });
+      throw error;
     }
   };
+  useSettingsSaveContributor({
+    id: `repository:${repository.id}`,
+    revision: JSON.stringify(repository),
+    isDirty,
+    save: handleSave,
+    discard: () => undefined,
+  });
 
   return (
     <>
@@ -580,14 +548,13 @@ export function RepositoryCard({
         renderEdit={({ close }) => (
           <RepositoryEditView
             repository={repository}
+            savedRepository={savedRepository}
             isDirty={isDirty}
             areScriptsDirty={areScriptsDirty}
-            saveRequest={saveRequest}
             onUpdate={onUpdate}
             onAddScript={onAddScript}
             onUpdateScript={onUpdateScript}
             onDeleteScript={onDeleteScript}
-            onSave={handleSave}
             onOpenDelete={deleteState.handleOpenDelete}
             deleteLoading={deleteState.buttonLoading}
             close={close}

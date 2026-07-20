@@ -1,5 +1,3 @@
-/* eslint-disable max-lines-per-function */
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DemoWorkerRequest, DemoWorkerResponse } from "./protocol";
 import { DEMO_IDS } from "./scenario";
@@ -7,6 +5,15 @@ import { handleHttp, handleSocketRequest } from "./worker";
 
 function get(path: string) {
   return handleHttp({ method: "GET", path, headers: {} });
+}
+
+function requestHttp(method: string, path: string, body?: Record<string, unknown>) {
+  return handleHttp({
+    method,
+    path,
+    headers: {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
 }
 
 let socketRequestSequence = 0;
@@ -116,6 +123,65 @@ describe("browser demo worker HTTP runtime", () => {
     expect(responses.every((response) => response.status === 200)).toBe(true);
     expect(responses[0].body).toMatchObject({ total_tasks: expect.any(Number) });
   });
+
+  it("returns explicit errors for unknown routed resources", async () => {
+    const missingWorkflow = await get("/api/v1/workflows/missing/snapshot");
+    const missingTask = await get("/api/v1/tasks/missing");
+    const unsupported = await get("/api/v1/not-implemented");
+
+    expect(missingWorkflow).toMatchObject({ status: 404, body: { error: "Workflow not found" } });
+    expect(missingTask).toMatchObject({ status: 404, body: { error: "Task not found" } });
+    expect(unsupported).toMatchObject({
+      status: 501,
+      body: { demo_mode: true, unsupported: "/api/v1/not-implemented" },
+    });
+  });
+});
+
+describe("browser demo worker HTTP task mutations", () => {
+  it("creates, updates, moves, archives, and deletes tasks with notifications", async () => {
+    const postMessage = vi.spyOn(self, "postMessage").mockImplementation(() => undefined);
+    const openSocket = self.onmessage as ((event: MessageEvent<DemoWorkerRequest>) => void) | null;
+    openSocket?.(
+      new MessageEvent("message", {
+        data: { kind: "ws-open", socketId: "task-events", url: "ws://demo.test/ws" },
+      }),
+    );
+    postMessage.mockClear();
+
+    const created = await requestHttp("POST", "/api/v1/tasks", {
+      title: "Review worker mutations",
+      workflow_id: DEMO_IDS.workflow,
+      workflow_step_id: DEMO_IDS.steps.backlog,
+    });
+    const taskId = (created.body as { id: string }).id;
+    const updated = await requestHttp("PATCH", `/api/v1/tasks/${taskId}`, {
+      title: "Review worker routing",
+    });
+    const moved = await requestHttp("POST", `/api/v1/tasks/${taskId}/move`, {
+      workflow_step_id: DEMO_IDS.steps.review,
+      position: 0,
+    });
+
+    expect(created.status).toBe(201);
+    expect(updated.body).toMatchObject({ id: taskId, title: "Review worker routing" });
+    expect(moved.body).toMatchObject({
+      task: { id: taskId, workflow_step_id: DEMO_IDS.steps.review, position: 0 },
+    });
+    expect(await requestHttp("POST", `/api/v1/tasks/${taskId}/archive`)).toMatchObject({
+      status: 204,
+    });
+    expect(await requestHttp("DELETE", `/api/v1/tasks/${taskId}`)).toMatchObject({ status: 204 });
+
+    const actions = postMessage.mock.calls.flatMap(([message]) => {
+      const event = message as DemoWorkerResponse;
+      if (event.kind !== "ws-event" || event.event !== "message") return [];
+      return [JSON.parse(event.data ?? "{}").action as string | undefined];
+    });
+    expect(actions).toEqual(
+      expect.arrayContaining(["task.created", "task.updated", "task.deleted"]),
+    );
+  });
 });
 
 describe("browser demo worker WebSocket runtime", () => {
@@ -206,7 +272,36 @@ describe("browser demo worker WebSocket runtime", () => {
     expect(commits.payload).toEqual({ commits: [], ready: true });
     expect(diff.payload).toEqual({ cumulative_diff: null, ready: true });
   });
+});
 
+describe("browser demo worker session lifecycle", () => {
+  it("reuses an existing session and creates one when the task has none", async () => {
+    expect(requestSocket("session.ensure", { task_id: "demo-task-audit" }).payload).toMatchObject({
+      source: "existing_primary",
+      newly_created: false,
+      session_id: AUDIT_SESSION_ID,
+    });
+
+    const created = await requestHttp("POST", "/api/v1/tasks", {
+      title: "Create a demo session",
+      workflow_id: DEMO_IDS.workflow,
+      workflow_step_id: DEMO_IDS.steps.backlog,
+    });
+    const taskId = (created.body as { id: string }).id;
+    const first = requestSocket("session.ensure", { task_id: taskId, prompt: "Inspect the task" });
+    const second = requestSocket("session.ensure", { task_id: taskId });
+
+    expect(first.payload).toMatchObject({ source: "created_start", newly_created: true });
+    expect(second.payload).toMatchObject({
+      source: "existing_primary",
+      newly_created: false,
+      session_id: first.payload.session_id,
+    });
+    expect(await requestHttp("DELETE", `/api/v1/tasks/${taskId}`)).toMatchObject({ status: 204 });
+  });
+});
+
+describe("browser demo worker workspace WebSocket runtime", () => {
   it("serves a browsable workspace tree and file contents", () => {
     const tree = requestSocket("workspace.tree.get", {
       session_id: AUDIT_SESSION_ID,
@@ -223,6 +318,35 @@ describe("browser demo worker WebSocket runtime", () => {
     );
     expect(file.payload).toMatchObject({ path: "README.md", is_binary: false });
     expect(file.payload.content).toContain("Acme Web");
+  });
+
+  it("supports the workspace file mutation lifecycle", () => {
+    const path = "src/demo-review-fixture.ts";
+
+    expect(requestSocket("workspace.file.create", { path }).payload).toMatchObject({
+      path,
+      success: true,
+    });
+    expect(
+      requestSocket("workspace.file.update", { path, desired_content: "export const demo = true;" })
+        .payload,
+    ).toMatchObject({ path, success: true, resolution: "applied" });
+    expect(requestSocket("workspace.file.get", { path }).payload.content).toBe(
+      "export const demo = true;",
+    );
+
+    const renamedPath = "src/demo-review-renamed.ts";
+    expect(
+      requestSocket("workspace.file.rename", { old_path: path, new_path: renamedPath }).payload,
+    ).toMatchObject({ old_path: path, new_path: renamedPath, success: true });
+    expect(requestSocket("workspace.file.delete", { path: renamedPath }).payload).toMatchObject({
+      path: renamedPath,
+      success: true,
+    });
+    expect(requestSocket("workspace.file.get", { path: renamedPath })).toMatchObject({
+      type: "error",
+      payload: { message: expect.stringContaining("File not found") },
+    });
   });
 
   it("lists the demo shell with the terminal union shape", () => {

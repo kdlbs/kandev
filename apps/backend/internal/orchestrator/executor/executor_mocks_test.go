@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ type mockAgentManager struct {
 	launchAgentFunc                  func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
 	startAgentProcessFunc            func(ctx context.Context, agentExecutionID string) error
 	stopAgentFunc                    func(ctx context.Context, agentExecutionID string, force bool) error
+	stopAgentWithReasonFunc          func(ctx context.Context, agentExecutionID string, reason string, force bool) error
 	resolveAgentProfileFunc          func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
 	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
@@ -94,6 +96,9 @@ func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID strin
 }
 
 func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID string, reason string, force bool) error {
+	if m.stopAgentWithReasonFunc != nil {
+		return m.stopAgentWithReasonFunc(ctx, agentExecutionID, reason, force)
+	}
 	return m.StopAgent(ctx, agentExecutionID, force)
 }
 
@@ -256,15 +261,52 @@ type mockRepository struct {
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
-	getTaskSessionFunc func(ctx context.Context, id string) (*models.TaskSession, error)
+	getTaskSessionFunc                 func(ctx context.Context, id string) (*models.TaskSession, error)
+	createTaskSessionFunc              func(ctx context.Context, session *models.TaskSession) error
+	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
+	listActiveTaskSessionsByTaskIDFunc func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	// Optional hook invoked at the top of UpdateTaskStateIfCurrentIn, before
+	// it reads task state/archived_at. Lets tests simulate the exact TOCTOU
+	// window this CAS closes: an earlier (non-transactional) archived-state
+	// guard already passed, then an archive commits in the gap before this
+	// call — the hook mutates the task here to model that gap. If nil, the
+	// CAS runs immediately against the task as currently seeded.
+	preCASHook func(taskID string)
+	// updateTaskStateIfNotArchivedCh, when non-nil, receives a non-blocking
+	// signal every time UpdateTaskStateIfNotArchived records a call — lets
+	// tests wait via select instead of polling with time.Sleep for a
+	// background goroutine's call to land. Buffered so a signal is never
+	// lost even if the test hasn't started waiting yet.
+	updateTaskStateIfNotArchivedCh chan struct{}
 
 	// Track calls for verification
-	createTaskSessionCalls     []*models.TaskSession
-	updateTaskSessionCalls     []*models.TaskSession
-	setSessionMetadataKeyCalls []setSessionMetadataKeyCall
-	setSessionPrimaryCalls     []string
-	createTaskEnvironmentCalls []*models.TaskEnvironment
-	updateTaskEnvironmentCalls []*models.TaskEnvironment
+	createTaskSessionCalls            []*models.TaskSession
+	updateTaskSessionCalls            []*models.TaskSession
+	setSessionMetadataKeyCalls        []setSessionMetadataKeyCall
+	setSessionPrimaryCalls            []string
+	createTaskEnvironmentCalls        []*models.TaskEnvironment
+	updateTaskEnvironmentCalls        []*models.TaskEnvironment
+	updateTaskStateIfCurrentInCalls   []updateTaskStateIfCurrentInCall
+	updateTaskStateIfNotArchivedCalls []updateTaskStateIfNotArchivedCall
+}
+
+// updateTaskStateIfCurrentInCall records one UpdateTaskStateIfCurrentIn
+// invocation so tests can assert callers route guarded REVIEW writes
+// through the archive-aware CAS instead of the unconditional
+// UpdateTaskState.
+type updateTaskStateIfCurrentInCall struct {
+	TaskID  string
+	State   v1.TaskState
+	Allowed []v1.TaskState
+}
+
+// updateTaskStateIfNotArchivedCall records one UpdateTaskStateIfNotArchived
+// invocation — the IN_PROGRESS/FAILED-writer analog of
+// updateTaskStateIfCurrentInCall, used to assert those callers route
+// through the archive-aware CAS instead of the unconditional UpdateTaskState.
+type updateTaskStateIfNotArchivedCall struct {
+	TaskID string
+	State  v1.TaskState
 }
 
 type setSessionMetadataKeyCall struct {
@@ -275,15 +317,16 @@ type setSessionMetadataKeyCall struct {
 
 func newMockRepository() *mockRepository {
 	return &mockRepository{
-		sessions:             make(map[string]*models.TaskSession),
-		tasks:                make(map[string]*models.Task),
-		taskRepositories:     make(map[string]*models.TaskRepository),
-		repositories:         make(map[string]*models.Repository),
-		executors:            make(map[string]*models.Executor),
-		executorProfiles:     make(map[string]*models.ExecutorProfile),
-		executorsRunning:     make(map[string]*models.ExecutorRunning),
-		taskEnvironments:     make(map[string]*models.TaskEnvironment),
-		taskEnvironmentRepos: make(map[string][]*models.TaskEnvironmentRepo),
+		sessions:                       make(map[string]*models.TaskSession),
+		tasks:                          make(map[string]*models.Task),
+		taskRepositories:               make(map[string]*models.TaskRepository),
+		repositories:                   make(map[string]*models.Repository),
+		executors:                      make(map[string]*models.Executor),
+		executorProfiles:               make(map[string]*models.ExecutorProfile),
+		executorsRunning:               make(map[string]*models.ExecutorRunning),
+		taskEnvironments:               make(map[string]*models.TaskEnvironment),
+		taskEnvironmentRepos:           make(map[string][]*models.TaskEnvironmentRepo),
+		updateTaskStateIfNotArchivedCh: make(chan struct{}, 8),
 	}
 }
 
@@ -308,10 +351,15 @@ func (m *mockRepository) GetRepository(ctx context.Context, id string) (*models.
 
 func (m *mockRepository) CreateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.createTaskSessionCalls = append(m.createTaskSessionCalls, session)
-	m.sessions[session.ID] = session
-	return nil
+	fn := m.createTaskSessionFunc
+	if fn == nil {
+		m.sessions[session.ID] = session
+		m.mu.Unlock()
+		return nil
+	}
+	m.mu.Unlock()
+	return fn(ctx, session)
 }
 
 func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
@@ -324,7 +372,9 @@ func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if session, ok := m.sessions[id]; ok {
-		return session, nil
+		// SQLite scans each query into a fresh value. Match that ownership
+		// boundary so concurrent executor paths cannot share mutable rows.
+		return cloneMockTaskSession(session), nil
 	}
 	return nil, nil
 }
@@ -337,6 +387,82 @@ func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.
 	return nil
 }
 
+func (m *mockRepository) UpdateTaskSessionIfCurrentState(
+	_ context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.sessions[session.ID]
+	if !ok {
+		return false, models.ErrTaskSessionNotFound
+	}
+	if current.State != expected {
+		return false, nil
+	}
+	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
+	m.sessions[session.ID] = session
+	return true, nil
+}
+
+func cloneMockTaskSession(session *models.TaskSession) *models.TaskSession {
+	if session == nil {
+		return nil
+	}
+	clone := *session
+	clone.Metadata = cloneMockSessionMap(session.Metadata)
+	clone.AgentProfileSnapshot = cloneMockSessionMap(session.AgentProfileSnapshot)
+	clone.ExecutorSnapshot = cloneMockSessionMap(session.ExecutorSnapshot)
+	clone.EnvironmentSnapshot = cloneMockSessionMap(session.EnvironmentSnapshot)
+	clone.RepositorySnapshot = cloneMockSessionMap(session.RepositorySnapshot)
+	if session.Worktrees != nil {
+		clone.Worktrees = make([]*models.TaskSessionWorktree, len(session.Worktrees))
+		for i, worktree := range session.Worktrees {
+			if worktree == nil {
+				continue
+			}
+			worktreeClone := *worktree
+			clone.Worktrees[i] = &worktreeClone
+		}
+	}
+	if session.CompletedAt != nil {
+		completedAt := *session.CompletedAt
+		clone.CompletedAt = &completedAt
+	}
+	return &clone
+}
+
+func cloneMockSessionMap(values map[string]interface{}) map[string]interface{} {
+	if values == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		panic(fmt.Sprintf("marshal mock task session map: %v", err))
+	}
+	var clone map[string]interface{}
+	if err := json.Unmarshal(encoded, &clone); err != nil {
+		panic(fmt.Sprintf("unmarshal mock task session map: %v", err))
+	}
+	return clone
+}
+
+func (m *mockRepository) UpdateTaskSessionAgentProfileSnapshot(
+	_ context.Context,
+	sessionID string,
+	snapshot map[string]interface{},
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session, ok := m.sessions[sessionID]
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.AgentProfileSnapshot = snapshot
+	return nil
+}
+
 func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -345,6 +471,12 @@ func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string
 }
 
 func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error {
+	m.mu.Lock()
+	fn := m.updateTaskSessionStateFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, sessionID, state, errorMessage)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if session, ok := m.sessions[sessionID]; ok {
@@ -381,6 +513,80 @@ func (m *mockRepository) CreateTaskSessionWorktree(_ context.Context, worktree *
 
 func (m *mockRepository) UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
 	return nil
+}
+
+// UpdateTaskStateIfCurrentIn mirrors the real repository's archive-aware CAS
+// semantics (task.go's UpdateTaskStateIfCurrentIn): the write only lands when
+// the task's current state is in allowed AND the task is not archived.
+func (m *mockRepository) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (v1.TaskState, bool, error) {
+	if m.preCASHook != nil {
+		m.preCASHook(taskID)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updateTaskStateIfCurrentInCalls = append(m.updateTaskStateIfCurrentInCalls, updateTaskStateIfCurrentInCall{
+		TaskID: taskID, State: state, Allowed: allowed,
+	})
+	task, ok := m.tasks[taskID]
+	if !ok {
+		return "", false, fmt.Errorf("task not found: %s", taskID)
+	}
+	currentState := task.State
+	if task.ArchivedAt != nil {
+		return currentState, false, nil
+	}
+	for _, candidate := range allowed {
+		if currentState == candidate {
+			task.State = state
+			return currentState, true, nil
+		}
+	}
+	return currentState, false, nil
+}
+
+// UpdateTaskStateIfNotArchived mirrors the real repository's archive-aware
+// CAS semantics (task.go's UpdateTaskStateIfNotArchived): unlike
+// UpdateTaskStateIfCurrentIn, there is no "allowed" prior-state set — the
+// write lands whenever the task is not archived. Reuses preCASHook so tests
+// can model the same TOCTOU window (archive commits between an earlier
+// non-transactional guard read and this call) for IN_PROGRESS/FAILED writers.
+func (m *mockRepository) UpdateTaskStateIfNotArchived(
+	ctx context.Context, taskID string, state v1.TaskState,
+) (v1.TaskState, bool, error) {
+	if m.preCASHook != nil {
+		m.preCASHook(taskID)
+	}
+	defer m.notifyUpdateTaskStateIfNotArchived()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updateTaskStateIfNotArchivedCalls = append(m.updateTaskStateIfNotArchivedCalls, updateTaskStateIfNotArchivedCall{
+		TaskID: taskID, State: state,
+	})
+	task, ok := m.tasks[taskID]
+	if !ok {
+		return "", false, fmt.Errorf("task not found: %s", taskID)
+	}
+	currentState := task.State
+	if task.ArchivedAt != nil {
+		return currentState, false, nil
+	}
+	task.State = state
+	return currentState, true, nil
+}
+
+// notifyUpdateTaskStateIfNotArchived signals updateTaskStateIfNotArchivedCh
+// (if the test wired one) that a call just landed. Non-blocking so it never
+// stalls the caller when nothing is listening.
+func (m *mockRepository) notifyUpdateTaskStateIfNotArchived() {
+	if m.updateTaskStateIfNotArchivedCh == nil {
+		return
+	}
+	select {
+	case m.updateTaskStateIfNotArchivedCh <- struct{}{}:
+	default:
+	}
 }
 func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
@@ -579,6 +785,12 @@ func (m *mockRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.
 	return nil, nil
 }
 func (m *mockRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	m.mu.Lock()
+	fn := m.listActiveTaskSessionsByTaskIDFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, taskID)
+	}
 	return nil, nil
 }
 func (m *mockRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {

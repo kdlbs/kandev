@@ -18,11 +18,6 @@ Kandev can coordinate several agents without turning every unit of work into a s
 
 Shared files make handoff cheap but allow concurrent edits to collide. Separate environments isolate file state, but only the executor determines whether host processes and credentials are also isolated.
 
-## Office status
-
-> [!EXPERIMENTAL]
-> Office is in progress and feature-flagged. Persistent coordinator teams, arbitrary-depth task trees, dependency properties, labels, named documents, reviewer/approver quorum, routines, and budgets are not stable regular-Kanban capabilities.
-
 ## Run parallel sessions in one task
 
 Use an additional session when agents need the same task, repository attachments, and materialized environment.
@@ -86,6 +81,12 @@ The subtask dialog currently does not enforce agent/executor credential compatib
 
 Regular Kanban allows one subtask level: a root task can have children, but a child cannot have another child. Split further work into sibling subtasks, additional sessions, or a separate top-level task. Arbitrary-depth trees belong to the in-progress Office surface.
 
+### Detach a subtask
+
+Open the subtask's action menu from its sidebar entry or Kanban card, choose **Detach from parent**, and confirm. The subtask becomes a top-level task without changing its workflow position, blockers, sessions, or descendants. The Office parent picker's **No parent** choice performs the same operation.
+
+Detaching changes task hierarchy only. An inherited workspace remains shared with the former parent, and the confirmation dialog calls this out explicitly. Create a task with **Create new workspace** when the work needs isolated files or a separate branch.
+
 ### Create a subtask from an agent
 
 Call `create_task_kandev` with `parent_id: "self"`. `workspace_mode` defaults to `inherit_parent`; set it to `new_workspace` for isolated materialization.
@@ -115,9 +116,27 @@ For predictable top-level creation, pass `repository_url`, `repository_id`, or `
 
 The default delivery mode is queued. Each session accepts 10 queued messages by default; operators can change it with `KANDEV_QUEUE_MAX_PER_SESSION`, and a value of `0` or less disables the limit. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after a target turn completes.
 
-`delivery_mode: "interrupt"` cancels current work and prioritizes the message, but only a direct parent task may interrupt its child. Other senders receive an error. If immediate dispatch cannot proceed safely, the response can still report the message as queued.
+Choose the control by intent:
 
-Additional boundaries:
+| Intent | Operation | Result |
+|---|---|---|
+| Send information that can wait | `message_task_kandev` with queued delivery or no `delivery_mode` | The current turn continues and the message waits FIFO. |
+| Stop the current approach and give replacement work now | `message_task_kandev` with `delivery_mode: "interrupt"` | The direct parent requests immediate cancellation and redispatch. If that cannot proceed safely, the response reports the message as queued. |
+| Halt all current work with no replacement prompt | `stop_task_kandev` | The direct parent requests logical cancellation and graceful teardown without creating or dispatching a message. |
+
+Only a direct parent may interrupt its child. Halt-only stop is stricter: it accepts only a same-workspace direct child, while self, siblings, ancestors other than the parent, deeper descendants, unrelated tasks, and cross-workspace callers are rejected. Use interrupt for stop-and-steer work. Reserve stop for halt-only intent.
+
+### Stop a direct child's work
+
+`stop_task_kandev` accepts the full ID of one direct child and has no session-specific option. Kandev inspects that child's active-session candidates and requests a graceful stop for every execution still observed as live, including non-primary sibling sessions. It does not recurse into descendants.
+
+For each accepted execution, Kandev persists the session as `CANCELLED` before scheduling runtime teardown. A `status: "stopped"` response confirms that logical state and scheduled teardown; cleanup continues asynchronously and the process may not have exited yet. When no live execution is accepted, the call succeeds idempotently with `status: "not_running"` and changes no task or session state.
+
+After at least one accepted stop, Kandev attempts to move a regular, unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`, provided no session remains working. Office, archived, and already non-active tasks keep their state, and a failed secondary `REVIEW` reconciliation does not undo accepted session stops.
+
+Stopping preserves the task record, worktrees, environments, commits, descendants, and existing queued messages. It sends no prompt, creates no replacement turn, and does not create a durable pause: a later user or workflow action can start the task again.
+
+Additional messaging boundaries:
 
 - A task cannot message its own primary session through the default route, and a session cannot message itself.
 - Normal targeted messages can cross workspaces when the sender has the exact task ID. Session spawning cannot.
@@ -125,6 +144,8 @@ Additional boundaries:
 - Use bounded requests with the repository, branch, expected result, and reply target instead of treating messages as shared memory.
 
 Use `get_task_conversation_kandev` to read a primary or explicit session conversation. It supports limits, before/after cursors, ascending or descending order, and message-type filters. Use `list_related_tasks_kandev` for the current or another same-workspace task to list its parent, direct children, siblings, stored blocker relationships, and associated GitHub pull requests.
+
+Replies close the loop: the receiving agent calls `message_task_kandev` back with the originating task's ID, turning a one-way notification into a genuine bidirectional conversation. This enables multi-turn negotiations between agents — for example, agreeing on an API contract before both sides implement. See [Agent Communication](agent-communication.md) for delivery semantics, discovery patterns, and a worked negotiation example.
 
 ## Wait for child tasks
 
@@ -197,11 +218,14 @@ The coordinator has only the tools, filesystem access, credentials, and permissi
 
 A human-led flow uses the same primitives but keeps **Do nothing** transitions at planning, review, or release steps. Humans can create each task, approve agent-proposed subtasks, restrict credentials to narrow profiles, and decide what merges or ships.
 
-### Dependencies and Office
+### Office dependencies and deeper coordination
+
+> [!EXPERIMENTAL]
+> Office is feature-flagged, disabled in the production profile by default, and still in progress. Its dependency editor, persistent coordinators, deeper task trees, quorum rules, and routines are not stable regular-Kanban features.
 
 Regular Kanban does not currently expose a dependency editor or blocker filter. Stored blocker data can appear through related-task MCP, but it is not a regular-board planning surface. For supported ordering, use parent/child structure, **When Child Tasks Complete**, explicit messages, workflow gates, and pull-request review.
 
-Office prototypes **Blocked by** and **Blocking** properties with same-workspace, self-reference, and cycle validation, plus persistent coordinators and deeper trees. Office remains in progress; do not rely on these properties or its advanced quorum/routine behavior for a stable Kanban workflow.
+When Office is enabled, it prototypes **Blocked by** and **Blocking** properties with same-workspace, self-reference, and cycle validation. Treat these as an evaluation surface rather than a production coordination contract.
 
 ## Troubleshooting
 
@@ -213,6 +237,8 @@ Office prototypes **Blocked by** and **Blocking** properties with same-workspace
 - **Inherited subtask sees unexpected changes:** it intentionally shares the parent's materialized files and branch.
 - **Message remains queued:** the target is busy and only one queued message drains per turn. Check for `queue_full` before retrying.
 - **Interrupt is rejected:** only the target's direct parent may use interrupt delivery.
+- **Stop is rejected:** `stop_task_kandev` is task-mode only and accepts only a same-workspace direct child of the caller.
+- **Stop reports `stopped` but a process is still visible:** the response confirms logical cancellation and scheduled graceful teardown, not process exit.
 - **Agent cannot spawn on another task:** `spawn_session_kandev` is same-workspace only; create a task or use a normal targeted message instead.
 - **Parent does not advance after children finish:** the parent needs an active session in `CREATED`, `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT` in addition to terminal direct children.
 - **A multi-repository executor is disabled:** multi-repository tasks require **git-worktree**.

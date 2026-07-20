@@ -376,10 +376,12 @@ type Run struct {
 	// RequestedTier is the tier the resolver consumed (override > workspace
 	// default) when the run was first dispatched.
 	RequestedTier *string `json:"requested_tier,omitempty" db:"requested_tier"`
-	// ResolvedProviderID/Model is the candidate that actually launched;
-	// empty until a launch succeeds.
-	ResolvedProviderID *string `json:"resolved_provider_id,omitempty" db:"resolved_provider_id"`
-	ResolvedModel      *string `json:"resolved_model,omitempty" db:"resolved_model"`
+	// ResolvedExecutionProfileID/ProviderID/Model identify the candidate
+	// that actually launched; empty until a launch succeeds. Provider and
+	// model are audit snapshots derived from the concrete profile.
+	ResolvedExecutionProfileID *string `json:"resolved_execution_profile_id,omitempty" db:"resolved_execution_profile_id"`
+	ResolvedProviderID         *string `json:"resolved_provider_id,omitempty" db:"resolved_provider_id"`
+	ResolvedModel              *string `json:"resolved_model,omitempty" db:"resolved_model"`
 	// CurrentRouteAttemptSeq tracks the in-flight attempt so post-start
 	// fallback can find the right row to update and exclude already-tried
 	// providers when re-resolving.
@@ -406,21 +408,22 @@ type Run struct {
 // Persisted by the routing scheduler dispatcher in
 // internal/office/scheduler/dispatch_routing.go.
 type RouteAttempt struct {
-	RunID           string              `json:"run_id" db:"run_id"`
-	Seq             int                 `json:"seq" db:"seq"`
-	ProviderID      string              `json:"provider_id" db:"provider_id"`
-	Model           string              `json:"model" db:"model"`
-	Tier            string              `json:"tier" db:"tier"`
-	Outcome         RouteAttemptOutcome `json:"outcome" db:"outcome"`
-	ErrorCode       string              `json:"error_code,omitempty" db:"error_code"`
-	ErrorConfidence ErrorConfidence     `json:"error_confidence,omitempty" db:"error_confidence"`
-	AdapterPhase    AdapterPhase        `json:"adapter_phase,omitempty" db:"adapter_phase"`
-	ClassifierRule  string              `json:"classifier_rule,omitempty" db:"classifier_rule"`
-	ExitCode        *int                `json:"exit_code,omitempty" db:"exit_code"`
-	RawExcerpt      string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
-	ResetHint       *time.Time          `json:"reset_hint,omitempty" db:"reset_hint"`
-	StartedAt       time.Time           `json:"started_at" db:"started_at"`
-	FinishedAt      *time.Time          `json:"finished_at,omitempty" db:"finished_at"`
+	RunID              string              `json:"run_id" db:"run_id"`
+	Seq                int                 `json:"seq" db:"seq"`
+	ExecutionProfileID string              `json:"execution_profile_id" db:"execution_profile_id"`
+	ProviderID         string              `json:"provider_id" db:"provider_id"`
+	Model              string              `json:"model" db:"model"`
+	Tier               string              `json:"tier" db:"tier"`
+	Outcome            RouteAttemptOutcome `json:"outcome" db:"outcome"`
+	ErrorCode          string              `json:"error_code,omitempty" db:"error_code"`
+	ErrorConfidence    ErrorConfidence     `json:"error_confidence,omitempty" db:"error_confidence"`
+	AdapterPhase       AdapterPhase        `json:"adapter_phase,omitempty" db:"adapter_phase"`
+	ClassifierRule     string              `json:"classifier_rule,omitempty" db:"classifier_rule"`
+	ExitCode           *int                `json:"exit_code,omitempty" db:"exit_code"`
+	RawExcerpt         string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
+	ResetHint          *time.Time          `json:"reset_hint,omitempty" db:"reset_hint"`
+	StartedAt          time.Time           `json:"started_at" db:"started_at"`
+	FinishedAt         *time.Time          `json:"finished_at,omitempty" db:"finished_at"`
 }
 
 // ProviderHealth records the health state of one (workspace, provider,

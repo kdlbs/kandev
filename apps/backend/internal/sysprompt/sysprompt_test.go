@@ -123,6 +123,21 @@ func TestFormatKandevContext_IncludesStepCompleteToolWhenRequired(t *testing.T) 
 		"step_complete_kandev must be exposed when the step requires an explicit signal")
 }
 
+func TestFormatKandevContext_CoordinatorTaskControlsFollowCapability(t *testing.T) {
+	taskMode := FormatKandevContext("task-abc", "session-xyz", false)
+	assert.Contains(t, taskMode, `delivery_mode="interrupt"`)
+	assert.Contains(t, taskMode, "stop_task_kandev")
+
+	for _, mode := range []string{"office", "config"} {
+		t.Run(mode, func(t *testing.T) {
+			context := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{})
+			assert.NotContains(t, context, "delivery_mode")
+			assert.NotContains(t, context, "stop_task_kandev")
+			assert.NotContains(t, context, "{coordinator_task_control_section}")
+		})
+	}
+}
+
 func TestFormatKandevContext_InjectsIDs(t *testing.T) {
 	result := FormatKandevContext("task-abc", "session-xyz", false)
 	assert.Contains(t, result, "Kandev Task ID: task-abc")

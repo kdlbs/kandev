@@ -135,8 +135,8 @@ Task mode currently registers these tool groups:
 
 | Group | Available operations |
 |---|---|
-| Board lookups and task lifecycle | List workspaces, workflows, workflow steps, tasks, agents, and executor profiles; create, update, move, archive, or delete tasks. This mode does not mutate workflows, profiles, or executors. |
-| Coordination | Message a task or targeted session, spawn a named session on the current or another same-workspace task, and read task conversation. |
+| Board lookups and task lifecycle | List workspaces, workflows, workflow steps, tasks, agents, and executor profiles; create, update, move, archive, or delete tasks; halt all live work on a direct child. This mode does not mutate workflows, profiles, or executors. |
+| Coordination | Message a task or targeted session, spawn a named session on the current or another same-workspace task, and read task conversation. See [Agent Communication](agent-communication.md) for delivery semantics, bidirectional reply patterns, and a worked example. |
 | User interaction | Ask a structured question when the current agent/session supports it. |
 | Plans | Create, get, update, and delete the current task plan. |
 | Walkthroughs | Show, get, and delete the task's code walkthrough. |
@@ -147,7 +147,11 @@ Task identity is injected for operations that require it. Workspace, parent/subt
 
 `spawn_session_kandev` creates a named sibling session on the current task by default and can target another task in the same workspace. `message_task_kandev` can address a task's primary session or an explicit session ID: a running agent receives queued input, an idle/created session can be started, and a failed or cancelled session rejects the message.
 
-A same-task message requires the sibling's session ID. Normal messages can cross workspaces when the sender knows the full task ID. Delivery to a running session is queued by default; `delivery_mode: "interrupt"` is allowed only from a direct parent task to its child, and another sender receives a hard error rather than a silent downgrade.
+A same-task message requires the sibling's session ID. Normal messages can cross workspaces when the sender knows the full task ID. Delivery to a running session is queued by default. When a direct child must abandon its current approach and receive replacement work now, its parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; another sender receives a hard error rather than a silent downgrade, and a request that cannot dispatch safely remains queued.
+
+Use `stop_task_kandev` only when the direct child should halt without a replacement prompt. It has no session selector: one call gracefully stops every execution Kandev still observes as live across the child's active sessions, including non-primary sessions. Accepted sessions become `CANCELLED` before runtime teardown is scheduled. `status: "stopped"` confirms logical cancellation and asynchronous teardown, not operating-system process exit; a child with no live execution returns the idempotent `status: "not_running"` without changing task or session state.
+
+After an accepted stop, Kandev attempts to move an unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states are preserved. Worktrees, task environments, commits, task records, descendants, and queued messages remain available, and the task can be started again later.
 
 `add_branch_to_task_kandev` works only with the Worktree executor. It can add another branch of the same repository or a second repository entirely. Select at most one of `repository_id`, `repository_url`, or `local_path`; `repository_url` accepts a GitHub repository URL, while the URL/path forms find or create that repository in the task's workspace. A locator is optional for a single-repository task and required to disambiguate a multi-repository task. The new repository/branch receives its own worktree. `update_repository_base_branch_kandev` changes the base used for Kandev's diff, not a pull request's target branch.
 
@@ -184,7 +188,7 @@ The settings page's static **Available tools** preview currently counts 29 and o
 
 In external mode, `create_task_kandev` has no current task and does not accept the `parent_id: "self"` shorthand. Its registered top-level contract asks for a repository ID, GitHub URL, or local path; workspace and workflow resolve automatically only when unambiguous. The current handler can nevertheless accept an omitted repository and create repo-less work, which is a contract/implementation mismatch rather than a supported equivalent of the regular UI's **None** option. Supply an explicit repository locator for portable clients. A resolvable agent profile is required even with `start_agent: false`; otherwise `start_agent` defaults to true. To create a subtask, pass the full ID of an existing parent.
 
-External mode has no live Kandev session, so it does not expose task-scoped questions, plans, walkthroughs, sibling-session spawning, targeted session messages, branch operations, or step-completion signals. Some external tools can delete or materially reconfigure data; review the client's tool approvals.
+External mode has no live Kandev session, so it does not expose `stop_task_kandev` or other task-scoped questions, plans, walkthroughs, sibling-session spawning, targeted session messages, branch operations, or step-completion signals. Some external tools can delete or materially reconfigure data; review the client's tool approvals.
 
 ### External MCP security boundary
 
@@ -195,11 +199,6 @@ The backend's `/mcp`, `/mcp/sse`, and `/mcp/message` routes currently have no Ka
 - Do not publish the MCP routes or backend port directly to the internet.
 - Ensure the proxy protects both Streamable HTTP and SSE/message paths and permits long-lived requests.
 - Scope integration, Git, and agent credentials for the damage an unattended client could cause.
-
-## Office status
-
-> [!EXPERIMENTAL]
-> Office has separate coordinator agents, routines, governance approvals, and an Office MCP/agentctl interface only when its feature flag is enabled. Office is disabled by default and remains in progress; do not treat its coordinator-led automation as a stable public contract. Workspace automations plus workflow approval/review steps are the supported human-gated mechanism today.
 
 ## Troubleshooting
 

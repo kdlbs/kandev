@@ -16,12 +16,27 @@ type Manifest struct {
 	Author      string   `yaml:"author" json:"author"`
 	Categories  []string `yaml:"categories" json:"categories"`
 
+	// Icon is an optional package-relative path (e.g. "icon.svg") to an
+	// image the plugin ships for display in the marketplace and plugin
+	// lists. The registry index-build resolves it to an absolute icon_url;
+	// for an installed plugin it is served from the extracted package.
+	Icon string `yaml:"icon,omitempty" json:"icon,omitempty"`
+
+	// RepoURL is an optional URL to the plugin's source repository (e.g.
+	// "https://github.com/owner/plugin"). kandev renders it as a "Repo" link
+	// in the installed-plugin list and detail. Unlike the marketplace
+	// catalog's repo_url — which the registry index-build derives from
+	// plugins.yaml — this is author-declared in the manifest, so sideloaded
+	// and directly-installed plugins carry the link too. When set it must be
+	// an http(s) URL (see Validate); the frontend href guard is enforced here
+	// as well so a bad scheme fails registration rather than reaching the UI.
+	RepoURL string `yaml:"repo_url,omitempty" json:"repo_url,omitempty"`
+
 	BaseURL string `yaml:"base_url" json:"base_url"`
 
 	Endpoints    Endpoints    `yaml:"endpoints" json:"endpoints"`
 	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
 
-	Tools    []Tool    `yaml:"tools,omitempty" json:"tools,omitempty"`
 	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
 
 	ConfigSchema map[string]any `yaml:"config_schema,omitempty" json:"config_schema,omitempty"`
@@ -47,7 +62,6 @@ type Runtime struct {
 type Endpoints struct {
 	Health   string `yaml:"health" json:"health"`
 	Events   string `yaml:"events" json:"events"`
-	Tools    string `yaml:"tools" json:"tools"`
 	Webhooks string `yaml:"webhooks" json:"webhooks"`
 }
 
@@ -58,14 +72,6 @@ type Capabilities struct {
 	APIWrite []string `yaml:"api_write,omitempty" json:"api_write,omitempty"`
 	State    bool     `yaml:"state,omitempty" json:"state,omitempty"`
 	Secrets  bool     `yaml:"secrets,omitempty" json:"secrets,omitempty"`
-}
-
-// Tool is an agent-invocable tool the plugin registers.
-type Tool struct {
-	Name        string         `yaml:"name" json:"name"`
-	DisplayName string         `yaml:"display_name" json:"display_name"`
-	Description string         `yaml:"description" json:"description"`
-	InputSchema map[string]any `yaml:"input_schema,omitempty" json:"input_schema,omitempty"`
 }
 
 // Webhook is a proxied external webhook endpoint the plugin declares.

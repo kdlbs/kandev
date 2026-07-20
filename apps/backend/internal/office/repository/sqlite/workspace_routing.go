@@ -166,9 +166,16 @@ func (r *Repository) ListRoutingTierReferencesByAgentProfile(
 			if !ok {
 				continue
 			}
-			refs = appendTierProfileReference(refs, workspaceID, providerID, routing.TierFrontier, profile.TierProfileIDs.Frontier, profileID)
-			refs = appendTierProfileReference(refs, workspaceID, providerID, routing.TierBalanced, profile.TierProfileIDs.Balanced, profileID)
-			refs = appendTierProfileReference(refs, workspaceID, providerID, routing.TierEconomy, profile.TierProfileIDs.Economy, profileID)
+			for _, tier := range routing.AllTiers {
+				refs = appendTierProfileReference(
+					refs,
+					workspaceID,
+					providerID,
+					tier,
+					profile.ExecutionProfileID(tier),
+					profileID,
+				)
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {

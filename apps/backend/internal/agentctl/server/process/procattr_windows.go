@@ -3,10 +3,12 @@
 package process
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/winproc"
 	"golang.org/x/sys/windows"
@@ -23,6 +25,10 @@ func setProcGroup(cmd *exec.Cmd) {
 // cleanup. On Windows, agents start suspended so installProcessLifecycle can
 // bind them to a kill-on-close Job Object before they can spawn descendants.
 func setAgentProcGroup(cmd *exec.Cmd) {
+	setManagedProcGroup(cmd)
+}
+
+func setManagedProcGroup(cmd *exec.Cmd) {
 	setProcGroup(cmd)
 	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
 }
@@ -41,6 +47,16 @@ func installProcessLifecycle(cmd *exec.Cmd) (processLifecycleHandle, error) {
 
 func releaseProcessLifecycle(lifecycle processLifecycleHandle) {
 	_ = lifecycle.job.Close()
+}
+
+func reapProcessLifecycle(lifecycle processLifecycleHandle) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return lifecycle.job.TerminateAndWait(ctx)
+}
+
+func ownsProcessLifecycle(lifecycle processLifecycleHandle) bool {
+	return lifecycle.job.Valid()
 }
 
 // killProcessGroup kills the entire process tree for the given PID.

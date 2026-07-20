@@ -11,7 +11,8 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
 import {
   arePermissionsDirty,
@@ -65,20 +66,12 @@ type ProfileEditorHeaderProps = {
   agentName: string;
   agentDisplayName: string;
   savedProfileName: string;
-  isDirty: boolean;
-  isLoading: boolean;
-  saveStatus: SaveStatus;
-  onSave: () => void;
 };
 
 function ProfileEditorHeader({
   agentName,
   agentDisplayName,
   savedProfileName,
-  isDirty,
-  isLoading,
-  saveStatus,
-  onSave,
 }: ProfileEditorHeaderProps) {
   return (
     <div className="flex items-start justify-between">
@@ -88,15 +81,6 @@ function ProfileEditorHeader({
           {agentDisplayName} • {savedProfileName}
         </h2>
         <p className="text-sm text-muted-foreground mt-1">{agentDisplayName} profile settings</p>
-      </div>
-      <div className="flex items-center gap-3">
-        {isDirty && <UnsavedChangesBadge />}
-        <UnsavedSaveButton
-          isDirty={isDirty}
-          isLoading={isLoading}
-          status={saveStatus}
-          onClick={onSave}
-        />
       </div>
     </div>
   );
@@ -129,6 +113,8 @@ function DeleteProfileCard({ onDelete }: DeleteProfileCardProps) {
 type ProfileSettingsCardProps = {
   agent: Agent;
   draft: AgentProfile;
+  savedProfile: AgentProfile;
+  isDirty: boolean;
   onDraftChange: (patch: Partial<AgentProfile>) => void;
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
@@ -138,6 +124,8 @@ type ProfileSettingsCardProps = {
 function ProfileSettingsCard({
   agent,
   draft,
+  savedProfile,
+  isDirty,
   onDraftChange,
   modelConfig,
   permissionSettings,
@@ -147,9 +135,10 @@ function ProfileSettingsCard({
     onDraftChange(toAgentProfilePatch(patch));
   };
   const permissionValues = profilePermissionValues(draft, permissionSettings);
+  const savedPermissionValues = profilePermissionValues(savedProfile, permissionSettings);
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <span>Profile settings</span>
@@ -168,6 +157,16 @@ function ProfileSettingsCard({
             cli_passthrough: draft.cliPassthrough,
             cli_flags: draft.cliFlags ?? [],
           }}
+          baselineProfile={{
+            name: savedProfile.name,
+            model: savedProfile.model,
+            mode: savedProfile.mode ?? "",
+            config_options: savedProfile.configOptions ?? {},
+            auto_approve: savedPermissionValues.auto_approve,
+            allow_indexing: savedPermissionValues.allow_indexing,
+            cli_passthrough: savedProfile.cliPassthrough,
+            cli_flags: savedProfile.cliFlags ?? [],
+          }}
           onChange={handleFormChange}
           modelConfig={modelConfig}
           permissionSettings={permissionSettings}
@@ -177,7 +176,7 @@ function ProfileSettingsCard({
           hideCustomCLIFlags
         />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -234,7 +233,7 @@ type ProfileEditorActionsOptions = {
   agent: Agent;
   draft: AgentProfile;
   setSavedProfile: (p: AgentProfile) => void;
-  setDraft: (p: AgentProfile) => void;
+  setDraft: React.Dispatch<React.SetStateAction<AgentProfile>>;
   setSaveStatus: (s: SaveStatus) => void;
   settingsAgents: Agent[];
   syncAgentsToStore: (agents: Agent[]) => void;
@@ -275,7 +274,7 @@ function useProfileSave({
         env_vars: draft.envVars ?? [],
       });
       setSavedProfile(updated);
-      setDraft(updated);
+      setDraft((current) => preserveNewerProfileDraft(current, draft, updated));
       const nextAgents = settingsAgents.map((agentItem: Agent) =>
         agentItem.id === agent.id
           ? {
@@ -295,8 +294,17 @@ function useProfileSave({
         description: errorMessage(error),
         variant: "error",
       });
+      throw error;
     }
   };
+}
+
+export function preserveNewerProfileDraft(
+  current: AgentProfile,
+  submitted: AgentProfile,
+  saved: AgentProfile,
+): AgentProfile {
+  return current === submitted ? saved : current;
 }
 
 function useProfileDelete(
@@ -410,6 +418,8 @@ function ProfileDeleteDialogs({
 type ProfileEditorBodyProps = {
   agent: Agent;
   draft: AgentProfile;
+  savedProfile: AgentProfile;
+  isDirty: boolean;
   updateDraft: (patch: Partial<AgentProfile>) => void;
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
@@ -422,6 +432,8 @@ type ProfileEditorBodyProps = {
 function ProfileEditorBody({
   agent,
   draft,
+  savedProfile,
+  isDirty,
   updateDraft,
   modelConfig,
   permissionSettings,
@@ -435,6 +447,8 @@ function ProfileEditorBody({
       <ProfileSettingsCard
         agent={agent}
         draft={draft}
+        savedProfile={savedProfile}
+        isDirty={isDirty}
         onDraftChange={updateDraft}
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}
@@ -443,11 +457,16 @@ function ProfileEditorBody({
 
       <CustomCLIFlagsCard
         flags={draft.cliFlags ?? []}
+        baselineFlags={savedProfile.cliFlags ?? []}
         onChange={(next) => updateDraft({ cliFlags: next })}
         permissionSettings={permissionSettings}
       />
 
-      <ProfileEnvVarsSection envVars={draft.envVars} onChange={updateDraft} />
+      <ProfileEnvVarsSection
+        envVars={draft.envVars}
+        baselineEnvVars={savedProfile.envVars}
+        onChange={updateDraft}
+      />
 
       <CommandPreviewCard
         agentName={agent.name}
@@ -483,7 +502,7 @@ function ProfileEditor({
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const syncAgentsToStore = useSyncAgentsToStore();
   const { items: secrets } = useSecrets();
-  const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } =
+  const { draft, setDraft, savedProfile, setSavedProfile, setSaveStatus, isDirty } =
     useProfileEditorState(profile, permissionSettings);
   const updateDraft = useCallback(
     (patch: Partial<AgentProfile>) => {
@@ -509,6 +528,15 @@ function ProfileEditor({
     syncAgentsToStore,
     toast,
   });
+  useSettingsSaveContributor({
+    id: `agent-profile:${draft.id}`,
+    revision: JSON.stringify(draft),
+    isDirty,
+    canSave: Boolean(draft.name.trim()),
+    invalidReason: draft.name.trim() ? undefined : "Profile name is required.",
+    save: handleSave,
+    discard: () => setDraft(savedProfile),
+  });
   const {
     requestDelete,
     showDeleteConfirm,
@@ -525,10 +553,6 @@ function ProfileEditor({
         agentName={agent.name}
         agentDisplayName={profile.agentDisplayName ?? ""}
         savedProfileName={savedProfile.name}
-        isDirty={isDirty}
-        isLoading={saveStatus === "loading"}
-        saveStatus={saveStatus}
-        onSave={handleSave}
       />
 
       <Separator />
@@ -536,6 +560,8 @@ function ProfileEditor({
       <ProfileEditorBody
         agent={agent}
         draft={draft}
+        savedProfile={savedProfile}
+        isDirty={isDirty}
         updateDraft={updateDraft}
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}

@@ -9,6 +9,7 @@ description: >-
   Five-step office workflow with a primary agent doing the work, multi-agent
   reviewers, and multi-agent approvers. Tasks flow Backlog -> Work -> Review
   -> Approval -> Done with quorum-gated transitions.
+hidden: true
 
 steps:
   - id: backlog

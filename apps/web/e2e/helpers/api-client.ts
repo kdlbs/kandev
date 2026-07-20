@@ -6,6 +6,7 @@ import type {
   ListWorkflowStepsResponse,
   TaskSessionState,
   TaskCreateLastUsedApi,
+  MCPTaskAgentProfileDefault,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
@@ -104,6 +105,8 @@ type CreateTaskOpts = {
   plan_mode?: boolean;
   metadata?: Record<string, unknown>;
   parent_id?: string;
+  workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
+  workspace_group_id?: string;
   attachments?: MessageAttachmentInput[];
 };
 
@@ -120,22 +123,25 @@ function buildCreateTaskBody(
   title: string,
   opts?: CreateTaskOpts,
 ): Record<string, unknown> {
+  const options = opts ?? {};
   const body: Record<string, unknown> = {
     workspace_id: workspaceId,
     title,
-    description: opts?.description ?? "",
+    description: options.description ?? "",
   };
-  setIf(body, "workflow_id", opts?.workflow_id);
-  setIf(body, "workflow_step_id", opts?.workflow_step_id);
-  setIf(body, "metadata", opts ? buildTaskMetadata(opts) : undefined);
+  setIf(body, "workflow_id", options.workflow_id);
+  setIf(body, "workflow_step_id", options.workflow_step_id);
+  setIf(body, "metadata", buildTaskMetadata(options));
   setIf(
     body,
     "repositories",
-    opts?.repositories ?? opts?.repository_ids?.map((id) => ({ repository_id: id })),
+    options.repositories ?? options.repository_ids?.map((id) => ({ repository_id: id })),
   );
-  setIf(body, "attachments", opts?.attachments);
-  if (opts?.plan_mode) body.plan_mode = true;
-  setIf(body, "parent_id", opts?.parent_id);
+  setIf(body, "attachments", options.attachments);
+  if (options.plan_mode) body.plan_mode = true;
+  setIf(body, "parent_id", options.parent_id);
+  setIf(body, "workspace_mode", options.workspace_mode);
+  setIf(body, "workspace_group_id", options.workspace_group_id);
   return body;
 }
 
@@ -321,6 +327,10 @@ export class ApiClient {
       metadata?: Record<string, unknown>;
       /** Parent task ID for subtasks. */
       parent_id?: string;
+      /** Workspace sharing policy used by parent/child task trees. */
+      workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
+      /** Existing group required when workspace_mode is shared_group. */
+      workspace_group_id?: string;
       attachments?: MessageAttachmentInput[];
     },
   ): Promise<CreateTaskResponse> {
@@ -650,6 +660,7 @@ export class ApiClient {
       terminal_link_behavior?: string;
       terminal_font_family?: string;
       terminal_font_size?: number;
+      mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       [key: string]: unknown;
     };
   }> {
@@ -659,6 +670,7 @@ export class ApiClient {
   async saveUserSettings(settings: {
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
+    mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
     workspace_id?: string;
     workflow_filter_id?: string;
     repository_ids?: string[];
@@ -1220,6 +1232,8 @@ export class ApiClient {
     primary_session_id?: string | null;
     state?: string;
     workflow_step_id?: string;
+    parent_id?: string;
+    metadata?: Record<string, unknown> | null;
     repositories?: Array<{
       id: string;
       task_id: string;

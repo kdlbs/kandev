@@ -228,6 +228,15 @@ type Adapter struct {
 	// the options list when the model is changed.
 	availableConfigOptions []streams.ConfigOption
 
+	dialect acpDialect
+
+	// Session configuration changes are serialized across model and option
+	// RPCs. configGeneration is incremented when a change begins so an older
+	// completion cannot overwrite a newer selection.
+	configChangeMu   sync.Mutex
+	configGeneration uint64
+	contextSamples   map[string]contextWindowSample
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -293,12 +302,14 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		logger:              l,
 		agentID:             cfg.AgentID,
 		normalizer:          NewNormalizer(cfg.AgentID),
+		dialect:             newACPDialect(cfg.AgentID),
 		updatesCh:           make(chan AgentEvent, 100),
 		notifQueue:          make(chan notifWork, notifQueueCapacity),
 		activeToolCalls:     make(map[string]*streams.NormalizedPayload),
 		activeMonitors:      make(map[string]map[string]string),
 		pendingWakeups:      make(map[string]*pendingWakeup),
 		usageBySession:      make(map[string]*usageTracker),
+		contextSamples:      make(map[string]contextWindowSample),
 		attachMgr:           shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 		promptGate:          make(chan struct{}, 1),
 		asyncTurnFinalizers: make(map[string]*asyncTurnFinalizer),
@@ -473,13 +484,22 @@ func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 func (a *Adapter) sendUpdate(event AgentEvent) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	if !a.sendUpdateLocked(event) && !a.closed {
+		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
+	}
+}
+
+// sendUpdateLocked enqueues an event without acquiring a.mu. Callers must
+// hold a.mu for reading or writing.
+func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
-		return
+		return false
 	}
 	select {
 	case a.updatesCh <- event:
+		return true
 	default:
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
+		return false
 	}
 }
 

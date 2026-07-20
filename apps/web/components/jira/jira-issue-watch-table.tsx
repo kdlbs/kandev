@@ -16,6 +16,7 @@ import type { JiraIssueWatch } from "@/lib/types/jira";
 
 type JiraIssueWatchTableProps = {
   watches: JiraIssueWatch[];
+  dirtyIds: ReadonlySet<string>;
   // showWorkspace renders a Workspace column when the table aggregates rows
   // from every workspace (install-wide settings page). Off for the legacy
   // single-workspace surfaces.
@@ -40,12 +41,14 @@ function formatLastPolled(dateStr?: string | null): string {
 
 function WatchActions({
   watch,
+  isDirty,
   onToggleEnabled,
   onTrigger,
   onReset,
   onDelete,
 }: {
   watch: JiraIssueWatch;
+  isDirty: boolean;
   onToggleEnabled: (watch: JiraIssueWatch) => void;
   onTrigger: (id: string) => void;
   onReset: (id: string) => void;
@@ -59,6 +62,8 @@ function WatchActions({
             variant="ghost"
             size="sm"
             className="h-7 w-7 p-0 cursor-pointer"
+            data-settings-dirty={isDirty}
+            data-testid={`jira-watch-enabled-${watch.id}`}
             onClick={(e) => {
               e.stopPropagation();
               onToggleEnabled(watch);
@@ -131,6 +136,7 @@ function WatchActions({
 
 export function JiraIssueWatchTable({
   watches,
+  dirtyIds,
   showWorkspace,
   onEdit,
   onDelete,
@@ -163,7 +169,14 @@ export function JiraIssueWatchTable({
       </TableHeader>
       <TableBody>
         {watches.map((watch) => (
-          <TableRow key={watch.id} className="cursor-pointer" onClick={() => onEdit(watch)}>
+          <TableRow
+            key={watch.id}
+            className="cursor-pointer"
+            data-settings-dirty={dirtyIds.has(watch.id)}
+            data-settings-dirty-level="container"
+            data-testid={`jira-watch-row-${watch.id}`}
+            onClick={() => onEdit(watch)}
+          >
             {showWorkspace && (
               <TableCell className="text-xs text-muted-foreground">
                 {workspaceName(watch.workspaceId)}
@@ -186,6 +199,7 @@ export function JiraIssueWatchTable({
             <TableCell className="text-right">
               <WatchActions
                 watch={watch}
+                isDirty={dirtyIds.has(watch.id)}
                 onToggleEnabled={onToggleEnabled}
                 onTrigger={onTrigger}
                 onReset={onReset}

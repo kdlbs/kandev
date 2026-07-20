@@ -52,8 +52,26 @@
       "audiences": ["user"],
       "stability": "stable",
       "docs": ["tasks-and-workflows", "coordination", "git-operations"],
-      "sources": ["apps/backend/internal/orchestrator/task_operations.go", "apps/backend/internal/mcp/handlers/config_task_handlers.go"],
-      "tests": ["apps/backend/internal/orchestrator/task_operations_test.go", "apps/backend/internal/mcp/handlers/handlers_test.go"],
+      "sources": [
+        "apps/backend/internal/orchestrator/task_operations.go",
+        "apps/backend/internal/mcp/handlers/config_task_handlers.go",
+        "apps/backend/internal/mcp/handlers/stop_task.go",
+        "apps/backend/internal/mcp/server/handlers.go",
+        "apps/backend/internal/mcp/server/server.go",
+        "apps/backend/internal/gateway/websocket/client.go"
+      ],
+      "tests": [
+        "apps/backend/internal/orchestrator/task_operations_test.go",
+        "apps/backend/internal/orchestrator/coordinator_stop_test.go",
+        "apps/backend/internal/mcp/handlers/handlers_test.go",
+        "apps/backend/internal/mcp/handlers/stop_task_test.go",
+        "apps/backend/internal/mcp/server/handlers_test.go",
+        "apps/backend/internal/mcp/server/server_test.go",
+        "apps/backend/internal/mcp/server/sysprompt_sync_test.go",
+        "apps/backend/internal/backendapp/mcp_stop_composition_test.go",
+        "apps/backend/internal/integration/mcp_stop_task_test.go",
+        "apps/backend/internal/gateway/websocket/client_mcp_actions_test.go"
+      ],
       "mcpTools": [
         "add_branch_to_task_kandev",
         "archive_task_kandev",
@@ -62,6 +80,7 @@
         "list_tasks_kandev",
         "move_task_kandev",
         "step_complete_kandev",
+        "stop_task_kandev",
         "update_repository_base_branch_kandev",
         "update_task_kandev",
         "update_task_state_kandev"
@@ -71,7 +90,7 @@
       "id": "sessions-and-coordination",
       "audiences": ["user"],
       "stability": "stable",
-      "docs": ["sessions-and-review", "coordination", "automation-and-mcp"],
+      "docs": ["sessions-and-review", "coordination", "automation-and-mcp", "agent-communication"],
       "sources": ["apps/backend/internal/mcp/handlers/spawn_session.go", "apps/web/components/task/dockview-session-tabs.ts"],
       "tests": ["apps/backend/internal/mcp/handlers/spawn_session_test.go", "apps/web/components/task/dockview-session-tabs.test.ts"],
       "mcpTools": [
@@ -196,14 +215,15 @@
       "id": "personal-settings-and-secrets",
       "audiences": ["user"],
       "stability": "stable",
-      "docs": ["security", "configuration", "developer-tools", "operations"],
-      "sources": ["apps/web/src/settings-routes.tsx", "apps/web/components/settings/general-settings.tsx"],
-      "tests": ["apps/web/src/settings-routes.test.ts", "apps/web/components/settings/terminal-settings.test.ts"],
+      "docs": ["security", "configuration", "developer-tools", "operations", "sessions-and-review"],
+      "sources": ["apps/web/src/settings-routes.tsx", "apps/web/components/settings/general-settings.tsx", "apps/web/components/settings/layouts/layout-settings.tsx"],
+      "tests": ["apps/web/src/settings-routes.test.ts", "apps/web/components/settings/terminal-settings.test.ts", "apps/web/lib/layout/layout-profiles.test.ts"],
       "settingsRoutes": [
         "/settings/general",
         "/settings/general/appearance",
         "/settings/general/editors",
         "/settings/general/keyboard-shortcuts",
+        "/settings/general/layouts",
         "/settings/general/notifications",
         "/settings/general/secrets",
         "/settings/general/sprites",
@@ -225,8 +245,18 @@
       "audiences": ["operator"],
       "stability": "stable",
       "docs": ["operations", "configuration", "feature-status"],
-      "sources": ["apps/backend/internal/system/settings/store.go", "apps/web/components/settings/system/feature-toggles-settings.tsx"],
-      "tests": ["apps/backend/internal/system/settings/store_test.go", "apps/web/components/settings/system/feature-toggles-settings.test.tsx"],
+      "sources": [
+        "apps/backend/internal/system/settings/store.go",
+        "apps/backend/internal/system/storage/handler.go",
+        "apps/web/components/settings/system/feature-toggles-settings.tsx",
+        "apps/web/components/settings/system/storage/storage-maintenance-settings.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/system/settings/store_test.go",
+        "apps/backend/internal/system/storage/handler_test.go",
+        "apps/web/components/settings/system/feature-toggles-settings.test.tsx",
+        "apps/web/components/settings/system/storage/storage-maintenance-settings.test.tsx"
+      ],
       "settingsRoutes": [
         "/settings/system/about",
         "/settings/system/backups",
@@ -235,6 +265,7 @@
         "/settings/system/licenses",
         "/settings/system/logs",
         "/settings/system/status",
+        "/settings/system/storage",
         "/settings/system/updates"
       ]
     },
@@ -250,9 +281,25 @@
       "id": "office-mode",
       "audiences": ["user", "operator"],
       "stability": "experimental",
-      "docs": ["coordination", "feature-status"],
+      "docs": ["coordination", "feature-status", "office-provider-routing"],
       "sources": ["apps/backend/internal/office/routes.go", "apps/web/src/office-routes.tsx"],
       "tests": ["apps/backend/internal/office/onboarding/service_test.go", "apps/web/src/office-routes.test.ts"]
+    },
+    {
+      "id": "plugin-system",
+      "audiences": ["operator", "contributor"],
+      "stability": "experimental",
+      "docs": ["plugins", "plugins-authoring", "plugins-manifest"],
+      "sources": ["apps/backend/internal/plugins/handlers.go", "apps/backend/pkg/pluginsdk/host.go", "apps/web/lib/plugins/host-api.ts"],
+      "tests": ["apps/backend/internal/plugins/service_test.go", "apps/backend/internal/plugins/manifest/manifest_test.go", "apps/web/lib/plugins/host-api.test.ts"]
+    },
+    {
+      "id": "plugin-marketplace",
+      "audiences": ["operator", "contributor"],
+      "stability": "experimental",
+      "docs": ["plugins-marketplace"],
+      "sources": ["apps/backend/internal/plugins/marketplace/catalog.go", "apps/backend/internal/plugins/marketplace/sourcestore.go", "apps/web/lib/api/domains/marketplace-api.ts"],
+      "tests": ["apps/backend/internal/plugins/marketplace/catalog_test.go", "apps/backend/internal/plugins/marketplace/sourcestore_test.go", "apps/web/hooks/domains/plugins/use-marketplace.test.ts"]
     },
     {
       "id": "websocket-protocol",

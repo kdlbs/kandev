@@ -189,6 +189,10 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	} else {
 		all = []string{rootID}
 	}
+	cleanupOps, err := s.prepareCascadeResourceCleanup(ctx, all, cascadeID, models.TaskResourceCleanupTriggerCascadeArchive)
+	if err != nil {
+		return out, err
+	}
 
 	// Cancel active runs first. Failures are logged and skipped — a
 	// stuck cancel must not block the archive cascade; the orchestrator
@@ -201,6 +205,7 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	for i := len(all) - 1; i >= 0; i-- {
 		ok, err := s.tasks.ArchiveTaskIfActive(ctx, all[i], cascadeID)
 		if err != nil {
+			s.cancelCascadeResourceCleanupRange(ctx, all[:i+1], cleanupOps)
 			return out, fmt.Errorf("archive %s: %w", all[i], err)
 		}
 		if ok {
@@ -215,10 +220,13 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 			// Tear down runtime resources (container/sandbox/worktree).
 			// Cancellation above stopped the agent but does not remove the
 			// container. Archive preserves the env row (deleteEnvRow=false).
-			if s.resourceCleaner != nil {
+			if operationID := cleanupOps[all[i]]; operationID != "" {
+				s.startCascadeResourceCleanup(ctx, operationID)
+			} else if s.resourceCleaner != nil {
 				s.resourceCleaner.CleanupTaskResources(ctx, all[i], false)
 			}
 		} else {
+			s.cancelCascadeResourceCleanup(ctx, cleanupOps[all[i]])
 			out.SkippedTaskIDs = append(out.SkippedTaskIDs, all[i])
 		}
 	}
@@ -269,6 +277,10 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 	if err != nil {
 		return nil, err
 	}
+	cleanupOps, err := s.prepareCascadeResourceCleanup(ctx, all, cascadeID, models.TaskResourceCleanupTriggerCascadeDelete)
+	if err != nil {
+		return out, err
+	}
 
 	s.cancelActiveRuns(ctx, all, "task tree deleted")
 
@@ -278,6 +290,7 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 	// longer log who left.
 	groupIDs, err := s.releaseMembershipsForCascade(ctx, all, orchmodels.WorkspaceReleaseReasonDeleted, cascadeID)
 	if err != nil {
+		s.cancelCascadeResourceCleanupRange(ctx, all, cleanupOps)
 		return out, err
 	}
 	out.ReleasedGroupIDs = groupIDs
@@ -298,11 +311,14 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 		// Tear down runtime resources BEFORE the DB delete so the env / worktree
 		// rows are still queryable for the gather step. The actual destroy work
 		// runs async after this returns. Delete cascade removes the env row.
-		if s.resourceCleaner != nil {
-			s.resourceCleaner.CleanupTaskResources(ctx, all[i], true)
-		}
 		if err := s.tasks.DeleteTask(ctx, all[i]); err != nil {
+			s.cancelCascadeResourceCleanupRange(ctx, all[:i+1], cleanupOps)
 			return out, fmt.Errorf("delete %s: %w", all[i], err)
+		}
+		if operationID := cleanupOps[all[i]]; operationID != "" {
+			s.startCascadeResourceCleanup(ctx, operationID)
+		} else if s.resourceCleaner != nil {
+			s.resourceCleaner.CleanupTaskResources(ctx, all[i], true)
 		}
 		out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
 		if s.eventPublisher != nil && snapshot != nil {
@@ -317,6 +333,59 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 		}
 	}
 	return out, nil
+}
+
+func (s *HandoffService) prepareCascadeResourceCleanup(
+	ctx context.Context,
+	taskIDs []string,
+	cascadeID string,
+	trigger models.TaskResourceCleanupTrigger,
+) (map[string]string, error) {
+	coordinator, ok := s.resourceCleaner.(taskResourceCleanupCoordinator)
+	if !ok {
+		return nil, nil
+	}
+	operations := make(map[string]string, len(taskIDs))
+	for _, taskID := range taskIDs {
+		operationID := string(trigger) + ":" + cascadeID + ":" + taskID
+		deleteEnvironmentRow := trigger == models.TaskResourceCleanupTriggerCascadeDelete
+		if err := coordinator.PrepareTaskResourceCleanup(ctx, taskID, trigger, operationID, deleteEnvironmentRow); err != nil {
+			s.cancelCascadeResourceCleanupRange(ctx, taskIDs, operations)
+			return nil, fmt.Errorf("prepare cleanup %s: %w", taskID, err)
+		}
+		operations[taskID] = operationID
+	}
+	return operations, nil
+}
+
+func (s *HandoffService) cancelCascadeResourceCleanupRange(
+	ctx context.Context,
+	taskIDs []string,
+	operations map[string]string,
+) {
+	for _, taskID := range taskIDs {
+		s.cancelCascadeResourceCleanup(ctx, operations[taskID])
+	}
+}
+
+func (s *HandoffService) startCascadeResourceCleanup(ctx context.Context, operationID string) {
+	coordinator, ok := s.resourceCleaner.(taskResourceCleanupCoordinator)
+	if !ok || operationID == "" {
+		return
+	}
+	if err := coordinator.StartPreparedTaskResourceCleanup(ctx, operationID); err != nil {
+		s.logf().Error("start cascade resource cleanup", zap.String("operation_id", operationID), zap.Error(err))
+	}
+}
+
+func (s *HandoffService) cancelCascadeResourceCleanup(ctx context.Context, operationID string) {
+	coordinator, ok := s.resourceCleaner.(taskResourceCleanupCoordinator)
+	if !ok || operationID == "" {
+		return
+	}
+	if err := coordinator.CancelPreparedTaskResourceCleanup(ctx, operationID); err != nil {
+		s.logf().Error("cancel cascade resource cleanup", zap.String("operation_id", operationID), zap.Error(err))
+	}
 }
 
 // cancelActiveRuns invokes the configured RunCanceller for every task
@@ -366,6 +435,9 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 	// Unarchive shallow→deep so the root's restored state is visible
 	// before children are queried by anyone watching the bus.
 	for _, id := range all {
+		if err := s.cancelArchiveResourceCleanup(ctx, id); err != nil {
+			return out, fmt.Errorf("cancel archive cleanup %s: %w", id, err)
+		}
 		ok, err := s.tasks.UnarchiveTaskByCascade(ctx, id, cascadeID)
 		if err != nil {
 			return out, fmt.Errorf("unarchive %s: %w", id, err)
@@ -416,6 +488,9 @@ func (s *HandoffService) unarchiveManualRoot(ctx context.Context, root *models.T
 		return nil, errors.New("task is not archived")
 	}
 	out := &CascadeOutcome{}
+	if err := s.cancelArchiveResourceCleanup(ctx, root.ID); err != nil {
+		return out, fmt.Errorf("cancel archive cleanup %s: %w", root.ID, err)
+	}
 	ok, err := s.tasks.UnarchiveTask(ctx, root.ID)
 	if err != nil {
 		return out, fmt.Errorf("unarchive %s: %w", root.ID, err)
@@ -442,6 +517,14 @@ func (s *HandoffService) unarchiveManualRoot(ctx context.Context, root *models.T
 		}
 	}
 	return out, nil
+}
+
+func (s *HandoffService) cancelArchiveResourceCleanup(ctx context.Context, taskID string) error {
+	canceller, ok := s.resourceCleaner.(archiveTaskResourceCleanupCanceller)
+	if !ok {
+		return nil
+	}
+	return canceller.CancelArchiveTaskResourceCleanup(ctx, taskID)
 }
 
 // resolveDeleteSet returns the set of task IDs DeleteTaskTree should
@@ -557,9 +640,8 @@ func (s *HandoffService) allChildrenIncludingArchived(ctx context.Context, paren
 
 // releaseMembershipsForCascade releases group membership for each task
 // in the input slice and returns the unique set of group IDs that had
-// at least one member released. Failures are logged and skipped — a
-// failed release does not abort the cascade since the row stays in the
-// audit log either way.
+// at least one member released. Inventory and release failures abort so the
+// caller can cancel prepared resource cleanup before task rows are mutated.
 func (s *HandoffService) releaseMembershipsForCascade(ctx context.Context, taskIDs []string, reason, cascadeID string) ([]string, error) {
 	if s.wsGroups == nil {
 		return nil, nil
@@ -569,16 +651,13 @@ func (s *HandoffService) releaseMembershipsForCascade(ctx context.Context, taskI
 	for _, id := range taskIDs {
 		g, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, id)
 		if err != nil {
-			s.logf().Error("lookup group for task", zap.String("task_id", id), zap.Error(err))
-			continue
+			return groups, fmt.Errorf("lookup group for task %s: %w", id, err)
 		}
 		if g == nil {
 			continue
 		}
 		if err := s.wsGroups.ReleaseWorkspaceGroupMember(ctx, g.ID, id, reason, cascadeID); err != nil {
-			s.logf().Error("release membership",
-				zap.String("group_id", g.ID), zap.String("task_id", id), zap.Error(err))
-			continue
+			return groups, fmt.Errorf("release membership for task %s from group %s: %w", id, g.ID, err)
 		}
 		if !seen[g.ID] {
 			seen[g.ID] = true

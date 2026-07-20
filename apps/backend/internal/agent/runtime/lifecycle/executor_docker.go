@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/config"
@@ -87,6 +88,7 @@ type DockerExecutor struct {
 	initialized  bool
 	docker       *docker.Client
 	containerMgr *ContainerManager
+	activity     *activity.Coordinator
 }
 
 // NewDockerExecutor creates a new Docker runtime.
@@ -118,12 +120,22 @@ func (r *DockerExecutor) ensureClient() (*docker.Client, *ContainerManager, erro
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create docker client: %w", err)
 	}
+	cli.SetActivityCoordinator(r.activity)
 
 	r.docker = cli
 	r.containerMgr = NewContainerManager(cli, "", r.kandevHomeDir, r.logger)
 	r.initialized = true
 
 	return r.docker, r.containerMgr, nil
+}
+
+func (r *DockerExecutor) SetActivityCoordinator(coordinator *activity.Coordinator) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.activity = coordinator
+	if r.docker != nil {
+		r.docker.SetActivityCoordinator(coordinator)
+	}
 }
 
 // Client returns the lazily-initialized Docker client, or nil if Docker is unavailable.

@@ -34,11 +34,27 @@ test.describe("Chat model selector — RPC failure", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const baseline = sessions[0]?.metadata?.acp_config_baseline as
+          | Record<string, string>
+          | undefined;
+        return baseline?.effort;
+      })
+      .toBe("medium");
+
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
     await expect(trigger).toBeVisible({ timeout: 15_000 });
-    // mock-agent ships with model="mock-fast" + effort="medium", so the
-    // composite trigger label starts as "Mock Fast / Medium".
+    // Baseline-matching secondary options stay out of the task-chat trigger.
     await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+
+    await trigger.hover();
+    const tooltip = testPage.getByRole("tooltip");
+    await expect(tooltip).toContainText("Model: Mock Fast");
+    await expect(tooltip).toContainText("Effort: Medium");
+    await expect(tooltip).not.toContainText("Controls how much reasoning the mock model uses");
+    await testPage.mouse.move(0, 0);
 
     const backendErrorMessage = "mock backend rejected model change";
     const fail = (route: import("@playwright/test").Route) =>
@@ -152,7 +168,164 @@ test.describe("Chat model selector — RPC failure", () => {
  * session snapshot and SSR re-served the pre-change model on reload.
  */
 test.describe("Chat model selector — persistence", () => {
-  test("model change persists across page reload", async ({ testPage, apiClient, seedData }) => {
+  test("completed turn metadata keeps changed options after a page reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Turn Config Reload Test",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("expected an auto-started session");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const trigger = testPage.getByRole("button", { name: "Session model settings" });
+    await trigger.click();
+    await testPage.getByTestId("config-option-trigger-effort").click();
+    await testPage.getByRole("button", { name: "High", exact: true }).click();
+    await expect(trigger).toHaveText("Mock Fast / High", { timeout: 5_000 });
+    await testPage.keyboard.press("Escape");
+
+    const prompt = "second turn uses high effort";
+    await session.sendMessage(prompt);
+    await session.expectChatResponseVisible(prompt);
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const capturedConfig = testPage.getByText("mock-fast · Effort: High", { exact: true });
+    await expect(capturedConfig.first()).toHaveText("mock-fast · Effort: High");
+
+    await testPage.reload();
+    await session.waitForLoad();
+
+    const messagesResponse = await testPage.request.get(
+      `/api/v1/task-sessions/${task.session_id}/messages?limit=50&sort=desc`,
+    );
+    const messagesPayload = (await messagesResponse.json()) as {
+      messages: { content: string; turn_id?: string }[];
+    };
+    const responseMessage = messagesPayload.messages.find((message) =>
+      message.content.includes(prompt),
+    );
+    expect(responseMessage?.turn_id).toBeTruthy();
+
+    const turnsResponse = await testPage.request.get(
+      `/api/v1/task-sessions/${task.session_id}/turns`,
+    );
+    const turnsPayload = (await turnsResponse.json()) as {
+      turns: { id: string; metadata?: Record<string, unknown> }[];
+    };
+    const responseTurn = turnsPayload.turns.find((turn) => turn.id === responseMessage?.turn_id);
+    expect(responseTurn?.metadata).toMatchObject({
+      runtime_config_snapshot: {
+        config_options: expect.arrayContaining([
+          expect.objectContaining({ id: "effort", value: "high" }),
+        ]),
+        config_baseline: { effort: "medium" },
+      },
+    });
+
+    await expect(capturedConfig.first()).toHaveText("mock-fast · Effort: High");
+  });
+
+  test("profile config overrides provider defaults on the first rendered label", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
+    const profile = await apiClient.createAgentProfile(agent.id, "High Effort Task Profile", {
+      model: "mock-fast",
+      config_options: { effort: "high" },
+    });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Profile Model Selector Defaults Test",
+        profile.id,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+
+      await expect
+        .poll(async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const metadata = sessions[0]?.metadata;
+          const runtime = metadata?.runtime_config as
+            | { config_options?: Record<string, string> }
+            | undefined;
+          const baseline = metadata?.acp_config_baseline as Record<string, string> | undefined;
+          return `${runtime?.config_options?.effort}/${baseline?.effort}`;
+        })
+        .toBe("high/medium");
+
+      const trigger = testPage.getByRole("button", { name: "Session model settings" });
+      await expect(trigger).toHaveText("Mock Fast / High", { timeout: 15_000 });
+
+      await testPage.addInitScript(() => {
+        const win = window as Window & { __modelSelectorTexts?: string[] };
+        const capture = () => {
+          const text = document
+            .querySelector('button[aria-label="Session model settings"]')
+            ?.textContent?.trim();
+          if (text && win.__modelSelectorTexts?.at(-1) !== text) {
+            win.__modelSelectorTexts?.push(text);
+          }
+        };
+        win.__modelSelectorTexts = [];
+        new MutationObserver(capture).observe(document, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+        });
+        document.addEventListener("DOMContentLoaded", capture);
+      });
+
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(trigger).toHaveText("Mock Fast / High", { timeout: 15_000 });
+      const renderedLabels = await testPage.evaluate(
+        () =>
+          (window as Window & { __modelSelectorTexts?: string[] }).__modelSelectorTexts?.filter(
+            (text) => text.startsWith("Mock Fast"),
+          ) ?? [],
+      );
+      expect(renderedLabels.length).toBeGreaterThan(0);
+      expect(renderedLabels).toEqual(renderedLabels.map(() => "Mock Fast / High"));
+    } finally {
+      await apiClient.deleteAgentProfile(profile.id, true);
+    }
+  });
+
+  test("changed values stay compact across backend restart", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Model Selector Persistence Test",
@@ -171,27 +344,89 @@ test.describe("Chat model selector — persistence", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const baseline = sessions[0]?.metadata?.acp_config_baseline as
+          | Record<string, string>
+          | undefined;
+        return baseline?.effort;
+      })
+      .toBe("medium");
+
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
-    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+    await expect(trigger).toHaveText("Mock Fast", { timeout: 15_000 });
 
-    // Switch from Mock Fast to Mock Smart. mock-agent routes model changes
-    // through POST /set-config-option — the same path the persistence bug
-    // lived on (SetConfigOption did not emit the session_models convergence
-    // event, so the orchestrator never wrote the new model to the DB).
+    // Model help is visible in the model list. Option help remains hidden in
+    // the compact top-level list until the user enters that option submenu.
     await trigger.click();
-    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
-    await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+    await expect(testPage.getByText("Fast mock model for testing", { exact: true })).toBeVisible();
+    await expect(testPage.getByText("Smart mock model for testing", { exact: true })).toBeVisible();
+    await expect(
+      testPage.getByText("Controls how much reasoning the mock model uses", { exact: true }),
+    ).toHaveCount(0);
 
+    // Change both model and effort. The closed task trigger lists every
+    // changed value in ACP order while omitting the baseline Medium value.
+    // Model changes refresh the provider's full option snapshot, so wait for
+    // that convergence before applying a dependent option.
+    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+    await expect(trigger).toHaveText("Mock Smart", { timeout: 5_000 });
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const runtime = sessions[0]?.metadata?.runtime_config as { model?: string } | undefined;
+        return runtime?.model;
+      })
+      .toBe("mock-smart");
+    await testPage.keyboard.press("Escape");
+    await expect(testPage.getByRole("option", { name: /Mock Smart/ })).toBeHidden();
+    await trigger.click();
+    await testPage.getByTestId("config-option-trigger-effort").click();
+    await expect(
+      testPage.getByText("Controls how much reasoning the mock model uses", { exact: true }),
+    ).toBeVisible();
+    await testPage.getByRole("button", { name: "Low", exact: true }).click();
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const runtime = sessions[0]?.metadata?.runtime_config as
+          | { config_options?: Record<string, string> }
+          | undefined;
+        return runtime?.config_options?.effort;
+      })
+      .toBe("low");
+    await expect(trigger).toHaveText("Mock Smart / Low", { timeout: 5_000 });
+    await expect(trigger).not.toContainText("Medium");
+
+    await testInfo.attach("task-model-selector-desktop", {
+      body: await testPage.screenshot(),
+      contentType: "image/png",
+    });
+
+    // A full backend recreation keeps both the mutable values and the original
+    // persisted baseline, so the same differences remain visible after resume.
+    await backend.restart();
     await testPage.reload();
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
 
-    // After reload the trigger label comes from SSR-hydrated session state.
-    // If SetConfigOption fails to emit the convergence event, the orchestrator
-    // never persists the change and SSR re-serves "Mock Fast" — this assertion
-    // is the regression guard.
-    await expect(trigger).toContainText("Mock Smart", { timeout: 15_000 });
-    await expect(trigger).not.toContainText("Mock Fast");
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const metadata = sessions[0]?.metadata;
+        const runtime = metadata?.runtime_config as
+          | { config_options?: Record<string, string> }
+          | undefined;
+        const baseline = metadata?.acp_config_baseline as Record<string, string> | undefined;
+        return `${runtime?.config_options?.effort}/${baseline?.effort}`;
+      })
+      .toBe("low/medium");
+    await trigger.click();
+    await expect(testPage.getByTestId("config-option-trigger-effort")).toContainText("Low");
+    await testPage.keyboard.press("Escape");
+    await expect(trigger).toHaveText("Mock Smart / Low", { timeout: 15_000 });
+    await expect(trigger).not.toContainText("Medium");
   });
 });
 

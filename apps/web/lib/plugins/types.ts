@@ -21,7 +21,12 @@ export interface NavItem {
   path: string;
   /** Curated icon name (see `lib/plugins/icons.ts`); unknown names render the puzzle glyph. */
   icon?: string;
-  section?: "main" | "settings";
+  /**
+   * Where the item renders: "main" (default) as a top-level sidebar entry,
+   * "integrations" inside the sidebar's Integrations section alongside the
+   * first-party integration links.
+   */
+  section?: "main" | "settings" | "integrations";
 }
 
 /**
@@ -66,8 +71,12 @@ export interface PluginRouteOptions {
 
 /**
  * Named slot the host renders via `<PluginSlot name .../>`. Initial slots:
- * "task-sidebar", "settings-nav", "main-nav-footer". Not a closed union —
- * hosts may register additional slot names.
+ * "task-sidebar", "settings-nav", "main-nav-footer", "chat-input-actions"
+ * (icon buttons in the chat composer toolbar, beside the model picker / mic /
+ * send — receives `{ taskId, taskTitle, activeSessionId, sessionIds }` as
+ * `slotProps`), and "chat-top-bar" (status in the session top bar, beside the
+ * CPU/DB metrics — receives `{ taskId, taskTitle, workspaceId, activeSessionId,
+ * sessionIds }`). Not a closed union — hosts may register additional slot names.
  */
 export type PluginSlotName = string;
 

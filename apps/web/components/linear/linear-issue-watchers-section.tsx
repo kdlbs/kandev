@@ -3,10 +3,11 @@
 import { useCallback, useState } from "react";
 import { IconBellRinging, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { WatcherSettingsCard } from "@/components/integrations/watcher-settings-card";
 import { useToast } from "@/components/toast-provider";
 import { useLinearIssueWatches } from "@/hooks/domains/linear/use-linear-issue-watches";
+import { useWatcherEnabledDrafts } from "@/components/integrations/use-watcher-enabled-drafts";
 import { ResetWatchDialog, useWatchResetController } from "@/components/watches/reset-watch-dialog";
 import { LinearIssueWatchTable } from "./linear-issue-watch-table";
 import { LinearIssueWatchDialog } from "./linear-issue-watch-dialog";
@@ -81,17 +82,6 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
     [trigger, toast],
   );
 
-  const toggleEnabled = useCallback(
-    async (w: LinearIssueWatch) => {
-      try {
-        await update(w.id, { enabled: !w.enabled }, w.workspaceId);
-      } catch (err) {
-        toast({ description: `Toggle failed: ${String(err)}`, variant: "error" });
-      }
-    },
-    [update, toast],
-  );
-
   const wrappedReset = useCallback(
     async (w: LinearIssueWatch) => {
       try {
@@ -118,14 +108,24 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
     remove: wrappedDelete,
     trigger: wrappedTrigger,
     reset: wrappedReset,
-    toggleEnabled,
   };
+}
+
+function useEnabledDrafts(items: LinearIssueWatch[], update: RawActions["update"]) {
+  const saveEnabled = useCallback(
+    async (watch: LinearIssueWatch, enabled: boolean) => {
+      await update(watch.id, { enabled }, watch.workspaceId);
+    },
+    [update],
+  );
+  return useWatcherEnabledDrafts({ id: "linear-watch-enabled", items, saveEnabled });
 }
 
 export function LinearIssueWatchersSection() {
   const { items, loading, create, update, remove, trigger, previewReset, reset } =
     useLinearIssueWatches();
   const actions = useToastedActions({ create, update, remove, trigger, reset });
+  const enabledDrafts = useEnabledDrafts(items, update);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<LinearIssueWatch | null>(null);
@@ -138,10 +138,13 @@ export function LinearIssueWatchersSection() {
     setEditing(null);
     setDialogOpen(true);
   }, []);
-  const openEdit = useCallback((w: LinearIssueWatch) => {
-    setEditing(w);
-    setDialogOpen(true);
-  }, []);
+  const openEdit = useCallback(
+    (w: LinearIssueWatch) => {
+      setEditing(items.find((item) => item.id === w.id) ?? w);
+      setDialogOpen(true);
+    },
+    [items],
+  );
 
   // Adapt the watch-aware actions back to id-keyed callbacks the table expects;
   // the table looks up the watch by id when it needs to forward the per-row
@@ -181,23 +184,23 @@ export function LinearIssueWatchersSection() {
         </Button>
       }
     >
-      <Card>
-        <CardContent className="pt-6">
-          {loading && items.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">Loading…</p>
-          ) : (
-            <LinearIssueWatchTable
-              watches={items}
-              showWorkspace
-              onEdit={openEdit}
-              onDelete={handleDelete}
-              onTrigger={handleTrigger}
-              onReset={handleReset}
-              onToggleEnabled={actions.toggleEnabled}
-            />
-          )}
-        </CardContent>
-      </Card>
+      <WatcherSettingsCard
+        isDirty={enabledDrafts.dirtyIds.size > 0}
+        isLoading={loading}
+        isEmpty={items.length === 0}
+        testId="linear-watchers-card"
+      >
+        <LinearIssueWatchTable
+          watches={enabledDrafts.items}
+          dirtyIds={enabledDrafts.dirtyIds}
+          showWorkspace
+          onEdit={openEdit}
+          onDelete={handleDelete}
+          onTrigger={handleTrigger}
+          onReset={handleReset}
+          onToggleEnabled={enabledDrafts.toggleEnabled}
+        />
+      </WatcherSettingsCard>
       <LinearIssueWatchDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}

@@ -34,7 +34,9 @@ type mockAgent struct {
 	conn            *acp.AgentSideConnection
 	model           string
 	sessions        map[acp.SessionId]bool
+	sessionConfig   map[acp.SessionId][]acp.SessionConfigOption
 	commandsEmitted map[acp.SessionId]bool
+	nextSessionID   uint64
 	mu              sync.Mutex
 }
 
@@ -64,6 +66,7 @@ func main() {
 	ag := &mockAgent{
 		model:           model,
 		sessions:        make(map[acp.SessionId]bool),
+		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
 		commandsEmitted: make(map[acp.SessionId]bool),
 	}
 	asc := acp.NewAgentSideConnection(ag, os.Stdout, os.Stdin)
@@ -91,9 +94,15 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 // show model and mode options for mock-agent in E2E, and lets profile-mode
 // tests select a non-default mode.
 func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
-	sid := acp.SessionId(fmt.Sprintf("mock-session-%d", os.Getpid()))
+	configOptions := mockSessionConfigOptions()
 	a.mu.Lock()
+	a.nextSessionID++
+	sid := acp.SessionId(fmt.Sprintf("mock-session-%d-%d", os.Getpid(), a.nextSessionID))
 	a.sessions[sid] = true
+	if a.sessionConfig == nil {
+		a.sessionConfig = make(map[acp.SessionId][]acp.SessionConfigOption)
+	}
+	a.sessionConfig[sid] = configOptions
 	a.mu.Unlock()
 
 	// Register MCP servers from the ACP session request (SSE servers).
@@ -103,12 +112,14 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 	// Emit available commands asynchronously after the session/new response
 	// flushes. Real ACP agents (OpenCode, Claude) emit available_commands_update
 	// here, which lets clients populate slash menus before the first prompt.
-	go a.emitAvailableCommandsAfterDelay(sid)
+	if a.conn != nil {
+		go a.emitAvailableCommandsAfterDelay(sid)
+	}
 
 	return acp.NewSessionResponse{
 		SessionId:     sid,
 		Modes:         mockSessionModes(),
-		ConfigOptions: mockSessionConfigOptions(),
+		ConfigOptions: cloneSessionConfigOptions(configOptions),
 	}, nil
 }
 
@@ -166,14 +177,28 @@ func mockSessionConfigOptions() []acp.SessionConfigOption {
 			CurrentValue: "medium",
 			Id:           "effort",
 			Name:         "Effort",
+			Description:  ptr("Controls how much reasoning the mock model uses"),
 			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-				{Value: "low", Name: "Low"},
-				{Value: "medium", Name: "Medium"},
-				{Value: "high", Name: "High"},
+				{Value: "low", Name: "Low", Description: ptr("Faster responses with less reasoning")},
+				{Value: "medium", Name: "Medium", Description: ptr("Balanced speed and reasoning")},
+				{Value: "high", Name: "High", Description: ptr("More reasoning for complex tasks")},
 			}},
 			Type: "select",
 		}},
 	}
+}
+
+func cloneSessionConfigOptions(options []acp.SessionConfigOption) []acp.SessionConfigOption {
+	cloned := make([]acp.SessionConfigOption, len(options))
+	copy(cloned, options)
+	for i := range cloned {
+		if options[i].Select == nil {
+			continue
+		}
+		selectOption := *options[i].Select
+		cloned[i].Select = &selectOption
+	}
+	return cloned
 }
 
 func ptr(s string) *string {
@@ -190,6 +215,12 @@ func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (
 	}
 	a.mu.Lock()
 	a.sessions[req.SessionId] = true
+	if a.sessionConfig == nil {
+		a.sessionConfig = make(map[acp.SessionId][]acp.SessionConfigOption)
+	}
+	if _, ok := a.sessionConfig[req.SessionId]; !ok {
+		a.sessionConfig[req.SessionId] = mockSessionConfigOptions()
+	}
 	// Reset emit state so the resume re-advertises commands (matches real
 	// agents which re-emit on session/load).
 	delete(a.commandsEmitted, req.SessionId)
@@ -230,14 +261,64 @@ func (a *mockAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeReques
 	return acp.SetSessionModeResponse{}, nil
 }
 
-func (a *mockAgent) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	return acp.SetSessionConfigOptionResponse{}, nil
+func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	if req.ValueId == nil {
+		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("mock agent supports select config options only")
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	options, ok := a.sessionConfig[req.ValueId.SessionId]
+	if !ok {
+		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("unknown mock session %q", req.ValueId.SessionId)
+	}
+	options = cloneSessionConfigOptions(options)
+	found := false
+	for i := range options {
+		if options[i].Select == nil || options[i].Select.Id != req.ValueId.ConfigId {
+			continue
+		}
+		if !mockConfigOptionContainsValue(options[i].Select.Options, req.ValueId.Value) {
+			return acp.SetSessionConfigOptionResponse{}, fmt.Errorf(
+				"unknown value %q for mock config option %q", req.ValueId.Value, req.ValueId.ConfigId,
+			)
+		}
+		options[i].Select.CurrentValue = req.ValueId.Value
+		found = true
+		break
+	}
+	if !found {
+		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("unknown mock config option %q", req.ValueId.ConfigId)
+	}
+	a.sessionConfig[req.ValueId.SessionId] = options
+	return acp.SetSessionConfigOptionResponse{ConfigOptions: cloneSessionConfigOptions(options)}, nil
+}
+
+func mockConfigOptionContainsValue(options acp.SessionConfigSelectOptions, value acp.SessionConfigValueId) bool {
+	if options.Ungrouped != nil {
+		for _, option := range *options.Ungrouped {
+			if option.Value == value {
+				return true
+			}
+		}
+	}
+	if options.Grouped != nil {
+		for _, group := range *options.Grouped {
+			for _, option := range group.Options {
+				if option.Value == value {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // CloseSession releases any state for a session (no-op for mock).
 func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
 	a.mu.Lock()
 	delete(a.sessions, req.SessionId)
+	delete(a.sessionConfig, req.SessionId)
 	delete(a.commandsEmitted, req.SessionId)
 	a.mu.Unlock()
 	_ = os.Remove(overloadedCounterPath(req.SessionId))

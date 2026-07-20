@@ -29,7 +29,9 @@ An action constant alone is not evidence that an action is registered or emitted
 
 The current `/ws` upgrade handler does **not authenticate clients**. It reads `?token=` or the `Authorization` header but does not validate or use the value; JWT validation is still a code TODO. The default backend host is `0.0.0.0`, so a default process can listen on every interface even though examples use `localhost`.
 
-Treat every client that can reach the backend as fully trusted. WebSocket actions can create and delete data, start agents and shells, read and change files, run Git operations, reveal stored secrets, and invoke configured integrations. Do not expose port `38429` directly to an untrusted LAN or the internet. Bind to loopback, firewall the port, or put Kandev behind an authenticated reverse proxy that terminates TLS and restricts access. See [Configuration](configuration.md) and [Run as a Service](run-as-a-service.md).
+The raw gateway rejects every action whose name starts with `mcp.` using a `FORBIDDEN` error before the shared dispatcher runs. This prevents raw clients from forging task or session identity that trusted MCP adapters inject; it is not user authentication. Internal MCP actions remain available through their mode-scoped MCP adapters and trusted in-process dispatch paths.
+
+Treat every client that can reach the backend as fully trusted for the remaining WebSocket surface. Actions can create and delete data, start agents and shells, read and change files, run Git operations, reveal stored secrets, and invoke configured integrations. Do not expose port `38429` directly to an untrusted LAN or the internet. Bind to loopback, firewall the port, or put Kandev behind an authenticated reverse proxy that terminates TLS and restricts access. See [Configuration](configuration.md) and [Run as a Service](run-as-a-service.md).
 
 The upgrade does enforce an origin policy for browser clients:
 
@@ -236,7 +238,7 @@ websocat ws://127.0.0.1:38429/ws
 
 ## Registered request action catalog
 
-The following 309 unique action names have concrete dispatcher registrations in the current backend. The 12 subscription/focus actions in the previous table are additional gateway-handled requests. Availability can still depend on a configured integration, handler mode, or service; registration does not supply credentials, provider installation, a running executor, or permission to external systems.
+The following 310 unique action names have concrete dispatcher registrations in the current backend. The 12 subscription/focus actions in the previous table are additional gateway-handled requests. Availability can still depend on a configured integration, handler mode, or service; registration does not supply credentials, provider installation, a running executor, or permission to external systems.
 
 Payloads are not uniform. Read the corresponding handler request struct before building a non-first-party client. Names below are exact, including `vscode.openFile` and underscore-separated `user_shell.*` actions.
 
@@ -605,6 +607,7 @@ mcp.reorder_workflow_steps
 mcp.show_walkthrough
 mcp.spawn_session
 mcp.step_complete
+mcp.stop_task
 mcp.update_agent
 mcp.update_agent_profile
 mcp.update_executor_profile
@@ -618,7 +621,7 @@ mcp.update_workflow_step
 mcp.write_task_document
 ```
 
-These registrations back Kandev's agent/MCP bridge. The subset registered in a process depends on its MCP handler mode and enabled capabilities. They are internal transport shims, not a reason to tunnel MCP calls manually over `/ws`; use the MCP tools exposed to the agent so tool schemas, task/session scoping, and compatibility handling remain intact.
+These registrations back Kandev's agent/MCP bridge. The subset registered in a process depends on its MCP handler mode and enabled capabilities. They are internal transport shims: raw `/ws` rejects every one of them before handler dispatch. Use the MCP tools exposed to the agent so tool schemas, task/session scoping, and compatibility handling remain intact. In particular, `mcp.stop_task` is the internal action behind task-mode `stop_task_kandev`; External MCP does not register that tool.
 
 ## Emitted notifications and recipients
 

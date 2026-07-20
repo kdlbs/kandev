@@ -163,14 +163,15 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
-			id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
+			id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			id = excluded.id,
 			task_id = excluded.task_id,
+			execution_profile_id = excluded.execution_profile_id,
 			executor_id = excluded.executor_id,
 			runtime = excluded.runtime,
 			status = excluded.status,
@@ -194,6 +195,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		running.ID,
 		running.SessionID,
 		running.TaskID,
+		running.ExecutionProfileID,
 		running.ExecutorID,
 		running.Runtime,
 		running.Status,
@@ -220,7 +222,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 
 func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
@@ -240,7 +242,7 @@ func (r *Repository) ListExecutorsRunningByTaskID(ctx context.Context, taskID st
 		return nil, fmt.Errorf("task_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
@@ -266,7 +268,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 	var metadataJSON string
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
 		       last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 		       worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 		       created_at, updated_at
@@ -276,6 +278,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 		&running.ID,
 		&running.SessionID,
 		&running.TaskID,
+		&running.ExecutionProfileID,
 		&running.ExecutorID,
 		&running.Runtime,
 		&running.Status,
@@ -328,6 +331,7 @@ func scanExecutorRunningRows(rows *sql.Rows) ([]*models.ExecutorRunning, error) 
 			&running.ID,
 			&running.SessionID,
 			&running.TaskID,
+			&running.ExecutionProfileID,
 			&running.ExecutorID,
 			&running.Runtime,
 			&running.Status,

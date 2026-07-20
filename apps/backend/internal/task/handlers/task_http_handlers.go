@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -454,7 +455,7 @@ type httpTaskRepositoryInput struct {
 
 	// Fresh-branch flow (local executor only): when FreshBranch is true the
 	// handler discards uncommitted changes in the local clone and creates
-	// NewBranchName from BaseBranch before the task is persisted.
+	// NewBranchName from BaseBranch after the task repository is persisted.
 	// ConfirmDiscard must be true if the working tree is dirty; otherwise
 	// the request is rejected with 409 + the dirty file list.
 	// ConsentedDirtyFiles is the dirty-file list the UI showed the user;
@@ -719,11 +720,15 @@ func (h *TaskHandlers) commitFreshBranch(
 		// so skip the destructive checkout and the DELETE+INSERT rewrite.
 		return true
 	}
-	if !h.applyFreshBranch(c, title, inputs, repos) {
-		if delErr := h.service.DeleteTask(c.Request.Context(), taskID); delErr != nil {
-			h.logger.Warn("failed to compensate by deleting task after fresh-branch failure",
-				zap.String("task_id", taskID), zap.Error(delErr))
-		}
+	task, err := h.service.GetTask(c.Request.Context(), taskID)
+	if err != nil {
+		h.logger.Error("failed to reload task repositories for fresh branch", zap.String("task_id", taskID), zap.Error(err))
+		h.rollbackFreshBranchTask(c.Request.Context(), taskID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve task repository"})
+		return false
+	}
+	if !h.applyFreshBranch(c, title, inputs, repos, task.Repositories) {
+		h.rollbackFreshBranchTask(c.Request.Context(), taskID)
 		return false
 	}
 	// Persist the rewritten BaseBranch (set by applyFreshBranch) onto the task.
@@ -742,8 +747,16 @@ func (h *TaskHandlers) commitFreshBranch(
 	return true
 }
 
+func (h *TaskHandlers) rollbackFreshBranchTask(ctx context.Context, taskID string) {
+	if err := h.service.DeleteTask(ctx, taskID); err != nil {
+		h.logger.Warn("failed to compensate by deleting task after fresh-branch failure",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
 // applyFreshBranch executes the fresh-branch flow for any local-executor
-// repository inputs that opted in. Mutates `repos[i].BaseBranch` to the
+// repository inputs that opted in, resolving each repository from the ordered
+// rows persisted on the new task. Mutates `repos[i].BaseBranch` to the
 // newly-created branch on success so the persisted task uses it as the
 // effective base branch on every session resume. Writes the appropriate
 // HTTP error response and returns false on failure.
@@ -751,24 +764,31 @@ func (h *TaskHandlers) commitFreshBranch(
 // When the caller doesn't supply NewBranchName, the backend generates a
 // semantic name from the task title (matching the worktree executor's
 // branch-naming) so the user only has to flip a switch.
-func (h *TaskHandlers) applyFreshBranch(c *gin.Context, taskTitle string, inputs []httpTaskRepositoryInput, repos []dto.TaskRepositoryInput) bool {
+func (h *TaskHandlers) applyFreshBranch(
+	c *gin.Context,
+	taskTitle string,
+	inputs []httpTaskRepositoryInput,
+	repos []dto.TaskRepositoryInput,
+	persisted []*models.TaskRepository,
+) bool {
 	ctx := c.Request.Context()
 	for i, raw := range inputs {
 		if !raw.FreshBranch {
 			continue
 		}
-		repoPath, ok := h.resolveLocalRepoPath(c, raw)
-		if !ok {
+		if i >= len(persisted) || persisted[i] == nil || persisted[i].RepositoryID == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve task repository"})
 			return false
 		}
+		repositoryID := persisted[i].RepositoryID
 		baseBranch := raw.BaseBranch
 		if baseBranch == "" {
 			// User didn't pick one — fall back to the repo's checked-out branch.
-			baseBranch, _ = h.service.LocalRepositoryCurrentBranch(ctx, repoPath)
+			baseBranch, _ = h.service.RepositoryCurrentBranch(ctx, repositoryID)
 		}
 		newBranch := resolveFreshBranchName(raw.NewBranchName, taskTitle)
 		err := h.service.PerformFreshBranch(ctx, service.FreshBranchRequest{
-			RepoPath:            repoPath,
+			RepositoryID:        repositoryID,
 			BaseBranch:          baseBranch,
 			NewBranch:           newBranch,
 			ConfirmDiscard:      raw.ConfirmDiscard,
@@ -796,22 +816,6 @@ func resolveFreshBranchName(rawNewBranch, taskTitle string) string {
 	return worktree.SemanticWorktreeName(taskTitle, worktree.SmallSuffix(3))
 }
 
-func (h *TaskHandlers) resolveLocalRepoPath(c *gin.Context, raw httpTaskRepositoryInput) (string, bool) {
-	if raw.LocalPath != "" {
-		return raw.LocalPath, true
-	}
-	if raw.RepositoryID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "fresh_branch requires repository_id or local_path"})
-		return "", false
-	}
-	repo, err := h.service.GetRepository(c.Request.Context(), raw.RepositoryID)
-	if err != nil || repo == nil || repo.LocalPath == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "repository has no local path"})
-		return "", false
-	}
-	return repo.LocalPath, true
-}
-
 func (h *TaskHandlers) respondFreshBranchError(c *gin.Context, err error) {
 	var dirty *service.ErrDirtyWorkingTree
 	if errors.As(err, &dirty) {
@@ -819,10 +823,6 @@ func (h *TaskHandlers) respondFreshBranchError(c *gin.Context, err error) {
 			"error":       "working tree has uncommitted changes",
 			"dirty_files": dirty.DirtyFiles,
 		})
-		return
-	}
-	if errors.Is(err, service.ErrPathNotAllowed) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "repository path is not within an allowed root"})
 		return
 	}
 	if errors.Is(err, service.ErrInvalidGitRef) {
@@ -1050,6 +1050,15 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.FromTask(task))
 }
 
+func (h *TaskHandlers) httpDetachTask(c *gin.Context) {
+	task, err := h.service.DetachTask(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not found")
+		return
+	}
+	c.JSON(http.StatusOK, dto.FromTask(task))
+}
+
 type httpUpdateTaskRepositoryRequest struct {
 	BaseBranch string `json:"base_branch"`
 }
@@ -1227,10 +1236,20 @@ func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
 	// list just means nothing was recoverable. Detached from the request
 	// context: the tasks are already unarchived, so a client disconnect
 	// must not skip the checkout_branch restore.
-	recoveryCtx := context.WithoutCancel(c.Request.Context())
+	recoveryCtx, cancelRecovery := context.WithTimeout(
+		context.WithoutCancel(c.Request.Context()),
+		h.detachedRecoveryTimeout(),
+	)
+	defer cancelRecovery()
 	recovery := make([]service.BranchRecovery, 0)
 	for _, id := range outcome.ArchivedTaskIDs {
 		recovery = append(recovery, h.service.RecoverTaskBranches(recoveryCtx, id)...)
+	}
+	workspaceRecovery := make([]storageworkspaces.WorkspaceRecovery, 0, len(outcome.ArchivedTaskIDs))
+	if h.workspaceRestorer != nil {
+		for _, id := range outcome.ArchivedTaskIDs {
+			workspaceRecovery = append(workspaceRecovery, h.workspaceRestorer.RestoreTask(recoveryCtx, id))
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":            true,
@@ -1238,6 +1257,7 @@ func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
 		"unarchived_ids":     outcome.ArchivedTaskIDs,
 		"skipped_ids":        outcome.SkippedTaskIDs,
 		"affected_group_ids": outcome.ReleasedGroupIDs,
+		"workspace_recovery": workspaceRecovery,
 		"recovery":           recovery,
 	})
 }

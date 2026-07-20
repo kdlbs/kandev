@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -49,6 +52,88 @@ func (r listTaskSessionsErrorRepo) ListTaskSessions(context.Context, string) ([]
 
 type failSetSessionMetadataRepo struct {
 	repoStore
+}
+
+type failSessionStateUpdateRepo struct {
+	repoStore
+	err error
+}
+
+func (r failSessionStateUpdateRepo) UpdateTaskSessionState(
+	context.Context,
+	string,
+	models.TaskSessionState,
+	string,
+) error {
+	return r.err
+}
+
+type failSetBaselineRepo struct {
+	repoStore
+}
+
+func (r failSetBaselineRepo) SetSessionMetadataKeyIfAbsent(
+	context.Context,
+	string,
+	string,
+	interface{},
+) (bool, error) {
+	return false, errors.New("baseline write failed")
+}
+
+type concurrentBaselineRepo struct {
+	repoStore
+	mu         sync.Mutex
+	loads      int
+	bothLoaded chan struct{}
+}
+
+func (r *concurrentBaselineRepo) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	session, err := r.repoStore.GetTaskSession(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	r.loads++
+	if r.loads == 2 {
+		close(r.bothLoaded)
+	}
+	r.mu.Unlock()
+	return session, nil
+}
+
+func (r *concurrentBaselineRepo) SetSessionMetadataKey(
+	ctx context.Context,
+	sessionID string,
+	key string,
+	value interface{},
+) error {
+	if key == models.SessionMetaKeyACPConfigBaseline {
+		<-r.bothLoaded
+	}
+	return r.repoStore.SetSessionMetadataKey(ctx, sessionID, key, value)
+}
+
+func (r *concurrentBaselineRepo) SetSessionMetadataKeyIfAbsent(
+	ctx context.Context,
+	sessionID string,
+	key string,
+	value interface{},
+) (bool, error) {
+	<-r.bothLoaded
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session, err := r.repoStore.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if _, ok := models.LoadSessionACPConfigBaseline(session.Metadata); ok {
+		return false, nil
+	}
+	if err := r.repoStore.SetSessionMetadataKey(ctx, sessionID, key, value); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 type mockAutomationRunService struct {
@@ -165,6 +250,53 @@ func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
 	session, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
 	require.Equal(t, session.UpdatedAt.UTC().Format(time.RFC3339Nano), data["updated_at"])
+}
+
+func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+
+	changed, finalState, err := svc.transitionTaskSessionState(
+		ctx,
+		"t1",
+		"s1",
+		models.TaskSessionStateCancelled,
+		"coordinator stop",
+	)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, models.TaskSessionStateCancelled, finalState)
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
+}
+
+func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	writeFailure := errors.New("database is read-only")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.repo = failSessionStateUpdateRepo{repoStore: repo, err: writeFailure}
+	svc.eventBus = eb
+
+	changed, finalState, err := svc.transitionTaskSessionState(
+		ctx,
+		"t1",
+		"s1",
+		models.TaskSessionStateCancelled,
+		"coordinator stop",
+	)
+
+	require.ErrorIs(t, err, writeFailure)
+	require.False(t, changed)
+	require.Equal(t, models.TaskSessionStateRunning, finalState)
+	require.Empty(t, eb.events)
 }
 
 func TestHandleSessionModeEvent(t *testing.T) {
@@ -432,6 +564,20 @@ func TestPersistTurnPromptMetadata(t *testing.T) {
 	svc.turnService = &repoTurnService{repo: repo}
 	turn, err := svc.turnService.StartTurn(ctx, "s1")
 	require.NoError(t, err)
+	configSnapshot := map[string]interface{}{
+		"model": "gpt-5.4",
+		"config_options": []interface{}{
+			map[string]interface{}{
+				"id": "reasoning_effort", "name": "Reasoning effort",
+				"value": "high", "value_name": "High",
+			},
+		},
+		"config_baseline": map[string]interface{}{"reasoning_effort": "medium"},
+	}
+	turn.Metadata = map[string]interface{}{
+		models.TurnMetaKeyRuntimeConfigSnapshot: configSnapshot,
+	}
+	require.NoError(t, svc.turnService.UpdateTurn(ctx, turn))
 
 	svc.persistTurnPromptMetadata(ctx, &lifecycle.AgentStreamEventPayload{
 		TaskID:    "t1",
@@ -459,6 +605,7 @@ func TestPersistTurnPromptMetadata(t *testing.T) {
 	updated, err := repo.GetTurn(ctx, turn.ID)
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.5", updated.Metadata["model"])
+	require.Equal(t, configSnapshot, updated.Metadata[models.TurnMetaKeyRuntimeConfigSnapshot])
 	require.Equal(t, "codex-acp", updated.Metadata["agent_type"])
 	require.Equal(t, "exec-1", updated.Metadata["agent_id"])
 	usage, ok := updated.Metadata["prompt_usage"].(map[string]interface{})
@@ -1134,6 +1281,193 @@ func TestWriteTaskInProgressForRuntimeSkipsArchivedTask(t *testing.T) {
 		"runtime reconciliation must not promote archived tasks to IN_PROGRESS")
 }
 
+func TestWriteTaskInProgressForRuntimeSkipsCancelledSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"s1",
+		models.TaskSessionStateCancelled,
+		"stopped by parent task via MCP",
+	))
+	task, err := repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateReview)
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskInProgressForRuntime(ctx, "t1", "s1")
+
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"cancelled session must not promote task from REVIEW to IN_PROGRESS")
+	require.Equal(t, v1.TaskStateReview, taskRepo.tasks["t1"].State)
+}
+
+func TestHandleAgentCompleted_CancelledSessionDoesNotForceCleanup(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"s1",
+		models.TaskSessionStateCancelled,
+		"stopped by parent task via MCP",
+	))
+
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-completed", nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	svc.RegisterExecutionStopOwner("s1", "execution-completed", false)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-completed",
+	})
+	coordinatorStopWaitForGuardReleased(t, svc, "s1")
+
+	agentManager.mu.Lock()
+	calls := append([]stopAgentCall(nil), agentManager.stopAgentWithReasonArgs...)
+	agentManager.mu.Unlock()
+	require.Empty(t, calls, "cancelled completion must not replace graceful teardown with force cleanup")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, session.State)
+}
+
+func TestHandleAgentCompleted_CoordinatorCancellationWinsWhileEventWaits(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-completion-stop-race", "session-completion-stop-race", "step-1")
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-1"] = &wfmodels.WorkflowStep{
+		ID: "step-1", WorkflowID: "wf1", Name: "Work", Position: 0,
+		Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+			Type: wfmodels.OnTurnCompleteMoveToNext,
+		}}},
+	}
+	stepGetter.steps["step-2"] = &wfmodels.WorkflowStep{
+		ID: "step-2", WorkflowID: "wf1", Name: "Review", Position: 1,
+	}
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-completion-stop-race", nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), manager)
+
+	guard, release := svc.acquireCancelInFlightGuard("session-completion-stop-race")
+	guard.Lock()
+	eventDone := make(chan struct{})
+	go func() {
+		svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+			TaskID:           "task-completion-stop-race",
+			SessionID:        "session-completion-stop-race",
+			AgentExecutionID: "execution-completion-stop-race",
+		})
+		close(eventDone)
+	}()
+	coordinatorStopWaitForGuardRefs(t, svc, "session-completion-stop-race", 2)
+	changed, _, err := repo.CancelActiveTaskSession(
+		ctx,
+		"session-completion-stop-race",
+		coordinatorMCPStopReason,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.True(t, svc.claimExecutionTeardown(
+		"session-completion-stop-race",
+		"execution-completion-stop-race",
+		executionTeardownIntentGraceful,
+	))
+	guard.Unlock()
+	release()
+	coordinatorStopAwaitSignal(t, eventDone, "guarded completion event")
+
+	session, err := repo.GetTaskSession(ctx, "session-completion-stop-race")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, session.State)
+	task, err := repo.GetTask(ctx, "task-completion-stop-race")
+	require.NoError(t, err)
+	require.Equal(t, "step-1", task.WorkflowStepID, "stale completion advanced workflow after cancellation")
+	manager.mu.Lock()
+	stopCalls := append([]stopAgentCall(nil), manager.stopAgentWithReasonArgs...)
+	manager.mu.Unlock()
+	require.Empty(t, stopCalls, "stale completion replaced graceful teardown with force cleanup")
+}
+
+// TestWriteTaskInProgressForRuntimeUsesArchiveAwareCAS is the TOCTOU
+// companion to TestWriteTaskInProgressForRuntimeSkipsArchivedTask
+// (carlosflorencio review on PR #1706): the earlier taskArchived() guard is
+// a plain, non-transactional read, so an ArchiveTask commit landing in the
+// window between that read and the write could still resurrect the task's
+// state if the write itself were the unconditional UpdateTaskState. Asserts
+// the write goes through UpdateTaskStateIfNotArchived (tracked separately
+// from the unconditional path via unconditionalWrites) instead.
+func TestWriteTaskInProgressForRuntimeUsesArchiveAwareCAS(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskInProgressForRuntime(ctx, "t1", "s1")
+
+	require.Equal(t, 1, taskRepo.stateWrites["t1"],
+		"runtime reconciliation must still promote a non-archived task to IN_PROGRESS")
+	require.Equal(t, v1.TaskStateInProgress, taskRepo.updatedStates["t1"])
+	require.Zero(t, taskRepo.unconditionalWrites["t1"],
+		"IN_PROGRESS write must use UpdateTaskStateIfNotArchived, not the unconditional UpdateTaskState")
+}
+
+func TestWriteTaskReviewStateSkipsArchivedTask(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.ArchiveTask(ctx, "t1"))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", State: v1.TaskStateInProgress}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskReviewState(ctx, "t1", "s1")
+
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"REVIEW reconcile must not resurrect an archived task's state")
+}
+
+func TestWriteTaskReviewStateOnCancelSkipsArchivedTask(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.ArchiveTask(ctx, "t1"))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", State: v1.TaskStateInProgress}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskReviewStateOnCancel(ctx, "t1", "s1")
+
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"cancel reconcile must not resurrect an archived task's state")
+}
+
 func TestWriteTaskReviewStateOnCancelSkipsWhenSessionActiveAgain(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1805,6 +2139,26 @@ func TestPersistSessionModel(t *testing.T) {
 	require.Equal(t, "gpt-5.4", preserved.AgentProfileSnapshot["model"])
 }
 
+func TestPersistSessionModelDoesNotRestoreStaleActiveStateAfterCancellation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	stale, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, stale.State)
+	changed, _, err := repo.CancelActiveTaskSession(ctx, "s1", "coordinator stop")
+	require.NoError(t, err)
+	require.True(t, changed)
+	svc := &Service{logger: testLogger(), repo: repo}
+
+	svc.persistSessionModelOnSession(ctx, "s1", stale, "gpt-after-stop")
+
+	stored, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, stored.State)
+	require.Equal(t, "gpt-after-stop", stored.AgentProfileSnapshot["model"])
+}
+
 func TestPersistSessionRuntimeConfigFromSessionModels(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1827,6 +2181,234 @@ func TestPersistSessionRuntimeConfigFromSessionModels(t *testing.T) {
 	}, cfg.ConfigOptions)
 }
 
+func TestPersistSessionRuntimeConfigUpdatesProviderState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyRuntimeConfig, models.SessionRuntimeConfig{
+		Model: "mock-smart",
+		ConfigOptions: map[string]string{
+			"model":  "mock-smart",
+			"effort": "low",
+		},
+	}))
+	svc := &Service{logger: testLogger(), repo: repo}
+
+	svc.persistSessionRuntimeConfig(ctx, "s1", "mock-fast", "", []streams.ConfigOption{
+		{ID: "model", Category: "model", CurrentValue: "mock-fast"},
+		{ID: "effort", Category: "thought_level", CurrentValue: "medium"},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	cfg, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "mock-fast", cfg.Model)
+	require.Equal(t, map[string]string{"model": "mock-fast", "effort": "medium"}, cfg.ConfigOptions)
+}
+
+func TestHandleSessionModelsEventPublishesPersistedConfigBaselineAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", "acp_config_baseline", map[string]string{
+		"model":            "gpt-5.6-sol",
+		"reasoning_effort": "high",
+	}))
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		AgentID:   "a1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-sol",
+			ConfigOptions: []streams.ConfigOption{{
+				ID: "reasoning_effort", CurrentValue: "low",
+			}},
+		},
+	})
+
+	require.Len(t, eb.events, 1)
+	raw, err := json.Marshal(eb.events[0].event.Data)
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(raw, &payload))
+	require.Equal(t, map[string]any{
+		"model":            "gpt-5.6-sol",
+		"reasoning_effort": "high",
+	}, payload["config_baseline"])
+}
+
+func TestHandleSessionModelsEventCapturesSettledConfigBaselineOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+
+	settled := func(reasoning string) {
+		svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID:    "t1",
+			SessionID: "s1",
+			AgentID:   "a1",
+			Data: &lifecycle.AgentStreamEventData{
+				CurrentModelID: "gpt-5.6-sol",
+				Data:           map[string]any{"config_options_settled": true},
+				ConfigOptions: []streams.ConfigOption{
+					{ID: "model", Category: "model", CurrentValue: "gpt-5.6-sol"},
+					{ID: "reasoning_effort", CurrentValue: reasoning},
+				},
+			},
+		})
+	}
+
+	settled("high")
+	settled("low")
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	baseline, ok := models.LoadSessionACPConfigBaseline(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, map[string]string{
+		"model":            "gpt-5.6-sol",
+		"reasoning_effort": "high",
+	}, baseline)
+	require.Len(t, eb.events, 2)
+	lastPayload := eb.events[1].event.Data.(lifecycle.SessionModelsEventPayload)
+	require.Equal(t, baseline, lastPayload.ConfigBaseline)
+}
+
+func TestHandleSessionModelsEventStoresBaselineCandidateAndPublishesLiveState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		AgentID:   "a1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-sol",
+			SessionModels: []streams.SessionModelInfo{{
+				ModelID: "gpt-5.6-sol", Name: "GPT-5.6-Sol", Description: "Provider model help",
+				Meta: map[string]any{"provider_internal": "not needed by task selector"},
+			}},
+			Data: map[string]any{"config_options_settled": true},
+			ConfigOptions: []streams.ConfigOption{
+				{ID: "model", Category: "model", CurrentValue: "gpt-5.6-sol"},
+				{
+					Type: "select", ID: "reasoning_effort", Name: "Reasoning effort",
+					Description: "Provider option help", CurrentValue: "low",
+					Options: []streams.ConfigOptionValue{{Value: "low", Name: "Low", Description: "Provider value help"}},
+				},
+				{ID: "fast_mode", CurrentValue: "on"},
+			},
+			ConfigBaselineCandidate: []streams.ConfigOption{
+				{ID: "model", Category: "model", CurrentValue: "gpt-5.6-sol"},
+				{ID: "reasoning_effort", CurrentValue: "high"},
+				{ID: "fast_mode", CurrentValue: "off"},
+			},
+		},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	baseline, ok := models.LoadSessionACPConfigBaseline(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, map[string]string{
+		"model":            "gpt-5.6-sol",
+		"reasoning_effort": "high",
+		"fast_mode":        "off",
+	}, baseline)
+	runtimeConfig, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "low", runtimeConfig.ConfigOptions["reasoning_effort"])
+	require.Equal(t, "on", runtimeConfig.ConfigOptions["fast_mode"])
+	modelState, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", modelState.CurrentModelID)
+	require.Equal(t, "Provider model help", modelState.Models[0].Description)
+	require.Nil(t, modelState.Models[0].Meta)
+	require.Equal(t, "Provider option help", modelState.ConfigOptions[1].Description)
+	require.Equal(t, "Provider value help", modelState.ConfigOptions[1].Options[0].Description)
+
+	require.Len(t, eb.events, 1)
+	published := eb.events[0].event.Data.(lifecycle.SessionModelsEventPayload)
+	require.Equal(t, "low", configOptionValues(published.ConfigOptions)["reasoning_effort"])
+	require.Equal(t, "on", configOptionValues(published.ConfigOptions)["fast_mode"])
+	require.Equal(t, baseline, published.ConfigBaseline)
+}
+
+func TestSettledConfigBaselineConcurrentCaptureReturnsOneWinner(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "t1", "s1", "step1")
+	repo := &concurrentBaselineRepo{repoStore: baseRepo, bothLoaded: make(chan struct{})}
+	svc := &Service{logger: testLogger(), repo: repo}
+
+	type baselineResult struct {
+		values map[string]string
+		err    error
+	}
+	results := make(chan baselineResult, 2)
+	for _, reasoning := range []string{"high", "low"} {
+		reasoning := reasoning
+		go func() {
+			values, err := svc.sessionACPConfigBaselineForEvent(ctx, "s1", &lifecycle.AgentStreamEventData{
+				Data: map[string]any{"config_options_settled": true},
+				ConfigOptions: []streams.ConfigOption{{
+					ID: "reasoning_effort", CurrentValue: reasoning,
+				}},
+			})
+			results <- baselineResult{values: values, err: err}
+		}()
+	}
+
+	captured := make([]baselineResult, 0, 2)
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for len(captured) < 2 {
+		select {
+		case result := <-results:
+			captured = append(captured, result)
+		case <-timer.C:
+			t.Fatal("timed out waiting for concurrent baseline captures")
+		}
+	}
+	require.NoError(t, captured[0].err)
+	require.NoError(t, captured[1].err)
+	require.Equal(t, captured[0].values, captured[1].values)
+}
+
+func TestSessionModelsEventSkipsMutableSnapshotWhenBaselineWriteFails(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: failSetBaselineRepo{repoStore: baseRepo}, eventBus: eb}
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			Data:           map[string]any{"config_options_settled": true},
+			CurrentModelID: "gpt-5.6-sol",
+			ConfigOptions: []streams.ConfigOption{{
+				ID: "reasoning_effort", CurrentValue: "high",
+			}},
+		},
+	})
+
+	updated, err := baseRepo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	_, snapshotStored := updated.Metadata[models.SessionMetaKeyACPModelState]
+	require.False(t, snapshotStored)
+	require.Empty(t, eb.events)
+}
+
 func TestPersistSessionModelAndRuntimeConfigPersistsSnapshotRuntimeConfigAndCache(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1834,7 +2416,7 @@ func TestPersistSessionModelAndRuntimeConfigPersistsSnapshotRuntimeConfigAndCach
 	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", "context_window", map[string]interface{}{"size": int64(256000)}))
 	svc := &Service{logger: testLogger(), repo: repo}
 
-	svc.persistSessionModelAndRuntimeConfig(ctx, "s1", "gpt-5.3-codex-spark", "", []streams.ConfigOption{
+	svc.persistSessionModelAndRuntimeConfig(ctx, "s1", "gpt-5.3-codex-spark", "", nil, []streams.ConfigOption{
 		{ID: "reasoning_effort", Category: "thought_level", CurrentValue: "low"},
 	})
 

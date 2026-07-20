@@ -79,6 +79,10 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 		}
 		return
 	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {

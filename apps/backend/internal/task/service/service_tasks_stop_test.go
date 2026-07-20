@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -144,17 +146,119 @@ func TestBuildStopTargets_TerminalSessionWithoutExecutorRow(t *testing.T) {
 	}
 }
 
+func TestRefreshTaskRuntimeStopTargets_MergesLateExecutionBeforeSnapshot(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.executionStopper = &stubStopper{}
+	svc.executors = &stubExecutors{
+		runningByTaskID: []*models.ExecutorRunning{
+			{SessionID: "sess-1", AgentExecutionID: "exec-late"},
+		},
+	}
+
+	targets, err := svc.refreshTaskRuntimeStopTargets(
+		context.Background(),
+		"task-1",
+		[]taskStopTarget{{sessionID: "sess-1", executionID: "exec-snapshot", terminal: true}},
+	)
+	if err != nil {
+		t.Fatalf("refreshTaskRuntimeStopTargets error: %v", err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("targets = %#v, want late and snapshot executions", targets)
+	}
+	if targets[0].sessionID != "sess-1" || targets[0].executionID != "exec-late" || targets[0].terminal {
+		t.Fatalf("first target = %#v, want live late execution", targets[0])
+	}
+	if targets[1].sessionID != "sess-1" || targets[1].executionID != "exec-snapshot" || !targets[1].terminal {
+		t.Fatalf("second target = %#v, want retained snapshot execution", targets[1])
+	}
+}
+
+func TestRefreshTaskRuntimeStopTargets_ExactRuntimeSupersedesEmptySessionFallback(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	stopper := &stubStopper{
+		stopSessionErr: fmt.Errorf("not registered: %w", runtimeapi.ErrNotFound),
+	}
+	svc.executionStopper = stopper
+	svc.executors = &stubExecutors{
+		runningByTaskID: []*models.ExecutorRunning{
+			{SessionID: "sess-1", AgentExecutionID: "exec-late"},
+		},
+	}
+
+	targets, err := svc.refreshTaskRuntimeStopTargets(
+		context.Background(),
+		"task-1",
+		[]taskStopTarget{{sessionID: "sess-1"}},
+	)
+	if err != nil {
+		t.Fatalf("refreshTaskRuntimeStopTargets error: %v", err)
+	}
+	failed := svc.stopTaskRuntimeTargets(
+		context.Background(),
+		"task-1",
+		targets,
+		"archive",
+		"stop failed",
+	)
+	if len(failed) != 0 {
+		t.Fatalf("late exact execution left retryable fallback failure: %v", failed)
+	}
+	if stopper.stopExecutionCalls != 1 || stopper.stopSessionCalls != 0 {
+		t.Fatalf(
+			"stop calls = execution:%d session:%d, want execution:1 session:0",
+			stopper.stopExecutionCalls,
+			stopper.stopSessionCalls,
+		)
+	}
+}
+
 // --- stopTaskRuntimeTargets ---
 
 // stubStopper is a minimal TaskExecutionStopper for tests.
 type stubStopper struct {
-	stopSessionErr error
+	stopSessionErr     error
+	stopExecutionErr   error
+	stopSessionCalls   int
+	stopExecutionCalls int
 }
 
-func (s *stubStopper) StopTask(_ context.Context, _, _ string, _ bool) error      { return nil }
-func (s *stubStopper) StopExecution(_ context.Context, _, _ string, _ bool) error { return nil }
+func (s *stubStopper) StopTask(_ context.Context, _, _ string, _ bool) error { return nil }
+func (s *stubStopper) StopExecution(_ context.Context, _, _ string, _ bool) error {
+	s.stopExecutionCalls++
+	return s.stopExecutionErr
+}
+func (s *stubStopper) RegisterExecutionStopOwner(string, string, bool) {}
 func (s *stubStopper) StopSession(_ context.Context, _, _ string, _ bool) error {
+	s.stopSessionCalls++
 	return s.stopSessionErr
+}
+
+type cancelAfterFirstStopper struct {
+	cancel context.CancelFunc
+	calls  []string
+}
+
+func (s *cancelAfterFirstStopper) StopTask(context.Context, string, string, bool) error {
+	return nil
+}
+
+func (s *cancelAfterFirstStopper) RegisterExecutionStopOwner(string, string, bool) {}
+
+func (s *cancelAfterFirstStopper) StopExecution(_ context.Context, id, _ string, _ bool) error {
+	s.calls = append(s.calls, id)
+	if len(s.calls) == 1 {
+		s.cancel()
+	}
+	return nil
+}
+
+func (s *cancelAfterFirstStopper) StopSession(_ context.Context, id, _ string, _ bool) error {
+	s.calls = append(s.calls, id)
+	if len(s.calls) == 1 {
+		s.cancel()
+	}
+	return nil
 }
 
 func TestStopTaskRuntimeTargets_TerminalStopFailureDoesNotBlockCleanup(t *testing.T) {
@@ -172,6 +276,42 @@ func TestStopTaskRuntimeTargets_TerminalStopFailureDoesNotBlockCleanup(t *testin
 	}
 }
 
+func TestStopTaskRuntimeTargets_ExactRuntimeAbsenceIsIdempotent(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.executors = &stubExecutors{}
+	svc.executionStopper = &stubStopper{
+		stopExecutionErr: fmt.Errorf("already stopped: %w", runtimeapi.ErrNotFound),
+	}
+	failed := svc.stopTaskRuntimeTargets(
+		context.Background(),
+		"task-a",
+		[]taskStopTarget{{sessionID: "sess-running", executionID: "exec-running"}},
+		"archive",
+		"stop failed",
+	)
+	if len(failed) != 0 {
+		t.Errorf("exact runtime absence must be idempotent; got %v", failed)
+	}
+}
+
+func TestStopTaskRuntimeTargets_SessionRuntimeAbsenceRemainsRetryable(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.executors = &stubExecutors{}
+	svc.executionStopper = &stubStopper{
+		stopSessionErr: fmt.Errorf("not registered yet: %w", runtimeapi.ErrNotFound),
+	}
+	failed := svc.stopTaskRuntimeTargets(
+		context.Background(),
+		"task-a",
+		[]taskStopTarget{{sessionID: "sess-running"}},
+		"archive",
+		"stop failed",
+	)
+	if _, ok := failed["sess-running"]; !ok {
+		t.Errorf("session-level absence must remain retryable; got %v", failed)
+	}
+}
+
 func TestStopTaskRuntimeTargets_NonTerminalStopFailureBlocksCleanup(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	svc.executors = &stubExecutors{}
@@ -184,6 +324,22 @@ func TestStopTaskRuntimeTargets_NonTerminalStopFailureBlocksCleanup(t *testing.T
 	failed := svc.stopTaskRuntimeTargets(context.Background(), "task-b", targets, "archive", "stop failed")
 	if _, ok := failed["sess-running"]; !ok {
 		t.Error("non-terminal stop failure must add session to failedStops")
+	}
+}
+
+func TestStopTaskRuntimeTargets_CancellationStopsBeforeNextTarget(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	stopper := &cancelAfterFirstStopper{cancel: cancel}
+	svc.executionStopper = stopper
+
+	svc.stopTaskRuntimeTargets(ctx, "task-cancel", []taskStopTarget{
+		{sessionID: "session-1", executionID: "execution-1"},
+		{sessionID: "session-2", executionID: "execution-2"},
+	}, "archive", "stop failed")
+
+	if len(stopper.calls) != 1 || stopper.calls[0] != "execution-1" {
+		t.Fatalf("stop calls after cancellation = %v, want [execution-1]", stopper.calls)
 	}
 }
 

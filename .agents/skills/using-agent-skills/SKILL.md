@@ -13,6 +13,7 @@ Use this as the routing map for Kandev's local skills. Prefer the repo's existin
 Task arrives
 |
 |-- Need to clarify intent first? ----------> /interview-me
+|-- Create/change/fix/publish Kandev plugin? -> /create-kandev-plugin plus /fix or /tdd as needed
 |-- New feature or behavior-changing fix? --> /spec-driven-development
 |-- Small self-contained bug regression? ---> /fix -> /tdd
 |-- Running/debugging Kandev locally? ------> /debug
@@ -20,7 +21,7 @@ Task arrives
 |-- Code change with test coverage? --------> /tdd
 |-- Browser/E2E coverage? ------------------> /e2e
 |-- Seed isolated product demo data? -------> /product-demo-seeding
-|-- Record landing/product media? ----------> /product-video-capture (seed first only for new visible state)
+|-- Record landing/product media? ----------> /product-demo-seeding -> /product-video-capture (always in that order)
 |-- Frontend/UI change? --------------------> /mobile-parity plus /e2e as needed
 |-- Security-sensitive change? -------------> security-auditor subagent plus /code-review
 |-- Test strategy or coverage gaps? --------> test-engineer subagent plus /tdd or /e2e
@@ -44,6 +45,7 @@ Task arrives
 4. Surface assumptions before building on them. If requirements, specs, and code disagree, stop and name the conflict.
 5. Keep scope tight. Do not refactor adjacent systems or add "useful" features that are not in the request/spec.
 6. Verify with evidence: targeted tests, full `/verify` when needed, browser/E2E proof for user-facing flows.
+7. Product media always invokes `/product-demo-seeding` before `/product-video-capture`, even when a prior seed or capture exists. Re-prove current `origin/main`, disposable runtime/data, and teardown; never capture a developer instance or database.
 
 ## Upstream Name Mapping
 

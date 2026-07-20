@@ -327,6 +327,40 @@ func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 	}
 }
 
+func TestBuildResumeRequest_UsesExecutionProfileAndKeepsOfficeIdentity(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Task 1"}
+	session := &models.TaskSession{
+		ID:                 "session-1",
+		TaskID:             task.ID,
+		AgentProfileID:     "office-cto",
+		ExecutionProfileID: "claude-opus",
+		ExecutorID:         models.ExecutorIDLocal,
+		State:              models.TaskSessionStateWaitingForInput,
+	}
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		SessionID:          session.ID,
+		TaskID:             task.ID,
+		ExecutionProfileID: "claude-opus",
+		ResumeToken:        "claude-session",
+	}
+
+	req, _, _, _, _, err := exec.buildResumeRequest(context.Background(), task, session, true)
+	if err != nil {
+		t.Fatalf("buildResumeRequest: %v", err)
+	}
+	if req.AgentProfileID != "claude-opus" {
+		t.Fatalf("AgentProfileID = %q, want concrete execution profile", req.AgentProfileID)
+	}
+	if req.OfficeAgentProfileID != "office-cto" {
+		t.Fatalf("OfficeAgentProfileID = %q, want stable Office identity", req.OfficeAgentProfileID)
+	}
+	if req.ACPSessionID != "claude-session" {
+		t.Fatalf("ACPSessionID = %q, want matching profile token", req.ACPSessionID)
+	}
+}
+
 func TestReuseExistingEnvironment_SandboxReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1"}

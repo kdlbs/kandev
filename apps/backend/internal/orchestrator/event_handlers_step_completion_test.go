@@ -470,4 +470,64 @@ func TestOnStepCompletionSignaled(t *testing.T) {
 			t.Errorf("expected no transition for un-gated step, got %q", updated.WorkflowStepID)
 		}
 	})
+
+	t.Run("coordinator cancellation wins while signal subscriber waits", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+			t.Fatalf("flip session waiting: %v", err)
+		}
+		signal := models.PendingStepCompletionSignal{
+			StepID: "step1", Source: models.StepCompletionSourceAgent,
+			Summary: "done", SignaledAt: time.Now().UTC(),
+		}
+		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+			t.Fatalf("seed signal: %v", err)
+		}
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+			AutoAdvanceRequiresSignal: true,
+			Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+				Type: wfmodels.OnTurnCompleteMoveToNext,
+			}}},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		}
+		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+		guard, release := svc.acquireCancelInFlightGuard("s1")
+		guard.Lock()
+		done := make(chan struct{})
+		go func() {
+			svc.onStepCompletionSignaled(ctx, buildEvent("t1", "s1", "step1"))
+			close(done)
+		}()
+		coordinatorStopWaitForGuardRefs(t, svc, "s1", 2)
+		changed, _, err := repo.CancelActiveTaskSession(ctx, "s1", coordinatorMCPStopReason)
+		if err != nil || !changed {
+			t.Fatalf("cancel waiting session: changed=%v err=%v", changed, err)
+		}
+		guard.Unlock()
+		release()
+		coordinatorStopAwaitSignal(t, done, "guarded step-completion subscriber")
+
+		updated, err := repo.GetTask(ctx, "t1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if updated.WorkflowStepID != "step1" {
+			t.Fatalf("stale signal advanced workflow after cancellation: %q", updated.WorkflowStepID)
+		}
+		updatedSession, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("get session: %v", err)
+		}
+		if updatedSession.State != models.TaskSessionStateCancelled {
+			t.Fatalf("expected cancelled session, got %q", updatedSession.State)
+		}
+		if _, hasSignal := models.LoadPendingStepSignal(updatedSession.Metadata); !hasSignal {
+			t.Fatal("stop-winning subscriber consumed the queued completion signal")
+		}
+	})
 }

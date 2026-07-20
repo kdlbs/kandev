@@ -17,6 +17,7 @@ import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
+import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useSidebarSelection, SidebarBulkDialogs } from "./task-session-sidebar-selection";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
@@ -152,6 +153,7 @@ function toSidebarItem(
     isArchived: false as boolean,
     parentTaskTitle: task.parentTaskId ? ctx.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
+    workspaceMode: task.workspaceMode,
     prInfo: toPrInfo(pr),
     isPRReview: task.isPRReview ?? false,
     isIssueWatch: task.isIssueWatch ?? false,
@@ -487,6 +489,7 @@ export function useSidebarActions(store: StoreApi) {
 
   const archiveActions = useArchiveActions(store);
   const deleteActions = useDeleteActions(store, removeTaskFromBoard);
+  const detachActions = useTaskDetachDialog(store);
   const linkActions = useSidebarLinkActions(store);
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
@@ -521,6 +524,7 @@ export function useSidebarActions(store: StoreApi) {
     ...linkActions,
     ...archiveActions,
     ...deleteActions,
+    ...detachActions,
   };
 }
 

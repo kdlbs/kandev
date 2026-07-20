@@ -15,8 +15,10 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
 
@@ -344,7 +346,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	}
 	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
 
-	resp, err := e.probeACPSession(ctx, stdin, stdout, workDir)
+	resp, err := e.probeACPSession(ctx, stdin, stdout, workDir, req.AgentID)
 	if err != nil {
 		return &ProbeResponse{
 			Success:    false,
@@ -460,6 +462,7 @@ func (e *ACPInferenceExecutor) probeACPSession(
 	stdin io.Writer,
 	stdout io.Reader,
 	workDir string,
+	agentID string,
 ) (*ProbeResponse, error) {
 	var mu sync.Mutex
 	var commands []ProbeCommand
@@ -518,7 +521,7 @@ func (e *ACPInferenceExecutor) probeACPSession(
 	}
 
 	out := buildInitProbeFields(initResp)
-	applySessionProbeFields(out, sessionResp)
+	applySessionProbeFields(out, sessionResp, agentID)
 	mu.Lock()
 	out.Commands = append([]ProbeCommand(nil), commands...)
 	mu.Unlock()
@@ -565,7 +568,7 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 // top-level `models` field via acp.LegacyModels for agents that haven't
 // migrated yet (auggie 0.29.x). The legacy `modes` field is still present on
 // the SDK type and we keep populating from it for older agents.
-func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionResponse) {
+func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionResponse, agentID string) {
 	out.ConfigOptions = probeConfigOptions(sessionResp.ConfigOptions)
 	if sessionResp.Modes != nil {
 		out.CurrentModeID = string(sessionResp.Modes.CurrentModeId)
@@ -584,6 +587,53 @@ func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionRespo
 	}
 	if sessionResp.Modes == nil {
 		applyConfigOptionsAsModes(out, sessionResp.ConfigOptions)
+	}
+	applySessionCompatibility(out, agentID)
+}
+
+func applySessionCompatibility(out *ProbeResponse, agentID string) {
+	models := make([]acpcompat.Model, 0, len(out.Models))
+	for _, model := range out.Models {
+		models = append(models, acpcompat.Model{ID: model.ID, Name: model.Name, Meta: model.Meta})
+	}
+	base := make([]streams.ConfigOption, 0, len(out.ConfigOptions))
+	for _, option := range out.ConfigOptions {
+		converted := streams.ConfigOption{
+			Type:         option.Type,
+			ID:           option.ID,
+			Name:         option.Name,
+			Description:  option.Description,
+			CurrentValue: option.CurrentValue,
+			Category:     option.Category,
+		}
+		for _, choice := range option.Options {
+			converted.Options = append(converted.Options, streams.ConfigOptionValue{
+				Value:       choice.Value,
+				Name:        choice.Name,
+				Description: choice.Description,
+			})
+		}
+		base = append(base, converted)
+	}
+	normalized := acpcompat.NormalizeSessionConfig(agentID, base, models, out.CurrentModelID)
+	out.ConfigOptions = make([]ProbeConfigOption, 0, len(normalized))
+	for _, option := range normalized {
+		converted := ProbeConfigOption{
+			Type:         option.Type,
+			ID:           option.ID,
+			Name:         option.Name,
+			Description:  option.Description,
+			CurrentValue: option.CurrentValue,
+			Category:     option.Category,
+		}
+		for _, choice := range option.Options {
+			converted.Options = append(converted.Options, ProbeConfigOptionChoice{
+				Value:       choice.Value,
+				Name:        choice.Name,
+				Description: choice.Description,
+			})
+		}
+		out.ConfigOptions = append(out.ConfigOptions, converted)
 	}
 }
 
@@ -617,6 +667,7 @@ func probeConfigOptions(opts []acp.SessionConfigOption) []ProbeConfigOption {
 			Type:         sel.Type,
 			ID:           string(sel.Id),
 			Name:         sel.Name,
+			Description:  derefString(sel.Description),
 			CurrentValue: string(sel.CurrentValue),
 		}
 		if sel.Category != nil {
@@ -624,8 +675,9 @@ func probeConfigOptions(opts []acp.SessionConfigOption) []ProbeConfigOption {
 		}
 		for _, item := range selectOptionsUngrouped(sel.Options) {
 			config.Options = append(config.Options, ProbeConfigOptionChoice{
-				Value: string(item.Value),
-				Name:  item.Name,
+				Value:       string(item.Value),
+				Name:        item.Name,
+				Description: derefString(item.Description),
 			})
 		}
 		out = append(out, config)

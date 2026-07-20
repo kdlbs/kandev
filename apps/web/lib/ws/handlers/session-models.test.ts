@@ -5,6 +5,11 @@ import type { BackendMessageMap } from "@/lib/types/backend";
 import type { SessionModelsPayload } from "@/lib/types/session-runtime-payloads";
 import { registerSessionModelsHandlers } from "./session-models";
 
+const providerModelId = "gpt-5.6-sol";
+const reasoningOptionId = "reasoning_effort";
+const optionDescription = "Controls how much reasoning the model performs.";
+const valueDescription = "Faster responses with less reasoning.";
+
 function makeStore(overrides: Partial<AppState> = {}) {
   const state = {
     activeModel: { bySessionId: {} },
@@ -130,5 +135,65 @@ describe("session.models_updated handler", () => {
       "session-1",
       expect.objectContaining({ currentModelId: "gpt-5.5" }),
     );
+  });
+});
+
+describe("session.models_updated config metadata", () => {
+  it("stores provider descriptions and the persisted config baseline", () => {
+    const store = makeStore();
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload(providerModelId, {
+          config_baseline: {
+            model: providerModelId,
+            [reasoningOptionId]: "high",
+          },
+          config_options: [
+            {
+              type: "select",
+              id: reasoningOptionId,
+              name: "Reasoning Effort",
+              description: optionDescription,
+              current_value: "low",
+              options: [
+                {
+                  value: "low",
+                  name: "Low",
+                  description: valueDescription,
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(store.getState().sessionModels.bySessionId["session-1"]).toEqual({
+      currentModelId: providerModelId,
+      models: [],
+      configBaseline: {
+        model: providerModelId,
+        [reasoningOptionId]: "high",
+      },
+      configOptions: [
+        {
+          type: "select",
+          id: reasoningOptionId,
+          name: "Reasoning Effort",
+          description: optionDescription,
+          currentValue: "low",
+          category: undefined,
+          options: [
+            {
+              value: "low",
+              name: "Low",
+              description: valueDescription,
+            },
+          ],
+        },
+      ],
+    });
   });
 });

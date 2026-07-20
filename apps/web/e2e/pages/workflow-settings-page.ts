@@ -6,6 +6,8 @@ export class WorkflowSettingsPage {
   readonly createDialog: Locator;
   readonly workflowNameInput: Locator;
   readonly confirmCreateButton: Locator;
+  readonly floatingSave: Locator;
+  readonly cycleGuardDialog: Locator;
 
   constructor(page: Page) {
     this.page = page;
@@ -13,6 +15,8 @@ export class WorkflowSettingsPage {
     this.createDialog = page.getByTestId("create-workflow-dialog");
     this.workflowNameInput = page.getByTestId("workflow-name-input");
     this.confirmCreateButton = page.getByTestId("confirm-create-workflow");
+    this.floatingSave = page.getByTestId("settings-floating-save");
+    this.cycleGuardDialog = page.getByTestId("workflow-cycle-guard-dialog");
   }
 
   async goto(workspaceId: string) {
@@ -62,14 +66,75 @@ export class WorkflowSettingsPage {
     return card.locator(".group.relative").filter({ hasText: stepName });
   }
 
+  /** A replay-cycle diagnostic rendered inside a workflow card or guard dialog. */
+  cycleDiagnostic(container: Locator, autoStartStepId: string): Locator {
+    return container.getByTestId(`workflow-cycle-diagnostic-${autoStartStepId}`);
+  }
+
+  /** Select a step and return its configuration panel. */
+  async selectStep(card: Locator, stepName: string, touch = false): Promise<Locator> {
+    const currentName = card.getByPlaceholder("Step name");
+    const alreadySelected =
+      (await currentName.isVisible().catch(() => false)) &&
+      (await currentName.inputValue().catch(() => "")) === stepName;
+    if (!alreadySelected) {
+      await this.activate(this.stepNodeByName(card, stepName), touch);
+    }
+    await expect(currentName).toHaveValue(stepName);
+    return currentName.locator(
+      "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' rounded-lg ')][1]",
+    );
+  }
+
+  /** Toggle auto-start for a step through the visible configuration panel. */
+  async setAutoStart(card: Locator, stepName: string, enabled: boolean, touch = false) {
+    const panel = await this.selectStep(card, stepName, touch);
+    const checkbox = panel.getByRole("checkbox", { name: "Auto-start agent" });
+    if ((await checkbox.isChecked()) !== enabled) {
+      await this.activate(checkbox, touch);
+    }
+    if (enabled) await expect(checkbox).toBeChecked();
+    else await expect(checkbox).not.toBeChecked();
+  }
+
+  /** Set the On Turn Complete transition in a step's configuration panel. */
+  async setTurnCompleteTransition(
+    card: Locator,
+    stepName: string,
+    optionName: string,
+    touch = false,
+  ) {
+    const panel = await this.selectStep(card, stepName, touch);
+    const transitionSection = panel
+      .getByText("On Turn Complete", { exact: true })
+      .locator("xpath=../..");
+    await this.activate(transitionSection.getByRole("combobox"), touch);
+    await this.activate(this.page.getByRole("option", { name: optionName }), touch);
+  }
+
   /** The add-step (+) button within a workflow card. */
   addStepButton(card: Locator): Locator {
     return card.getByTestId("add-step-button");
   }
 
-  /** The save button within a workflow card (matches button text "Save"). */
-  saveButton(card: Locator): Locator {
-    return card.getByRole("button", { name: "Save" });
+  /** Submit the route-level action without waiting for a possible guard dialog. */
+  async submitSaveChanges(touch = false): Promise<void> {
+    await expect(this.floatingSave).toBeVisible();
+    await this.activate(this.floatingSave.getByRole("button", { name: /save changes/i }), touch);
+  }
+
+  /** Save every dirty workflow contributor through the route-level action. */
+  async saveChanges(): Promise<void> {
+    await this.submitSaveChanges();
+    await expect
+      .poll(
+        async () =>
+          (await this.floatingSave.isVisible())
+            ? await this.floatingSave.getAttribute("data-dirty-contributors")
+            : null,
+        { timeout: 15_000 },
+      )
+      .toBeNull();
   }
 
   /** The delete workflow button within a card. */
@@ -79,7 +144,9 @@ export class WorkflowSettingsPage {
 
   /** The step delete confirmation dialog. */
   get stepDeleteDialog(): Locator {
-    return this.page.getByTestId("step-delete-confirm-dialog");
+    return this.page.getByRole("dialog").filter({
+      has: this.page.getByRole("heading", { name: "Delete step", exact: true }),
+    });
   }
 
   /** Returns the ordered names of all workflow cards on the page. */
@@ -100,21 +167,25 @@ export class WorkflowSettingsPage {
   }
 
   /** Open the "Add Workflow" dialog and create a workflow. */
-  async createWorkflow(name: string, templateName?: string) {
-    await this.addWorkflowButton.click();
+  async createWorkflow(name: string, templateName?: string, touch = false) {
+    await this.activate(this.addWorkflowButton, touch);
     await expect(this.createDialog).toBeVisible();
 
     if (name) {
+      if (touch) await this.workflowNameInput.tap();
       await this.workflowNameInput.fill(name);
     }
 
     if (templateName === "Custom") {
-      await this.createDialog.locator('label[for="custom"]').click();
+      await this.activate(this.createDialog.locator('label[for="custom"]'), touch);
     } else if (templateName) {
-      await this.createDialog.getByText(templateName, { exact: false }).first().click();
+      await this.activate(
+        this.createDialog.getByRole("radio", { name: templateName, exact: false }),
+        touch,
+      );
     }
 
-    await this.confirmCreateButton.click();
+    await this.activate(this.confirmCreateButton, touch);
     await expect(this.createDialog).not.toBeVisible();
   }
 
@@ -136,5 +207,10 @@ export class WorkflowSettingsPage {
       .locator("button")
       .filter({ has: this.page.locator(".tabler-icon-trash") })
       .click();
+  }
+
+  private async activate(locator: Locator, touch: boolean) {
+    if (touch) await locator.tap();
+    else await locator.click();
   }
 }

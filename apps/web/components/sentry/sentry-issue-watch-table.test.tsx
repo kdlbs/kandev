@@ -41,6 +41,7 @@ function renderTable(watches: SentryIssueWatch[]) {
     <TooltipProvider>
       <SentryIssueWatchTable
         watches={watches}
+        dirtyIds={new Set(watches.slice(0, 1).map(({ id }) => id))}
         instanceName={resolveName}
         onEdit={noop}
         onDelete={noop}
@@ -72,5 +73,19 @@ describe("SentryIssueWatchTable", () => {
     ]);
     const cells = screen.getAllByTestId("watch-instance").map((c) => c.textContent);
     expect(cells).toEqual(["Production", "(unavailable)", "—"]);
+  });
+
+  it("marks the changed watcher row and enable control dirty", () => {
+    renderTable([watch({ id: "w1" }), watch({ id: "w2" })]);
+
+    expect(screen.getByTestId("sentry-watch-row-w1").getAttribute("data-settings-dirty")).toBe(
+      "true",
+    );
+    expect(screen.getByTestId("sentry-watch-enabled-w1").getAttribute("data-settings-dirty")).toBe(
+      "true",
+    );
+    expect(screen.getByTestId("sentry-watch-row-w2").getAttribute("data-settings-dirty")).toBe(
+      "false",
+    );
   });
 });

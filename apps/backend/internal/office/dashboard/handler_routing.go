@@ -39,7 +39,14 @@ func (h *Handler) getWorkspaceRouting(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, RoutingConfigResponse{Config: cfg, KnownProviders: known})
+	profiles, err := rp.ListExecutionProfiles(c.Request.Context(), c.Param("wsId"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, RoutingConfigResponse{
+		Config: cfg, KnownProviders: known, ExecutionProfiles: profiles,
+	})
 }
 
 // updateWorkspaceRouting serves PUT /workspaces/:wsId/routing. Strict
@@ -206,9 +213,10 @@ func previewItemsToDTOs(items []routing.PreviewItem) []AgentRoutePreview {
 		chain := make([]ProviderModelPair, len(it.FallbackChain))
 		for j, p := range it.FallbackChain {
 			chain[j] = ProviderModelPair{
-				ProviderID: p.ProviderID,
-				Model:      p.Model,
-				Tier:       p.Tier,
+				ExecutionProfileID: p.ExecutionProfileID,
+				ProviderID:         p.ProviderID,
+				Model:              p.Model,
+				Tier:               p.Tier,
 			}
 		}
 		missing := it.Missing
@@ -216,17 +224,19 @@ func previewItemsToDTOs(items []routing.PreviewItem) []AgentRoutePreview {
 			missing = []string{}
 		}
 		out[i] = AgentRoutePreview{
-			AgentID:           it.AgentID,
-			AgentName:         it.AgentName,
-			TierSource:        it.TierSource,
-			EffectiveTier:     it.EffectiveTier,
-			PrimaryProviderID: it.PrimaryProviderID,
-			PrimaryModel:      it.PrimaryModel,
-			CurrentProviderID: it.CurrentProviderID,
-			CurrentModel:      it.CurrentModel,
-			FallbackChain:     chain,
-			Missing:           missing,
-			Degraded:          it.Degraded,
+			AgentID:                   it.AgentID,
+			AgentName:                 it.AgentName,
+			TierSource:                it.TierSource,
+			EffectiveTier:             it.EffectiveTier,
+			PrimaryProviderID:         it.PrimaryProviderID,
+			PrimaryExecutionProfileID: it.PrimaryExecutionProfileID,
+			PrimaryModel:              it.PrimaryModel,
+			CurrentProviderID:         it.CurrentProviderID,
+			CurrentExecutionProfileID: it.CurrentExecutionProfileID,
+			CurrentModel:              it.CurrentModel,
+			FallbackChain:             chain,
+			Missing:                   missing,
+			Degraded:                  it.Degraded,
 		}
 	}
 	return out

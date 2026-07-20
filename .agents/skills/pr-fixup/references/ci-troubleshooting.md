@@ -58,6 +58,16 @@ headers` are infrastructure/package-registry issues, not app or test failures.
 If GitHub rejects `gh run rerun <run-id> --failed` while the workflow is still
 active, wait for the workflow/report job to finish and retry.
 
+**Third-party action pnpm auto-install failures:** If an action detects pnpm
+and fails with `ERR_PNPM_ADDING_TO_ROOT`, inspect the pinned action bundle and
+its supported inputs before changing the repository package manager. Do not
+switch a pnpm workspace with `workspace:*` dependencies to npm. Either
+preinstall the action's pinned tool with
+`pnpm add --workspace-root --save-dev --ignore-scripts <tool>@<version>`, or
+run the action from an isolated npm working directory when the action supports
+one. Reproduce the action's exact version-detection command locally before
+pushing the workflow fix.
+
 ## Go Race-Suite Flakes
 
 For a backend race-suite failure, extract the named failure from the saved log:

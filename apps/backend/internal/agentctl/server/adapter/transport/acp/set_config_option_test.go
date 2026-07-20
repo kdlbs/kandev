@@ -5,8 +5,112 @@ import (
 	"strings"
 	"testing"
 
+	acp "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
+
+func TestEmitAuthoritativeConfigOptionsUsesCompleteResponseState(t *testing.T) {
+	a := newTestAdapter()
+	a.sessionID = "sess-1"
+	values := func(current string) acp.SessionConfigOption {
+		options := acp.SessionConfigSelectOptionsUngrouped{{Value: acp.SessionConfigValueId(current), Name: current}}
+		return acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{
+			Type: "select", Id: acp.SessionConfigId(current), Name: current,
+			CurrentValue: acp.SessionConfigValueId(current), Options: acp.SessionConfigSelectOptions{Ungrouped: &options},
+		}}
+	}
+	response := []acp.SessionConfigOption{values("low"), values("on")}
+	response[0].Select.Id = "reasoning_effort"
+	response[1].Select.Id = "fast_mode"
+
+	a.emitAuthoritativeConfigOptions("sess-1", "reasoning_effort", response, nil)
+
+	event := findSessionModelsEvent(t, drainEvents(a))
+	if got := currentConfigValue(event.ConfigOptions, "reasoning_effort"); got != "low" {
+		t.Errorf("reasoning_effort = %q, want response value low", got)
+	}
+	if got := currentConfigValue(event.ConfigOptions, "fast_mode"); got != "on" {
+		t.Errorf("fast_mode = %q, want dependent response value on", got)
+	}
+	if event.Data["config_options_source"] != "provider_response" ||
+		event.Data["config_options_config_id"] != "reasoning_effort" {
+		t.Fatalf("authoritative metadata = %#v", event.Data)
+	}
+}
+
+func TestEmitAuthoritativeConfigOptionsIgnoresReplacedSession(t *testing.T) {
+	a := newTestAdapter()
+	a.sessionID = "sess-2"
+	a.availableConfigOptions = []streams.ConfigOption{{
+		ID: "reasoning_effort", CurrentValue: "high",
+	}}
+	options := acp.SessionConfigSelectOptionsUngrouped{{Value: "low", Name: "Low"}}
+
+	a.emitAuthoritativeConfigOptions("sess-1", "reasoning_effort", []acp.SessionConfigOption{{
+		Select: &acp.SessionConfigOptionSelect{
+			Type: "select", Id: "reasoning_effort", Name: "Reasoning effort",
+			CurrentValue: "low", Options: acp.SessionConfigSelectOptions{Ungrouped: &options},
+		},
+	}}, nil)
+
+	if events := drainEvents(a); len(events) != 0 {
+		t.Fatalf("stale response emitted %d events, want none", len(events))
+	}
+	if got := currentConfigValue(a.availableConfigOptions, "reasoning_effort"); got != "high" {
+		t.Fatalf("active session cache = %q, want high", got)
+	}
+}
+
+func TestFallbackConfigEmittersIgnoreReplacedSession(t *testing.T) {
+	tests := []struct {
+		name string
+		emit func(*Adapter, []streams.ConfigOption)
+	}{
+		{
+			name: "model",
+			emit: func(a *Adapter, cached []streams.ConfigOption) {
+				a.emitSetModelEvent("sess-1", "gpt-5.6", nil, cached)
+			},
+		},
+		{
+			name: "config option",
+			emit: func(a *Adapter, cached []streams.ConfigOption) {
+				a.emitSetConfigOptionEvent("sess-1", "reasoning_effort", "low", nil, cached)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newTestAdapter()
+			a.sessionID = "sess-2"
+			a.availableConfigOptions = []streams.ConfigOption{{
+				ID: "reasoning_effort", CurrentValue: "high",
+			}}
+			cached := []streams.ConfigOption{
+				{ID: "model", Category: "model", CurrentValue: "gpt-5.5"},
+				{ID: "reasoning_effort", CurrentValue: "medium"},
+			}
+
+			tt.emit(a, cached)
+
+			if events := drainEvents(a); len(events) != 0 {
+				t.Fatalf("stale fallback emitted %d events, want none", len(events))
+			}
+			if got := currentConfigValue(a.availableConfigOptions, "reasoning_effort"); got != "high" {
+				t.Fatalf("active session cache = %q, want high", got)
+			}
+		})
+	}
+}
+
+func currentConfigValue(options []streams.ConfigOption, id string) string {
+	for _, option := range options {
+		if option.ID == id {
+			return option.CurrentValue
+		}
+	}
+	return ""
+}
 
 // TestSetConfigOption_WithoutConnectionReturnsError pins the precondition
 // that SetConfigOption must surface an error rather than panic when invoked
@@ -70,6 +174,7 @@ func TestIsModelConfigID(t *testing.T) {
 // would be lost on page refresh after a backend restart.
 func TestEmitSetConfigOptionEvent_RewritesChangedOptionAndKeepsModel(t *testing.T) {
 	a := newTestAdapter()
+	a.sessionID = "sess-1"
 	cachedModels := []modelInfo{{ModelId: "gpt-5", Name: "GPT-5"}}
 	cachedConfig := []streams.ConfigOption{
 		{Type: "select", ID: "model", Category: "model", Name: "Model", CurrentValue: "gpt-5"},

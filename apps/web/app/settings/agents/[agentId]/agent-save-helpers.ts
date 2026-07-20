@@ -113,7 +113,24 @@ async function saveMcpForProfile({
     });
   } catch (error) {
     onToastError(error);
+    throw error;
   }
+}
+
+function correlateCreatedProfiles(
+  submitted: DraftProfile[],
+  created: AgentProfile[],
+): Map<string, string> {
+  const mappings = new Map<string, string>();
+  if (submitted.length === created.length) {
+    submitted.forEach((profile, index) => mappings.set(profile.id, created[index].id));
+    return mappings;
+  }
+  for (const profile of submitted) {
+    const match = created.find((candidate) => candidate.name === profile.name);
+    if (match) mappings.set(profile.id, match.id);
+  }
+  return mappings;
 }
 
 async function saveMcpForCreatedProfiles(
@@ -142,6 +159,23 @@ async function saveMcpForCreatedProfiles(
   }
 }
 
+function preservePendingMcpDrafts(draftAgent: DraftAgent, created: Agent): Agent {
+  const submittedById = new Map<string, DraftProfile>(
+    draftAgent.profiles.map((profile) => [profile.id, profile]),
+  );
+  const profileIds = correlateCreatedProfiles(draftAgent.profiles, created.profiles);
+  const submittedByCreatedId = new Map(
+    [...profileIds].map(([submittedId, createdId]) => [createdId, submittedById.get(submittedId)]),
+  );
+  return {
+    ...created,
+    profiles: created.profiles.map((profile) => {
+      const pending = submittedByCreatedId.get(profile.id)?.mcp_config;
+      return pending ? { ...profile, mcp_config: pending } : profile;
+    }),
+  };
+}
+
 export type EnsureProfilesFn = (
   agent: DraftAgent,
   displayName: string,
@@ -157,7 +191,7 @@ export type SaveAgentCallbacks = {
   permissionSettings: Record<string, PermissionSetting>;
   resolveDisplayName: (name: string) => string;
   upsertAgent: (agent: Agent) => void;
-  setDraftAgent: (agent: DraftAgent) => void;
+  setDraftAgent: (agent: DraftAgent | ((current: DraftAgent) => DraftAgent)) => void;
   ensureProfiles: EnsureProfilesFn;
   cloneAgent: CloneAgentFn;
   replaceRoute: (path: string) => void;
@@ -179,7 +213,24 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
     })),
   });
 
-  await saveMcpForCreatedProfiles(draftAgent, created, callbacks.onToastError);
+  try {
+    await saveMcpForCreatedProfiles(draftAgent, created, callbacks.onToastError);
+  } catch (error) {
+    const reconciled = preservePendingMcpDrafts(draftAgent, created);
+    callbacks.upsertAgent(reconciled);
+    const savedDraft = callbacks.ensureProfiles(
+      callbacks.cloneAgent(reconciled),
+      callbacks.resolveDisplayName(reconciled.name),
+      callbacks.currentAgentModelConfig.default_model,
+      callbacks.permissionSettings,
+    );
+    const profileIds = correlateCreatedProfiles(draftAgent.profiles, reconciled.profiles);
+    callbacks.setDraftAgent((current) =>
+      mergeSavedAgentDraft(current, draftAgent, savedDraft, profileIds),
+    );
+    callbacks.replaceRoute(`/settings/agents/${encodeURIComponent(reconciled.name)}`);
+    throw error;
+  }
 
   if ((draftAgent.mcp_config_path ?? "") !== (created.mcp_config_path ?? "")) {
     created = await updateAgentAction(created.id, {
@@ -187,15 +238,18 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
     });
   }
   callbacks.upsertAgent(created);
-  callbacks.setDraftAgent(
-    callbacks.ensureProfiles(
-      callbacks.cloneAgent(created),
-      callbacks.resolveDisplayName(created.name),
-      callbacks.currentAgentModelConfig.default_model,
-      callbacks.permissionSettings,
-    ),
+  const savedDraft = callbacks.ensureProfiles(
+    callbacks.cloneAgent(created),
+    callbacks.resolveDisplayName(created.name),
+    callbacks.currentAgentModelConfig.default_model,
+    callbacks.permissionSettings,
+  );
+  const profileIds = correlateCreatedProfiles(draftAgent.profiles, created.profiles);
+  callbacks.setDraftAgent((current) =>
+    mergeSavedAgentDraft(current, draftAgent, savedDraft, profileIds),
   );
   callbacks.replaceRoute(`/settings/agents/${encodeURIComponent(created.name)}`);
+  return savedDraft;
 }
 
 async function saveExistingAgentPatch(draftAgent: DraftAgent, savedAgent: Agent) {
@@ -211,53 +265,137 @@ async function saveExistingAgentPatch(draftAgent: DraftAgent, savedAgent: Agent)
   }
 }
 
+async function savePersistedProfile(
+  profile: DraftProfile,
+  savedProfile: AgentProfile,
+  onToastError: (error: unknown) => void,
+): Promise<AgentProfile> {
+  await saveMcpForProfile({
+    draftProfile: profile,
+    targetProfileId: savedProfile.id,
+    onToastError,
+  });
+  if (isProfileDirty(profile, savedProfile)) {
+    return updateAgentProfileAction(profile.id, {
+      name: profile.name,
+      model: profile.model,
+      mode: profile.mode,
+      config_options: profile.configOptions ?? {},
+      ...permissionsToProfilePatch(profile),
+      cli_passthrough: profile.cliPassthrough ?? false,
+      cli_flags: profile.cliFlags ?? [],
+      env_vars: profile.envVars ?? [],
+    });
+  }
+  const { mcp_config: _pendingMcp, ...persistedProfile } = savedProfile as DraftProfile;
+  return persistedProfile;
+}
+
 async function saveExistingProfiles(
   draftAgent: DraftAgent,
   savedAgent: Agent,
   isCreateMode: boolean,
   onToastError: (error: unknown) => void,
-): Promise<AgentProfile[]> {
+): Promise<{ profiles: AgentProfile[]; profileIds: Map<string, string> }> {
   const savedProfilesById = new Map(savedAgent.profiles.map((p) => [p.id, p]));
   const nextProfiles: AgentProfile[] = isCreateMode ? [...savedAgent.profiles] : [];
+  const profileIds = new Map<string, string>();
+  const persistedProfiles: DraftProfile[] = [];
+  const persistedSubmittedIds = new Set<string>();
 
-  for (const profile of draftAgent.profiles) {
-    const savedProfile = savedProfilesById.get(profile.id);
-    if (!savedProfile) {
-      const createdProfile = await createAgentProfileAction(savedAgent.id, {
-        name: profile.name,
-        model: profile.model,
-        mode: profile.mode,
-        config_options: profile.configOptions ?? {},
-        ...permissionsToProfilePatch(profile),
-        cli_passthrough: profile.cliPassthrough ?? false,
-        cli_flags: profile.cliFlags ?? [],
-        env_vars: profile.envVars ?? [],
-      });
-      await saveMcpForProfile({
-        draftProfile: profile,
-        targetProfileId: createdProfile.id,
-        onToastError,
-      });
-      nextProfiles.push(createdProfile);
-      continue;
+  try {
+    for (const profile of draftAgent.profiles) {
+      const savedProfile = savedProfilesById.get(profile.id);
+      if (!savedProfile) {
+        const createdProfile = await createAgentProfileAction(savedAgent.id, {
+          name: profile.name,
+          model: profile.model,
+          mode: profile.mode,
+          config_options: profile.configOptions ?? {},
+          ...permissionsToProfilePatch(profile),
+          cli_passthrough: profile.cliPassthrough ?? false,
+          cli_flags: profile.cliFlags ?? [],
+          env_vars: profile.envVars ?? [],
+        });
+        profileIds.set(profile.id, createdProfile.id);
+        persistedSubmittedIds.add(profile.id);
+        persistedProfiles.push(
+          profile.mcp_config
+            ? { ...createdProfile, mcp_config: profile.mcp_config }
+            : createdProfile,
+        );
+        await saveMcpForProfile({
+          draftProfile: profile,
+          targetProfileId: createdProfile.id,
+          onToastError,
+        });
+        persistedProfiles[persistedProfiles.length - 1] = createdProfile;
+        nextProfiles.push(createdProfile);
+        continue;
+      }
+      profileIds.set(profile.id, savedProfile.id);
+      const persistedProfile = await savePersistedProfile(profile, savedProfile, onToastError);
+      persistedSubmittedIds.add(profile.id);
+      persistedProfiles.push(persistedProfile);
+      nextProfiles.push(persistedProfile);
     }
-    if (isProfileDirty(profile, savedProfile)) {
-      const updatedProfile = await updateAgentProfileAction(profile.id, {
-        name: profile.name,
-        model: profile.model,
-        mode: profile.mode,
-        config_options: profile.configOptions ?? {},
-        ...permissionsToProfilePatch(profile),
-        cli_passthrough: profile.cliPassthrough ?? false,
-        cli_flags: profile.cliFlags ?? [],
-        env_vars: profile.envVars ?? [],
-      });
-      nextProfiles.push(updatedProfile);
-      continue;
+  } catch (error) {
+    if (persistedProfiles.length > 0) {
+      throw new PartialProfileSaveError(
+        error,
+        persistedProfiles,
+        persistedSubmittedIds,
+        profileIds,
+      );
     }
-    nextProfiles.push(savedProfile);
+    throw error;
   }
-  return nextProfiles;
+  return { profiles: nextProfiles, profileIds };
+}
+
+class PartialProfileSaveError extends Error {
+  constructor(
+    readonly original: unknown,
+    readonly persistedProfiles: DraftProfile[],
+    readonly persistedSubmittedIds: Set<string>,
+    readonly profileIds: Map<string, string>,
+  ) {
+    super("Profile creation only partially completed");
+  }
+}
+
+function reconcilePartialProfileSave(
+  draftAgent: DraftAgent,
+  savedAgent: Agent,
+  partial: PartialProfileSaveError,
+  callbacks: SaveAgentCallbacks,
+) {
+  const profilesById = new Map(savedAgent.profiles.map((profile) => [profile.id, profile]));
+  for (const profile of partial.persistedProfiles) profilesById.set(profile.id, profile);
+  const reconciled = {
+    ...savedAgent,
+    profiles: [...profilesById.values()],
+  };
+  callbacks.upsertAgent(reconciled);
+  const submitted = {
+    ...draftAgent,
+    profiles: draftAgent.profiles.filter((profile) =>
+      partial.persistedSubmittedIds.has(profile.id),
+    ),
+  };
+  const persistedIds = new Set(partial.persistedProfiles.map((profile) => profile.id));
+  const savedDraft = callbacks.ensureProfiles(
+    {
+      ...callbacks.cloneAgent(reconciled),
+      profiles: reconciled.profiles.filter((profile) => persistedIds.has(profile.id)),
+    },
+    callbacks.resolveDisplayName(reconciled.name),
+    callbacks.currentAgentModelConfig.default_model,
+    callbacks.permissionSettings,
+  );
+  callbacks.setDraftAgent((current) =>
+    mergeSavedAgentDraft(current, submitted, savedDraft, partial.profileIds),
+  );
 }
 
 async function deleteRemovedProfiles(draftAgent: DraftAgent, savedAgent: Agent) {
@@ -277,12 +415,21 @@ export async function saveExistingAgent(
 ) {
   await saveExistingAgentPatch(draftAgent, savedAgent);
 
-  const nextProfiles = await saveExistingProfiles(
-    draftAgent,
-    savedAgent,
-    isCreateMode,
-    callbacks.onToastError,
-  );
+  let savedProfiles: Awaited<ReturnType<typeof saveExistingProfiles>>;
+  try {
+    savedProfiles = await saveExistingProfiles(
+      draftAgent,
+      savedAgent,
+      isCreateMode,
+      callbacks.onToastError,
+    );
+  } catch (error) {
+    if (error instanceof PartialProfileSaveError) {
+      reconcilePartialProfileSave(draftAgent, savedAgent, error, callbacks);
+      throw error.original;
+    }
+    throw error;
+  }
 
   if (!isCreateMode) {
     await deleteRemovedProfiles(draftAgent, savedAgent);
@@ -292,20 +439,46 @@ export async function saveExistingAgent(
     ...savedAgent,
     workspace_id: draftAgent.workspace_id ?? null,
     mcp_config_path: draftAgent.mcp_config_path ?? "",
-    profiles: nextProfiles,
+    profiles: savedProfiles.profiles,
   };
   callbacks.upsertAgent(nextAgent);
-  callbacks.setDraftAgent(
-    callbacks.ensureProfiles(
-      callbacks.cloneAgent(nextAgent),
-      callbacks.resolveDisplayName(nextAgent.name),
-      callbacks.currentAgentModelConfig.default_model,
-      callbacks.permissionSettings,
-    ),
+  const savedDraft = callbacks.ensureProfiles(
+    callbacks.cloneAgent(nextAgent),
+    callbacks.resolveDisplayName(nextAgent.name),
+    callbacks.currentAgentModelConfig.default_model,
+    callbacks.permissionSettings,
+  );
+  callbacks.setDraftAgent((current) =>
+    mergeSavedAgentDraft(current, draftAgent, savedDraft, savedProfiles.profileIds),
   );
   if (isCreateMode) {
     callbacks.replaceRoute(`/settings/agents/${encodeURIComponent(savedAgent.name)}`);
   }
+  return savedDraft;
+}
+
+export function mergeSavedAgentDraft(
+  current: DraftAgent,
+  submitted: DraftAgent,
+  saved: DraftAgent,
+  profileIds: ReadonlyMap<string, string> = new Map(),
+): DraftAgent {
+  const currentById = new Map(current.profiles.map((profile) => [profile.id, profile]));
+  const submittedBySavedId = new Map(
+    submitted.profiles.map((profile) => [profileIds.get(profile.id) ?? profile.id, profile]),
+  );
+  const profiles = saved.profiles.map((savedProfile) => {
+    const submittedProfile = submittedBySavedId.get(savedProfile.id);
+    if (!submittedProfile) return savedProfile;
+    const currentProfile = currentById.get(submittedProfile.id);
+    if (!currentProfile || JSON.stringify(currentProfile) === JSON.stringify(submittedProfile)) {
+      return savedProfile;
+    }
+    return { ...savedProfile, ...currentProfile, id: savedProfile.id };
+  });
+  const submittedIds = new Set(submitted.profiles.map((profile) => profile.id));
+  profiles.push(...current.profiles.filter((profile) => !submittedIds.has(profile.id)));
+  return { ...saved, ...current, id: saved.id, name: saved.name, profiles };
 }
 
 export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boolean {

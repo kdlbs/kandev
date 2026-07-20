@@ -21,7 +21,7 @@ const (
 
 // handleMessageChunkEvent handles a "message_chunk" agent event, accumulating and flushing on newlines.
 func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	if event.Text == "" {
+	if event.Role == "user" || event.Text == "" {
 		return
 	}
 	execution.messageMu.Lock()
@@ -260,6 +260,7 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 	if !claimed {
 		return false
 	}
+	m.releaseActivity(executionActivityKey(execution.ID))
 
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
@@ -576,16 +577,30 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		// can filter and re-publish to the dedicated session mode subject.
 
 	case "session_models":
-		execution.SetModelState(&CachedModelState{
+		baselineCandidate, settled := execution.SetModelStateApplyingSettlement(&CachedModelState{
 			CurrentModelID: event.CurrentModelID,
 			Models:         event.SessionModels,
 			ConfigOptions:  event.ConfigOptions,
+			ConfigSource:   agentEventDataString(event.Data, "config_options_source"),
+			ConfigID:       agentEventDataString(event.Data, "config_options_config_id"),
 		})
+		if settled {
+			event.ConfigBaselineCandidate = baselineCandidate.ConfigOptions
+			if event.Data == nil {
+				event.Data = make(map[string]any)
+			}
+			event.Data["config_options_settled"] = true
+		}
 		// No return — must flow through to PublishAgentStreamEvent so the orchestrator
 		// can persist the model and re-publish to the dedicated session models subject.
 	}
 
 	m.eventPublisher.PublishAgentStreamEvent(execution, event)
+}
+
+func agentEventDataString(data map[string]any, key string) string {
+	value, _ := data[key].(string)
+	return value
 }
 
 // handleGitStatusUpdate processes git status updates from the workspace tracker
@@ -648,6 +663,7 @@ func (m *Manager) handleProcessStatus(execution *AgentExecution, status *agentct
 		zap.String("status", string(status.Status)),
 	)
 	m.eventPublisher.PublishProcessStatus(execution, status)
+	m.releaseTerminalProcessActivity(status)
 }
 
 // handleShellExit processes shell exit events from the workspace stream

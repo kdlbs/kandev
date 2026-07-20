@@ -43,3 +43,18 @@ func TestTaskSearchSelectQuery_OrdersOutsideDistinctForPostgres(t *testing.T) {
 		t.Fatalf("query = %q, want outer Postgres title ordering", query)
 	}
 }
+
+func TestDetachTaskQueryUsesDialectJSONFunctions(t *testing.T) {
+	sqliteQuery := detachTaskQuery(dialect.SQLite3)
+	if !strings.Contains(sqliteQuery, "json_set") || strings.Contains(sqliteQuery, "jsonb_set") {
+		t.Fatalf("SQLite detach query uses wrong JSON functions: %s", sqliteQuery)
+	}
+
+	postgresQuery := detachTaskQuery(dialect.PGX)
+	if !strings.Contains(postgresQuery, "jsonb_set") || !strings.Contains(postgresQuery, "jsonb_extract_path_text") {
+		t.Fatalf("Postgres detach query must use JSONB functions: %s", postgresQuery)
+	}
+	if strings.Contains(postgresQuery, "json_extract(") || strings.Contains(postgresQuery, "json_set(") {
+		t.Fatalf("Postgres detach query uses SQLite JSON functions: %s", postgresQuery)
+	}
+}

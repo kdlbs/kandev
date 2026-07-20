@@ -1,15 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type Dispatch,
-  type MutableRefObject,
-  type SetStateAction,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -30,6 +21,7 @@ import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
 import type { RestartCapability } from "@/lib/types/system";
 import { FeatureToggleCard } from "./feature-toggle-card";
 import { RestartProgressDialog } from "./restart-progress-dialog";
+import { useSettingsSaveContributor } from "../settings-save-provider";
 
 type Props = {
   initialFlags: RuntimeFlagState[];
@@ -44,80 +36,25 @@ export function FeatureTogglesSettings({
   restartCapability,
   browserDemoAvailable = isBrowserDemoDevRouteAvailable() && isDebugUI(),
 }: Props) {
-  const [flags, setFlags] = useState(initialFlags);
-  const [isLoadingFlags, setIsLoadingFlags] = useState(initialFlags.length === 0);
-  const [savingKeys, setSavingKeys] = useState<Set<string>>(() => new Set());
-  const requestSeqRef = useRef(0);
-  const attemptedEmptyInitialReloadRef = useRef(false);
-  const { toast } = useToast();
+  const { flags, savedFlags, isLoadingFlags, isDirty, reload, setOverride } =
+    useRuntimeFlagsDraft(initialFlags);
   const pendingRestart = useMemo(
     () => flags.some((flag) => flag.requires_restart_to_apply),
     [flags],
   );
-
-  const reload = useCallback(
-    async (options?: { bootstrap?: boolean }) => {
-      const seq = nextRequestSeq(requestSeqRef);
-      setIsLoadingFlags(true);
-      try {
-        const res = await fetchRuntimeFlagsForReload(options?.bootstrap === true);
-        setFlagsIfLatest(requestSeqRef, seq, res.flags, setFlags);
-      } catch (err) {
-        toast({
-          title: "Failed to load feature toggles",
-          description: errorMessage(err),
-          variant: "error",
-        });
-      } finally {
-        if (seq === requestSeqRef.current) {
-          setIsLoadingFlags(false);
-        }
-      }
-    },
-    [toast],
+  const savedFlagsByKey = useMemo(
+    () => new Map(savedFlags.map((flag) => [flag.key, flag])),
+    [savedFlags],
   );
-
   const onRestartComplete = useCallback(() => void reload(), [reload]);
   const restart = useKandevRestart({ onComplete: onRestartComplete });
-
-  useEffect(() => {
-    if (flags.length > 0 || attemptedEmptyInitialReloadRef.current) return;
-    attemptedEmptyInitialReloadRef.current = true;
-    void reload({ bootstrap: true });
-  }, [flags.length, reload]);
-
-  const setOverride = async (flag: RuntimeFlagState, override: boolean | null) => {
-    const seq = nextRequestSeq(requestSeqRef);
-    setSavingKeys((prev) => {
-      const next = new Set(prev);
-      next.add(flag.key);
-      return next;
-    });
-    try {
-      const res = await updateRuntimeFlag(flag.key, override);
-      setFlagsIfLatest(requestSeqRef, seq, res.flags, setFlags);
-      toast({ title: "Feature toggle saved", variant: "success" });
-    } catch (err) {
-      toast({
-        title: "Failed to save feature toggle",
-        description: errorMessage(err),
-        variant: "error",
-      });
-    } finally {
-      setSavingKeys((prev) => {
-        const next = new Set(prev);
-        next.delete(flag.key);
-        return next;
-      });
-    }
-  };
 
   return (
     <div className="space-y-4" data-testid="feature-toggles-settings">
       {pendingRestart && (
         <RestartRequiredAlert
           capability={restartCapability}
-          restarting={restart.isRestarting}
+          restarting={restart.isRestarting || isDirty}
           onRestart={() => void restart.start()}
         />
       )}
@@ -125,9 +62,10 @@ export function FeatureTogglesSettings({
         <FeatureToggleCard
           key={flag.key}
           flag={flag}
-          saving={savingKeys.has(flag.key) || restart.isRestarting}
-          onChange={(next) => void setOverride(flag, next)}
-          onReset={() => void setOverride(flag, null)}
+          isDirty={flag.override_value !== savedFlagsByKey.get(flag.key)?.override_value}
+          saving={restart.isRestarting}
+          onChange={(next) => setOverride(flag, next)}
+          onReset={() => setOverride(flag, null)}
           action={
             browserDemoAvailable && flag.key === "debug.devMode" ? <BrowserDemoAction /> : null
           }
@@ -143,6 +81,90 @@ export function FeatureTogglesSettings({
       />
     </div>
   );
+}
+
+function useRuntimeFlagsDraft(initialFlags: RuntimeFlagState[]) {
+  const [flags, setFlags] = useState(initialFlags);
+  const [savedFlags, setSavedFlags] = useState(initialFlags);
+  const [isLoadingFlags, setIsLoadingFlags] = useState(initialFlags.length === 0);
+  const requestSeqRef = useRef(0);
+  const attemptedEmptyInitialReloadRef = useRef(false);
+  const { toast } = useToast();
+
+  const reload = useCallback(
+    async (options?: { bootstrap?: boolean }) => {
+      const seq = nextRequestSeq(requestSeqRef);
+      setIsLoadingFlags(true);
+      try {
+        const res = await fetchRuntimeFlagsForReload(options?.bootstrap === true);
+        if (seq === requestSeqRef.current) {
+          setFlags(res.flags);
+          setSavedFlags(res.flags);
+        }
+      } catch (err) {
+        toast({
+          title: "Failed to load feature toggles",
+          description: errorMessage(err),
+          variant: "error",
+        });
+      } finally {
+        if (seq === requestSeqRef.current) {
+          setIsLoadingFlags(false);
+        }
+      }
+    },
+    [toast],
+  );
+
+  useEffect(() => {
+    if (flags.length > 0 || attemptedEmptyInitialReloadRef.current) return;
+    attemptedEmptyInitialReloadRef.current = true;
+    void reload({ bootstrap: true });
+  }, [flags.length, reload]);
+
+  const setOverride = (flag: RuntimeFlagState, override: boolean | null) => {
+    setFlags((current) =>
+      current.map((item) =>
+        item.key === flag.key
+          ? {
+              ...item,
+              override_value: override,
+              effective_value: override ?? item.default_value,
+              source: override === null ? "default" : "override",
+            }
+          : item,
+      ),
+    );
+  };
+
+  const revision = JSON.stringify(flags.map(({ key, override_value }) => [key, override_value]));
+  const savedRevision = JSON.stringify(
+    savedFlags.map(({ key, override_value }) => [key, override_value]),
+  );
+  const isDirty = revision !== savedRevision;
+  useSettingsSaveContributor({
+    id: "system-feature-toggles",
+    revision,
+    isDirty,
+    save: async () => {
+      const submitted = flags;
+      const changed = submitted.filter((flag) => {
+        const saved = savedFlags.find((candidate) => candidate.key === flag.key);
+        return saved?.override_value !== flag.override_value;
+      });
+      let persisted = savedFlags;
+      for (const flag of changed) {
+        const response = await updateRuntimeFlag(flag.key, flag.override_value);
+        persisted = response.flags;
+      }
+      setSavedFlags(persisted);
+      setFlags((current) => (current === submitted ? persisted : current));
+      toast({ title: "Feature toggles saved", variant: "success" });
+    },
+    discard: () => setFlags(savedFlags),
+  });
+
+  return { flags, savedFlags, isLoadingFlags, isDirty, reload, setOverride };
 }
 
 function BrowserDemoAction() {
@@ -275,15 +297,4 @@ function errorMessage(err: unknown): string {
 function nextRequestSeq(seqRef: MutableRefObject<number>): number {
   seqRef.current += 1;
   return seqRef.current;
-}
-
-function setFlagsIfLatest(
-  seqRef: MutableRefObject<number>,
-  seq: number,
-  flags: RuntimeFlagState[],
-  setFlags: Dispatch<SetStateAction<RuntimeFlagState[]>>,
-) {
-  if (seq === seqRef.current) {
-    setFlags(flags);
-  }
 }

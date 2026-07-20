@@ -128,6 +128,7 @@ func convertACPConfigOptions(opts []acp.SessionConfigOption) []streams.ConfigOpt
 			Type:         s.Type,
 			ID:           string(s.Id),
 			Name:         s.Name,
+			Description:  derefStr(s.Description),
 			CurrentValue: string(s.CurrentValue),
 		}
 		if s.Category != nil {
@@ -137,8 +138,9 @@ func convertACPConfigOptions(opts []acp.SessionConfigOption) []streams.ConfigOpt
 		if s.Options.Ungrouped != nil {
 			for _, o := range *s.Options.Ungrouped {
 				co.Options = append(co.Options, streams.ConfigOptionValue{
-					Value: string(o.Value),
-					Name:  o.Name,
+					Value:       string(o.Value),
+					Name:        o.Name,
+					Description: derefStr(o.Description),
 				})
 			}
 		}
@@ -172,6 +174,7 @@ func extractConfigOptions(meta any) []streams.ConfigOption {
 			Type:         getString(opt, "type"),
 			ID:           getString(opt, "id"),
 			Name:         getString(opt, "name"),
+			Description:  getString(opt, "description"),
 			CurrentValue: getString(opt, "currentValue"),
 			Category:     getString(opt, "category"),
 		}
@@ -179,8 +182,9 @@ func extractConfigOptions(meta any) []streams.ConfigOption {
 			for _, o := range options {
 				if om, ok := o.(map[string]any); ok {
 					co.Options = append(co.Options, streams.ConfigOptionValue{
-						Value: getString(om, "value"),
-						Name:  getString(om, "name"),
+						Value:       getString(om, "value"),
+						Name:        getString(om, "name"),
+						Description: getString(om, "description"),
 					})
 				}
 			}

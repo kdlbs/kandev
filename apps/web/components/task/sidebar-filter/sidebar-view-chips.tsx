@@ -54,7 +54,7 @@ export function SidebarViewChips() {
         strategy={horizontalListSortingStrategy}
       >
         <div
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+          className="mr-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto md:mr-0"
           data-testid="sidebar-view-chip-row"
         >
           {views.map((view) => (
@@ -144,7 +144,7 @@ function SidebarViewChip({
       data-active={active}
       aria-pressed={active}
       className={cn(
-        "flex h-6 shrink-0 cursor-pointer items-center rounded-md border px-2 text-left text-[11px] transition-colors active:cursor-grabbing",
+        "flex h-10 shrink-0 cursor-pointer items-center rounded-md border px-2 text-left text-[11px] transition-colors active:cursor-grabbing md:h-6",
         active
           ? "border-primary/40 bg-primary/10 text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground",

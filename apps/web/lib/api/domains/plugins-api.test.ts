@@ -8,10 +8,10 @@ import {
   disablePlugin,
   enablePlugin,
   getPlugin,
+  getPluginConfig,
   installPluginFromUrl,
   installPluginUpload,
   listPlugins,
-  listPluginTools,
   syncPlugins,
   uninstallPlugin,
   updatePluginConfig,
@@ -290,24 +290,6 @@ describe("enablePlugin / disablePlugin / uninstallPlugin", () => {
   });
 });
 
-describe("listPluginTools", () => {
-  it("fetches GET /api/plugins/tools and unwraps the tools array", async () => {
-    const tool = {
-      plugin_id: PLUGIN_ID,
-      name: "search",
-      display_name: "Search",
-      description: "desc",
-    };
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ tools: [tool] }));
-
-    const result = await listPluginTools();
-
-    const [url] = fetchSpy.mock.calls.at(-1) ?? [];
-    expect(String(url)).toBe("http://api.test/api/plugins/tools");
-    expect(result).toEqual([tool]);
-  });
-});
-
 describe("syncPlugins", () => {
   it("POSTs /api/plugins/sync and returns the SyncResult", async () => {
     const body = {
@@ -330,5 +312,29 @@ describe("syncPlugins", () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ error: "sync failed" }, 500));
 
     await expect(syncPlugins()).rejects.toMatchObject({ status: 500, message: "sync failed" });
+  });
+});
+
+describe("getPluginConfig", () => {
+  it("fetches GET /api/plugins/:id/config and unwraps the config object", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ config: { default_channel: "#dev" } }));
+
+    const result = await getPluginConfig(PLUGIN_ID);
+
+    const [url] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe(`${PLUGIN_URL}/config`);
+    expect(result).toEqual({ default_channel: "#dev" });
+  });
+
+  it("returns an empty object when the backend omits config", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({}));
+    expect(await getPluginConfig(PLUGIN_ID)).toEqual({});
+  });
+
+  it("URL-encodes the plugin id", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ config: {} }));
+    await getPluginConfig("my plugin");
+    const [url] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toContain("my%20plugin");
   });
 });

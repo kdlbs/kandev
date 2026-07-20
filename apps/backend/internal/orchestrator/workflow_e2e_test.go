@@ -428,6 +428,8 @@ func TestProcessOnTurnCompleteViaEngine_NonTerminalStepWritesTaskStateReview(t *
 		isAgentRunning:         true,
 	}
 	svc := createEngineService(t, repo, sg, agentMgr)
+	onEnterDone := make(chan struct{})
+	svc.onProcessOnEnterComplete = func() { close(onEnterDone) }
 	taskRepo := svc.taskRepo.(*mockTaskRepo)
 	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 
@@ -442,11 +444,23 @@ func TestProcessOnTurnCompleteViaEngine_NonTerminalStepWritesTaskStateReview(t *
 	}
 
 	assertStepByName(t, ctx, repo, "s1", "In Progress", nameToID)
+	select {
+	case <-onEnterDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for on_enter processing")
+	}
 	taskRepo.mu.Lock()
-	state, ok := taskRepo.updatedStates["t1"]
+	history := append([]v1.TaskState(nil), taskRepo.stateHistory["t1"]...)
 	taskRepo.mu.Unlock()
-	if !ok || state != v1.TaskStateReview {
-		t.Errorf("tasks.state = %q, want %q (ok=%v)", state, v1.TaskStateReview, ok)
+	wroteReview := false
+	for _, state := range history {
+		if state == v1.TaskStateReview {
+			wroteReview = true
+			break
+		}
+	}
+	if !wroteReview {
+		t.Errorf("tasks.state history = %v, want a %q write", history, v1.TaskStateReview)
 	}
 }
 

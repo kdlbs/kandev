@@ -23,10 +23,6 @@ func (p *fakeAuthorPlugin) OnEvent(_ context.Context, e *Event) error {
 	return nil
 }
 
-func (p *fakeAuthorPlugin) InvokeTool(_ context.Context, req *ToolRequest) (*ToolResponse, error) {
-	return &ToolResponse{Output: map[string]any{"echo": req.ToolName}}, nil
-}
-
 func (p *fakeAuthorPlugin) HandleWebhook(_ context.Context, req *WebhookRequest) (*WebhookResponse, error) {
 	return &WebhookResponse{Status: 200, Body: append([]byte("got:"), req.Body...)}, nil
 }
@@ -34,7 +30,7 @@ func (p *fakeAuthorPlugin) HandleWebhook(_ context.Context, req *WebhookRequest)
 // TestServe_EndToEnd exercises the same GRPCPlugin wiring Serve() (plugin
 // side) and kandev's runtime manager (host side, via plugin.NewClient)
 // use, over a real go-plugin gRPC connection + broker
-// (hcplugin.TestPluginGRPCConn). It covers all three Plugin RPCs plus the
+// (hcplugin.TestPluginGRPCConn). It covers both Plugin RPCs plus the
 // Host broker round trip (§3/§4 of docs/plans/plugins/GRPC-CONTRACT.md).
 func TestServe_EndToEnd(t *testing.T) {
 	author := &fakeAuthorPlugin{}
@@ -75,12 +71,6 @@ func TestServe_EndToEnd(t *testing.T) {
 		require.Len(t, author.events, 1)
 		require.Equal(t, "e1", author.events[0].EventID)
 		require.Equal(t, map[string]any{"a": float64(1)}, author.events[0].Payload)
-	})
-
-	t.Run("InvokeTool", func(t *testing.T) {
-		resp, err := remote.InvokeTool(context.Background(), &ToolRequest{ToolName: "search"})
-		require.NoError(t, err)
-		require.Equal(t, "search", resp.Output["echo"])
 	})
 
 	t.Run("HandleWebhook", func(t *testing.T) {

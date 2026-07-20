@@ -176,7 +176,9 @@ func (m *Manager) allocatePortAndListener(id string) (int, net.Listener, error) 
 		if err != nil {
 			return 0, nil, fmt.Errorf("failed to allocate port: %w", err)
 		}
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", allocated))
+		// Bind loopback-only when auth is disabled (no token); otherwise bind
+		// all interfaces so Docker/remote executors can reach the instance.
+		ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", m.config.ListenHost(), allocated))
 		if err != nil {
 			if errors.Is(err, syscall.EADDRINUSE) || strings.Contains(err.Error(), "address already in use") {
 				m.portAlloc.MarkUnavailable(allocated)
@@ -322,57 +324,79 @@ func (m *Manager) ListInstances() []*InstanceInfo {
 
 // StopInstance stops and removes an instance by ID.
 func (m *Manager) StopInstance(ctx context.Context, id string) error {
-	// Get instance and remove from map under lock (quick operation)
-	m.mu.Lock()
+	m.mu.RLock()
 	inst, ok := m.instances[id]
+	m.mu.RUnlock()
 	if !ok {
+		return fmt.Errorf("instance %s not found", id)
+	}
+	inst.stopMu.Lock()
+	defer inst.stopMu.Unlock()
+
+	// A concurrent successful stop may have removed the instance while this
+	// caller waited for the per-instance teardown lock.
+	m.mu.Lock()
+	if current, exists := m.instances[id]; !exists || current != inst {
 		m.mu.Unlock()
 		return fmt.Errorf("instance %s not found", id)
 	}
-	// Remove from map immediately so new instances aren't blocked
-	delete(m.instances, id)
+	inst.setStatus("stopping")
 	m.mu.Unlock()
 
 	m.logger.Debug("stopping instance", zap.String("instance_id", id))
-
-	// Stop the process manager (potentially slow, done without lock)
 	if inst.manager != nil {
-		if err := inst.manager.Stop(ctx); err != nil {
+		inst.manager.CloseAdmission()
+	}
+
+	// Quiesce HTTP before process teardown. CloseAdmission has already closed every
+	// process-start admission path, including handlers already in flight.
+	var httpStopErr error
+	if inst.server != nil {
+		httpStopErr = m.stopHTTPServer(ctx, id, inst.Port, inst.server)
+	}
+	// Stop the process manager (potentially slow, done without lock)
+	var processStopErr error
+	if inst.manager != nil {
+		if err := inst.manager.StopForTeardown(ctx); err != nil {
+			processStopErr = fmt.Errorf("stop process manager for instance %s: %w", id, err)
 			m.logger.Warn("error stopping process manager",
 				zap.String("instance_id", id),
 				zap.Error(err))
 		}
 	}
 
-	m.logger.Debug("StopInstance: shutting down HTTP server",
-		zap.String("instance_id", id),
-		zap.Int("port", inst.Port))
-
-	var stopErr error
-	if inst.server != nil {
-		if err := m.stopHTTPServer(ctx, id, inst.Port, inst.server); err != nil {
-			stopErr = err
-		}
+	stopErr := errors.Join(httpStopErr, processStopErr)
+	if httpStopErr != nil || (processStopErr != nil && !canReleaseInstanceResources(processStopErr)) {
+		return stopErr
 	}
 
 	m.logger.Debug("StopInstance: releasing port",
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
-
-	// Release port (quick operation, re-acquire lock)
 	m.mu.Lock()
-	m.portAlloc.Release(inst.Port)
-	m.mu.Unlock()
-
-	if stopErr != nil {
-		return stopErr
+	if !inst.portReleased {
+		m.portAlloc.Release(inst.Port)
+		inst.portReleased = true
 	}
+	if stopErr == nil {
+		delete(m.instances, id)
+	}
+	m.mu.Unlock()
 
 	m.logger.Info("StopInstance completed",
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
 
-	return nil
+	return stopErr
+}
+
+type instanceResourceReleaseError interface {
+	CanReleaseInstanceResources() bool
+}
+
+func canReleaseInstanceResources(err error) bool {
+	var classified instanceResourceReleaseError
+	return errors.As(err, &classified) && classified.CanReleaseInstanceResources()
 }
 
 type instanceHTTPServer interface {

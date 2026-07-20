@@ -3,6 +3,7 @@
 import { useMemo, useSyncExternalStore } from "react";
 
 import { LOCATION_CHANGE_EVENT } from "./navigation-event";
+import { pushNavigationState, replaceNavigationState } from "./navigation-guard";
 
 type NavigateOptions = {
   scroll?: boolean;
@@ -47,13 +48,14 @@ export function useParams(): Record<string, string> {
 
 function navigate(mode: "push" | "replace", href: string, options?: NavigateOptions): void {
   if (mode === "push") {
-    window.history.pushState({}, "", href);
+    pushNavigationState({}, "", href, () => finishNavigation(options));
   } else {
-    window.history.replaceState({}, "", href);
+    replaceNavigationState({}, "", href, () => finishNavigation(options));
   }
-  if (options?.scroll !== false) {
-    window.scrollTo(0, 0);
-  }
+}
+
+function finishNavigation(options?: NavigateOptions): void {
+  if (options?.scroll !== false) window.scrollTo(0, 0);
   dispatchLocationChange();
 }
 

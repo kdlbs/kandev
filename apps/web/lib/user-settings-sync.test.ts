@@ -72,8 +72,18 @@ describe("createQueuedUserSettingsSync", () => {
       preferred_shell: value,
     }));
 
-    await sync("bash");
+    await expect(sync("bash")).rejects.toBeInstanceOf(ApiError);
 
     expect(updateUserSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects failed writes so explicit-save callers remain dirty and retryable", async () => {
+    const failure = new Error("network unavailable");
+    vi.mocked(updateUserSettings).mockRejectedValue(failure);
+    const sync = createQueuedUserSettingsSync<string>((value) => ({
+      preferred_shell: value,
+    }));
+
+    await expect(sync("zsh")).rejects.toBe(failure);
   });
 });

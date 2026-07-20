@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { resolveDesiredWorkflowId } from "./resolve-workflow";
+import {
+  resolveBoardWorkflowId,
+  resolveBoardWorkflowSteps,
+  resolveDesiredWorkflowId,
+} from "./resolve-workflow";
 import type { WorkflowsState } from "@/lib/state/slices";
 
 type Workflow = WorkflowsState["items"][number];
@@ -91,5 +95,84 @@ describe("resolveDesiredWorkflowId", () => {
       workspaceWorkflows: [workflow("wf-hidden", { hidden: true }), workflow("wf-visible")],
     });
     expect(result).toBe("wf-visible");
+  });
+});
+
+describe("resolveBoardWorkflowId", () => {
+  it("uses the selected mobile workflow before its snapshot hydrates", () => {
+    expect(
+      resolveBoardWorkflowId({
+        isMobile: true,
+        selectedWorkflowId: "wf-new",
+        focusedWorkflowId: "wf-new",
+        hydratedWorkflowId: "wf-old",
+      }),
+    ).toBe("wf-new");
+  });
+
+  it("uses the focused workflow for the mobile All-workflows view", () => {
+    expect(
+      resolveBoardWorkflowId({
+        isMobile: true,
+        selectedWorkflowId: null,
+        focusedWorkflowId: "wf-focused",
+        hydratedWorkflowId: null,
+      }),
+    ).toBe("wf-focused");
+  });
+
+  it("keeps desktop actions tied to the hydrated workflow", () => {
+    expect(
+      resolveBoardWorkflowId({
+        isMobile: false,
+        selectedWorkflowId: "wf-selected",
+        focusedWorkflowId: "wf-focused",
+        hydratedWorkflowId: "wf-hydrated",
+      }),
+    ).toBe("wf-hydrated");
+  });
+});
+
+describe("resolveBoardWorkflowSteps", () => {
+  const oldSteps = [{ id: "old-step", position: 0 }];
+
+  it("does not reuse steps from a previously hydrated workflow", () => {
+    expect(
+      resolveBoardWorkflowSteps({
+        effectiveWorkflowId: "wf-new",
+        hydratedWorkflowId: "wf-old",
+        snapshots: {},
+        activeSteps: oldSteps,
+      }),
+    ).toEqual([]);
+  });
+
+  it("uses active steps when they belong to the effective workflow", () => {
+    expect(
+      resolveBoardWorkflowSteps({
+        effectiveWorkflowId: "wf-old",
+        hydratedWorkflowId: "wf-old",
+        snapshots: {},
+        activeSteps: oldSteps,
+      }),
+    ).toBe(oldSteps);
+  });
+
+  it("sorts steps from the effective workflow snapshot", () => {
+    expect(
+      resolveBoardWorkflowSteps({
+        effectiveWorkflowId: "wf-new",
+        hydratedWorkflowId: "wf-old",
+        snapshots: {
+          "wf-new": {
+            steps: [
+              { id: "later", position: 2 },
+              { id: "first", position: 0 },
+            ],
+          },
+        },
+        activeSteps: oldSteps,
+      }).map((step) => step.id),
+    ).toEqual(["first", "later"]);
   });
 });

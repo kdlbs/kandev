@@ -4,15 +4,43 @@ import { useEffect, useMemo, useState } from "react";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { useAppStore } from "@/components/state-provider";
 import { searchTasks, updateTask } from "@/lib/api/domains/office-extended-api";
+import { detachTask, fetchTask } from "@/lib/api/domains/kanban-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
+import { TaskDetachConfirmDialog } from "@/components/task/task-detach-confirm-dialog";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import type { Task } from "@/app/office/tasks/[id]/types";
+import { workspaceModeFromMetadata, type WorkspaceMode } from "@/lib/kanban/map-task";
 
 type ParentPickerProps = {
   task: Task;
 };
 
 const NO_PARENT = "__none__";
+
+function useTaskWorkspaceMode(task: Task) {
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | undefined>(task.workspaceMode);
+
+  useEffect(() => {
+    if (task.workspaceMode) {
+      setWorkspaceMode(task.workspaceMode);
+      return;
+    }
+    if (!task.parentId) return;
+    let cancelled = false;
+    fetchTask(task.id)
+      .then((canonicalTask) => {
+        if (!cancelled) setWorkspaceMode(workspaceModeFromMetadata(canonicalTask.metadata));
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceMode(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [task.id, task.parentId, task.workspaceMode]);
+
+  return workspaceMode;
+}
 
 function buildOptions(candidates: OfficeTask[], currentTaskId: string): ComboboxOption[] {
   const noOpt: ComboboxOption = {
@@ -41,6 +69,9 @@ export function ParentPicker({ task }: ParentPickerProps) {
   const storeTasks = useAppStore((s) => s.office.tasks.items);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [fetched, setFetched] = useState<OfficeTask[]>([]);
+  const [detachRequested, setDetachRequested] = useState(false);
+  const [isDetaching, setIsDetaching] = useState(false);
+  const workspaceMode = useTaskWorkspaceMode(task);
   const mutate = useOptimisticTaskMutation();
 
   // If the store doesn't already have tasks for the workspace, lazily fetch.
@@ -68,6 +99,10 @@ export function ParentPicker({ task }: ParentPickerProps) {
   const handleSelect = async (next: string) => {
     const sendValue = next === NO_PARENT || next === "" ? "" : next;
     if (sendValue === (task.parentId ?? "")) return;
+    if (!sendValue) {
+      setDetachRequested(true);
+      return;
+    }
     const matched = candidates.find((t) => t.id === sendValue);
     try {
       await mutate(
@@ -84,17 +119,49 @@ export function ParentPicker({ task }: ParentPickerProps) {
     }
   };
 
+  const handleDetachConfirm = async () => {
+    if (isDetaching) return;
+    setIsDetaching(true);
+    try {
+      await mutate(
+        task.id,
+        {
+          parentId: undefined,
+          parentTitle: undefined,
+          parentIdentifier: undefined,
+        },
+        () => detachTask(task.id),
+      );
+      setDetachRequested(false);
+    } catch {
+      // useOptimisticTaskMutation restores state and reports the request error.
+    } finally {
+      setIsDetaching(false);
+    }
+  };
+
   return (
-    <Combobox
-      options={options}
-      value={currentValue}
-      onValueChange={handleSelect}
-      placeholder="No parent"
-      searchPlaceholder="Search tasks..."
-      emptyMessage="No tasks found."
-      triggerClassName="h-7 w-full justify-end px-2"
-      popoverAlign="end"
-      testId="parent-picker-trigger"
-    />
+    <>
+      <Combobox
+        options={options}
+        value={currentValue}
+        onValueChange={handleSelect}
+        placeholder="No parent"
+        searchPlaceholder="Search tasks..."
+        emptyMessage="No tasks found."
+        disabled={isDetaching}
+        triggerClassName="h-7 w-full justify-end px-2"
+        popoverAlign="end"
+        testId="parent-picker-trigger"
+      />
+      <TaskDetachConfirmDialog
+        open={detachRequested}
+        onOpenChange={setDetachRequested}
+        taskTitle={task.title}
+        sharesParentWorkspace={workspaceMode === "inherit_parent"}
+        isDetaching={isDetaching}
+        onConfirm={handleDetachConfirm}
+      />
+    </>
   );
 }

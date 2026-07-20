@@ -37,6 +37,12 @@ import (
 //
 // Idempotent: a rescan with no on-disk changes is a no-op.
 func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) {
+	release, err := m.admitStart()
+	if err != nil {
+		m.logger.Debug("workspace rescan rejected during teardown")
+		return
+	}
+	defer release()
 	// Serialize the whole rescan body. Two concurrent calls could otherwise
 	// both observe existingTrackers == 0 between the write-lock snapshot
 	// and the bootstrap branch, both calling transitionToMultiRepoMode and

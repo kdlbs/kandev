@@ -48,8 +48,35 @@ type Host interface {
 	// ListState returns every state entry for a scope/scopeID pair.
 	ListState(ctx context.Context, scope, scopeID string) ([]StateEntry, error)
 
-	// RevealSecret resolves a secret reference to its cleartext value.
+	// GetConfig returns the plugin's own operator-editable config: the
+	// values set in kandev's Settings > Plugins > <plugin> page against the
+	// manifest's config_schema. Returns an empty (non-nil) map when no
+	// config has been set yet. Ungated — a plugin can always read its own
+	// config, secret values included. Plugins should re-read config at
+	// startup: kandev restarts a running plugin when its config changes.
+	GetConfig(ctx context.Context) (map[string]any, error)
+
+	// RevealSecret resolves an operator-provided secret reference (e.g. a
+	// ref placed in config pointing at a shared kandev secret) to its
+	// cleartext value. For secrets the plugin itself owns, use
+	// GetSecret/SetSecret/DeleteSecret instead.
 	RevealSecret(ctx context.Context, ref string) (string, error)
+
+	// GetSecret reads a plugin-owned secret previously stored with
+	// SetSecret. found is false, err is nil when the key was never set.
+	// Requires the `secrets` capability.
+	GetSecret(ctx context.Context, key string) (value string, found bool, err error)
+
+	// SetSecret upserts a plugin-owned secret into kandev's encrypted
+	// vault. Keys are namespaced to this plugin server-side — a plugin can
+	// never read or write another plugin's (or kandev's) secrets through
+	// this API. Keys must match [a-zA-Z0-9][a-zA-Z0-9._-]{0,127}. Requires
+	// the `secrets` capability.
+	SetSecret(ctx context.Context, key, value string) error
+
+	// DeleteSecret removes a plugin-owned secret. Deleting a missing key
+	// is not an error. Requires the `secrets` capability.
+	DeleteSecret(ctx context.Context, key string) error
 
 	// EmitEvent publishes a plugin-originated event onto kandev's bus.
 	EmitEvent(ctx context.Context, name string, payload map[string]any) error
@@ -179,12 +206,48 @@ func (h *grpcHostClient) ListState(ctx context.Context, scope, scopeID string) (
 	return stateEntriesFromProto(resp.GetEntries())
 }
 
+func (h *grpcHostClient) GetConfig(ctx context.Context) (map[string]any, error) {
+	resp, err := h.client.GetConfig(ctx, &pluginv1.GetConfigRequest{})
+	if err != nil {
+		return nil, err
+	}
+	config, err := structToMap(resp.GetConfig())
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		config = map[string]any{}
+	}
+	return config, nil
+}
+
 func (h *grpcHostClient) RevealSecret(ctx context.Context, ref string) (string, error) {
 	resp, err := h.client.RevealSecret(ctx, &pluginv1.RevealSecretRequest{Ref: ref})
 	if err != nil {
 		return "", err
 	}
 	return resp.GetValue(), nil
+}
+
+func (h *grpcHostClient) GetSecret(ctx context.Context, key string) (string, bool, error) {
+	resp, err := h.client.GetSecret(ctx, &pluginv1.GetSecretRequest{Key: key})
+	if err != nil {
+		return "", false, err
+	}
+	if !resp.GetFound() {
+		return "", false, nil
+	}
+	return resp.GetValue(), true, nil
+}
+
+func (h *grpcHostClient) SetSecret(ctx context.Context, key, value string) error {
+	_, err := h.client.SetSecret(ctx, &pluginv1.SetSecretRequest{Key: key, Value: value})
+	return err
+}
+
+func (h *grpcHostClient) DeleteSecret(ctx context.Context, key string) error {
+	_, err := h.client.DeleteSecret(ctx, &pluginv1.DeleteSecretRequest{Key: key})
+	return err
 }
 
 func (h *grpcHostClient) EmitEvent(ctx context.Context, name string, payload map[string]any) error {
@@ -386,12 +449,46 @@ func (s *grpcHostServer) ListState(ctx context.Context, req *pluginv1.ListStateR
 	return &pluginv1.ListStateResponse{Entries: protoEntries}, nil
 }
 
+func (s *grpcHostServer) GetConfig(ctx context.Context, req *pluginv1.GetConfigRequest) (*pluginv1.GetConfigResponse, error) {
+	config, err := s.impl.GetConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	protoConfig, err := mapToStruct(config)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.GetConfigResponse{Config: protoConfig}, nil
+}
+
 func (s *grpcHostServer) RevealSecret(ctx context.Context, req *pluginv1.RevealSecretRequest) (*pluginv1.RevealSecretResponse, error) {
 	value, err := s.impl.RevealSecret(ctx, req.GetRef())
 	if err != nil {
 		return nil, err
 	}
 	return &pluginv1.RevealSecretResponse{Value: value}, nil
+}
+
+func (s *grpcHostServer) GetSecret(ctx context.Context, req *pluginv1.GetSecretRequest) (*pluginv1.GetSecretResponse, error) {
+	value, found, err := s.impl.GetSecret(ctx, req.GetKey())
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.GetSecretResponse{Found: found, Value: value}, nil
+}
+
+func (s *grpcHostServer) SetSecret(ctx context.Context, req *pluginv1.SetSecretRequest) (*pluginv1.SetSecretResponse, error) {
+	if err := s.impl.SetSecret(ctx, req.GetKey(), req.GetValue()); err != nil {
+		return nil, err
+	}
+	return &pluginv1.SetSecretResponse{}, nil
+}
+
+func (s *grpcHostServer) DeleteSecret(ctx context.Context, req *pluginv1.DeleteSecretRequest) (*pluginv1.DeleteSecretResponse, error) {
+	if err := s.impl.DeleteSecret(ctx, req.GetKey()); err != nil {
+		return nil, err
+	}
+	return &pluginv1.DeleteSecretResponse{}, nil
 }
 
 func (s *grpcHostServer) EmitEvent(ctx context.Context, req *pluginv1.EmitEventRequest) (*pluginv1.EmitEventResponse, error) {

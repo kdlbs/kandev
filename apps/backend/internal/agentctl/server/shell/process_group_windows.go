@@ -3,18 +3,44 @@
 package shell
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"syscall"
+	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/server/winproc"
+	"golang.org/x/sys/windows"
 )
 
 func configureShellProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
 	}
+}
+
+type shellProcessLifecycleHandle struct {
+	job winproc.KillOnCloseJob
+}
+
+func installShellProcessLifecycle(cmd *exec.Cmd) (shellProcessLifecycleHandle, error) {
+	job, err := winproc.InstallKillOnCloseJobForSuspendedCommand(cmd)
+	if err != nil {
+		return shellProcessLifecycleHandle{}, err
+	}
+	return shellProcessLifecycleHandle{job: job}, nil
+}
+
+func reapShellProcessLifecycle(lifecycle shellProcessLifecycleHandle) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return lifecycle.job.TerminateAndWait(ctx)
+}
+
+func ownsShellProcessLifecycle(lifecycle shellProcessLifecycleHandle) bool {
+	return lifecycle.job.Valid()
 }
 
 func killShellProcessGroup(p *os.Process) error {
@@ -30,14 +56,10 @@ func killShellProcessGroup(p *os.Process) error {
 	return nil
 }
 
+// taskkill /T waits for the requested process tree termination before it
+// returns; Windows does not expose Unix-style process-group liveness here.
+func shellProcessGroupAlive(_ *os.Process) bool { return false }
+
 func runShellTaskkill(args ...string) error {
-	output, err := exec.Command("taskkill", args...).CombinedOutput()
-	if err == nil {
-		return nil
-	}
-	msg := strings.TrimSpace(string(output))
-	if msg == "" {
-		return err
-	}
-	return fmt.Errorf("%w: %s", err, msg)
+	return winproc.RunTaskkill(args...)
 }

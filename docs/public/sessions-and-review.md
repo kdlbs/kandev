@@ -48,7 +48,7 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 |---|---|
 | **Rename** | Changes the session's display name |
 | **Set as Primary** | Makes a stoppable session the task's primary target |
-| **Stop** | Cancels the active agent turn |
+| **Stop** | Cancels the active agent turn for this session |
 | **Resume** | Attempts to continue a completed, failed, or cancelled session |
 | **Delete** | Permanently removes the conversation; if it was primary, another session is promoted when possible |
 | **Share** | Opens the publishing preview for an eligible session |
@@ -57,14 +57,17 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 
 Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
 
+Stopping a turn does not itself run the next queued message. Expand the queue and select **Run next** when you want processing to continue.
+
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
 ## Let agents coordinate sessions
 
-Task MCP gives an agent two coordination operations:
+Task MCP gives an agent three session-coordination operations:
 
 - `spawn_session_kandev` starts another session on the current task by default. It can select a profile and name, and can target another task in the same workspace. The new session shares the target task's environment; its supplied prompt is its initial context.
 - `message_task_kandev` sends work to a task's primary session or to an explicit session ID. A same-task sibling must be addressed by session ID, and a session cannot message itself.
+- `stop_task_kandev` asks the current task to halt all live sessions on one same-workspace direct child. It sends no prompt and has no session-specific option.
 
 Delivery follows the target state:
 
@@ -75,11 +78,15 @@ Delivery follows the target state:
 
 The default pending-message limit is 10 per session. Operators can change it with `KANDEV_QUEUE_MAX_PER_SESSION`; a value of `0` or less removes the cap, so the queue can grow without that bound. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders must queue.
 
+For urgent replacement work, the parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; this cancels the current approach and immediately tries to dispatch the new prompt, with a safe queued fallback. Use `stop_task_kandev` only for halt-only intent. A successful stop marks every accepted live child session `CANCELLED` and schedules graceful teardown asynchronously. Kandev then attempts to move an eligible unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states remain unchanged. A child with no live execution returns idempotent `not_running`, and its worktrees, environment, commits, task record, descendants, and queued messages are preserved. See [Coordination](coordination.md) for the complete authority and lifecycle contract.
+
 Messages show peer attribution, and Kandev gives the receiving agent hidden reply instructions. The receiver can still decline the request. A full task UUID is sufficient for cross-workspace messaging, so treat task IDs as sensitive routing identifiers when untrusted agents share one deployment. See [Coordination](coordination.md) and [Automation and MCP](automation-and-mcp.md).
 
 ## Use the workbench
 
-Desktop panel groups can host agent chat, files, terminals, Changes, the task plan, previews, and GitHub pull-request detail. Use **+** to add a panel. Mobile exposes sessions, files, terminal, and changes through task navigation and sheets.
+Desktop panel groups can host agent chat, files, terminals, Changes, the task plan, previews, and GitHub pull-request detail. Use **+** to add a panel. Mobile exposes sessions, files, terminal, and changes through task navigation and sheets. Its task switcher opens as an inset bottom card, and the current-session control shows the active agent's icon and name.
+
+Open **Settings > General > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell. Changing the default does not replace a layout already saved for a task; choose **Reset Layout** from the workbench layout menu when you want that task to adopt the latest default.
 
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
 

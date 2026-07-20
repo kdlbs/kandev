@@ -14,6 +14,7 @@ import {
   parseTerminalLinkBehavior,
   taskCreateLastUsedHasValue,
   parseVoiceMode,
+  parseMCPTaskAgentProfileDefault,
 } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import {
@@ -244,6 +245,7 @@ function mapEditorBehaviorFields(
     chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
     confirmTaskArchive: s.confirm_task_archive ?? true,
+    mcpTaskAgentProfileDefault: parseMCPTaskAgentProfileDefault(s.mcp_task_agent_profile_default),
     showReleaseNotification: s.show_release_notification ?? true,
     releaseNotesLastSeenVersion: (s.release_notes_last_seen_version as string) || null,
     savedLayouts: s.saved_layouts ?? [],

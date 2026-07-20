@@ -42,6 +42,9 @@ func (e *Executor) EnsureSessionForAgent(
 		return nil, fmt.Errorf("lookup (task,agent) session: %w", err)
 	}
 	if existing != nil {
+		if err := e.rebindOfficeSessionExecutionProfile(ctx, existing, agentProfileID); err != nil {
+			return nil, err
+		}
 		reused, decision := e.tryReuseExistingSession(ctx, existing)
 		if decision == reuseDecisionTerminal {
 			// Fall through to create a new row below.
@@ -55,6 +58,9 @@ func (e *Executor) EnsureSessionForAgent(
 		// Lost the race against a concurrent caller. Re-read and reuse.
 		raced, lookupErr := e.repo.GetTaskSessionByTaskAndAgent(ctx, task.ID, agentInstanceID)
 		if lookupErr == nil && raced != nil {
+			if rebindErr := e.rebindOfficeSessionExecutionProfile(ctx, raced, agentProfileID); rebindErr != nil {
+				return nil, rebindErr
+			}
 			reused, _ := e.tryReuseExistingSession(ctx, raced)
 			if reused != nil {
 				return reused, nil
@@ -62,6 +68,46 @@ func (e *Executor) EnsureSessionForAgent(
 		}
 	}
 	return created, err
+}
+
+func (e *Executor) rebindOfficeSessionExecutionProfile(
+	ctx context.Context, session *models.TaskSession, executionProfileID string,
+) error {
+	if session == nil || executionProfileID == "" || session.ExecutionProfileID == executionProfileID {
+		return nil
+	}
+	snapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, executionProfileID)
+	for {
+		if isStopTerminalSessionState(session.State) {
+			return nil
+		}
+
+		expectedState := session.State
+		updated := *session
+		updated.ExecutionProfileID = executionProfileID
+		updated.AgentProfileSnapshot = snapshot
+		updated.IsPassthrough = isPassthrough
+		changed, err := e.repo.UpdateTaskSessionIfCurrentState(ctx, &updated, expectedState)
+		if err != nil {
+			return fmt.Errorf("update office execution profile: %w", err)
+		}
+		if changed {
+			*session = updated
+			return nil
+		}
+
+		fresh, err := e.repo.GetTaskSession(ctx, session.ID)
+		if err != nil {
+			return fmt.Errorf("reload office session after execution profile race: %w", err)
+		}
+		if fresh == nil {
+			return fmt.Errorf("reload office session after execution profile race: %w", models.ErrTaskSessionNotFound)
+		}
+		*session = *fresh
+		if session.ExecutionProfileID == executionProfileID || isStopTerminalSessionState(session.State) {
+			return nil
+		}
+	}
 }
 
 // reuseDecision describes what tryReuseExistingSession did with an existing
@@ -124,9 +170,8 @@ func (e *Executor) createOfficeSession(
 	agentProfileSnapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
 
 	now := time.Now().UTC()
-	// agentInstanceID and agentProfileID collapse to the same value after
-	// ADR 0005 (the office agent IS the profile). Prefer the explicit
-	// agent-id parameter when present; fall back to the profile id.
+	// Office sessions are owned by the stable agent identity while their
+	// concrete execution profile may change between runs.
 	sessionAgentProfileID := agentInstanceID
 	if sessionAgentProfileID == "" {
 		sessionAgentProfileID = agentProfileID
@@ -135,6 +180,7 @@ func (e *Executor) createOfficeSession(
 		ID:                   uuid.New().String(),
 		TaskID:               task.ID,
 		AgentProfileID:       sessionAgentProfileID,
+		ExecutionProfileID:   agentProfileID,
 		RepositoryID:         repositoryID,
 		BaseBranch:           baseBranch,
 		State:                models.TaskSessionStateCreated,

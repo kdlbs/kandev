@@ -175,6 +175,11 @@ func TestService_UpdateAvailable_Cases(t *testing.T) {
 		{"empty_current", "", "v1.0.1", false},
 		{"invalid_latest", "v1.0.0", "not-a-version", false},
 		{"no_prefix", "1.0.0", "1.0.1", true},
+		// git-describe build 60 commits ahead of the latest release: not behind.
+		{"ahead_of_latest", "v0.79.0-60-g8fae44fb1", "v0.79.0", false},
+		{"ahead_of_latest_dirty", "v0.79.0-60-g8fae44fb1-dirty", "v0.79.0", false},
+		// A dev build of an older tag is still behind a newer release.
+		{"ahead_but_older_tag", "v0.79.0-60-g8fae44fb1", "v0.80.0", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

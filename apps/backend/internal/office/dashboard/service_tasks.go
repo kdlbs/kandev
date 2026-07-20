@@ -71,6 +71,15 @@ func (s *DashboardService) UpdateTaskParentID(ctx context.Context, taskID, paren
 	if parentID != "" && parentID == taskID {
 		return fmt.Errorf("task cannot be its own parent")
 	}
+	if parentID == "" {
+		if s.taskDetacher == nil {
+			return errors.New("task detacher is not configured")
+		}
+		if _, err := s.taskDetacher.DetachTask(ctx, taskID); err != nil {
+			return err
+		}
+		return nil
+	}
 	if err := s.repo.UpdateTaskParentID(ctx, taskID, parentID); err != nil {
 		return err
 	}

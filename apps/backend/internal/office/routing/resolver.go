@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/registry"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -68,8 +69,19 @@ type Repo interface {
 // Resolver turns workspace routing config + agent overrides + provider
 // health into an ordered Candidate list. Pure: no I/O beyond Repo reads.
 type Resolver struct {
-	repo  Repo
-	clock func() time.Time
+	repo     Repo
+	clock    func() time.Time
+	profiles ExecutionProfileStore
+	registry *registry.Registry
+}
+
+// SetExecutionProfileStore enables live candidate validation. Without it the
+// resolver retains legacy behavior for isolated tests and non-composed callers.
+func (r *Resolver) SetExecutionProfileStore(
+	profiles ExecutionProfileStore, reg *registry.Registry,
+) {
+	r.profiles = profiles
+	r.registry = reg
 }
 
 // NewResolver builds a Resolver. When clock is nil, time.Now is used.
@@ -85,12 +97,13 @@ func NewResolver(repo Repo, clock func() time.Time) *Resolver {
 // workspace ProviderProfile. Self-describing so the launch path does not
 // have to reach back into routing config.
 type Candidate struct {
-	ProviderID ProviderID
-	Model      string
-	Tier       Tier
-	Mode       string
-	Flags      []string
-	Env        map[string]string
+	ExecutionProfileID string
+	ProviderID         ProviderID
+	Model              string
+	Tier               Tier
+	Mode               string
+	Flags              []string
+	Env                map[string]string
 }
 
 // SkippedCandidate records why a provider in the effective order was
@@ -156,8 +169,15 @@ func (r *Resolver) Resolve(
 	if err != nil {
 		return nil, fmt.Errorf("routing: load workspace config: %w", err)
 	}
-	if cfg == nil || !cfg.Enabled {
+	if cfg == nil || (!cfg.Enabled && len(cfg.ProviderOrder) == 0) {
 		return &Resolution{Enabled: false}, nil
+	}
+	if r.profiles != nil {
+		if _, err := normalizeProfileMappings(
+			ctx, workspaceID, cfg, r.profiles, r.registry,
+		); err != nil {
+			return nil, err
+		}
 	}
 	ov, err := ReadAgentOverrides(agent.Settings)
 	if err != nil {
@@ -168,18 +188,29 @@ func (r *Resolver) Resolve(
 	if len(order) == 0 {
 		return nil, ErrEmptyOrder
 	}
+	res := &Resolution{Enabled: cfg.Enabled, RequestedTier: tier, ProviderOrder: order}
+	if !cfg.Enabled {
+		if err := r.evaluateProvider(ctx, workspaceID, res, cfg, nil, order[0], tier, r.clock()); err != nil {
+			return nil, err
+		}
+		if len(res.Candidates) == 0 {
+			res.BlockReason = aggregateBlock(res.SkippedDegraded)
+		}
+		return res, nil
+	}
 	idx, err := r.loadHealthIndex(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	res := &Resolution{Enabled: true, RequestedTier: tier, ProviderOrder: order}
 	excluded := providerExcludeSet(opts.ExcludeProviders)
 	now := r.clock()
 	for _, pid := range order {
 		if _, skip := excluded[pid]; skip {
 			continue
 		}
-		r.evaluateProvider(res, cfg, idx, pid, tier, now)
+		if err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, pid, tier, now); err != nil {
+			return nil, err
+		}
 	}
 	if len(res.Candidates) == 0 {
 		res.BlockReason = aggregateBlock(res.SkippedDegraded)
@@ -191,32 +222,82 @@ func (r *Resolver) Resolve(
 // missing-mapping check, scoped health lookup, then appends either a
 // Candidate or a SkippedCandidate to res.
 func (r *Resolver) evaluateProvider(
+	ctx context.Context, workspaceID string,
 	res *Resolution, cfg *WorkspaceConfig, idx healthIndex,
 	pid ProviderID, tier Tier, now time.Time,
-) {
+) error {
 	prof, ok := cfg.ProviderProfiles[pid]
 	model := prof.TierMap.Model(tier)
-	if !ok || model == "" {
+	executionProfileID := prof.ExecutionProfileID(tier)
+	if !ok || executionProfileID == "" || (r.profiles == nil && model == "") {
 		res.SkippedDegraded = append(res.SkippedDegraded, SkippedCandidate{
 			ProviderID: pid,
 			Reason:     SkipReasonMissingModelMapping,
 		})
-		return
+		return nil
+	}
+	if r.profiles != nil {
+		resolvedModel, err := r.resolveExecutionProfile(ctx, workspaceID, pid, tier, executionProfileID)
+		if err != nil {
+			return err
+		}
+		model = resolvedModel
 	}
 	if hit, found := lookupHealth(idx, pid, tier, model); found {
 		if sc, skip := classifyHealthHit(pid, hit, now); skip {
 			res.SkippedDegraded = append(res.SkippedDegraded, sc)
-			return
+			return nil
 		}
 	}
 	res.Candidates = append(res.Candidates, Candidate{
-		ProviderID: pid,
-		Model:      model,
-		Tier:       tier,
-		Mode:       prof.Mode,
-		Flags:      prof.Flags,
-		Env:        prof.Env,
+		ExecutionProfileID: executionProfileID,
+		ProviderID:         pid,
+		Model:              model,
+		Tier:               tier,
+		Mode:               prof.Mode,
+		Flags:              prof.Flags,
+		Env:                prof.Env,
 	})
+	return nil
+}
+
+func (r *Resolver) resolveExecutionProfile(
+	ctx context.Context, workspaceID string, providerID ProviderID,
+	tier Tier, profileID string,
+) (string, error) {
+	profile, err := r.profiles.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil {
+		return "", profileMappingError(providerID, tier,
+			fmt.Sprintf("execution profile %q does not exist or is deleted", profileID))
+	}
+	if profile.WorkspaceID != "" && profile.WorkspaceID != workspaceID {
+		return "", profileMappingError(providerID, tier,
+			fmt.Sprintf("execution profile %q belongs to another workspace", profileID))
+	}
+	if profile.Role != "" {
+		return "", profileMappingError(providerID, tier,
+			fmt.Sprintf("profile %q is an Office agent identity, not an execution profile", profileID))
+	}
+	agent, err := r.profiles.GetAgent(ctx, profile.AgentID)
+	if err != nil || agent == nil || agent.Name == "" {
+		return "", profileMappingError(providerID, tier,
+			fmt.Sprintf("execution profile %q has no launchable provider", profileID))
+	}
+	if ProviderID(agent.Name) != providerID {
+		return "", profileMappingError(providerID, tier,
+			fmt.Sprintf("execution profile %q belongs to provider %q", profileID, agent.Name))
+	}
+	if r.registry != nil {
+		if _, ok := r.registry.Get(agent.Name); !ok {
+			return "", profileMappingError(providerID, tier,
+				fmt.Sprintf("execution profile %q provider %q is not launchable", profileID, agent.Name))
+		}
+	}
+	if profile.Model == "" {
+		return "", profileMappingError(providerID, tier,
+			fmt.Sprintf("execution profile %q has no model configured", profileID))
+	}
+	return profile.Model, nil
 }
 
 // loadHealthIndex pulls every non-healthy row for the workspace and

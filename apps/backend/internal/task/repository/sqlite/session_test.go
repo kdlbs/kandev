@@ -5,13 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
 )
 
 func newRepoForSessionTests(t *testing.T) *Repository {
@@ -170,6 +173,46 @@ func TestTaskSessionNotFoundErrorsAreTyped(t *testing.T) {
 	}
 	if err := repo.UpdateTaskSessionState(ctx, "session-found", models.TaskSessionStateCompleted, ""); err != nil {
 		t.Fatalf("UpdateTaskSessionState existing row: %v", err)
+	}
+}
+
+func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-baseline", "session-baseline", "turn-baseline")
+	ctx := context.Background()
+
+	stored, err := repo.SetSessionMetadataKeyIfAbsent(ctx, "session-baseline", "baseline", map[string]string{"effort": "high"})
+	if err != nil {
+		t.Fatalf("first SetSessionMetadataKeyIfAbsent: %v", err)
+	}
+	if !stored {
+		t.Fatal("first SetSessionMetadataKeyIfAbsent should store")
+	}
+	stored, err = repo.SetSessionMetadataKeyIfAbsent(ctx, "session-baseline", "baseline", map[string]string{"effort": "low"})
+	if err != nil {
+		t.Fatalf("second SetSessionMetadataKeyIfAbsent: %v", err)
+	}
+	if stored {
+		t.Fatal("second SetSessionMetadataKeyIfAbsent should not overwrite")
+	}
+
+	session, err := repo.GetTaskSession(ctx, "session-baseline")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	baseline, ok := session.Metadata["baseline"].(map[string]interface{})
+	if !ok || baseline["effort"] != "high" {
+		t.Fatalf("baseline = %#v, want effort=high", session.Metadata["baseline"])
+	}
+}
+
+func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
+	query := setSessionMetadataKeyIfAbsentQuery(dialect.PGX)
+	if strings.Contains(query, "json_set") || strings.Contains(query, "json_type") || strings.Contains(query, "json(?)") {
+		t.Fatalf("postgres write-once query uses SQLite JSON functions: %s", query)
+	}
+	if !strings.Contains(query, "jsonb_set") || !strings.Contains(query, "jsonb_extract_path") {
+		t.Fatalf("postgres write-once query must use JSONB set/existence operations: %s", query)
 	}
 }
 
@@ -692,6 +735,101 @@ func sessionState(t *testing.T, repo *Repository, sessionID string) string {
 		t.Fatalf("read state for %s: %v", sessionID, err)
 	}
 	return state
+}
+
+func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-cas", "session-running", "turn-cas")
+	if err := repo.UpdateTaskSessionState(ctx, "session-running", models.TaskSessionStateRunning, ""); err != nil {
+		t.Fatalf("seed running state: %v", err)
+	}
+	insertSession(t, repo, "session-completed", "task-cas", string(models.TaskSessionStateCompleted))
+
+	changed, cancelledAt, err := repo.CancelActiveTaskSession(ctx, "session-running", "coordinator stop")
+	if err != nil {
+		t.Fatalf("cancel running session: %v", err)
+	}
+	if !changed {
+		t.Fatal("running session was not cancelled")
+	}
+	if got := sessionState(t, repo, "session-running"); got != string(models.TaskSessionStateCancelled) {
+		t.Fatalf("running session state = %q, want CANCELLED", got)
+	}
+	cancelled, err := repo.GetTaskSession(ctx, "session-running")
+	if err != nil {
+		t.Fatalf("read cancelled session: %v", err)
+	}
+	if !cancelled.UpdatedAt.Equal(cancelledAt) {
+		t.Fatalf("cancel timestamp = %s, stored updated_at = %s", cancelledAt, cancelled.UpdatedAt)
+	}
+
+	changed, _, err = repo.CancelActiveTaskSession(ctx, "session-completed", "coordinator stop")
+	if err != nil {
+		t.Fatalf("cancel completed session: %v", err)
+	}
+	if changed {
+		t.Fatal("completed session reported a cancellation")
+	}
+	if got := sessionState(t, repo, "session-completed"); got != string(models.TaskSessionStateCompleted) {
+		t.Fatalf("completed session state = %q, want COMPLETED", got)
+	}
+}
+
+func TestUpdateTaskSessionStateIfCurrentRejectsStaleActiveWriter(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-state-cas", "session-state-cas", "turn-state-cas")
+	if err := repo.UpdateTaskSessionState(ctx, "session-state-cas", models.TaskSessionStateRunning, ""); err != nil {
+		t.Fatalf("seed running state: %v", err)
+	}
+	if changed, _, err := repo.CancelActiveTaskSession(ctx, "session-state-cas", "coordinator stop"); err != nil || !changed {
+		t.Fatalf("cancel session: changed=%v err=%v", changed, err)
+	}
+
+	changed, _, err := repo.UpdateTaskSessionStateIfCurrent(
+		ctx,
+		"session-state-cas",
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("stale conditional update: %v", err)
+	}
+	if changed {
+		t.Fatal("stale RUNNING writer changed a CANCELLED session")
+	}
+	if got := sessionState(t, repo, "session-state-cas"); got != string(models.TaskSessionStateCancelled) {
+		t.Fatalf("session state = %q, want CANCELLED", got)
+	}
+}
+
+func TestUpdateTaskSessionIfCurrentStateRejectsStaleFullRowWriter(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-full-row-cas", "session-full-row-cas", "turn-full-row-cas")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx, "session-full-row-cas", models.TaskSessionStateRunning, "",
+	))
+	stale, err := repo.GetTaskSession(ctx, "session-full-row-cas")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, stale.State)
+	changed, _, err := repo.CancelActiveTaskSession(ctx, stale.ID, "stopped by parent task via MCP")
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	stale.State = models.TaskSessionStateStarting
+	stale.ExecutorID = "late-executor"
+	changed, err = repo.UpdateTaskSessionIfCurrentState(
+		ctx, stale, models.TaskSessionStateRunning,
+	)
+	require.NoError(t, err)
+	require.False(t, changed)
+	stored, err := repo.GetTaskSession(ctx, stale.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, stored.State)
+	require.Empty(t, stored.ExecutorID)
 }
 
 func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *testing.T) {

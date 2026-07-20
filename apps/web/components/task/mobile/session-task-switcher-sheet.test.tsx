@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToastProvider } from "@/components/toast-provider";
@@ -76,6 +76,7 @@ describe("MobileTaskList", () => {
           onSelectTask={vi.fn()}
           onArchiveTask={vi.fn()}
           onDeleteTask={vi.fn()}
+          onDetachTask={vi.fn()}
           deletingTaskId={null}
         />
       </ToastProvider>,
@@ -88,5 +89,34 @@ describe("MobileTaskList", () => {
     fireEvent.click(header);
 
     expect(mocks.toggleSidebarGroupCollapsed).toHaveBeenCalledWith("default", "step-1");
+  });
+
+  it("opens detach from the touch task actions button for a subtask", () => {
+    const onDetachTask = vi.fn();
+    render(
+      <ToastProvider>
+        <MobileTaskList
+          tasks={[task("parent"), { ...task("child"), parentTaskId: "parent" }]}
+          workflows={[]}
+          stepsByWorkflowId={{}}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onArchiveTask={vi.fn()}
+          onDeleteTask={vi.fn()}
+          onDetachTask={onDetachTask}
+          deletingTaskId={null}
+        />
+      </ToastProvider>,
+    );
+
+    const childRow = screen
+      .getByText("Task child")
+      .closest<HTMLElement>("[data-testid='sidebar-task-item']");
+    expect(childRow).not.toBeNull();
+    fireEvent.click(within(childRow!).getByRole("button", { name: "Task actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Detach from parent" }));
+
+    expect(onDetachTask).toHaveBeenCalledWith("child");
   });
 });

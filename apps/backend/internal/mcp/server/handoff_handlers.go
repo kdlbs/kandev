@@ -19,9 +19,11 @@ func (s *Server) registerRelatedTasksTool() {
 			mcp.WithDescription(
 				`List parent, children, siblings, blockers, and blocked tasks for the current task.
 Use this to discover task IDs you can reach via message_task_kandev. Each related task includes its
-associated GitHub pull requests (number, url, title, state) under the "prs" field when any exist. In
-office mode, document keys are also included so you can fetch documents with get_task_document_kandev.
-Pass task_id to inspect a different task in the same workspace.`,
+title and description, so you can read dependency metadata (e.g. a "Depends on:" line) from a sibling
+that has not started yet — no need to fetch its conversation or list every task in the workflow. Each
+related task also includes its associated GitHub pull requests (number, url, title, state) under the
+"prs" field when any exist. In office mode, document keys are also included so you can fetch documents
+with get_task_document_kandev. Pass task_id to inspect a different task in the same workspace.`,
 			),
 			mcp.WithString("task_id", mcp.Description("Defaults to the current task.")),
 		),

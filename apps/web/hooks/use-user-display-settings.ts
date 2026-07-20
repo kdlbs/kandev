@@ -71,6 +71,7 @@ function carryForwardCoreSettings(current: DisplaySettings) {
 function carryForwardTaskActionSettings(current: DisplaySettings) {
   return {
     confirmTaskArchive: current.confirmTaskArchive ?? true,
+    mcpTaskAgentProfileDefault: current.mcpTaskAgentProfileDefault ?? "current_task",
   };
 }
 

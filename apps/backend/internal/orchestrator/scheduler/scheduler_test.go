@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -231,6 +232,28 @@ func (r *testTaskRepository) UpdateTaskStateIfCurrentIn(
 		return true, nil
 	}
 	return false, nil
+}
+
+func (r *testTaskRepository) UpdateTaskStateIfNotArchived(
+	_ context.Context, taskID string, state v1.TaskState,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	task, exists := r.tasks[taskID]
+	if !exists {
+		return false, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, taskID)
+	}
+	task.State = state
+	return true, nil
+}
+
+func (r *testTaskRepository) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, _ string,
+	_ models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	return r.UpdateTaskStateIfNotArchived(ctx, taskID, state)
 }
 
 func createTestLogger() *logger.Logger {

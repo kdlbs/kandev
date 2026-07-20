@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import {
@@ -18,9 +18,12 @@ import {
 } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
+import { useShellSettings } from "@/hooks/domains/settings/use-shell-settings";
+import { useSettingsSaveContributor } from "./settings-save-provider";
 import { TERMINAL_FONT_PRESETS } from "@/lib/terminal/terminal-font";
 import type { FontCategory } from "@/lib/terminal/terminal-font";
 
@@ -68,45 +71,21 @@ function FontGroupOptions() {
   ));
 }
 
-function TerminalFontSizeCard() {
-  const storeApi = useAppStoreApi();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const [isSaving, setIsSaving] = useState(false);
-  const [fontSize, setFontSize] = useState(() => userSettings.terminalFontSize ?? 13);
-
-  const saveFontSize = async (value: number) => {
-    if (isSaving) return;
-    if (!Number.isFinite(value)) return;
-    if (value < 8 || value > 24) return;
-    setIsSaving(true);
-    const current = storeApi.getState().userSettings;
-    const previous = current.terminalFontSize;
-    try {
-      setUserSettings({ ...current, terminalFontSize: value });
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        terminal_font_size: value,
-      });
-    } catch {
-      const latest = storeApi.getState().userSettings;
-      if (latest.workspaceId === current.workspaceId && latest.terminalFontSize === value) {
-        setUserSettings({ ...latest, terminalFontSize: previous });
-      }
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
+function TerminalFontSizeCard({
+  fontSize,
+  isDirty,
+  onChange,
+}: {
+  fontSize: number;
+  isDirty: boolean;
+  onChange: (value: number) => void;
+}) {
   const handleFontSizeBlur = () => {
-    const value = normalizeTerminalFontSize(fontSize, userSettings.terminalFontSize ?? 13);
-    setFontSize(value);
-    void saveFontSize(value);
+    onChange(normalizeTerminalFontSize(fontSize, 13));
   };
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="terminal-font-size-card">
       <CardHeader>
         <CardTitle className="text-base">Terminal Font Size</CardTitle>
       </CardHeader>
@@ -120,13 +99,13 @@ function TerminalFontSizeCard() {
               min={8}
               max={24}
               value={fontSize}
-              onChange={(e) => setFontSize(Number(e.target.value))}
+              data-settings-dirty={isDirty}
+              onChange={(e) => onChange(Number(e.target.value))}
               onBlur={handleFontSizeBlur}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleFontSizeBlur();
               }}
               className="w-20"
-              disabled={isSaving}
               data-testid="terminal-font-size-input"
             />
             <span className="text-xs text-muted-foreground">px (8-24)</span>
@@ -136,46 +115,33 @@ function TerminalFontSizeCard() {
           </p>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
-function TerminalFontCard() {
-  const storeApi = useAppStoreApi();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const [isSaving, setIsSaving] = useState(false);
+function TerminalFontCard({
+  fontFamily,
+  isDirty,
+  onChange,
+}: {
+  fontFamily: string | null;
+  isDirty: boolean;
+  onChange: (value: string | null) => void;
+}) {
   const [isCustom, setIsCustom] = useState(() => {
-    const current = userSettings.terminalFontFamily;
+    const current = fontFamily;
     if (!current) return false;
     return !TERMINAL_FONT_PRESETS.some((p) => p.value === current);
   });
-  const [customValue, setCustomValue] = useState(
-    () => (isCustom ? userSettings.terminalFontFamily : "") ?? "",
-  );
+  const [customValue, setCustomValue] = useState(() => (isCustom ? fontFamily : "") ?? "");
 
-  const saveFontFamily = async (value: string) => {
-    if (isSaving) return;
-    setIsSaving(true);
-    const current = storeApi.getState().userSettings;
-    const previous = current.terminalFontFamily;
-    const nextValue = value || null;
-    try {
-      setUserSettings({ ...current, terminalFontFamily: nextValue });
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        terminal_font_family: value,
-      });
-    } catch {
-      const latest = storeApi.getState().userSettings;
-      if (latest.workspaceId === current.workspaceId && latest.terminalFontFamily === nextValue) {
-        setUserSettings({ ...latest, terminalFontFamily: previous });
-      }
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  useEffect(() => {
+    const nextIsCustom = Boolean(
+      fontFamily && !TERMINAL_FONT_PRESETS.some((preset) => preset.value === fontFamily),
+    );
+    setIsCustom(nextIsCustom);
+    setCustomValue(nextIsCustom ? (fontFamily ?? "") : "");
+  }, [fontFamily]);
 
   const handleSelectChange = (value: string) => {
     if (value === CUSTOM_VALUE) {
@@ -184,26 +150,30 @@ function TerminalFontCard() {
     }
     setIsCustom(false);
     setCustomValue("");
-    void saveFontFamily(value === "default" ? "" : value);
+    onChange(value === "default" ? null : value);
   };
 
   const handleCustomBlur = () => {
     const trimmed = customValue.trim();
-    if (trimmed) void saveFontFamily(trimmed);
+    if (trimmed) onChange(trimmed);
   };
 
-  const selectValue = isCustom ? CUSTOM_VALUE : userSettings.terminalFontFamily || "default";
+  const selectValue = isCustom ? CUSTOM_VALUE : fontFamily || "default";
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="terminal-font-card">
       <CardHeader>
         <CardTitle className="text-base">Terminal Font</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
           <Label htmlFor="terminal-font">Font Family</Label>
-          <Select value={selectValue} onValueChange={handleSelectChange} disabled={isSaving}>
-            <SelectTrigger id="terminal-font" data-testid="terminal-font-select">
+          <Select value={selectValue} onValueChange={handleSelectChange}>
+            <SelectTrigger
+              id="terminal-font"
+              data-testid="terminal-font-select"
+              data-settings-dirty={isDirty}
+            >
               <SelectValue placeholder="Default" />
             </SelectTrigger>
             <SelectContent>
@@ -217,6 +187,7 @@ function TerminalFontCard() {
             <Input
               placeholder='e.g. "My Custom Font"'
               value={customValue}
+              data-settings-dirty={isDirty}
               onChange={(e) => setCustomValue(e.target.value)}
               onBlur={handleCustomBlur}
               onKeyDown={(e) => {
@@ -230,40 +201,21 @@ function TerminalFontCard() {
           </p>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
-function TerminalLinksCard() {
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
-  const [isSaving, setIsSaving] = useState(false);
-
-  const handleChange = async (value: "new_tab" | "browser_panel") => {
-    if (isSaving) return;
-    setIsSaving(true);
-    const current = storeApi.getState().userSettings;
-    const previous = current.terminalLinkBehavior;
-    try {
-      setUserSettings({ ...current, terminalLinkBehavior: value });
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        terminal_link_behavior: value,
-      });
-    } catch {
-      const latest = storeApi.getState().userSettings;
-      if (latest.workspaceId === current.workspaceId && latest.terminalLinkBehavior === value) {
-        setUserSettings({ ...latest, terminalLinkBehavior: previous });
-      }
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
+function TerminalLinksCard({
+  value,
+  isDirty,
+  onChange,
+}: {
+  value: "new_tab" | "browser_panel";
+  isDirty: boolean;
+  onChange: (value: "new_tab" | "browser_panel") => void;
+}) {
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="terminal-links-card">
       <CardHeader>
         <CardTitle className="text-base">Terminal Links</CardTitle>
       </CardHeader>
@@ -271,11 +223,10 @@ function TerminalLinksCard() {
         <div className="space-y-2">
           <Label htmlFor="terminal-link-behavior">Open links in</Label>
           <Select
-            value={userSettings.terminalLinkBehavior}
-            onValueChange={(v) => void handleChange(v as "new_tab" | "browser_panel")}
-            disabled={isSaving}
+            value={value}
+            onValueChange={(next) => onChange(next as "new_tab" | "browser_panel")}
           >
-            <SelectTrigger id="terminal-link-behavior">
+            <SelectTrigger id="terminal-link-behavior" data-settings-dirty={isDirty}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -286,14 +237,66 @@ function TerminalLinksCard() {
           <p className="text-xs text-muted-foreground">Click a URL in the terminal to open it.</p>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
 export function TerminalSettings() {
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const storeApi = useAppStoreApi();
+  const shellSettings = useShellSettings();
+  const [saved, setSaved] = useState(() => ({
+    preferredShell: shellSettings.preferredShell ?? "",
+    terminalFontFamily: userSettings.terminalFontFamily,
+    terminalFontSize: userSettings.terminalFontSize ?? 13,
+    terminalLinkBehavior: userSettings.terminalLinkBehavior,
+  }));
+  const [draft, setDraft] = useState(saved);
+  const revision = JSON.stringify(draft);
+  const validFontSize = normalizeTerminalFontSize(draft.terminalFontSize, 13);
+
+  useSettingsSaveContributor({
+    id: "general-terminal",
+    revision,
+    isDirty: revision !== JSON.stringify(saved),
+    canSave: Number.isFinite(draft.terminalFontSize),
+    invalidReason: "Terminal font size must be a number between 8 and 24.",
+    save: async () => {
+      const submitted = { ...draft, terminalFontSize: validFontSize };
+      const current = storeApi.getState().userSettings;
+      await updateUserSettings({
+        workspace_id: current.workspaceId || "",
+        repository_ids: current.repositoryIds || [],
+        preferred_shell: submitted.preferredShell.trim(),
+        terminal_font_family: submitted.terminalFontFamily ?? "",
+        terminal_font_size: submitted.terminalFontSize,
+        terminal_link_behavior: submitted.terminalLinkBehavior,
+      });
+      setSaved(submitted);
+      setDraft((latest) => (latest === draft ? submitted : latest));
+      setUserSettings({
+        ...storeApi.getState().userSettings,
+        preferredShell: submitted.preferredShell.trim() || null,
+        terminalFontFamily: submitted.terminalFontFamily,
+        terminalFontSize: submitted.terminalFontSize,
+        terminalLinkBehavior: submitted.terminalLinkBehavior,
+      });
+    },
+    discard: () => setDraft(saved),
+  });
+
   return (
     <div className="space-y-8">
-      <ShellSettingsCard />
+      <ShellSettingsCard
+        preferredShell={draft.preferredShell}
+        isDirty={draft.preferredShell !== saved.preferredShell}
+        onPreferredShellChange={(preferredShell) =>
+          setDraft((current) => ({ ...current, preferredShell }))
+        }
+        shellLoaded={shellSettings.loaded}
+        shellOptions={shellSettings.shellOptions ?? []}
+      />
 
       <Separator />
 
@@ -302,9 +305,25 @@ export function TerminalSettings() {
         title="Terminal"
         description="Configure terminal appearance and behavior"
       >
-        <TerminalFontCard />
-        <TerminalFontSizeCard />
-        <TerminalLinksCard />
+        <TerminalFontCard
+          fontFamily={draft.terminalFontFamily}
+          isDirty={draft.terminalFontFamily !== saved.terminalFontFamily}
+          onChange={(terminalFontFamily) =>
+            setDraft((current) => ({ ...current, terminalFontFamily }))
+          }
+        />
+        <TerminalFontSizeCard
+          fontSize={draft.terminalFontSize}
+          isDirty={draft.terminalFontSize !== saved.terminalFontSize}
+          onChange={(terminalFontSize) => setDraft((current) => ({ ...current, terminalFontSize }))}
+        />
+        <TerminalLinksCard
+          value={draft.terminalLinkBehavior}
+          isDirty={draft.terminalLinkBehavior !== saved.terminalLinkBehavior}
+          onChange={(terminalLinkBehavior) =>
+            setDraft((current) => ({ ...current, terminalLinkBehavior }))
+          }
+        />
       </SettingsSection>
     </div>
   );

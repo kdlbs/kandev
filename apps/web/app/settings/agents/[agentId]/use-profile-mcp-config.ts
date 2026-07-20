@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getAgentProfileMcpConfigAction,
   updateAgentProfileMcpConfigAction,
@@ -19,15 +19,28 @@ type UseProfileMcpConfigParams = {
 type UseProfileMcpConfigResult = {
   mcpEnabled: boolean;
   mcpServers: string;
+  mcpBaselineEnabled: boolean;
+  mcpBaselineServers: string;
   mcpError: string | null;
   mcpDirty: boolean;
   mcpStatus: McpStatus;
   setMcpEnabled: (enabled: boolean) => void;
   handleMcpServersChange: (value: string) => void;
   handleSaveMcp: () => Promise<void>;
+  resetMcpDraft: () => void;
 };
 
 const EMPTY_EXAMPLE = '{\n  "mcpServers": {}\n}';
+const isEmptyExample = (value: string) => value.trim() === EMPTY_EXAMPLE.trim();
+
+type McpStateSetters = {
+  setMcpConfig: (value: AgentProfileMcpConfig | null) => void;
+  setMcpEnabledState: (value: boolean) => void;
+  setMcpServers: (value: string) => void;
+  setMcpDirty: (value: boolean) => void;
+  setMcpError: (value: string | null) => void;
+  setMcpStatus: (value: McpStatus) => void;
+};
 
 function serializeServers(config: AgentProfileMcpConfig | null): string {
   if (!config?.servers || Object.keys(config.servers).length === 0) {
@@ -53,14 +66,7 @@ function normalizeServers(value: unknown): Record<string, McpServerDef> {
 function useResetOnUnsupported(
   supportsMcp: boolean,
   isEditableProfile: boolean,
-  setters: {
-    setMcpConfig: (v: AgentProfileMcpConfig | null) => void;
-    setMcpEnabledState: (v: boolean) => void;
-    setMcpServers: (v: string) => void;
-    setMcpDirty: (v: boolean) => void;
-    setMcpError: (v: string | null) => void;
-    setMcpStatus: (v: McpStatus) => void;
-  },
+  setters: McpStateSetters,
 ) {
   useEffect(() => {
     if (supportsMcp && isEditableProfile) return;
@@ -86,14 +92,7 @@ function useFetchConfig(
   supportsMcp: boolean,
   isEditableProfile: boolean,
   hasInitialConfig: boolean,
-  setters: {
-    setMcpConfig: (v: AgentProfileMcpConfig) => void;
-    setMcpEnabledState: (v: boolean) => void;
-    setMcpServers: (v: string) => void;
-    setMcpDirty: (v: boolean) => void;
-    setMcpError: (v: string | null) => void;
-    setMcpStatus: (v: McpStatus) => void;
-  },
+  setters: McpStateSetters,
 ) {
   useEffect(() => {
     if (!supportsMcp || !isEditableProfile || hasInitialConfig) return;
@@ -125,6 +124,27 @@ function useFetchConfig(
   }, [profileId, supportsMcp, isEditableProfile, hasInitialConfig]);
 }
 
+function useLatestMcpDraft(enabled: boolean, servers: string) {
+  const ref = useRef({ enabled, servers });
+  ref.current = { enabled, servers };
+  return ref;
+}
+
+function resetMcpDraftState(config: AgentProfileMcpConfig | null, setters: McpStateSetters) {
+  setters.setMcpEnabledState(config?.enabled ?? false);
+  setters.setMcpServers(serializeServers(config));
+  setters.setMcpDirty(false);
+  setters.setMcpError(null);
+  setters.setMcpStatus("idle");
+}
+
+function mcpBaseline(config: AgentProfileMcpConfig | null) {
+  return {
+    mcpBaselineEnabled: config?.enabled ?? false,
+    mcpBaselineServers: serializeServers(config),
+  };
+}
+
 export function useProfileMcpConfig({
   profileId,
   supportsMcp,
@@ -139,6 +159,7 @@ export function useProfileMcpConfig({
   const [mcpDirty, setMcpDirty] = useState(false);
   const [mcpStatus, setMcpStatus] = useState<McpStatus>("idle");
   const [hasInitialConfig] = useState(initialConfig !== undefined);
+  const latestDraftRef = useLatestMcpDraft(mcpEnabled, mcpServers);
 
   const isEditableProfile = Boolean(profileId) && !profileId.startsWith("draft-");
 
@@ -153,8 +174,6 @@ export function useProfileMcpConfig({
 
   useResetOnUnsupported(supportsMcp, isEditableProfile, stateSetters);
   useFetchConfig(profileId, supportsMcp, isEditableProfile, hasInitialConfig, stateSetters);
-
-  const isEmptyExample = (value: string) => value.trim() === EMPTY_EXAMPLE.trim();
 
   const setMcpEnabled = (enabled: boolean) => {
     setMcpEnabledState(enabled);
@@ -183,6 +202,8 @@ export function useProfileMcpConfig({
 
   const handleSaveMcp = async () => {
     if (!isEditableProfile) return;
+    const submittedEnabled = mcpEnabled;
+    const submittedServers = mcpServers;
     setMcpStatus("loading");
 
     let servers: Record<string, McpServerDef> = {};
@@ -193,7 +214,7 @@ export function useProfileMcpConfig({
     } catch (error) {
       setMcpStatus("error");
       setMcpError(error instanceof Error ? error.message : "Invalid MCP config");
-      return;
+      throw error;
     }
 
     try {
@@ -203,25 +224,33 @@ export function useProfileMcpConfig({
         meta: mcpConfig?.meta ?? {},
       });
       setMcpConfig(updated);
-      setMcpEnabledState(updated.enabled);
-      setMcpServers(serializeServers(updated));
-      setMcpDirty(false);
+      setMcpEnabledState((current) => (current === submittedEnabled ? updated.enabled : current));
+      setMcpServers((current) =>
+        current === submittedServers ? serializeServers(updated) : current,
+      );
+      setMcpDirty(
+        latestDraftRef.current.enabled !== submittedEnabled ||
+          latestDraftRef.current.servers !== submittedServers,
+      );
       setMcpError(null);
       setMcpStatus("success");
     } catch (error) {
       setMcpStatus("error");
       onToastError(error);
+      throw error;
     }
   };
 
   return {
     mcpEnabled,
     mcpServers,
+    ...mcpBaseline(mcpConfig),
     mcpError,
     mcpDirty,
     mcpStatus,
     setMcpEnabled,
     handleMcpServersChange,
     handleSaveMcp,
+    resetMcpDraft: () => resetMcpDraftState(mcpConfig, stateSetters),
   };
 }

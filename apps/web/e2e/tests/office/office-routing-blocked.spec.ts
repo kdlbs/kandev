@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { balancedExecutionProfileRouting } from "../../helpers/office-routing";
 
 /**
  * Phase 7 spec #3 — every provider blocked on user-actionable code.
@@ -30,6 +31,7 @@ test.describe("Office provider routing — blocked", () => {
 
   test("user-action codes on every provider park run as blocked", async ({
     backend,
+    apiClient,
     officeApi,
     officeSeed,
   }) => {
@@ -39,15 +41,13 @@ test.describe("Office provider routing — blocked", () => {
       KANDEV_PROVIDER_FAILURES: "claude-acp:auth_required,codex-acp:missing_credentials",
     });
 
-    await officeApi.updateRouting(officeSeed.workspaceId, {
-      enabled: true,
-      provider_order: ["claude-acp", "codex-acp"],
-      default_tier: "balanced",
-      provider_profiles: {
-        "claude-acp": { tier_map: { balanced: "sonnet" }, mode: "default" },
-        "codex-acp": { tier_map: { balanced: "gpt-5" }, mode: "default" },
-      },
-    });
+    await officeApi.updateRouting(
+      officeSeed.workspaceId,
+      await balancedExecutionProfileRouting(apiClient, officeApi, officeSeed.workspaceId, [
+        "claude-acp",
+        "codex-acp",
+      ]),
+    );
 
     const task = (await officeApi.createTask(officeSeed.workspaceId, "Blocked test", {
       workflow_id: officeSeed.workflowId,

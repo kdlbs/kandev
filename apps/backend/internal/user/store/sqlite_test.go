@@ -91,6 +91,39 @@ func TestScanUserSettingsConfirmTaskArchiveDefault(t *testing.T) {
 	}
 }
 
+func TestScanUserSettingsMCPTaskAgentProfileDefault(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty settings use current task", raw: `{}`, want: "current_task"},
+		{name: "missing setting uses current task", raw: `{"chat_submit_key":"enter"}`, want: "current_task"},
+		{name: "unknown setting uses current task", raw: `{"mcp_task_agent_profile_default":"future_value"}`, want: "current_task"},
+		{name: "workspace default is preserved", raw: `{"mcp_task_agent_profile_default":"workspace_default"}`, want: "workspace_default"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			raw, err := json.Marshal(settings)
+			if err != nil {
+				t.Fatalf("marshal normalized settings: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatalf("decode normalized settings: %v", err)
+			}
+			if got := payload["mcp_task_agent_profile_default"]; got != tt.want {
+				t.Fatalf("mcp_task_agent_profile_default = %#v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMarshalUserSettingsPersistsDisabledArchiveConfirmation(t *testing.T) {
 	raw, err := marshalUserSettingsPayload(&models.UserSettings{ConfirmTaskArchive: false})
 	if err != nil {
@@ -103,6 +136,52 @@ func TestMarshalUserSettingsPersistsDisabledArchiveConfirmation(t *testing.T) {
 	}
 	if got, ok := payload["confirm_task_archive"].(bool); !ok || got {
 		t.Fatalf("confirm_task_archive = %#v, want false", payload["confirm_task_archive"])
+	}
+}
+
+func TestMarshalUserSettingsPersistsMCPTaskAgentProfileDefault(t *testing.T) {
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{
+		MCPTaskAgentProfileDefault: models.MCPTaskAgentProfileDefaultWorkspaceDefault,
+	})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if got := payload["mcp_task_agent_profile_default"]; got != models.MCPTaskAgentProfileDefaultWorkspaceDefault {
+		t.Fatalf("mcp_task_agent_profile_default = %#v, want workspace_default", got)
+	}
+}
+
+func TestSQLiteRepositoryMCPTaskAgentProfileDefaultRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	settings.MCPTaskAgentProfileDefault = models.MCPTaskAgentProfileDefaultWorkspaceDefault
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get saved settings: %v", err)
+	}
+	if got.MCPTaskAgentProfileDefault != models.MCPTaskAgentProfileDefaultWorkspaceDefault {
+		t.Fatalf("MCPTaskAgentProfileDefault = %q, want workspace_default", got.MCPTaskAgentProfileDefault)
 	}
 }
 

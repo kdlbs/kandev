@@ -215,6 +215,103 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect.poll(() => fs.existsSync(pluginDir), { timeout: 10_000 }).toBe(false);
   });
 
+  test("settings page: schema-driven form, secret masking, and Host GetConfig delivery", async ({
+    testPage,
+    apiClient,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+    const pluginsDir = path.join(backend.tmpDir, ".kandev", "plugins");
+    const secretToken = "ghp_e2e_secret_token";
+
+    // --- Install via the upload UI, then click through to the detail page ---
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+    await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+
+    await testPage.getByTestId(`plugin-row-link-${PLUGIN_ID}`).click();
+    await expect(testPage).toHaveURL(new RegExp(`/settings/plugins/${PLUGIN_ID}$`));
+    await expect(testPage.getByTestId(`plugin-detail-${PLUGIN_ID}`)).toBeVisible();
+    await expect(testPage.getByTestId("plugin-manifest-card")).toBeVisible();
+
+    // --- Fill the config_schema-driven form: secret token + plain string ---
+    const tokenInput = testPage.getByTestId("plugin-config-field-api_token").locator("input");
+    const greetingInput = testPage.getByTestId("plugin-config-field-greeting").locator("input");
+    await expect(tokenInput).toHaveAttribute("type", "password");
+    await tokenInput.fill(secretToken);
+    await greetingInput.fill("hello from e2e");
+    await expect(tokenInput).toHaveAttribute("data-settings-dirty", "true");
+    await expect(greetingInput).toHaveAttribute("data-settings-dirty", "true");
+    await expect(testPage.getByTestId("plugin-settings-card")).toHaveAttribute(
+      "data-settings-dirty",
+      "true",
+    );
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
+
+    // --- After save the form re-fetches the MASKED config: the token shows
+    // as the placeholder, never the cleartext; the greeting round-trips. ---
+    await expect(tokenInput).toHaveValue("********", { timeout: 15_000 });
+    await expect(greetingInput).toHaveValue("hello from e2e");
+
+    // --- The config file never persists the cleartext: the secret field is
+    // a reference into kandev's encrypted vault. ---
+    const configPath = path.join(pluginsDir, `${PLUGIN_ID}.config.yml`);
+    await expect.poll(() => fs.existsSync(configPath), { timeout: 10_000 }).toBe(true);
+    const configFile = fs.readFileSync(configPath, "utf8");
+    expect(configFile).not.toContain(secretToken);
+    expect(configFile).toContain(`vault:plugin:${PLUGIN_ID}:config:api_token`);
+
+    // --- The operator API never returns the cleartext either. ---
+    const configRes = await apiClient.rawRequest("GET", `/api/plugins/${PLUGIN_ID}/config`);
+    const configBody = (await configRes.json()) as { config: Record<string, unknown> };
+    expect(configBody.config.api_token).toBe("********");
+    expect(configBody.config.greeting).toBe("hello from e2e");
+
+    // --- Saving restarted the plugin; it must be Active again. ---
+    await testPage.goto("/settings/plugins");
+    await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible({ timeout: 15_000 });
+
+    // --- Prove the Host GetConfig gRPC path: the webhook makes the fixture
+    // binary call Host.GetConfig and snapshot the result to config.json in
+    // its data dir — cleartext secret included. ---
+    const webhookRes = await apiClient.rawRequest(
+      "POST",
+      `/api/plugins/${PLUGIN_ID}/webhooks/test-hook`,
+      {},
+    );
+    expect(webhookRes.status).toBe(200);
+
+    const snapshotPath = path.join(pluginsDir, PLUGIN_ID, "data", "config.json");
+    await expect
+      .poll(
+        () => {
+          if (!fs.existsSync(snapshotPath)) return null;
+          return (JSON.parse(fs.readFileSync(snapshotPath, "utf8")) as Record<string, unknown>)
+            .api_token;
+        },
+        { timeout: 15_000, intervals: [250, 500, 1000] },
+      )
+      .toBe(secretToken);
+
+    // --- And the plugin-scoped secret primitives: the same webhook makes
+    // the fixture SetSecret("probe") then GetSecret it back through the
+    // vault, writing the round-tripped value to secret-probe.json. ---
+    const probePath = path.join(pluginsDir, PLUGIN_ID, "data", "secret-probe.json");
+    await expect
+      .poll(
+        () => {
+          if (!fs.existsSync(probePath)) return null;
+          return (JSON.parse(fs.readFileSync(probePath, "utf8")) as Record<string, unknown>).probe;
+        },
+        { timeout: 15_000, intervals: [250, 500, 1000] },
+      )
+      .toBe("s3cret-roundtrip");
+  });
+
   test("uploading a corrupted package surfaces install-plugin-error", async ({ testPage }) => {
     const junkPath = path.join(os.tmpdir(), `kandev-e2e-corrupt-plugin-${Date.now()}.tar.gz`);
     fs.writeFileSync(junkPath, "not a real gzip archive, just junk bytes\n".repeat(8));

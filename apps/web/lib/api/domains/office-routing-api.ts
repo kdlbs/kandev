@@ -3,6 +3,7 @@ import type {
   AgentRouteData,
   AgentRoutePreview,
   AgentRoutingOverrides,
+  ExecutionProfileSummary,
   ProviderHealth,
   WorkspaceRouting,
 } from "@/lib/state/slices/office/types";
@@ -12,6 +13,7 @@ const BASE = "/api/v1/office";
 export type RoutingConfigResponse = {
   config: WorkspaceRouting | null;
   known_providers: string[];
+  execution_profiles: ExecutionProfileSummary[];
 };
 
 export function getWorkspaceRouting(workspaceId: string, options?: ApiRequestOptions) {

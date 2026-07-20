@@ -1,6 +1,13 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render as renderWithoutSettingsProvider,
+  screen,
+} from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
+import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import type { PluginRecord, SyncResult } from "@/lib/types/plugins";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
@@ -88,6 +95,11 @@ const NEW_PLUGIN_ID = "new-plugin";
 const SYNC_BUTTON_TESTID = "plugins-sync-button";
 const INSTALL_TRIGGER_TESTID = "install-plugin-trigger";
 const NEW_PLUGIN_URL = "https://example.test/new-plugin-1.0.0.tar.gz";
+const UPLOAD_FILENAME = "new-plugin-1.0.0.tar.gz";
+
+function render(element: ReactElement) {
+  return renderWithoutSettingsProvider(<SettingsSaveProvider>{element}</SettingsSaveProvider>);
+}
 
 function activePlugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
   return {
@@ -264,7 +276,7 @@ describe("PluginsSettingsPage install dialog", () => {
 
   it("installs a plugin by uploading a file: calls the API and updates the store", async () => {
     setStoreState([]);
-    const file = new File([new Uint8Array([1, 2, 3])], "new-plugin-1.0.0.tar.gz", {
+    const file = new File([new Uint8Array([1, 2, 3])], UPLOAD_FILENAME, {
       type: "application/gzip",
     });
 
@@ -281,6 +293,38 @@ describe("PluginsSettingsPage install dialog", () => {
     await vi.waitFor(() => expect(installPluginUploadSpy).toHaveBeenCalledWith(file));
     const upsertPlugin = storeState.upsertPlugin as ReturnType<typeof vi.fn>;
     expect(upsertPlugin).toHaveBeenCalledWith(expect.objectContaining({ id: NEW_PLUGIN_ID }));
+  });
+});
+
+describe("PluginsSettingsPage install dialog state reset", () => {
+  it("clears the selected file after a successful upload install so reopening starts empty", async () => {
+    setStoreState([]);
+    const file = new File([new Uint8Array([1, 2, 3])], UPLOAD_FILENAME, {
+      type: "application/gzip",
+    });
+
+    render(<PluginsSettingsPage />);
+    fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
+    fireEvent.mouseDown(screen.getByTestId("install-plugin-tab-upload"));
+    fireEvent.change(screen.getByTestId("install-plugin-file-input"), {
+      target: { files: [file] },
+    });
+    expect(screen.getByTestId("install-plugin-dropzone").textContent).toContain(UPLOAD_FILENAME);
+    fireEvent.click(screen.getByTestId("install-plugin-upload-submit"));
+
+    // afterInstall closes the dialog by flipping the controlled `open` prop
+    // directly (not via onOpenChange), so the lifted file state must still be
+    // reset — otherwise the stale file leaks into the next open.
+    await vi.waitFor(() => expect(screen.queryByTestId("install-plugin-dialog")).toBeNull());
+
+    fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
+    fireEvent.mouseDown(screen.getByTestId("install-plugin-tab-upload"));
+    expect(screen.getByTestId("install-plugin-dropzone").textContent).not.toContain(
+      UPLOAD_FILENAME,
+    );
+    expect((screen.getByTestId("install-plugin-upload-submit") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it("shows a warning toast (not a bare success toast) when the package installed but failed to start", async () => {

@@ -1,5 +1,5 @@
 // Guards fixture-package/manifest.yaml against drift: it must stay a valid,
-// runtime-managed manifest that declares the id, tool, webhook, and UI
+// runtime-managed manifest that declares the id, webhook, and UI
 // bundle path the e2e suite and `make e2e-plugin-package` depend on. See
 // docs/plans/plugins/GRPC-CONTRACT.md §6.
 package main
@@ -24,12 +24,10 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.Equal(t, 1, m.APIVersion)
 	require.Equal(t, "1.0.0", m.Version)
 	require.True(t, m.IsManaged())
+	require.Equal(t, "https://github.com/kdlbs/kandev-plugin-template", m.RepoURL)
 	require.Equal(t, "/ui/bundle.js", m.UI.Bundle)
 	require.True(t, m.HasEvent("task.created"))
 	require.True(t, m.Capabilities.State)
-
-	require.Len(t, m.Tools, 1)
-	require.Equal(t, "echo", m.Tools[0].Name)
 
 	require.Len(t, m.Webhooks, 1)
 	require.Equal(t, "test-hook", m.Webhooks[0].Key)

@@ -3,10 +3,11 @@
 import { useCallback, useState } from "react";
 import { IconBellRinging, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { WatcherSettingsCard } from "@/components/integrations/watcher-settings-card";
 import { useToast } from "@/components/toast-provider";
 import { useJiraIssueWatches } from "@/hooks/domains/jira/use-jira-issue-watches";
+import { useWatcherEnabledDrafts } from "@/components/integrations/use-watcher-enabled-drafts";
 import { ResetWatchDialog, useWatchResetController } from "@/components/watches/reset-watch-dialog";
 import { JiraIssueWatchTable } from "./jira-issue-watch-table";
 import { JiraIssueWatchDialog } from "./jira-issue-watch-dialog";
@@ -86,17 +87,6 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
     [trigger, toast],
   );
 
-  const toggleEnabled = useCallback(
-    async (w: JiraIssueWatch) => {
-      try {
-        await update(w.id, { enabled: !w.enabled }, w.workspaceId);
-      } catch (err) {
-        toast({ description: `Toggle failed: ${String(err)}`, variant: "error" });
-      }
-    },
-    [update, toast],
-  );
-
   const wrappedReset = useCallback(
     async (w: JiraIssueWatch) => {
       try {
@@ -123,8 +113,17 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
     remove: wrappedDelete,
     trigger: wrappedTrigger,
     reset: wrappedReset,
-    toggleEnabled,
   };
+}
+
+function useEnabledDrafts(items: JiraIssueWatch[], update: RawActions["update"]) {
+  const saveEnabled = useCallback(
+    async (watch: JiraIssueWatch, enabled: boolean) => {
+      await update(watch.id, { enabled }, watch.workspaceId);
+    },
+    [update],
+  );
+  return useWatcherEnabledDrafts({ id: "jira-watch-enabled", items, saveEnabled });
 }
 
 export function JiraIssueWatchersSection() {
@@ -132,6 +131,7 @@ export function JiraIssueWatchersSection() {
   const { items, loading, create, update, remove, trigger, previewReset, reset } =
     useJiraIssueWatches();
   const actions = useToastedActions({ create, update, remove, trigger, reset });
+  const enabledDrafts = useEnabledDrafts(items, update);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<JiraIssueWatch | null>(null);
@@ -191,23 +191,23 @@ export function JiraIssueWatchersSection() {
         </Button>
       }
     >
-      <Card>
-        <CardContent className="pt-6">
-          {loading && items.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">Loading…</p>
-          ) : (
-            <JiraIssueWatchTable
-              watches={items}
-              showWorkspace
-              onEdit={openEdit}
-              onDelete={handleDelete}
-              onTrigger={handleTrigger}
-              onReset={handleReset}
-              onToggleEnabled={actions.toggleEnabled}
-            />
-          )}
-        </CardContent>
-      </Card>
+      <WatcherSettingsCard
+        isDirty={enabledDrafts.dirtyIds.size > 0}
+        isLoading={loading}
+        isEmpty={items.length === 0}
+        testId="jira-watchers-card"
+      >
+        <JiraIssueWatchTable
+          watches={enabledDrafts.items}
+          dirtyIds={enabledDrafts.dirtyIds}
+          showWorkspace
+          onEdit={openEdit}
+          onDelete={handleDelete}
+          onTrigger={handleTrigger}
+          onReset={handleReset}
+          onToggleEnabled={enabledDrafts.toggleEnabled}
+        />
+      </WatcherSettingsCard>
       <JiraIssueWatchDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}

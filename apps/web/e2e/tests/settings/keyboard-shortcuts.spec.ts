@@ -54,6 +54,10 @@ test.describe("Keyboard Shortcuts Settings", () => {
     // The Kbd element should now show the new shortcut
     await expect(recorder).toContainText("T", { timeout: 3_000 });
 
+    const floatingSave = testPage.getByTestId("settings-floating-save");
+    await floatingSave.getByRole("button", { name: "Save changes" }).click();
+    await expect(floatingSave).not.toBeVisible({ timeout: 10_000 });
+
     // Reload the page and verify the shortcut persisted
     await testPage.goto(KEYBOARD_SETTINGS_PATH);
     const recorderAfterReload = testPage.getByTestId("shortcut-recorder-BOTTOM_TERMINAL");

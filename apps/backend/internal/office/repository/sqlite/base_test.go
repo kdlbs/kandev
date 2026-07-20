@@ -1,6 +1,7 @@
 package sqlite_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -21,6 +22,7 @@ func newTestRepo(t *testing.T) *sqlite.Repository {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
@@ -39,6 +41,7 @@ func TestInitSchema_AllTablesExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	defer func() { _ = db.Close() }()
 
 	_, err = sqlite.NewWithDB(db, db, nil)
@@ -99,6 +102,7 @@ func TestInitSchema_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	defer func() { _ = db.Close() }()
 
 	// Create repo twice - should not error on second call
@@ -110,4 +114,83 @@ func TestInitSchema_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second init should be idempotent: %v", err)
 	}
+}
+
+func TestInitSchema_ExecutionProfileRoutingColumnsExist(t *testing.T) {
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init schema: %v", err)
+	}
+
+	assertTableColumn(t, db, "runs", "resolved_execution_profile_id")
+	assertTableColumn(t, db, "office_run_route_attempts", "execution_profile_id")
+}
+
+func TestInitSchema_ExecutionProfileRoutingColumnsReplay(t *testing.T) {
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("first init: %v", err)
+	}
+	dropColumnIfPresent(t, db, "runs", "resolved_execution_profile_id")
+	dropColumnIfPresent(t, db, "office_run_route_attempts", "execution_profile_id")
+
+	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("replay init: %v", err)
+	}
+
+	assertTableColumn(t, db, "runs", "resolved_execution_profile_id")
+	assertTableColumn(t, db, "office_run_route_attempts", "execution_profile_id")
+}
+
+func dropColumnIfPresent(t *testing.T, db *sqlx.DB, table, column string) {
+	t.Helper()
+	if !tableHasColumn(t, db, table, column) {
+		return
+	}
+	if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s DROP COLUMN %s`, table, column)); err != nil {
+		t.Fatalf("drop %s.%s: %v", table, column, err)
+	}
+}
+
+func assertTableColumn(t *testing.T, db *sqlx.DB, table, column string) {
+	t.Helper()
+	if !tableHasColumn(t, db, table, column) {
+		t.Errorf("%s.%s not found", table, column)
+	}
+}
+
+func tableHasColumn(t *testing.T, db *sqlx.DB, table, column string) bool {
+	t.Helper()
+	rows, err := db.Queryx(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		t.Fatalf("table info %s: %v", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatalf("scan table info %s: %v", table, err)
+		}
+		if name == column {
+			return true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate table info %s: %v", table, err)
+	}
+	return false
 }

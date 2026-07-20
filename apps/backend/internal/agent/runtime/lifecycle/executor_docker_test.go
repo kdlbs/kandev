@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -44,6 +46,27 @@ func TestNewDockerExecutor(t *testing.T) {
 	}
 	if exec.newClientFunc == nil {
 		t.Error("expected newClientFunc to be set")
+	}
+}
+
+func TestSetActivityCoordinatorReachesLazilyCreatedDockerClient(t *testing.T) {
+	log := newTestDockerLogger()
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", log)
+	dockerExec.newClientFunc = func(config.DockerConfig, *logger.Logger) (*docker.Client, error) {
+		return &docker.Client{}, nil
+	}
+	registry := NewExecutorRegistry(log)
+	registry.Register(dockerExec)
+	manager := NewManager(nil, nil, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	manager.SetActivityCoordinator(activity.NewCoordinator(activity.Options{}))
+
+	client := dockerExec.Client()
+	if client == nil {
+		t.Fatal("DockerExecutor.Client returned nil")
+	}
+	activityField := reflect.ValueOf(client).Elem().FieldByName("activity")
+	if !activityField.IsValid() || activityField.IsNil() {
+		t.Fatal("lazy Docker client did not receive the activity coordinator")
 	}
 }
 
@@ -679,7 +702,7 @@ func TestResolvePrepareScript(t *testing.T) {
 		if !strings.Contains(script, "git remote set-url") {
 			t.Error("expected token stripping after clone")
 		}
-		if !strings.Contains(script, "git checkout -b \"feature/task-abc\"") {
+		if !strings.Contains(script, "git checkout -b 'feature/task-abc'") {
 			t.Fatalf("expected Docker prepare script to create task branch, got:\n%s", script)
 		}
 	})

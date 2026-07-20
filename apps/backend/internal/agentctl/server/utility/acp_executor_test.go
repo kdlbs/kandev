@@ -1,6 +1,7 @@
 package utility
 
 import (
+	"encoding/json"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -11,6 +12,69 @@ import (
 )
 
 func ptr[T any](v T) *T { return &v }
+
+func TestProbeConfigOptions_PreservesDescriptions(t *testing.T) {
+	t.Parallel()
+
+	options := acp.SessionConfigSelectOptionsUngrouped{{
+		Value:       "high",
+		Name:        "High",
+		Description: ptr("More thorough reasoning."),
+	}}
+
+	converted := probeConfigOptions([]acp.SessionConfigOption{{
+		Select: &acp.SessionConfigOptionSelect{
+			Type:         "select",
+			Id:           "reasoning_effort",
+			Name:         "Reasoning effort",
+			Description:  ptr("Controls reasoning depth."),
+			CurrentValue: "high",
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &options},
+		},
+	}})
+
+	raw, err := json.Marshal(converted)
+	if err != nil {
+		t.Fatalf("marshal config options: %v", err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal config options: %v", err)
+	}
+	if got := payload[0]["description"]; got != "Controls reasoning depth." {
+		t.Errorf("option description = %#v, want %q", got, "Controls reasoning depth.")
+	}
+	values := payload[0]["options"].([]any)
+	if got := values[0].(map[string]any)["description"]; got != "More thorough reasoning." {
+		t.Errorf("value description = %#v, want %q", got, "More thorough reasoning.")
+	}
+}
+
+func TestApplySessionCompatibility_PreservesDescriptions(t *testing.T) {
+	t.Parallel()
+
+	out := &ProbeResponse{ConfigOptions: []ProbeConfigOption{{
+		Type:         "select",
+		ID:           "reasoning_effort",
+		Name:         "Reasoning effort",
+		Description:  "Controls reasoning depth.",
+		CurrentValue: "high",
+		Options: []ProbeConfigOptionChoice{{
+			Value:       "high",
+			Name:        "High",
+			Description: "More thorough reasoning.",
+		}},
+	}}}
+
+	applySessionCompatibility(out, "mock-agent")
+
+	if got := out.ConfigOptions[0].Description; got != "Controls reasoning depth." {
+		t.Errorf("option description = %q, want provider description", got)
+	}
+	if got := out.ConfigOptions[0].Options[0].Description; got != "More thorough reasoning." {
+		t.Errorf("value description = %q, want provider description", got)
+	}
+}
 
 func TestResolveProbeCommand_AllowsEveryListedBinary(t *testing.T) {
 	t.Parallel()
@@ -227,7 +291,7 @@ func TestApplySessionProbeFields_FallsBackToConfigOptions(t *testing.T) {
 	}
 
 	out := &ProbeResponse{}
-	applySessionProbeFields(out, resp)
+	applySessionProbeFields(out, resp, "")
 
 	if got, want := out.CurrentModelID, "opus"; got != want {
 		t.Fatalf("CurrentModelID = %q, want %q", got, want)
@@ -271,7 +335,7 @@ func TestApplySessionProbeFields_FallsBackToLegacyModels(t *testing.T) {
 	}
 
 	out := &ProbeResponse{}
-	applySessionProbeFields(out, resp)
+	applySessionProbeFields(out, resp, "")
 
 	if got, want := out.CurrentModelID, "claude-opus-4-7"; got != want {
 		t.Fatalf("CurrentModelID = %q, want %q", got, want)
@@ -284,6 +348,35 @@ func TestApplySessionProbeFields_FallsBackToLegacyModels(t *testing.T) {
 	}
 	if got, want := out.Models[0].Description, "Great for complex coding"; got != want {
 		t.Fatalf("Models[0].Description = %q, want %q", got, want)
+	}
+}
+
+func TestApplySessionProbeFields_GrokLegacyModelsExposeReasoning(t *testing.T) {
+	t.Parallel()
+
+	resp := acp.NewSessionResponse{
+		LegacyModels: &acp.LegacyModels{
+			CurrentModelId: "grok-4.5",
+			AvailableModels: []acp.LegacyModelInfo{{
+				ModelId: "grok-4.5",
+				Name:    "Grok 4.5",
+				Meta: map[string]any{
+					"supportsReasoningEffort": true,
+					"reasoningEffort":         "high",
+					"reasoningEfforts":        []any{"high", "medium", "low"},
+				},
+			}},
+		},
+	}
+
+	out := &ProbeResponse{}
+	applySessionProbeFields(out, resp, "grok-acp")
+
+	if got, want := len(out.ConfigOptions), 2; got != want {
+		t.Fatalf("len(ConfigOptions) = %d, want model + reasoning", got)
+	}
+	if got, want := out.ConfigOptions[1].ID, "reasoning_effort"; got != want {
+		t.Fatalf("ConfigOptions[1].ID = %q, want %q", got, want)
 	}
 }
 
@@ -313,7 +406,7 @@ func TestApplySessionProbeFields_TypedConfigOptionsBeatLegacyModels(t *testing.T
 	}
 
 	out := &ProbeResponse{}
-	applySessionProbeFields(out, resp)
+	applySessionProbeFields(out, resp, "")
 
 	if got, want := out.CurrentModelID, "opus"; got != want {
 		t.Fatalf("CurrentModelID = %q, want %q (typed configOptions must win)", got, want)
@@ -351,7 +444,7 @@ func TestApplySessionProbeFields_FlattensGroupedConfigOptions(t *testing.T) {
 	}
 
 	out := &ProbeResponse{}
-	applySessionProbeFields(out, resp)
+	applySessionProbeFields(out, resp, "")
 
 	if got, want := len(out.Modes), 2; got != want {
 		t.Fatalf("len(Modes) = %d, want %d", got, want)

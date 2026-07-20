@@ -4,6 +4,7 @@ import { forwardRef } from "react";
 import type { AnchorHTMLAttributes, MouseEvent, ReactNode } from "react";
 
 import { LOCATION_CHANGE_EVENT } from "@/lib/routing/navigation-event";
+import { pushNavigationState } from "@/lib/routing/navigation-guard";
 
 type AppLinkHref = string | URL;
 
@@ -23,9 +24,10 @@ const Link = forwardRef<HTMLAnchorElement, AppLinkProps>(function Link(
     if (shouldUseBrowserNavigation(event, resolvedHref)) return;
 
     event.preventDefault();
-    window.history.pushState({}, "", resolvedHref);
-    window.scrollTo({ top: 0, left: 0 });
-    window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
+    pushNavigationState({}, "", resolvedHref, () => {
+      window.scrollTo({ top: 0, left: 0 });
+      window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
+    });
   };
 
   return <a {...props} ref={ref} href={resolvedHref} onClick={handleClick} />;

@@ -87,6 +87,35 @@ func createTestExecution(id, taskID, sessionID string) *AgentExecution {
 	}
 }
 
+func TestHandleAgentEvent_UserMessageChunkNotBufferedAsAssistant(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "<hidden-system-prompt>\nhello",
+		Role: "user",
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "Hello.",
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+
+	var streamedText string
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data != nil && event.Data.Type == "message_streaming" {
+			streamedText += event.Data.Text
+		}
+	}
+	if streamedText != "Hello." {
+		t.Fatalf("streamed assistant text = %q, want %q", streamedText, "Hello.")
+	}
+}
+
 // TestHandleAgentEvent_StreamingThenComplete tests the normal flow:
 // message_chunk events followed by complete event - should NOT create duplicate
 func TestHandleAgentEvent_StreamingThenComplete(t *testing.T) {

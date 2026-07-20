@@ -16,13 +16,15 @@ import {
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
 import { Spinner } from "@kandev/ui/spinner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import {
   clearGitLabToken,
   configureGitLabHost,
@@ -92,93 +94,134 @@ function AuthMethodBadge({ method }: { method: GitLabStatus["auth_method"] }) {
   return <Badge variant="outline">{labels[method] ?? method}</Badge>;
 }
 
-function HostForm({ initial, onSaved }: { initial: string; onSaved: () => void }) {
+function HostForm({
+  initial,
+  onSaved,
+  onDirtyChange,
+}: {
+  initial: string;
+  onSaved: () => void;
+  onDirtyChange: (isDirty: boolean) => void;
+}) {
   const [host, setHost] = useState(initial);
-  const [saving, setSaving] = useState(false);
+  const [baseline, setBaseline] = useState(initial);
+  const [syncedInitial, setSyncedInitial] = useState(initial);
   const { toast } = useToast();
+  const isDirty = host !== baseline;
 
-  useEffect(() => {
+  useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
+
+  if (initial !== syncedInitial && host === baseline) {
+    setSyncedInitial(initial);
+    setBaseline(initial);
     setHost(initial);
-  }, [initial]);
+  }
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!host.trim()) return;
-      setSaving(true);
-      try {
-        await configureGitLabHost(host.trim());
-        toast({ description: "GitLab host updated", variant: "success" });
-        onSaved();
-      } catch (err) {
-        toast({
-          description: err instanceof Error ? err.message : "Failed to update host",
-          variant: "error",
-        });
-      } finally {
-        setSaving(false);
-      }
-    },
-    [host, toast, onSaved],
-  );
+  const save = useCallback(async () => {
+    const submitted = host.trim();
+    try {
+      await configureGitLabHost(submitted);
+      setBaseline(submitted);
+      setHost((current) => (current.trim() === submitted ? submitted : current));
+      toast({ description: "GitLab host updated", variant: "success" });
+      onSaved();
+    } catch (err) {
+      toast({
+        description: err instanceof Error ? err.message : "Failed to update host",
+        variant: "error",
+      });
+      throw err;
+    }
+  }, [host, toast, onSaved]);
+  const discard = useCallback(() => setHost(baseline), [baseline]);
+  const validHost = (() => {
+    try {
+      const url = new URL(host.trim());
+      return (
+        (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password
+      );
+    } catch {
+      return false;
+    }
+  })();
+
+  useSettingsSaveContributor({
+    id: "gitlab-host",
+    revision: host,
+    isDirty,
+    canSave: validHost,
+    invalidReason: validHost ? undefined : "Enter a valid HTTP or HTTPS GitLab host URL.",
+    save,
+    discard,
+  });
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 items-center">
+    <div className="flex gap-2 items-center">
       <IconWorld className="h-4 w-4 text-muted-foreground shrink-0" />
       <Input
         type="url"
         placeholder={DEFAULT_HOST}
         value={host}
+        data-settings-dirty={isDirty}
         onChange={(e) => setHost(e.target.value)}
         className="font-mono text-sm"
-        disabled={saving}
       />
-      <Button type="submit" disabled={saving || !host.trim()} className="cursor-pointer">
-        {saving ? <Spinner className="h-3 w-3" /> : "Save host"}
-      </Button>
-    </form>
+    </div>
   );
 }
 
-function TokenForm({ onSuccess }: { onSuccess: () => void }) {
+function TokenForm({
+  onSuccess,
+  onDirtyChange,
+}: {
+  onSuccess: () => void;
+  onDirtyChange: (isDirty: boolean) => void;
+}) {
   const [token, setToken] = useState("");
   const [showToken, setShowToken] = useState(false);
-  const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+  const isDirty = Boolean(token);
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!token.trim()) return;
-      setSaving(true);
-      try {
-        await configureGitLabToken(token.trim());
-        toast({ description: "GitLab token configured", variant: "success" });
-        setToken("");
-        onSuccess();
-      } catch (err) {
-        toast({
-          description: err instanceof Error ? err.message : "Failed to save token",
-          variant: "error",
-        });
-      } finally {
-        setSaving(false);
-      }
-    },
-    [token, toast, onSuccess],
-  );
+  useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
+
+  const save = useCallback(async () => {
+    const submitted = token.trim();
+    try {
+      await configureGitLabToken(submitted);
+      toast({ description: "GitLab token configured", variant: "success" });
+      setToken((current) => (current.trim() === submitted ? "" : current));
+      onSuccess();
+    } catch (err) {
+      toast({
+        description: err instanceof Error ? err.message : "Failed to save token",
+        variant: "error",
+      });
+      throw err;
+    }
+  }, [token, toast, onSuccess]);
+  const discard = useCallback(() => setToken(""), []);
+
+  useSettingsSaveContributor({
+    id: "gitlab-token",
+    revision: token,
+    isDirty,
+    canSave: Boolean(token.trim()),
+    invalidReason: token && !token.trim() ? "A GitLab token is required." : undefined,
+    save,
+    discard,
+  });
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 items-center">
+    <div className="flex gap-2 items-center">
       <IconKey className="h-4 w-4 text-muted-foreground shrink-0" />
       <div className="relative flex-1">
         <Input
           type={showToken ? "text" : "password"}
           placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
           value={token}
+          data-settings-dirty={isDirty}
           onChange={(e) => setToken(e.target.value)}
           className="font-mono text-sm pr-9"
-          disabled={saving}
           autoComplete="off"
         />
         <button
@@ -190,10 +233,7 @@ function TokenForm({ onSuccess }: { onSuccess: () => void }) {
           {showToken ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
         </button>
       </div>
-      <Button type="submit" disabled={saving || !token.trim()} className="cursor-pointer">
-        {saving ? <Spinner className="h-3 w-3" /> : "Save token"}
-      </Button>
-    </form>
+    </div>
   );
 }
 
@@ -243,6 +283,8 @@ export function GitLabIntegrationPage({ workspaceId }: GitLabIntegrationPageProp
 function GitLabConnectionSection() {
   const [status, setStatus] = useState<GitLabStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hostDirty, setHostDirty] = useState(false);
+  const [tokenDirty, setTokenDirty] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -278,7 +320,7 @@ function GitLabConnectionSection() {
         </Button>
       }
     >
-      <Card>
+      <SettingsCard isDirty={hostDirty || tokenDirty}>
         <CardContent className="space-y-4 py-4">
           <ConnectionErrorAlert status={status} />
           <div className="flex items-center justify-between">
@@ -305,7 +347,11 @@ function GitLabConnectionSection() {
               GitLab host URL. Override for self-managed instances; leave at the default for
               gitlab.com.
             </p>
-            <HostForm initial={status?.host ?? DEFAULT_HOST} onSaved={() => void reload()} />
+            <HostForm
+              initial={status?.host ?? DEFAULT_HOST}
+              onSaved={() => void reload()}
+              onDirtyChange={setHostDirty}
+            />
           </div>
 
           <Separator />
@@ -318,10 +364,10 @@ function GitLabConnectionSection() {
               </p>
               {status?.token_configured && <ClearTokenButton onCleared={() => void reload()} />}
             </div>
-            <TokenForm onSuccess={() => void reload()} />
+            <TokenForm onSuccess={() => void reload()} onDirtyChange={setTokenDirty} />
           </div>
         </CardContent>
-      </Card>
+      </SettingsCard>
     </SettingsSection>
   );
 }

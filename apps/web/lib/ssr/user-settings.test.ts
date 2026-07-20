@@ -117,6 +117,22 @@ describe("buildTerminalFields via buildCoreFields", () => {
 });
 
 describe("mapUserSettingsResponse", () => {
+  it("defaults missing and unknown MCP task agent profile preferences", () => {
+    const missing = mapUserSettingsResponse(null);
+    const unknown = mapUserSettingsResponse({
+      settings: {
+        user_id: "default-user",
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        mcp_task_agent_profile_default: "unexpected",
+        updated_at: UPDATED_AT,
+      } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
+    });
+
+    expect(missing.mcpTaskAgentProfileDefault).toBe("current_task");
+    expect(unknown.mcpTaskAgentProfileDefault).toBe("current_task");
+  });
+
   it("requires archive confirmation when settings are unavailable", () => {
     expect(mapUserSettingsResponse(null).confirmTaskArchive).toBe(true);
   });

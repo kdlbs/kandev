@@ -15,7 +15,7 @@ import { useToast } from "@/components/toast-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionConfigOption, setSessionModel } from "@/lib/api/domains/session-api";
-import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
+import type { Agent, AgentProfile, AvailableAgent, TaskSession } from "@/lib/types/http";
 import type {
   ConfigOptionEntry,
   SessionModelEntry,
@@ -25,12 +25,29 @@ type SessionModelsEntry = {
   currentModelId: string;
   models: SessionModelEntry[];
   configOptions: ConfigOptionEntry[];
+  configBaseline?: Record<string, string>;
 };
 
 type ModelSelectorProps = {
   sessionId: string | null;
   triggerClassName?: string;
 };
+
+function resolveSessionState(
+  sessionId: string | null,
+  taskSessions: Record<string, TaskSession>,
+  activeModels: Record<string, string>,
+  sessionModelsData: SessionModelsEntry | undefined,
+) {
+  if (!sessionId) {
+    return { session: null, activeModel: null, sessionModelsData: undefined };
+  }
+  return {
+    session: taskSessions[sessionId] ?? null,
+    activeModel: activeModels[sessionId] || null,
+    sessionModelsData,
+  };
+}
 
 function resolveSnapshotModel(snapshot: unknown): string | null {
   if (!snapshot || typeof snapshot !== "object") return null;
@@ -236,11 +253,15 @@ function useModelSelectorState(sessionId: string | null) {
   const taskSessions = useAppStore((state) => state.taskSessions.items);
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
   const { items: availableAgents } = useAvailableAgents();
-  const sessionModelsData = useAppStore((state) =>
+  const selectedSessionModels = useAppStore((state) =>
     sessionId ? state.sessionModels.bySessionId[sessionId] : undefined,
   );
-
-  const session = sessionId ? (taskSessions[sessionId] ?? null) : null;
+  const { session, activeModel, sessionModelsData } = resolveSessionState(
+    sessionId,
+    taskSessions,
+    activeModels,
+    selectedSessionModels,
+  );
   const snapshotModel = resolveSnapshotModel(session?.agent_profile_snapshot);
   const profileModel = useMemo(
     () => resolveProfileModel(session?.agent_profile_id, settingsAgents as Agent[]),
@@ -259,7 +280,6 @@ function useModelSelectorState(sessionId: string | null) {
     availableAgents,
   });
 
-  const activeModel = sessionId ? activeModels[sessionId] || null : null;
   const acpCurrentModel = sessionModelsData?.currentModelId || null;
   const currentModel = resolveCurrentModel(
     activeModel,
@@ -274,15 +294,28 @@ function useModelSelectorState(sessionId: string | null) {
     sessionModelsData,
   );
 
-  return { currentModel, modelOptions, configOptions, handleModelChange, handleConfigChange };
+  return {
+    currentModel,
+    modelOptions,
+    configOptions,
+    configBaseline: sessionModelsData?.configBaseline,
+    handleModelChange,
+    handleConfigChange,
+  };
 }
 
 export const ModelSelector = memo(function ModelSelector({
   sessionId,
   triggerClassName,
 }: ModelSelectorProps) {
-  const { currentModel, modelOptions, configOptions, handleModelChange, handleConfigChange } =
-    useModelSelectorState(sessionId);
+  const {
+    currentModel,
+    modelOptions,
+    configOptions,
+    configBaseline,
+    handleModelChange,
+    handleConfigChange,
+  } = useModelSelectorState(sessionId);
   const modelConfig = configOptions.find(isModelConfigOption);
 
   const onModelChange = useCallback(
@@ -315,6 +348,8 @@ export const ModelSelector = memo(function ModelSelector({
       variant="compact"
       popoverSide="top"
       triggerClassName={triggerClassName}
+      triggerSummary="changed"
+      configBaseline={configBaseline}
     />
   );
 });

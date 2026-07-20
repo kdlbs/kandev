@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -20,6 +21,8 @@ const (
 	legacyOfficeWorkspaceCookie = "office-active-workspace"
 	bootStateKeySessionID       = "sessionId"
 	bootStateKeyWorkspaceID     = "workspaceId"
+	quickChatSessionKindChat    = "chat"
+	quickChatSessionKindConfig  = "config"
 )
 
 func bootInitialState(
@@ -386,13 +389,21 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 			continue
 		}
 		items = append(items, quickChatBootSession{
-			state:     mapQuickChatSessionState(task, primary),
-			createdAt: task.CreatedAt,
+			state:          mapQuickChatSessionState(task, primary),
+			taskID:         task.ID,
+			createdAt:      task.CreatedAt,
+			lastActivityAt: quickChatLastActivityAt(task, primary),
 		})
 		taskSessions[primary.ID] = taskdto.FromTaskSession(primary)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].createdAt.Before(items[j].createdAt)
+		if !items[i].lastActivityAt.Equal(items[j].lastActivityAt) {
+			return items[i].lastActivityAt.After(items[j].lastActivityAt)
+		}
+		if !items[i].createdAt.Equal(items[j].createdAt) {
+			return items[i].createdAt.Before(items[j].createdAt)
+		}
+		return items[i].taskID < items[j].taskID
 	})
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
@@ -405,7 +416,7 @@ func (b bootStateBuilder) listQuickChatTasks(ctx context.Context, workspaceID st
 	const pageSize = 1000
 	var all []*taskmodels.Task
 	for page := 1; ; page++ {
-		tasks, total, err := b.p.taskSvc.ListTasksByWorkspace(ctx, workspaceID, "", "", "", page, pageSize, "", false, false, true, true)
+		tasks, total, err := b.p.taskSvc.ListTasksByWorkspace(ctx, workspaceID, "", "", "", page, pageSize, "", false, false, true, false)
 		if err != nil {
 			return nil, err
 		}
@@ -417,8 +428,17 @@ func (b bootStateBuilder) listQuickChatTasks(ctx context.Context, workspaceID st
 }
 
 type quickChatBootSession struct {
-	state     map[string]any
-	createdAt time.Time
+	state          map[string]any
+	taskID         string
+	createdAt      time.Time
+	lastActivityAt time.Time
+}
+
+func quickChatLastActivityAt(task *taskmodels.Task, primary *taskmodels.TaskSession) time.Time {
+	if primary.UpdatedAt.After(task.UpdatedAt) {
+		return primary.UpdatedAt
+	}
+	return task.UpdatedAt
 }
 
 type quickChatBootState struct {
@@ -473,6 +493,7 @@ func mapQuickChatSessionState(task *taskmodels.Task, primary *taskmodels.TaskSes
 	state := map[string]any{
 		bootStateKeySessionID:   primary.ID,
 		bootStateKeyWorkspaceID: task.WorkspaceID,
+		"kind":                  quickChatSessionKind(task),
 	}
 	if task.Title != "" && task.Title != "Quick Chat" {
 		state["name"] = task.Title
@@ -481,6 +502,15 @@ func mapQuickChatSessionState(task *taskmodels.Task, primary *taskmodels.TaskSes
 		state["agentProfileId"] = agentProfileID
 	}
 	return state
+}
+
+func quickChatSessionKind(task *taskmodels.Task) string {
+	if task != nil {
+		if configMode, ok := task.Metadata["config_mode"].(bool); ok && configMode {
+			return quickChatSessionKindConfig
+		}
+	}
+	return quickChatSessionKindChat
 }
 
 func quickChatAgentProfileID(task *taskmodels.Task, primary *taskmodels.TaskSession) string {
@@ -796,7 +826,7 @@ func (b bootStateBuilder) taskDetailInitialState(
 	b.addTaskDetailResourceState(ctx, state, task)
 	b.addTaskDetailKanbanState(ctx, state, task)
 	b.addTaskDetailActiveTaskState(ctx, state, taskDTO, activeSessionID)
-	b.addTaskDetailSessionsState(state, task.ID, sessions, activeSessionID)
+	b.addTaskDetailSessionsState(ctx, state, task.ID, sessions, activeSessionID)
 	b.addTaskDetailAgentsState(ctx, state)
 	return state
 }
@@ -912,6 +942,7 @@ func lastSessionByTaskState(taskID, sessionID string) map[string]string {
 }
 
 func (b bootStateBuilder) addTaskDetailSessionsState(
+	ctx context.Context,
 	state map[string]any,
 	taskID string,
 	sessions []*taskmodels.TaskSession,
@@ -922,6 +953,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	environmentBySession := make(map[string]string, len(sessions))
 	worktrees := make(map[string]any)
 	worktreesBySession := make(map[string]any)
+	sessionModelsByID := make(map[string]any)
 	for _, session := range sessions {
 		if session == nil {
 			continue
@@ -942,6 +974,13 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 			}
 			worktreesBySession[session.ID] = []string{dto.WorktreeID}
 		}
+		if snapshot, ok := lifecycle.LoadSessionModelsSnapshot(
+			session.Metadata[taskmodels.SessionMetaKeyACPModelState],
+		); ok {
+			sessionModelsByID[session.ID] = taskSessionModelsBootState(
+				snapshot, sessionACPConfigBaseline(session),
+			)
+		}
 	}
 	state["taskSessions"] = map[string]any{"items": sessionItems}
 	state["taskSessionsByTask"] = map[string]any{
@@ -949,13 +988,74 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 		"loadingByTaskId": map[string]any{taskID: false},
 		"loadedByTaskId":  map[string]any{taskID: true},
 	}
-	state["turns"] = map[string]any{
-		"bySession":       map[string]any{},
-		"activeBySession": activeTurnBySessionState(activeSessionID),
-	}
+	state["turns"] = b.taskDetailTurnsState(ctx, activeSessionID)
 	state["environmentIdBySessionId"] = environmentBySession
 	state["worktrees"] = map[string]any{"items": worktrees}
 	state["sessionWorktreesBySessionId"] = map[string]any{"itemsBySessionId": worktreesBySession}
+	if len(sessionModelsByID) > 0 {
+		state["sessionModels"] = map[string]any{"bySessionId": sessionModelsByID}
+	}
+}
+
+func (b bootStateBuilder) taskDetailTurnsState(ctx context.Context, sessionID string) map[string]any {
+	bySession := map[string]any{}
+	activeBySession := activeTurnBySessionState(sessionID)
+	if sessionID == "" {
+		return map[string]any{"bySession": bySession, "activeBySession": activeBySession}
+	}
+	turns, err := b.p.taskSvc.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		b.logBootError("list task detail turns", err)
+		return map[string]any{"bySession": bySession, "activeBySession": activeBySession}
+	}
+	items := make([]taskdto.TurnDTO, 0, len(turns))
+	for _, turn := range turns {
+		if turn == nil {
+			continue
+		}
+		items = append(items, taskdto.FromTurn(turn))
+		if turn.CompletedAt == nil {
+			activeBySession[sessionID] = turn.ID
+		}
+	}
+	bySession[sessionID] = items
+	return map[string]any{"bySession": bySession, "activeBySession": activeBySession}
+}
+
+func taskSessionModelsBootState(
+	snapshot lifecycle.SessionModelsSnapshot,
+	baseline map[string]string,
+) map[string]any {
+	models := make([]map[string]any, 0, len(snapshot.Models))
+	for _, model := range snapshot.Models {
+		models = append(models, map[string]any{
+			"modelId":         model.ModelID,
+			"name":            model.Name,
+			"description":     model.Description,
+			"usageMultiplier": model.UsageMultiplier,
+		})
+	}
+	options := make([]map[string]any, 0, len(snapshot.ConfigOptions))
+	for _, option := range snapshot.ConfigOptions {
+		options = append(options, map[string]any{
+			"type":         option.Type,
+			"id":           option.ID,
+			"name":         option.Name,
+			"description":  option.Description,
+			"currentValue": option.CurrentValue,
+			"category":     option.Category,
+			"options":      option.Options,
+		})
+	}
+	state := map[string]any{
+		"currentModelId": snapshot.CurrentModelID,
+		"models":         models,
+		"configOptions":  options,
+	}
+	if len(baseline) > 0 {
+		state["configBaseline"] = baseline
+	}
+	return state
 }
 
 func activeTurnBySessionState(sessionID string) map[string]any {

@@ -51,6 +51,16 @@ func TestEmitSessionModels_EmptyCurrentIDNoFallback(t *testing.T) {
 	}
 }
 
+func TestValidateAvailableModelRejectsStaleProfileValue(t *testing.T) {
+	available := []modelInfo{{ModelId: "mock-fast"}, {ModelId: "mock-smart"}}
+	if err := validateAvailableModel(available, "mock-smart"); err != nil {
+		t.Fatalf("advertised model rejected: %v", err)
+	}
+	if err := validateAvailableModel(available, "mock-default"); err == nil {
+		t.Fatal("stale profile model was accepted")
+	}
+}
+
 // TestEmitSessionModels_EmptyCurrentIDFromConfigOption pins the legitimate
 // fallback that we keep: some agents expose the current model via a
 // configOption (id="model") rather than CurrentModelId.
@@ -385,6 +395,7 @@ func TestEmitSessionModels_NonEmptyCurrentIDPreserved(t *testing.T) {
 // applies the profile model at session init.
 func TestEmitSetModelEvent_EmitsSessionModelsWithCachedState(t *testing.T) {
 	a := newTestAdapter()
+	a.sessionID = "sess-1"
 
 	cachedModels := []modelInfo{
 		{ModelId: "claude-opus-4-7", Name: "Opus 4.7"},
@@ -495,7 +506,7 @@ func TestFinalizeSetModel_MethodNoneEmitsNothing(t *testing.T) {
 		{Type: "select", ID: "model", Name: "Model", CurrentValue: "old-model"},
 	}
 
-	a.finalizeSetModel(sessionmodel.MethodNone, "sess-1", "claude-opus-4-7", cachedModels, cachedConfig)
+	a.finalizeSetModel(sessionmodel.MethodNone, "sess-1", "claude-opus-4-7", cachedModels, cachedConfig, "", nil)
 
 	events := drainEvents(a)
 	for _, ev := range events {
@@ -511,13 +522,14 @@ func TestFinalizeSetModel_MethodNoneEmitsNothing(t *testing.T) {
 // frontend converges on the new model.
 func TestFinalizeSetModel_RealMethodEmitsEvent(t *testing.T) {
 	a := newTestAdapter()
+	a.sessionID = "sess-1"
 
 	cachedModels := []modelInfo{{ModelId: "claude-opus-4-7", Name: "Opus 4.7"}}
 	cachedConfig := []streams.ConfigOption{
 		{Type: "select", ID: "model", Name: "Model", CurrentValue: "old-model"},
 	}
 
-	a.finalizeSetModel(sessionmodel.MethodSetConfigOption, "sess-1", "claude-opus-4-7", cachedModels, cachedConfig)
+	a.finalizeSetModel(sessionmodel.MethodSetConfigOption, "sess-1", "claude-opus-4-7", cachedModels, cachedConfig, "model", nil)
 
 	ev := findSessionModelsEvent(t, drainEvents(a))
 	if ev.CurrentModelID != "claude-opus-4-7" {
@@ -536,6 +548,7 @@ func TestFinalizeSetModel_RealMethodEmitsEvent(t *testing.T) {
 // model-shaped option's CurrentValue says — verbatim.
 func TestSetModelThenSetConfigOption_PreservesModel(t *testing.T) {
 	a := newTestAdapter()
+	a.sessionID = "sess-1"
 
 	reasoningOptions := []streams.ConfigOptionValue{
 		{Name: "Medium", Value: "medium"},

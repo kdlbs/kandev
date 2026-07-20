@@ -10,6 +10,24 @@ type PendingRequest = {
   reject(error: Error): void;
 };
 
+export function rejectPendingRequests(pending: Map<string, PendingRequest>, error: Error): void {
+  const requests = [...pending.values()];
+  pending.clear();
+  for (const request of requests) request.reject(error);
+}
+
+function toWorkerError(event: ErrorEvent | MessageEvent): Error {
+  if (event instanceof ErrorEvent) {
+    if (event.error instanceof Error) return event.error;
+    if (event.message) return new Error(event.message);
+  }
+  return new Error("Browser demo worker failed");
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 export async function installBrowserDemo(): Promise<void> {
   history.replaceState({}, "", "/");
   resetKanbanPreviewState();
@@ -17,6 +35,7 @@ export async function installBrowserDemo(): Promise<void> {
   const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
   const pending = new Map<string, PendingRequest>();
   const sockets = new Map<string, DemoWebSocket>();
+  let workerFailure: Error | null = null;
   let sequence = 0;
 
   worker.addEventListener("message", (event: MessageEvent<DemoWorkerResponse>) => {
@@ -36,6 +55,18 @@ export async function installBrowserDemo(): Promise<void> {
     request.resolve(message.kind === "http-result" ? message.response : message.value);
   });
 
+  const failWorker = (event: ErrorEvent | MessageEvent) => {
+    if (workerFailure) return;
+    workerFailure = toWorkerError(event);
+    rejectPendingRequests(pending, workerFailure);
+    worker.terminate();
+    const activeSockets = [...sockets.values()];
+    sockets.clear();
+    for (const socket of activeSockets) socket.fail();
+  };
+  worker.addEventListener("error", failWorker);
+  worker.addEventListener("messageerror", failWorker);
+
   function call(
     message:
       | { kind: "init"; id?: string; persistedState?: string }
@@ -45,10 +76,16 @@ export async function installBrowserDemo(): Promise<void> {
           request: Extract<DemoWorkerRequest, { kind: "http" }>["request"];
         },
   ) {
+    if (workerFailure) return Promise.reject(workerFailure);
     const id = message.id ?? `demo-${++sequence}`;
     return new Promise<unknown>((resolve, reject) => {
       pending.set(id, { resolve, reject });
-      worker.postMessage({ ...message, id });
+      try {
+        worker.postMessage({ ...message, id });
+      } catch (error) {
+        pending.delete(id);
+        reject(toError(error));
+      }
     });
   }
 
@@ -122,6 +159,16 @@ export async function installBrowserDemo(): Promise<void> {
       worker.postMessage({ kind: "ws-close", socketId: this.socketId } satisfies DemoWorkerRequest);
     }
 
+    fail() {
+      if (this.readyState === DemoWebSocket.CLOSED) return;
+      this.readyState = DemoWebSocket.CLOSED;
+      try {
+        this.dispatch("error", new Event("error"));
+      } finally {
+        this.dispatch("close", new CloseEvent("close", { code: 1011, reason: "Worker failed" }));
+      }
+    }
+
     receive(message: Extract<DemoWorkerResponse, { kind: "ws-event" }>) {
       if (message.event === "open") {
         this.readyState = DemoWebSocket.OPEN;
@@ -135,7 +182,7 @@ export async function installBrowserDemo(): Promise<void> {
       }
     }
 
-    private dispatch(name: "open" | "message" | "close", event: Event) {
+    private dispatch(name: "open" | "message" | "error" | "close", event: Event) {
       this.dispatchEvent(event);
       const handler = this[`on${name}`] as ((value: never) => void) | null;
       handler?.call(this, event as never);

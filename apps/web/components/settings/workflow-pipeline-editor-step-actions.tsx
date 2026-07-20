@@ -19,6 +19,7 @@ import {
   getChildrenCompletedTransitionType,
   hasDisablePlanMode,
 } from "./workflow-pipeline-editor-helpers";
+import { isWorkflowStepValueDirty } from "./workflow-dirty-state";
 
 // --- useStepActions hook ---
 
@@ -104,6 +105,7 @@ export function useStepActions({ step, onUpdate }: UseStepActionsArgs) {
 
 type StepSelectProps = {
   step: WorkflowStep;
+  savedStep?: WorkflowStep;
   otherSteps: WorkflowStep[];
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   readOnly: boolean;
@@ -111,6 +113,7 @@ type StepSelectProps = {
 
 export function TurnStartSelect({
   step,
+  savedStep,
   otherSteps,
   onUpdate,
   setOnTurnStartTransition,
@@ -131,7 +134,14 @@ export function TurnStartSelect({
         }}
         disabled={readOnly}
       >
-        <SelectTrigger className="w-full h-8">
+        <SelectTrigger
+          className="w-full h-8"
+          data-settings-dirty={isWorkflowStepValueDirty(
+            step,
+            savedStep,
+            getOnTurnStartTransitionType,
+          )}
+        >
           <SelectValue placeholder="Select action" />
         </SelectTrigger>
         <SelectContent position="popper" side="bottom" align="start">
@@ -157,7 +167,16 @@ export function TurnStartSelect({
           }}
           disabled={readOnly}
         >
-          <SelectTrigger className="w-full h-8">
+          <SelectTrigger
+            className="w-full h-8"
+            data-settings-dirty={isWorkflowStepValueDirty(
+              step,
+              savedStep,
+              (item) =>
+                item.events?.on_turn_start?.find((action) => action.type === "move_to_step")?.config
+                  ?.step_id ?? "",
+            )}
+          >
             <SelectValue placeholder="Select step" />
           </SelectTrigger>
           <SelectContent position="popper" side="bottom" align="start">
@@ -184,8 +203,58 @@ type TurnCompleteSelectProps = StepSelectProps & {
   planModeEnabled: boolean;
 };
 
+function getTurnCompleteTargetStepId(step: WorkflowStep): string {
+  return (
+    (step.events?.on_turn_complete?.find((action) => action.type === "move_to_step")?.config
+      ?.step_id as string) ?? ""
+  );
+}
+
+function TurnCompleteTargetSelect({
+  step,
+  savedStep,
+  otherSteps,
+  onUpdate,
+  readOnly,
+}: StepSelectProps) {
+  const updateTarget = (stepId: string) => {
+    if (readOnly) return;
+    const currentEvents = step.events ?? {};
+    const onTurnComplete = (currentEvents.on_turn_complete ?? []).map((action) =>
+      action.type === "move_to_step" ? { ...action, config: { step_id: stepId } } : action,
+    );
+    onUpdate({ events: { ...currentEvents, on_turn_complete: onTurnComplete } });
+  };
+
+  return (
+    <Select
+      value={getTurnCompleteTargetStepId(step)}
+      onValueChange={updateTarget}
+      disabled={readOnly}
+    >
+      <SelectTrigger
+        className="w-full h-8"
+        data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, getTurnCompleteTargetStepId)}
+      >
+        <SelectValue placeholder="Select step" />
+      </SelectTrigger>
+      <SelectContent position="popper" side="bottom" align="start">
+        {otherSteps.map((candidate) => (
+          <SelectItem key={candidate.id} value={candidate.id}>
+            <div className="flex items-center gap-2">
+              <div className={cn("w-2 h-2 rounded-full", candidate.color)} />
+              {candidate.name}
+            </div>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 export function TurnCompleteSelect({
   step,
+  savedStep,
   otherSteps,
   onUpdate,
   setTransition,
@@ -208,7 +277,10 @@ export function TurnCompleteSelect({
         }}
         disabled={readOnly}
       >
-        <SelectTrigger className="w-full h-8">
+        <SelectTrigger
+          className="w-full h-8"
+          data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, getTransitionType)}
+        >
           <SelectValue placeholder="Select action" />
         </SelectTrigger>
         <SelectContent position="popper" side="bottom" align="start">
@@ -219,35 +291,13 @@ export function TurnCompleteSelect({
         </SelectContent>
       </Select>
       {transitionType === "move_to_step" && (
-        <Select
-          value={
-            (step.events?.on_turn_complete?.find((a) => a.type === "move_to_step")?.config
-              ?.step_id as string) ?? ""
-          }
-          onValueChange={(value) => {
-            if (readOnly) return;
-            const currentEvents = step.events ?? {};
-            const onTurnComplete = (currentEvents.on_turn_complete ?? []).map((a) =>
-              a.type === "move_to_step" ? { ...a, config: { step_id: value } } : a,
-            );
-            onUpdate({ events: { ...currentEvents, on_turn_complete: onTurnComplete } });
-          }}
-          disabled={readOnly}
-        >
-          <SelectTrigger className="w-full h-8">
-            <SelectValue placeholder="Select step" />
-          </SelectTrigger>
-          <SelectContent position="popper" side="bottom" align="start">
-            {otherSteps.map((s) => (
-              <SelectItem key={s.id} value={s.id}>
-                <div className="flex items-center gap-2">
-                  <div className={cn("w-2 h-2 rounded-full", s.color)} />
-                  {s.name}
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TurnCompleteTargetSelect
+          step={step}
+          savedStep={savedStep}
+          otherSteps={otherSteps}
+          onUpdate={onUpdate}
+          readOnly={readOnly}
+        />
       )}
       {planModeEnabled && (
         <div className="flex items-center gap-2 pt-1">
@@ -259,6 +309,7 @@ export function TurnCompleteSelect({
               toggleDisablePlanMode();
             }}
             disabled={readOnly}
+            data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, hasDisablePlanMode)}
           />
           <Label htmlFor={`${step.id}-disable-plan`} className="text-sm">
             Disable plan mode on complete
@@ -267,7 +318,12 @@ export function TurnCompleteSelect({
         </div>
       )}
       {transitionType !== "none" && (
-        <ExplicitCompletionToggle step={step} onUpdate={onUpdate} readOnly={readOnly} />
+        <ExplicitCompletionToggle
+          step={step}
+          savedStep={savedStep}
+          onUpdate={onUpdate}
+          readOnly={readOnly}
+        />
       )}
     </div>
   );
@@ -281,6 +337,7 @@ type ChildrenCompletedSelectProps = StepSelectProps & {
 
 export function ChildrenCompletedSelect({
   step,
+  savedStep,
   otherSteps,
   onUpdate,
   setChildrenCompletedTransition,
@@ -316,6 +373,11 @@ export function ChildrenCompletedSelect({
         <SelectTrigger
           className="w-full h-8"
           data-testid={`${step.id}-children-completed-transition-select`}
+          data-settings-dirty={isWorkflowStepValueDirty(
+            step,
+            savedStep,
+            getChildrenCompletedTransitionType,
+          )}
         >
           <SelectValue placeholder="Select action" />
         </SelectTrigger>
@@ -346,6 +408,13 @@ export function ChildrenCompletedSelect({
           <SelectTrigger
             className="w-full h-8"
             data-testid={`${step.id}-children-completed-step-select`}
+            data-settings-dirty={isWorkflowStepValueDirty(
+              step,
+              savedStep,
+              (item) =>
+                item.events?.on_children_completed?.find((action) => action.type === "move_to_step")
+                  ?.config?.step_id ?? "",
+            )}
           >
             <SelectValue placeholder="Select step" />
           </SelectTrigger>
@@ -372,12 +441,14 @@ export function ChildrenCompletedSelect({
 
 type ExplicitCompletionToggleProps = {
   step: WorkflowStep;
+  savedStep?: WorkflowStep;
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   readOnly: boolean;
 };
 
 export function ExplicitCompletionToggle({
   step,
+  savedStep,
   onUpdate,
   readOnly,
 }: ExplicitCompletionToggleProps) {
@@ -392,6 +463,11 @@ export function ExplicitCompletionToggle({
           onUpdate({ auto_advance_requires_signal: c === true });
         }}
         disabled={readOnly}
+        data-settings-dirty={isWorkflowStepValueDirty(
+          step,
+          savedStep,
+          (item) => item.auto_advance_requires_signal ?? false,
+        )}
       />
       <Label htmlFor={`${step.id}-require-signal`} className="text-sm">
         Wait for agent completion signal

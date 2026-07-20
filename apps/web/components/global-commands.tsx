@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useCallback } from "react";
+import { useMemo } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { useTheme } from "@/components/theme/app-theme";
 import {
@@ -21,6 +21,7 @@ import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppShortcuts } from "@/hooks/use-app-shortcuts";
 import { useAppStore } from "@/components/state-provider";
+import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { CommandItem } from "@/lib/commands/types";
 
@@ -136,51 +137,8 @@ export function GlobalCommands() {
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const quickChatSessions = useAppStore((s) => s.quickChat.sessions);
-  const openQuickChat = useAppStore((s) => s.openQuickChat);
-  const startNewConfigChat = useAppStore((s) => s.startNewConfigChat);
-  const openConfigChat = useAppStore((s) => s.openConfigChat);
-  const configChatSessions = useAppStore((s) => s.configChat.sessions);
-  const configChatActiveSessionId = useAppStore((s) => s.configChat.activeSessionId);
-  const configChatWorkspaceId = useAppStore((s) => s.configChat.workspaceId);
-
-  const handleOpenQuickChat = useCallback(() => {
-    if (!activeWorkspaceId) {
-      return;
-    }
-
-    // If there's an existing session for this workspace, open it
-    const existingSession = quickChatSessions.find((s) => s.workspaceId === activeWorkspaceId);
-    if (existingSession) {
-      openQuickChat(existingSession.sessionId, activeWorkspaceId);
-    } else {
-      // Open modal without a session - will show agent picker
-      openQuickChat("", activeWorkspaceId);
-    }
-  }, [activeWorkspaceId, quickChatSessions, openQuickChat]);
-
-  const handleOpenConfigChat = useCallback(() => {
-    if (!activeWorkspaceId) return;
-    // Reuse existing session if one is active for this workspace
-    if (configChatActiveSessionId && configChatWorkspaceId === activeWorkspaceId) {
-      openConfigChat(configChatActiveSessionId, activeWorkspaceId);
-      return;
-    }
-    // Check for a persisted session for this workspace
-    const existingSession = configChatSessions.find((s) => s.workspaceId === activeWorkspaceId);
-    if (existingSession) {
-      openConfigChat(existingSession.sessionId, activeWorkspaceId);
-      return;
-    }
-    startNewConfigChat(activeWorkspaceId);
-  }, [
-    activeWorkspaceId,
-    configChatSessions,
-    configChatActiveSessionId,
-    configChatWorkspaceId,
-    openConfigChat,
-    startNewConfigChat,
-  ]);
+  const handleOpenQuickChat = useQuickChatLauncher(activeWorkspaceId);
+  const handleOpenConfigChat = useQuickChatLauncher(activeWorkspaceId, "config");
 
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const quickChatShortcut = getShortcut("QUICK_CHAT", keyboardShortcuts);

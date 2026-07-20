@@ -4,6 +4,36 @@ import { SentrySettingsPage } from "../../pages/sentry-settings-page";
 const TOKEN = "sntrys_xxx";
 
 test.describe("Sentry settings — instances", () => {
+  test("keeps an existing instance edit local until the floating Save", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.mockSentryReset();
+    await apiClient.createSentryInstance({
+      workspaceId: seedData.workspaceId,
+      name: "Original Sentry",
+      secret: TOKEN,
+    });
+
+    const settings = new SentrySettingsPage(testPage);
+    await settings.goto();
+    const card = settings.cardByName("Original Sentry");
+    await card.getByTestId("sentry-instance-edit-button").click();
+    await testPage.getByTestId("sentry-edit-name-input").fill("Renamed Sentry");
+
+    expect((await apiClient.listSentryInstances(seedData.workspaceId))[0]?.name).toBe(
+      "Original Sentry",
+    );
+    const floatingSave = testPage.getByTestId("settings-floating-save");
+    await floatingSave.getByRole("button", { name: "Save changes" }).click();
+    await expect(floatingSave).not.toBeVisible({ timeout: 15_000 });
+    expect((await apiClient.listSentryInstances(seedData.workspaceId))[0]?.name).toBe(
+      "Renamed Sentry",
+    );
+    await expect(settings.cardByName("Renamed Sentry")).toBeVisible();
+  });
+
   // The settings page manages a LIST of named instances per workspace. This
   // covers add → the card appears → the backend probe flips it healthy.
   test("adds a named instance and reports it healthy", async ({ testPage, apiClient }) => {

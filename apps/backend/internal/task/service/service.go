@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -35,11 +36,28 @@ type WorktreeBatchCleaner interface {
 	CleanupWorktrees(ctx context.Context, worktrees []*worktree.Worktree) error
 }
 
+type worktreeReferenceGuard interface {
+	CountActiveWorktreeReferences(ctx context.Context, worktreeID string, excludeSessionIDs []string) (int, error)
+	ReleaseWorktreeReference(ctx context.Context, wt *worktree.Worktree) error
+}
+
 // TaskExecutionStopper stops active task execution (agent session + instance).
 type TaskExecutionStopper interface {
 	StopTask(ctx context.Context, taskID, reason string, force bool) error
 	StopSession(ctx context.Context, sessionID, reason string, force bool) error
 	StopExecution(ctx context.Context, executionID, reason string, force bool) error
+	// RegisterExecutionStopOwner records exact teardown ownership before a
+	// terminal session mutation. It never replaces the explicit stop call.
+	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
+}
+
+// TaskResourceCleanupActivityGate serializes durable cleanup with install-wide maintenance.
+type TaskResourceCleanupActivityGate interface {
+	AcquireTaskResourceCleanup(context.Context) (TaskResourceCleanupActivityLease, error)
+}
+
+type TaskResourceCleanupActivityLease interface {
+	Release()
 }
 
 // ProviderDefaultBranchProber resolves a provider repo's default branch
@@ -156,6 +174,7 @@ type Repos struct {
 	Environments     repository.EnvironmentRepository
 	TaskEnvironments repository.TaskEnvironmentRepository
 	Reviews          repository.ReviewRepository
+	ResourceCleanups repository.TaskResourceCleanupRepository
 }
 
 // Service provides task business logic
@@ -173,11 +192,13 @@ type Service struct {
 	environments          repository.EnvironmentRepository
 	taskEnvironments      repository.TaskEnvironmentRepository
 	reviews               repository.ReviewRepository
+	resourceCleanups      repository.TaskResourceCleanupRepository
 	eventBus              bus.EventBus
 	logger                *logger.Logger
 	discoveryConfig       RepositoryDiscoveryConfig
 	worktreeCleanup       WorktreeCleanup
 	executionStopper      TaskExecutionStopper
+	cleanupActivity       TaskResourceCleanupActivityGate
 	branchMaterializer    BranchMaterializer
 	providerProber        ProviderDefaultBranchProber
 	gitArchiveCapture     GitArchiveCapture
@@ -194,8 +215,15 @@ type Service struct {
 	blockers              BlockerRepository
 	comments              CommentRepository
 	baseBranchPusher      AgentBaseBranchPusher
+	runtimeOverridesMu    sync.Mutex
 	// cleanupDoneForTest lets unit tests wait for async cleanup; nil in production.
-	cleanupDoneForTest chan struct{}
+	cleanupDoneForTest  chan struct{}
+	cleanupWorkerMu     sync.Mutex
+	cleanupWorkerCancel context.CancelFunc
+	cleanupWorkerWG     sync.WaitGroup
+	cleanupWorkerWake   chan struct{}
+	cleanupRunsMu       sync.Mutex
+	cleanupRuns         map[*taskResourceCleanupRun]struct{}
 }
 
 // NewService creates a new task service
@@ -214,6 +242,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		environments:     repos.Environments,
 		taskEnvironments: repos.TaskEnvironments,
 		reviews:          repos.Reviews,
+		resourceCleanups: repos.ResourceCleanups,
 		eventBus:         eventBus,
 		logger:           log,
 		discoveryConfig:  discoveryConfig,
@@ -256,6 +285,10 @@ func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) 
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
+}
+
+func (s *Service) SetTaskResourceCleanupActivityGate(gate TaskResourceCleanupActivityGate) {
+	s.cleanupActivity = gate
 }
 
 // SetGitArchiveCapture wires the git archive capture handler.

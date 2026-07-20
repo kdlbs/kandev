@@ -2,9 +2,11 @@ package routing
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -54,6 +56,61 @@ func (f *fakeRetry) RetryProvider(_ context.Context, _, _ string) error {
 	return nil
 }
 
+type fakeExecutionProfileStore struct {
+	agents   []*settingsmodels.Agent
+	profiles map[string][]*settingsmodels.AgentProfile
+}
+
+func (f *fakeExecutionProfileStore) GetAgent(_ context.Context, id string) (*settingsmodels.Agent, error) {
+	for _, agent := range f.agents {
+		if agent.ID == id {
+			return agent, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (f *fakeExecutionProfileStore) GetAgentProfile(_ context.Context, id string) (*settingsmodels.AgentProfile, error) {
+	for _, profiles := range f.profiles {
+		for _, profile := range profiles {
+			if profile.ID == id {
+				return profile, nil
+			}
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (f *fakeExecutionProfileStore) ListAgents(_ context.Context) ([]*settingsmodels.Agent, error) {
+	return f.agents, nil
+}
+
+func (f *fakeExecutionProfileStore) ListAgentProfiles(
+	_ context.Context, agentID string,
+) ([]*settingsmodels.AgentProfile, error) {
+	return f.profiles[agentID], nil
+}
+
+func testExecutionProfiles() *fakeExecutionProfileStore {
+	return &fakeExecutionProfileStore{
+		agents: []*settingsmodels.Agent{
+			{ID: "codex-agent", Name: "codex-acp"},
+			{ID: "claude-agent", Name: "claude-acp"},
+		},
+		profiles: map[string][]*settingsmodels.AgentProfile{
+			"codex-agent": {
+				{ID: "codex-global", AgentID: "codex-agent", Name: "Codex global", Model: "gpt-5.6"},
+				{ID: "codex-local", AgentID: "codex-agent", Name: "Codex local", Model: "gpt-5.6", WorkspaceID: "ws-1"},
+				{ID: "codex-other", AgentID: "codex-agent", Name: "Codex other", Model: "gpt-5.6", WorkspaceID: "ws-2"},
+				{ID: "office-cto", AgentID: "codex-agent", Name: "CTO", Model: "gpt-5.6", WorkspaceID: "ws-1", Role: settingsmodels.AgentRole("cto")},
+			},
+			"claude-agent": {
+				{ID: "claude-opus", AgentID: "claude-agent", Name: "Claude Opus", Model: "opus"},
+			},
+		},
+	}
+}
+
 func newProviderTest(cfg *WorkspaceConfig, agents []*models.AgentInstance) (*Provider, *fakeProviderRepo) {
 	repo := &fakeProviderRepo{
 		cfg:    cfg,
@@ -65,6 +122,129 @@ func newProviderTest(cfg *WorkspaceConfig, agents []*models.AgentInstance) (*Pro
 	}
 	resolver := NewResolver(&providerResolverAdapter{repo: repo}, nil)
 	return NewProvider(repo, nil, resolver, &fakeRetry{}), repo
+}
+
+func TestProvider_UpdateConfigValidatesAndDerivesExecutionProfile(t *testing.T) {
+	p, repo := newProviderTest(nil, nil)
+	p.SetExecutionProfileStore(testExecutionProfiles())
+	cfg := WorkspaceConfig{
+		DefaultTier:   TierBalanced,
+		ProviderOrder: []ProviderID{"claude-acp"},
+		ProviderProfiles: map[ProviderID]ProviderProfile{
+			"claude-acp": {ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-opus"}},
+		},
+	}
+	if err := p.UpdateConfig(context.Background(), "ws-1", cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	got := repo.cfg.ProviderProfiles["claude-acp"]
+	if got.TierMap.Balanced != "opus" {
+		t.Fatalf("derived model = %q, want opus", got.TierMap.Balanced)
+	}
+}
+
+func TestProvider_OfficeIdentityIsNotAnExecutionProfile(t *testing.T) {
+	p, _ := newProviderTest(nil, nil)
+	p.SetExecutionProfileStore(testExecutionProfiles())
+
+	profiles, err := p.ListExecutionProfiles(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("list execution profiles: %v", err)
+	}
+	for _, profile := range profiles {
+		if profile.ID == "office-cto" {
+			t.Fatal("rich Office identity must not appear in execution profile catalogue")
+		}
+	}
+
+	err = p.UpdateConfig(context.Background(), "ws-1", WorkspaceConfig{
+		DefaultTier:   TierBalanced,
+		ProviderOrder: []ProviderID{"codex-acp"},
+		ProviderProfiles: map[ProviderID]ProviderProfile{
+			"codex-acp": {ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "office-cto"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected Office identity mapping to be rejected")
+	}
+}
+
+func TestProvider_ExcludesProviderAgentsOwnedByAnotherWorkspace(t *testing.T) {
+	store := testExecutionProfiles()
+	otherWorkspace := "ws-2"
+	store.agents[0].WorkspaceID = &otherWorkspace
+	p, _ := newProviderTest(nil, nil)
+	p.SetExecutionProfileStore(store)
+
+	profiles, err := p.ListExecutionProfiles(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("list execution profiles: %v", err)
+	}
+	for _, profile := range profiles {
+		if profile.ProviderID == "codex-acp" {
+			t.Fatalf("cross-workspace provider profile leaked into catalogue: %+v", profile)
+		}
+	}
+}
+
+func TestProvider_UpdateConfigRejectsCrossWorkspaceAndWrongProvider(t *testing.T) {
+	tests := []struct {
+		name, profileID, providerID string
+	}{
+		{name: "cross workspace", profileID: "codex-other", providerID: "codex-acp"},
+		{name: "wrong provider", profileID: "claude-opus", providerID: "codex-acp"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _ := newProviderTest(nil, nil)
+			p.SetExecutionProfileStore(testExecutionProfiles())
+			err := p.UpdateConfig(context.Background(), "ws-1", WorkspaceConfig{
+				DefaultTier:   TierBalanced,
+				ProviderOrder: []ProviderID{ProviderID(tt.providerID)},
+				ProviderProfiles: map[ProviderID]ProviderProfile{
+					ProviderID(tt.providerID): {
+						ExecutionProfileIDs: ExecutionProfileIDs{Balanced: tt.profileID},
+					},
+				},
+			})
+			if err == nil {
+				t.Fatal("expected invalid execution profile mapping")
+			}
+		})
+	}
+}
+
+func TestProvider_UpdateConfigMigratesOnlyUniqueLegacyMapping(t *testing.T) {
+	store := testExecutionProfiles()
+	store.profiles["codex-agent"] = store.profiles["codex-agent"][:1]
+	p, repo := newProviderTest(nil, nil)
+	p.SetExecutionProfileStore(store)
+	err := p.UpdateConfig(context.Background(), "ws-1", WorkspaceConfig{
+		DefaultTier:   TierBalanced,
+		ProviderOrder: []ProviderID{"codex-acp"},
+		ProviderProfiles: map[ProviderID]ProviderProfile{
+			"codex-acp": {TierMap: TierMap{Balanced: "gpt-5.6"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("migrate unique legacy mapping: %v", err)
+	}
+	if got := repo.cfg.ProviderProfiles["codex-acp"].ExecutionProfileID(TierBalanced); got != "codex-global" {
+		t.Fatalf("execution profile = %q, want codex-global", got)
+	}
+
+	p, _ = newProviderTest(nil, nil)
+	p.SetExecutionProfileStore(testExecutionProfiles())
+	err = p.UpdateConfig(context.Background(), "ws-1", WorkspaceConfig{
+		DefaultTier:   TierBalanced,
+		ProviderOrder: []ProviderID{"codex-acp"},
+		ProviderProfiles: map[ProviderID]ProviderProfile{
+			"codex-acp": {TierMap: TierMap{Balanced: "gpt-5.6"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected ambiguous legacy mapping to be rejected")
+	}
 }
 
 // providerResolverAdapter adapts ProviderRepo to the Resolver's narrower
@@ -85,7 +265,10 @@ func TestProvider_PreviewComposesCandidatesAndMissing(t *testing.T) {
 		DefaultTier:   TierBalanced,
 		ProviderOrder: []ProviderID{"claude-acp", "codex-acp"},
 		ProviderProfiles: map[ProviderID]ProviderProfile{
-			"claude-acp": {TierMap: TierMap{Balanced: "sonnet"}},
+			"claude-acp": {
+				TierMap:             TierMap{Balanced: "sonnet"},
+				ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-sonnet-profile"},
+			},
 			// codex-acp deliberately has no profile -> missing mapping
 		},
 	}
@@ -115,7 +298,10 @@ func TestProvider_PreviewPrimaryReflectsIntent(t *testing.T) {
 		DefaultTier:   TierBalanced,
 		ProviderOrder: []ProviderID{"claude-acp"},
 		ProviderProfiles: map[ProviderID]ProviderProfile{
-			"claude-acp": {TierMap: TierMap{Balanced: "sonnet"}},
+			"claude-acp": {
+				TierMap:             TierMap{Balanced: "sonnet"},
+				ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-sonnet-profile"},
+			},
 		},
 	}
 	agents := []*models.AgentInstance{{ID: "a1", Name: "Alice", WorkspaceID: "ws-1"}}
@@ -135,8 +321,14 @@ func TestProvider_PreviewCurrentDiffersWhenPrimaryDegraded(t *testing.T) {
 		DefaultTier:   TierBalanced,
 		ProviderOrder: []ProviderID{"claude-acp", "codex-acp"},
 		ProviderProfiles: map[ProviderID]ProviderProfile{
-			"claude-acp": {TierMap: TierMap{Balanced: "sonnet"}},
-			"codex-acp":  {TierMap: TierMap{Balanced: "gpt-5"}},
+			"claude-acp": {
+				TierMap:             TierMap{Balanced: "sonnet"},
+				ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-sonnet-profile"},
+			},
+			"codex-acp": {
+				TierMap:             TierMap{Balanced: "gpt-5"},
+				ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "codex-balanced-profile"},
+			},
 		},
 	}
 	agents := []*models.AgentInstance{{ID: "a1", Name: "Alice", WorkspaceID: "ws-1"}}
@@ -204,7 +396,10 @@ func TestProvider_PreviewAgentRoundTrips(t *testing.T) {
 		DefaultTier:   TierBalanced,
 		ProviderOrder: []ProviderID{"claude-acp"},
 		ProviderProfiles: map[ProviderID]ProviderProfile{
-			"claude-acp": {TierMap: TierMap{Balanced: "sonnet"}},
+			"claude-acp": {
+				ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-sonnet"},
+				TierMap:             TierMap{Balanced: "sonnet"},
+			},
 		},
 	}
 	agents := []*models.AgentInstance{{ID: "a1", Name: "Alice", WorkspaceID: "ws-1"}}
@@ -286,7 +481,10 @@ func TestProvider_UpdateClearsParkedOnMaterialChange(t *testing.T) {
 		DefaultTier:   TierFrontier,
 		ProviderOrder: []ProviderID{"claude-acp"},
 		ProviderProfiles: map[ProviderID]ProviderProfile{
-			"claude-acp": {TierMap: TierMap{Frontier: "opus"}},
+			"claude-acp": {
+				ExecutionProfileIDs: ExecutionProfileIDs{Frontier: "claude-opus"},
+				TierMap:             TierMap{Frontier: "opus"},
+			},
 		},
 	}
 	if err := p.UpdateConfig(context.Background(), "ws-1", next); err != nil {
@@ -298,13 +496,45 @@ func TestProvider_UpdateClearsParkedOnMaterialChange(t *testing.T) {
 	}
 }
 
+func TestProvider_UpdateClearsParkedWhenExecutionProfileChanges(t *testing.T) {
+	prev := &WorkspaceConfig{
+		Enabled:       true,
+		DefaultTier:   TierBalanced,
+		ProviderOrder: []ProviderID{"claude-acp"},
+		ProviderProfiles: map[ProviderID]ProviderProfile{
+			"claude-acp": {
+				TierMap:             TierMap{Balanced: "sonnet"},
+				ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-account-a"},
+			},
+		},
+	}
+	p, repo := newProviderTest(prev, nil)
+	next := *prev
+	next.ProviderProfiles = map[ProviderID]ProviderProfile{
+		"claude-acp": {
+			TierMap:             TierMap{Balanced: "sonnet"},
+			ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-account-b"},
+		},
+	}
+
+	if err := p.UpdateConfig(context.Background(), "ws-1", next); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	if len(repo.clearedParkedFor) != 1 || repo.clearedParkedFor[0] != "ws-1" {
+		t.Fatalf("execution profile change did not clear parked runs: %v", repo.clearedParkedFor)
+	}
+}
+
 func TestProvider_UpdateDoesNotClearWhenConfigUnchanged(t *testing.T) {
 	prev := &WorkspaceConfig{
 		Enabled:       true,
 		DefaultTier:   TierBalanced,
 		ProviderOrder: []ProviderID{"claude-acp"},
 		ProviderProfiles: map[ProviderID]ProviderProfile{
-			"claude-acp": {TierMap: TierMap{Balanced: "sonnet"}},
+			"claude-acp": {
+				ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-sonnet"},
+				TierMap:             TierMap{Balanced: "sonnet"},
+			},
 		},
 	}
 	p, repo := newProviderTest(prev, nil)
@@ -313,7 +543,10 @@ func TestProvider_UpdateDoesNotClearWhenConfigUnchanged(t *testing.T) {
 		DefaultTier:   TierBalanced,
 		ProviderOrder: []ProviderID{"claude-acp"},
 		ProviderProfiles: map[ProviderID]ProviderProfile{
-			"claude-acp": {TierMap: TierMap{Balanced: "sonnet"}},
+			"claude-acp": {
+				ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-sonnet"},
+				TierMap:             TierMap{Balanced: "sonnet"},
+			},
 		},
 	}
 	if err := p.UpdateConfig(context.Background(), "ws-1", next); err != nil {

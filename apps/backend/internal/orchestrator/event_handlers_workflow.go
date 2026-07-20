@@ -208,9 +208,20 @@ func (s *Service) processOnTurnStart(ctx context.Context, task *models.Task, ses
 // ProcessOnTurnStart is the public API for triggering on_turn_start events.
 // Called by message handlers before sending a prompt to the agent.
 func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("load session for on_turn_start: %w", err)
+	}
+	if isTerminalSessionState(session.State) {
+		return &executor.SessionStateSupersededError{
+			SessionID: session.ID,
+			State:     session.State,
+		}
 	}
 	// ADR 0015 — a fresh user message before the pending signal's
 	// transition has fired cancels the signal (re-open semantics). The
@@ -303,8 +314,18 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.clearPendingStepSignalByID(ctx, sessionID)
 		// Automated transitions always clear review: the agent just completed
 		// a turn, so any pending review from a prior step is stale regardless
-		// of whether the new step has auto_start_agent.
-		s.finalizeStepEnter(ctx, taskID, sessionID, targetStep, task.Description, true)
+		// of whether the new step has auto_start_agent. Match the engine path's
+		// asynchronous on_enter dispatch: terminal-event handlers own the
+		// session cancel guard through this transition, and inline auto-start
+		// would re-enter that non-reentrant guard from PromptTask.
+		go s.finalizeStepEnter(
+			context.WithoutCancel(ctx),
+			taskID,
+			sessionID,
+			targetStep,
+			task.Description,
+			true,
+		)
 	} else {
 		// on_turn_start transitions: user is about to send a message, no on_enter needed.
 		// However, we still need to switch the agent profile if the target step requires
@@ -772,9 +793,10 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 
 // completeAndStopSession stops the agent for a session and marks it COMPLETED.
 // Used by both the reuse path and the create-new path to terminate the
-// previous session in a uniform way. IsPrimary is cleared explicitly so the
-// full-row UpdateTaskSession write doesn't overwrite the SetPrimarySession
-// call the caller just made on the replacement session.
+// previous session in a uniform way. The state transition is the only session
+// row write here: SetPrimarySession already cleared the old primary flag, and
+// writing the caller's stale full row could resurrect a concurrently stopped
+// session.
 func (s *Service) completeAndStopSession(ctx context.Context, taskID string, session *models.TaskSession) {
 	// Flip state to COMPLETED *before* stopping the agent. StopAgent fires an
 	// agent.completed event, and handleAgentCompleted's terminal-state guard
@@ -792,17 +814,6 @@ func (s *Service) completeAndStopSession(ctx context.Context, taskID string, ses
 				zap.String("session_id", session.ID),
 				zap.Error(stopErr))
 		}
-	}
-
-	now := time.Now().UTC()
-	session.State = models.TaskSessionStateCompleted
-	session.IsPrimary = false
-	session.CompletedAt = &now
-	session.UpdatedAt = now
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
-		s.logger.Warn("failed to complete old session after switch",
-			zap.String("session_id", session.ID),
-			zap.Error(err))
 	}
 }
 
@@ -1156,9 +1167,8 @@ func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromS
 // Callers must ensure the session is ready for input *before* calling this
 // — exactly as before this was guarded — but must not have already claimed
 // the guard themselves; use drainQueuedMessageForPromptableSessionLocked
-// instead when the guard is already held (e.g. inside CancelAgent,
-// cancelAndTakeForPeerMessage, handleAgentBootReady, handleAgentReady,
-// applyPendingMove).
+// instead when the guard is already held (e.g. inside
+// cancelAndTakeForPeerMessage, handleAgentReady, or applyPendingMove).
 //
 // Reloads the session and re-confirms promptability *after* acquiring the
 // guard rather than trusting the caller's own earlier check: callers like
@@ -1379,8 +1389,17 @@ func (s *Service) autoStartStepPrompt(
 	// the agent CLI's TTY and the user sees it verbatim.
 	recordedPrompt := prompt
 	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (prompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(prompt) {
+		isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
+		if err != nil {
+			requeueTaken()
+			return fmt.Errorf("resolve MCP mode for workflow auto-start: %w", err)
+		}
+		configMode, _ := session.Metadata["config_mode"].(bool)
 		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
-		recordedPrompt = sysprompt.InjectKandevContext(taskID, sessionID, prompt, requiresSignal)
+		recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
+			RequiresCompletionSignal:       requiresSignal,
+			IncludeCoordinatorTaskControls: !isOfficeTask && !configMode,
+		})
 	}
 	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin)
 
@@ -1486,28 +1505,16 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		}
 	}
 
-	fresh, err := s.repo.GetTaskSession(ctx, sessionID)
+	// Keep coordinator stop outside the reset-to-CREATED / fresh-runtime
+	// registration window. If fallback wins, stop observes the newly
+	// registered execution after this guard is released; if stop won earlier,
+	// the guarded state CAS below sees CANCELLED and aborts the replacement.
+	cancelLock, releaseCancelLock := s.acquireCancelInFlightGuard(sessionID)
+	cancelLock.Lock()
+	fresh, err := s.resetSessionForFreshFallback(ctx, sessionID)
+	cancelLock.Unlock()
+	releaseCancelLock()
 	if err != nil {
-		s.logger.Error("auto-start fallback: failed to load session",
-			zap.String("session_id", sessionID), zap.Error(err))
-		requeue()
-		return err
-	}
-
-	// Drop the executors_running row for this session: the next StartCreatedSession
-	// will go through the full LaunchAgent path which creates a fresh row via
-	// lifecycle.persistExecutorRunning. Pre-refactor this also cleared
-	// fresh.AgentExecutionID; that field no longer drives runtime decisions —
-	// the in-memory store + executors_running are the source of truth.
-	if delErr := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); delErr != nil && !errors.Is(delErr, models.ErrExecutorRunningNotFound) {
-		s.logger.Warn("auto-start fallback: failed to clear executors_running for fresh launch",
-			zap.String("session_id", sessionID), zap.Error(delErr))
-	}
-	fresh.State = models.TaskSessionStateCreated
-	fresh.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTaskSession(ctx, fresh); err != nil {
-		s.logger.Error("auto-start fallback: failed to reset session for fresh launch",
-			zap.String("session_id", sessionID), zap.Error(err))
 		requeue()
 		return err
 	}
@@ -1519,6 +1526,49 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return err
 	}
 	return nil
+}
+
+func (s *Service) resetSessionForFreshFallback(
+	ctx context.Context,
+	sessionID string,
+) (*models.TaskSession, error) {
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
+
+	fresh, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Error("auto-start fallback: failed to load session",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return nil, err
+	}
+	if fresh == nil {
+		return nil, fmt.Errorf("auto-start fallback: session %q is nil", sessionID)
+	}
+	if isTerminalSessionState(fresh.State) {
+		return nil, &executor.SessionStateSupersededError{
+			SessionID: fresh.ID,
+			State:     fresh.State,
+		}
+	}
+
+	reset := *fresh
+	reset.State = models.TaskSessionStateCreated
+	reset.UpdatedAt = time.Now().UTC()
+	if err := s.persistFullTaskSessionIfCurrent(ctx, &reset, fresh.State); err != nil {
+		s.logger.Error("auto-start fallback: failed to reset session for fresh launch",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return nil, err
+	}
+
+	// Drop the executors_running row only after the guarded state reset wins.
+	// The next StartCreatedSession takes the full LaunchAgent path and creates a
+	// fresh row via lifecycle.persistExecutorRunning.
+	if delErr := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); delErr != nil &&
+		!errors.Is(delErr, models.ErrExecutorRunningNotFound) {
+		s.logger.Warn("auto-start fallback: failed to clear executors_running for fresh launch",
+			zap.String("session_id", sessionID), zap.Error(delErr))
+	}
+	return &reset, nil
 }
 
 // takeAndMergeHandoffMessage drains any queued hand-off message for the session

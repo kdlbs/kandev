@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -120,6 +121,12 @@ func (c *Client) handleMessage(msg *ws.Message) {
 	c.logger.Debug("Received message",
 		zap.String("action", msg.Action),
 		zap.String("id", msg.ID))
+
+	if strings.HasPrefix(msg.Action, "mcp.") {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
+			"MCP actions are not available over the raw WebSocket", nil)
+		return
+	}
 
 	// Handle subscription actions specially (they need access to the client)
 	switch msg.Action {

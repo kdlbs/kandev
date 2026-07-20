@@ -7,7 +7,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 useRegularMode();
 
 test.describe("Workflow agent profile", () => {
-  test("set workflow-level agent profile in settings and persist after save", async ({
+  test("saves the workflow-level agent profile explicitly", async ({
     testPage,
     seedData,
     apiClient,
@@ -33,9 +33,12 @@ test.describe("Workflow agent profile", () => {
     await profileSelect.click();
     await testPage.getByRole("option", { name: profileLabel }).click();
 
-    // Save the workflow
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
+    expect(
+      (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+        (workflow) => workflow.id === seedData.workflowId,
+      )?.agent_profile_id,
+    ).not.toBe(agentProfile.id);
+    await page.saveChanges();
 
     // Reload and verify the selection persists
     await page.goto(seedData.workspaceId);
@@ -80,12 +83,10 @@ test.describe("Workflow agent profile", () => {
     await stepProfileSelect.click();
     await testPage.getByRole("option", { name: profileLabel }).click();
 
-    // Wait for debounced update to propagate
-    await testPage.waitForTimeout(600);
-
-    // Save the workflow
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
+    expect(
+      (await apiClient.listWorkflowSteps(seedData.workflowId)).steps[0]?.agent_profile_id,
+    ).not.toBe(agentProfile.id);
+    await page.saveChanges();
 
     // Reload and verify - the step should now show the agent profile icon (IconUserCog)
     await page.goto(seedData.workspaceId);

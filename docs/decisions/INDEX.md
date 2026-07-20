@@ -45,7 +45,16 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0037 | [Resource-aware frontend unit tests](0037-resource-aware-frontend-unit-tests.md)                                                     | accepted   | frontend, infra             | 2026-07-14 |
 | 0038 | [Quick Chat Repository Isolation](0038-quick-chat-repository-isolation.md)                                                           | accepted   | backend, frontend           | 2026-07-14 |
 | 0039 | [Native desktop integration boundary](0039-native-desktop-integration-boundary.md)                                                  | accepted   | desktop, frontend, backend, infra | 2026-07-15 |
-| 0040 | [Separate updater integrity from OS publisher identity](0040-separate-updater-integrity-from-os-publisher-identity.md)                  | accepted   | desktop, infra, workflow    | 2026-07-15 |
+| 0040 | [Separate updater integrity from OS publisher identity](0040-separate-updater-integrity-from-os-publisher-identity.md)              | accepted   | desktop, infra, workflow    | 2026-07-15 |
 | 0041 | [Backend-owned portable user settings](0041-backend-owned-portable-user-settings.md)                                               | accepted   | backend, frontend           | 2026-07-15 |
 | 0042 | [Project shell output and fetch it on demand](0042-project-shell-output-and-fetch-on-demand.md)                                    | accepted   | backend, frontend, protocol | 2026-07-16 |
 | 0043 | [Plugins read/write kandev data via capability-gated Host gRPC RPCs](0043-plugin-host-data-api.md)                                  | accepted   | backend, protocol           | 2026-07-17 |
+| 2026-07-14-typed-utility-chat-sessions | [Typed Utility Chats Share the Quick Chat Session Model](2026-07-14-typed-utility-chat-sessions.md) | accepted   | backend, frontend           | 2026-07-14 |
+| 2026-07-15-office-agent-execution-profile-routing | [Separate Office identity from routed execution profiles](2026-07-15-office-agent-execution-profile-routing.md) | proposed | backend, frontend | 2026-07-15 |
+| 0044 | [ACP agent compatibility dialects](0044-acp-agent-compatibility-dialects.md)                                                        | accepted   | backend, protocol           | 2026-07-16 |
+| 0045 | [Install-wide storage maintenance uses typed ownership providers and quarantine](0045-install-wide-storage-maintenance.md)          | accepted (amended 2026-07-19) | backend, frontend, infra | 2026-07-14 |
+| 0046 | [Settings route save coordinator](0046-settings-route-save-coordinator.md)                                                          | accepted   | frontend                    | 2026-07-14 |
+| 2026-07-18-turn-configuration-snapshots | [Attribute runtime configuration to turns](2026-07-18-turn-configuration-snapshots.md) | accepted | backend, frontend | 2026-07-18 |
+| 2026-07-19-reject-mcp-actions-on-raw-websocket | [Reject MCP Actions on the Raw WebSocket](2026-07-19-reject-mcp-actions-on-raw-websocket.md) | accepted | backend, protocol | 2026-07-19 |
+| 2026-07-19-workspace-symlink-entries | [Treat Nested Workspace Symlinks as Entries](2026-07-19-workspace-symlink-entries.md) | accepted | backend, infra | 2026-07-19 |
+| 2026-07-20-explicit-local-repository-trust | [Explicit Local Repository Trust](2026-07-20-explicit-local-repository-trust.md) | accepted | backend, frontend | 2026-07-20 |

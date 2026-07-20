@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -112,6 +113,31 @@ func TestValidateLocalPathUnderRoot(t *testing.T) {
 func TestValidateLocalPathUnderRoot_EmptyRootSkipsGuard(t *testing.T) {
 	if err := validateLocalPathUnderRoot("/etc/ssh", ""); err != nil {
 		t.Errorf("empty allowedRoot should skip guard, got %v", err)
+	}
+}
+
+// TestGitCloneArgs_HasEndOfOptionsSeparator is the regression guard for the
+// missing `--` fix: the clone argv must place `--` immediately before the
+// source locator so a `-`-prefixed locator can never be parsed as a git flag.
+func TestGitCloneArgs_HasEndOfOptionsSeparator(t *testing.T) {
+	locator := "https://github.com/user/repo.git"
+	repoDir := "/cache/git/deadbeef"
+	args := gitCloneArgs(locator, repoDir)
+
+	sep := slices.Index(args, "--")
+	loc := slices.Index(args, locator)
+	if sep == -1 {
+		t.Fatalf("expected -- separator in clone args, got %v", args)
+	}
+	if loc == -1 {
+		t.Fatalf("expected locator in clone args, got %v", args)
+	}
+	if sep >= loc {
+		t.Fatalf("expected -- (index %d) to precede locator (index %d) in %v", sep, loc, args)
+	}
+	// The locator must be the argument directly after `--`.
+	if args[sep+1] != locator {
+		t.Fatalf("expected locator directly after --, got %q in %v", args[sep+1], args)
 	}
 }
 

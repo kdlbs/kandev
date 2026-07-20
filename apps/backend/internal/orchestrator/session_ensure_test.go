@@ -452,6 +452,24 @@ func TestResolveTaskAgentProfile_StepThenWorkflowThenWorkspace(t *testing.T) {
 		}
 	})
 
+	t.Run("office assignee before workspace default", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ws := &models.Workspace{
+			ID: "ws-office", Name: "Office", DefaultAgentProfileID: strPtr("ws-profile"),
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := repo.CreateWorkspace(ctx, ws); err != nil {
+			t.Fatalf("create workspace: %v", err)
+		}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		task := &models.Task{
+			ID: "t-office", WorkspaceID: "ws-office", AssigneeAgentProfileID: "office-agent",
+		}
+		if got, _ := svc.resolveTaskAgentProfile(ctx, task); got != "office-agent" {
+			t.Errorf("expected office-agent, got %q", got)
+		}
+	})
+
 	t.Run("returns empty when nothing resolves", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		ws := &models.Workspace{ID: "ws-y", Name: "Y", CreatedAt: now, UpdatedAt: now}

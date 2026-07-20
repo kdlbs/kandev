@@ -20,6 +20,10 @@ func setAgentProcGroup(cmd *exec.Cmd) {
 	setProcGroup(cmd)
 }
 
+func setManagedProcGroup(cmd *exec.Cmd) {
+	setProcGroup(cmd)
+}
+
 type processLifecycleHandle struct{}
 
 func installProcessLifecycle(_ *exec.Cmd) (processLifecycleHandle, error) {
@@ -27,6 +31,10 @@ func installProcessLifecycle(_ *exec.Cmd) (processLifecycleHandle, error) {
 }
 
 func releaseProcessLifecycle(_ processLifecycleHandle) {}
+
+func reapProcessLifecycle(_ processLifecycleHandle) error { return nil }
+
+func ownsProcessLifecycle(_ processLifecycleHandle) bool { return false }
 
 // killProcessGroup kills the entire process group for the given PID.
 // Returns nil if successful, or an error if the kill failed.

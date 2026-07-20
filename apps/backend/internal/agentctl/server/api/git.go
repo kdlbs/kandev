@@ -848,8 +848,8 @@ func (s *Server) handleGitLogMultiRepo(
 		// branch (e.g. "main"). Both can be wrong for sibling repos — running
 		// `git log <foreign-sha>..HEAD` in lvc fails outright and the repo's
 		// commits silently disappear from the merged response. Compute a
-		// per-repo base via merge-base against `origin/main` (with
-		// `origin/master` fallback) so each repo's commits show up.
+		// per-repo base through the workspace tracker so the task's configured
+		// base branch and normal integration-branch fallbacks both work.
 		perRepoReq := req
 		perRepoReq.Since = ""
 		perRepoReq.TargetBranch = ""
@@ -975,10 +975,10 @@ func (s *Server) runGitCumulativeDiffForRepo(
 }
 
 // handleGitCumulativeDiffMultiRepo fans cumulative diff out across every
-// per-repo tracker. Each repo's base commit is computed locally via
-// merge-base against the integration branch — the caller-supplied base only
-// makes sense for one repo at a time, since each repo has its own commit
-// graph. Files from each repo are merged into a single map, keyed by
+// per-repo tracker. Each repo's base commit is resolved from its configured
+// task base branch — the caller-supplied base only makes sense for one repo at
+// a time, since each repo has its own commit graph. Files from each repo are
+// merged into a single map, keyed by
 // `<repoSubpath>/<path>` so paths that exist in multiple repos don't clash,
 // and tagged with `repository_name` so the frontend can group them.
 func (s *Server) handleGitCumulativeDiffMultiRepo(
@@ -998,7 +998,7 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 				zap.String("repo", sub))
 			continue
 		}
-		// Multi-repo: base is already merge-base'd per-repo via resolvePerRepoBase,
+		// Multi-repo: base is already resolved per-repo via resolvePerRepoBase,
 		// so we pass empty target_branch to skip the second merge-base attempt.
 		result := s.runGitCumulativeDiffForRepo(c, base, "", sub)
 		if result == nil {
@@ -1021,21 +1021,15 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 	c.JSON(http.StatusOK, merged)
 }
 
-// resolvePerRepoBase returns the merge-base of HEAD against the integration
-// branch (origin/main, with origin/master fallback). Multi-repo tasks share
-// no single base commit across repos, so each repo computes its own.
+// resolvePerRepoBase returns the comparison anchor owned by the repository's
+// workspace tracker. Multi-repo tasks share no single base commit across
+// repos, and each tracker carries that repository's configured task base.
 func (s *Server) resolvePerRepoBase(c *gin.Context, repo string) string {
-	gitOp, err := s.procMgr.GitOperatorFor(repo)
+	tracker, err := s.procMgr.GetWorkspaceTrackerFor(repo)
 	if err != nil {
 		return ""
 	}
-	for _, candidate := range []string{"origin/main", "origin/master"} {
-		base, mbErr := gitOp.GetMergeBase(c.Request.Context(), "HEAD", candidate)
-		if mbErr == nil && base != "" {
-			return base
-		}
-	}
-	return ""
+	return tracker.ResolveBaseCommit(c.Request.Context())
 }
 
 // mergeCumulativeFiles copies per-repo files into the merged map under a

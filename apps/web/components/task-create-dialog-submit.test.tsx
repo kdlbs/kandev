@@ -9,6 +9,9 @@ import { createRef } from "react";
 // create call; non-empty prompt → call with that prompt in the payload.
 
 const pushMock = vi.fn();
+const TASK_ID = "task-1";
+const RENAMED_TITLE = "Renamed task";
+const ORIGINAL_PROMPT = "Original prompt";
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: pushMock, replace: vi.fn(), back: vi.fn() }),
 }));
@@ -23,12 +26,14 @@ vi.mock("@/components/state-provider", () => ({
     selector({ setActiveDocument: vi.fn(), setPlanMode: vi.fn() }),
 }));
 
+const updateTaskMock = vi.fn();
 vi.mock("@/lib/api", () => ({
-  updateTask: vi.fn(),
+  updateTask: (...args: unknown[]) => updateTaskMock(...args),
 }));
 
+const launchSessionMock = vi.fn(async (..._args: unknown[]) => ({ session_id: "session-1" }));
 vi.mock("@/lib/services/session-launch-service", () => ({
-  launchSession: vi.fn(async () => ({ session_id: "session-1" })),
+  launchSession: (...args: unknown[]) => launchSessionMock(...args),
 }));
 
 vi.mock("@/lib/services/session-launch-helpers", () => ({
@@ -57,10 +62,20 @@ const buildCreateTaskPayloadMock = vi.fn((args: BuildCreateTaskPayloadCall) => (
   executor_profile_id: args.executorProfileId || undefined,
 }));
 const validateCreateInputsMock = vi.fn((..._args: unknown[]) => true);
+const buildRepositoriesPayloadMock = vi.fn(
+  (_args: unknown) => [] as Array<{ repository_id: string; base_branch?: string }>,
+);
 vi.mock("@/components/task-create-dialog-helpers", () => ({
   activatePlanMode: vi.fn(),
   buildCreateTaskPayload: (args: BuildCreateTaskPayloadCall) => buildCreateTaskPayloadMock(args),
-  buildRepositoriesPayload: () => [],
+  buildRepositoriesPayload: (args: unknown) => buildRepositoriesPayloadMock(args),
+  computeIsTaskStarted: (isEditMode: boolean, editingTask?: { state?: string } | null) =>
+    Boolean(
+      isEditMode &&
+      editingTask?.state &&
+      editingTask.state !== "TODO" &&
+      editingTask.state !== "CREATED",
+    ),
   findDuplicateRemoteRepo: () => null,
   validateCreateInputs: (...args: unknown[]) => validateCreateInputsMock(...args),
   toMessageAttachments: () => [],
@@ -70,7 +85,7 @@ const createTaskRetryMock = vi.fn(async (buildPayload: (consented: string[]) => 
   // Invoke the build function so payload-construction side effects (and
   // assertions on it) run as they would in production.
   buildPayload([]);
-  return { id: "task-1", session_id: "session-1" };
+  return { id: TASK_ID, session_id: "session-1" };
 });
 vi.mock("@/components/task-create-dialog-fresh-branch-consent", () => ({
   useFreshBranchConsent: () => ({
@@ -152,10 +167,99 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
 beforeEach(() => {
   resetTaskCreateLastUsedSync({ clearQueued: true });
   buildCreateTaskPayloadMock.mockClear();
+  buildRepositoriesPayloadMock.mockReset();
+  buildRepositoriesPayloadMock.mockReturnValue([]);
   validateCreateInputsMock.mockClear();
   createTaskRetryMock.mockClear();
+  updateTaskMock.mockReset();
+  updateTaskMock.mockResolvedValue({ id: TASK_ID, title: RENAMED_TITLE });
+  launchSessionMock.mockClear();
   pushMock.mockClear();
   toastMock.mockClear();
+});
+
+describe("useTaskSubmitHandlers — started task edits", () => {
+  it("updates only the title so a locked prompt cannot be cleared", async () => {
+    buildRepositoriesPayloadMock.mockReturnValue([
+      { repository_id: "repo-1", base_branch: "main" },
+    ]);
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: RENAMED_TITLE,
+      editingTask: {
+        id: TASK_ID,
+        title: "Original title",
+        description: ORIGINAL_PROMPT,
+        workflowStepId: "step-1",
+        state: "IN_PROGRESS",
+      },
+      descriptionInputRef: makeRef(""),
+      noRepository: false,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(updateTaskMock).toHaveBeenCalledWith(TASK_ID, { title: RENAMED_TITLE });
+    expect(buildRepositoriesPayloadMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps repository updates for tasks that have not started", async () => {
+    const repositories = [{ repository_id: "repo-1", base_branch: "main" }];
+    buildRepositoriesPayloadMock.mockReturnValue(repositories);
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: RENAMED_TITLE,
+      editingTask: {
+        id: TASK_ID,
+        title: "Original title",
+        description: ORIGINAL_PROMPT,
+        workflowStepId: "step-1",
+        state: "TODO",
+      },
+      descriptionInputRef: makeRef("Updated prompt"),
+      noRepository: false,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(updateTaskMock).toHaveBeenCalledWith(TASK_ID, {
+      title: RENAMED_TITLE,
+      description: "Updated prompt",
+      repositories,
+    });
+  });
+
+  it("uses the update-only path when the started edit form is submitted", async () => {
+    const onSuccess = vi.fn();
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: RENAMED_TITLE,
+      editingTask: {
+        id: TASK_ID,
+        title: "Original title",
+        description: ORIGINAL_PROMPT,
+        workflowStepId: "step-1",
+        state: "IN_PROGRESS",
+      },
+      descriptionInputRef: makeRef(ORIGINAL_PROMPT),
+      onSuccess,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+
+    expect(updateTaskMock).toHaveBeenCalledWith(TASK_ID, { title: RENAMED_TITLE });
+    expect(launchSessionMock).not.toHaveBeenCalled();
+    expect(onSuccess).toHaveBeenCalledWith({ id: TASK_ID, title: RENAMED_TITLE }, "edit");
+  });
 });
 
 describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () => {

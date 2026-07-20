@@ -125,10 +125,36 @@ func TestBuildShareHTML_InlineBackticksAndFencedCode(t *testing.T) {
 		},
 	}
 	doc := BuildShareHTML(snap)
-	assertContains(t, doc, `<code class="inline">t.Cleanup</code>`)
-	assertContains(t, doc, `<pre class="code lang-go"><code>`)
+	assertContains(t, doc, `<code>t.Cleanup</code>`)
+	assertContains(t, doc, `<pre><code class="language-go">`)
 	assertContains(t, doc, "func TestX(t *testing.T)")
 	assertContains(t, doc, "<p>Done.</p>")
+}
+
+func TestBuildShareHTML_RendersMarkdownWithoutUnsafeHTML(t *testing.T) {
+	t.Parallel()
+	snap := &Snapshot{
+		Task: TaskMeta{Title: "T"},
+		Messages: []Message{
+			{Role: roleAssistant, Blocks: []Block{{
+				Kind: blockKindText,
+				Text: "## Summary\n\n**Pushed** successfully.\n\n- tests passed\n- lint passed\n\n[docs](https://example.com)\n\n![tracker](https://attacker.example/pixel)\n\n[![linked tracker](https://attacker.example/pixel)](https://linked.example/target)\n\n<script>alert('xss')</script>\n\n[bad](javascript:alert('xss'))\n\n[data](data:text/html;base64,PHNjcmlwdD4=)",
+			}}},
+		},
+	}
+
+	doc := BuildShareHTML(snap)
+
+	assertContains(t, doc, "<h2>Summary</h2>")
+	assertContains(t, doc, "<strong>Pushed</strong>")
+	assertContains(t, doc, "<li>tests passed</li>")
+	assertContains(t, doc, `<a href="https://example.com">docs</a>`)
+	if strings.Contains(doc, "<script>") || strings.Contains(doc, `href="javascript:`) || strings.Contains(doc, `href="data:`) {
+		t.Fatalf("unsafe markdown content leaked into rendered HTML:\n%s", doc)
+	}
+	if strings.Contains(doc, "<img") || strings.Contains(doc, "attacker.example") || strings.Contains(doc, "linked.example") {
+		t.Fatalf("external markdown image leaked into rendered HTML:\n%s", doc)
+	}
 }
 
 func TestBuildShareHTML_EmptyMessagesShowsPlaceholder(t *testing.T) {
@@ -154,24 +180,6 @@ func TestGroupMessages_RunsFusedAcrossEmptyMessages(t *testing.T) {
 	})
 	if len(groups) != 1 || len(groups[0].blocks) != 2 {
 		t.Fatalf("expected 1 group with 2 blocks, got %+v", groups)
-	}
-}
-
-func TestInlineFormat_UnmatchedBacktickIsRendered(t *testing.T) {
-	t.Parallel()
-	got := inlineFormat("an unmatched ` here")
-	if !strings.Contains(got, "`") {
-		t.Fatalf("expected unmatched backtick preserved, got %q", got)
-	}
-}
-
-func TestSanitiseLang_StripsUnsafe(t *testing.T) {
-	t.Parallel()
-	if got := sanitiseLang("GO-1.21"); got != "go-121" {
-		t.Fatalf("got %q", got)
-	}
-	if got := sanitiseLang("<script>"); got != "script" {
-		t.Fatalf("got %q", got)
 	}
 }
 

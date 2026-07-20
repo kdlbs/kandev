@@ -137,11 +137,17 @@ func (p WorkspacePolicy) NeedsAttachment() bool {
 
 // RelatedTask is the lightweight projection of a task surfaced through the
 // list_related_tasks_kandev MCP tool. Document keys are precomputed so an
-// agent can decide what to fetch without a follow-up list call.
+// agent can decide what to fetch without a follow-up list call. Description
+// is included so a coordinating agent can read dependency metadata (e.g. a
+// "Depends on:" line) from a related task — including a CREATED sibling that
+// has no session yet — without an unbounded list_tasks call. The relation
+// graph itself is the bound: only parent/children/siblings/blockers are ever
+// projected, so descriptions never leak from unrelated tasks.
 type RelatedTask struct {
 	ID            string             `json:"id"`
 	Identifier    string             `json:"identifier,omitempty"`
 	Title         string             `json:"title"`
+	Description   string             `json:"description,omitempty"`
 	State         string             `json:"state"`
 	WorkspaceID   string             `json:"workspace_id"`
 	ParentID      string             `json:"parent_id,omitempty"`
@@ -234,6 +240,16 @@ func (s *HandoffService) SetTaskEventPublisher(p TaskEventPublisher) {
 // archive (archive preserves the env row for later inspection).
 type TaskResourceCleaner interface {
 	CleanupTaskResources(ctx context.Context, taskID string, deleteEnvRow bool)
+}
+
+type archiveTaskResourceCleanupCanceller interface {
+	CancelArchiveTaskResourceCleanup(ctx context.Context, taskID string) error
+}
+
+type taskResourceCleanupCoordinator interface {
+	PrepareTaskResourceCleanup(ctx context.Context, taskID string, trigger models.TaskResourceCleanupTrigger, operationID string, deleteEnvironmentRow bool) error
+	StartPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
+	CancelPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
 }
 
 // SetTaskResourceCleaner wires the resource teardown surface invoked by
@@ -414,6 +430,39 @@ func (s *HandoffService) attachSequentialBlocker(ctx context.Context, taskID, pa
 	})
 }
 
+// ListRelatedForCaller is the access-checked entry point behind the
+// list_related_tasks_kandev MCP tool. When the caller inspects a task other
+// than itself, the target must be readable under the same relation/workspace
+// guard the document tools use (self / ancestor / descendant / sibling /
+// blocker, same workspace). Without this gate a caller that learns an
+// unrelated or cross-workspace task ID could read that task's description and
+// its relatives' descriptions. Returns ErrAccessDenied for inaccessible
+// targets.
+//
+// The un-gated ListRelated remains for trusted internal callers (e.g.
+// GetTaskContext renders the context panel for a task the user already owns).
+func (s *HandoffService) ListRelatedForCaller(ctx context.Context, callerTaskID, targetTaskID string) (*RelatedTasks, error) {
+	if targetTaskID == "" {
+		return nil, ErrDocumentTaskRequired
+	}
+	// Any target other than the caller itself must pass the read guard. An
+	// empty caller has no identity to authorize against, so canReadDocuments
+	// denies it (rather than silently delegating to the ungated ListRelated).
+	if callerTaskID != targetTaskID {
+		ok, err := canReadDocuments(ctx,
+			repoTaskLookupAdapter{r: s.tasks},
+			blockerLookupAdapter{repo: s.blockers},
+			callerTaskID, targetTaskID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, ErrAccessDenied
+		}
+	}
+	return s.ListRelated(ctx, targetTaskID)
+}
+
 // ListRelated returns the parent, children, siblings, blockers, and
 // blocked-by tasks for taskID. Document keys are populated for the task
 // itself plus every related task so an agent can shop for documents in
@@ -556,6 +605,7 @@ func (s *HandoffService) toRelated(ctx context.Context, t *models.Task) RelatedT
 		ID:            t.ID,
 		Identifier:    t.Identifier,
 		Title:         t.Title,
+		Description:   t.Description,
 		State:         string(t.State),
 		WorkspaceID:   t.WorkspaceID,
 		ParentID:      t.ParentID,

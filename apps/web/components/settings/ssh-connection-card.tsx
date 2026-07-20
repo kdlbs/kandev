@@ -1,12 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import {
   IconCheck,
   IconLoader2,
@@ -17,6 +14,12 @@ import {
 } from "@tabler/icons-react";
 import { testSSHConnection } from "@/lib/api/domains/ssh-api";
 import { FingerprintTrustBlock } from "@/components/settings/ssh-fingerprint-trust-block";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { SSHConnectionForm } from "@/components/settings/ssh-connection-form";
+import {
+  SettingsSaveCancelledError,
+  useSettingsSaveContributor,
+} from "@/components/settings/settings-save-provider";
 import type {
   SSHIdentitySource,
   SSHTestRequest,
@@ -44,6 +47,9 @@ export interface SSHConnectionCardProps {
   // Called when the user clicks Save after a successful test+trust. The
   // returned config carries the freshly pinned fingerprint.
   onSave: (config: SSHExecutorConfig) => Promise<void> | void;
+  // Existing executor routes opt into the shared settings save coordinator.
+  // Create flows omit this and retain their local Save button.
+  coordinatedSaveId?: string;
   // Existing running sessions for this executor. Triggers the
   // "this won't affect existing sessions" warning on save.
   runningSessionCount?: number;
@@ -101,9 +107,55 @@ function initialState(initial?: Partial<SSHExecutorConfig>): SSHConnectionState 
   };
 }
 
+function confirmRunningSessions(count?: number): boolean {
+  if (!count) return true;
+  return window.confirm(
+    `This executor has ${count} running session(s). ` +
+      "They will keep running on the current host. Only new sessions started " +
+      "after save will use the updated config. Continue?",
+  );
+}
+
+type CoordinatedSSHSaveOptions = {
+  id?: string;
+  form: SSHExecutorConfig;
+  baseline: SSHExecutorConfig;
+  canSave: boolean;
+  save: () => Promise<void>;
+  discard: () => void;
+};
+
+function useCoordinatedSSHSave({
+  id,
+  form,
+  baseline,
+  canSave,
+  save,
+  discard,
+}: CoordinatedSSHSaveOptions) {
+  const revision = JSON.stringify(form);
+  useSettingsSaveContributor({
+    id: id ?? "ssh-connection-create",
+    revision,
+    isDirty: Boolean(id) && revision !== JSON.stringify(baseline),
+    canSave,
+    invalidReason: canSave ? undefined : "Test the connection and trust its fingerprint to save.",
+    save,
+    discard,
+  });
+}
+
+function canTestConnection(form: SSHExecutorConfig, testing: boolean): boolean {
+  if (testing || form.name.trim() === "") return false;
+  return (form.host ?? "").trim() !== "" || (form.host_alias ?? "").trim() !== "";
+}
+
 function useSSHConnection(props: SSHConnectionCardProps) {
   const [state, setState] = useState<SSHConnectionState>(() => initialState(props.initial));
+  const [baseline, setBaseline] = useState(() => initialState(props.initial).form);
   const { form, testing, saving, result, resultStale, trust, error } = state;
+  const isDirty =
+    Boolean(props.coordinatedSaveId) && JSON.stringify(form) !== JSON.stringify(baseline);
 
   const update = useCallback(
     <K extends keyof SSHExecutorConfig>(key: K, value: SSHExecutorConfig[K]) => {
@@ -131,12 +183,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
 
   const setTrust = useCallback((v: boolean) => setState((prev) => ({ ...prev, trust: v })), []);
 
-  const canTest = useMemo(() => {
-    if (testing) return false;
-    if (form.name.trim() === "") return false;
-    if ((form.host ?? "").trim() === "" && (form.host_alias ?? "").trim() === "") return false;
-    return true;
-  }, [form, testing]);
+  const canTest = canTestConnection(form, testing);
 
   const handleTest = useCallback(async () => {
     setState((prev) => ({
@@ -175,30 +222,30 @@ function useSSHConnection(props: SSHConnectionCardProps) {
 
   const canSave = !!result?.success && !!result.fingerprint && trust && !resultStale && !saving;
 
-  const confirmRunningSessions = useCallback(
-    () =>
-      props.runningSessionCount
-        ? window.confirm(
-            `This executor has ${props.runningSessionCount} running session(s). ` +
-              `They will keep running on the current host. Only new sessions started ` +
-              `after save will use the updated config. Continue?`,
-          )
-        : true,
-    [props.runningSessionCount],
-  );
-
   const handleSave = useCallback(async () => {
-    if (!canSave || !result?.fingerprint) return;
-    if (!confirmRunningSessions()) return;
+    if (!canSave || !result?.fingerprint) throw new Error("Test and trust this host before saving");
+    if (!confirmRunningSessions(props.runningSessionCount)) throw new SettingsSaveCancelledError();
+    const submitted = form;
     setState((prev) => ({ ...prev, saving: true, error: null }));
     try {
-      await props.onSave({ ...form, host_fingerprint: result.fingerprint });
+      await props.onSave({ ...submitted, host_fingerprint: result.fingerprint });
+      setBaseline(submitted);
       setState((prev) => ({ ...prev, saving: false }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to save executor";
       setState((prev) => ({ ...prev, saving: false, error: msg }));
+      throw e;
     }
-  }, [canSave, confirmRunningSessions, form, props, result]);
+  }, [canSave, form, props, result]);
+
+  useCoordinatedSSHSave({
+    id: props.coordinatedSaveId,
+    form,
+    baseline,
+    canSave,
+    save: handleSave,
+    discard: () => setState(initialState(baseline)),
+  });
 
   return {
     form,
@@ -214,13 +261,15 @@ function useSSHConnection(props: SSHConnectionCardProps) {
     setTrust,
     handleTest,
     handleSave,
+    baseline,
+    isDirty,
   };
 }
 
 export function SSHConnectionCard(props: SSHConnectionCardProps) {
   const c = useSSHConnection(props);
   return (
-    <Card data-testid="ssh-connection-card">
+    <SettingsCard isDirty={c.isDirty} data-testid="ssh-connection-card">
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
@@ -236,7 +285,7 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <SSHConnectionForm form={c.form} onChange={c.update} />
+        <SSHConnectionForm form={c.form} baseline={c.baseline} onChange={c.update} />
         {c.form.host_fingerprint && <PinnedFingerprintRow fingerprint={c.form.host_fingerprint} />}
         <SSHConnectionActions
           testing={c.testing}
@@ -245,6 +294,7 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
           canSave={c.canSave}
           onTest={c.handleTest}
           onSave={c.handleSave}
+          showSave={!props.coordinatedSaveId}
         />
         {c.error && (
           <p data-testid="ssh-error" className="text-sm text-red-600">
@@ -261,170 +311,7 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
           />
         )}
       </CardContent>
-    </Card>
-  );
-}
-
-type FieldOnChange = <K extends keyof SSHExecutorConfig>(
-  key: K,
-  value: SSHExecutorConfig[K],
-) => void;
-
-function SSHConnectionForm({
-  form,
-  onChange,
-}: {
-  form: SSHExecutorConfig;
-  onChange: FieldOnChange;
-}) {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <TextField
-        id="ssh-name"
-        testId="ssh-input-name"
-        label="Name"
-        placeholder="My VPS"
-        value={form.name}
-        onChange={(v) => onChange("name", v)}
-      />
-      <TextField
-        id="ssh-host-alias"
-        testId="ssh-input-host-alias"
-        label="Host alias from ~/.ssh/config (optional)"
-        hint="If set, inherits HostName / Port / User / IdentityFile / ProxyJump from your config."
-        placeholder="prod"
-        value={form.host_alias ?? ""}
-        onChange={(v) => onChange("host_alias", v)}
-      />
-      <TextField
-        id="ssh-host"
-        testId="ssh-input-host"
-        label="Host"
-        placeholder="dev.example.com"
-        value={form.host ?? ""}
-        onChange={(v) => onChange("host", v)}
-      />
-      <TextField
-        id="ssh-port"
-        testId="ssh-input-port"
-        label="Port"
-        type="number"
-        placeholder="22"
-        value={String(form.port ?? 22)}
-        onChange={(v) => onChange("port", parseInt(v, 10) || 22)}
-      />
-      <TextField
-        id="ssh-user"
-        testId="ssh-input-user"
-        label="User"
-        placeholder="ubuntu"
-        value={form.user ?? ""}
-        onChange={(v) => onChange("user", v)}
-      />
-      <IdentitySourceField
-        value={form.identity_source}
-        onChange={(v) => onChange("identity_source", v)}
-      />
-      {form.identity_source === "file" && (
-        <TextField
-          id="ssh-identity-file"
-          testId="ssh-input-identity-file"
-          label="Identity file path"
-          hint="Passphrase-protected keys must be loaded into ssh-agent first."
-          placeholder="~/.ssh/id_ed25519"
-          value={form.identity_file ?? ""}
-          onChange={(v) => onChange("identity_file", v)}
-        />
-      )}
-      <TextField
-        id="ssh-proxy-jump"
-        testId="ssh-input-proxy-jump"
-        label="ProxyJump (optional)"
-        hint="Single bastion hop. Chained jumps are not supported."
-        placeholder="bastion.example.com"
-        value={form.proxy_jump ?? ""}
-        onChange={(v) => onChange("proxy_jump", v)}
-      />
-    </div>
-  );
-}
-
-function TextField({
-  id,
-  testId,
-  label,
-  hint,
-  placeholder,
-  type,
-  value,
-  onChange,
-}: {
-  id: string;
-  testId: string;
-  label: string;
-  hint?: string;
-  placeholder?: string;
-  type?: string;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <FieldShell id={id} label={label} hint={hint}>
-      <Input
-        id={id}
-        data-testid={testId}
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </FieldShell>
-  );
-}
-
-function IdentitySourceField({
-  value,
-  onChange,
-}: {
-  value: SSHIdentitySource;
-  onChange: (v: SSHIdentitySource) => void;
-}) {
-  return (
-    <FieldShell id="ssh-identity-source" label="Identity source">
-      <Select value={value} onValueChange={(v) => onChange(v as SSHIdentitySource)}>
-        <SelectTrigger id="ssh-identity-source" data-testid="ssh-input-identity-source">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="agent" data-testid="ssh-input-identity-source-agent">
-            ssh-agent (SSH_AUTH_SOCK)
-          </SelectItem>
-          <SelectItem value="file" data-testid="ssh-input-identity-source-file">
-            Identity file (private key path)
-          </SelectItem>
-        </SelectContent>
-      </Select>
-    </FieldShell>
-  );
-}
-
-function FieldShell({
-  id,
-  label,
-  hint,
-  children,
-}: {
-  id: string;
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      {children}
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
+    </SettingsCard>
   );
 }
 
@@ -452,6 +339,7 @@ function SSHConnectionActions({
   canSave,
   onTest,
   onSave,
+  showSave,
 }: {
   testing: boolean;
   saving: boolean;
@@ -459,6 +347,7 @@ function SSHConnectionActions({
   canSave: boolean;
   onTest: () => void;
   onSave: () => void;
+  showSave: boolean;
 }) {
   return (
     <div className="flex items-center gap-3">
@@ -477,16 +366,18 @@ function SSHConnectionActions({
         )}
         Test connection
       </Button>
-      <Button
-        size="sm"
-        onClick={onSave}
-        disabled={!canSave}
-        data-testid="ssh-save-button"
-        className="cursor-pointer"
-      >
-        {saving ? <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
-        Save
-      </Button>
+      {showSave && (
+        <Button
+          size="sm"
+          onClick={onSave}
+          disabled={!canSave}
+          data-testid="ssh-save-button"
+          className="cursor-pointer"
+        >
+          {saving ? <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+          Save
+        </Button>
+      )}
     </div>
   );
 }
@@ -588,12 +479,7 @@ function StepRow({ step }: { step: SSHTestStep }) {
           <span className="text-muted-foreground text-xs">({step.duration_ms}ms)</span>
         </div>
         {step.output && (
-          <p
-            data-testid={`ssh-test-step-${slug}-output`}
-            className="text-xs text-muted-foreground truncate font-mono"
-          >
-            {step.output}
-          </p>
+          <p className="text-xs text-muted-foreground truncate font-mono">{step.output}</p>
         )}
         {step.error && (
           <p data-testid={`ssh-test-step-${slug}-error`} className="text-xs text-red-600 truncate">

@@ -6,6 +6,7 @@
 id: routine
 name: Routine
 description: System workflow for routine-fired tasks. Single auto-completing step.
+hidden: true
 steps:
   - id: in_progress
     name: In Progress

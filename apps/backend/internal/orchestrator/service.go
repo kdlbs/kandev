@@ -128,6 +128,13 @@ type repoStore interface {
 	sessionExecutorStore
 	// Additional methods needed by executor
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
+	// UpdateTaskStateIfCurrentIn — see executor.executorStore's doc comment;
+	// required here because repo (this interface) is what NewService passes
+	// to executor.NewExecutor.
+	UpdateTaskStateIfCurrentIn(ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState) (v1.TaskState, bool, error)
+	// UpdateTaskStateIfNotArchived — see executor.executorStore's doc comment;
+	// required here for the same reason as UpdateTaskStateIfCurrentIn above.
+	UpdateTaskStateIfNotArchived(ctx context.Context, id string, state v1.TaskState) (v1.TaskState, bool, error)
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
@@ -158,6 +165,7 @@ type sessionExecutorStore interface {
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	RenameTaskSession(ctx context.Context, id, name string) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
+	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
@@ -165,6 +173,7 @@ type sessionExecutorStore interface {
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+	SetSessionMetadataKeyIfAbsent(ctx context.Context, sessionID, key string, value interface{}) (bool, error)
 	SetSessionACPSessionID(ctx context.Context, sessionID, acpSessionID string) (bool, error)
 	// Executor running state
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
@@ -417,6 +426,14 @@ type Service struct {
 	// guard does not grow without bound in long-running backend processes.
 	completedExecutions sync.Map
 
+	// executionTeardownClaims arbitrates detached runtime teardown by
+	// "<session_id>::<execution_id>". Coordinator stop requests graceful
+	// teardown while terminal-event cleanup requests force teardown; the first
+	// intent accepted under the session's cancelInFlight guard owns that
+	// execution. Claims expire with the same bounded grace period used for
+	// completed-execution stream markers.
+	executionTeardownClaims sync.Map
+
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
@@ -540,20 +557,39 @@ func NewService(
 	// Wire executor state changes through the orchestrator so events are published
 	// (e.g. WebSocket notifications to the frontend). Must be set after service
 	// construction so the session callback can reference s.updateTaskSessionState.
+	// UpdateTaskStateIfNotArchived (not the unconditional UpdateTaskState) so
+	// every runtime-driven task-state write the executor makes through this
+	// single callback — IN_PROGRESS on agent start/resume, FAILED on launch
+	// error — is atomic against archived_at. Each caller's own archived
+	// guard (e.g. writeTaskInProgressForRuntime) reads the task before this
+	// fires; ArchiveTask can commit in that window without an intervening
+	// state write to invalidate the guard, so only this conditional write
+	// closes the race (PR #1706 review).
 	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
-		if err := taskRepo.UpdateTaskState(ctx, taskID, state); err != nil {
+		updated, err := taskRepo.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+		if err != nil {
 			return err
+		}
+		if !updated {
+			s.logger.Debug("skipping runtime task state write for archived task",
+				zap.String("task_id", taskID),
+				zap.String("state", string(state)))
+			return nil
 		}
 		s.processParentChildrenCompletedForTaskState(ctx, taskID, state)
 		return nil
 	})
+	exec.SetOnTaskRuntimeStateReconcile(s.reconcileTaskStateForRuntime)
 	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil
 	})
+	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
 	exec.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
 		return s.setSessionStarting(ctx, taskID, session, promoteTask)
 	})
+	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
+	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
 	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
 		s.writeTaskReviewState(ctx, taskID, completedSessionID)
 	})
@@ -1310,9 +1346,14 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 
 	// Ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if running.TaskID != "" {
-		task, taskErr := s.taskRepo.GetTask(ctx, running.TaskID)
-		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress {
-			if updateErr := s.taskRepo.UpdateTaskState(ctx, running.TaskID, v1.TaskStateReview); updateErr != nil {
+		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
+		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
+			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
+			// so the write is atomic against archived_at: the taskArchived guard
+			// above reads the row before this call, and ArchiveTask can commit in
+			// that window without changing task.State, so only an archive-aware
+			// conditional write closes the race.
+			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, running.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
 				s.logger.Warn("failed to update task to REVIEW on startup",
 					zap.String("task_id", running.TaskID),
 					zap.Error(updateErr))
@@ -1421,12 +1462,15 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
 	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if session.TaskID != "" {
-		task, taskErr := s.taskRepo.GetTask(ctx, session.TaskID)
-		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress {
+		task, taskErr := s.repo.GetTask(ctx, session.TaskID)
+		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
 			s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
 				zap.String("task_id", session.TaskID),
 				zap.String("session_id", sessionID))
-			if updateErr := s.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateReview); updateErr != nil {
+			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
+			// so the write is atomic against archived_at — see the matching
+			// comment in reconcileOneSessionOnStartup above.
+			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, session.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
 				s.logger.Warn("failed to update task state to REVIEW",
 					zap.String("task_id", session.TaskID),
 					zap.Error(updateErr))

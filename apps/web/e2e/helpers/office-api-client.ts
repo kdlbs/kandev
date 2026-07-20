@@ -270,10 +270,20 @@ export class OfficeApiClient {
       default_tier: "frontier" | "balanced" | "economy";
       provider_profiles: Record<
         string,
-        { tier_map: { frontier?: string; balanced?: string; economy?: string }; mode?: string }
+        {
+          tier_map: { frontier?: string; balanced?: string; economy?: string };
+          execution_profile_ids?: { frontier?: string; balanced?: string; economy?: string };
+        }
       >;
     };
     known_providers: string[];
+    execution_profiles: Array<{
+      id: string;
+      name: string;
+      provider_id: string;
+      model: string;
+      mode?: string;
+    }>;
   }> {
     return this.request("GET", `/workspaces/${wsId}/routing`);
   }
@@ -291,7 +301,10 @@ export class OfficeApiClient {
       default_tier: "frontier" | "balanced" | "economy";
       provider_profiles: Record<
         string,
-        { tier_map: { frontier?: string; balanced?: string; economy?: string }; mode?: string }
+        {
+          tier_map: { frontier?: string; balanced?: string; economy?: string };
+          execution_profile_ids?: { frontier?: string; balanced?: string; economy?: string };
+        }
       >;
     },
   ): Promise<Record<string, unknown>> {
@@ -333,6 +346,7 @@ export class OfficeApiClient {
     attempts: Array<{
       seq: number;
       provider_id: string;
+      execution_profile_id: string;
       model: string;
       tier: string;
       outcome: string;

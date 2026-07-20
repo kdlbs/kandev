@@ -2,16 +2,24 @@ package plugins
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/plugins/marketplace"
 	"github.com/kandev/kandev/internal/plugins/runtime"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
 )
+
+// marketplaceURLEnv overrides the built-in official marketplace source URL at
+// boot (used by e2e to point the catalog at a local fixture server).
+const marketplaceURLEnv = "KANDEV_PLUGIN_MARKETPLACE_URL"
 
 // pluginsSubdir is the directory name under the Kandev home dir plugins
 // live under: records ("<id>.yml"/"<id>.config.yml"), extracted packages
@@ -43,7 +51,7 @@ const pluginsSubdir = "plugins"
 // "Extension points" doc comment on Service for how backendapp attaches
 // them after calling Provide. cleanup stops the runtime manager (kills any
 // spawned processes); callers should register it with addCleanup.
-func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretRevealer, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, error) {
+func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, error) {
 	dir := filepath.Join(cfg.ResolvedHomeDir(), pluginsSubdir)
 	pluginStore := store.NewFSStore(dir)
 	pluginStore.SetLogger(log)
@@ -63,6 +71,12 @@ func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretRevealer, eventB
 	svc.SetSecrets(secrets)
 	svc.SetPluginsDir(dir)
 
+	if err := attachMarketplace(svc, dbPool, log); err != nil {
+		// Non-fatal: the rest of the plugin system still works without the
+		// discovery catalog (install-by-URL/upload is unaffected).
+		log.Warn("plugins: marketplace init failed (non-fatal)", zap.Error(err))
+	}
+
 	rt := runtime.NewManager(dir, svc.handleStatusChange, log)
 	svc.SetRuntime(rt)
 
@@ -71,4 +85,23 @@ func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretRevealer, eventB
 		return nil
 	}
 	return svc, cleanup, nil
+}
+
+// attachMarketplace builds the marketplace source store, seeds the built-in
+// official source (URL overridable via KANDEV_PLUGIN_MARKETPLACE_URL), and
+// attaches the catalog service to svc.
+func attachMarketplace(svc *Service, dbPool *db.Pool, log *logger.Logger) error {
+	sourceStore, err := marketplace.NewSourceStore(dbPool)
+	if err != nil {
+		return fmt.Errorf("marketplace source store: %w", err)
+	}
+	officialURL := marketplace.OfficialSourceURL
+	if override := os.Getenv(marketplaceURLEnv); override != "" {
+		officialURL = override
+	}
+	if err := sourceStore.EnsureBuiltin(marketplace.OfficialSourceName, officialURL); err != nil {
+		return fmt.Errorf("marketplace seed builtin: %w", err)
+	}
+	svc.SetMarketplace(marketplace.NewService(sourceStore, log))
+	return nil
 }

@@ -45,7 +45,7 @@ import (
 // exists to receive the Host injected over the broker (via the embedded
 // UnimplementedPlugin's HostSetter/Host() accessor — see serve.go's "Host
 // injection" doc), so these tests can call host.Sessions()... exactly as a
-// real plugin author would from InvokeTool/OnEvent/HandleWebhook.
+// real plugin author would from OnEvent/HandleWebhook.
 type wireAuthorPlugin struct {
 	pluginsdk.UnimplementedPlugin
 }

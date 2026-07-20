@@ -13,6 +13,15 @@ import type {
   WorkflowStep,
 } from "@/lib/types/http";
 import type { GitHubPR, PRFeedback, TaskPR } from "@/lib/types/github";
+import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
+import {
+  agentProfileId as toAgentProfileId,
+  repositoryId as toRepositoryId,
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  workflowId as toWorkflowId,
+  workspaceId as toWorkspaceId,
+} from "@/lib/types/ids";
 
 export const DEMO_STORAGE_KEY = "kandev-browser-demo:v1";
 export const DEMO_SCENARIO_VERSION = 3;
@@ -47,10 +56,11 @@ export type DemoState = {
 };
 
 const NOW = "2026-07-18T12:00:00.000Z";
-const WORKSPACE_ID = DEMO_IDS.workspace as never;
-const WORKFLOW_ID = DEMO_IDS.workflow as never;
-const REPOSITORY_ID = DEMO_IDS.repository as never;
-const API_REPOSITORY_ID = DEMO_IDS.apiRepository as never;
+const WORKSPACE_ID = toWorkspaceId(DEMO_IDS.workspace);
+const WORKFLOW_ID = toWorkflowId(DEMO_IDS.workflow);
+const SUPPORT_WORKFLOW_ID = toWorkflowId(DEMO_IDS.supportWorkflow);
+const REPOSITORY_ID = toRepositoryId(DEMO_IDS.repository);
+const API_REPOSITORY_ID = toRepositoryId(DEMO_IDS.apiRepository);
 
 export const demoGitHubPR: GitHubPR = {
   number: 142,
@@ -146,10 +156,10 @@ export const demoWorkflow: Workflow = {
 
 export const demoSupportWorkflow: Workflow = {
   ...demoWorkflow,
-  id: DEMO_IDS.supportWorkflow as never,
+  id: SUPPORT_WORKFLOW_ID,
   name: "Incident response",
   description: "A focused workflow for diagnosing and validating production fixes.",
-  agent_profile_id: DEMO_IDS.reviewProfile as never,
+  agent_profile_id: toAgentProfileId(DEMO_IDS.reviewProfile),
   sort_order: 1,
 };
 
@@ -166,14 +176,14 @@ export const demoSupportSteps: WorkflowStep[] = [
   {
     ...demoSteps[0],
     id: "demo-support-step-triage",
-    workflow_id: DEMO_IDS.supportWorkflow as never,
+    workflow_id: SUPPORT_WORKFLOW_ID,
     name: "Triage",
     color: "bg-rose-500",
   },
   {
     ...demoSteps[2],
     id: "demo-support-step-verify",
-    workflow_id: DEMO_IDS.supportWorkflow as never,
+    workflow_id: SUPPORT_WORKFLOW_ID,
     name: "Verify",
     position: 1,
     color: "bg-cyan-500",
@@ -181,7 +191,7 @@ export const demoSupportSteps: WorkflowStep[] = [
   {
     ...demoSteps[3],
     id: "demo-support-step-resolved",
-    workflow_id: DEMO_IDS.supportWorkflow as never,
+    workflow_id: SUPPORT_WORKFLOW_ID,
     name: "Resolved",
     position: 2,
   },
@@ -1312,6 +1322,7 @@ export function createBootPayload(state: DemoState): BootPayload {
       executors: { items: demoExecutors },
       settingsData: { agentsLoaded: true, executorsLoaded: true },
       userSettings: {
+        ...defaultSettingsState.userSettings,
         workspaceId: DEMO_IDS.workspace,
         workflowId: DEMO_IDS.workflow,
         repositoryIds: [DEMO_IDS.repository],
@@ -1324,7 +1335,7 @@ export function createBootPayload(state: DemoState): BootPayload {
         },
         enablePreviewOnClick: true,
         loaded: true,
-      } as never,
+      },
       githubStatus: {
         status: {
           authenticated: true,
@@ -1398,8 +1409,8 @@ export function createTaskFromInput(state: DemoState, input: Record<string, unkn
       workflowId: String(input.workflow_id || DEMO_IDS.workflow),
       repositories: repositories.map((repository, index) => ({
         id: `${id}-repository-${index + 1}`,
-        task_id: id as never,
-        repository_id: String(repository.repository_id || DEMO_IDS.repository) as never,
+        task_id: toTaskId(id),
+        repository_id: toRepositoryId(String(repository.repository_id || DEMO_IDS.repository)),
         base_branch: String(repository.base_branch || "main"),
         position: index,
         created_at: new Date().toISOString(),
@@ -1449,9 +1460,9 @@ function makeTask(
   } = {},
 ): Task {
   return {
-    id: id as never,
+    id: toTaskId(id),
     workspace_id: WORKSPACE_ID,
-    workflow_id: (options.workflowId ?? WORKFLOW_ID) as never,
+    workflow_id: toWorkflowId(options.workflowId ?? WORKFLOW_ID),
     workflow_step_id: stepId,
     position,
     title,
@@ -1459,7 +1470,9 @@ function makeTask(
     state,
     priority: 2,
     repositories: options.repositories ?? [makeTaskRepository(id, DEMO_IDS.repository, 0)],
-    primary_session_id: options.primarySessionId as never,
+    primary_session_id: options.primarySessionId
+      ? toSessionId(options.primarySessionId)
+      : undefined,
     primary_session_state: options.primarySessionState,
     session_count: options.primarySessionId ? 1 : 0,
     review_status: options.reviewStatus,
@@ -1476,8 +1489,8 @@ function makeTaskRepository(
 ): NonNullable<Task["repositories"]>[number] {
   return {
     id: `${taskId}-repository-${position + 1}`,
-    task_id: taskId as never,
-    repository_id: repositoryId as never,
+    task_id: toTaskId(taskId),
+    repository_id: toRepositoryId(repositoryId),
     base_branch: baseBranch,
     position,
     created_at: NOW,
@@ -1487,10 +1500,10 @@ function makeTaskRepository(
 
 export function makeSession(id: string, taskId: string, state: TaskSession["state"]): TaskSession {
   return {
-    id: id as never,
-    task_id: taskId as never,
+    id: toSessionId(id),
+    task_id: toTaskId(taskId),
     name: "Mock agent",
-    agent_profile_id: DEMO_IDS.profile as never,
+    agent_profile_id: toAgentProfileId(DEMO_IDS.profile),
     repository_id: REPOSITORY_ID,
     worktree_path: `/demo/worktrees/${taskId}`,
     worktree_branch: `kandev/${taskId}`,
@@ -1504,7 +1517,7 @@ export function makeSession(id: string, taskId: string, state: TaskSession["stat
 
 function makeAgentProfile(id: string, name: string, model: string): Agent["profiles"][number] {
   return {
-    id: id as never,
+    id: toAgentProfileId(id),
     name,
     agentId: DEMO_IDS.agent,
     agentDisplayName: "Mock agent",
@@ -1547,8 +1560,8 @@ export function makeMessage(
 ): Message {
   return {
     id,
-    session_id: sessionId as never,
-    task_id: taskId as never,
+    session_id: toSessionId(sessionId),
+    task_id: toTaskId(taskId),
     author_type: author,
     author_id: author === "agent" ? DEMO_IDS.agent : "demo-user",
     content,

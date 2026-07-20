@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
@@ -11,12 +11,14 @@ import { IconCheck, IconCopy, IconLoader2, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { probeSSHAgents, probeSSHShells } from "@/lib/api/domains/ssh-api";
 import type { SSHAgentReadinessRow } from "@/lib/types/http-ssh";
+import { SettingsCard } from "@/components/settings/settings-card";
 
 export interface SSHAgentReadinessCardProps {
   executorId: string;
   /** The shell currently saved on the profile. Drives initial selection + the
    *  shell sent to the probe endpoint. */
   shell?: string;
+  baselineShell?: string;
   /** Persist a shell change up to the profile. Called when the user picks a
    *  different option in the dropdown so the choice survives the page reload
    *  and flows into the next agent launch as ssh_shell metadata. */
@@ -158,6 +160,7 @@ function useReadinessState({
 export function SSHAgentReadinessCard({
   executorId,
   shell: shellProp,
+  baselineShell,
   onShellChange,
 }: SSHAgentReadinessCardProps) {
   const state = useReadinessState({ executorId, shellProp, onShellChange });
@@ -174,9 +177,10 @@ export function SSHAgentReadinessCard({
     handleShellChange,
   } = state;
   const displayShell = readinessDisplayShell(shell, defaultShell);
+  const shellDirty = baselineShell !== undefined && shell !== baselineShell;
 
   return (
-    <Card data-testid="ssh-agent-readiness-card">
+    <SettingsCard isDirty={shellDirty} data-testid="ssh-agent-readiness-card">
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -204,12 +208,13 @@ export function SSHAgentReadinessCard({
           loading={shellsLoading}
           defaultShell={defaultShell}
           onChange={handleShellChange}
+          isDirty={shellDirty}
         />
       </CardHeader>
       <CardContent>
         <ReadinessContent error={error} hasProbed={hasProbed} rows={rows} />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -219,12 +224,14 @@ function ShellSelector({
   loading,
   defaultShell,
   onChange,
+  isDirty,
 }: {
   shell: string;
   shells: string[] | null;
   loading: boolean;
   defaultShell: string;
   onChange: (s: string) => void | Promise<void>;
+  isDirty: boolean;
 }) {
   // While probing, show a placeholder option so the dropdown can't surface
   // a stale "bash" selection that we haven't confirmed exists on the host.
@@ -241,6 +248,7 @@ function ShellSelector({
           id="ssh-readiness-shell"
           data-testid="ssh-readiness-shell"
           className="h-7 w-32 text-xs"
+          data-settings-dirty={isDirty}
         >
           <SelectValue placeholder={defaultShell || DEFAULT_SHELL} />
         </SelectTrigger>

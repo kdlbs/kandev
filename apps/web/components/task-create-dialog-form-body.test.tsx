@@ -135,6 +135,24 @@ function makeFs(): DialogFormState {
 }
 
 describe("DialogPromptSection (CLI-mode parity)", () => {
+  it("keeps a started task prompt locked", () => {
+    taskFormInputsCalls.length = 0;
+    const view = render(
+      <DialogPromptSection
+        isSessionMode={false}
+        isTaskStarted={true}
+        initialDescription="Original prompt"
+        fs={makeFs()}
+        handleKeyDown={(() => {}) as never}
+      />,
+    );
+
+    expect((view.getByTestId("task-description-textarea") as HTMLTextAreaElement).disabled).toBe(
+      true,
+    );
+    view.unmount();
+  });
+
   it("keeps the prompt textarea enabled when the selected profile is passthrough", () => {
     taskFormInputsCalls.length = 0;
     render(

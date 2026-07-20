@@ -3,6 +3,16 @@
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { WorkflowStep } from "@/lib/types/http";
+import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
+
+export const STEP_PROMPT_PLACEHOLDERS: ScriptPlaceholder[] = [
+  {
+    key: "task_prompt",
+    description: "The original task description provided by the user",
+    example: "Implement user authentication with OAuth2",
+    executor_types: [],
+  },
+];
 
 export function HelpTip({
   text,

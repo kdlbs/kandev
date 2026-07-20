@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-/* eslint-disable complexity, max-lines, max-lines-per-function, sonarjs/cognitive-complexity, sonarjs/no-duplicate-string */
+/* eslint-disable max-lines -- The worker intentionally keeps the complete in-browser backend fixture in one module. */
 
 import type { Message, Task, TaskPlan, TaskPlanRevision, TaskSession } from "@/lib/types/http";
 import type {
@@ -51,6 +51,9 @@ const terminalInputBySocket = new Map<string, string>();
 
 const DEMO_ENVIRONMENT_ID = "demo-environment";
 const DEMO_TERMINAL_ID = "demo-terminal-1";
+const DEMO_TIMESTAMP = "2026-07-18T12:00:00.000Z";
+const TASK_NOT_FOUND = "Task not found";
+const PLAN_NOT_FOUND = "Task plan not found";
 const DEMO_REPOSITORY_SCRIPTS = [
   {
     id: "demo-script-test",
@@ -58,8 +61,8 @@ const DEMO_REPOSITORY_SCRIPTS = [
     name: "Run tests",
     command: "pnpm test",
     position: 0,
-    created_at: "2026-07-18T12:00:00.000Z",
-    updated_at: "2026-07-18T12:00:00.000Z",
+    created_at: DEMO_TIMESTAMP,
+    updated_at: DEMO_TIMESTAMP,
   },
   {
     id: "demo-script-lint",
@@ -67,8 +70,8 @@ const DEMO_REPOSITORY_SCRIPTS = [
     name: "Lint",
     command: "pnpm lint",
     position: 1,
-    created_at: "2026-07-18T12:00:00.000Z",
-    updated_at: "2026-07-18T12:00:00.000Z",
+    created_at: DEMO_TIMESTAMP,
+    updated_at: DEMO_TIMESTAMP,
   },
 ];
 
@@ -121,22 +124,58 @@ function restoreState(persisted?: string): DemoState {
   }
 }
 
-export async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResponse> {
-  const url = new URL(request.path, "https://demo.kandev.com");
-  const path = url.pathname;
-  const method = request.method.toUpperCase();
-  const input = parseBody(request.body);
+type HttpRouteContext = {
+  path: string;
+  method: string;
+  input: Record<string, unknown>;
+};
 
+type HttpRouter = (context: HttpRouteContext) => DemoHttpResponse | null;
+
+const HTTP_ROUTERS: HttpRouter[] = [
+  routeCoreHttp,
+  routeRepositoryHttp,
+  routeWorkflowHttp,
+  routeStatsHttp,
+  routeGitHubHttp,
+  routeTaskHttp,
+];
+
+export async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResponse> {
+  const context: HttpRouteContext = {
+    path: new URL(request.path, "https://demo.kandev.com").pathname,
+    method: request.method.toUpperCase(),
+    input: parseBody(request.body),
+  };
+  for (const router of HTTP_ROUTERS) {
+    const response = router(context);
+    if (response) return response;
+  }
+  if (context.method === "GET") {
+    return json({ demo_mode: true, unsupported: context.path }, 501);
+  }
+  return json({ error: "This action is disabled in the browser demo", demo_mode: true }, 501);
+}
+
+function routeCoreHttp({ path }: HttpRouteContext): DemoHttpResponse | null {
   if (path === "/health") return json({ status: "ok", mode: "browser-demo" });
   if (path === "/api/v1/features") return json({ office: false, plugins: false });
   if (path === "/api/v1/app-state") return json(createBootPayload(state));
-  if (path === "/api/v1/workspaces")
-    return json({
-      workspaces: createBootPayload(state).initialState?.workspaces?.items ?? [],
-      total: 1,
-    });
+  if (path === "/api/v1/agents") return json({ agents: demoAgents, total: demoAgents.length });
+  if (path === "/api/v1/agents/available") return json({ agents: [], tools: [], total: 0 });
+  if (path === "/api/v1/executors") {
+    return json({ executors: demoExecutors, total: demoExecutors.length });
+  }
+  return null;
+}
+
+function routeRepositoryHttp({ path }: HttpRouteContext): DemoHttpResponse | null {
+  if (path === "/api/v1/workspaces") {
+    const workspaces = createBootPayload(state).initialState?.workspaces?.items ?? [];
+    return json({ workspaces, total: workspaces.length });
+  }
   if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}`) return json(demoWorkspace());
-  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/repositories`)
+  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/repositories`) {
     return json({
       repositories: [
         { ...demoRepository, scripts: DEMO_REPOSITORY_SCRIPTS },
@@ -144,120 +183,157 @@ export async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResp
       ],
       total: 2,
     });
-  if (
-    path === `/api/v1/repositories/${DEMO_IDS.repository}/branches` ||
-    path === `/api/v1/repositories/${DEMO_IDS.apiRepository}/branches`
-  )
-    return json({ branches: [{ name: "main", type: "local" }], total: 1, current_branch: "main" });
-  if (path === `/api/v1/repositories/${DEMO_IDS.repository}/scripts`)
-    return json({ scripts: DEMO_REPOSITORY_SCRIPTS, total: DEMO_REPOSITORY_SCRIPTS.length });
-  if (path === `/api/v1/repositories/${DEMO_IDS.apiRepository}/scripts`)
-    return json({ scripts: [], total: 0 });
-  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/repositories/discover`)
-    return json({ roots: [], repositories: [], total: 0 });
-  if (path === "/api/v1/agents") return json({ agents: demoAgents, total: demoAgents.length });
-  if (path === "/api/v1/agents/available") return json({ agents: [], tools: [], total: 0 });
-  if (path === "/api/v1/executors")
-    return json({ executors: demoExecutors, total: demoExecutors.length });
-  if (path === "/api/v1/workflows")
-    return json({ workflows: demoWorkflows, total: demoWorkflows.length });
-  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/workflows`)
-    return json({ workflows: demoWorkflows, total: demoWorkflows.length });
-  if (path === "/api/v1/workflow-templates") return json({ templates: [], total: 0 });
-  const workflowSnapshotMatch = path.match(/^\/api\/v1\/workflows\/([^/]+)\/snapshot$/);
-  if (workflowSnapshotMatch) {
-    const workflow = demoWorkflows.find((item) => item.id === workflowSnapshotMatch[1]);
-    if (!workflow) return json({ error: "Workflow not found" }, 404);
-    const steps = workflow.id === demoSupportWorkflow.id ? demoSupportSteps : demoSteps;
-    return json({
-      workflow,
-      steps,
-      tasks: activeTasks().filter((task) => task.workflow_id === workflow.id),
-    });
   }
-  const workflowStepsMatch = path.match(/^\/api\/v1\/workflows\/([^/]+)\/workflow\/steps$/);
-  if (workflowStepsMatch) {
-    const steps = workflowStepsMatch[1] === demoSupportWorkflow.id ? demoSupportSteps : demoSteps;
+  const branchPaths = [
+    `/api/v1/repositories/${DEMO_IDS.repository}/branches`,
+    `/api/v1/repositories/${DEMO_IDS.apiRepository}/branches`,
+  ];
+  if (branchPaths.includes(path)) {
+    return json({ branches: [{ name: "main", type: "local" }], total: 1, current_branch: "main" });
+  }
+  if (path === `/api/v1/repositories/${DEMO_IDS.repository}/scripts`) {
+    return json({ scripts: DEMO_REPOSITORY_SCRIPTS, total: DEMO_REPOSITORY_SCRIPTS.length });
+  }
+  if (path === `/api/v1/repositories/${DEMO_IDS.apiRepository}/scripts`) {
+    return json({ scripts: [], total: 0 });
+  }
+  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/repositories/discover`) {
+    return json({ roots: [], repositories: [], total: 0 });
+  }
+  return null;
+}
+
+function routeWorkflowHttp({ path }: HttpRouteContext): DemoHttpResponse | null {
+  const workflowListPaths = [
+    "/api/v1/workflows",
+    `/api/v1/workspaces/${DEMO_IDS.workspace}/workflows`,
+  ];
+  if (workflowListPaths.includes(path)) {
+    return json({ workflows: demoWorkflows, total: demoWorkflows.length });
+  }
+  if (path === "/api/v1/workflow-templates") return json({ templates: [], total: 0 });
+  const snapshotMatch = path.match(/^\/api\/v1\/workflows\/([^/]+)\/snapshot$/);
+  if (snapshotMatch) return workflowSnapshotResponse(snapshotMatch[1]);
+  const stepsMatch = path.match(/^\/api\/v1\/workflows\/([^/]+)\/workflow\/steps$/);
+  if (stepsMatch) {
+    const steps = stepsMatch[1] === demoSupportWorkflow.id ? demoSupportSteps : demoSteps;
     return json({ steps, total: steps.length });
   }
-  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/workflow-steps`)
-    return json({
-      steps: [...demoSteps, ...demoSupportSteps],
-      total: demoSteps.length + demoSupportSteps.length,
-    });
-  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/tasks`)
-    return json({ tasks: activeTasks(), total: activeTasks().length });
-  const statsMatch = path.match(
-    new RegExp(`^/api/v1/workspaces/${DEMO_IDS.workspace}/stats/([^/]+)$`),
-  );
-  if (statsMatch) {
-    const stats = createDemoStats(statsMatch[1], state);
-    if (stats !== undefined) return json(stats);
+  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/workflow-steps`) {
+    const steps = [...demoSteps, ...demoSupportSteps];
+    return json({ steps, total: steps.length });
   }
-  if (path === "/api/v1/github/status")
+  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/tasks`) {
+    const tasks = activeTasks();
+    return json({ tasks, total: tasks.length });
+  }
+  return null;
+}
+
+function workflowSnapshotResponse(workflowId: string): DemoHttpResponse {
+  const workflow = demoWorkflows.find((item) => item.id === workflowId);
+  if (!workflow) return json({ error: "Workflow not found" }, 404);
+  const steps = workflow.id === demoSupportWorkflow.id ? demoSupportSteps : demoSteps;
+  const tasks = activeTasks().filter((task) => task.workflow_id === workflow.id);
+  return json({ workflow, steps, tasks });
+}
+
+function routeStatsHttp({ path }: HttpRouteContext): DemoHttpResponse | null {
+  const match = path.match(new RegExp(`^/api/v1/workspaces/${DEMO_IDS.workspace}/stats/([^/]+)$`));
+  if (!match) return null;
+  const stats = createDemoStats(match[1], state);
+  return stats === undefined ? null : json(stats);
+}
+
+function routeGitHubHttp({ path }: HttpRouteContext): DemoHttpResponse | null {
+  if (path === "/api/v1/github/status") {
     return json({
       configured: true,
       authenticated: true,
       auth_method: "gh_cli",
       username: "kandev-demo",
     });
-  if (path === "/api/v1/github/user/prs")
-    return json({ prs: [demoGitHubPR], total_count: 1, page: 1, per_page: 25 });
-  if (path === "/api/v1/github/user/issues")
-    return json({ issues: [], total_count: 0, page: 1, per_page: 25 });
-  if (path === "/api/v1/github/workspace-settings") {
-    return json({
-      workspace_id: DEMO_IDS.workspace,
-      repo_scope_mode: "repos",
-      repo_scope_orgs: [],
-      repo_scope_repos: [{ owner: "kandev-demo", name: "acme-web" }],
-      saved_presets: [],
-      default_query_presets: null,
-      created_at: "2026-07-18T12:00:00.000Z",
-      updated_at: "2026-07-18T12:00:00.000Z",
-    });
   }
+  if (path === "/api/v1/github/user/prs") {
+    return json({ prs: [demoGitHubPR], total_count: 1, page: 1, per_page: 25 });
+  }
+  if (path === "/api/v1/github/user/issues") {
+    return json({ issues: [], total_count: 0, page: 1, per_page: 25 });
+  }
+  if (path === "/api/v1/github/workspace-settings") return githubWorkspaceSettings();
   if (path === "/api/v1/github/action-presets") {
     return json({ workspace_id: DEMO_IDS.workspace, pr: [], issue: [] });
   }
   if (path === "/api/v1/github/task-prs") return json({ task_prs: state.taskPRs });
   if (path === "/api/v1/github/prs/kandev-demo/acme-web/142") return json(demoPRFeedback);
-  if (path === "/api/v1/github/watches/pr") return json({ watches: [] });
-  if (path === "/api/v1/github/watches/review") return json({ watches: [] });
-  if (path === "/api/v1/github/watches/issues") return json({ watches: [] });
-  if (path === "/api/v1/tasks" && method === "POST") return createTask(input);
+  if (
+    [
+      "/api/v1/github/watches/pr",
+      "/api/v1/github/watches/review",
+      "/api/v1/github/watches/issues",
+    ].includes(path)
+  ) {
+    return json({ watches: [] });
+  }
+  return null;
+}
 
+function githubWorkspaceSettings(): DemoHttpResponse {
+  return json({
+    workspace_id: DEMO_IDS.workspace,
+    repo_scope_mode: "repos",
+    repo_scope_orgs: [],
+    repo_scope_repos: [{ owner: "kandev-demo", name: "acme-web" }],
+    saved_presets: [],
+    default_query_presets: null,
+    created_at: DEMO_TIMESTAMP,
+    updated_at: DEMO_TIMESTAMP,
+  });
+}
+
+function routeTaskHttp(context: HttpRouteContext): DemoHttpResponse | null {
+  const { path, method, input } = context;
+  if (path === "/api/v1/tasks" && method === "POST") return createTask(input);
   const taskMatch = path.match(/^\/api\/v1\/tasks\/([^/]+)$/);
-  if (taskMatch) {
-    const task = findTask(taskMatch[1]);
-    if (!task) return json({ error: "Task not found" }, 404);
-    if (method === "GET") return json(task);
-    if (method === "PATCH") return updateTask(task, input);
-    if (method === "DELETE") return removeTask(task);
-  }
+  if (taskMatch) return taskResponse(taskMatch[1], method, input);
   const moveMatch = path.match(/^\/api\/v1\/tasks\/([^/]+)\/move$/);
-  if (moveMatch && method === "POST") {
-    const task = findTask(moveMatch[1]);
-    if (!task) return json({ error: "Task not found" }, 404);
-    task.workflow_step_id = String(input.workflow_step_id || task.workflow_step_id);
-    task.position = Number(input.position ?? task.position);
-    task.updated_at = new Date().toISOString();
-    persist();
-    notify("task.updated", taskEvent(task));
-    return json({
-      task,
-      workflow_step: demoSteps.find((step) => step.id === task.workflow_step_id),
-    });
-  }
+  if (moveMatch && method === "POST") return moveTask(moveMatch[1], input);
   const archiveMatch = path.match(/^\/api\/v1\/tasks\/([^/]+)\/archive$/);
-  if (archiveMatch && method === "POST") {
-    const task = findTask(archiveMatch[1]);
-    if (!task) return json({ error: "Task not found" }, 404);
-    task.archived_at = new Date().toISOString();
-    persist();
-    notify("task.deleted", taskEvent(task));
-    return empty();
-  }
+  if (archiveMatch && method === "POST") return archiveTask(archiveMatch[1]);
+  return routeTaskSessionHttp(path);
+}
+
+function taskResponse(id: string, method: string, input: Record<string, unknown>) {
+  const task = findTask(id);
+  if (!task) return json({ error: TASK_NOT_FOUND }, 404);
+  if (method === "GET") return json(task);
+  if (method === "PATCH") return updateTask(task, input);
+  if (method === "DELETE") return removeTask(task);
+  return null;
+}
+
+function moveTask(id: string, input: Record<string, unknown>): DemoHttpResponse {
+  const task = findTask(id);
+  if (!task) return json({ error: TASK_NOT_FOUND }, 404);
+  task.workflow_step_id = String(input.workflow_step_id || task.workflow_step_id);
+  task.position = Number(input.position ?? task.position);
+  task.updated_at = new Date().toISOString();
+  persist();
+  notify("task.updated", taskEvent(task));
+  const workflowStep = demoSteps.find((step) => step.id === task.workflow_step_id);
+  return json({ task, workflow_step: workflowStep });
+}
+
+function archiveTask(id: string): DemoHttpResponse {
+  const task = findTask(id);
+  if (!task) return json({ error: TASK_NOT_FOUND }, 404);
+  task.archived_at = new Date().toISOString();
+  persist();
+  notify("task.deleted", taskEvent(task));
+  return empty();
+}
+
+function routeTaskSessionHttp(path: string): DemoHttpResponse | null {
   const sessionsMatch = path.match(/^\/api\/v1\/tasks\/([^/]+)\/sessions$/);
   if (sessionsMatch) {
     const sessions = state.sessions
@@ -265,8 +341,9 @@ export async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResp
       .map(withDemoEnvironment);
     return json({ sessions, total: sessions.length });
   }
-  const terminalsMatch = path.match(/^\/api\/v1\/tasks\/([^/]+)\/terminals$/);
-  if (terminalsMatch) return json({ terminals: [demoTerminal()], total: 1 });
+  if (/^\/api\/v1\/tasks\/[^/]+\/terminals$/.test(path)) {
+    return json({ terminals: [demoTerminal()], total: 1 });
+  }
   const sessionMatch = path.match(/^\/api\/v1\/task-sessions\/([^/]+)$/);
   if (sessionMatch) {
     const session = state.sessions.find((item) => item.id === sessionMatch[1]);
@@ -275,13 +352,13 @@ export async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResp
       : json({ error: "Session not found" }, 404);
   }
   const messagesMatch = path.match(/^\/api\/v1\/task-sessions\/([^/]+)\/messages$/);
-  if (messagesMatch)
+  if (messagesMatch) {
     return json({ messages: state.messagesBySession[messagesMatch[1]] ?? [], has_more: false });
-  const turnsMatch = path.match(/^\/api\/v1\/task-sessions\/([^/]+)\/turns$/);
-  if (turnsMatch) return json({ turns: [], total: 0 });
-
-  if (method === "GET") return json({ demo_mode: true, unsupported: path }, 501);
-  return json({ error: "This action is disabled in the browser demo", demo_mode: true }, 501);
+  }
+  if (/^\/api\/v1\/task-sessions\/[^/]+\/turns$/.test(path)) {
+    return json({ turns: [], total: 0 });
+  }
+  return null;
 }
 
 function createTask(input: Record<string, unknown>): DemoHttpResponse {
@@ -333,84 +410,138 @@ export function handleSocketRequest(socketId: string, raw: string) {
   const action = request.action ?? "";
   const payload = request.payload ?? {};
   if (!id) return;
+  const context = { socketId, id, action, payload };
+  if (SOCKET_ROUTERS.some((router) => router(context))) return;
+  respond(socketId, id, { success: true, demo_mode: true });
+}
 
-  if (action === "session.subscribe") {
-    const sessionId = String(payload.session_id || "");
-    const session = state.sessions.find((item) => item.id === sessionId);
-    respond(socketId, id, { success: true });
-    if (session) {
-      notify("session.agentctl_ready", {
-        task_id: session.task_id,
-        session_id: session.id,
-        task_environment_id: session.task_environment_id ?? DEMO_ENVIRONMENT_ID,
-        agent_execution_id: `demo-execution-${session.task_id}`,
-        worktree_id: `demo-worktree-${session.task_id}`,
-        worktree_path: session.worktree_path,
-        worktree_branch: session.worktree_branch,
-      });
-      notifyGitStatus(session.id);
-    }
-    return;
-  }
+type SocketRouteContext = {
+  socketId: string;
+  id: string;
+  action: string;
+  payload: Record<string, unknown>;
+};
+
+type SocketRouter = (context: SocketRouteContext) => boolean;
+
+const SOCKET_ROUTERS: SocketRouter[] = [
+  routeSessionSocket,
+  routePlanReviewSocket,
+  routeWorkspaceReadSocket,
+  routeWorkspaceMutationSocket,
+  routeShellSocket,
+  routeMessageSocket,
+];
+
+function routeSessionSocket(context: SocketRouteContext): boolean {
+  const { socketId, id, action, payload } = context;
+  const sessionId = String(payload.session_id || "");
+  if (action === "session.subscribe") return subscribeSession(socketId, id, sessionId);
   if (action === "session.focus") {
-    const sessionId = String(payload.session_id || "");
     respond(socketId, id, { success: true });
     notifyGitStatus(sessionId);
-    return;
+    return true;
   }
   if (action === "session.unfocus") {
     respond(socketId, id, { success: true });
-    return;
-  }
-  if (action.startsWith("task.plan.")) {
-    handlePlanRequest(socketId, id, action, payload);
-    return;
+    return true;
   }
   if (action === "session.git.commits") {
-    const sessionId = String(payload.session_id || "");
     respond(socketId, id, { commits: demoGitData(sessionId).commits, ready: true });
-    return;
+    return true;
   }
   if (action === "session.cumulative_diff") {
-    const sessionId = String(payload.session_id || "");
     respond(socketId, id, { cumulative_diff: demoGitData(sessionId).cumulativeDiff, ready: true });
+    return true;
+  }
+  if (action === "session.ensure" || action === "session.launch") {
+    ensureSession(socketId, id, payload);
+    return true;
+  }
+  return false;
+}
+
+function subscribeSession(socketId: string, id: string, sessionId: string): true {
+  const session = state.sessions.find((item) => item.id === sessionId);
+  respond(socketId, id, { success: true });
+  if (session) {
+    notify("session.agentctl_ready", {
+      task_id: session.task_id,
+      session_id: session.id,
+      task_environment_id: session.task_environment_id ?? DEMO_ENVIRONMENT_ID,
+      agent_execution_id: `demo-execution-${session.task_id}`,
+      worktree_id: `demo-worktree-${session.task_id}`,
+      worktree_path: session.worktree_path,
+      worktree_branch: session.worktree_branch,
+    });
+    notifyGitStatus(session.id);
+  }
+  return true;
+}
+
+function ensureSession(socketId: string, id: string, payload: Record<string, unknown>) {
+  const task = findTask(String(payload.task_id));
+  if (!task) {
+    respond(socketId, id, { message: TASK_NOT_FOUND }, true);
     return;
   }
+  const existing = state.sessions.find((session) => session.task_id === task.id);
+  const prompt = String(payload.prompt || task.description || "Implement this task");
+  const session = existing ?? startAgent(task, prompt);
+  respond(socketId, id, {
+    success: true,
+    task_id: task.id,
+    session_id: session.id,
+    agent_execution_id: `demo-execution-${task.id}`,
+    state: session.state,
+    source: existing ? "existing_primary" : "created_start",
+    newly_created: !existing,
+  });
+  if (!existing) persist();
+}
+
+function routePlanReviewSocket(context: SocketRouteContext): boolean {
+  const { socketId, id, action, payload } = context;
+  if (action.startsWith("task.plan.")) {
+    handlePlanRequest(socketId, id, action, payload);
+    return true;
+  }
+  const sessionId = String(payload.session_id || "");
   if (action === "session.file_review.get") {
-    const sessionId = String(payload.session_id || "");
     respond(socketId, id, { reviews: serializeFileReviews(sessionId) });
-    return;
+    return true;
   }
   if (action === "session.file_review.update") {
-    const sessionId = String(payload.session_id || "");
-    const filePath = String(payload.file_path || "");
-    const reviews = fileReviewsBySession.get(sessionId) ?? new Map();
-    reviews.set(filePath, {
-      reviewed: payload.reviewed === true,
-      diffHash: String(payload.diff_hash || ""),
-    });
-    fileReviewsBySession.set(sessionId, reviews);
+    updateFileReview(sessionId, payload);
     respond(socketId, id, { success: true });
-    return;
+    return true;
   }
   if (action === "session.file_review.reset") {
-    fileReviewsBySession.delete(String(payload.session_id || ""));
+    fileReviewsBySession.delete(sessionId);
     respond(socketId, id, { success: true });
-    return;
+    return true;
   }
+  return false;
+}
+
+function updateFileReview(sessionId: string, payload: Record<string, unknown>) {
+  const reviews = fileReviewsBySession.get(sessionId) ?? new Map();
+  reviews.set(String(payload.file_path || ""), {
+    reviewed: payload.reviewed === true,
+    diffHash: String(payload.diff_hash || ""),
+  });
+  fileReviewsBySession.set(sessionId, reviews);
+}
+
+function routeWorkspaceReadSocket(context: SocketRouteContext): boolean {
+  const { socketId, id, action, payload } = context;
   if (action === "workspace.tree.get") {
     respond(socketId, id, { root: buildFileTree(String(payload.path || "")) });
-    return;
+    return true;
   }
   if (action === "workspace.file.get" || action === "workspace.file.get_at_ref") {
-    const path = normalizeFilePath(payload.path);
-    const content = files[path];
-    if (content === undefined) {
-      respond(socketId, id, { message: `File not found: ${path}` }, true);
-      return;
-    }
-    respond(socketId, id, { path, content, size: content.length, is_binary: false });
-    return;
+    readWorkspaceFile(socketId, id, payload.path);
+    return true;
   }
   if (action === "workspace.files.search") {
     const query = String(payload.query || "").toLowerCase();
@@ -419,126 +550,121 @@ export function handleSocketRequest(socketId: string, raw: string) {
       .filter((path) => path.toLowerCase().includes(query))
       .slice(0, limit);
     respond(socketId, id, { files: matches });
+    return true;
+  }
+  return false;
+}
+
+function readWorkspaceFile(socketId: string, id: string, value: unknown) {
+  const path = normalizeFilePath(value);
+  const content = files[path];
+  if (content === undefined) {
+    respond(socketId, id, { message: `File not found: ${path}` }, true);
     return;
   }
-  if (action === "workspace.file.update") {
-    const path = normalizeFilePath(payload.path);
-    const desiredContent = payload.desired_content;
-    if (typeof desiredContent !== "string") {
-      respond(socketId, id, { message: "The demo editor requires desired_content" }, true);
-      return;
-    }
-    files[path] = desiredContent;
-    respond(socketId, id, {
-      path,
-      success: true,
-      new_hash: simpleHash(desiredContent),
-      resolution: "applied",
-    });
-    notifyFileChange(String(payload.session_id || ""), path, "write");
-    return;
+  respond(socketId, id, { path, content, size: content.length, is_binary: false });
+}
+
+function routeWorkspaceMutationSocket(context: SocketRouteContext): boolean {
+  const { socketId, id, action, payload } = context;
+  if (action === "workspace.file.update") return updateWorkspaceFile(socketId, id, payload);
+  if (action === "workspace.file.create") return createWorkspaceFile(socketId, id, payload);
+  if (action === "workspace.file.delete") return deleteWorkspaceFile(socketId, id, payload);
+  if (action === "workspace.file.rename") return renameWorkspaceFile(socketId, id, payload);
+  return false;
+}
+
+function updateWorkspaceFile(socketId: string, id: string, payload: Record<string, unknown>): true {
+  const path = normalizeFilePath(payload.path);
+  const content = payload.desired_content;
+  if (typeof content !== "string") {
+    respond(socketId, id, { message: "The demo editor requires desired_content" }, true);
+    return true;
   }
-  if (action === "workspace.file.create") {
-    const path = normalizeFilePath(payload.path);
-    files[path] = "";
-    respond(socketId, id, { path, success: true });
-    notifyFileChange(String(payload.session_id || ""), path, "create");
-    return;
+  files[path] = content;
+  respond(socketId, id, {
+    path,
+    success: true,
+    new_hash: simpleHash(content),
+    resolution: "applied",
+  });
+  notifyFileChange(String(payload.session_id || ""), path, "write");
+  return true;
+}
+
+function createWorkspaceFile(socketId: string, id: string, payload: Record<string, unknown>): true {
+  const path = normalizeFilePath(payload.path);
+  files[path] = "";
+  respond(socketId, id, { path, success: true });
+  notifyFileChange(String(payload.session_id || ""), path, "create");
+  return true;
+}
+
+function deleteWorkspaceFile(socketId: string, id: string, payload: Record<string, unknown>): true {
+  const path = normalizeFilePath(payload.path);
+  for (const filePath of Object.keys(files)) {
+    if (filePath === path || filePath.startsWith(`${path}/`)) delete files[filePath];
   }
-  if (action === "workspace.file.delete") {
-    const path = normalizeFilePath(payload.path);
-    for (const filePath of Object.keys(files)) {
-      if (filePath === path || filePath.startsWith(`${path}/`)) delete files[filePath];
-    }
-    respond(socketId, id, { path, success: true });
-    notifyFileChange(String(payload.session_id || ""), path, "remove");
-    return;
+  respond(socketId, id, { path, success: true });
+  notifyFileChange(String(payload.session_id || ""), path, "remove");
+  return true;
+}
+
+function renameWorkspaceFile(socketId: string, id: string, payload: Record<string, unknown>): true {
+  const oldPath = normalizeFilePath(payload.old_path);
+  const newPath = normalizeFilePath(payload.new_path);
+  for (const filePath of Object.keys(files)) {
+    if (filePath !== oldPath && !filePath.startsWith(`${oldPath}/`)) continue;
+    files[`${newPath}${filePath.slice(oldPath.length)}`] = files[filePath];
+    delete files[filePath];
   }
-  if (action === "workspace.file.rename") {
-    const oldPath = normalizeFilePath(payload.old_path);
-    const newPath = normalizeFilePath(payload.new_path);
-    for (const filePath of Object.keys(files)) {
-      if (filePath !== oldPath && !filePath.startsWith(`${oldPath}/`)) continue;
-      const renamedPath = `${newPath}${filePath.slice(oldPath.length)}`;
-      files[renamedPath] = files[filePath];
-      delete files[filePath];
-    }
-    respond(socketId, id, { old_path: oldPath, new_path: newPath, success: true });
-    notifyFileChange(String(payload.session_id || ""), newPath, "rename");
-    return;
-  }
+  respond(socketId, id, { old_path: oldPath, new_path: newPath, success: true });
+  notifyFileChange(String(payload.session_id || ""), newPath, "rename");
+  return true;
+}
+
+function routeShellSocket({ socketId, id, action }: SocketRouteContext): boolean {
   if (action === "user_shell.list") {
     respond(socketId, id, { shells: [demoTerminal()] });
-    return;
+    return true;
   }
   if (action === "user_shell.create") {
-    respond(socketId, id, {
-      terminal_id: DEMO_TERMINAL_ID,
-      kind: "ordinary",
-      seq: 1,
-      display_name: "Terminal 1",
-      state: "open",
-      pty_status: "running",
-      closable: true,
-    });
-    return;
+    respond(socketId, id, { ...demoTerminal(), terminal_id: DEMO_TERMINAL_ID });
+    return true;
   }
-  if (
-    action === "user_shell.destroy" ||
-    action === "user_shell.stop" ||
-    action === "user_shell.rename" ||
-    action === "user_shell.park" ||
-    action === "user_shell.resume"
-  ) {
-    respond(socketId, id, { success: true });
-    return;
-  }
+  const mutations = new Set([
+    "user_shell.destroy",
+    "user_shell.stop",
+    "user_shell.rename",
+    "user_shell.park",
+    "user_shell.resume",
+  ]);
+  if (!mutations.has(action)) return false;
+  respond(socketId, id, { success: true });
+  return true;
+}
 
+function routeMessageSocket(context: SocketRouteContext): boolean {
+  const { socketId, id, action, payload } = context;
+  const sessionId = String(payload.session_id || "");
+  const messages = state.messagesBySession[sessionId] ?? [];
   if (action === "message.list") {
-    respond(socketId, id, {
-      messages: [...(state.messagesBySession[String(payload.session_id)] ?? [])].reverse(),
-      has_more: false,
-    });
-    return;
+    respond(socketId, id, { messages: [...messages].reverse(), has_more: false });
+    return true;
   }
-  if (action === "message.search") {
-    const query = String(payload.query || "").toLowerCase();
-    const messages = state.messagesBySession[String(payload.session_id)] ?? [];
-    const hits = messages
-      .filter((message) => message.content.toLowerCase().includes(query))
-      .map((message) => ({
-        id: message.id,
-        author_type: message.author_type,
-        type: message.type,
-        snippet: message.content,
-        created_at: message.created_at,
-      }));
-    respond(socketId, id, { hits, total: hits.length });
-    return;
-  }
-  if (action === "session.ensure" || action === "session.launch") {
-    const task = findTask(String(payload.task_id));
-    if (!task) {
-      respond(socketId, id, { message: "Task not found" }, true);
-      return;
-    }
-    const existing = state.sessions.find((session) => session.task_id === task.id);
-    const session =
-      existing ??
-      startAgent(task, String(payload.prompt || task.description || "Implement this task"));
-    respond(socketId, id, {
-      success: true,
-      task_id: task.id,
-      session_id: session.id,
-      agent_execution_id: `demo-execution-${task.id}`,
-      state: session.state,
-      source: existing ? "existing_primary" : "created_start",
-      newly_created: !existing,
-    });
-    if (!existing) persist();
-    return;
-  }
-  respond(socketId, id, { success: true, demo_mode: true });
+  if (action !== "message.search") return false;
+  const query = String(payload.query || "").toLowerCase();
+  const hits = messages
+    .filter((message) => message.content.toLowerCase().includes(query))
+    .map((message) => ({
+      id: message.id,
+      author_type: message.author_type,
+      type: message.type,
+      snippet: message.content,
+      created_at: message.created_at,
+    }));
+  respond(socketId, id, { hits, total: hits.length });
+  return true;
 }
 
 function createDemoPlans(): Record<string, TaskPlan> {
@@ -551,67 +677,90 @@ function handlePlanRequest(
   action: string,
   payload: Record<string, unknown>,
 ) {
+  const handler = PLAN_REQUEST_HANDLERS[action];
+  if (handler) handler({ socketId, id, payload });
+  else respond(socketId, id, { message: `Unsupported plan action: ${action}` }, true);
+}
+
+type PlanRequestContext = Omit<SocketRouteContext, "action">;
+type PlanRequestHandler = (context: PlanRequestContext) => void;
+
+const PLAN_REQUEST_HANDLERS: Record<string, PlanRequestHandler> = {
+  "task.plan.get": getPlan,
+  "task.plan.revisions.list": listPlanRevisions,
+  "task.plan.revision.get": getPlanRevision,
+  "task.plan.delete": deletePlan,
+  "task.plan.revert": revertPlan,
+  "task.plan.implementation_started": startPlanImplementation,
+  "task.plan.create": (context) => savePlan(context, "task.plan.created"),
+  "task.plan.update": (context) => savePlan(context, "task.plan.updated"),
+};
+
+function getPlan({ socketId, id, payload }: PlanRequestContext) {
+  respond(socketId, id, plansByTask[String(payload.task_id || "")] ?? null);
+}
+
+function listPlanRevisions({ socketId, id, payload }: PlanRequestContext) {
+  const plan = plansByTask[String(payload.task_id || "")];
+  respond(socketId, id, { revisions: plan ? [demoPlanRevision(plan, false)] : [] });
+}
+
+function getPlanRevision({ socketId, id, payload }: PlanRequestContext) {
+  const revision = Object.values(plansByTask)
+    .map((plan) => demoPlanRevision(plan, true))
+    .find((candidate) => candidate.id === payload.revision_id);
+  respond(socketId, id, revision ?? null);
+}
+
+function deletePlan({ socketId, id, payload }: PlanRequestContext) {
+  const taskId = String(payload.task_id || "");
+  delete plansByTask[taskId];
+  respond(socketId, id, { success: true });
+  notify("task.plan.deleted", { task_id: taskId });
+}
+
+function revertPlan({ socketId, id, payload }: PlanRequestContext) {
+  const plan = plansByTask[String(payload.task_id || "")];
+  respond(socketId, id, plan ? demoPlanRevision(plan, true) : null);
+}
+
+function startPlanImplementation({ socketId, id, payload }: PlanRequestContext) {
   const taskId = String(payload.task_id || "");
   const plan = plansByTask[taskId];
-  if (action === "task.plan.get") {
-    respond(socketId, id, plan ?? null);
+  if (!plan) {
+    respond(socketId, id, { message: PLAN_NOT_FOUND }, true);
     return;
   }
-  if (action === "task.plan.revisions.list") {
-    respond(socketId, id, { revisions: plan ? [demoPlanRevision(plan, false)] : [] });
-    return;
-  }
-  if (action === "task.plan.revision.get") {
-    const revision = Object.values(plansByTask)
-      .map((candidate) => demoPlanRevision(candidate, true))
-      .find((candidate) => candidate.id === payload.revision_id);
-    respond(socketId, id, revision ?? null);
-    return;
-  }
-  if (action === "task.plan.delete") {
-    delete plansByTask[taskId];
-    respond(socketId, id, { success: true });
-    notify("task.plan.deleted", { task_id: taskId });
-    return;
-  }
-  if (action === "task.plan.revert") {
-    const revision = plan ? demoPlanRevision(plan, true) : null;
-    respond(socketId, id, revision);
-    return;
-  }
-  if (action === "task.plan.implementation_started") {
-    if (!plan) {
-      respond(socketId, id, { message: "Task plan not found" }, true);
-      return;
-    }
-    const updated = {
-      ...plan,
-      implementation_started_at: new Date().toISOString(),
-      implementation_started_session_id: String(payload.session_id || ""),
-      implementation_started_by: String(payload.actor || "user"),
-    };
-    plansByTask[taskId] = updated;
-    respond(socketId, id, updated);
-    notify("task.plan.updated", updated);
-    return;
-  }
-  if (action === "task.plan.create" || action === "task.plan.update") {
-    const now = new Date().toISOString();
-    const updated: TaskPlan = {
-      id: plan?.id ?? `demo-plan-${taskId}`,
-      task_id: taskId,
-      title: String(payload.title || plan?.title || "Plan"),
-      content: String(payload.content ?? plan?.content ?? ""),
-      created_by: payload.created_by === "agent" ? "agent" : "user",
-      created_at: plan?.created_at ?? now,
-      updated_at: now,
-    };
-    plansByTask[taskId] = updated;
-    respond(socketId, id, updated);
-    notify(action === "task.plan.create" ? "task.plan.created" : "task.plan.updated", updated);
-    return;
-  }
-  respond(socketId, id, { message: `Unsupported plan action: ${action}` }, true);
+  const updated: TaskPlan = {
+    ...plan,
+    implementation_started_at: new Date().toISOString(),
+    implementation_started_session_id: String(payload.session_id || ""),
+    implementation_started_by: String(payload.actor || "user"),
+  };
+  plansByTask[taskId] = updated;
+  respond(socketId, id, updated);
+  notify("task.plan.updated", updated);
+}
+
+function savePlan(
+  { socketId, id, payload }: PlanRequestContext,
+  event: "task.plan.created" | "task.plan.updated",
+) {
+  const taskId = String(payload.task_id || "");
+  const previous = plansByTask[taskId];
+  const now = new Date().toISOString();
+  const plan: TaskPlan = {
+    id: previous?.id ?? `demo-plan-${taskId}`,
+    task_id: taskId,
+    title: String(payload.title || previous?.title || "Plan"),
+    content: String(payload.content ?? previous?.content ?? ""),
+    created_by: payload.created_by === "agent" ? "agent" : "user",
+    created_at: previous?.created_at ?? now,
+    updated_at: now,
+  };
+  plansByTask[taskId] = plan;
+  respond(socketId, id, plan);
+  notify(event, plan);
 }
 
 function demoPlanRevision(plan: TaskPlan, includeContent: boolean): TaskPlanRevision {

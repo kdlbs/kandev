@@ -2,13 +2,11 @@
 
 import { cloneElement, isValidElement, useState } from "react";
 import {
-  IconArchive,
   IconBrandSentry,
   IconCopy,
   IconCircleDot,
   IconGitPullRequest,
   IconLink,
-  IconLoader,
   IconPencil,
   IconPin,
   IconPinFilled,
@@ -31,6 +29,7 @@ import {
 } from "@/components/task/task-move-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { TaskColorMenu } from "./task-switcher-color-menu";
+import { TaskArchiveItem, TaskDeleteItem, TaskDetachItem } from "./task-switcher-action-items";
 import type { TaskSwitcherItem } from "./task-switcher";
 
 export type StepDef = {
@@ -49,6 +48,7 @@ type ContextMenuProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
+  onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkIssue?: (taskId: string, taskTitle?: string) => void;
   onLinkJiraTicket?: (taskId: string, taskTitle?: string) => void;
@@ -79,6 +79,7 @@ export function TaskItemWithContextMenu({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onDetachTask,
   onLinkPullRequest,
   onLinkIssue,
   onLinkJiraTicket,
@@ -100,7 +101,6 @@ export function TaskItemWithContextMenu({
   const [contextOpen, setContextOpen] = useState(false);
   const [menuKey, setMenuKey] = useState(0);
   const moveTasks = useTaskWorkflowMove();
-  const menuOpen = contextOpen || isDeleting === true;
   const closeMenu = () => {
     setContextOpen(false);
     setMenuKey((k) => k + 1);
@@ -109,7 +109,7 @@ export function TaskItemWithContextMenu({
   return (
     <ContextMenu key={menuKey} onOpenChange={setContextOpen}>
       <ContextMenuTrigger asChild>
-        <div>{cloneWithMenuOpen(children, menuOpen)}</div>
+        <div>{cloneWithMenuOpen(children, contextOpen)}</div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
         <TaskContextMenuItems
@@ -120,6 +120,7 @@ export function TaskItemWithContextMenu({
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
           onDeleteTask={onDeleteTask}
+          onDetachTask={onDetachTask}
           onLinkPullRequest={onLinkPullRequest}
           onLinkIssue={onLinkIssue}
           onLinkJiraTicket={onLinkJiraTicket}
@@ -159,6 +160,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
     onRenameTask,
     onArchiveTask,
     onDeleteTask,
+    onDetachTask,
     onMoveToStep,
     onTogglePin,
     isPinned,
@@ -213,6 +215,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
         }
       : handler;
   const onDelete = withClear(onDeleteTask);
+  const onDetach = withClear(onDetachTask);
   return (
     <>
       <TaskPinItem
@@ -250,6 +253,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
         closeMenu={closeMenu}
         moveTasks={moveTasks}
       />
+      <TaskDetachItem task={task} disabled={isDeleting} onDetachTask={onDetach} />
       <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDelete} />
     </>
   );
@@ -413,41 +417,6 @@ function TaskRenameItem({
   );
 }
 
-function TaskArchiveItem({
-  taskId,
-  actingIds,
-  actingOnSelection,
-  disabled,
-  onArchiveTask,
-  onBulkArchive,
-}: {
-  taskId: string;
-  actingIds: string[];
-  actingOnSelection: boolean;
-  disabled?: boolean;
-  onArchiveTask?: (taskId: string) => void;
-  onBulkArchive?: (taskIds: string[]) => void;
-}) {
-  // Acting on the selection routes through the bulk path (which clears the
-  // selection afterwards) even for a single selected row.
-  if (actingOnSelection && onBulkArchive) {
-    const n = actingIds.length;
-    return (
-      <ContextMenuItem disabled={disabled} onSelect={() => onBulkArchive(actingIds)}>
-        <IconArchive className="mr-2 h-4 w-4" />
-        {n > 1 ? `Archive ${n} tasks` : "Archive"}
-      </ContextMenuItem>
-    );
-  }
-  if (!onArchiveTask) return null;
-  return (
-    <ContextMenuItem disabled={disabled} onSelect={() => onArchiveTask(taskId)}>
-      <IconArchive className="mr-2 h-4 w-4" />
-      Archive
-    </ContextMenuItem>
-  );
-}
-
 function TaskMoveItems({
   task,
   workflows,
@@ -470,13 +439,17 @@ function TaskMoveItems({
   // Moving a selection routes through the sidebar hook's bulkMove, which clears
   // the selection afterwards. Fall back to a raw move when no bulk handler is
   // wired (e.g. the kanban-less callers that don't manage a selection).
-  const runSelectionMove = (targetWorkflowId: string, stepId: string) => {
+  const runSelectionMove = (
+    targetWorkflowId: string,
+    stepId: string,
+    destination: "step" | "workflow",
+  ) => {
     closeMenu();
     if (onBulkMove) {
       onBulkMove(actingIds, targetWorkflowId, stepId);
       return;
     }
-    void moveTasks(actingIds, targetWorkflowId, stepId).catch(() => {
+    void moveTasks(actingIds, targetWorkflowId, stepId, destination).catch(() => {
       // useTaskWorkflowMove already shows the failure toast.
     });
   };
@@ -488,9 +461,18 @@ function TaskMoveItems({
   if (actingOnSelection) {
     moveToStep = isMixedWorkflowSelection
       ? undefined
-      : (stepId) => runSelectionMove(workflowId, stepId);
+      : (stepId) => runSelectionMove(workflowId, stepId, "step");
   } else {
-    moveToStep = selectMoveAction(task.id, workflowId, onMoveToStep, closeMenu);
+    moveToStep = (stepId) => {
+      closeMenu();
+      if (onMoveToStep) {
+        onMoveToStep(task.id, workflowId, stepId);
+        return;
+      }
+      void moveTasks([task.id], workflowId, stepId, "step").catch(() => {
+        // useTaskWorkflowMove already shows the failure toast.
+      });
+    };
   }
 
   return (
@@ -506,57 +488,15 @@ function TaskMoveItems({
       onMoveToStep={moveToStep}
       onSendToWorkflow={(targetWorkflowId, stepId) => {
         if (actingOnSelection) {
-          runSelectionMove(targetWorkflowId, stepId);
+          runSelectionMove(targetWorkflowId, stepId, "workflow");
           return;
         }
         closeMenu();
-        void moveTasks([task.id], targetWorkflowId, stepId).catch(() => {
+        void moveTasks([task.id], targetWorkflowId, stepId, "workflow").catch(() => {
           // useTaskWorkflowMove already shows the failure toast.
         });
       }}
     />
-  );
-}
-
-function selectMoveAction(
-  taskId: string,
-  workflowId: string,
-  handler: ((taskId: string, workflowId: string, targetStepId: string) => void) | undefined,
-  closeMenu: () => void,
-) {
-  if (!handler) return undefined;
-  return (stepId: string) => {
-    closeMenu();
-    handler(taskId, workflowId, stepId);
-  };
-}
-
-function TaskDeleteItem({
-  taskId,
-  isDeleting,
-  onDeleteTask,
-}: {
-  taskId: string;
-  isDeleting?: boolean;
-  onDeleteTask?: (taskId: string) => void;
-}) {
-  if (!onDeleteTask) return null;
-  return (
-    <>
-      <ContextMenuSeparator />
-      <ContextMenuItem
-        variant="destructive"
-        disabled={isDeleting}
-        onSelect={() => onDeleteTask(taskId)}
-      >
-        {isDeleting ? (
-          <IconLoader className="mr-2 h-4 w-4 animate-spin" />
-        ) : (
-          <IconTrash className="mr-2 h-4 w-4" />
-        )}
-        Delete
-      </ContextMenuItem>
-    </>
   );
 }
 

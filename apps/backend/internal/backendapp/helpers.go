@@ -432,11 +432,20 @@ func appendSessionModelsMessage(sessionID string, session *models.TaskSession, l
 		CurrentModelID: modelState.CurrentModelID,
 		Models:         modelState.Models,
 		ConfigOptions:  modelState.ConfigOptions,
+		ConfigBaseline: sessionACPConfigBaseline(session),
 	})
 	if err == nil {
 		result = append(result, notification)
 	}
 	return result
+}
+
+func sessionACPConfigBaseline(session *models.TaskSession) map[string]string {
+	if session == nil {
+		return nil
+	}
+	baseline, _ := models.LoadSessionACPConfigBaseline(session.Metadata)
+	return baseline
 }
 
 // routeParams holds all dependencies needed for HTTP and WebSocket route registration.
@@ -453,6 +462,7 @@ type routeParams struct {
 	eventBus                bus.EventBus
 	services                *Services
 	systemSvc               *systemsvc.Service
+	workspaceRestorer       taskhandlers.WorkspaceQuarantineRestorer
 	runtimeFlagsSvc         *runtimeflags.Service
 	agentSettingsController *agentsettingscontroller.Controller
 	agentSettingsRepo       settingsstore.Repository
@@ -828,6 +838,9 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	if handoffSvc != nil {
 		taskH.SetHandoffService(handoffSvc)
 	}
+	if p.workspaceRestorer != nil {
+		taskH.SetWorkspaceQuarantineRestorer(p.workspaceRestorer)
+	}
 	if p.services.GitHub != nil {
 		ghSvc := p.services.GitHub
 		taskH.SetOnTaskCreatedWithPR(func(ctx context.Context, taskID, sessionID, prURL, branch string) {
@@ -1078,12 +1091,16 @@ func registerHealthRoutes(p routeParams) {
 		oslimits.NewOSLimitsChecker(oslimits.NewInotifyProbe()),
 		5*time.Minute,
 	)
-	healthSvc := health.NewService(p.log,
+	checkers := []health.Checker{
 		health.NewGitExecutableChecker(),
 		githubChecker,
 		health.NewAgentChecker(p.agentSettingsController),
 		osLimitsChecker,
-	)
+	}
+	if p.systemSvc != nil && p.systemSvc.StorageRuntime != nil {
+		checkers = append(checkers, p.systemSvc.StorageRuntime)
+	}
+	healthSvc := health.NewService(p.log, checkers...)
 	health.RegisterRoutes(p.router, healthSvc, p.log)
 }
 
@@ -1166,6 +1183,8 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
+	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
+	mcpHandlers.SetUserSettingsProvider(p.services.User)
 
 	// Enrich list_tasks responses with associated GitHub PRs (link, title,
 	// number, state) when the github service is available.
@@ -1240,6 +1259,7 @@ func externalMCPOpenMiddleware() gin.HandlerFunc {
 // runGracefulShutdown gracefully stops all services and runs cleanups.
 func runGracefulShutdown(
 	server *http.Server,
+	listeners *serverListeners,
 	orchestratorSvc *orchestrator.Service,
 	lifecycleMgr *lifecycle.Manager,
 	runCleanups func(),
@@ -1251,6 +1271,10 @@ func runGracefulShutdown(
 		zap.Int("http_timeout_seconds", int(httpShutdownTimeout/time.Second)),
 		zap.Int("agent_timeout_seconds", int(agentShutdownTimeout/time.Second)),
 		zap.Int("tracing_timeout_seconds", int(tracingShutdownTimeout/time.Second)))
+
+	// Stop the background bind-retry loop before Shutdown so no new listener
+	// can be created after the server begins closing its listeners.
+	listeners.Stop()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 	defer shutdownCancel()

@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -609,10 +609,15 @@ func (s *Service) resolveRepoInputLocal(
 	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput,
 	repoByPath map[string]*models.Repository, baseBranch string,
 ) (string, string, bool, error) {
-	repo := repoByPath[repoInput.LocalPath]
+	lookupPath := repoInput.LocalPath
+	canonicalPath, probedBranch, pathErr := resolveExplicitLocalRepositoryPath(repoInput.LocalPath)
+	if pathErr == nil {
+		lookupPath = canonicalPath
+	}
+	repo := repoByPath[lookupPath]
 	created := false
 	if repo == nil {
-		if isKandevTaskWorktreePath(repoInput.LocalPath, s.discoveryConfig.TaskWorktreeRoots) {
+		if isKandevTaskWorktreePath(lookupPath, s.discoveryConfig.TaskWorktreeRoots) {
 			return "", "", false, fmt.Errorf("local path %q points at a Kandev task worktree; use the source repository or GitHub URL", repoInput.LocalPath)
 		}
 		name := strings.TrimSpace(repoInput.Name)
@@ -628,15 +633,12 @@ func (s *Service) resolveRepoInputLocal(
 		// branch, which would permanently pin repositories.default_branch to
 		// a feature branch and break every downstream merge-base lookup.
 		defaultBranch := repoInput.DefaultBranch
-		if defaultBranch == "" {
-			// Probe must operate on a path validated against the discovery
-			// allowlist — repoInput.LocalPath comes straight from the HTTP body
-			// and feeds into os.Stat/ReadFile inside gitref.DefaultBranch, so
-			// without this guard a caller could traverse the filesystem.
-			if safePath, pathErr := s.resolveAllowedLocalPath(repoInput.LocalPath); pathErr == nil {
-				if probed, err := gitref.DefaultBranchOrEmpty(safePath); err == nil && probed != "" {
-					defaultBranch = probed
-				}
+		if defaultBranch == "" && pathErr == nil {
+			// A manually supplied path is an explicit read-only probe. Canonical
+			// repository validation protects the filesystem read; discovery roots
+			// only constrain automatic scans.
+			if probedBranch != "" {
+				defaultBranch = probedBranch
 			}
 		}
 		createdRepo, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
@@ -652,6 +654,7 @@ func (s *Service) resolveRepoInputLocal(
 		repo = createdRepo
 		if repoByPath != nil {
 			repoByPath[repoInput.LocalPath] = repo
+			repoByPath[repo.LocalPath] = repo
 		}
 		created = true
 	} else {
@@ -894,6 +897,56 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	return task, nil
 }
 
+type taskMessageRollbackRepository interface {
+	RestoreTaskMessageRollbackIfSessionState(
+		ctx context.Context,
+		task *models.Task,
+		sessionID string,
+		expectedSessionState models.TaskSessionState,
+	) (bool, error)
+}
+
+// RestoreTaskMessageRollback restores message_task's task-state/workflow-step
+// snapshot only while ownerSessionID still has expectedSessionState. It is a
+// narrow compensation API: the repository predicate and both task-field
+// writes share one SQL statement, so coordinator cancellation cannot be
+// overwritten between a state check and the rollback write.
+func (s *Service) RestoreTaskMessageRollback(
+	ctx context.Context,
+	taskID, ownerSessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+	workflowStepID string,
+) (*models.Task, bool, error) {
+	repo, ok := s.tasks.(taskMessageRollbackRepository)
+	if !ok {
+		return nil, false, errors.New("task repository does not support guarded message rollback")
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	oldState := task.State
+	restoredTask := *task
+	restoredTask.State = state
+	restoredTask.WorkflowStepID = workflowStepID
+	updated, err := repo.RestoreTaskMessageRollbackIfSessionState(
+		ctx,
+		&restoredTask,
+		ownerSessionID,
+		expectedSessionState,
+	)
+	if err != nil || !updated {
+		return task, updated, err
+	}
+
+	if restoredTask.State != oldState {
+		s.publishTaskEvent(ctx, events.TaskStateChanged, &restoredTask, &oldState)
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, &restoredTask, nil)
+	return &restoredTask, true, nil
+}
+
 // ArchiveTask archives a task by setting its archived_at timestamp.
 // The task remains in the DB but is excluded from active board views.
 // Active agent sessions are stopped and worktrees cleaned up in background.
@@ -914,9 +967,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	var stopTargets []taskStopTarget
 	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
 	if err != nil {
-		s.logger.Warn("failed to list active sessions for archive",
-			zap.String("task_id", id),
-			zap.Error(err))
+		return fmt.Errorf("list active task sessions for archive: %w", err)
 	}
 	if s.executionStopper != nil {
 		stopTargets, err = s.buildStopTargets(ctx, id, activeSessions)
@@ -946,28 +997,36 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	sessions, err := s.sessions.ListTaskSessions(ctx, id)
 	if err != nil {
-		s.logger.Warn("failed to list task sessions for archive",
-			zap.String("task_id", id),
-			zap.Error(err))
+		return fmt.Errorf("list task sessions for archive: %w", err)
 	}
 
-	var worktrees []*worktree.Worktree
-	if s.worktreeCleanup != nil {
-		if provider, ok := s.worktreeCleanup.(WorktreeProvider); ok {
-			worktrees, err = provider.GetAllByTaskID(ctx, id)
-			if err != nil {
-				s.logger.Warn("failed to list worktrees for archive",
-					zap.String("task_id", id),
-					zap.Error(err))
-			}
-		}
+	worktrees, err := s.gatherWorktreesForDelete(ctx, id)
+	if err != nil {
+		return fmt.Errorf("list worktrees for archive: %w", err)
 	}
-	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, id)
+	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, id)
+	if err != nil {
+		return fmt.Errorf("lookup task environment for archive: %w", err)
+	}
+	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: true}
+	cleanupJob, err := s.persistTaskResourceCleanup(
+		ctx, id, models.TaskResourceCleanupTriggerArchive, "",
+		sessions, worktrees, stopTargets, envCleanup, true,
+	)
+	if err != nil {
+		return err
+	}
 
 	// 3. Set archived_at in DB
 	if err := s.tasks.ArchiveTask(ctx, id); err != nil {
+		s.cancelTaskResourceCleanupJob(ctx, cleanupJob)
 		return err
 	}
+
+	// Register the exact inventory before CANCELLED becomes visible. A launch
+	// persistence loser can then distinguish these owned executions from one
+	// that raced in after the snapshot and must clean itself up.
+	s.registerTaskRuntimeStopOwners(stopTargets, true)
 
 	// 3b. Finalize active sessions in the DB. The async cleanup below tears down
 	// the agent processes; this records the terminal session state, which
@@ -995,13 +1054,33 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		zap.Duration("duration", time.Since(start)))
 
 	// 6. Background: Stop agents and cleanup worktrees
-	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: true}
-	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || taskEnv != nil {
+	if cleanupJob != nil {
+		if err := s.StartPreparedTaskResourceCleanup(ctx, cleanupJob.OperationID); err != nil {
+			s.logger.Warn("start committed archive resource cleanup",
+				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
+		}
+	} else if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || taskEnv != nil {
 		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
 			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
 
 	return nil
+}
+
+func (s *Service) registerTaskRuntimeStopOwners(stopTargets []taskStopTarget, force bool) {
+	if s.executionStopper == nil {
+		return
+	}
+	for _, target := range stopTargets {
+		if target.sessionID == "" || target.executionID == "" {
+			continue
+		}
+		s.executionStopper.RegisterExecutionStopOwner(
+			target.sessionID,
+			target.executionID,
+			force,
+		)
+	}
 }
 
 // DeleteTask deletes a task and publishes a task.deleted event.
@@ -1019,7 +1098,7 @@ func (s *Service) DeleteTaskWithReason(ctx context.Context, id, reason string) e
 }
 
 func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) error {
-	_, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, reason, func(ctx context.Context, id string) (bool, error) {
+	_, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, reason, models.TaskResourceCleanupTriggerDelete, func(ctx context.Context, id string) (bool, error) {
 		if err := s.tasks.DeleteTask(ctx, id); err != nil {
 			return false, err
 		}
@@ -1029,7 +1108,7 @@ func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) e
 }
 
 func (s *Service) deleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
-	deleted, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, "", func(ctx context.Context, id string) (bool, error) {
+	deleted, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, "", models.TaskResourceCleanupTriggerQuickChatExpire, func(ctx context.Context, id string) (bool, error) {
 		return s.tasks.DeleteExpiredQuickChatTask(ctx, id, cutoff)
 	})
 	if errors.Is(err, taskrepo.ErrTaskNotFound) {
@@ -1042,6 +1121,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	ctx context.Context,
 	id string,
 	reason string,
+	trigger models.TaskResourceCleanupTrigger,
 	deleteFromDB func(context.Context, string) (bool, error),
 ) (bool, error) {
 	start := time.Now()
@@ -1055,13 +1135,21 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	// 2. Gather data needed for cleanup BEFORE delete (sync, fast)
 	sessions, err := s.sessions.ListTaskSessions(ctx, id)
 	if err != nil {
-		s.logger.Warn("failed to list task sessions for delete",
-			zap.String("task_id", id),
-			zap.Error(err))
+		return false, fmt.Errorf("list task sessions for delete: %w", err)
 	}
 
-	worktrees := s.gatherWorktreesForDelete(ctx, id)
-	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, id)
+	worktrees, err := s.gatherWorktreesForDelete(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("list worktrees for delete: %w", err)
+	}
+	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("lookup task environment for delete: %w", err)
+	}
+	stopTargets, err := s.deleteTaskStopTargets(ctx, id)
+	if err != nil {
+		return false, err
+	}
 	if preserved, err := s.preserveTaskEnvironmentForActiveBorrower(ctx, id, taskEnv); err != nil {
 		return false, err
 	} else if preserved {
@@ -1071,7 +1159,10 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 			zap.String("new_owner_task_id", taskEnv.TaskID))
 	}
 
-	stopTargets, err := s.deleteTaskStopTargets(ctx, id)
+	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false}
+	cleanupJob, err := s.persistTaskResourceCleanup(
+		ctx, id, trigger, "", sessions, worktrees, stopTargets, envCleanup, true,
+	)
 	if err != nil {
 		return false, err
 	}
@@ -1079,10 +1170,12 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	// 4. Delete from DB (sync, fast)
 	deleted, err := deleteFromDB(ctx, id)
 	if err != nil {
+		s.cancelTaskResourceCleanupJob(ctx, cleanupJob)
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
 		return false, err
 	}
 	if !deleted {
+		s.cancelTaskResourceCleanupJob(ctx, cleanupJob)
 		return false, nil
 	}
 
@@ -1100,9 +1193,13 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	//    envCleanup struct so the task environment row is reset alongside
 	//    the worktrees (an extra task.taskEnv != nil branch keeps the
 	//    cleanup running when only the env needs reclaiming).
-	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false}
 	hasCleanup := len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral || taskEnv != nil
-	if hasCleanup {
+	if cleanupJob != nil {
+		if err := s.StartPreparedTaskResourceCleanup(ctx, cleanupJob.OperationID); err != nil {
+			s.logger.Warn("start committed delete resource cleanup",
+				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
+		}
+	} else if hasCleanup {
 		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}
@@ -1117,9 +1214,7 @@ func (s *Service) deleteTaskStopTargets(ctx context.Context, id string) ([]taskS
 	}
 	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
 	if err != nil {
-		s.logger.Warn("failed to list active sessions for delete",
-			zap.String("task_id", id),
-			zap.Error(err))
+		return nil, fmt.Errorf("list active sessions for delete: %w", err)
 	}
 	stopTargets, err := s.buildStopTargets(ctx, id, activeSessions)
 	if err != nil {
@@ -1161,8 +1256,18 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 			return
 		}
 	}
-	worktrees := s.gatherWorktreesForDelete(ctx, taskID)
-	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, taskID)
+	worktrees, err := s.gatherWorktreesForDelete(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("skipping cascade cleanup because worktree inventory failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("skipping cascade cleanup because task environment inventory failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
 	if deleteEnvRow {
 		preserved, err := s.preserveTaskEnvironmentForActiveBorrower(ctx, taskID, taskEnv)
 		if err != nil {
@@ -1195,41 +1300,38 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 // gatherWorktreesForDelete collects worktrees for a task before it is deleted.
 // For legacy WorktreeCleanup implementations that do not implement WorktreeProvider,
 // it triggers cleanup immediately and returns nil.
-func (s *Service) gatherWorktreesForDelete(ctx context.Context, taskID string) []*worktree.Worktree {
+func (s *Service) gatherWorktreesForDelete(ctx context.Context, taskID string) ([]*worktree.Worktree, error) {
 	if s.worktreeCleanup == nil {
-		return nil
+		return nil, nil
 	}
 	provider, ok := s.worktreeCleanup.(WorktreeProvider)
 	if !ok {
-		// Fallback for legacy implementations: cleanup before delete.
-		if err := s.worktreeCleanup.OnTaskDeleted(ctx, taskID); err != nil {
-			s.logger.Warn("failed to cleanup worktree on task deletion",
-				zap.String("task_id", taskID),
-				zap.Error(err))
+		// Durable cleanup must persist its intent before invoking a destructive
+		// legacy callback. Non-durable test/legacy wiring keeps the old behavior.
+		if s.resourceCleanups == nil {
+			if err := s.worktreeCleanup.OnTaskDeleted(ctx, taskID); err != nil {
+				s.logger.Warn("failed to cleanup worktree on task deletion",
+					zap.String("task_id", taskID), zap.Error(err))
+			}
 		}
-		return nil
+		return nil, nil
 	}
 	worktrees, err := provider.GetAllByTaskID(ctx, taskID)
 	if err != nil {
-		s.logger.Warn("failed to list worktrees for delete",
-			zap.String("task_id", taskID),
-			zap.Error(err))
+		return nil, err
 	}
-	return worktrees
+	return worktrees, nil
 }
 
-func (s *Service) gatherTaskEnvironmentForCleanup(ctx context.Context, taskID string) *models.TaskEnvironment {
+func (s *Service) gatherTaskEnvironmentForCleanup(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
 	if s.taskEnvironments == nil {
-		return nil
+		return nil, nil
 	}
 	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
-		s.logger.Warn("failed to lookup task environment for cleanup",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return nil
+		return nil, err
 	}
-	return env
+	return env, nil
 }
 
 func (s *Service) runAsyncTaskCleanup(
@@ -1254,6 +1356,16 @@ func (s *Service) runTaskCleanup(
 	cleanupStart := time.Now()
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	refreshedTargets, err := s.refreshTaskRuntimeStopTargets(cleanupCtx, id, stopTargets)
+	if err != nil {
+		s.logger.Warn(cleanupMsg+" deferred because runtime inventory refresh failed",
+			zap.String("task_id", id),
+			zap.Error(err))
+		s.signalCleanupDoneForTest()
+		return
+	}
+	stopTargets = refreshedTargets
+	s.registerTaskRuntimeStopOwners(stopTargets, true)
 
 	failedStops := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
 
@@ -1347,14 +1459,101 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 	return targets, nil
 }
 
+// refreshTaskRuntimeStopTargets merges the durable/pre-mutation snapshot with
+// the live runtime inventory immediately before teardown. A launch may rotate
+// an execution after the snapshot but before archive/delete becomes visible;
+// keeping every exact ID makes cleanup safe across that race and worker
+// restarts. A session-only fallback is retained only when no exact ID exists
+// for that session; otherwise it would observe absence after the exact stop and
+// keep a durable cleanup retrying forever.
+func (s *Service) refreshTaskRuntimeStopTargets(
+	ctx context.Context,
+	taskID string,
+	snapshot []taskStopTarget,
+) ([]taskStopTarget, error) {
+	if s.executionStopper == nil || s.executors == nil {
+		return snapshot, nil
+	}
+	runningRows, err := s.executors.ListExecutorsRunningByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return mergeTaskStopTargets(taskStopTargetsFromRunningRows(runningRows), snapshot), nil
+}
+
+func taskStopTargetsFromRunningRows(runningRows []*models.ExecutorRunning) []taskStopTarget {
+	targets := make([]taskStopTarget, 0, len(runningRows))
+	for _, running := range runningRows {
+		if running == nil {
+			continue
+		}
+		targets = append(targets, taskStopTarget{
+			sessionID:   strings.TrimSpace(running.SessionID),
+			executionID: strings.TrimSpace(running.AgentExecutionID),
+		})
+	}
+	return targets
+}
+
+func mergeTaskStopTargets(live, snapshot []taskStopTarget) []taskStopTarget {
+	sessionsWithExactTarget := exactTaskStopTargetSessions(live, snapshot)
+	targets := make([]taskStopTarget, 0, len(live)+len(snapshot))
+	seen := make(map[string]int, len(live)+len(snapshot))
+	appendTarget := func(target taskStopTarget) {
+		target.sessionID = strings.TrimSpace(target.sessionID)
+		target.executionID = strings.TrimSpace(target.executionID)
+		if target.sessionID == "" {
+			return
+		}
+		if target.executionID == "" {
+			if _, hasExact := sessionsWithExactTarget[target.sessionID]; hasExact {
+				return
+			}
+		}
+		key := target.sessionID + "\x00" + target.executionID
+		if index, exists := seen[key]; exists {
+			targets[index].terminal = targets[index].terminal || target.terminal
+			return
+		}
+		seen[key] = len(targets)
+		targets = append(targets, target)
+	}
+	for _, target := range live {
+		appendTarget(target)
+	}
+	for _, target := range snapshot {
+		appendTarget(target)
+	}
+	return targets
+}
+
+func exactTaskStopTargetSessions(targetSets ...[]taskStopTarget) map[string]struct{} {
+	exact := make(map[string]struct{})
+	for _, targets := range targetSets {
+		for _, target := range targets {
+			sessionID := strings.TrimSpace(target.sessionID)
+			if sessionID != "" && strings.TrimSpace(target.executionID) != "" {
+				exact[sessionID] = struct{}{}
+			}
+		}
+	}
+	return exact
+}
+
 func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, stopTargets []taskStopTarget, stopReason, stopFailMsg string) map[string]struct{} {
 	failedStops := make(map[string]struct{})
 	if s.executionStopper == nil || len(stopTargets) == 0 {
 		return failedStops
 	}
 	for _, target := range stopTargets {
+		if context.Cause(ctx) != nil {
+			return failedStops
+		}
 		if target.executionID != "" {
 			if err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true); err != nil {
+				if runtimeStopAlreadyComplete(err) {
+					continue
+				}
 				if target.terminal {
 					s.logger.Debug("stop failed for terminal session execution (expected), proceeding with cleanup",
 						zap.String("task_id", taskID),
@@ -1389,6 +1588,10 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 	return failedStops
 }
 
+func runtimeStopAlreadyComplete(err error) bool {
+	return errors.Is(err, runtimeapi.ErrNotFound)
+}
+
 // performTaskCleanup handles post-deletion cleanup operations.
 // Handles worktree cleanup, executor_running records, and quick-chat workspace directories.
 // Agent stopping is handled separately in the DeleteTask background goroutine.
@@ -1403,6 +1606,9 @@ func (s *Service) performTaskCleanup(
 	preserveExecutorRows map[string]struct{},
 ) []error {
 	var errs []error
+	if cause := context.Cause(ctx); cause != nil {
+		return []error{cause}
+	}
 	hasPreservedRuntimes := len(preserveExecutorRows) > 0
 
 	if hasPreservedRuntimes {
@@ -1411,6 +1617,9 @@ func (s *Service) performTaskCleanup(
 			zap.Int("preserved_runtime_count", len(preserveExecutorRows)))
 	}
 	errs = append(errs, s.cleanupDestructiveTaskResources(ctx, taskID, sessions, worktrees, envCleanup, preserveExecutorRows)...)
+	if cause := context.Cause(ctx); cause != nil {
+		return append(errs, cause)
+	}
 
 	sessionIDs := cleanupSessionIDs(sessions, stopTargets)
 	for _, sessionID := range sessionIDs {
@@ -1419,6 +1628,9 @@ func (s *Service) performTaskCleanup(
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID))
 			continue
+		}
+		if cause := context.Cause(ctx); cause != nil {
+			return append(errs, cause)
 		}
 		if err := s.executors.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
 			s.logger.Debug("failed to delete executor runtime for session",
@@ -1432,7 +1644,10 @@ func (s *Service) performTaskCleanup(
 	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
 	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
 	// both cases must be cleaned up to avoid a disk leak.
-	errs = append(errs, s.cleanupQuickChatDirs(taskID, sessionIDs, preserveExecutorRows)...)
+	if cause := context.Cause(ctx); cause != nil {
+		return append(errs, cause)
+	}
+	errs = append(errs, s.cleanupQuickChatDirs(ctx, taskID, sessionIDs, preserveExecutorRows)...)
 
 	return errs
 }
@@ -1474,6 +1689,7 @@ func appendUniqueSessionID(sessionIDs []string, seen map[string]struct{}, sessio
 }
 
 func (s *Service) cleanupQuickChatDirs(
+	ctx context.Context,
 	taskID string,
 	sessionIDs []string,
 	preserveExecutorRows map[string]struct{},
@@ -1490,6 +1706,9 @@ func (s *Service) cleanupQuickChatDirs(
 		if _, statErr := os.Stat(sessionDir); statErr != nil {
 			// Directory does not exist — nothing to remove.
 			continue
+		}
+		if cause := context.Cause(ctx); cause != nil {
+			return append(errs, cause)
 		}
 		if err := os.RemoveAll(sessionDir); err != nil {
 			s.logger.Warn("failed to cleanup quick-chat workspace directory",
@@ -1517,6 +1736,9 @@ func (s *Service) cleanupDestructiveTaskResources(
 	preserveExecutorRows map[string]struct{},
 ) []error {
 	var errs []error
+	if cause := context.Cause(ctx); cause != nil {
+		return []error{cause}
+	}
 	skipOwnedEnvironment, err := s.hasActiveOtherTaskSessionsForEnvironment(ctx, taskID, envCleanup.env)
 	if err != nil {
 		s.logger.Warn("skipping task environment cleanup after shared-environment ownership check failed",
@@ -1531,12 +1753,21 @@ func (s *Service) cleanupDestructiveTaskResources(
 			zap.String("task_id", taskID),
 			zap.String("env_id", taskEnvironmentID(envCleanup.env)))
 	}
+	if cause := context.Cause(ctx); cause != nil {
+		return append(errs, cause)
+	}
 	if len(preserveExecutorRows) == 0 && !skipOwnedEnvironment {
 		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
+		if cause := context.Cause(ctx); cause != nil {
+			return append(errs, cause)
+		}
 	}
 	originalWorktreeCount := len(worktrees)
 	worktrees = s.filterOwnedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees, envCleanup.env, skipOwnedEnvironment)
 	worktrees = cleanupEligibleWorktrees(worktrees, envCleanup.env, preserveExecutorRows)
+	var referenceErrs []error
+	worktrees, referenceErrs = s.filterSharedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees)
+	errs = append(errs, referenceErrs...)
 	if len(worktrees) == 0 {
 		if originalWorktreeCount > 0 {
 			s.logger.Debug("no task worktrees eligible for cleanup",
@@ -1550,6 +1781,9 @@ func (s *Service) cleanupDestructiveTaskResources(
 	if !ok {
 		return errs
 	}
+	if cause := context.Cause(ctx); cause != nil {
+		return append(errs, cause)
+	}
 	if err := cleaner.CleanupWorktrees(ctx, worktrees); err != nil {
 		s.logger.Warn("failed to cleanup worktrees after delete",
 			zap.String("task_id", taskID),
@@ -1557,6 +1791,51 @@ func (s *Service) cleanupDestructiveTaskResources(
 		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
 	}
 	return errs
+}
+
+func (s *Service) filterSharedWorktreesForTaskCleanup(
+	ctx context.Context,
+	taskID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+) ([]*worktree.Worktree, []error) {
+	guard, ok := s.worktreeCleanup.(worktreeReferenceGuard)
+	if !ok || len(worktrees) == 0 {
+		return worktrees, nil
+	}
+	excludedSessionIDs := taskSessionIDs(sessions)
+	filtered := worktrees[:0]
+	var errs []error
+	for _, wt := range worktrees {
+		count, err := guard.CountActiveWorktreeReferences(ctx, wt.ID, excludedSessionIDs)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("count active references for worktree %s: %w", wt.ID, err))
+			continue
+		}
+		if count == 0 {
+			filtered = append(filtered, wt)
+			continue
+		}
+		if err := guard.ReleaseWorktreeReference(ctx, wt); err != nil {
+			errs = append(errs, fmt.Errorf("release shared worktree reference %s: %w", wt.ID, err))
+			continue
+		}
+		s.logger.Info("preserving worktree still referenced by another active task",
+			zap.String("task_id", taskID),
+			zap.String("worktree_id", wt.ID),
+			zap.Int("active_references", count))
+	}
+	return filtered, errs
+}
+
+func taskSessionIDs(sessions []*models.TaskSession) []string {
+	ids := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && session.ID != "" {
+			ids = append(ids, session.ID)
+		}
+	}
+	return ids
 }
 
 func taskEnvironmentID(env *models.TaskEnvironment) string {
@@ -1714,6 +1993,9 @@ func (s *Service) cleanupTaskEnvironment(
 	if cleanup.env == nil {
 		return nil
 	}
+	if cause := context.Cause(ctx); cause != nil {
+		return []error{cause}
+	}
 	if err := s.teardownEnvironmentResources(ctx, cleanup.env); err != nil {
 		s.logger.Warn("failed to teardown task environment during task cleanup",
 			zap.String("task_id", taskID),
@@ -1722,6 +2004,9 @@ func (s *Service) cleanupTaskEnvironment(
 		return []error{fmt.Errorf("teardown task environment %s: %w", cleanup.env.ID, err)}
 	}
 	if cleanup.deleteRow {
+		if cause := context.Cause(ctx); cause != nil {
+			return []error{cause}
+		}
 		if err := s.taskEnvironments.DeleteTaskEnvironment(ctx, cleanup.env.ID); err != nil {
 			s.logger.Warn("failed to delete task environment row during task cleanup",
 				zap.String("task_id", taskID),

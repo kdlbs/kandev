@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
@@ -89,7 +90,17 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments, dispatchOnly)
+	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
+	if err != nil {
+		return nil, err
+	}
+	key := executionActivityKey(executionID)
+	m.trackActivity(key, lease)
+	result, err := m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments, dispatchOnly)
+	if err != nil || !dispatchOnly {
+		m.releaseActivity(key)
+	}
+	return result, err
 }
 
 // cancelWaitTimeout bounds how long CancelAgent waits for the in-flight SendPrompt
@@ -523,8 +534,14 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, reason string, force bool) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
-		return fmt.Errorf("execution %q not found", executionID)
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
+	if err != nil {
+		return err
+	}
+	defer activityLease.Release()
+	m.releaseActivity(executionActivityKey(executionID))
 
 	m.logger.Info("stopping agent",
 		zap.String("execution_id", executionID),
@@ -1009,6 +1026,12 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if execution.PassthroughProcessID != "" || execution.IsPassthrough || execution.agentctl == nil {
 		return nil
 	}
+	// InitializeAndPrompt owns the first updates stream. Starting a recovery
+	// stream before ACP initialization finishes creates competing consumers and
+	// can split one prompt's events across them.
+	if !execution.sessionInitialized || execution.ACPSessionID == "" {
+		return nil
+	}
 	if execution.agentctl.HasAgentStream() {
 		return nil
 	}
@@ -1128,7 +1151,11 @@ func (m *Manager) MarkReady(executionID string) error {
 //
 // Publishes events.AgentBootReady. Returns error if execution not found.
 func (m *Manager) MarkBootReady(executionID string) error {
-	return m.markReadyEventWithContext(context.Background(), executionID, events.AgentBootReady, false)
+	err := m.markReadyEventWithContext(context.Background(), executionID, events.AgentBootReady, false)
+	if err == nil {
+		m.releaseActivity(executionActivityKey(executionID))
+	}
+	return err
 }
 
 // markReadyEvent is the shared body of MarkReady / MarkBootReady — both flip
@@ -1263,6 +1290,7 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 	// (#1597). Re-stamping here leaves the row truthful (terminal
 	// status + fresh last_seen_at) the moment the process is gone.
 	m.persistExecutorRunning(context.Background(), execution)
+	m.releaseActivity(executionActivityKey(executionID))
 
 	m.logger.Info("execution completed",
 		zap.String("execution_id", executionID),

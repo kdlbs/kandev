@@ -55,7 +55,7 @@ test.describe("Quick Chat repository context on mobile", () => {
     const restoredDialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     const restoredTabs = restoredDialog.getByTestId("quick-chat-tab");
     await expect(restoredTabs).toHaveCount(2);
-    await expect(restoredTabs.locator("span")).toHaveText(originalNames);
+    await expect(restoredTabs.locator("span")).toHaveText([...originalNames].reverse());
     await expect(restoredDialog.getByTestId("quick-chat-setup")).not.toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
   });

@@ -159,33 +159,38 @@ export function useDefaultQueryPresets(workspaceId: string | null = null) {
   );
 
   const save = useCallback(
-    (defaults: StoredDefaults) => {
-      if (workspaceId && workspaceDefaults === undefined) return;
+    async (defaults: StoredDefaults) => {
+      if (workspaceId && workspaceDefaults === undefined) {
+        throw new Error("Default queries are still loading");
+      }
       if (workspaceId) {
+        await syncWorkspaceDefaultQueryPresets(workspaceId, defaults);
         setWorkspaceDefaults(defaults);
-        void syncWorkspaceDefaultQueryPresets(workspaceId, defaults).catch(() => {});
         return;
       }
+      await syncServer(defaults);
       publish(defaults);
-      void syncServer(defaults);
     },
     [workspaceId, workspaceDefaults, setWorkspaceDefaults],
   );
 
-  const reset = useCallback(() => {
-    if (workspaceId && workspaceDefaults === undefined) return;
+  const reset = useCallback(async () => {
+    if (workspaceId && workspaceDefaults === undefined) {
+      throw new Error("Default queries are still loading");
+    }
     if (workspaceId) {
+      await syncWorkspaceDefaultQueryPresets(workspaceId, null);
       setWorkspaceDefaults(null);
-      void syncWorkspaceDefaultQueryPresets(workspaceId, null).catch(() => {});
       return;
     }
+    await syncServer(null);
     publish(null);
-    void syncServer(null);
   }, [workspaceId, workspaceDefaults, setWorkspaceDefaults]);
 
   const isCustomized = effectiveStored !== null && effectiveStored !== undefined;
+  const isReady = !workspaceId || workspaceDefaults !== undefined;
 
-  return { prPresets, issuePresets, save, reset, isCustomized };
+  return { prPresets, issuePresets, save, reset, isCustomized, isReady };
 }
 
 /** Resolve full PresetOption[] by merging stored presets with icon lookups from builtins. */

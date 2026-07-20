@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,12 +15,15 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 // Turn operations
+
+const runtimeModelConfigID = "model"
 
 // StartTurn creates a new turn for a session and publishes the turn.started event.
 // Returns the created turn.
@@ -34,6 +38,7 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 		TaskSessionID: sessionID,
 		TaskID:        session.TaskID,
 		StartedAt:     time.Now().UTC(),
+		Metadata:      runtimeConfigSnapshotMetadata(session),
 		CreatedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
 	}
@@ -54,9 +59,150 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 	return turn, nil
 }
 
+func runtimeConfigSnapshotMetadata(session *models.TaskSession) map[string]interface{} {
+	if session == nil {
+		return nil
+	}
+	snapshot := buildTurnRuntimeConfigSnapshot(session)
+	if snapshot.Model == "" && snapshot.Mode == "" && len(snapshot.ConfigOptions) == 0 {
+		return nil
+	}
+	return map[string]interface{}{models.TurnMetaKeyRuntimeConfigSnapshot: snapshot}
+}
+
+func buildTurnRuntimeConfigSnapshot(session *models.TaskSession) models.TurnRuntimeConfigSnapshot {
+	effective := runtimeConfigFromProfileSnapshot(session.AgentProfileSnapshot)
+	if runtime, ok := models.LoadSessionRuntimeConfig(session.Metadata); ok {
+		mergeRuntimeConfig(&effective, runtime)
+	}
+	if overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
+		mergeRuntimeConfig(&effective, overrides)
+	}
+	baseline, _ := models.LoadSessionACPConfigBaseline(session.Metadata)
+	result := models.TurnRuntimeConfigSnapshot{
+		Model:          effective.Model,
+		Mode:           effective.Mode,
+		ConfigBaseline: maps.Clone(baseline),
+	}
+	selector, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
+	if result.Model == "" && ok {
+		result.Model = selector.CurrentModelID
+	}
+	seen := make(map[string]struct{}, len(selector.ConfigOptions))
+	for _, option := range selector.ConfigOptions {
+		selected, ok := selectedTurnConfigOption(option, effective.ConfigOptions)
+		if !ok {
+			continue
+		}
+		result.ConfigOptions = append(result.ConfigOptions, selected)
+		seen[option.ID] = struct{}{}
+	}
+	unknownIDs := make([]string, 0)
+	for id := range effective.ConfigOptions {
+		if _, exists := seen[id]; !exists && id != runtimeModelConfigID {
+			unknownIDs = append(unknownIDs, id)
+		}
+	}
+	sort.Strings(unknownIDs)
+	for _, id := range unknownIDs {
+		value := effective.ConfigOptions[id]
+		if value != "" {
+			result.ConfigOptions = append(result.ConfigOptions, models.TurnRuntimeConfigOption{
+				ID: id, Value: value, ValueName: value,
+			})
+		}
+	}
+	return result
+}
+
+func selectedTurnConfigOption(
+	option streams.ConfigOption,
+	overrides map[string]string,
+) (models.TurnRuntimeConfigOption, bool) {
+	if option.ID == "" || option.ID == runtimeModelConfigID || option.Category == runtimeModelConfigID {
+		return models.TurnRuntimeConfigOption{}, false
+	}
+	value := option.CurrentValue
+	if override, exists := overrides[option.ID]; exists {
+		value = override
+	}
+	if value == "" {
+		return models.TurnRuntimeConfigOption{}, false
+	}
+	return models.TurnRuntimeConfigOption{
+		ID:        option.ID,
+		Name:      option.Name,
+		Value:     value,
+		ValueName: selectedConfigValueName(option.Options, value),
+	}, true
+}
+
+func runtimeConfigFromProfileSnapshot(snapshot map[string]interface{}) models.SessionRuntimeConfig {
+	config := models.SessionRuntimeConfig{}
+	if snapshot == nil {
+		return config
+	}
+	config.Model = models.StringFromAny(snapshot[runtimeModelConfigID])
+	config.Mode = models.StringFromAny(snapshot["mode"])
+	config.ConfigOptions = stringConfigOptions(snapshot["config_options"])
+	if config.ConfigOptions == nil {
+		config.ConfigOptions = stringConfigOptions(snapshot["configOptions"])
+	}
+	return config
+}
+
+func stringConfigOptions(raw interface{}) map[string]string {
+	switch values := raw.(type) {
+	case map[string]string:
+		return maps.Clone(values)
+	case map[string]interface{}:
+		result := make(map[string]string, len(values))
+		for key, value := range values {
+			if text := models.StringFromAny(value); text != "" {
+				result[key] = text
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func mergeRuntimeConfig(target *models.SessionRuntimeConfig, source models.SessionRuntimeConfig) {
+	if source.Model != "" {
+		target.Model = source.Model
+	}
+	if source.Mode != "" {
+		target.Mode = source.Mode
+	}
+	if source.ConfigOptions == nil {
+		return
+	}
+	if target.ConfigOptions == nil {
+		target.ConfigOptions = make(map[string]string)
+	}
+	for key, value := range source.ConfigOptions {
+		target.ConfigOptions[key] = value
+	}
+}
+
+func selectedConfigValueName(options []streams.ConfigOptionValue, value string) string {
+	for _, option := range options {
+		if option.Value == value {
+			return option.Name
+		}
+	}
+	return value
+}
+
 // GetTurn returns a turn by ID.
 func (s *Service) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {
 	return s.turns.GetTurn(ctx, turnID)
+}
+
+// ListTurnsBySession returns all persisted turns for a session.
+func (s *Service) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
+	return s.turns.ListTurnsBySession(ctx, sessionID)
 }
 
 // CompleteTurn marks a turn as completed and publishes the turn.completed event.
@@ -399,11 +545,27 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 		if cfg, ok := models.LoadSessionRuntimeConfig(session.Metadata); ok {
 			runtimeConfig = cfg
-			runtimeConfigOptionsSet = cfg.ConfigOptions != nil
 			if sessionMode == "" {
 				sessionMode = cfg.Mode
 			}
 		}
+		if overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
+			if overrides.Model != "" {
+				runtimeConfig.Model = overrides.Model
+			}
+			if overrides.Mode != "" {
+				sessionMode = overrides.Mode
+			}
+			if overrides.ConfigOptions != nil {
+				if runtimeConfig.ConfigOptions == nil {
+					runtimeConfig.ConfigOptions = make(map[string]string)
+				}
+				for key, value := range overrides.ConfigOptions {
+					runtimeConfig.ConfigOptions[key] = value
+				}
+			}
+		}
+		runtimeConfigOptionsSet = runtimeConfig.ConfigOptions != nil
 	}
 
 	info := &lifecycle.WorkspaceInfo{
@@ -412,6 +574,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		TaskEnvironmentID:       session.TaskEnvironmentID,
 		WorkspacePath:           workspacePath,
 		AgentProfileID:          session.AgentProfileID,
+		ExecutionProfileID:      session.ExecutionProfileID,
 		AgentID:                 agentID,
 		ACPSessionID:            acpSessionID,
 		SessionMode:             sessionMode,
@@ -502,7 +665,7 @@ func (s *Service) PersistSessionRuntimeModel(ctx context.Context, sessionID, mod
 	if modelID == "" {
 		return nil
 	}
-	if err := s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+	if err := s.updateSessionRuntimeConfigOverrides(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
 		cfg.Model = modelID
 	}); err != nil {
 		return err
@@ -518,7 +681,7 @@ func (s *Service) PersistSessionRuntimeMode(ctx context.Context, sessionID, mode
 	if err := s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeySessionMode, modeID); err != nil {
 		return err
 	}
-	return s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+	return s.updateSessionRuntimeConfigOverrides(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
 		cfg.Mode = modeID
 	})
 }
@@ -528,24 +691,27 @@ func (s *Service) PersistSessionRuntimeConfigOption(ctx context.Context, session
 	if configID == "" {
 		return nil
 	}
-	if err := s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+	if err := s.updateSessionRuntimeConfigOverrides(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
 		if cfg.ConfigOptions == nil {
 			cfg.ConfigOptions = make(map[string]string)
 		}
 		cfg.ConfigOptions[configID] = value
-		if configID == "model" {
+		if configID == runtimeModelConfigID {
 			cfg.Model = value
 		}
 	}); err != nil {
 		return err
 	}
-	if configID == "model" {
+	if configID == runtimeModelConfigID {
 		return s.sessions.SetSessionMetadataKey(ctx, sessionID, "context_window", nil)
 	}
 	return nil
 }
 
-func (s *Service) updateSessionRuntimeConfig(ctx context.Context, sessionID string, mutate func(*models.SessionRuntimeConfig)) error {
+func (s *Service) updateSessionRuntimeConfigOverrides(ctx context.Context, sessionID string, mutate func(*models.SessionRuntimeConfig)) error {
+	s.runtimeOverridesMu.Lock()
+	defer s.runtimeOverridesMu.Unlock()
+
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
@@ -553,12 +719,12 @@ func (s *Service) updateSessionRuntimeConfig(ctx context.Context, sessionID stri
 	if session == nil {
 		return fmt.Errorf("agent session not found: %s", sessionID)
 	}
-	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
+	cfg, _ := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
 	mutate(&cfg)
 	if cfg.IsZero() {
 		return nil
 	}
-	return s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg)
+	return s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRuntimeConfigOverrides, cfg)
 }
 
 func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *models.TaskEnvironment) {

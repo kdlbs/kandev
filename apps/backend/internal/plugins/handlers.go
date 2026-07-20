@@ -26,10 +26,9 @@ import (
 const maxWebhookBodyBytes = 4 << 20 // 4 MiB
 
 // Controller holds the plugin HTTP handlers: operator-facing management
-// (install/list/get/config/uninstall/enable/disable), the tools listing,
-// the bundle/UI static-file serving (from the extracted package on disk),
-// and the external webhook relay (HTTP -> Host RPC over the live
-// subprocess).
+// (install/list/get/config/uninstall/enable/disable), the bundle/UI
+// static-file serving (from the extracted package on disk), and the
+// external webhook relay (HTTP -> Host RPC over the live subprocess).
 type Controller struct {
 	svc *Service
 	log *logger.Logger
@@ -45,9 +44,13 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	api := router.Group("/api/plugins")
 	api.POST("/install", ctrl.install)
 	api.POST("/sync", ctrl.sync)
+	// Register the static /marketplace routes before the /:id wildcard, matching
+	// the /install and /sync ordering — some gin/httprouter tree versions reject
+	// a static sibling added after an existing wildcard for the same method.
+	ctrl.registerMarketplaceRoutes(api)
 	api.GET("", ctrl.list)
-	api.GET("/tools", ctrl.listTools)
 	api.GET("/:id", ctrl.get)
+	api.GET("/:id/config", ctrl.getConfig)
 	api.PATCH("/:id", ctrl.updateConfig)
 	api.DELETE("/:id", ctrl.uninstall)
 	api.POST("/:id/enable", ctrl.enable)
@@ -155,13 +158,29 @@ func (c *Controller) get(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, record)
 }
 
+// getConfig serves GET /api/plugins/:id/config: the stored operator config
+// with secret values (per the manifest's config_schema) masked — cleartext
+// secrets never leave the backend on this surface.
+func (c *Controller) getConfig(ctx *gin.Context) {
+	config, err := c.svc.GetMaskedConfig(ctx.Param("id"))
+	if err != nil {
+		c.writeLookupError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"config": config})
+}
+
 func (c *Controller) updateConfig(ctx *gin.Context) {
 	var req UpdateConfigRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if err := c.svc.UpdateConfig(ctx.Param("id"), req.Config); err != nil {
+	if err := c.svc.UpdateConfig(ctx.Request.Context(), ctx.Param("id"), req.Config); err != nil {
+		if errors.Is(err, ErrConfigInvalid) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		c.writeLookupError(ctx, err)
 		return
 	}
@@ -169,7 +188,7 @@ func (c *Controller) updateConfig(ctx *gin.Context) {
 }
 
 func (c *Controller) uninstall(ctx *gin.Context) {
-	if err := c.svc.Uninstall(ctx.Param("id")); err != nil {
+	if err := c.svc.Uninstall(ctx.Request.Context(), ctx.Param("id")); err != nil {
 		c.writeLookupError(ctx, err)
 		return
 	}
@@ -206,33 +225,6 @@ func (c *Controller) writeLookupError(ctx *gin.Context, err error) {
 	}
 	c.log.Warn("plugin handler error", zap.Error(err))
 	ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-}
-
-// --- Tools listing ---
-
-// listTools aggregates the declared tools of every StatusActive plugin
-// (GET /api/plugins/tools). Listing only — wiring these into the agent's
-// invocable tool set is out of scope for this task.
-func (c *Controller) listTools(ctx *gin.Context) {
-	var tools []PluginToolDTO
-	for _, rec := range c.svc.List() {
-		if rec.Status != StatusActive {
-			continue
-		}
-		for _, tool := range rec.Tools {
-			tools = append(tools, PluginToolDTO{
-				PluginID:    rec.ID,
-				Name:        tool.Name,
-				DisplayName: tool.DisplayName,
-				Description: tool.Description,
-				InputSchema: tool.InputSchema,
-			})
-		}
-	}
-	if tools == nil {
-		tools = []PluginToolDTO{}
-	}
-	ctx.JSON(http.StatusOK, gin.H{"tools": tools})
 }
 
 // --- Bundle / UI static file serving ---

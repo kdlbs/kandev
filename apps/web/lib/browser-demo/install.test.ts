@@ -1,9 +1,18 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootPayload } from "@/src/boot-payload";
 import { resetKanbanPreviewState } from "@/lib/local-storage";
-import { applyBrowserDemoDefaults } from "./install";
+import { applyBrowserDemoDefaults, installBrowserDemo, rejectPendingRequests } from "./install";
+
+const nativeFetch = window.fetch;
+const nativeWebSocket = window.WebSocket;
 
 beforeEach(() => localStorage.clear());
+
+afterEach(() => {
+  window.fetch = nativeFetch;
+  window.WebSocket = nativeWebSocket;
+  vi.unstubAllGlobals();
+});
 
 describe("applyBrowserDemoDefaults", () => {
   it("disables preview-on-click before the browser demo mounts", () => {
@@ -44,3 +53,43 @@ describe("browser demo preview state", () => {
     expect(localStorage.getItem("kandev.kanban.preview.width")).toBe("560");
   });
 });
+
+describe("browser demo worker failures", () => {
+  it("clears and rejects every pending worker request", () => {
+    const firstReject = vi.fn();
+    const secondReject = vi.fn();
+    const pending = new Map([
+      ["first", { resolve: vi.fn(), reject: firstReject }],
+      ["second", { resolve: vi.fn(), reject: secondReject }],
+    ]);
+    const error = new Error("worker crashed");
+
+    rejectPendingRequests(pending, error);
+
+    expect(pending.size).toBe(0);
+    expect(firstReject).toHaveBeenCalledWith(error);
+    expect(secondReject).toHaveBeenCalledWith(error);
+  });
+
+  it("rejects installation and terminates when the worker emits an error", async () => {
+    const demoWorker = new FakeWorker();
+    vi.stubGlobal(
+      "Worker",
+      vi.fn(function WorkerMock() {
+        return demoWorker;
+      }),
+    );
+
+    const installation = installBrowserDemo();
+    const error = new Error("failed to load demo worker");
+    demoWorker.dispatchEvent(new ErrorEvent("error", { error, message: error.message }));
+
+    await expect(installation).rejects.toBe(error);
+    expect(demoWorker.terminate).toHaveBeenCalledOnce();
+  });
+});
+
+class FakeWorker extends EventTarget {
+  postMessage = vi.fn();
+  terminate = vi.fn();
+}

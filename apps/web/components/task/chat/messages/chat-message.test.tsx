@@ -9,12 +9,14 @@ import {
   type CustomPrompt,
   type Message,
   type TaskSession,
+  type Turn,
 } from "@/lib/types/http";
 
 const SENDER_TASK_ID = "task-sender";
 const SENDER_TITLE = "Fix login bug";
 const SENDER_BADGE_SELECTOR = "[data-testid='sender-task-badge']";
 const MESSAGE_TIMESTAMP = "2026-05-04T00:00:00Z";
+const TURN_MODEL = "gpt-5.6-sol";
 const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
@@ -168,7 +170,11 @@ function renderWithSender(
   );
 }
 
-function renderAgentMessageWithSession(session: Partial<TaskSession>, metadata = {}) {
+function renderAgentMessageWithSession(
+  session: Partial<TaskSession>,
+  metadata = {},
+  turnMetadata?: Record<string, unknown>,
+) {
   const taskSession: TaskSession = {
     id: toSessionId("sess-1"),
     task_id: toTaskId("task-target"),
@@ -177,10 +183,26 @@ function renderAgentMessageWithSession(session: Partial<TaskSession>, metadata =
     updated_at: MESSAGE_TIMESTAMP,
     ...session,
   };
+  const turn: Turn | null =
+    turnMetadata === undefined
+      ? null
+      : {
+          id: "turn-1",
+          session_id: toSessionId("sess-1"),
+          task_id: toTaskId("task-target"),
+          started_at: MESSAGE_TIMESTAMP,
+          metadata: turnMetadata,
+          created_at: MESSAGE_TIMESTAMP,
+          updated_at: MESSAGE_TIMESTAMP,
+        };
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <StateProvider
       initialState={{
         taskSessions: { items: { "sess-1": taskSession } },
+        turns: {
+          bySession: { "sess-1": turn ? [turn] : [] },
+          activeBySession: { "sess-1": turn?.id ?? null },
+        },
       }}
     >
       {children}
@@ -190,7 +212,7 @@ function renderAgentMessageWithSession(session: Partial<TaskSession>, metadata =
   return render(
     <Wrapper>
       <ChatMessage
-        comment={userMessage({ author_type: "agent", metadata })}
+        comment={userMessage({ author_type: "agent", metadata, turn_id: turn?.id })}
         label="Message"
         className=""
       />
@@ -390,148 +412,72 @@ describe("ChatMessage agent session config metadata", () => {
 
     expect(onOpenFile).toHaveBeenCalledWith("docs/specs/native/spec.md");
   });
-
-  it("shows session config options next to the model", () => {
-    renderAgentMessageWithSession({
-      agent_profile_snapshot: {
-        model: "gpt-5.5",
-        config_options: {
-          reasoning_effort: "high",
-          verbosity: "low",
-        },
-      },
-    });
-
-    expect(screen.getByText("gpt-5.5 · Reasoning effort: high · Verbosity: low")).not.toBeNull();
-  });
-
-  it("prefers live runtime config over the profile snapshot", () => {
-    renderAgentMessageWithSession({
-      metadata: {
-        runtime_config: {
-          model: "gpt-5.6",
-          mode: "accept-edits",
-          config_options: {
-            reasoning_effort: "medium",
-          },
-        },
-      },
-      agent_profile_snapshot: {
-        model: "gpt-5.5",
-        mode: "default",
-        config_options: {
-          reasoning_effort: "high",
-        },
-      },
-    });
-
-    expect(
-      screen.getByText("gpt-5.6 · Mode: accept-edits · Reasoning effort: medium"),
-    ).not.toBeNull();
-  });
-
-  it("merges runtime config options over snapshot options per option", () => {
-    renderAgentMessageWithSession({
-      metadata: {
-        runtime_config: {
-          config_options: {
-            reasoning_effort: "medium",
-          },
-        },
-      },
-      agent_profile_snapshot: {
-        model: "gpt-5.5",
-        config_options: {
-          reasoning_effort: "high",
-          verbosity: "low",
-        },
-      },
-    });
-
-    expect(
-      screen.getAllByText("gpt-5.5 · Reasoning effort: medium · Verbosity: low").length,
-    ).toBeGreaterThan(0);
-  });
-
-  it("keeps merged runtime-only config options sorted", () => {
-    renderAgentMessageWithSession({
-      metadata: {
-        runtime_config: {
-          config_options: {
-            reasoning_effort: "medium",
-          },
-        },
-      },
-      agent_profile_snapshot: {
-        model: "gpt-5.5",
-        config_options: {
-          verbosity: "low",
-        },
-      },
-    });
-
-    expect(
-      screen.getAllByText("gpt-5.5 · Reasoning effort: medium · Verbosity: low").length,
-    ).toBeGreaterThan(0);
-  });
 });
 
 describe("ChatMessage agent session config metadata overrides", () => {
-  it("does not fall back to snapshot options when runtime options are explicitly empty", () => {
-    const { container } = renderAgentMessageWithSession({
-      metadata: {
-        runtime_config: {
-          config_options: {},
+  it("renders changed options from the immutable turn snapshot", () => {
+    const { container } = renderAgentMessageWithSession(
+      {
+        metadata: {
+          runtime_config: {
+            model: TURN_MODEL,
+            mode: "agent",
+            config_options: {
+              collaboration_mode: "default",
+              reasoning_effort: "low",
+            },
+          },
         },
       },
-      agent_profile_snapshot: {
-        model: "gpt-5.5",
-        config_options: {
-          reasoning_effort: "high",
+      { model: TURN_MODEL },
+      {
+        runtime_config_snapshot: {
+          model: TURN_MODEL,
+          mode: "agent",
+          config_options: [
+            {
+              id: "collaboration_mode",
+              name: "Collaboration mode",
+              value: "default",
+              value_name: "Default",
+            },
+            {
+              id: "reasoning_effort",
+              name: "Reasoning effort",
+              value: "high",
+              value_name: "High",
+            },
+          ],
+          config_baseline: {
+            collaboration_mode: "default",
+            reasoning_effort: "medium",
+          },
         },
       },
-    });
+    );
 
-    expect(screen.getByText("gpt-5.5")).not.toBeNull();
-    expect(container.textContent).not.toContain("Reasoning effort");
+    expect(screen.getByText(`${TURN_MODEL} · Reasoning effort: High`)).not.toBeNull();
+    expect(container.textContent).not.toContain("Reasoning effort: low");
+    expect(container.textContent).not.toContain("Collaboration mode");
+    expect(container.textContent).not.toContain("Mode: agent");
   });
 
-  it("keeps message-level model attribution while showing session options", () => {
-    renderAgentMessageWithSession(
+  it("does not borrow mutable session options for a legacy turn", () => {
+    const { container } = renderAgentMessageWithSession(
       {
-        agent_profile_snapshot: {
-          model: "gpt-5.5",
-          config_options: {
-            reasoning_effort: "high",
+        metadata: {
+          runtime_config: {
+            model: TURN_MODEL,
+            config_options: { reasoning_effort: "high" },
           },
         },
       },
       { model: "gpt-5.5-mini" },
+      {},
     );
 
-    expect(screen.getByText("gpt-5.5-mini · Reasoning effort: high")).not.toBeNull();
-  });
-
-  it("uses message-level config options when message metadata provides them", () => {
-    const { container } = renderAgentMessageWithSession(
-      {
-        agent_profile_snapshot: {
-          model: "gpt-5.5",
-          config_options: {
-            reasoning_effort: "high",
-          },
-        },
-      },
-      {
-        model: "gpt-5.5-mini",
-        config_options: {
-          reasoning_effort: "low",
-        },
-      },
-    );
-
-    expect(screen.getByText("gpt-5.5-mini · Reasoning effort: low")).not.toBeNull();
-    expect(container.textContent).not.toContain("Reasoning effort: high");
+    expect(screen.getByText("gpt-5.5-mini")).not.toBeNull();
+    expect(container.textContent).not.toContain("Reasoning effort");
   });
 });
 

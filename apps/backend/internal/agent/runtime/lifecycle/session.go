@@ -15,21 +15,25 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
 )
 
+const modelConfigOptionID = "model"
+
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
-	logger         *logger.Logger
-	eventPublisher *EventPublisher
-	streamManager  *StreamManager
-	executionStore *ExecutionStore
-	promptStarter  func(executionID string) (uint64, error)
-	historyManager *SessionHistoryManager
-	stopCh         <-chan struct{} // For graceful shutdown coordination
+	logger               *logger.Logger
+	eventPublisher       *EventPublisher
+	streamManager        *StreamManager
+	executionStore       *ExecutionStore
+	promptStarter        func(executionID string) (uint64, error)
+	initialPromptFailure func(executionID string)
+	historyManager       *SessionHistoryManager
+	stopCh               <-chan struct{} // For graceful shutdown coordination
 }
 
 // NewSessionManager creates a new SessionManager
@@ -51,6 +55,10 @@ func (sm *SessionManager) SetDependencies(ep *EventPublisher, strm *StreamManage
 
 func (sm *SessionManager) SetPromptStarter(starter func(executionID string) (uint64, error)) {
 	sm.promptStarter = starter
+}
+
+func (sm *SessionManager) SetInitialPromptFailureHandler(handler func(executionID string)) {
+	sm.initialPromptFailure = handler
 }
 
 // InitializeResult contains the result of session initialization
@@ -346,6 +354,8 @@ func (sm *SessionManager) InitializeAndPrompt(
 
 	execution.ACPSessionID = result.SessionID
 	execution.sessionInitialized = true
+	providerDefaultConfig := execution.GetModelState()
+	finalConfigID := ""
 
 	// Apply profile model through the ACP session's advertised model-selection
 	// mechanism (best-effort). ACP is the only surface for model selection now;
@@ -357,6 +367,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 				zap.String("model", profileModel),
 				zap.Error(err))
 		} else {
+			finalConfigID = modelConfigIDFromState(execution.GetModelState())
 			sm.logger.Info("set profile model on ACP session",
 				zap.String("execution_id", execution.ID),
 				zap.String("model", profileModel))
@@ -390,12 +401,14 @@ func (sm *SessionManager) InitializeAndPrompt(
 				zap.String("value", value),
 				zap.Error(err))
 		} else {
+			finalConfigID = configID
 			sm.logger.Info("set profile config option on ACP session",
 				zap.String("execution_id", execution.ID),
 				zap.String("config_id", configID),
 				zap.String("value", value))
 		}
 	}
+	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
 
 	// Publish session created event
 	if sm.eventPublisher != nil {
@@ -406,6 +419,42 @@ func (sm *SessionManager) InitializeAndPrompt(
 	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)
 
 	return nil
+}
+
+func (sm *SessionManager) publishSettledConfigOptions(
+	execution *AgentExecution,
+	acpSessionID string,
+	finalConfigID string,
+	providerDefaultConfig *CachedModelState,
+) {
+	if sm.eventPublisher == nil {
+		return
+	}
+	baselineCandidate, live, ready := execution.SettleConfigOptions(finalConfigID, providerDefaultConfig)
+	if !ready || len(baselineCandidate.ConfigOptions) == 0 || live == nil {
+		return
+	}
+	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
+		Type:                    streams.EventTypeSessionModels,
+		SessionID:               acpSessionID,
+		CurrentModelID:          live.CurrentModelID,
+		SessionModels:           live.Models,
+		ConfigOptions:           live.ConfigOptions,
+		ConfigBaselineCandidate: baselineCandidate.ConfigOptions,
+		Data:                    map[string]any{"config_options_settled": true},
+	})
+}
+
+func modelConfigIDFromState(state *CachedModelState) string {
+	if state == nil {
+		return modelConfigOptionID
+	}
+	for _, option := range state.ConfigOptions {
+		if option.ID == modelConfigOptionID || option.Category == modelConfigOptionID {
+			return option.ID
+		}
+	}
+	return modelConfigOptionID
 }
 
 // convertAttachments converts lifecycle.MessageAttachment to v1.MessageAttachment for ACP.
@@ -452,6 +501,9 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				sm.logger.Error("initial prompt failed",
 					zap.String("execution_id", execution.ID),
 					zap.Error(err))
+				if sm.initialPromptFailure != nil {
+					sm.initialPromptFailure(execution.ID)
+				}
 			}
 		}()
 	case sm.shouldInjectResumeContext(agentConfig, execution.SessionID):

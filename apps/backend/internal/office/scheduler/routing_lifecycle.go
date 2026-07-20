@@ -61,9 +61,10 @@ func (ss *SchedulerService) inflightCandidate(
 	for _, a := range attempts {
 		if a.Seq == run.CurrentRouteAttemptSeq {
 			return routing.Candidate{
-				ProviderID: routing.ProviderID(a.ProviderID),
-				Model:      a.Model,
-				Tier:       routing.Tier(a.Tier),
+				ExecutionProfileID: a.ExecutionProfileID,
+				ProviderID:         routing.ProviderID(a.ProviderID),
+				Model:              a.Model,
+				Tier:               routing.Tier(a.Tier),
 			}, nil
 		}
 	}

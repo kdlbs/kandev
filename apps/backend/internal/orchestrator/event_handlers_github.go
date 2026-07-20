@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	promptcfg "github.com/kandev/kandev/config/prompts"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -512,6 +513,19 @@ func (s *Service) resolveReviewRepository(ctx context.Context, workspaceID strin
 		zap.String("repo", repoSlug),
 		zap.String("repo_id", repoID),
 		zap.String("base_branch", baseBranch))
+	// SECURITY (defense-in-depth): the PR head branch is attacker-controlled for
+	// fork PRs and flows unescaped-at-source into executor prepare scripts via
+	// {{worktree.branch}} / {{repository.branch}}. Reject any head branch that
+	// isn't a plain, safe git ref before it ever reaches CheckoutBranch. We still
+	// create the review task (just without a checkout) so a malicious ref cannot
+	// suppress review entirely; the scriptengine now also shell-escapes values.
+	if !securityutil.IsValidBranchName(pr.HeadBranch) {
+		s.logger.Warn("PR head branch failed branch-name validation; creating review task without checkout branch",
+			zap.String("repo", repoSlug),
+			zap.String("pr_head_branch", pr.HeadBranch),
+			zap.Int("pr_number", pr.Number))
+		return []ReviewTaskRepository{{RepositoryID: repoID, BaseBranch: baseBranch, PRNumber: pr.Number}}
+	}
 	// BaseBranch = repo default branch (e.g. "main") for worktree creation.
 	// CheckoutBranch = PR head branch to fetch and checkout after worktree is created.
 	return []ReviewTaskRepository{{RepositoryID: repoID, BaseBranch: baseBranch, CheckoutBranch: pr.HeadBranch, PRNumber: pr.Number}}

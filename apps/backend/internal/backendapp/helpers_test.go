@@ -15,10 +15,14 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	storagepkg "github.com/kandev/kandev/internal/system/storage"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -34,6 +38,69 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+func TestRegisterTaskRoutesWiresProductionWorkspaceRestorer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil || len(workspaces) == 0 {
+		t.Fatalf("ListWorkspaces: workspaces=%d err=%v", len(workspaces), err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: workflows=%d err=%v", len(workflows), err)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil || len(steps) == 0 {
+		t.Fatalf("ListStepsByWorkflow: steps=%d err=%v", len(steps), err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
+		WorkflowStepID: steps[0].ID, Title: "Production unarchive wiring",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := harness.taskRepo.ArchiveTask(ctx, task.ID); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	router := gin.New()
+	gateway := gateways.NewGateway(log)
+	settings, store := newStorageMaintenanceStores(t)
+	composition := storageComposition{workspaceRestorer: &workspaceQuarantineController{
+		settings: settings,
+		factory: func(storagepkg.StorageMaintenanceSettings) *storageworkspaces.Provider {
+			return storageworkspaces.New(storageworkspaces.Config{Store: store})
+		},
+	}}
+	handoff := taskservice.NewHandoffService(
+		harness.taskRepo, harness.taskRepo,
+		taskservice.NewDocumentService(harness.taskRepo, log), nil, nil, log,
+	)
+	registerTaskRoutes(routeParams{
+		router: router, gateway: gateway, taskSvc: harness.taskSvc, taskRepo: harness.taskRepo,
+		services: &Services{Workflow: harness.workflowSvc}, workspaceRestorer: composition.workspaceRestorer, log: log,
+	}, taskservice.NewPlanService(harness.taskRepo, nil, log), handoff)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+task.ID+"/unarchive", nil)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unarchive status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		WorkspaceRecovery []storageworkspaces.WorkspaceRecovery `json:"workspace_recovery"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response.WorkspaceRecovery) != 1 || response.WorkspaceRecovery[0].Status != "not_found" {
+		t.Fatalf("workspace recovery = %#v", response.WorkspaceRecovery)
+	}
+}
 
 func decodePayload(t *testing.T, raw json.RawMessage) map[string]interface{} {
 	t.Helper()
@@ -669,6 +736,179 @@ func TestBootTaskDetailMessagesProjectShellOutput(t *testing.T) {
 	}
 }
 
+func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil {
+		t.Fatalf("ListStepsByWorkflow: %v", err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
+		WorkflowStepID: steps[0].ID, Title: "Hydrated model selector",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	session := &models.TaskSession{
+		ID: "boot-model-session", TaskID: task.ID, IsPrimary: true,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPConfigBaseline: map[string]string{"effort": "medium"},
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModelID: "gpt-5.6-sol",
+				Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"}},
+				ConfigOptions: []streams.ConfigOption{{
+					Type: "select", ID: "effort", Name: "Reasoning effort",
+					Description: "Provider option help", CurrentValue: "high",
+					Options: []streams.ConfigOptionValue{{Value: "high", Name: "High", Description: "Provider value help"}},
+				}},
+			},
+		},
+	}
+	if err := harness.taskRepo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	routeData := bootRouteData(ctx, nil, routeParams{
+		taskSvc:  harness.taskSvc,
+		services: &Services{Workflow: harness.workflowSvc},
+	}, webapp.ClassifyRoute("/t/"+task.ID))
+	raw, err := json.Marshal(routeData)
+	if err != nil {
+		t.Fatalf("Marshal route data: %v", err)
+	}
+	var decoded struct {
+		TaskDetail struct {
+			InitialState struct {
+				SessionModels struct {
+					BySessionID map[string]struct {
+						CurrentModelID string `json:"currentModelId"`
+						Models         []struct {
+							ModelID string `json:"modelId"`
+						} `json:"models"`
+						ConfigOptions []struct {
+							ID           string                      `json:"id"`
+							Description  string                      `json:"description"`
+							CurrentValue string                      `json:"currentValue"`
+							Options      []streams.ConfigOptionValue `json:"options"`
+						} `json:"configOptions"`
+						ConfigBaseline map[string]string `json:"configBaseline"`
+					} `json:"bySessionId"`
+				} `json:"sessionModels"`
+			} `json:"initialState"`
+		} `json:"taskDetail"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal route data: %v", err)
+	}
+	got := decoded.TaskDetail.InitialState.SessionModels.BySessionID[session.ID]
+	if got.CurrentModelID != "gpt-5.6-sol" || len(got.Models) != 1 || got.Models[0].ModelID != "gpt-5.6-sol" {
+		t.Fatalf("boot model state = %#v", got)
+	}
+	if len(got.ConfigOptions) != 1 || got.ConfigOptions[0].CurrentValue != "high" {
+		t.Fatalf("boot config options = %#v", got.ConfigOptions)
+	}
+	if got.ConfigOptions[0].Description != "Provider option help" || got.ConfigOptions[0].Options[0].Description != "Provider value help" {
+		t.Fatalf("provider descriptions missing from boot config: %#v", got.ConfigOptions[0])
+	}
+	if got.ConfigBaseline["effort"] != "medium" {
+		t.Fatalf("boot config baseline = %#v, want effort=medium", got.ConfigBaseline)
+	}
+}
+
+func TestBootRouteDataTaskDetailIncludesPersistedTurns(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil {
+		t.Fatalf("ListStepsByWorkflow: %v", err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
+		WorkflowStepID: steps[0].ID, Title: "Hydrated turn snapshot",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID: "boot-turn-session", TaskID: task.ID, IsPrimary: true,
+	}
+	if err := harness.taskRepo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	turn := &models.Turn{
+		ID: "boot-persisted-turn", TaskID: task.ID, TaskSessionID: session.ID,
+		StartedAt: now, CompletedAt: &now, CreatedAt: now, UpdatedAt: now,
+		Metadata: map[string]interface{}{
+			models.TurnMetaKeyRuntimeConfigSnapshot: models.TurnRuntimeConfigSnapshot{
+				Model: "mock-fast",
+				ConfigOptions: []models.TurnRuntimeConfigOption{{
+					ID: "effort", Name: "Effort", Value: "high", ValueName: "High",
+				}},
+				ConfigBaseline: map[string]string{"effort": "medium"},
+			},
+		},
+	}
+	if err := harness.taskRepo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+
+	routeData := bootRouteData(ctx, nil, routeParams{
+		taskSvc:  harness.taskSvc,
+		services: &Services{Workflow: harness.workflowSvc},
+	}, webapp.ClassifyRoute("/t/"+task.ID))
+	raw, err := json.Marshal(routeData)
+	if err != nil {
+		t.Fatalf("Marshal route data: %v", err)
+	}
+	var decoded struct {
+		TaskDetail struct {
+			InitialState struct {
+				Turns struct {
+					BySession map[string][]taskdto.TurnDTO `json:"bySession"`
+				} `json:"turns"`
+			} `json:"initialState"`
+		} `json:"taskDetail"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal route data: %v", err)
+	}
+	got := decoded.TaskDetail.InitialState.Turns.BySession[session.ID]
+	if len(got) != 1 || got[0].ID != turn.ID {
+		t.Fatalf("boot turns = %#v, want turn %q", got, turn.ID)
+	}
+	snapshot, ok := models.LoadTurnRuntimeConfigSnapshot(got[0].Metadata)
+	if !ok || len(snapshot.ConfigOptions) != 1 || snapshot.ConfigOptions[0].Value != "high" {
+		t.Fatalf("boot turn snapshot = %#v, ok=%v", snapshot, ok)
+	}
+}
+
+func TestTaskSessionModelsBootStateOmitsUnavailableBaseline(t *testing.T) {
+	state := taskSessionModelsBootState(lifecycle.SessionModelsSnapshot{
+		CurrentModelID: "gpt-5.6-sol",
+	}, nil)
+	if _, ok := state["configBaseline"]; ok {
+		t.Fatal("boot selector state must omit an unavailable baseline")
+	}
+}
+
 func TestBootRouteDataTasksIncludesFirstPageRows(t *testing.T) {
 	taskSvc, workflowSvc := newBootStateTestServices(t)
 	ctx := context.Background()
@@ -832,6 +1072,9 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-qc", Name: "Quick Chats"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-other", Name: "Other"}); err != nil {
+		t.Fatalf("CreateWorkspace(other): %v", err)
+	}
 	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-qc", WorkspaceID: "ws-qc", Name: "Workflow"}); err != nil {
 		t.Fatalf("CreateWorkflow: %v", err)
 	}
@@ -847,6 +1090,18 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
 		id: "task-config", title: "Config", updatedAt: base, sessionUpdatedAt: base,
 		agentProfileID: "agent-config", metadata: map[string]interface{}{"config_mode": true},
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-archived", title: "Archived", updatedAt: base, sessionUpdatedAt: base,
+		agentProfileID: "agent-archived", archived: true,
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-no-primary", title: "No Primary", updatedAt: base,
+		agentProfileID: "agent-no-primary", withoutPrimary: true,
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-other-workspace", workspaceID: "ws-other", title: "Foreign", updatedAt: base,
+		sessionUpdatedAt: base, agentProfileID: "agent-foreign",
 	})
 	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
 		id: "task-automation", title: "Automation", updatedAt: base, sessionUpdatedAt: base,
@@ -876,8 +1131,10 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 					WorkspaceID    string `json:"workspaceId"`
 					Name           string `json:"name"`
 					AgentProfileID string `json:"agentProfileId"`
+					Kind           string `json:"kind"`
 				} `json:"sessions"`
-				IsOpen bool `json:"isOpen"`
+				IsOpen          bool    `json:"isOpen"`
+				ActiveSessionID *string `json:"activeSessionId"`
 			} `json:"quickChat"`
 			TaskSessions struct {
 				Items map[string]struct {
@@ -891,20 +1148,32 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	}
 
 	sessions := decoded.InitialState.QuickChat.Sessions
-	if len(sessions) != 2 {
-		t.Fatalf("quickChat sessions = %#v, want 2 restored sessions", sessions)
+	if len(sessions) != 3 {
+		t.Fatalf("quickChat sessions = %#v, want 3 restored sessions", sessions)
 	}
-	if got := sessions[0].SessionID; got != "task-old-session" {
-		t.Fatalf("first restored session = %q, want first-created task-old-session", got)
+	if got := sessions[0].SessionID; got != "task-config-session" {
+		t.Fatalf("first restored session = %q, want newest task-config-session", got)
 	}
-	if sessions[0].AgentProfileID != "agent-old" || sessions[1].AgentProfileID != "agent-new" {
+	if sessions[0].Kind != "config" || sessions[1].Kind != "chat" || sessions[2].Kind != "chat" {
+		t.Fatalf("restored session kinds = %#v, want config, chat, chat", sessions)
+	}
+	if sessions[0].WorkspaceID != "ws-qc" || sessions[0].Name != "Config" {
+		t.Fatalf("config session identity = %#v, want workspace and task title preserved", sessions[0])
+	}
+	if sessions[0].AgentProfileID != "agent-config" || sessions[1].AgentProfileID != "agent-new" || sessions[2].AgentProfileID != "agent-old" {
 		t.Fatalf("agent profile IDs = %#v", sessions)
 	}
-	if got := decoded.InitialState.TaskSessions.Items["task-new-session"].TaskID; got != "task-new" {
-		t.Fatalf("quick chat task session task_id = %q, want task-new", got)
+	if got := decoded.InitialState.TaskSessions.Items["task-config-session"].TaskID; got != "task-config" {
+		t.Fatalf("config chat task session task_id = %q, want task-config", got)
+	}
+	if len(decoded.InitialState.TaskSessions.Items) != 3 {
+		t.Fatalf("taskSessions items = %#v, want only the 3 restored primary sessions", decoded.InitialState.TaskSessions.Items)
 	}
 	if decoded.InitialState.QuickChat.IsOpen {
 		t.Fatal("quick chat should hydrate closed")
+	}
+	if decoded.InitialState.QuickChat.ActiveSessionID != nil {
+		t.Fatalf("quick chat active session = %q, want nil", *decoded.InitialState.QuickChat.ActiveSessionID)
 	}
 }
 
@@ -969,8 +1238,8 @@ func TestBootPayloadRestoresQuickChatsFromTaskRouteWorkspace(t *testing.T) {
 			if len(sessions) != 2 {
 				t.Fatalf("quickChat sessions = %#v, want 2 task-workspace sessions", sessions)
 			}
-			if sessions[0].SessionID != "task-route-first-session" || sessions[1].SessionID != "task-route-second-session" {
-				t.Fatalf("quickChat sessions = %#v, want task-workspace creation order", sessions)
+			if sessions[0].SessionID != "task-route-second-session" || sessions[1].SessionID != "task-route-first-session" {
+				t.Fatalf("quickChat sessions = %#v, want task-workspace activity order", sessions)
 			}
 			for _, session := range sessions {
 				if session.WorkspaceID != "ws-task" {
@@ -991,6 +1260,8 @@ type bootQuickChatFixture struct {
 	metadata         map[string]interface{}
 	updatedAt        time.Time
 	sessionUpdatedAt time.Time
+	archived         bool
+	withoutPrimary   bool
 }
 
 func seedBootQuickChatTask(t *testing.T, repo *sqlitetaskrepo.Repository, ctx context.Context, f bootQuickChatFixture) {
@@ -1021,6 +1292,14 @@ func seedBootQuickChatTask(t *testing.T, repo *sqlitetaskrepo.Repository, ctx co
 		f.updatedAt.Add(-time.Hour), f.updatedAt, f.id,
 	); err != nil {
 		t.Fatalf("backdate task(%s): %v", f.id, err)
+	}
+	if f.archived {
+		if _, err := repo.DB().ExecContext(ctx, `UPDATE tasks SET archived_at = ? WHERE id = ?`, f.updatedAt, f.id); err != nil {
+			t.Fatalf("archive task(%s): %v", f.id, err)
+		}
+	}
+	if f.withoutPrimary {
+		return
 	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:             f.id + "-session",

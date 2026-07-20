@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/shared"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 
 	"go.uber.org/zap"
@@ -149,6 +150,12 @@ type TaskCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID, reason string, force bool) error
 }
 
+// TaskDetacher applies the canonical task hierarchy/workspace detachment and
+// publishes the task lifecycle and Office refresh events.
+type TaskDetacher interface {
+	DetachTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
+}
+
 // SessionTerminator flips the (task, agent) office session row to a terminal
 // state. Used when an agent stops being a participant on a task — reassignment,
 // reviewer/approver removal, or agent instance deletion. Idempotent: skipping
@@ -272,6 +279,7 @@ type ApprovalReactivityQueuer interface {
 // next to the rest of the routing code.
 type RoutingProvider interface {
 	GetConfig(ctx context.Context, workspaceID string) (*routing.WorkspaceConfig, []routing.ProviderID, error)
+	ListExecutionProfiles(ctx context.Context, workspaceID string) ([]routing.ExecutionProfileSummary, error)
 	UpdateConfig(ctx context.Context, workspaceID string, cfg routing.WorkspaceConfig) error
 	Retry(ctx context.Context, workspaceID, providerID string) (string, *time.Time, error)
 	Health(ctx context.Context, workspaceID string) ([]models.ProviderHealth, error)
@@ -330,6 +338,7 @@ type DashboardService struct {
 	eb               bus.EventBus                    // optional; nil means no events are published
 	retryCanceller   RetryCanceller                  // optional; nil means retries are not cancelled on reassign
 	taskCanceller    TaskCanceller                   // optional; used to hard-cancel sessions on status→cancelled
+	taskDetacher     TaskDetacher                    // optional; canonical empty-parent mutation
 	sessionTerm      SessionTerminator               // optional; flips office session rows to COMPLETED on participation removal
 	reactivity       ReactivityApplier               // optional; runs the office reactivity pipeline on mutations
 	engineDispatcher shared.WorkflowEngineDispatcher // optional; synchronously routes comment triggers through the engine
@@ -446,6 +455,12 @@ func (s *DashboardService) SetRetryCanceller(c RetryCanceller) {
 // a task is moved to "cancelled".
 func (s *DashboardService) SetTaskCanceller(c TaskCanceller) {
 	s.taskCanceller = c
+}
+
+// SetTaskDetacher wires the canonical task detachment operation used when the
+// Office parent picker selects "No parent".
+func (s *DashboardService) SetTaskDetacher(d TaskDetacher) {
+	s.taskDetacher = d
 }
 
 // SetSessionTerminator wires the office session terminator. Optional; when

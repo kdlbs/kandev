@@ -939,6 +939,22 @@ function performBuildDefault(
   });
 }
 
+function resetToEffectiveDefault(set: StoreSet, get: StoreGet): void {
+  const { api, currentLayoutEnvId, preMaximizeLayout } = get();
+  if (!api) return;
+  if (preMaximizeLayout) {
+    set({ preMaximizeLayout: null, maximizedGroupId: null });
+    if (currentLayoutEnvId) removeEnvMaximizeState(currentLayoutEnvId);
+  }
+  get().buildDefaultLayout(api);
+  requestAnimationFrame(() => {
+    const { currentLayoutEnvId: activeEnvId, preMaximizeLayout } = get();
+    if (activeEnvId === currentLayoutEnvId) {
+      persistEnvLayoutNow(api, currentLayoutEnvId, preMaximizeLayout);
+    }
+  });
+}
+
 export const useDockviewStore = create<DockviewStore>((set, get) => ({
   api: null,
   activeFilePath: null,
@@ -1040,10 +1056,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     })),
   switchEnvLayout: buildEnvSwitchAction(set, get),
   buildDefaultLayout: (api, intentName) => performBuildDefault(api, set, get, intentName),
-  resetLayout: () => {
-    const { api } = get();
-    if (api) get().buildDefaultLayout(api);
-  },
+  resetLayout: () => resetToEffectiveDefault(set, get),
   pendingChatScrollTop: null,
   setPendingChatScrollTop: (value) => set({ pendingChatScrollTop: value }),
   preMaximizeLayout: null,

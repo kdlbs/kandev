@@ -48,6 +48,10 @@ func newTestRouter(t *testing.T) (*gin.Engine, *Service) {
 	gin.SetMode(gin.TestMode)
 	svc, _, _ := newTestService(t)
 	svc.SetState(newTestStateStore(t))
+	// A vault is mandatory for plugins with secret config fields (Service
+	// fails closed without one), so wire an in-memory one, matching prod
+	// where Provide always attaches the shared vault.
+	svc.SetSecrets(newFakeSecretRevealer())
 	router := gin.New()
 	RegisterRoutes(router, svc, nil, testLogger(t))
 	return router, svc
@@ -220,65 +224,6 @@ func TestUninstallHandlerRemovesPlugin(t *testing.T) {
 	}
 	if _, err := svc.Get("kandev-plugin-slack"); err == nil {
 		t.Fatal("plugin still present after uninstall")
-	}
-}
-
-// toolPackage builds a valid runtime-managed package that also declares a
-// single tool named "<id>_tool", for GET /api/plugins/tools tests.
-func toolPackage(t *testing.T, id string) *bytes.Buffer {
-	t.Helper()
-	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
-	manifestYAML := fmt.Sprintf(`
-id: %s
-api_version: 1
-version: "1.0.0"
-display_name: Test Plugin
-tools:
-  - name: %s_tool
-    display_name: Tool
-runtime:
-  type: binary
-  executables:
-    %s: server/plugin
-`, id, id, platformKey)
-
-	var buf bytes.Buffer
-	files := map[string][]byte{
-		"manifest.yaml": []byte(manifestYAML),
-		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
-	}
-	if err := pkgtartest.WritePackage(&buf, files); err != nil {
-		t.Fatalf("WritePackage: %v", err)
-	}
-	return &buf
-}
-
-func TestListToolsOnlyIncludesActivePlugins(t *testing.T) {
-	router, svc := newTestRouter(t)
-
-	if _, err := svc.Install(t.Context(), toolPackage(t, "kandev-plugin-slack")); err != nil {
-		t.Fatalf("Install(slack): %v", err)
-	}
-	if _, err := svc.Install(t.Context(), toolPackage(t, "kandev-plugin-jira")); err != nil {
-		t.Fatalf("Install(jira): %v", err)
-	}
-	// kandev-plugin-jira gets disabled — its tool must not be listed.
-	if err := svc.Disable("kandev-plugin-jira"); err != nil {
-		t.Fatalf("Disable(jira): %v", err)
-	}
-
-	rec := doRequest(router, http.MethodGet, "/api/plugins/tools", "", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	var body struct {
-		Tools []PluginToolDTO `json:"tools"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if len(body.Tools) != 1 || body.Tools[0].PluginID != "kandev-plugin-slack" {
-		t.Fatalf("tools = %+v, want exactly one tool from kandev-plugin-slack", body.Tools)
 	}
 }
 

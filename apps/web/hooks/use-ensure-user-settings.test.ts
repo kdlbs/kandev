@@ -59,6 +59,7 @@ function makeUnloadedSettings(): UserSettingsState {
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
+    mcpTaskAgentProfileDefault: "current_task",
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     savedLayouts: [],

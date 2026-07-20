@@ -59,6 +59,7 @@ explicitly requests task tracking.
    - Remove all HTML comments/placeholders from the final body.
    - Do NOT add tool attribution footers.
    - Before creating the PR, self-check that the final body has no `<!--`, no empty required sections, and no placeholder text.
+   - If the diff touches user-visible UI, a `## Screenshots` section gets appended after the PR is created (step 6) — don't add a placeholder for it here.
    ```bash
    test -f .github/pull_request_template.md
    # Build /tmp/pr-body.md from the template, using comments as instructions
@@ -78,22 +79,44 @@ explicitly requests task tracking.
 
    A ready PR may still end with "CI pending" after fixup when no checks have failed and no review threads remain unresolved, especially after a late fixup push restarts CodeQL, E2E, or preview jobs. Continue fixing failed checks and unresolved review threads, but it is acceptable to report the PR as ready locally once full local verification is green, `failed_checks: []`, `unresolved_review_thread_count: 0`, and only queued/in-progress long-running checks remain. This includes CodeQL and preview deploy as well as E2E shards; do not wait indefinitely. Include the exact pending checks from the final re-check in the response, and stop immediately if a pending check fails or a new unresolved thread appears.
 
-6. **PR screenshots:** After creating the PR, check if `apps/web/.pr-assets/manifest.json` exists. If it does:
-   - Read the manifest to list available screenshots/GIFs
-   - Run `npx tsx apps/web/e2e/scripts/upload-pr-assets.ts <PR_NUMBER>` to generate embed markdown
-   - If `apps/web/.pr-assets/embed.md` exists and is non-empty, append its contents to the PR body using a body file and `gh pr edit <PR_NUMBER> --body-file <file>`
-   - If `gh pr edit --body-file` fails after PR creation, especially with the GitHub Projects classic deprecation GraphQL error, fall back to REST. Build the payload with `jq --rawfile`, never by hand-escaping shell strings:
-     ```bash
-     jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
-     gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input /tmp/pr-body-payload.json
-     ```
-   - Tell the user to drag and drop the image files from `.pr-assets/` into the PR description on GitHub for the images to render
+6. **Screenshots — required for any UI-visible change.** If the diff touches user-visible UI (typically under `apps/web/`, excluding e2e-only or backend-only edits), you must capture and embed screenshots that show the change actually working before treating the PR as complete — do not wait to be asked. Capture both desktop and mobile viewports whenever the change is responsive.
+
+   **Capture:**
+   - If `apps/web/.pr-assets/manifest.json` already has fresh entries for this change, reuse them.
+   - Otherwise drive the changed UI with Playwright and call the `PrAssetCapture` helper (`apps/web/e2e/helpers/pr-asset-capture.ts`, `.screenshot(name, { caption })`) from an existing or temporary spec, run with `CAPTURE_PR_ASSETS=1` so output lands in `apps/web/.pr-assets/`. Delete a purely-temporary spec after capturing.
+   - Compress PNGs before embedding: `pngquant --quality 65-90 --ext .png --force apps/web/.pr-assets/*.png`.
+
+   **Embed (GitHub only — image binaries must never merge into `main`):** GitHub has no public API to upload images into a PR body (drag-and-drop is web-UI only), so publish the images on an orphan commit that can never be merged and reference them with SHA-pinned raw URLs:
+   ```bash
+   blob=$(git hash-object -w apps/web/.pr-assets/shot.png)
+   printf '100644 blob %s\tshot.png\n' "$blob" > /tmp/tree
+   # repeat the hash-object + printf lines, appending one line per file to /tmp/tree
+   tree=$(git mktree < /tmp/tree)
+   commit=$(git commit-tree "$tree" -m "media: screenshots for PR #<N>")
+   git push origin "$commit:refs/heads/media/pr-<N>-screenshots"
+   ```
+   (A quoting glitch can make the first push report failure — retry with the literal commit SHA.) Reference each image in the PR body under a `## Screenshots` section using dash-named files (no spaces):
+   `https://raw.githubusercontent.com/<owner>/<repo>/<media-commit-sha>/shot.png`
+
+   Append the section to the PR body:
+   ```bash
+   gh pr edit <PR_NUMBER> --body-file <file>
+   ```
+   `gh pr edit` fails on this repo (GraphQL touches the deprecated Projects-classic API). Fall back to REST — build the payload with `jq --rawfile`, never by hand-escaping shell strings:
+   ```bash
+   jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
+   gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input /tmp/pr-body-payload.json
+   ```
+
+   Never commit the screenshot binaries to the PR branch itself — only to the throwaway `media/pr-<N>-screenshots` ref (`git rm` them from the PR branch tip if they were committed there earlier; with squash-merge, deleting at tip is enough). The `docs/screenshots/` directory is for product/docs imagery that is meant to merge — don't confuse the two. The media branch must survive branch-cleanup sweeps; deleting it 404s the images in the PR body, so don't treat "unmerged branch" as automatically safe to delete.
+
+   If capture genuinely isn't possible in the environment (no browser, no dev server), fall back to `pnpm exec tsx apps/web/e2e/scripts/upload-pr-assets.ts <PR_NUMBER>` to generate `apps/web/.pr-assets/embed.md` with drag-and-drop placeholders, and tell the user to drag the files from `.pr-assets/` into the PR description manually.
 
 7. **Return the PR URL** when done.
 
 ## Azure Repos flow
 
-When `git remote get-url origin` points at Azure Repos, the steps are the same up through **Push** (1–3). For step 4, create an Azure Repos pull request instead of a GitHub PR. **Skip steps 5 and 6** — `/pr-fixup` and the PR asset upload flow are GitHub-specific.
+When `git remote get-url origin` points at Azure Repos, the steps are the same up through **Push** (1–3). For step 4, create an Azure Repos pull request instead of a GitHub PR. **Skip steps 5 and 6** — `/pr-fixup` and PR image preparation are GitHub-specific.
 
 Prefer the Azure CLI when it is on `PATH`:
 

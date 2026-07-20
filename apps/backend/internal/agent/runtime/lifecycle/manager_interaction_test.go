@@ -35,6 +35,14 @@ type restartMockAgentctlServer struct {
 	failSessionNew bool
 }
 
+func TestStopAgentWithReason_MissingExecutionIsClassified(t *testing.T) {
+	mgr := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger().WithFields()}
+
+	err := mgr.StopAgentWithReason(context.Background(), "missing", "cleanup", true)
+
+	require.ErrorIs(t, err, ErrExecutionNotFound)
+}
+
 func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *restartMockAgentctlServer {
 	t.Helper()
 
@@ -819,6 +827,23 @@ func TestRecoverAgentPromptStream(t *testing.T) {
 		require.NoError(t, mgr.RecoverAgentPromptStream(context.Background(), "session-passthrough"))
 	})
 
+	t.Run("session initialization owns the initial stream connection", func(t *testing.T) {
+		mgr := &Manager{
+			executionStore: NewExecutionStore(),
+			logger:         newTestLogger().WithFields(),
+		}
+		client := createTestClient(t, "http://127.0.0.1:1")
+		t.Cleanup(client.Close)
+		require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+			ID:        "exec-initializing",
+			SessionID: "session-initializing",
+			Status:    v1.AgentStatusStarting,
+			agentctl:  client,
+		}))
+
+		require.NoError(t, mgr.RecoverAgentPromptStream(context.Background(), "session-initializing"))
+	})
+
 	t.Run("missing stream manager errors when stream is absent", func(t *testing.T) {
 		mgr := &Manager{
 			executionStore: NewExecutionStore(),
@@ -827,11 +852,12 @@ func TestRecoverAgentPromptStream(t *testing.T) {
 		client := createTestClient(t, "http://127.0.0.1:1")
 		t.Cleanup(client.Close)
 		require.NoError(t, mgr.executionStore.Add(&AgentExecution{
-			ID:           "exec-no-stream-manager",
-			SessionID:    "session-no-stream-manager",
-			ACPSessionID: "acp-session-1",
-			Status:       v1.AgentStatusFailed,
-			agentctl:     client,
+			ID:                 "exec-no-stream-manager",
+			SessionID:          "session-no-stream-manager",
+			ACPSessionID:       "acp-session-1",
+			Status:             v1.AgentStatusFailed,
+			agentctl:           client,
+			sessionInitialized: true,
 		}))
 
 		err := mgr.RecoverAgentPromptStream(context.Background(), "session-no-stream-manager")
@@ -983,6 +1009,8 @@ func TestEffectiveSessionRuntimeConfig(t *testing.T) {
 		)
 
 		require.Equal(t, "gpt-5.3-codex-spark", model)
+		provider.infos["session-1"].RuntimeConfigOptions["reasoning_effort"] = "medium"
+		require.Equal(t, "low", options["reasoning_effort"], "effective config must own its map")
 		require.Equal(t, "full-access", mode)
 		require.Equal(t, map[string]string{"reasoning_effort": "low"}, options)
 		require.Equal(t, 1, provider.sessionCalls)

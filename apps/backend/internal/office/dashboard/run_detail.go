@@ -320,6 +320,9 @@ func buildRunRouting(
 	if run.RequestedTier != nil {
 		out.RequestedTier = *run.RequestedTier
 	}
+	if run.ResolvedExecutionProfileID != nil {
+		out.ResolvedExecutionProfileID = *run.ResolvedExecutionProfileID
+	}
 	if run.ResolvedProviderID != nil {
 		out.ResolvedProviderID = *run.ResolvedProviderID
 	}
@@ -341,6 +344,9 @@ func runHasRoutingSnapshot(run *models.Run) bool {
 		return false
 	}
 	if run.LogicalProviderOrder != nil && *run.LogicalProviderOrder != "" {
+		return true
+	}
+	if run.ResolvedExecutionProfileID != nil && *run.ResolvedExecutionProfileID != "" {
 		return true
 	}
 	if run.ResolvedProviderID != nil && *run.ResolvedProviderID != "" {

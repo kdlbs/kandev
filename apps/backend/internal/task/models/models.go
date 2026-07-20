@@ -88,19 +88,74 @@ const (
 // SSR reload, alongside the in-memory re-apply on context reset. See issue #1183.
 const SessionMetaKeySessionMode = "session_mode"
 
-// SessionMetaKeyRuntimeConfig records user-selected session runtime settings
-// (model, mode, and dynamic config options) separately from the immutable-ish
-// agent profile snapshot that seeded the session.
+// SessionMetaKeyRuntimeConfig records the provider's latest session runtime
+// state (model, mode, and dynamic config options) separately from the profile
+// snapshot that seeded the session.
 const SessionMetaKeyRuntimeConfig = "runtime_config"
 
-// SessionRuntimeConfig is persisted under
-// TaskSession.Metadata[SessionMetaKeyRuntimeConfig]. It captures live ACP
-// settings chosen after session start so process resume can restore the same
-// model/config instead of reverting to profile defaults.
+// SessionMetaKeyRuntimeConfigOverrides records explicit user selections
+// separately from provider snapshots so delayed events cannot clobber resume
+// intent. Overrides are applied after SessionMetaKeyRuntimeConfig.
+const SessionMetaKeyRuntimeConfigOverrides = "runtime_config_overrides"
+
+// SessionMetaKeyACPConfigBaseline records the write-once effective ACP select
+// values with which a task session started. It is comparison metadata only;
+// runtime restoration continues to use SessionMetaKeyRuntimeConfig.
+const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
+
+// SessionMetaKeyACPModelState records the provider's latest complete model
+// selector state so task-detail boot hydration does not wait for WebSocket
+// reconnection. It is display metadata and is not replayed to the provider.
+const SessionMetaKeyACPModelState = "acp_model_state"
+
+// TurnMetaKeyRuntimeConfigSnapshot stores the immutable effective runtime
+// configuration attributed to one prompt/response turn.
+const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
+
+// SessionRuntimeConfig is persisted as provider state or explicit overrides.
+// On resume, explicit values take precedence over the latest provider snapshot
+// so delayed provider events cannot replace user intent.
 type SessionRuntimeConfig struct {
 	Model         string            `json:"model,omitempty"`
 	Mode          string            `json:"mode,omitempty"`
 	ConfigOptions map[string]string `json:"config_options,omitempty"`
+}
+
+// TurnRuntimeConfigSnapshot is the minimal display state captured when a turn
+// starts. It intentionally excludes the provider's complete option catalog.
+type TurnRuntimeConfigSnapshot struct {
+	Model          string                    `json:"model,omitempty"`
+	Mode           string                    `json:"mode,omitempty"`
+	ConfigOptions  []TurnRuntimeConfigOption `json:"config_options,omitempty"`
+	ConfigBaseline map[string]string         `json:"config_baseline,omitempty"`
+}
+
+// TurnRuntimeConfigOption preserves one selected value in provider order.
+type TurnRuntimeConfigOption struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Value     string `json:"value"`
+	ValueName string `json:"value_name,omitempty"`
+}
+
+// LoadTurnRuntimeConfigSnapshot decodes typed and JSON-rehydrated turn metadata.
+func LoadTurnRuntimeConfigSnapshot(metadata map[string]interface{}) (TurnRuntimeConfigSnapshot, bool) {
+	if metadata == nil {
+		return TurnRuntimeConfigSnapshot{}, false
+	}
+	raw := metadata[TurnMetaKeyRuntimeConfigSnapshot]
+	if snapshot, ok := raw.(TurnRuntimeConfigSnapshot); ok {
+		return snapshot, snapshot.Model != "" || snapshot.Mode != "" || len(snapshot.ConfigOptions) > 0
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return TurnRuntimeConfigSnapshot{}, false
+	}
+	var snapshot TurnRuntimeConfigSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return TurnRuntimeConfigSnapshot{}, false
+	}
+	return snapshot, snapshot.Model != "" || snapshot.Mode != "" || len(snapshot.ConfigOptions) > 0
 }
 
 // SessionMetaKeyPendingStepCompletion stores the agent's (or manual fallback's)
@@ -196,10 +251,19 @@ type PendingStepCompletionSignal struct {
 // LoadSessionRuntimeConfig decodes the runtime-config bag entry from session
 // metadata. It tolerates both typed values and JSON-rehydrated maps.
 func LoadSessionRuntimeConfig(metadata map[string]interface{}) (SessionRuntimeConfig, bool) {
+	return loadSessionRuntimeConfig(metadata, SessionMetaKeyRuntimeConfig)
+}
+
+// LoadSessionRuntimeConfigOverrides decodes explicit user runtime selections.
+func LoadSessionRuntimeConfigOverrides(metadata map[string]interface{}) (SessionRuntimeConfig, bool) {
+	return loadSessionRuntimeConfig(metadata, SessionMetaKeyRuntimeConfigOverrides)
+}
+
+func loadSessionRuntimeConfig(metadata map[string]interface{}, key string) (SessionRuntimeConfig, bool) {
 	if metadata == nil {
 		return SessionRuntimeConfig{}, false
 	}
-	raw, ok := metadata[SessionMetaKeyRuntimeConfig]
+	raw, ok := metadata[key]
 	if !ok || raw == nil {
 		return SessionRuntimeConfig{}, false
 	}
@@ -229,6 +293,36 @@ func LoadSessionRuntimeConfig(metadata map[string]interface{}) (SessionRuntimeCo
 		return out, !out.IsZero()
 	default:
 		return SessionRuntimeConfig{}, false
+	}
+}
+
+// LoadSessionACPConfigBaseline decodes the write-once ACP configuration
+// baseline from session metadata. It tolerates typed and JSON-rehydrated maps.
+func LoadSessionACPConfigBaseline(metadata map[string]interface{}) (map[string]string, bool) {
+	if metadata == nil {
+		return nil, false
+	}
+	values := stringMapFromAnyPreservingEmpty(metadata[SessionMetaKeyACPConfigBaseline])
+	if len(values) == 0 {
+		return nil, false
+	}
+	return values, true
+}
+
+func stringMapFromAnyPreservingEmpty(raw interface{}) map[string]string {
+	switch values := raw.(type) {
+	case map[string]string:
+		return maps.Clone(values)
+	case map[string]interface{}:
+		out := make(map[string]string, len(values))
+		for key, value := range values {
+			if str, ok := value.(string); ok {
+				out[key] = str
+			}
+		}
+		return out
+	default:
+		return nil
 	}
 }
 
@@ -697,10 +791,11 @@ type SessionBranchInfo struct {
 type TaskSession struct {
 	ID                   string                 `json:"id"`
 	TaskID               string                 `json:"task_id"`
-	Name                 string                 `json:"name,omitempty"`     // Optional user-supplied label shown on the session tab
-	AgentExecutionID     string                 `json:"agent_execution_id"` // Docker container/agent execution
-	ContainerID          string                 `json:"container_id"`       // Docker container ID for cleanup
-	AgentProfileID       string                 `json:"agent_profile_id"`   // ID of the agent profile used
+	Name                 string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
+	AgentExecutionID     string                 `json:"agent_execution_id"`   // Docker container/agent execution
+	ContainerID          string                 `json:"container_id"`         // Docker container ID for cleanup
+	AgentProfileID       string                 `json:"agent_profile_id"`     // ID of the agent profile used
+	ExecutionProfileID   string                 `json:"execution_profile_id"` // Concrete profile used for this execution
 	ExecutorID           string                 `json:"executor_id"`
 	ExecutorProfileID    string                 `json:"executor_profile_id"`
 	EnvironmentID        string                 `json:"environment_id"`
@@ -923,19 +1018,20 @@ type Executor struct {
 
 // ExecutorRunning tracks an active executor instance for a session.
 type ExecutorRunning struct {
-	ID               string               `json:"id"`
-	SessionID        string               `json:"session_id"`
-	TaskID           string               `json:"task_id"`
-	ExecutorID       string               `json:"executor_id"`
-	Runtime          agentruntime.Runtime `json:"runtime,omitempty"`
-	Status           string               `json:"status"`
-	Resumable        bool                 `json:"resumable"`
-	ResumeToken      string               `json:"resume_token,omitempty"`
-	LastMessageUUID  string               `json:"last_message_uuid,omitempty"`
-	AgentExecutionID string               `json:"agent_execution_id,omitempty"`
-	ContainerID      string               `json:"container_id,omitempty"`
-	AgentctlURL      string               `json:"agentctl_url,omitempty"`
-	AgentctlPort     int                  `json:"agentctl_port,omitempty"`
+	ID                 string               `json:"id"`
+	SessionID          string               `json:"session_id"`
+	TaskID             string               `json:"task_id"`
+	ExecutionProfileID string               `json:"execution_profile_id"`
+	ExecutorID         string               `json:"executor_id"`
+	Runtime            agentruntime.Runtime `json:"runtime,omitempty"`
+	Status             string               `json:"status"`
+	Resumable          bool                 `json:"resumable"`
+	ResumeToken        string               `json:"resume_token,omitempty"`
+	LastMessageUUID    string               `json:"last_message_uuid,omitempty"`
+	AgentExecutionID   string               `json:"agent_execution_id,omitempty"`
+	ContainerID        string               `json:"container_id,omitempty"`
+	AgentctlURL        string               `json:"agentctl_url,omitempty"`
+	AgentctlPort       int                  `json:"agentctl_port,omitempty"`
 	// PID is SSH-only: the agentctl PID on the *remote* host, used by the SSH
 	// executor's remote-pid stop path. It is 0 for local/standalone rows.
 	PID int `json:"pid,omitempty"`

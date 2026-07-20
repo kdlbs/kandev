@@ -20,8 +20,8 @@ context without changing their checked-out branches or creating a kanban task.
   repository has one explicit base branch and can appear at most once in a chat.
 - Selecting a repository automatically fills its preferred branch (`main`, `master`, or the
   first available branch), including when another repository lookup is still pending.
-- A workspace with no existing quick chats explains that quick chat is for discussing an idea,
-  question, or codebase outside the task board.
+- Every new-chat setup explains that quick chat is for questions, exploration, and small requests
+  outside the tracked task workflow.
 - Agent and repository fields include concise helper copy. Repository copy explains that the
   optional selection focuses the conversation on specific code and branches.
 - Repo-backed quick chats run in Kandev-owned isolated worktrees. They never switch or modify
@@ -88,7 +88,7 @@ them through the existing quick-chat task deletion path.
 
 ## Scenarios
 
-- **GIVEN** a workspace with no quick chats, **WHEN** the user opens Quick Chat, **THEN** the
+- **GIVEN** a user opens a new Quick Chat setup, **WHEN** the setup renders, **THEN** the
   setup explains its purpose and shows agent and repository helper copy.
 - **GIVEN** an agent and no repositories, **WHEN** the user starts a chat, **THEN** the chat uses
   the existing repo-less scratch workspace.
@@ -100,8 +100,8 @@ them through the existing quick-chat task deletion path.
   starts, **THEN** the source checkout and its uncommitted files remain unchanged.
 - **GIVEN** one repo-backed chat is active, **WHEN** another chat targets the same repository and
   base branch, **THEN** both start in distinct Kandev-owned worktrees.
-- **GIVEN** an existing quick chat, **WHEN** the user opens a new chat tab, **THEN** the long
-  first-use introduction is omitted while field helper copy remains.
+- **GIVEN** an existing quick chat, **WHEN** the user opens a new chat tab, **THEN** the Quick Chat
+  versus tracked-task guidance and field helper copy remain visible.
 - **GIVEN** a mobile viewport, **WHEN** the user selects an agent and repository branch, **THEN**
   all controls remain touch-accessible and the page has no horizontal overflow.
 - **GIVEN** a desktop quick-chat dialog, **WHEN** the user drags either horizontal edge, **THEN**

@@ -67,6 +67,51 @@ func TestStopCancelsInFlightBootstrap(t *testing.T) {
 	}
 }
 
+func TestProbePreservesConfigOptionDescriptions(t *testing.T) {
+	log := newTestLogger(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/inference/probe" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"config_options": []any{map[string]any{
+				"type":          "select",
+				"id":            "reasoning_effort",
+				"name":          "Reasoning effort",
+				"description":   "Controls reasoning depth.",
+				"current_value": "high",
+				"options": []any{map[string]any{
+					"value":       "high",
+					"name":        "High",
+					"description": "More thorough reasoning.",
+				}},
+			}},
+		}); err != nil {
+			t.Errorf("encode probe response: %v", err)
+		}
+	}))
+	defer server.Close()
+	host, port := serverHostPort(t, server)
+	mgr := NewManager(registry.NewRegistry(log), host, port, nil, log)
+
+	caps := mgr.probe(context.Background(), &instance{
+		agentType: "codex-acp",
+		workDir:   t.TempDir(),
+		client:    agentctlclient.NewClient(host, port, log),
+	}, &installedInferenceAgent{id: "codex-acp"})
+
+	raw, err := json.Marshal(caps.ConfigOptions)
+	require.NoError(t, err)
+	var payload []map[string]any
+	require.NoError(t, json.Unmarshal(raw, &payload))
+	require.Equal(t, "Controls reasoning depth.", payload[0]["description"])
+	values := payload[0]["options"].([]any)
+	require.Equal(t, "More thorough reasoning.", values[0].(map[string]any)["description"])
+}
+
 func TestDeleteInstanceRemovesWorkDirWithoutControlClient(t *testing.T) {
 	log := newTestLogger(t)
 	mgr := NewManager(registry.NewRegistry(log), "127.0.0.1", 1, nil, log)

@@ -218,8 +218,8 @@ func TestManager_CancelAgent_EscalationCleanupSurvivesCtxCancel(t *testing.T) {
 // bus.MemoryEventBus.publishToQueue's "deliver synchronously to preserve
 // ordering" comment). A synchronous inline publish here would have that
 // reentrant Lock() call block forever on the non-reentrant mutex, and
-// CancelAgent would never return — exactly what the E2E "a message queued
-// during a running turn is delivered when the turn is paused" test caught.
+// CancelAgent would never return — exactly what the pause/resume queue E2E
+// coverage caught while asserting the session settles after a forced stop.
 //
 // This test cannot reproduce the real cross-package reentrancy (it would
 // need the real bus.MemoryEventBus plus a real orchestrator.Service), so it

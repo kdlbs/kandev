@@ -98,6 +98,7 @@ import (
 	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	workflowengine "github.com/kandev/kandev/internal/workflow/engine"
 
+	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
@@ -734,25 +735,42 @@ func startGatewayAndServe(
 	}, systemsvc.Wiring{
 		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
 	})
+	storageComposition, err := provideStorageComposition(
+		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,
+	)
+	if err != nil {
+		log.Error("Failed to initialize storage maintenance", zap.Error(err))
+		return false
+	}
+	systemSvc.Storage = storageComposition.handler
+	systemSvc.StorageRuntime = storageComposition.runtime
 	if systemSvc.Metrics != nil {
 		systemSvc.Metrics.SetBroadcaster(gateway.Hub.BroadcastToSystemMetrics)
 		gateway.Hub.SetSystemMetricsInterestTracker(systemSvc.Metrics)
 		systemSvc.Metrics.SetExecutionProvider(lifecycleMetricProvider{manager: lifecycleMgr})
 	}
 	systemSvc.StartBackground(ctx)
+	addCleanup(func() error { systemSvc.StopBackground(); return nil })
 	gateways.RegisterSystemNotifications(ctx, eventBus, gateway.Hub, log)
 
 	// ============================================
 	// HTTP SERVER
 	// ============================================
 	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup, repoCloner, systemSvc)
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
+		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer)
 
 	port := cfg.Server.Port
 	if port == 0 {
 		port = ports.Backend
 	}
-	if !startHTTPServer(server, port, log) {
+	hosts, err := cfg.Server.ResolvedBinds()
+	if err != nil {
+		log.Error("Invalid server bind configuration", zap.Error(err))
+		return false
+	}
+	listeners, ok := startHTTPServers(server, hosts, port, log)
+	if !ok {
 		return false
 	}
 
@@ -764,33 +782,12 @@ func startGatewayAndServe(
 
 	// Flip the readiness flag once the HTTP listener is actually
 	// accepting connections, not just "spawned". Serve runs in a goroutine
-	// after we bind the socket above; probe the local listener with a short
-	// retry loop — once a single connect succeeds, the kernel queue is up and
-	// any subsequent /health call will land on a wired route.
-	go waitListenerThenMarkReady(server.Addr, log)
+	// after we bind the socket above; probe a reachable local listener with a
+	// short retry loop — once a single connect succeeds, the kernel queue is up
+	// and any subsequent /health call will land on a wired route.
+	go waitListenerThenMarkReady(listeners.probeAddr(), log)
 
-	awaitShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
-	return true
-}
-
-func startHTTPServer(server *http.Server, port int, log *logger.Logger) bool {
-	addr := strings.TrimSpace(server.Addr)
-	if addr == "" {
-		addr = serverListenAddr("", port)
-	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		log.Error("Server listen error", zap.Error(err))
-		return false
-	}
-
-	go func() {
-		log.Info("WebSocket server listening", zap.String("addr", ln.Addr().String()), zap.Int("port", port))
-		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Error("Server serve error", zap.Error(err))
-		}
-	}()
-
+	awaitShutdown(server, listeners, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
 }
 
@@ -808,8 +805,12 @@ func serverProbeAddr(listenAddr string) string {
 		return listenAddr
 	}
 	switch host {
-	case "", "0.0.0.0", "::":
+	case "", "0.0.0.0":
 		host = "127.0.0.1"
+	case "::":
+		// Preserve the address family: an IPv6-only wildcard listener isn't
+		// reachable via 127.0.0.1, so probe the IPv6 loopback instead.
+		host = "::1"
 	}
 	return net.JoinHostPort(host, port)
 }
@@ -984,6 +985,9 @@ func wireOfficeSvcsDependencies(
 	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
 	// Wire the office service as the task canceller for status→cancelled hard-cancels.
 	services.OfficeSvcs.Dashboard.SetTaskCanceller(services.Office)
+	// Route the Office "No parent" mutation through the canonical task detach
+	// operation so inherited workspace sharing remains valid.
+	services.OfficeSvcs.Dashboard.SetTaskDetacher(services.Task)
 	// Wire the reactivity pipeline so property mutations queue downstream runs.
 	services.OfficeSvcs.Dashboard.SetReactivityApplier(
 		officescheduler.NewDashboardReactivityAdapter(services.OfficeSvcs.Scheduler),
@@ -1024,12 +1028,14 @@ func wireOfficeProviderRouting(
 ) {
 	scheduler := services.OfficeSvcs.Scheduler
 	resolver := routing.NewResolver(&officeRoutingRepoAdapter{repo: repos.Office}, nil)
+	resolver.SetExecutionProfileStore(repos.AgentSettings, agentRegistry)
 	scheduler.SetResolver(resolver)
 	scheduler.SetTaskStarter(&schedulerTaskStarterAdapter{orch: orchestratorSvc})
 	scheduler.SetEventBus(eventBus)
 	services.Office.SetRoutingDispatcher(scheduler)
 
 	provider := routing.NewProvider(repos.Office, agentRegistry, resolver, scheduler)
+	provider.SetExecutionProfileStore(repos.AgentSettings)
 	services.OfficeSvcs.Dashboard.SetRoutingProvider(provider)
 	services.OfficeSvcs.Dashboard.SetRouteAttemptLister(repos.Office)
 	services.OfficeSvcs.Agents.SetKnownProvidersFn(func() []routing.ProviderID {
@@ -1092,12 +1098,13 @@ func (a *schedulerTaskStarterAdapter) StartTaskWithRoute(
 			Env:               launch.Env,
 		},
 		orchexecutor.RouteOverride{
-			ProviderID: route.ProviderID,
-			Model:      route.Model,
-			Tier:       route.Tier,
-			Mode:       route.Mode,
-			Flags:      route.Flags,
-			Env:        route.Env,
+			ExecutionProfileID: route.ExecutionProfileID,
+			ProviderID:         route.ProviderID,
+			Model:              route.Model,
+			Tier:               route.Tier,
+			Mode:               route.Mode,
+			Flags:              route.Flags,
+			Env:                route.Env,
 		})
 }
 
@@ -1154,17 +1161,6 @@ func startOfficeSchedulersAndGC(
 		officeRoutines = services.OfficeSvcs.Routines
 	}
 	startCronScheduler(ctx, repos, engineDispatcher, officeRoutines, log)
-	// Start GC sweep for orphaned worktrees and containers.
-	worktreeBase := filepath.Join(cfg.ResolvedHomeDir(), "tasks")
-	gc := officeinfra.NewGarbageCollector(
-		repos.Office,
-		services.WorktreeMgr, // WorktreeInventory — authoritative live-worktrees source
-		log, worktreeBase,
-		nil, // dockerClient - pass if Docker available
-		3*time.Hour,
-	)
-	go gc.Start(ctx)
-	log.Info("Office GC sweep started")
 }
 
 // wireWorkflowEngineForOffice composes the Phase 2 (ADR-0004)
@@ -1506,6 +1502,7 @@ func buildOfficeFeatureServices(
 	activity := officeshared.NewActivityLogger(repo, log)
 
 	agentSvc := officeagents.NewAgentService(repo, log, activity)
+	agentSvc.SetProfileStore(settingsRepo)
 	agentSvc.SetAuth(newAgentAuth(jwtSigningKey, log))
 	if services.Office != nil {
 		services.Office.SetAgentTokenMinter(agentSvc)
@@ -1632,6 +1629,7 @@ func buildHTTPServer(
 	addCleanup func(func() error),
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
+	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
 ) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -1658,6 +1656,7 @@ func buildHTTPServer(
 		eventBus:                eventBus,
 		services:                services,
 		systemSvc:               systemSvc,
+		workspaceRestorer:       workspaceRestorer,
 		runtimeFlagsSvc:         services.RuntimeFlags,
 		agentSettingsController: agentSettingsController,
 		agentSettingsRepo:       repos.AgentSettings,
@@ -1683,8 +1682,11 @@ func buildHTTPServer(
 		log:                     log,
 	})
 
+	// Addr is intentionally left unset: bind addresses are resolved from
+	// cfg.Server.ResolvedBinds() and served via startHTTPServers, which may
+	// create several listeners on one shared handler. server.Shutdown closes
+	// all of them regardless of Addr.
 	return &http.Server{
-		Addr:         serverListenAddr(cfg.Server.Host, port),
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
 		WriteTimeout: cfg.Server.WriteTimeoutDuration(),
@@ -1694,6 +1696,7 @@ func buildHTTPServer(
 // awaitShutdown waits for an OS signal then performs graceful shutdown.
 func awaitShutdown(
 	server *http.Server,
+	listeners *serverListeners,
 	orchestratorSvc *orchestrator.Service,
 	lifecycleMgr *lifecycle.Manager,
 	runCleanups func(),
@@ -1720,5 +1723,5 @@ func awaitShutdown(
 	log.Info("Received shutdown signal",
 		zap.String("signal", sig.String()),
 		zap.Int("pid", os.Getpid()))
-	runGracefulShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
+	runGracefulShutdown(server, listeners, orchestratorSvc, lifecycleMgr, runCleanups, log)
 }

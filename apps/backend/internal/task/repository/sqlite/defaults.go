@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	workflowcfg "github.com/kandev/kandev/config/workflows"
 	"github.com/kandev/kandev/internal/common/config"
@@ -31,6 +32,36 @@ const (
 // new system workflows land.
 var SystemWorkflowTemplateIDs = []string{
 	templateIDRoutine,
+}
+
+// hideBuiltinWorkflows reconciles system workflow rows created before their
+// embedded templates were marked hidden. User-created workflows are left
+// untouched even if they reference the same template.
+func (r *Repository) hideBuiltinWorkflows() error {
+	hidden, err := workflowcfg.HiddenTemplateIDs()
+	if err != nil {
+		return fmt.Errorf("load hidden workflow templates: %w", err)
+	}
+	templateIDs := make([]string, 0, len(hidden))
+	for templateID, isHidden := range hidden {
+		if isHidden {
+			templateIDs = append(templateIDs, templateID)
+		}
+	}
+	if len(templateIDs) == 0 {
+		return nil
+	}
+	query, args, err := sqlx.In(`
+		UPDATE workflows SET hidden = 1, updated_at = ?
+		WHERE is_system = 1 AND workflow_template_id IN (?) AND hidden != 1
+	`, time.Now().UTC(), templateIDs)
+	if err != nil {
+		return fmt.Errorf("build hidden workflow reconciliation: %w", err)
+	}
+	if _, err := r.db.Exec(r.db.Rebind(query), args...); err != nil {
+		return fmt.Errorf("hide builtin workflows: %w", err)
+	}
+	return nil
 }
 
 // ensureDefaultWorkspace creates a default workspace if none exists
@@ -314,27 +345,34 @@ func (r *Repository) ensureBuiltinWorkflow(ctx context.Context, workspaceID, tem
 	if workspaceID == "" {
 		return "", fmt.Errorf("workspace_id is required")
 	}
-	existing, err := r.findWorkflowByTemplate(ctx, workspaceID, templateID)
-	if err != nil {
-		return "", err
-	}
-	if existing != "" {
-		return existing, nil
-	}
 	tmpl, err := loadBuiltinTemplate(templateID)
 	if err != nil {
 		return "", err
 	}
+	existing, err := r.findBuiltinWorkflowByTemplate(ctx, workspaceID, templateID)
+	if err != nil {
+		return "", err
+	}
+	if existing != "" {
+		hidden := dialect.BoolToInt(tmpl.Hidden)
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+			UPDATE workflows SET hidden = ?, updated_at = ?
+			WHERE id = ? AND is_system = 1 AND hidden != ?
+		`), hidden, time.Now().UTC(), existing, hidden); err != nil {
+			return "", fmt.Errorf("update builtin workflow visibility: %w", err)
+		}
+		return existing, nil
+	}
 	return r.createWorkflowFromTemplate(ctx, workspaceID, name, description, tmpl)
 }
 
-// findWorkflowByTemplate returns the workflow id in workspaceID with the
-// given workflow_template_id, or empty string when none exists.
-func (r *Repository) findWorkflowByTemplate(ctx context.Context, workspaceID, templateID string) (string, error) {
+// findBuiltinWorkflowByTemplate returns the system workflow id in workspaceID
+// with the given workflow_template_id, or empty string when none exists.
+func (r *Repository) findBuiltinWorkflowByTemplate(ctx context.Context, workspaceID, templateID string) (string, error) {
 	var id string
 	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id FROM workflows
-		WHERE workspace_id = ? AND workflow_template_id = ?
+		WHERE workspace_id = ? AND workflow_template_id = ? AND is_system = 1
 		LIMIT 1
 	`), workspaceID, templateID).Scan(&id)
 	if err == sql.ErrNoRows {
@@ -370,9 +408,9 @@ func (r *Repository) createWorkflowFromTemplate(
 	workflowID := uuid.New().String()
 
 	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, is_system, sort_order, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 1, 999, ?, ?)
-	`), workflowID, workspaceID, name, description, tmpl.ID, now, now); err != nil {
+		INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, is_system, sort_order, hidden, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 1, 999, ?, ?, ?)
+	`), workflowID, workspaceID, name, description, tmpl.ID, dialect.BoolToInt(tmpl.Hidden), now, now); err != nil {
 		return "", fmt.Errorf("insert builtin workflow %s: %w", tmpl.ID, err)
 	}
 

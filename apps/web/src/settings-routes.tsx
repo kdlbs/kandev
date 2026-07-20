@@ -19,6 +19,8 @@ import IntegrationsLinearPage from "@/app/settings/integrations/linear/page";
 import IntegrationsSentryPage from "@/app/settings/integrations/sentry/page";
 import IntegrationsSlackPage from "@/app/settings/integrations/slack/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
+import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
+import StoragePage from "@/app/settings/system/storage/page";
 import UtilityAgentsSettingsPage from "@/app/settings/utility-agents/page";
 import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
@@ -37,6 +39,7 @@ import {
   TaskActionsSettings,
 } from "@/components/settings/general-settings";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
+import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
 import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
@@ -126,6 +129,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   ),
   "/settings/general/editors": () => <EditorsSettings />,
   "/settings/general/keyboard-shortcuts": () => <KeyboardShortcutsSettings />,
+  "/settings/general/layouts": () => <LayoutSettings />,
   "/settings/general/notifications": () => <NotificationsSettings />,
   "/settings/general/resource-metrics": () => (
     <SettingsRedirect to="/settings/general/appearance" />
@@ -208,6 +212,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <UIStateCard />
     </SystemPageShell>
   ),
+  "/settings/system/storage": () => <StoragePage />,
   "/settings/system/updates": renderUpdatesRoute,
   "/settings/changelog": () => <SettingsRedirect to="/settings/system/updates" />,
 };
@@ -262,6 +267,18 @@ function renderPluginSettingsRoute(pathname: string) {
 function renderDynamicSettingsRoute(pathname: string) {
   const workspaceRoute = renderWorkspaceSettingsRoute(pathname);
   if (workspaceRoute) return workspaceRoute;
+
+  const pluginId = matchSingle(pathname, /^\/settings\/plugins\/([^/]+)$/);
+  if (pluginId) {
+    // A plugin-authored settings route registered at exactly this path
+    // (registry.registerSettingsRoute) wins over the first-party detail
+    // page, so a plugin can fully replace its own settings surface.
+    return (
+      renderPluginSettingsRoute(pathname) ?? (
+        <PluginDetailPage params={Promise.resolve({ pluginId })} />
+      )
+    );
+  }
 
   const agentProfile = matchDouble(pathname, /^\/settings\/agents\/([^/]+)\/profiles\/([^/]+)$/);
   if (agentProfile) {
@@ -340,7 +357,7 @@ function renderWorkspaceSettingsRoute(pathname: string) {
     if (section === "workflows") {
       return <WorkspaceWorkflowsRoute workspaceId={id} />;
     }
-    return <AutomationsPage params={Promise.resolve({ id })} />;
+    return <AutomationsPage workspaceId={id} />;
   }
 
   const workspaceId = matchSingle(pathname, /^\/settings\/workspace\/([^/]+)$/);

@@ -16,6 +16,7 @@ import {
   removeDockerContainer,
 } from "@/lib/api/domains/settings-api";
 import type { DockerContainer } from "@/lib/api/domains/settings-api";
+import { SettingsCard } from "@/components/settings/settings-card";
 
 const DEFAULT_IMAGE_TAG = "kandev/multi-agent:latest";
 // Self-contained default that produces a working image:
@@ -152,6 +153,8 @@ type DockerfileBuildCardProps = {
   dockerfile: string;
   onDockerfileChange: (v: string) => void;
   imageTag: string;
+  baselineDockerfile?: string;
+  baselineImageTag?: string;
   onImageTagChange: (v: string) => void;
   onBuildSuccess?: (result: DockerBuildSuccess) => void;
 };
@@ -160,6 +163,8 @@ export function DockerfileBuildCard({
   dockerfile,
   onDockerfileChange,
   imageTag,
+  baselineDockerfile,
+  baselineImageTag,
   onImageTagChange,
   onBuildSuccess,
 }: DockerfileBuildCardProps) {
@@ -175,6 +180,8 @@ export function DockerfileBuildCard({
   };
 
   const canFillDefaults = !dockerfile.trim() || !imageTag.trim();
+  const dockerfileDirty = baselineDockerfile !== undefined && dockerfile !== baselineDockerfile;
+  const imageTagDirty = baselineImageTag !== undefined && imageTag !== baselineImageTag;
 
   const fillDefaults = () => {
     if (!imageTag.trim()) onImageTagChange(DEFAULT_IMAGE_TAG);
@@ -182,7 +189,7 @@ export function DockerfileBuildCard({
   };
 
   return (
-    <Card>
+    <SettingsCard isDirty={dockerfileDirty || imageTagDirty}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div className="space-y-1">
@@ -210,11 +217,16 @@ export function DockerfileBuildCard({
             onChange={(e) => onImageTagChange(e.target.value)}
             placeholder={DEFAULT_IMAGE_TAG}
             className="font-mono text-sm"
+            data-settings-dirty={imageTagDirty}
           />
         </div>
         <div className="space-y-2">
           <Label>Dockerfile Content</Label>
-          <div className="overflow-hidden rounded-md border">
+          <div
+            className="overflow-hidden rounded-md border"
+            data-settings-dirty={dockerfileDirty}
+            data-settings-dirty-level="container"
+          >
             <ScriptEditor
               value={dockerfile}
               onChange={onDockerfileChange}
@@ -247,7 +259,7 @@ export function DockerfileBuildCard({
           </pre>
         )}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

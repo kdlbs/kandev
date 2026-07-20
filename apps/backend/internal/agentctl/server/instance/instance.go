@@ -4,11 +4,16 @@
 package instance
 
 import (
+	"context"
+	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/kandev/kandev/internal/agentctl/server/process"
 )
+
+type processManager interface {
+	CloseAdmission()
+	StopForTeardown(context.Context) error
+}
 
 // Instance represents a single agent instance running as a subprocess.
 // Each instance has its own process manager, HTTP server, and configuration.
@@ -35,7 +40,7 @@ type Instance struct {
 	CreatedAt time.Time
 
 	// manager is the process manager handling the agent subprocess (unexported)
-	manager *process.Manager
+	manager processManager
 
 	// server is the HTTP server for this instance's API (unexported)
 	server instanceHTTPServer
@@ -53,6 +58,9 @@ type Instance struct {
 	// instance with an open WS as active even when no new HTTP request
 	// arrives. Maintained by the activity middleware.
 	inflightRequests atomic.Int32
+	stopMu           sync.Mutex
+	statusMu         sync.RWMutex
+	portReleased     bool
 }
 
 // MarkActivity stamps the current time as the most recent activity on this
@@ -210,6 +218,8 @@ type InstanceInfo struct {
 // This method creates an InstanceInfo struct containing only the exported,
 // serializable fields from the Instance.
 func (i *Instance) Info() *InstanceInfo {
+	i.statusMu.RLock()
+	defer i.statusMu.RUnlock()
 	// Create a copy of the environment map to prevent external modification
 	var envCopy map[string]string
 	if i.Env != nil {
@@ -228,4 +238,10 @@ func (i *Instance) Info() *InstanceInfo {
 		Env:           envCopy,
 		CreatedAt:     i.CreatedAt,
 	}
+}
+
+func (i *Instance) setStatus(status string) {
+	i.statusMu.Lock()
+	i.Status = status
+	i.statusMu.Unlock()
 }

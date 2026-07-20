@@ -20,7 +20,9 @@ export class JiraSettingsPage {
     this.instanceSelect = page.locator("#jira-instance");
     this.authSelect = page.locator("#jira-auth");
     this.testButton = page.getByTestId("jira-test-button");
-    this.saveButton = page.getByTestId("jira-save-button");
+    this.saveButton = page
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: /save changes/i });
     this.deleteButton = page.getByTestId("jira-delete-button");
     this.statusBanner = page.getByTestId("integration-auth-status-banner");
   }

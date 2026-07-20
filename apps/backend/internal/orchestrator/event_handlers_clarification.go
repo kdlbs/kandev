@@ -59,6 +59,11 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 	}
 
 	writeCtx := context.WithoutCancel(ctx)
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
 	if s.sessionHasPendingClarification(writeCtx, data.SessionID) {
 		return nil
 	}
@@ -282,15 +287,42 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 	lock.Lock()
 	defer lock.Unlock()
 
+	// Coordinator stop may have won while this recovery waited for the shared
+	// guard. Re-read inside the critical section and never revive a terminal
+	// session or queue replacement work for it.
+	session, sessionErr := s.repo.GetTaskSession(ctx, data.SessionID)
+	if sessionErr != nil || session == nil {
+		s.logger.Warn("cannot confirm live session for clarification recovery",
+			zap.String("session_id", data.SessionID),
+			zap.Error(sessionErr))
+		return false
+	}
+	if isTerminalSessionState(session.State) {
+		s.logger.Debug("skipping clarification recovery for terminal session",
+			zap.String("session_id", data.SessionID),
+			zap.String("session_state", string(session.State)))
+		return false
+	}
+
 	if err := s.cancelAgentSilent(ctx, data.TaskID, data.SessionID); err != nil {
 		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
-		// Force-revert session state so the retry prompt can proceed
-		if revertErr := s.repo.UpdateTaskSessionState(ctx, data.SessionID, models.TaskSessionStateWaitingForInput, ""); revertErr != nil {
+		// Revert through the terminal-safe state writer. Production uses a
+		// compare-and-set, and the shared guard keeps coordinator cancellation
+		// outside this narrow mutation.
+		reverted := s.updateTaskSessionState(
+			ctx,
+			data.TaskID,
+			data.SessionID,
+			models.TaskSessionStateWaitingForInput,
+			"",
+			true,
+			session,
+		)
+		if reverted == nil || reverted.State != models.TaskSessionStateWaitingForInput {
 			s.logger.Error("failed to force-revert session state for clarification recovery",
-				zap.String("session_id", data.SessionID),
-				zap.Error(revertErr))
+				zap.String("session_id", data.SessionID))
 			return false
 		}
 		s.completeTurnForSession(ctx, data.SessionID)

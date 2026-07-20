@@ -6,8 +6,8 @@ export class MobileKanbanPage {
   readonly mobileSearchBar: Locator;
   readonly mobileSearchToggle: Locator;
   readonly mobileMenuButton: Locator;
-  readonly mobileTaskSheet: Locator;
   readonly swimlaneContainer: Locator;
+  readonly boardNavigator: Locator;
 
   constructor(private page: Page) {
     this.board = page.getByTestId("kanban-board");
@@ -15,8 +15,8 @@ export class MobileKanbanPage {
     this.mobileSearchBar = page.getByTestId("mobile-search-bar");
     this.mobileSearchToggle = page.getByTestId("mobile-search-toggle");
     this.mobileMenuButton = page.getByRole("button", { name: "Open menu" });
-    this.mobileTaskSheet = page.getByTestId("mobile-task-sheet");
     this.swimlaneContainer = page.getByTestId("swimlane-container");
+    this.boardNavigator = page.getByTestId("mobile-board-navigator");
   }
 
   async goto() {
@@ -32,6 +32,10 @@ export class MobileKanbanPage {
 
   columnTab(name: string): Locator {
     return this.page.getByRole("button", { name });
+  }
+
+  workflowItem(workflowId: string): Locator {
+    return this.page.getByTestId(`mobile-workflow-item-${workflowId}`);
   }
 
   taskCard(taskId: string): Locator {
@@ -51,17 +55,5 @@ export class MobileKanbanPage {
   async openSearch() {
     await this.mobileSearchToggle.click();
     await this.mobileSearchBar.waitFor({ state: "visible" });
-  }
-
-  sheetGoToSession(): Locator {
-    return this.mobileTaskSheet.getByRole("button", { name: /Open Session/ });
-  }
-
-  sheetEditButton(): Locator {
-    return this.mobileTaskSheet.getByRole("button", { name: /Edit/ });
-  }
-
-  sheetDeleteButton(): Locator {
-    return this.mobileTaskSheet.getByRole("button", { name: /Delete/ });
   }
 }

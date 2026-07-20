@@ -1,0 +1,26 @@
+name: Plugin Registry Star Refresh
+
+# Thin, manual "refresh stars now" trigger. The catalog is rebuilt daily by
+# plugin-registry-index.yml (that schedule already refreshes GitHub star counts
+# and latest versions), so this workflow adds NO build logic of its own — it
+# simply re-runs that single source of truth via workflow_call. Use it to force
+# an out-of-band refresh (for example right after a plugin repo goes viral)
+# without waiting for the daily run.
+#
+# Kept DRY on purpose: the actual index build lives only in
+# plugin-registry-index.yml.
+
+on:
+  workflow_dispatch:
+
+# Inherit the same least-privilege permissions the called build needs for its
+# Pages deploy.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  refresh:
+    name: Rebuild catalog to refresh stars
+    uses: ./.github/workflows/plugin-registry-index.yml

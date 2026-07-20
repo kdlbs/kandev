@@ -35,6 +35,14 @@ type ConfigSectionProps = {
   repositorySelection: RepositorySelection;
   executionMode: ExecutionMode;
   conditionType: TriggerType | null;
+  dirtyFields?: {
+    executionMode: boolean;
+    workflowId: boolean;
+    workflowStepId: boolean;
+    agentProfileId: boolean;
+    executorProfileId: boolean;
+    repositorySelection: boolean;
+  };
   onWorkflowChange: (id: string) => void;
   onStepChange: (id: string) => void;
   onAgentProfileChange: (id: string) => void;
@@ -45,6 +53,14 @@ type ConfigSectionProps = {
 
 const REPO_NONE_OPTION_ID = "__none__";
 const DISCOVERED_PREFIX = "path:";
+const CLEAN_FIELDS = {
+  executionMode: false,
+  workflowId: false,
+  workflowStepId: false,
+  agentProfileId: false,
+  executorProfileId: false,
+  repositorySelection: false,
+};
 
 function selectionToOptionId(sel: RepositorySelection): string {
   if (sel.kind === "registered") return sel.id;
@@ -160,6 +176,7 @@ export function ConfigSection({
   repositorySelection,
   executionMode,
   conditionType,
+  dirtyFields = CLEAN_FIELDS,
   onWorkflowChange,
   onStepChange,
   onAgentProfileChange,
@@ -177,14 +194,10 @@ export function ConfigSection({
   const executors = useAppStore((state) => state.executors.items);
   const steps = useWorkflowSteps(workflowId);
 
-  const filteredAgentProfiles = useMemo(
-    () => agentProfiles.filter((p) => !p.cli_passthrough),
-    [agentProfiles],
-  );
-  const allExecutorProfiles = useMemo(
-    () => executors.filter((e) => e.type !== "local").flatMap((e) => e.profiles ?? []),
-    [executors],
-  );
+  const filteredAgentProfiles = agentProfiles.filter((profile) => !profile.cli_passthrough);
+  const allExecutorProfiles = executors
+    .filter((executor) => executor.type !== "local")
+    .flatMap((executor) => executor.profiles ?? []);
   const isPRTrigger = conditionType === "github_pr";
   const isRunMode = executionMode === "run";
   const repositoryItems = useMemo(
@@ -202,6 +215,7 @@ export function ConfigSection({
           testId="execution-mode-selector"
           label="Execution Mode"
           value={executionMode}
+          isDirty={dirtyFields.executionMode}
           onChange={(v) => onExecutionModeChange(v as ExecutionMode)}
           placeholder="Select mode"
           items={EXECUTION_MODE_ITEMS}
@@ -212,6 +226,8 @@ export function ConfigSection({
             workflowStepId={workflowStepId}
             workflows={workflows}
             steps={steps}
+            workflowDirty={dirtyFields.workflowId}
+            workflowStepDirty={dirtyFields.workflowStepId}
             onWorkflowChange={onWorkflowChange}
             onStepChange={onStepChange}
           />
@@ -219,6 +235,7 @@ export function ConfigSection({
         <SelectField
           label="Agent Profile"
           value={agentProfileId}
+          isDirty={dirtyFields.agentProfileId}
           onChange={onAgentProfileChange}
           placeholder="Select agent"
           items={filteredAgentProfiles.map((p) => ({
@@ -229,6 +246,7 @@ export function ConfigSection({
         <SelectField
           label="Executor Profile"
           value={executorProfileId}
+          isDirty={dirtyFields.executorProfileId}
           onChange={onExecutorProfileChange}
           placeholder="Select executor"
           items={allExecutorProfiles.map((p) => ({ id: p.id, label: p.name }))}
@@ -237,6 +255,7 @@ export function ConfigSection({
           testId="repository-selector"
           label="Repository"
           value={selectionToOptionId(repositorySelection)}
+          isDirty={dirtyFields.repositorySelection}
           onChange={(v) =>
             onRepositoryChange(pickSelectionFromOptionId(v, repositories, discoveredRepos))
           }
@@ -255,6 +274,8 @@ function WorkflowFields({
   workflowStepId,
   workflows,
   steps,
+  workflowDirty,
+  workflowStepDirty,
   onWorkflowChange,
   onStepChange,
 }: {
@@ -262,6 +283,8 @@ function WorkflowFields({
   workflowStepId: string;
   workflows: Array<{ id: string; name: string }>;
   steps: StepOption[];
+  workflowDirty: boolean;
+  workflowStepDirty: boolean;
   onWorkflowChange: (id: string) => void;
   onStepChange: (id: string) => void;
 }) {
@@ -278,6 +301,7 @@ function WorkflowFields({
         label="Workflow"
         required
         value={workflowId}
+        isDirty={workflowDirty}
         onChange={onWorkflowChange}
         placeholder="Select workflow"
         items={workflows.map((w) => ({ id: w.id, label: w.name }))}
@@ -288,6 +312,7 @@ function WorkflowFields({
         label="Workflow Step"
         required
         value={workflowStepId}
+        isDirty={workflowStepDirty}
         onChange={onStepChange}
         placeholder={hasWorkflow ? "Select step" : "Pick a workflow first"}
         items={steps.map((s) => ({ id: s.id, label: s.name }))}
@@ -308,6 +333,7 @@ function SelectField({
   disabled,
   helpText,
   required,
+  isDirty = false,
 }: {
   testId?: string;
   label: string;
@@ -318,6 +344,7 @@ function SelectField({
   disabled?: boolean;
   helpText?: string;
   required?: boolean;
+  isDirty?: boolean;
 }) {
   const invalid = required && !value;
   const helpId = testId && helpText ? `${testId}-help` : undefined;
@@ -334,6 +361,7 @@ function SelectField({
           className="cursor-pointer"
           aria-describedby={invalid ? helpId : undefined}
           aria-invalid={invalid ? true : undefined}
+          data-settings-dirty={isDirty}
         >
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>

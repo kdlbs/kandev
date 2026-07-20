@@ -147,11 +147,12 @@ func (m *Manager) GetRecoveredExecutions() []RecoveredExecution {
 	result := make([]RecoveredExecution, 0, len(executions))
 	for _, exec := range executions {
 		result = append(result, RecoveredExecution{
-			ExecutionID:    exec.ID,
-			TaskID:         exec.TaskID,
-			SessionID:      exec.SessionID,
-			ContainerID:    exec.ContainerID,
-			AgentProfileID: exec.AgentProfileID,
+			ExecutionID:        exec.ID,
+			TaskID:             exec.TaskID,
+			SessionID:          exec.SessionID,
+			ContainerID:        exec.ContainerID,
+			AgentProfileID:     exec.officeProfileID(),
+			ExecutionProfileID: exec.AgentProfileID,
 		})
 	}
 	return result
@@ -353,6 +354,7 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 // Typical usage: Called by cleanup loops or after successful StopAgent completion.
 // For stale/dead executions, use CleanupStaleExecutionBySessionID instead.
 func (m *Manager) RemoveExecution(executionID string) {
+	m.releaseActivity(executionActivityKey(executionID))
 	if execution, ok := m.executionStore.Get(executionID); ok {
 		m.cleanupPassthroughMCPConfig(execution)
 	}
