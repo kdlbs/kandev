@@ -242,8 +242,8 @@ func (h *RepositoryHandlers) httpLocalRepositoryStatus(c *gin.Context) {
 	}
 	status, err := h.service.LocalRepositoryStatus(c.Request.Context(), path)
 	if err != nil {
-		if errors.Is(err, service.ErrPathNotAllowed) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "path is not within allowed roots"})
+		if errors.Is(err, service.ErrInvalidRepositoryPath) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		h.logger.Error("failed to read local repository status", zap.Error(err))

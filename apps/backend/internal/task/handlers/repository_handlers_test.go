@@ -157,6 +157,22 @@ func TestHTTPListBranchesRejectsInvalidExplicitPath(t *testing.T) {
 	}
 }
 
+func TestHTTPLocalRepositoryStatusRejectsInvalidExplicitPath(t *testing.T) {
+	router, _ := newRepositoryHTTPTestRouter(t)
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/workspaces/ws-1/repositories/local-status?path="+url.QueryEscape(t.TempDir()),
+		nil,
+	)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusBadRequest, response.Body.String())
+	}
+}
+
 func newRepositoryHTTPTestRouter(t *testing.T) (*gin.Engine, *taskrepo.Repository) {
 	t.Helper()
 	router, repo, _ := newRepositoryHTTPTestRouterWithService(t)
