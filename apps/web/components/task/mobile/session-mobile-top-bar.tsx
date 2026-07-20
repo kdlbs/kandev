@@ -16,6 +16,7 @@ import {
   useMobileGitActions,
 } from "./session-mobile-top-bar-git-controls";
 import { MobileRepoPill } from "./mobile-repo-pill";
+import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 
 type SessionMobileTopBarProps = {
   taskId?: string | null;
@@ -63,6 +64,56 @@ function MobileTaskTitle({
   );
 }
 
+function RemoteExecutorIndicator({
+  taskId,
+  sessionId,
+  remoteExecutorType,
+  remoteExecutorName,
+  remoteState,
+  remoteCreatedAt,
+  remoteCheckedAt,
+  remoteStatusError,
+}: {
+  taskId?: string | null;
+  sessionId?: string | null;
+  remoteExecutorType?: string | null;
+  remoteExecutorName?: string | null;
+  remoteState?: string | null;
+  remoteCreatedAt?: string | null;
+  remoteCheckedAt?: string | null;
+  remoteStatusError?: string | null;
+}) {
+  return (
+    <RemoteCloudTooltip
+      taskId={taskId ?? ""}
+      sessionId={sessionId}
+      executorType={remoteExecutorType}
+      fallbackName={remoteExecutorName ?? remoteExecutorType}
+      iconClassName="h-4 w-4"
+      status={{
+        remote_name: remoteExecutorName ?? undefined,
+        remote_state: remoteState ?? undefined,
+        remote_created_at: remoteCreatedAt ?? undefined,
+        remote_checked_at: remoteCheckedAt ?? undefined,
+        remote_status_error: remoteStatusError ?? undefined,
+      }}
+    />
+  );
+}
+
+function ApproveButton({ onApprove }: { onApprove: () => void }) {
+  return (
+    <Button
+      size="sm"
+      className="h-7 gap-1 px-2 cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+      onClick={onApprove}
+    >
+      <IconCheck className="h-3.5 w-3.5" />
+      Approve
+    </Button>
+  );
+}
+
 type MobileTopBarActionsProps = {
   taskId?: string | null;
   workspaceId?: string | null;
@@ -79,6 +130,7 @@ type MobileTopBarActionsProps = {
   isGitLoading: boolean;
   uncommittedCount: number;
   baseBranch?: string;
+  taskTitle?: string;
   onCommitClick: () => void;
   onPRClick: () => void;
   onPull: () => void;
@@ -104,6 +156,7 @@ function MobileTopBarActions({
   isGitLoading,
   uncommittedCount,
   baseBranch,
+  taskTitle,
   onCommitClick,
   onPRClick,
   onPull,
@@ -115,32 +168,25 @@ function MobileTopBarActions({
   return (
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MobileRepoPill taskId={taskId ?? null} workspaceId={workspaceId ?? null} />
+      <TaskTopBarPluginActions
+        sessionId={sessionId ?? null}
+        taskId={taskId ?? null}
+        taskTitle={taskTitle}
+        workspaceId={workspaceId ?? null}
+      />
       {isRemoteExecutor && (
-        <RemoteCloudTooltip
-          taskId={taskId ?? ""}
+        <RemoteExecutorIndicator
+          taskId={taskId}
           sessionId={sessionId}
-          executorType={remoteExecutorType}
-          fallbackName={remoteExecutorName ?? remoteExecutorType}
-          iconClassName="h-4 w-4"
-          status={{
-            remote_name: remoteExecutorName ?? undefined,
-            remote_state: remoteState ?? undefined,
-            remote_created_at: remoteCreatedAt ?? undefined,
-            remote_checked_at: remoteCheckedAt ?? undefined,
-            remote_status_error: remoteStatusError ?? undefined,
-          }}
+          remoteExecutorType={remoteExecutorType}
+          remoteExecutorName={remoteExecutorName}
+          remoteState={remoteState}
+          remoteCreatedAt={remoteCreatedAt}
+          remoteCheckedAt={remoteCheckedAt}
+          remoteStatusError={remoteStatusError}
         />
       )}
-      {showApproveButton && onApprove && (
-        <Button
-          size="sm"
-          className="h-7 gap-1 px-2 cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
-          onClick={onApprove}
-        >
-          <IconCheck className="h-3.5 w-3.5" />
-          Approve
-        </Button>
-      )}
+      {showApproveButton && onApprove && <ApproveButton onApprove={onApprove} />}
       <GitActionsDropdown
         sessionId={sessionId}
         isGitLoading={isGitLoading}
@@ -164,6 +210,62 @@ function MobileTopBarActions({
         <IconMenu2 className="h-4 w-4" />
       </Button>
     </div>
+  );
+}
+
+function MobileTopBarDialogs({
+  commitDialogOpen,
+  setCommitDialogOpen,
+  prDialogOpen,
+  setPrDialogOpen,
+  uncommittedCount,
+  uncommittedAdditions,
+  uncommittedDeletions,
+  isGitLoading,
+  onCommit,
+  displayBranch,
+  baseBranch,
+  taskTitle,
+  firstCommitMessage,
+  onCreatePR,
+}: {
+  commitDialogOpen: boolean;
+  setCommitDialogOpen: (open: boolean) => void;
+  prDialogOpen: boolean;
+  setPrDialogOpen: (open: boolean) => void;
+  uncommittedCount: number;
+  uncommittedAdditions: number;
+  uncommittedDeletions: number;
+  isGitLoading: boolean;
+  onCommit: (message: string, stageAll: boolean) => Promise<void>;
+  displayBranch?: string;
+  baseBranch?: string;
+  taskTitle?: string;
+  firstCommitMessage?: string;
+  onCreatePR: (title: string, body: string, draft: boolean) => Promise<void>;
+}) {
+  return (
+    <>
+      <CommitDialog
+        open={commitDialogOpen}
+        onOpenChange={setCommitDialogOpen}
+        uncommittedCount={uncommittedCount}
+        uncommittedAdditions={uncommittedAdditions}
+        uncommittedDeletions={uncommittedDeletions}
+        isGitLoading={isGitLoading}
+        onCommit={onCommit}
+      />
+      <PRDialog
+        open={prDialogOpen}
+        onOpenChange={setPrDialogOpen}
+        displayBranch={displayBranch}
+        baseBranch={baseBranch}
+        isGitLoading={isGitLoading}
+        taskTitle={taskTitle}
+        firstCommitMessage={firstCommitMessage}
+        onCreatePR={onCreatePR}
+      />
+    </>
   );
 }
 
@@ -240,6 +342,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
         isGitLoading={isGitLoading}
         uncommittedCount={uncommittedCount}
         baseBranch={baseBranch}
+        taskTitle={taskTitle}
         onCommitClick={() => setCommitDialogOpen(true)}
         onPRClick={() => setPrDialogOpen(true)}
         onPull={handlePull}
@@ -248,21 +351,18 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
         onMerge={handleMerge}
         onMenuClick={onMenuClick}
       />
-      <CommitDialog
-        open={commitDialogOpen}
-        onOpenChange={setCommitDialogOpen}
+      <MobileTopBarDialogs
+        commitDialogOpen={commitDialogOpen}
+        setCommitDialogOpen={setCommitDialogOpen}
+        prDialogOpen={prDialogOpen}
+        setPrDialogOpen={setPrDialogOpen}
         uncommittedCount={uncommittedCount}
         uncommittedAdditions={uncommittedAdditions}
         uncommittedDeletions={uncommittedDeletions}
         isGitLoading={isGitLoading}
         onCommit={handleCommit}
-      />
-      <PRDialog
-        open={prDialogOpen}
-        onOpenChange={setPrDialogOpen}
         displayBranch={displayBranch}
         baseBranch={baseBranch}
-        isGitLoading={isGitLoading}
         taskTitle={taskTitle}
         firstCommitMessage={commits[0]?.commit_message}
         onCreatePR={handleCreatePR}

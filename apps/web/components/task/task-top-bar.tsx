@@ -359,14 +359,16 @@ function TopBarRight({
   return (
     <div className="flex items-center justify-self-end gap-2 [&_button]:whitespace-nowrap">
       <TopbarMetrics activeSessionId={activeSessionId} size="sm" />
-      <TopbarCluster label="Plugin top bar actions" className="[&_button]:h-7 [&_button]:text-xs">
-        <TaskTopBarPluginActions
-          sessionId={activeSessionId ?? null}
-          taskId={taskId ?? null}
-          taskTitle={taskTitle}
-          workspaceId={workspaceId ?? null}
-        />
-      </TopbarCluster>
+      {!isArchived && (
+        <TopbarCluster label="Plugin top bar actions" className="[&_button]:h-7 [&_button]:text-xs">
+          <TaskTopBarPluginActions
+            sessionId={activeSessionId ?? null}
+            taskId={taskId ?? null}
+            taskTitle={taskTitle}
+            workspaceId={workspaceId ?? null}
+          />
+        </TopbarCluster>
+      )}
       {isArchived && (
         <TopbarCluster label="Unarchive task" className="[&_button]:h-7 [&_button]:text-xs">
           <TaskUnarchiveButton taskId={taskId} onUnarchived={onTaskUnarchived} />
