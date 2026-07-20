@@ -367,7 +367,7 @@ func TestLaunchPreparedSession_AbortsWhenStartingPersistenceFails(t *testing.T) 
 				Status:           v1.AgentStatusStarting,
 			}, nil
 		},
-		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+		startAgentProcessFunc: func(_ context.Context, _ string) error {
 			startCalled <- struct{}{}
 			return nil
 		},
@@ -2466,6 +2466,12 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 	var launchCount int64
 	entered := make(chan struct{}, 2)
 	gate := make(chan struct{})
+	startProcessGate := make(chan struct{})
+	var releaseStartProcess sync.Once
+	releaseStartProcessGate := func() {
+		releaseStartProcess.Do(func() { close(startProcessGate) })
+	}
+	t.Cleanup(releaseStartProcessGate)
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			atomic.AddInt64(&launchCount, 1)
@@ -2488,6 +2494,13 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 		// the live store would return after the first caller registered.
 		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
 			return "exec-race", nil
+		},
+		// The repository mock returns shared pointers, unlike the production
+		// database store. Hold both async process-start callbacks until the
+		// serialized launch calls finish mutating their session snapshots.
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			<-startProcessGate
+			return nil
 		},
 	}
 	executor := newTestExecutor(t, agentManager, repo)
@@ -2528,6 +2541,9 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 	}
 	close(gate)
 	wg.Wait()
+	releaseStartProcessGate()
+	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
+	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
 
 	// First call ran LaunchAgent; second call took the fast path so total
 	// stays at 1. Both return non-error (the second is a no-op start).
