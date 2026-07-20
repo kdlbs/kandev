@@ -1,3 +1,5 @@
+/* eslint-disable max-lines-per-function */
+
 import { describe, expect, it } from "vitest";
 import {
   DEMO_IDS,
@@ -6,6 +8,7 @@ import {
   createTaskFromInput,
   demoPRFeedback,
 } from "./scenario";
+import { createDemoFiles } from "./demo-files";
 
 describe("browser demo scenario", () => {
   it("hydrates a realistic board and GitHub pull request", () => {
@@ -14,6 +17,7 @@ describe("browser demo scenario", () => {
     const snapshot = payload.initialState?.kanbanMulti?.snapshots[DEMO_IDS.workflow];
 
     expect(payload.initialState?.workspaces?.activeId).toBe(DEMO_IDS.workspace);
+    expect(payload.initialState?.workflows?.items).toHaveLength(2);
     expect(snapshot?.steps).toHaveLength(4);
     expect(snapshot?.tasks).toHaveLength(5);
     expect(payload.initialState?.repositories?.itemsByWorkspaceId[DEMO_IDS.workspace]).toHaveLength(
@@ -28,19 +32,42 @@ describe("browser demo scenario", () => {
     expect(demoPRFeedback.comments[1].in_reply_to).toBe(demoPRFeedback.comments[0].id);
   });
 
+  it("hydrates selectable task-creation profiles and runnable session environments", () => {
+    const payload = createBootPayload(createDemoState());
+
+    expect(payload.initialState?.agentProfiles?.items).toHaveLength(2);
+    expect(payload.initialState?.executors?.items[0]?.profiles).toHaveLength(2);
+    expect(payload.initialState?.availableAgents?.loaded).toBe(true);
+    expect(payload.initialState?.workflows?.items[0]?.agent_profile_id).toBeUndefined();
+    expect(payload.initialState?.environmentIdBySessionId?.["demo-session-audit"]).toBe(
+      "demo-environment-demo-task-audit",
+    );
+  });
+
   it("shows structured agent capabilities in the checkout conversation", () => {
     const messages = createDemoState().messagesBySession["demo-session-checkout"];
     const types = new Set(messages.map((message) => message.type));
 
     expect(types).toEqual(
-      new Set(["message", "thinking", "tool_search", "tool_read", "tool_execute", "tool_edit"]),
+      new Set([
+        "message",
+        "thinking",
+        "todo",
+        "tool_search",
+        "tool_read",
+        "tool_execute",
+        "tool_edit",
+      ]),
     );
     expect(
       messages.find((message) => message.type === "tool_edit")?.metadata?.normalized,
     ).toMatchObject({
       modify_file: { mutations: [{ type: "patch" }] },
     });
-    expect(messages.at(-1)?.content).toContain("```text");
+    expect(
+      new Set(messages.flatMap((message) => (message.turn_id ? [message.turn_id] : []))),
+    ).toEqual(new Set(["checkout-turn", "checkout-followup"]));
+    expect(messages).toHaveLength(13);
   });
 
   it("hydrates a multi-repository plan-mode task with a populated plan", () => {
@@ -52,8 +79,14 @@ describe("browser demo scenario", () => {
       { repository_id: DEMO_IDS.repository, base_branch: "main" },
       { repository_id: DEMO_IDS.apiRepository, base_branch: "develop" },
     ]);
-    expect(state.messagesBySession["demo-session-react"].map((message) => message.type)).toContain(
-      "agent_plan",
+    expect(
+      state.messagesBySession["demo-session-react"].map((message) => message.type),
+    ).not.toContain("agent_plan");
+    expect(state.messagesBySession["demo-session-react"]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ content: expect.stringContaining("acme-web/package.json") }),
+        expect.objectContaining({ content: expect.stringContaining("acme-api/") }),
+      ]),
     );
     expect(payload.initialState?.taskPlans?.byTaskId["demo-task-react"]?.content).toContain(
       "acme-api",
@@ -76,6 +109,37 @@ describe("browser demo scenario", () => {
         },
       },
     });
+  });
+
+  it("seeds believable multi-turn histories for active, review, and completed work", () => {
+    const state = createDemoState();
+    const audit = state.messagesBySession["demo-session-audit"];
+    const auth = state.messagesBySession["demo-session-auth"];
+
+    expect(audit.filter((message) => message.author_type === "user")).toHaveLength(2);
+    expect(new Set(audit.map((message) => message.turn_id))).toEqual(
+      new Set(["audit-implementation", "audit-review-fix"]),
+    );
+    expect(audit.map((message) => message.type)).toEqual(
+      expect.arrayContaining(["thinking", "tool_search", "tool_edit", "tool_execute"]),
+    );
+    expect(auth.filter((message) => message.author_type === "user")).toHaveLength(2);
+    expect(auth.at(-1)?.content).toContain("task is complete");
+    expect(state.tasks.find((task) => task.id === "demo-task-auth")).toMatchObject({
+      state: "COMPLETED",
+      primary_session_id: "demo-session-auth",
+    });
+  });
+
+  it("provides a rich, navigable repository fixture", () => {
+    const files = createDemoFiles();
+
+    expect(Object.keys(files).length).toBeGreaterThanOrEqual(20);
+    expect(files["src/checkout/complete-order.ts"]).toContain("withOrderLock");
+    expect(files["src/audit/record-event.ts"]).toContain("coarseRegion");
+    expect(files["migrations/20260718_create_audit_events.sql"]).toContain(
+      "CREATE TABLE audit_events",
+    );
   });
 
   it("creates task DTOs compatible with the normal kanban API", () => {

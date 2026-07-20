@@ -1,5 +1,7 @@
+/* eslint-disable max-lines-per-function */
+
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { DemoWorkerResponse } from "./protocol";
+import type { DemoWorkerRequest, DemoWorkerResponse } from "./protocol";
 import { DEMO_IDS } from "./scenario";
 import { handleHttp, handleSocketRequest } from "./worker";
 
@@ -8,6 +10,9 @@ function get(path: string) {
 }
 
 let socketRequestSequence = 0;
+const CHECKOUT_SESSION_ID = "demo-session-checkout";
+const AUDIT_SESSION_ID = "demo-session-audit";
+const REACT_TASK_ID = "demo-task-react";
 
 function requestSocket(action: string, payload: Record<string, unknown> = {}) {
   const postMessage = vi.spyOn(self, "postMessage").mockImplementation(() => undefined);
@@ -54,11 +59,28 @@ describe("browser demo worker HTTP runtime", () => {
 
     expect(sessions).toMatchObject({
       status: 200,
-      body: { sessions: [{ task_environment_id: "demo-environment" }] },
+      body: { sessions: [{ task_environment_id: "demo-environment-demo-task-audit" }] },
     });
     expect(terminals).toMatchObject({
       status: 200,
       body: { terminals: [{ kind: "ordinary", pty_status: "running" }] },
+    });
+  });
+
+  it("serves the resources required to navigate to tasks and configure new ones", async () => {
+    const [agents, executors, workflows, supportSnapshot] = await Promise.all([
+      get("/api/v1/agents"),
+      get("/api/v1/executors"),
+      get(`/api/v1/workspaces/${DEMO_IDS.workspace}/workflows`),
+      get(`/api/v1/workflows/${DEMO_IDS.supportWorkflow}/snapshot`),
+    ]);
+
+    expect(agents).toMatchObject({ status: 200, body: { total: 1 } });
+    expect(executors).toMatchObject({ status: 200, body: { total: 1 } });
+    expect(workflows).toMatchObject({ status: 200, body: { total: 2 } });
+    expect(supportSnapshot).toMatchObject({
+      status: 200,
+      body: { workflow: { id: DEMO_IDS.supportWorkflow }, steps: { length: 3 } },
     });
   });
 
@@ -97,14 +119,102 @@ describe("browser demo worker HTTP runtime", () => {
 });
 
 describe("browser demo worker WebSocket runtime", () => {
+  it("announces the selected task's environment when a session subscribes", () => {
+    const postMessage = vi.spyOn(self, "postMessage").mockImplementation(() => undefined);
+    const openSocket = self.onmessage as ((event: MessageEvent<DemoWorkerRequest>) => void) | null;
+    openSocket?.(
+      new MessageEvent("message", {
+        data: { kind: "ws-open", socketId: "control-socket", url: "ws://demo.test/ws" },
+      }),
+    );
+    postMessage.mockClear();
+    handleSocketRequest(
+      "control-socket",
+      JSON.stringify({
+        id: "subscribe-audit",
+        type: "request",
+        action: "session.subscribe",
+        payload: { session_id: AUDIT_SESSION_ID },
+      }),
+    );
+
+    const ready = postMessage.mock.calls
+      .map(([message]) => message as DemoWorkerResponse)
+      .flatMap((message) =>
+        message.kind === "ws-event" && message.event === "message"
+          ? [JSON.parse(message.data ?? "{}")]
+          : [],
+      )
+      .find((message) => message.action === "session.agentctl_ready");
+
+    expect(ready?.payload).toMatchObject({
+      session_id: AUDIT_SESSION_ID,
+      task_environment_id: "demo-environment-demo-task-audit",
+    });
+  });
+
+  it("serves the seeded task plan through the plan editor protocol", () => {
+    const plan = requestSocket("task.plan.get", { task_id: REACT_TASK_ID });
+    const revisions = requestSocket("task.plan.revisions.list", {
+      task_id: REACT_TASK_ID,
+    });
+
+    expect(plan.payload).toMatchObject({
+      task_id: REACT_TASK_ID,
+      title: "React 19 multi-repository upgrade",
+      created_by: "agent",
+    });
+    expect(plan.payload.content).toContain("acme-api");
+    expect(revisions.payload.revisions).toEqual([
+      expect.objectContaining({ task_id: REACT_TASK_ID, revision_number: 1 }),
+    ]);
+  });
+
+  it("serves changed files, commits, and cumulative diffs for seeded work", () => {
+    const commits = requestSocket("session.git.commits", {
+      session_id: CHECKOUT_SESSION_ID,
+    });
+    const diff = requestSocket("session.cumulative_diff", {
+      session_id: CHECKOUT_SESSION_ID,
+    });
+
+    expect(commits.payload).toMatchObject({
+      ready: true,
+      commits: [expect.objectContaining({ commit_message: expect.stringContaining("checkout") })],
+    });
+    expect(diff.payload.cumulative_diff).toMatchObject({
+      session_id: CHECKOUT_SESSION_ID,
+      total_commits: 1,
+      files: {
+        "src/checkout/complete-order.ts": {
+          status: "modified",
+          diff: expect.stringContaining("completePayment"),
+        },
+        "tests/checkout/concurrent-inventory.test.ts": { status: "added" },
+      },
+    });
+  });
+
+  it("returns an empty git history for tasks that have not changed files", () => {
+    const commits = requestSocket("session.git.commits", {
+      session_id: "demo-session-react",
+    });
+    const diff = requestSocket("session.cumulative_diff", {
+      session_id: "demo-session-react",
+    });
+
+    expect(commits.payload).toEqual({ commits: [], ready: true });
+    expect(diff.payload).toEqual({ cumulative_diff: null, ready: true });
+  });
+
   it("serves a browsable workspace tree and file contents", () => {
     const tree = requestSocket("workspace.tree.get", {
-      session_id: "demo-session-audit",
+      session_id: AUDIT_SESSION_ID,
       path: "",
       depth: 1,
     });
     const file = requestSocket("workspace.file.get", {
-      session_id: "demo-session-audit",
+      session_id: AUDIT_SESSION_ID,
       path: "README.md",
     });
 
