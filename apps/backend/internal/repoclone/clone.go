@@ -81,7 +81,15 @@ func (c *Cloner) RepoPath(owner, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(basePath, owner, name), nil
+	targetPath := filepath.Join(basePath, owner, name)
+	relativePath, err := filepath.Rel(basePath, targetPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve repository path: %w", err)
+	}
+	if relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) || filepath.IsAbs(relativePath) {
+		return "", fmt.Errorf("repository path %q escapes clone base", targetPath)
+	}
+	return targetPath, nil
 }
 
 // EnsureCloned clones the repository if it doesn't exist locally, or fetches if it does.

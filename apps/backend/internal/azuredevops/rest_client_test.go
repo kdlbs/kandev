@@ -29,6 +29,9 @@ func TestRESTClientAuthAndDiscovery(t *testing.T) {
 		case "/acme/project-1/_apis/git/repositories":
 			_, _ = w.Write([]byte(`{"count":1,"value":[{"id":"repo-1","name":"widgets","defaultBranch":"refs/heads/main","webUrl":"https://dev.azure.com/acme/Platform/_git/widgets","project":{"id":"project-1","name":"Platform"}}]}`))
 		case "/acme/project-1/_apis/git/repositories/repo-1/refs":
+			if got := r.URL.Query().Get("$top"); got != "1000" {
+				t.Errorf("branch $top = %q, want 1000", got)
+			}
 			_, _ = w.Write([]byte(`{"count":1,"value":[{"name":"refs/heads/main"}]}`))
 		default:
 			http.NotFound(w, r)

@@ -21,6 +21,7 @@ const (
 	maxErrorBodyBytes    = 4096
 	maxResponseBodyBytes = 16 << 20
 	workItemBatchSize    = 200
+	branchResultLimit    = 1000
 	defaultPRPageSize    = 50
 )
 
@@ -118,7 +119,7 @@ func (c *RESTClient) ListBranches(ctx context.Context, projectID, repositoryID s
 			Name string `json:"name"`
 		} `json:"value"`
 	}
-	endpoint := fmt.Sprintf("/%s/_apis/git/repositories/%s/refs?filter=heads/&api-version=%s", pathPart(projectID), pathPart(repositoryID), restAPIVersion)
+	endpoint := fmt.Sprintf("/%s/_apis/git/repositories/%s/refs?filter=heads/&$top=%d&api-version=%s", pathPart(projectID), pathPart(repositoryID), branchResultLimit, restAPIVersion)
 	if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, &response); err != nil {
 		return nil, err
 	}
