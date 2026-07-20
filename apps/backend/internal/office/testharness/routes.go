@@ -38,6 +38,8 @@ import (
 // "true" to enable — matches the convention used by KANDEV_MOCK_JIRA etc.
 const EnvVar = "KANDEV_E2E_MOCK"
 
+const gitLabRemoteURLEnv = "KANDEV_E2E_GITLAB_REMOTE_URL"
+
 // errInvalidJSONPrefix is the shared 400 message for malformed request bodies.
 const errInvalidJSONPrefix = "invalid JSON: "
 
@@ -146,15 +148,26 @@ func configureGitRemoteHandler(repo *sqliterepo.Repository, log *logger.Logger) 
 			errJSON(c, http.StatusBadRequest, errInvalidJSONPrefix+err.Error())
 			return
 		}
-		remote, err := url.Parse(strings.TrimSpace(req.RemoteURL))
-		if err != nil || (remote.Hostname() != "localhost" && remote.Hostname() != "127.0.0.1") {
+		requestedRemote, err := url.Parse(strings.TrimSpace(req.RemoteURL))
+		if err != nil || (requestedRemote.Hostname() != "localhost" && requestedRemote.Hostname() != "127.0.0.1") {
 			errJSON(c, http.StatusBadRequest, "remote_url must use the local E2E server")
 			return
 		}
-		args := []string{"-C", repository.LocalPath, "remote", "add", "origin", remote.String()}
+		configuredRemote, err := url.Parse(strings.TrimSpace(os.Getenv(gitLabRemoteURLEnv)))
+		if err != nil ||
+			(configuredRemote.Hostname() != "localhost" && configuredRemote.Hostname() != "127.0.0.1") {
+			errJSON(c, http.StatusInternalServerError, "GitLab E2E remote is not configured")
+			return
+		}
+		trustedRemoteURL := configuredRemote.String()
+		if requestedRemote.String() != trustedRemoteURL {
+			errJSON(c, http.StatusBadRequest, "remote_url does not match the configured E2E remote")
+			return
+		}
+		args := []string{"-C", repository.LocalPath, "remote", "add", "origin", trustedRemoteURL}
 		if getErr := exec.CommandContext(c.Request.Context(), "git", "-C", repository.LocalPath,
 			"remote", "get-url", "origin").Run(); getErr == nil {
-			args = []string{"-C", repository.LocalPath, "remote", "set-url", "origin", remote.String()}
+			args = []string{"-C", repository.LocalPath, "remote", "set-url", "origin", trustedRemoteURL}
 		}
 		if output, runErr := exec.CommandContext(c.Request.Context(), "git", args...).CombinedOutput(); runErr != nil {
 			log.Error("test harness: configure git remote failed", zap.Error(runErr))
@@ -162,7 +175,7 @@ func configureGitRemoteHandler(repo *sqliterepo.Repository, log *logger.Logger) 
 			return
 		}
 		if marker := os.Getenv("KANDEV_E2E_GITLAB_PUSH_FILE"); marker != "" {
-			if writeErr := os.WriteFile(marker, []byte(remote.String()), 0o600); writeErr != nil {
+			if writeErr := os.WriteFile(marker, []byte(trustedRemoteURL), 0o600); writeErr != nil {
 				log.Error("test harness: write GitLab push marker failed", zap.Error(writeErr))
 				errJSON(c, http.StatusInternalServerError, "write GitLab push marker")
 				return

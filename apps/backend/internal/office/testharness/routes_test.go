@@ -129,6 +129,19 @@ func TestConfigureGitRemoteRoute(t *testing.T) {
 	t.Setenv("KANDEV_E2E_GITLAB_PUSH_RECORD_FILE", record)
 	router := newRouter(t, repo, nil)
 	remoteURL := "http://localhost:18080/group/project.git"
+	t.Setenv("KANDEV_E2E_GITLAB_REMOTE_URL", remoteURL)
+	unexpectedBody := mustJSON(t, map[string]string{
+		"remote_url": "http://localhost:18080/group/unexpected.git",
+	})
+	unexpectedReq := httptest.NewRequest(http.MethodPut,
+		"/api/v1/_test/repositories/"+model.ID+"/git-remote", bytes.NewReader(unexpectedBody))
+	unexpectedReq.Header.Set("Content-Type", "application/json")
+	unexpectedRes := httptest.NewRecorder()
+	router.ServeHTTP(unexpectedRes, unexpectedReq)
+	if unexpectedRes.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected remote status=%d body=%s", unexpectedRes.Code, unexpectedRes.Body.String())
+	}
+
 	body := mustJSON(t, map[string]string{"remote_url": remoteURL})
 	req := httptest.NewRequest(http.MethodPut,
 		"/api/v1/_test/repositories/"+model.ID+"/git-remote", bytes.NewReader(body))

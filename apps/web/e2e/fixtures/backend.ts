@@ -287,6 +287,7 @@ exec git "$@"
         KANDEV_E2E_GIT_DELAY_FILE: shimDelayFile,
         KANDEV_E2E_GITLAB_PUSH_FILE: shimGitLabPushFile,
         KANDEV_E2E_GITLAB_PUSH_RECORD_FILE: shimGitLabPushRecordFile,
+        KANDEV_E2E_GITLAB_REMOTE_URL: `http://localhost:${backendPort}/platform/kandev.git`,
         HOME: tmpDir,
         KANDEV_HOME_DIR: homeDir,
         KANDEV_SERVER_PORT: String(backendPort),
