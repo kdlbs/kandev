@@ -311,6 +311,11 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	}
 
 	startTime := time.Now()
+	isOpenCode := isOpenCodeACPCommand(cfg.Command)
+	var refreshedOpenCodeModels []ProbeModel
+	if isOpenCode && req.Refresh {
+		refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, true)
+	}
 
 	// Probes intentionally omit the model flag so session/new returns the agent's
 	// default model and the complete availableModels list.
@@ -354,8 +359,11 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 			DurationMs: int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
-	if len(resp.Models) == 0 && isOpenCodeACPCommand(cfg.Command) {
-		e.applyOpenCodeModelsFallback(ctx, resp, resolvedCmd, workDir, req.Refresh)
+	if len(resp.Models) == 0 && isOpenCode {
+		if len(refreshedOpenCodeModels) == 0 {
+			refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, false)
+		}
+		resp.Models = refreshedOpenCodeModels
 	}
 
 	resp.Success = true
@@ -371,28 +379,26 @@ func isOpenCodeACPCommand(command []string) bool {
 		command[1] == openCodeACPSubcommand
 }
 
-// applyOpenCodeModelsFallback fills an otherwise empty probe model list from
-// OpenCode's CLI model listing.
-func (e *ACPInferenceExecutor) applyOpenCodeModelsFallback(
+// loadOpenCodeModels runs OpenCode's CLI model listing and logs failures
+// without failing the broader ACP capability probe.
+func (e *ACPInferenceExecutor) loadOpenCodeModels(
 	ctx context.Context,
-	resp *ProbeResponse,
 	resolvedCmd string,
 	workDir string,
 	refresh bool,
-) {
+) []ProbeModel {
 	models, err := probeOpenCodeModels(ctx, resolvedCmd, workDir, refresh)
 	if err != nil {
 		e.logger.Warn("ACP probe: failed to list opencode models",
 			zap.String("command", resolvedCmd),
 			zap.Error(err))
-		return
+		return nil
 	}
 	if len(models) == 0 {
 		e.logger.Warn("ACP probe: opencode models returned no valid model entries",
 			zap.String("command", resolvedCmd))
-		return
 	}
-	resp.Models = models
+	return models
 }
 
 // probeOpenCodeModels lists OpenCode's models, optionally refreshing its cache.

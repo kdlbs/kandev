@@ -94,6 +94,55 @@ fi
 	}
 }
 
+func TestProbeRefreshesOpenCodeCacheBeforeACPSession(t *testing.T) {
+	tmp := t.TempDir()
+	marker := filepath.Join(tmp, "models-refreshed")
+	agentPath := filepath.Join(tmp, openCodeCommand)
+	writeExecutable(t, agentPath, `#!/bin/sh
+if [ "$1" = "models" ]; then
+  if [ "$2" = "--refresh" ]; then
+    touch "$OPENCODE_REFRESH_MARKER"
+  fi
+  echo "opencode/fresh"
+  exit 0
+fi
+
+read -r INITIALIZE
+INITIALIZE_ID=$(printf '%s' "$INITIALIZE" | sed -n 's/.*"id":\([^,}]*\).*/\1/p')
+printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$INITIALIZE_ID"
+
+read -r NEW_SESSION
+SESSION_ID=$(printf '%s' "$NEW_SESSION" | sed -n 's/.*"id":\([^,}]*\).*/\1/p')
+MODEL="opencode/stale"
+if [ -f "$OPENCODE_REFRESH_MARKER" ]; then
+  MODEL="opencode/fresh"
+fi
+printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test","configOptions":[{"type":"select","id":"model","name":"Model","category":"model","currentValue":"%s","options":[{"value":"%s","name":"%s"}]}]}}\n' "$SESSION_ID" "$MODEL" "$MODEL" "$MODEL"
+cat >/dev/null
+`)
+	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("OPENCODE_REFRESH_MARKER", marker)
+
+	executor := NewACPInferenceExecutor(zap.NewNop())
+	resp, err := executor.Probe(context.Background(), &ProbeRequest{
+		AgentID: "opencode-acp",
+		Refresh: true,
+		InferenceConfig: &InferenceConfigDTO{
+			Command: []string{openCodeCommand, openCodeACPSubcommand},
+			WorkDir: tmp,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Probe returned error: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("Probe failed: %s", resp.Error)
+	}
+	if len(resp.Models) != 1 || resp.Models[0].ID != "opencode/fresh" {
+		t.Fatalf("models = %#v, want refreshed ACP model list", resp.Models)
+	}
+}
+
 func TestWaitForACPProcessGroupExitHonorsContextCancellation(t *testing.T) {
 	cmd := exec.Command("sleep", "30")
 	setACPCommandProcAttr(cmd)
