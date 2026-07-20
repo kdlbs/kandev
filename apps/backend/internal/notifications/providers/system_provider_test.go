@@ -248,3 +248,64 @@ func TestOsascriptNotifyArgs_OptionTerminator(t *testing.T) {
 		}
 	}
 }
+
+// TestEscapePowerShell_NeutralizesSubExpression is the regression guard for the
+// PowerShell sub-expression injection fix. It asserts that escapePowerShell
+// backtick-escapes `$` (killing `$(...)` sub-expressions and `$var` expansion),
+// doubles bare backticks, and escapes `"` — so a hostile SoundFile path can no
+// longer inject code into the playWindowsSound `-c` script.
+func TestEscapePowerShell_NeutralizesSubExpression(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "sub-expression is defused",
+			input: `a$(Remove-Item C:\x).wav`,
+			want:  "a`$(Remove-Item C:\\x).wav",
+		},
+		{
+			name:  "variable expansion is defused",
+			input: `$env:TEMP\s.wav`,
+			want:  "`$env:TEMP\\s.wav",
+		},
+		{
+			name:  "backtick doubled before other escapes",
+			input: "a`$(x).wav",
+			want:  "a```$(x).wav",
+		},
+		{
+			name:  "double quote escaped",
+			input: `a".wav`,
+			want:  "a`\".wav",
+		},
+		{
+			name:  "plain path unchanged",
+			input: `C:\Users\me\sound.wav`,
+			want:  `C:\Users\me\sound.wav`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := escapePowerShell(tc.input); got != tc.want {
+				t.Fatalf("escapePowerShell(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPlayWindowsSoundScript_NoLiveSubExpression asserts the reconstructed
+// `-c` script contains no live `$(` sub-expression once the path is escaped.
+func TestPlayWindowsSoundScript_NoLiveSubExpression(t *testing.T) {
+	payload := `C:\sounds\a$(Remove-Item -Recurse C:\important).wav`
+	script := fmt.Sprintf(`(New-Object Media.SoundPlayer "%s").PlaySync()`, escapePowerShell(payload))
+	// A live sub-expression would appear as `$(` with no escaping backtick in
+	// front. After escaping, the only `$(` occurrence must be the escaped form.
+	if strings.Contains(script, "$(") && !strings.Contains(script, "`$(") {
+		t.Fatalf("script still contains a live sub-expression: %q", script)
+	}
+	if strings.Contains(strings.ReplaceAll(script, "`$(", ""), "$(") {
+		t.Fatalf("script contains an unescaped sub-expression: %q", script)
+	}
+}

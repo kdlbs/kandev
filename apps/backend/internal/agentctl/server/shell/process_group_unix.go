@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build unix && !linux
 
 package shell
 
@@ -10,6 +10,16 @@ import (
 )
 
 func configureShellProcess(_ *exec.Cmd) {}
+
+type shellProcessLifecycleHandle struct{}
+
+func installShellProcessLifecycle(_ *exec.Cmd) (shellProcessLifecycleHandle, error) {
+	return shellProcessLifecycleHandle{}, nil
+}
+
+func reapShellProcessLifecycle(_ shellProcessLifecycleHandle) error { return nil }
+
+func ownsShellProcessLifecycle(_ shellProcessLifecycleHandle) bool { return false }
 
 func killShellProcessGroup(p *os.Process) error {
 	if p == nil {
@@ -25,4 +35,12 @@ func killShellProcessGroup(p *os.Process) error {
 		return err
 	}
 	return nil
+}
+
+func shellProcessGroupAlive(p *os.Process) bool {
+	if p == nil || p.Pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(-p.Pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }

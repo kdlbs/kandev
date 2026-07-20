@@ -53,6 +53,11 @@ tmp/
 temp/
 /workspaces/
 
+# Verification caches belong outside Git worktrees. Ignore this legacy/local
+# fallback so a misconfigured verification run cannot flood Git status.
+/.verify-cache/
+/.tmp/
+
 # Agent session files (local development)
 .augment/
 

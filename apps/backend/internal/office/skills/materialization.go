@@ -127,13 +127,22 @@ func materializeGit(skill *models.Skill, cacheDir string) (SkillDir, error) {
 		if err := runGit(repoDir, "pull", "--ff-only"); err != nil {
 			return SkillDir{}, err
 		}
-	} else if err := runGit("", "clone", "--depth=1", skill.SourceLocator, repoDir); err != nil {
+	} else if err := runGit("", gitCloneArgs(skill.SourceLocator, repoDir)...); err != nil {
 		return SkillDir{}, err
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "SKILL.md")); err != nil {
 		return SkillDir{}, fmt.Errorf("git skill %q has no SKILL.md at repository root", skill.Slug)
 	}
 	return SkillDir{Slug: skill.Slug, Path: repoDir}, nil
+}
+
+// gitCloneArgs builds the argv for the shallow skill clone. The `--`
+// end-of-options separator (matching internal/office/configloader/git.go)
+// ensures the source locator is always treated as a positional URL, never as a
+// flag — defense-in-depth in case validateGitLocator is ever relaxed enough to
+// admit a `-`-prefixed locator such as `--upload-pack=...`.
+func gitCloneArgs(locator, repoDir string) []string {
+	return []string{"clone", "--depth=1", "--", locator, repoDir}
 }
 
 func validateGitLocator(locator string) error {

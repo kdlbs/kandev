@@ -71,10 +71,12 @@ export interface PluginRouteOptions {
 
 /**
  * Named slot the host renders via `<PluginSlot name .../>`. Initial slots:
- * "task-sidebar", "settings-nav", "main-nav-footer", and "chat-input-actions"
+ * "task-sidebar", "settings-nav", "main-nav-footer", "chat-input-actions"
  * (icon buttons in the chat composer toolbar, beside the model picker / mic /
  * send — receives `{ taskId, taskTitle, activeSessionId, sessionIds }` as
- * `slotProps`). Not a closed union — hosts may register additional slot names.
+ * `slotProps`), and "chat-top-bar" (status in the session top bar, beside the
+ * CPU/DB metrics — receives `{ taskId, taskTitle, workspaceId, activeSessionId,
+ * sessionIds }`). Not a closed union — hosts may register additional slot names.
  */
 export type PluginSlotName = string;
 

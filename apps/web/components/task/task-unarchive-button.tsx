@@ -7,10 +7,13 @@ import { unarchiveTask } from "@/lib/api";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { useToast } from "@/components/toast-provider";
 
-// Shown in the task top bar when the task is archived. On success the
-// backend publishes task.updated with archived_at=null, which restores the
-// task in the kanban/store — no manual refetch needed here.
-export function TaskUnarchiveButton({ taskId }: { taskId?: string | null }) {
+export function TaskUnarchiveButton({
+  taskId,
+  onUnarchived,
+}: {
+  taskId?: string | null;
+  onUnarchived?: (taskId: string) => void;
+}) {
   const { toast } = useToast();
   const [isPending, setIsPending] = useState(false);
   if (!taskId) return null;
@@ -20,6 +23,11 @@ export function TaskUnarchiveButton({ taskId }: { taskId?: string | null }) {
     try {
       const result = await unarchiveTask(taskId);
       toast(unarchiveToastPayload(result));
+      if (result.success && result.unarchived_ids.includes(taskId)) {
+        onUnarchived?.(taskId);
+      } else if (result.success) {
+        console.warn("[TaskUnarchiveButton] task missing from successful response", taskId);
+      }
     } catch (err) {
       toast({
         title: "Failed to unarchive task",

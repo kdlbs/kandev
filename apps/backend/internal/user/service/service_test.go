@@ -393,6 +393,49 @@ func TestApplySavedLayouts(t *testing.T) {
 			wantApplied: true,
 		},
 		{
+			name: "valid layout with one default is applied",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "l1", Name: "Default layout", IsDefault: true, Layout: json.RawMessage(`{}`)},
+					{ID: "l2", Name: "Other layout", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   2,
+			wantApplied: true,
+		},
+		{
+			name: "valid reserved override default is applied",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "layout-override-default", Name: "Default", IsDefault: true, Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   1,
+			wantApplied: true,
+		},
+		{
+			name: "valid mixed custom and reserved override layouts are applied",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "layout-custom", Name: "Custom", Layout: json.RawMessage(`{}`)},
+					{ID: "layout-override-plan", Name: "Plan Mode", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   2,
+			wantApplied: true,
+		},
+		{
+			name: "valid mixed layouts allow one reserved override default",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "layout-custom", Name: "Custom", Layout: json.RawMessage(`{}`)},
+					{ID: "layout-override-default", Name: "Default", IsDefault: true, Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   2,
+			wantApplied: true,
+		},
+		{
 			name: "exactly max layouts is accepted",
 			req: &UpdateUserSettingsRequest{
 				SavedLayouts: ptr(makeLayouts(maxSavedLayouts)),
@@ -424,6 +467,44 @@ func TestApplySavedLayouts(t *testing.T) {
 				}),
 			},
 			wantErr: "saved_layouts: layout name must not be empty",
+		},
+		{
+			name: "empty id returns error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "", Name: "Layout", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: "saved_layouts: layout id must not be empty",
+		},
+		{
+			name: "whitespace-only id returns error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "   ", Name: "Layout", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: "saved_layouts: layout id must not be empty",
+		},
+		{
+			name: "duplicate ids return error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "l1", Name: "First", Layout: json.RawMessage(`{}`)},
+					{ID: "l1", Name: "Second", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: `saved_layouts: duplicate layout id "l1"`,
+		},
+		{
+			name: "mixed custom and reserved override defaults return error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "layout-custom", Name: "Custom", IsDefault: true, Layout: json.RawMessage(`{}`)},
+					{ID: "layout-override-default", Name: "Default", IsDefault: true, Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: "saved_layouts: at most one default layout allowed",
 		},
 	}
 

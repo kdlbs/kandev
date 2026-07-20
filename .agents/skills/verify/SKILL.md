@@ -66,25 +66,27 @@ inspect free space on the temp and cache filesystems before changing code:
 df -h /tmp /var/tmp "$PWD"
 ```
 
-Choose one writable filesystem with space, create one agent-owned root there,
-and use it consistently for the remaining verification commands. For example,
-replace `/var/tmp` below if a different filesystem has the available space:
+Keep reusable caches shared. In particular, preserve an existing absolute
+`GOCACHE` injected by Kandev's managed Go-cache provider, and preserve an
+existing `GOLANGCI_LINT_CACHE`. Create an invocation-owned directory only for
+scratch files and command logs. For example, replace `/var/tmp` below if a
+different filesystem has the available space:
 
 ```bash
-VERIFY_CACHE_ROOT="$(mktemp -d /var/tmp/kandev-verify.XXXXXXXX)"
-mkdir -p "$VERIFY_CACHE_ROOT/tmp" "$VERIFY_CACHE_ROOT/go-cache" "$VERIFY_CACHE_ROOT/golangci-cache"
-export TMPDIR="$VERIFY_CACHE_ROOT/tmp"
-export GOCACHE="$VERIFY_CACHE_ROOT/go-cache"
-export GOLANGCI_LINT_CACHE="$VERIFY_CACHE_ROOT/golangci-cache"
+VERIFY_SCRATCH_ROOT="$(mktemp -d /var/tmp/kandev-verify.XXXXXXXX)"
+mkdir -p "$VERIFY_SCRATCH_ROOT/tmp" "$VERIFY_SCRATCH_ROOT/logs"
+export TMPDIR="$VERIFY_SCRATCH_ROOT/tmp"
+export KANDEV_RUN_QUIET_DIR="$VERIFY_SCRATCH_ROOT/logs"
 ```
 
 In a managed sandbox, request the normal filesystem escalation when the chosen
 root is outside the writable roots; do not work around sandbox permissions.
-`scripts/run-quiet` honors `KANDEV_RUN_QUIET_DIR`, then `TMPDIR`, so its logs
-move to the same filesystem. Re-run the original failing command before
-diagnosing source code and verify that the disk/cache errors are gone. After all
-verification finishes, remove only `$VERIFY_CACHE_ROOT`; do not clear shared
-caches or unrelated temp files.
+If the cache filesystem itself is full or unwritable, relocate only the affected
+cache to an explicit persistent, agent-owned path outside every worktree and
+reuse that path on later verification runs. Never fall back to `.verify-cache`,
+`.tmp`, or another directory inside the repository. Re-run the original failing
+command before diagnosing source code. After verification, remove only
+`$VERIFY_SCRATCH_ROOT`; do not clear shared caches or unrelated temp files.
 
 ### Restricted remote-environment failures
 

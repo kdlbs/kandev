@@ -362,8 +362,17 @@ func osascriptNotifyArgs(title, body string) []string {
 	}
 }
 
+// escapePowerShell neutralizes PowerShell double-quoted-string metacharacters
+// so an operator-supplied sound path cannot inject code into the `-c` script.
+// Inside a double-quoted string PowerShell treats the backtick as the escape
+// character and expands `$(...)` sub-expressions and `$var` references, so all
+// three must be neutralized. Order matters: the backtick is doubled first,
+// otherwise the escapes added for `$` and `"` would themselves be corrupted.
 func escapePowerShell(value string) string {
-	return strings.ReplaceAll(value, `"`, "`\"")
+	value = strings.ReplaceAll(value, "`", "``")
+	value = strings.ReplaceAll(value, "$", "`$")
+	value = strings.ReplaceAll(value, `"`, "`\"")
+	return value
 }
 
 func runCommand(ctx context.Context, name string, args ...string) error {

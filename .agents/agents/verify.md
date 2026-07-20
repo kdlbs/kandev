@@ -46,7 +46,7 @@ Run the full verification pipeline for the monorepo, then fix any issues found.
    - For type, lint, or test failures, fix implementation behavior unless the test is demonstrably outdated.
    - For goleak failures after otherwise passing Go tests, loop the affected package with `go test -race -count=10 ./internal/<pkg>/...` and inspect cleanup ownership.
    - If Go tests fail because `httptest.NewServer` cannot bind loopback in a restricted sandbox, rerun the exact command with normal network/loopback escalation before diagnosing code.
-   - For `ENOSPC`, read-only cache, or cache-initialization failures, create invocation-specific writable `TMPDIR`, `GOCACHE`, and `GOLANGCI_LINT_CACHE` directories and rerun the exact command. Clean only those directories.
+   - For `ENOSPC`, read-only cache, or cache-initialization failures, preserve an existing absolute managed `GOCACHE` and existing lint cache. Move only invocation scratch (`TMPDIR` and quiet logs) to a writable filesystem. If a cache filesystem itself is unusable, relocate only that cache to a persistent agent-owned path outside every worktree; never use a repository-local fallback.
    - For Rust/Tauri changes, compare `rustc --version` with `apps/desktop/src-tauri/Cargo.toml`'s `rust-version`. Activate a matching installed toolchain without replacing `PATH`; report or request installation if unavailable.
    - After fixing, rerun only the failed command through `scripts/run-quiet`.
 

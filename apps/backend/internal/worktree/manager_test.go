@@ -113,6 +113,10 @@ func (s *mockStore) ListActiveWorktreePaths(_ context.Context) ([]string, error)
 	return paths, nil
 }
 
+func (s *mockStore) CountActiveWorktreeReferences(_ context.Context, _ string, _ []string) (int, error) {
+	return 0, nil
+}
+
 // GetWorktreesBySessionID — MultiRepoStore.
 func (s *mockStore) GetWorktreesBySessionID(_ context.Context, sessionID string) ([]*Worktree, error) {
 	var out []*Worktree

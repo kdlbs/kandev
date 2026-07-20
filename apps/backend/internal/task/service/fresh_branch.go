@@ -34,8 +34,9 @@ var ErrFreshBranchCheckout = errors.New("checkout failed")
 // hide the fact that some user work has already been destroyed.
 var ErrPartialDiscard = errors.New("partial discard: tracked changes were reset but git clean failed")
 
-// FreshBranchRequest performs a destructive checkout on a local repository:
-// discard uncommitted changes, then create NewBranch from BaseBranch.
+// FreshBranchRequest performs a destructive checkout on a saved local
+// repository: discard uncommitted changes, then create NewBranch from
+// BaseBranch. RepositoryID is resolved to its persisted exact-path grant.
 //
 // ConsentedDirtyFiles is the dirty-file list the caller already showed to
 // the user. The backend re-reads dirty files at execution time and rejects
@@ -43,7 +44,7 @@ var ErrPartialDiscard = errors.New("partial discard: tracked changes were reset 
 // consented list — this protects against silent loss of files that became
 // dirty between the consent dialog and the actual discard.
 type FreshBranchRequest struct {
-	RepoPath            string
+	RepositoryID        string
 	BaseBranch          string
 	NewBranch           string
 	ConfirmDiscard      bool
@@ -82,7 +83,7 @@ func (s *Service) PerformFreshBranch(ctx context.Context, req FreshBranchRequest
 	if err != nil {
 		return err
 	}
-	absPath, err := s.resolveAllowedLocalPath(req.RepoPath)
+	absPath, err := s.resolveRepositoryLocalPath(ctx, req.RepositoryID)
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -371,7 +372,9 @@ func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if session, ok := m.sessions[id]; ok {
-		return session, nil
+		// SQLite scans each query into a fresh value. Match that ownership
+		// boundary so concurrent executor paths cannot share mutable rows.
+		return cloneMockTaskSession(session), nil
 	}
 	return nil, nil
 }
@@ -401,6 +404,48 @@ func (m *mockRepository) UpdateTaskSessionIfCurrentState(
 	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
 	m.sessions[session.ID] = session
 	return true, nil
+}
+
+func cloneMockTaskSession(session *models.TaskSession) *models.TaskSession {
+	if session == nil {
+		return nil
+	}
+	clone := *session
+	clone.Metadata = cloneMockSessionMap(session.Metadata)
+	clone.AgentProfileSnapshot = cloneMockSessionMap(session.AgentProfileSnapshot)
+	clone.ExecutorSnapshot = cloneMockSessionMap(session.ExecutorSnapshot)
+	clone.EnvironmentSnapshot = cloneMockSessionMap(session.EnvironmentSnapshot)
+	clone.RepositorySnapshot = cloneMockSessionMap(session.RepositorySnapshot)
+	if session.Worktrees != nil {
+		clone.Worktrees = make([]*models.TaskSessionWorktree, len(session.Worktrees))
+		for i, worktree := range session.Worktrees {
+			if worktree == nil {
+				continue
+			}
+			worktreeClone := *worktree
+			clone.Worktrees[i] = &worktreeClone
+		}
+	}
+	if session.CompletedAt != nil {
+		completedAt := *session.CompletedAt
+		clone.CompletedAt = &completedAt
+	}
+	return &clone
+}
+
+func cloneMockSessionMap(values map[string]interface{}) map[string]interface{} {
+	if values == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		panic(fmt.Sprintf("marshal mock task session map: %v", err))
+	}
+	var clone map[string]interface{}
+	if err := json.Unmarshal(encoded, &clone); err != nil {
+		panic(fmt.Sprintf("unmarshal mock task session map: %v", err))
+	}
+	return clone
 }
 
 func (m *mockRepository) UpdateTaskSessionAgentProfileSnapshot(

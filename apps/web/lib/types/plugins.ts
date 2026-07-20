@@ -52,6 +52,13 @@ export interface PluginRecord {
   description: string;
   author: string;
   categories: string[];
+  /**
+   * Optional URL to the plugin's source repository, declared by the author in
+   * the manifest (`repo_url`). Rendered as a guarded "Repo" link in the plugin
+   * list and detail; omitted when the plugin declares none. The backend
+   * enforces an http(s) scheme at registration, but the UI guards again.
+   */
+  repo_url?: string;
   capabilities: PluginCapabilities;
   webhooks?: PluginWebhook[];
   config_schema?: Record<string, unknown>;

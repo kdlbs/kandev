@@ -111,6 +111,12 @@ describe("buildSettingsInitialStateForRoute", () => {
 });
 
 describe("renderSettingsRoute", () => {
+  it("renders layout profile settings from General settings", () => {
+    const route = renderSettingsRoute("/settings/general/layouts");
+    expect(isValidElement(route)).toBe(true);
+    expect(((route as ReactElement).type as { name?: string }).name).toBe("LayoutSettings");
+  });
+
   it("renders task action preferences from General settings", () => {
     const route = renderSettingsRoute("/settings/general/task-actions");
     expect(isValidElement(route)).toBe(true);

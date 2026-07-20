@@ -856,7 +856,7 @@ func walkthroughDemoArgs() map[string]interface{} {
 			wtStep("The change in A", "walkthrough_a.txt",
 				"Step 2: this is WALKTHROUGH_CHANGE_A the tour narrates.", 2, 3),
 			wtStep("File B", "walkthrough_b.txt",
-				"Step 3: WALKTHROUGH_CHANGE_B lives in file B.", 2, 0),
+				"Step 3: WALKTHROUGH_CHANGE_B lives in file B.", 4, 5),
 			wtStep("File C", "walkthrough_c.txt",
 				"Step 4: WALKTHROUGH_CHANGE_C lives in file C.", 2, 0),
 			wtStep("Unchanged file", "walkthrough_base.txt",
@@ -907,7 +907,8 @@ func setupWalkthroughFiles(e *emitter, prefix string) bool {
 		"line 1: ENTRY\nline 2: BASE\nline 3: BASE\n",
 		"line 1: ENTRY\nline 2: WALKTHROUGH_CHANGE_A\nline 3: WALKTHROUGH_CHANGE_A\n")
 	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_b.txt",
-		"line 1: B\nline 2: BASE\n", "line 1: B\nline 2: WALKTHROUGH_CHANGE_B\n")
+		"line 1: B\nline 2: BASE\nline 3: BASE\nline 4: BASE\nline 5: BASE\n",
+		"line 1: B\nline 2: BASE\nline 3: BASE\nline 4: WALKTHROUGH_CHANGE_B\nline 5: WALKTHROUGH_CHANGE_B\n")
 	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_c.txt",
 		"line 1: C\nline 2: BASE\n", "line 1: C\nline 2: WALKTHROUGH_CHANGE_C\n")
 	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_base.txt",

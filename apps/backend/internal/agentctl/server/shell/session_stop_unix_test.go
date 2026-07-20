@@ -16,6 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestKillAndWaitShellCommandReapsProcess(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "sleep 30")
+	require.NoError(t, cmd.Start())
+
+	require.NoError(t, killAndWaitShellCommand(cmd))
+	require.NotNil(t, cmd.ProcessState)
+}
+
 func TestStopKillsShellProcessGroupOnTimeout(t *testing.T) {
 	sh, err := exec.LookPath("sh")
 	require.NoError(t, err)
@@ -31,9 +39,7 @@ func TestStopKillsShellProcessGroupOnTimeout(t *testing.T) {
 
 	childPID := waitForShellChildPID(t, pidFile)
 	require.NoError(t, session.Stop())
-	require.Eventually(t, func() bool {
-		return !shellProcessAlive(childPID)
-	}, 5*time.Second, 50*time.Millisecond, "shell child process %d should be killed", childPID)
+	require.False(t, shellProcessAlive(childPID), "shell child process %d should be gone when Stop returns", childPID)
 }
 
 func TestStopKillsShellProcessGroupAfterLeaderExits(t *testing.T) {
@@ -51,9 +57,8 @@ func TestStopKillsShellProcessGroupAfterLeaderExits(t *testing.T) {
 
 	childPID := waitForShellChildPID(t, pidFile)
 	require.NoError(t, session.Stop())
-	require.Eventually(t, func() bool {
-		return !shellProcessAlive(childPID)
-	}, 5*time.Second, 50*time.Millisecond, "shell child process %d should be killed after shell leader exits", childPID)
+	require.False(t, shellProcessAlive(childPID),
+		"shell child process %d should be gone when Stop returns after leader exit", childPID)
 }
 
 func waitForShellChildPID(t *testing.T, pidFile string) int {

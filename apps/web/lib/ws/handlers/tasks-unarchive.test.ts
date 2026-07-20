@@ -56,11 +56,10 @@ function makeUpdatedMessage(payload: Record<string, unknown>) {
   } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
 }
 
-// Unarchive is delivered as task.updated with archived_at back to null. The
-// handler must re-add the task to the kanban caches (mirror of the archive
-// removal path).
+// The backend omits archived_at after unarchive because the field is nil. The
+// resulting task.updated event must still re-add the task to the kanban caches.
 describe("task.updated unarchive restore", () => {
-  it("re-adds the task to the active kanban when archived_at clears", () => {
+  it("re-adds the task to the active kanban when archived_at is omitted", () => {
     const store = makeStore();
     const handlers = registerTasksHandlers(store);
 
@@ -72,7 +71,6 @@ describe("task.updated unarchive restore", () => {
         title: "Restored task",
         state: "TODO",
         is_ephemeral: false,
-        archived_at: null,
       }),
     );
 
@@ -80,7 +78,7 @@ describe("task.updated unarchive restore", () => {
     expect(state.kanban.tasks.map((t) => t.id)).toContain(TASK_ID);
   });
 
-  it("re-adds the task to a multi-kanban snapshot when archived_at clears", () => {
+  it("re-adds the task to a multi-kanban snapshot when archived_at is omitted", () => {
     const store = makeStore({
       kanban: { workflowId: "wf-other", steps: [], tasks: [] } as unknown as AppState["kanban"],
       kanbanMulti: {
@@ -100,7 +98,6 @@ describe("task.updated unarchive restore", () => {
         title: "Restored task",
         state: "TODO",
         is_ephemeral: false,
-        archived_at: null,
       }),
     );
 

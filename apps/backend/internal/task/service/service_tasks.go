@@ -16,7 +16,6 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -610,10 +609,15 @@ func (s *Service) resolveRepoInputLocal(
 	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput,
 	repoByPath map[string]*models.Repository, baseBranch string,
 ) (string, string, bool, error) {
-	repo := repoByPath[repoInput.LocalPath]
+	lookupPath := repoInput.LocalPath
+	canonicalPath, probedBranch, pathErr := resolveExplicitLocalRepositoryPath(repoInput.LocalPath)
+	if pathErr == nil {
+		lookupPath = canonicalPath
+	}
+	repo := repoByPath[lookupPath]
 	created := false
 	if repo == nil {
-		if isKandevTaskWorktreePath(repoInput.LocalPath, s.discoveryConfig.TaskWorktreeRoots) {
+		if isKandevTaskWorktreePath(lookupPath, s.discoveryConfig.TaskWorktreeRoots) {
 			return "", "", false, fmt.Errorf("local path %q points at a Kandev task worktree; use the source repository or GitHub URL", repoInput.LocalPath)
 		}
 		name := strings.TrimSpace(repoInput.Name)
@@ -629,15 +633,12 @@ func (s *Service) resolveRepoInputLocal(
 		// branch, which would permanently pin repositories.default_branch to
 		// a feature branch and break every downstream merge-base lookup.
 		defaultBranch := repoInput.DefaultBranch
-		if defaultBranch == "" {
-			// Probe must operate on a path validated against the discovery
-			// allowlist — repoInput.LocalPath comes straight from the HTTP body
-			// and feeds into os.Stat/ReadFile inside gitref.DefaultBranch, so
-			// without this guard a caller could traverse the filesystem.
-			if safePath, pathErr := s.resolveAllowedLocalPath(repoInput.LocalPath); pathErr == nil {
-				if probed, err := gitref.DefaultBranchOrEmpty(safePath); err == nil && probed != "" {
-					defaultBranch = probed
-				}
+		if defaultBranch == "" && pathErr == nil {
+			// A manually supplied path is an explicit read-only probe. Canonical
+			// repository validation protects the filesystem read; discovery roots
+			// only constrain automatic scans.
+			if probedBranch != "" {
+				defaultBranch = probedBranch
 			}
 		}
 		createdRepo, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
@@ -653,6 +654,7 @@ func (s *Service) resolveRepoInputLocal(
 		repo = createdRepo
 		if repoByPath != nil {
 			repoByPath[repoInput.LocalPath] = repo
+			repoByPath[repo.LocalPath] = repo
 		}
 		created = true
 	} else {
@@ -1763,6 +1765,9 @@ func (s *Service) cleanupDestructiveTaskResources(
 	originalWorktreeCount := len(worktrees)
 	worktrees = s.filterOwnedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees, envCleanup.env, skipOwnedEnvironment)
 	worktrees = cleanupEligibleWorktrees(worktrees, envCleanup.env, preserveExecutorRows)
+	var referenceErrs []error
+	worktrees, referenceErrs = s.filterSharedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees)
+	errs = append(errs, referenceErrs...)
 	if len(worktrees) == 0 {
 		if originalWorktreeCount > 0 {
 			s.logger.Debug("no task worktrees eligible for cleanup",
@@ -1786,6 +1791,51 @@ func (s *Service) cleanupDestructiveTaskResources(
 		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
 	}
 	return errs
+}
+
+func (s *Service) filterSharedWorktreesForTaskCleanup(
+	ctx context.Context,
+	taskID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+) ([]*worktree.Worktree, []error) {
+	guard, ok := s.worktreeCleanup.(worktreeReferenceGuard)
+	if !ok || len(worktrees) == 0 {
+		return worktrees, nil
+	}
+	excludedSessionIDs := taskSessionIDs(sessions)
+	filtered := worktrees[:0]
+	var errs []error
+	for _, wt := range worktrees {
+		count, err := guard.CountActiveWorktreeReferences(ctx, wt.ID, excludedSessionIDs)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("count active references for worktree %s: %w", wt.ID, err))
+			continue
+		}
+		if count == 0 {
+			filtered = append(filtered, wt)
+			continue
+		}
+		if err := guard.ReleaseWorktreeReference(ctx, wt); err != nil {
+			errs = append(errs, fmt.Errorf("release shared worktree reference %s: %w", wt.ID, err))
+			continue
+		}
+		s.logger.Info("preserving worktree still referenced by another active task",
+			zap.String("task_id", taskID),
+			zap.String("worktree_id", wt.ID),
+			zap.Int("active_references", count))
+	}
+	return filtered, errs
+}
+
+func taskSessionIDs(sessions []*models.TaskSession) []string {
+	ids := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && session.ID != "" {
+			ids = append(ids, session.ID)
+		}
+	}
+	return ids
 }
 
 func taskEnvironmentID(env *models.TaskEnvironment) string {

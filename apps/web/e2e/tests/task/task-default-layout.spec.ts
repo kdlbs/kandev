@@ -8,6 +8,40 @@ import { SessionPage } from "../../pages/session-page";
 // placeholder before adding the session panel, which destroyed the center
 // group and collapsed the horizontal split into a single vertical column.
 test.describe("Task default layout shape", () => {
+  test("repo-less tasks keep every panel in the built-in default layout", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Repo-less Default Layout",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForDockviewReady();
+
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate(() => {
+            type Api = { panels: Array<{ id: string }> };
+            const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+            return api?.panels.map((panel) => panel.id).sort() ?? [];
+          }),
+        { message: "Waiting for every built-in default panel" },
+      )
+      .toEqual(["changes", "files", `session:${task.session_id}`, "terminal-default"]);
+  });
+
   test("entering a task is horizontal (right column beside chat, not stacked)", async ({
     testPage,
     apiClient,

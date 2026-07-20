@@ -51,6 +51,11 @@ export function useReviewWatches(workspaceId?: string | null) {
       });
     return () => {
       cancelled = true;
+      // Clear the scope guard so a same-scope re-mount (React StrictMode's
+      // double-invoke, or an effect re-run) re-issues the fetch. Without this,
+      // the cancelled first fetch drops its response while the guard blocks the
+      // second run, leaving the store stuck at loading with no items.
+      if (loadedScopeRef.current === scopeKey) loadedScopeRef.current = null;
     };
   }, [workspaceId, setReviewWatches, setReviewWatchesLoading]);
 

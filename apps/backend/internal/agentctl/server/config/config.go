@@ -270,6 +270,24 @@ func Load() *Config {
 	return cfg
 }
 
+// ListenHost returns the interface agentctl should bind its HTTP listeners to.
+//
+// When no AuthToken is configured the bearer-token middleware is a pass-through
+// (auth disabled), which would otherwise expose command/shell/process routes
+// unauthenticated. In that case we bind to loopback only so the surface is
+// never reachable beyond the local host. This does not affect the normal flow:
+// the launcher always injects AGENTCTL_BOOTSTRAP_NONCE, so a token is generated
+// and auth is enforced — including Docker, where the backend must reach agentctl
+// across the container boundary and an all-interfaces bind is required.
+//
+// An empty return means "all interfaces" (the historical ":port" form).
+func (c *Config) ListenHost() string {
+	if c.AuthToken == "" {
+		return "127.0.0.1"
+	}
+	return ""
+}
+
 // ConsumeNonce atomically validates and burns the bootstrap nonce.
 // Returns the auth token if the nonce matches, empty string otherwise.
 // The nonce is invalidated after a single successful call (one-shot).

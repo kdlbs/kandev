@@ -55,9 +55,9 @@ The first-run dialog scans supported agent CLIs, lets you inspect detected profi
 
 1. Open **Settings > Workspaces > Default Workspace > Repositories**. If you created or renamed the workspace, choose that workspace instead.
 2. Select **Add Local Repository**.
-3. Choose a discovered repository, or enter an absolute path and select **Validate**. The backend accepts only an existing Git repository within its configured discovery roots (the current user's home directory by default) or Kandev's configured clone base.
+3. Choose a discovered repository, or enter an absolute path and select **Validate**. The backend accepts any existing Git repository the Kandev process can access. Configured discovery roots bound automatic scans; they do not restrict an explicit path.
 4. Select **Use Repository**. This opens an unsaved repository card.
-5. Review the repository name, worktree branch template, pull behavior, setup/cleanup/dev scripts, copied files, and custom commands. Then select **Save**.
+5. Review the repository name, worktree branch template, pull behavior, setup/cleanup/dev scripts, copied files, and custom commands. Then select **Save changes**.
 
 New local repository records default to:
 
@@ -68,6 +68,8 @@ New local repository records default to:
 - empty setup, cleanup, dev, copied-file, and custom-script configuration.
 
 Scripts execute in agent workspaces and therefore belong to the trust boundary. Do not add an unreviewed command or copy pattern. Repository deletion is irreversible in the UI and is blocked while an active task session still references the repository.
+
+Repositories saved by an older Kandev version may still contain a path spelling with symbolic-link components. If branch operations report that such a saved path resolves to a different location after upgrading, edit and save the repository path again to record its current canonical location. Kandev does not silently accept the new resolution because that would also accept a saved path whose symbolic-link target was changed after registration.
 
 Remote repository and issue/PR URLs are not added from this settings page. Use the **Remote** tab in **New Task** after configuring GitHub, or paste a supported GitHub URL there. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
 
@@ -139,7 +141,7 @@ Common corrections:
 
 - If an agent is absent after installation, run **Rescan** and inspect the host terminal's `PATH`.
 - If a profile has no usable model or mode, authenticate the CLI, rescan, and reopen the profile. Capability probing can heal selections that an upgraded CLI removed.
-- If repository validation fails, use an absolute path inside an allowed discovery root and confirm it is a Git working tree.
+- If repository validation fails, use an absolute path to an existing, accessible Git working tree. Discovery roots control automatic scans only; they do not restrict an explicit path.
 - If a worktree cannot be prepared, resolve dirty/conflicting branch state, remote authentication, pull errors, setup-script failures, and disk exhaustion before retrying.
 - If the browser did not open, use the URL printed by the launcher or start with `--headless`; do not assume port `38429` when the launcher selected a fallback.
 

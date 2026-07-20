@@ -20,6 +20,13 @@ import { Dialog } from "@kandev/ui/dialog";
 - For data tables, use `@kandev/ui/table` with TanStack Table; use shadcn Pagination components.
 - Only create custom components when shadcn doesn't provide what's needed.
 
+### Responsive and touch surfaces
+
+- Use `hooks/use-responsive-breakpoint.ts` for application layout decisions. Its phone boundary is 640px and it also models tablet, compact desktop, full desktop, and pointer precision; do not substitute the UI package's generic `useIsMobile` hook.
+- Use `useTouchDrawer` when a hover/popover disclosure needs a coarse-pointer `Drawer` alternative. Width-based phone composition and pointer-based disclosure behavior are related but not interchangeable.
+- Existing Radix DropdownMenu and ContextMenu surfaces receive inset, safe-area-aware bottom-sheet treatment below 640px in `app/globals.css`. Reuse those primitives for contextual actions and add focused coverage for long or nested menus instead of creating a parallel mobile menu.
+- Mobile capability parity does not require desktop layout parity. Load `/mobile-parity` for the Kandev surface decision guide, mobile design contract, and verification requirements.
+
 ## Data Flow Pattern (Critical)
 
 ```text
@@ -97,6 +104,11 @@ surface.
   important exclusions, precedence, cost, or destructive consequences next to the control when they
   can affect the decision. Do not rely on tooltips, external documentation, or implementation terms
   alone to teach the setting.
+- **Settings save coordination:** settings surfaces with local unsaved state must register a
+  contributor with `useSettingsSaveContributor` (or use `SettingsPageTemplate`) so the shared
+  floating **Save changes** control, navigation guard, and discard flow own persistence. Do not add
+  page-local Save/Cancel controls. Contributor `save` callbacks must reject on failure so the
+  coordinator can report an error; `discard` must restore the contributor's authoritative baseline.
 - **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
   activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`),
   so per-dialog "submit on Enter" input handlers are unnecessary — let the base own it.

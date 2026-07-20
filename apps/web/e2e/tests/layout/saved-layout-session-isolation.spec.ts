@@ -123,7 +123,7 @@ test.describe("saved Dockview layouts", () => {
     expect(await dockviewPanelIds(testPage)).not.toContain(`session:${taskA.sessionId}`);
 
     await testPage.getByTestId("layout-preset-trigger").click();
-    await testPage.getByRole("menuitem", { name: /Simple/ }).click();
+    await testPage.getByRole("menuitem", { name: "Simple", exact: true }).click();
 
     await expect
       .poll(() => dockviewPanelIds(testPage), {

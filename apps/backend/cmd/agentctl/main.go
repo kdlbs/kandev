@@ -184,8 +184,10 @@ func run(cfg *config.Config, log *logger.Logger) {
 	// Create control server
 	controlServer := api.NewControlServer(cfg, instMgr, log)
 
-	// Start HTTP server
-	addr := fmt.Sprintf(":%d", cfg.Port)
+	// Start HTTP server. When no auth token is configured (auth disabled),
+	// ListenHost binds to loopback only so the unauthenticated command/shell/
+	// process routes are never reachable beyond the local host.
+	addr := fmt.Sprintf("%s:%d", cfg.ListenHost(), cfg.Port)
 	httpServer := &http.Server{
 		Addr:    addr,
 		Handler: controlServer.Router(),

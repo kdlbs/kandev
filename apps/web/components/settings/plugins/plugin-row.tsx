@@ -4,6 +4,7 @@ import { IconArrowUpCircle } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import Link from "@/components/routing/app-link";
+import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
 import type { MarketplaceEntry, PluginRecord } from "@/lib/types/plugins";
 
@@ -61,8 +62,11 @@ export function PluginRow({
               </Badge>
             )}
           </div>
-          <div className="text-xs text-muted-foreground font-mono truncate">
-            {plugin.id} · v{plugin.version}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span className="font-mono truncate">
+              {plugin.id} · v{plugin.version}
+            </span>
+            <PluginRepoLink url={plugin.repo_url} />
           </div>
           {plugin.description && (
             <div className="text-xs text-muted-foreground">{plugin.description}</div>
