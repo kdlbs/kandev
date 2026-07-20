@@ -1170,6 +1170,24 @@ export class ApiClient {
       number,
       commits,
     });
+    await this.seedMockGitHubRepositoryAccess([{ repo_owner: owner, repo_name: repo }]);
+
+    // PR commit fixtures predate workspace-scoped GitHub authentication and
+    // expect the shared mock client to be available for provider lookups.
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+    await Promise.all([
+      this.mockGitHubSetWorkspaceConnection(workspaceId, {
+        source: "legacy_shared",
+        status: "active",
+      }),
+      this.mockGitHubSetPersonalConnection(workspaceId, {
+        login: "e2e-test",
+        status: "active",
+        github_user_id: 1,
+        access_expires_at: "2100-01-01T00:00:00Z",
+      }),
+    ]);
   }
 
   async mockGitHubAddBranches(
