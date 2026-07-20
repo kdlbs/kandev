@@ -1,24 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { IconArrowUpCircle, IconCheck, IconExternalLink, IconStar } from "@tabler/icons-react";
+import { IconArrowUpCircle, IconCheck, IconStar } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import type { MarketplaceEntry } from "@/lib/types/plugins";
+import { PluginRepoLink } from "./plugin-repo-link";
 
 // Id of the built-in official source (marketplace.officialSourceID). Entries
 // from any other source get a source badge; the official one does not.
 const OFFICIAL_SOURCE_ID = "official";
-
-/**
- * Guard for rendering a catalog-supplied URL as an <a href>. repo_url comes
- * from an untrusted index.json (an operator-added or compromised source), so
- * only http(s) is allowed — a `javascript:` (or other) scheme would execute in
- * the operator's session on click. rel/target do NOT block `javascript:`.
- */
-function isHttpUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url.trim());
-}
 
 type MarketplaceEntryRowProps = {
   entry: MarketplaceEntry;
@@ -65,17 +56,7 @@ export function MarketplaceEntryRow({ entry, busy, onInstall }: MarketplaceEntry
             {cat}
           </Badge>
         ))}
-        {isHttpUrl(entry.repo_url) && (
-          <a
-            href={entry.repo_url}
-            target="_blank"
-            rel="noreferrer"
-            className="ml-auto inline-flex items-center gap-1 hover:text-foreground cursor-pointer"
-          >
-            <IconExternalLink className="h-3.5 w-3.5" />
-            Repo
-          </a>
-        )}
+        <PluginRepoLink url={entry.repo_url} className="ml-auto" />
       </div>
     </div>
   );
