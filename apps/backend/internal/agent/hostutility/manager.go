@@ -617,14 +617,14 @@ func buildProbeRequest(
 func probeFailureCapabilities(
 	agentType string,
 	status Status,
-	err string,
+	errorMessage string,
 	durationMs int,
 	checkedAt time.Time,
 ) AgentCapabilities {
 	return AgentCapabilities{
 		AgentType:     agentType,
 		Status:        status,
-		Error:         err,
+		Error:         errorMessage,
 		DurationMs:    durationMs,
 		LastCheckedAt: checkedAt,
 	}
