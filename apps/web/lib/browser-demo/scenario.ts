@@ -2,6 +2,8 @@
 
 import type { BootPayload } from "@/src/boot-payload";
 import type {
+  Agent,
+  Executor,
   Message,
   Repository,
   Task,
@@ -13,15 +15,20 @@ import type {
 import type { GitHubPR, PRFeedback, TaskPR } from "@/lib/types/github";
 
 export const DEMO_STORAGE_KEY = "kandev-browser-demo:v1";
-export const DEMO_SCENARIO_VERSION = 2;
+export const DEMO_SCENARIO_VERSION = 3;
 
 export const DEMO_IDS = {
   workspace: "demo-workspace",
   workflow: "demo-workflow",
+  supportWorkflow: "demo-support-workflow",
   repository: "demo-repository",
   apiRepository: "demo-api-repository",
   profile: "demo-mock-profile",
+  reviewProfile: "demo-review-profile",
   agent: "demo-mock-agent",
+  executor: "demo-worktree-executor",
+  executorProfile: "demo-worktree-profile",
+  safeExecutorProfile: "demo-worktree-safe-profile",
   steps: {
     backlog: "demo-step-backlog",
     progress: "demo-step-progress",
@@ -131,18 +138,84 @@ export const demoWorkflow: Workflow = {
   workspace_id: WORKSPACE_ID,
   name: "Product delivery",
   description: "A realistic Kandev workflow running entirely in this browser.",
-  agent_profile_id: DEMO_IDS.profile as never,
   sort_order: 0,
   style: "kanban",
   created_at: NOW,
   updated_at: NOW,
 };
 
+export const demoSupportWorkflow: Workflow = {
+  ...demoWorkflow,
+  id: DEMO_IDS.supportWorkflow as never,
+  name: "Incident response",
+  description: "A focused workflow for diagnosing and validating production fixes.",
+  agent_profile_id: DEMO_IDS.reviewProfile as never,
+  sort_order: 1,
+};
+
+export const demoWorkflows = [demoWorkflow, demoSupportWorkflow];
+
 export const demoSteps: WorkflowStep[] = [
   makeStep(DEMO_IDS.steps.backlog, "Backlog", 0, "bg-neutral-400", "work", true),
   makeStep(DEMO_IDS.steps.progress, "In progress", 1, "bg-blue-500", "work"),
   makeStep(DEMO_IDS.steps.review, "Review", 2, "bg-amber-500", "review"),
   makeStep(DEMO_IDS.steps.done, "Done", 3, "bg-emerald-500", "approval"),
+];
+
+export const demoSupportSteps: WorkflowStep[] = [
+  {
+    ...demoSteps[0],
+    id: "demo-support-step-triage",
+    workflow_id: DEMO_IDS.supportWorkflow as never,
+    name: "Triage",
+    color: "bg-rose-500",
+  },
+  {
+    ...demoSteps[2],
+    id: "demo-support-step-verify",
+    workflow_id: DEMO_IDS.supportWorkflow as never,
+    name: "Verify",
+    position: 1,
+    color: "bg-cyan-500",
+  },
+  {
+    ...demoSteps[3],
+    id: "demo-support-step-resolved",
+    workflow_id: DEMO_IDS.supportWorkflow as never,
+    name: "Resolved",
+    position: 2,
+  },
+];
+
+export const demoAgents: Agent[] = [
+  {
+    id: DEMO_IDS.agent,
+    name: "mock",
+    supports_mcp: true,
+    capability_status: "ok",
+    profiles: [
+      makeAgentProfile(DEMO_IDS.profile, "Build", "demo-fast"),
+      makeAgentProfile(DEMO_IDS.reviewProfile, "Review", "demo-review"),
+    ],
+    created_at: NOW,
+    updated_at: NOW,
+  },
+];
+
+export const demoExecutors: Executor[] = [
+  {
+    id: DEMO_IDS.executor,
+    name: "Browser workspace",
+    type: "worktree",
+    status: "active",
+    is_system: true,
+    profiles: [
+      makeExecutorProfile(DEMO_IDS.executorProfile, "Standard workspace"),
+      makeExecutorProfile(DEMO_IDS.safeExecutorProfile, "Isolated workspace"),
+    ],
+    created_at: NOW,
+    updated_at: NOW,
+  },
 ];
 
 export const demoRepository: Repository = {
@@ -241,13 +314,19 @@ export function createDemoState(): DemoState {
       primarySessionId: "demo-session-empty",
       primarySessionState: "IDLE",
     }),
-    makeTask("demo-task-auth", "Harden session refresh", DEMO_IDS.steps.done, "COMPLETED", 0),
+    makeTask("demo-task-auth", "Harden session refresh", DEMO_IDS.steps.done, "COMPLETED", 0, {
+      description:
+        "Rotate refresh tokens safely during concurrent requests and preserve device sessions.",
+      primarySessionId: "demo-session-auth",
+      primarySessionState: "IDLE",
+    }),
   ];
   const sessions = [
     makeSession("demo-session-checkout", "demo-task-checkout", "RUNNING"),
     makeSession("demo-session-audit", "demo-task-audit", "IDLE"),
     makeSession("demo-session-react", "demo-task-react", "IDLE"),
     makeSession("demo-session-empty", "demo-task-empty", "IDLE"),
+    makeSession("demo-session-auth", "demo-task-auth", "IDLE"),
   ];
   return {
     version: DEMO_SCENARIO_VERSION,
@@ -397,6 +476,111 @@ export function createDemoState(): DemoState {
           "The checkout path now holds the order lock only while reserving inventory. The focused regression suite passes:\n\n```text\nPASS checkout/concurrent-inventory.test.ts\nTests: 12 passed, 12 total\n```",
           { turnId: "checkout-turn" },
         ),
+        makeMessage(
+          "checkout-followup-user",
+          "demo-session-checkout",
+          "demo-task-checkout",
+          "user",
+          "Good find. Keep payment capture outside the lock, but make sure a gateway retry cannot reserve inventory twice.",
+          { turnId: "checkout-followup" },
+        ),
+        makeMessage(
+          "checkout-followup-thinking",
+          "demo-session-checkout",
+          "demo-task-checkout",
+          "agent",
+          "The existing inventory client accepts an idempotency key. I can reuse the order ID and assert the retry behavior without widening the critical section.",
+          {
+            type: "thinking",
+            turnId: "checkout-followup",
+            metadata: {
+              thinking:
+                "The inventory boundary already supports idempotency, so the regression belongs at the checkout orchestration layer.",
+            },
+          },
+        ),
+        makeMessage(
+          "checkout-followup-todos",
+          "demo-session-checkout",
+          "demo-task-checkout",
+          "agent",
+          "Updated implementation checklist",
+          {
+            type: "todo",
+            turnId: "checkout-followup",
+            metadata: {
+              todos: [
+                { text: "Reproduce lock contention", status: "completed" },
+                { text: "Narrow the order lock", status: "completed" },
+                { text: "Cover idempotent gateway retries", status: "completed" },
+                { text: "Run the full checkout suite", status: "in_progress" },
+              ],
+              previous_todo_snapshots: [
+                {
+                  todos: [
+                    { text: "Reproduce lock contention", status: "completed" },
+                    { text: "Narrow the order lock", status: "in_progress" },
+                    { text: "Cover idempotent gateway retries", status: "pending" },
+                  ],
+                  created_at: NOW,
+                },
+              ],
+            },
+          },
+        ),
+        makeMessage(
+          "checkout-followup-edit",
+          "demo-session-checkout",
+          "demo-task-checkout",
+          "agent",
+          "Edited tests/checkout/concurrent-inventory.test.ts",
+          {
+            type: "tool_edit",
+            turnId: "checkout-followup",
+            metadata: {
+              status: "complete",
+              normalized: {
+                modify_file: {
+                  file_path:
+                    "/demo/worktrees/demo-task-checkout/tests/checkout/concurrent-inventory.test.ts",
+                  mutations: [
+                    {
+                      type: "patch",
+                      old_content: 'expect(result.status).toBe("confirmed");',
+                      new_content:
+                        'expect(result.status).toBe("confirmed");\nexpect(inventory.reserve).toHaveBeenCalledTimes(1);',
+                      diff: '@@ -31,1 +31,2 @@\n expect(result.status).toBe("confirmed");\n+expect(inventory.reserve).toHaveBeenCalledTimes(1);',
+                      start_line: 31,
+                      end_line: 32,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "checkout-followup-command",
+          "demo-session-checkout",
+          "demo-task-checkout",
+          "agent",
+          "pnpm test tests/checkout --runInBand",
+          {
+            type: "tool_execute",
+            turnId: "checkout-followup",
+            metadata: {
+              status: "running",
+              normalized: {
+                shell_exec: {
+                  command: "pnpm test tests/checkout --runInBand",
+                  work_dir: "/demo/worktrees/demo-task-checkout",
+                  description: "Run the full checkout test suite",
+                  output: { has_output: true, stdout_bytes: 936, stderr_bytes: 0 },
+                },
+              },
+            },
+          },
+        ),
       ],
       "demo-session-audit": [
         makeMessage(
@@ -405,13 +589,204 @@ export function createDemoState(): DemoState {
           "demo-task-audit",
           "user",
           "Add audit events for role and access changes.",
+          { turnId: "audit-implementation" },
+        ),
+        makeMessage(
+          "audit-thinking",
+          "demo-session-audit",
+          "demo-task-audit",
+          "agent",
+          "Role changes currently write directly through three separate handlers. A shared append-only recorder will keep the event contract consistent.",
+          {
+            type: "thinking",
+            turnId: "audit-implementation",
+            metadata: {
+              thinking:
+                "Trace every privileged mutation first, then introduce one privacy-filtered event boundary.",
+            },
+          },
+        ),
+        makeMessage(
+          "audit-search",
+          "demo-session-audit",
+          "demo-task-audit",
+          "agent",
+          "Searched for privileged role mutations",
+          {
+            type: "tool_search",
+            turnId: "audit-implementation",
+            metadata: {
+              status: "complete",
+              normalized: {
+                code_search: {
+                  query: "updateRole|revokeAccess|inviteMember",
+                  path: "/demo/worktrees/demo-task-audit/src",
+                  output: {
+                    files: [
+                      "src/admin/members/update-role.ts",
+                      "src/admin/members/revoke-access.ts",
+                      "src/admin/members/invite-member.ts",
+                    ],
+                    file_count: 3,
+                  },
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "audit-schema-edit",
+          "demo-session-audit",
+          "demo-task-audit",
+          "agent",
+          "Created migrations/20260718_create_audit_events.sql",
+          {
+            type: "tool_edit",
+            turnId: "audit-implementation",
+            metadata: {
+              status: "complete",
+              normalized: {
+                modify_file: {
+                  file_path:
+                    "/demo/worktrees/demo-task-audit/migrations/20260718_create_audit_events.sql",
+                  mutations: [
+                    {
+                      type: "create",
+                      content:
+                        "CREATE TABLE audit_events (\n  id UUID PRIMARY KEY,\n  action TEXT NOT NULL,\n  actor_id UUID NOT NULL,\n  target_type TEXT NOT NULL,\n  target_id TEXT NOT NULL,\n  region TEXT NOT NULL,\n  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+                      start_line: 1,
+                      end_line: 9,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "audit-tests",
+          "demo-session-audit",
+          "demo-task-audit",
+          "agent",
+          "pnpm test tests/audit tests/components/audit-log.test.tsx",
+          {
+            type: "tool_execute",
+            turnId: "audit-implementation",
+            metadata: {
+              status: "complete",
+              normalized: {
+                shell_exec: {
+                  command: "pnpm test tests/audit tests/components/audit-log.test.tsx",
+                  work_dir: "/demo/worktrees/demo-task-audit",
+                  description: "Run audit service and activity view tests",
+                  output: { exit_code: 0, has_output: true, stdout_bytes: 1260, stderr_bytes: 0 },
+                },
+              },
+            },
+          },
         ),
         makeMessage(
           "audit-agent",
           "demo-session-audit",
           "demo-task-audit",
           "agent",
-          "Implemented the audit event schema, persistence path, and admin activity view. The pull request is ready for review.",
+          "Implemented the audit event schema, persistence path, and admin activity view. The pull request is ready for review.\n\n**Coverage:** role updates, access revocation, and member invitations. All 18 focused tests pass.",
+          { turnId: "audit-implementation" },
+        ),
+        makeMessage(
+          "audit-review-user",
+          "demo-session-audit",
+          "demo-task-audit",
+          "user",
+          "Mira left a review note: do not persist actor IP addresses. Keep enough location context for incident response and update the PR.",
+          { turnId: "audit-review-fix" },
+        ),
+        makeMessage(
+          "audit-review-read",
+          "demo-session-audit",
+          "demo-task-audit",
+          "agent",
+          "Read docs/architecture/audit-events.md",
+          {
+            type: "tool_read",
+            turnId: "audit-review-fix",
+            metadata: {
+              status: "complete",
+              normalized: {
+                read_file: {
+                  file_path: "/demo/worktrees/demo-task-audit/docs/architecture/audit-events.md",
+                  offset: 1,
+                  limit: 32,
+                  output: {
+                    content:
+                      "Privileged audit payloads may include a coarse request region, but never raw IP addresses, credentials, or request bodies.",
+                    line_count: 6,
+                    language: "markdown",
+                    truncated: false,
+                  },
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "audit-review-edit",
+          "demo-session-audit",
+          "demo-task-audit",
+          "agent",
+          "Edited src/audit/record-event.ts",
+          {
+            type: "tool_edit",
+            turnId: "audit-review-fix",
+            metadata: {
+              status: "complete",
+              normalized: {
+                modify_file: {
+                  file_path: "/demo/worktrees/demo-task-audit/src/audit/record-event.ts",
+                  mutations: [
+                    {
+                      type: "patch",
+                      old_content: "requestIp: input.requestIp,",
+                      new_content: "region: coarseRegion(input.requestIp),",
+                      diff: "@@ -45,1 +45,1 @@\n-requestIp: input.requestIp,\n+region: coarseRegion(input.requestIp),",
+                      start_line: 45,
+                      end_line: 45,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "audit-review-tests",
+          "demo-session-audit",
+          "demo-task-audit",
+          "agent",
+          "pnpm test tests/audit/record-event.test.ts",
+          {
+            type: "tool_execute",
+            turnId: "audit-review-fix",
+            metadata: {
+              status: "complete",
+              normalized: {
+                shell_exec: {
+                  command: "pnpm test tests/audit/record-event.test.ts",
+                  work_dir: "/demo/worktrees/demo-task-audit",
+                  description: "Verify privacy-safe audit payloads",
+                  output: { exit_code: 0, has_output: true, stdout_bytes: 684, stderr_bytes: 0 },
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "audit-review-summary",
+          "demo-session-audit",
+          "demo-task-audit",
+          "agent",
+          "Addressed Mira's review: raw IP addresses never cross the audit boundary now. The recorder stores only `internal`, `global`, or `global-ipv6`, and the new regression test asserts the source address is absent. PR #142 is updated and checks are green.",
+          { turnId: "audit-review-fix" },
         ),
       ],
       "demo-session-react": [
@@ -422,6 +797,113 @@ export function createDemoState(): DemoState {
           "user",
           "Plan the React upgrade across acme-web and the API contract test repository before changing code.",
           { metadata: { plan_mode: true } },
+        ),
+        makeMessage(
+          "react-web-search",
+          "demo-session-react",
+          "demo-task-react",
+          "agent",
+          "Searched acme-web for React runtime dependencies",
+          {
+            type: "tool_search",
+            turnId: "react-plan-turn",
+            metadata: {
+              status: "complete",
+              normalized: {
+                code_search: {
+                  query: "react-dom|react-test-renderer|hydrateRoot",
+                  path: "/demo/worktrees/demo-task-react/acme-web",
+                  output: {
+                    files: [
+                      "acme-web/package.json",
+                      "acme-web/src/main.tsx",
+                      "acme-web/tests/setup.ts",
+                    ],
+                    file_count: 3,
+                  },
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "react-web-read",
+          "demo-session-react",
+          "demo-task-react",
+          "agent",
+          "Read acme-web/package.json",
+          {
+            type: "tool_read",
+            turnId: "react-plan-turn",
+            metadata: {
+              status: "complete",
+              normalized: {
+                read_file: {
+                  file_path: "/demo/worktrees/demo-task-react/acme-web/package.json",
+                  offset: 1,
+                  limit: 80,
+                  output: {
+                    content:
+                      '"react": "^18.3.1",\n"react-dom": "^18.3.1",\n"@types/react": "^18.3.18",\n"vitest": "^3.0.5"',
+                    line_count: 42,
+                    language: "json",
+                    truncated: false,
+                  },
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "react-api-read",
+          "demo-session-react",
+          "demo-task-react",
+          "agent",
+          "Read acme-api/internal/contracts/dashboard_fixture_test.go",
+          {
+            type: "tool_read",
+            turnId: "react-plan-turn",
+            metadata: {
+              status: "complete",
+              normalized: {
+                read_file: {
+                  file_path:
+                    "/demo/worktrees/demo-task-react/acme-api/internal/contracts/dashboard_fixture_test.go",
+                  offset: 1,
+                  limit: 120,
+                  output: {
+                    content:
+                      'func TestDashboardFixtureMatchesWebClient(t *testing.T) {\n  fixtures.AssertMatches(t, "../../../acme-web/src/api/generated")\n}',
+                    line_count: 67,
+                    language: "go",
+                    truncated: false,
+                  },
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "react-versions-command",
+          "demo-session-react",
+          "demo-task-react",
+          "agent",
+          "pnpm why react react-dom && go list -m all | rg acme-contracts",
+          {
+            type: "tool_execute",
+            turnId: "react-plan-turn",
+            metadata: {
+              status: "complete",
+              normalized: {
+                shell_exec: {
+                  command: "pnpm why react react-dom && go list -m all | rg acme-contracts",
+                  work_dir: "/demo/worktrees/demo-task-react",
+                  description: "Map dependency versions across both repositories",
+                  output: { exit_code: 0, has_output: true, stdout_bytes: 1104, stderr_bytes: 0 },
+                },
+              },
+            },
+          },
         ),
         makeMessage(
           "react-thinking",
@@ -435,19 +917,12 @@ export function createDemoState(): DemoState {
           },
         ),
         makeMessage(
-          "react-plan",
-          "demo-session-react",
-          "demo-task-react",
-          "agent",
-          demoUpgradePlan.content,
-          { type: "agent_plan" },
-        ),
-        makeMessage(
           "react-agent",
           "demo-session-react",
           "demo-task-react",
           "agent",
-          "The implementation plan is ready. It keeps generated API fixtures compatible while the web runtime and tests move to React 19.",
+          "The implementation plan is ready in the **Plan** tab. The key dependency is the generated dashboard contract: `acme-web` should land first, then `acme-api` can validate the regenerated fixture before either compatibility flag is removed.",
+          { turnId: "react-plan-turn" },
         ),
       ],
       "demo-session-empty": [
@@ -457,6 +932,51 @@ export function createDemoState(): DemoState {
           "demo-task-empty",
           "user",
           "Improve the empty states for new workspace members.",
+          { turnId: "empty-discovery" },
+        ),
+        makeMessage(
+          "empty-read",
+          "demo-session-empty",
+          "demo-task-empty",
+          "agent",
+          "Read src/components/empty-workspace.tsx",
+          {
+            type: "tool_read",
+            turnId: "empty-discovery",
+            metadata: {
+              status: "complete",
+              normalized: {
+                read_file: {
+                  file_path: "/demo/worktrees/demo-task-empty/src/components/empty-workspace.tsx",
+                  offset: 1,
+                  limit: 90,
+                  output: {
+                    content:
+                      "export function EmptyWorkspace() {\n  return <section><h2>No repositories</h2></section>;\n}",
+                    line_count: 18,
+                    language: "tsx",
+                    truncated: false,
+                  },
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "empty-agent-discovery",
+          "demo-session-empty",
+          "demo-task-empty",
+          "agent",
+          "The current state only says “No repositories” and offers no recovery path. I can tailor the action to repository permissions and keep the view useful for both admins and members. Should regular members be sent to setup or to an administrator?",
+          { turnId: "empty-discovery" },
+        ),
+        makeMessage(
+          "empty-user-constraints",
+          "demo-session-empty",
+          "demo-task-empty",
+          "user",
+          "Use permission-aware actions. Administrators can connect a repository; regular members should get a clear handoff. Before implementing, ask me which handoff we want to feature in the demo.",
+          { turnId: "empty-clarification" },
         ),
         makeMessage(
           "empty-thinking",
@@ -464,7 +984,7 @@ export function createDemoState(): DemoState {
           "demo-task-empty",
           "agent",
           "The correct call to action depends on whether new members can create repositories themselves.",
-          { type: "thinking" },
+          { type: "thinking", turnId: "empty-clarification" },
         ),
         makeMessage(
           "empty-question",
@@ -475,6 +995,7 @@ export function createDemoState(): DemoState {
           {
             type: "clarification_request",
             requestsInput: true,
+            turnId: "empty-clarification",
             metadata: {
               pending_id: "demo-clarification-empty-state",
               session_id: "demo-session-empty",
@@ -504,6 +1025,153 @@ export function createDemoState(): DemoState {
           },
         ),
       ],
+      "demo-session-auth": [
+        makeMessage(
+          "auth-user",
+          "demo-session-auth",
+          "demo-task-auth",
+          "user",
+          "Users are occasionally signed out when two tabs refresh at the same time. Fix the rotation race without weakening replay protection.",
+          { turnId: "auth-diagnosis" },
+        ),
+        makeMessage(
+          "auth-search",
+          "demo-session-auth",
+          "demo-task-auth",
+          "agent",
+          "Searched for refresh token rotation",
+          {
+            type: "tool_search",
+            turnId: "auth-diagnosis",
+            metadata: {
+              status: "complete",
+              normalized: {
+                code_search: {
+                  query: "rotateRefreshToken",
+                  path: "/demo/worktrees/demo-task-auth/src/auth",
+                  output: {
+                    files: ["src/auth/refresh-session.ts", "src/auth/token-store.ts"],
+                    file_count: 2,
+                  },
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "auth-thinking",
+          "demo-session-auth",
+          "demo-task-auth",
+          "agent",
+          "Both tabs validate the same token before either transaction commits. The second request then treats a legitimate concurrent rotation as replay.",
+          {
+            type: "thinking",
+            turnId: "auth-diagnosis",
+            metadata: {
+              thinking:
+                "Serialize rotation by token family and allow one short grace-window handoff to the already-issued successor.",
+            },
+          },
+        ),
+        makeMessage(
+          "auth-edit",
+          "demo-session-auth",
+          "demo-task-auth",
+          "agent",
+          "Edited src/auth/refresh-session.ts",
+          {
+            type: "tool_edit",
+            turnId: "auth-diagnosis",
+            metadata: {
+              status: "complete",
+              normalized: {
+                modify_file: {
+                  file_path: "/demo/worktrees/demo-task-auth/src/auth/refresh-session.ts",
+                  mutations: [
+                    {
+                      type: "patch",
+                      old_content: "return tokenStore.rotate(token);",
+                      new_content:
+                        "return tokenStore.withFamilyLock(token.familyId, () =>\n  tokenStore.rotateOrReuseSuccessor(token, ROTATION_GRACE_MS),\n);",
+                      diff: "@@ -28,1 +28,3 @@\n-return tokenStore.rotate(token);\n+return tokenStore.withFamilyLock(token.familyId, () =>\n+  tokenStore.rotateOrReuseSuccessor(token, ROTATION_GRACE_MS),\n+);",
+                      start_line: 28,
+                      end_line: 30,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "auth-test",
+          "demo-session-auth",
+          "demo-task-auth",
+          "agent",
+          "pnpm test tests/auth/refresh-session.test.ts --runInBand",
+          {
+            type: "tool_execute",
+            turnId: "auth-diagnosis",
+            metadata: {
+              status: "complete",
+              normalized: {
+                shell_exec: {
+                  command: "pnpm test tests/auth/refresh-session.test.ts --runInBand",
+                  work_dir: "/demo/worktrees/demo-task-auth",
+                  description: "Run session rotation race tests",
+                  output: { exit_code: 0, has_output: true, stdout_bytes: 1518, stderr_bytes: 0 },
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "auth-agent",
+          "demo-session-auth",
+          "demo-task-auth",
+          "agent",
+          "The concurrent refresh race is fixed with a per-family lock and a five-second successor handoff. Replay attempts outside that window still revoke the family.\n\n```text\nPASS refresh-session.test.ts (14 tests)\nPASS token-replay.test.ts (9 tests)\n```",
+          { turnId: "auth-diagnosis" },
+        ),
+        makeMessage(
+          "auth-followup-user",
+          "demo-session-auth",
+          "demo-task-auth",
+          "user",
+          "Please also verify that signing out from one device does not revoke a different device's token family.",
+          { turnId: "auth-device-check" },
+        ),
+        makeMessage(
+          "auth-device-test",
+          "demo-session-auth",
+          "demo-task-auth",
+          "agent",
+          "pnpm test tests/auth/device-sessions.test.ts",
+          {
+            type: "tool_execute",
+            turnId: "auth-device-check",
+            metadata: {
+              status: "complete",
+              normalized: {
+                shell_exec: {
+                  command: "pnpm test tests/auth/device-sessions.test.ts",
+                  work_dir: "/demo/worktrees/demo-task-auth",
+                  description: "Verify device-scoped revocation",
+                  output: { exit_code: 0, has_output: true, stdout_bytes: 812, stderr_bytes: 0 },
+                },
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "auth-final",
+          "demo-session-auth",
+          "demo-task-auth",
+          "agent",
+          "Verified. Revocation is scoped to the current `deviceId`; the other device keeps its independent token family. The full auth suite passes, and the task is complete.",
+          { turnId: "auth-device-check" },
+        ),
+      ],
     },
     taskPRs: {
       "demo-task-audit": [makeTaskPR()],
@@ -513,6 +1181,11 @@ export function createDemoState(): DemoState {
 
 export function createBootPayload(state: DemoState): BootPayload {
   const snapshot = createSnapshot(state.tasks);
+  const supportSnapshot = createWorkflowSnapshot(
+    state.tasks,
+    demoSupportWorkflow,
+    demoSupportSteps,
+  );
   return {
     version: 1,
     runtime: { apiPrefix: "/api/v1", webSocketPath: "/ws", debug: false },
@@ -525,6 +1198,7 @@ export function createBootPayload(state: DemoState): BootPayload {
             name: "Acme Platform",
             description: "Browser demo workspace",
             owner_id: "demo-user",
+            default_executor_id: DEMO_IDS.executor,
             default_agent_profile_id: DEMO_IDS.profile,
             created_at: NOW,
             updated_at: NOW,
@@ -533,17 +1207,15 @@ export function createBootPayload(state: DemoState): BootPayload {
         activeId: DEMO_IDS.workspace,
       },
       workflows: {
-        items: [
-          {
-            id: DEMO_IDS.workflow,
-            workspaceId: DEMO_IDS.workspace,
-            name: demoWorkflow.name,
-            description: demoWorkflow.description,
-            sortOrder: 0,
-            agent_profile_id: DEMO_IDS.profile,
-            style: "kanban",
-          },
-        ],
+        items: demoWorkflows.map((workflow) => ({
+          id: workflow.id,
+          workspaceId: workflow.workspace_id,
+          name: workflow.name,
+          description: workflow.description,
+          sortOrder: workflow.sort_order,
+          agent_profile_id: workflow.agent_profile_id,
+          style: workflow.style,
+        })),
         activeId: DEMO_IDS.workflow,
       },
       repositories: {
@@ -574,7 +1246,13 @@ export function createBootPayload(state: DemoState): BootPayload {
         fetchErrorByRepositoryId: {},
       },
       kanban: { ...snapshot, isLoading: false },
-      kanbanMulti: { snapshots: { [DEMO_IDS.workflow]: snapshot }, isLoading: false },
+      kanbanMulti: {
+        snapshots: {
+          [DEMO_IDS.workflow]: snapshot,
+          [DEMO_IDS.supportWorkflow]: supportSnapshot,
+        },
+        isLoading: false,
+      },
       taskSessions: {
         items: Object.fromEntries(state.sessions.map((session) => [session.id, session])),
       },
@@ -588,6 +1266,11 @@ export function createBootPayload(state: DemoState): BootPayload {
         loadingByTaskId: Object.fromEntries(state.tasks.map((task) => [task.id, false])),
         loadedByTaskId: Object.fromEntries(state.tasks.map((task) => [task.id, true])),
       },
+      environmentIdBySessionId: Object.fromEntries(
+        state.sessions.flatMap((session) =>
+          session.task_environment_id ? ([[session.id, session.task_environment_id]] as const) : [],
+        ),
+      ),
       messages: {
         bySession: state.messagesBySession,
         metaBySession: Object.fromEntries(
@@ -612,31 +1295,21 @@ export function createBootPayload(state: DemoState): BootPayload {
       },
       chatInput: { planModeBySessionId: { "demo-session-react": true } },
       settingsAgents: {
-        items: [
-          {
-            id: DEMO_IDS.agent,
-            name: "mock",
-            supports_mcp: true,
-            profiles: [],
-            capability_status: "ok",
-            created_at: NOW,
-            updated_at: NOW,
-          },
-        ],
+        items: demoAgents,
       },
       agentProfiles: {
-        items: [
-          {
-            id: DEMO_IDS.profile,
-            label: "Mock agent - Browser demo",
-            agent_id: DEMO_IDS.agent,
-            agent_name: "mock",
-            cli_passthrough: false,
-            capability_status: "ok",
-          },
-        ],
+        items: demoAgents[0].profiles.map((profile) => ({
+          id: profile.id,
+          label: `${profile.agentDisplayName} • ${profile.name}`,
+          agent_id: DEMO_IDS.agent,
+          agent_name: "mock",
+          cli_passthrough: profile.cliPassthrough,
+          capability_status: "ok" as const,
+        })),
         version: 0,
       },
+      availableAgents: { items: [], tools: [], loading: false, loaded: true },
+      executors: { items: demoExecutors },
       settingsData: { agentsLoaded: true, executorsLoaded: true },
       userSettings: {
         workspaceId: DEMO_IDS.workspace,
@@ -646,7 +1319,7 @@ export function createBootPayload(state: DemoState): BootPayload {
           repositoryId: DEMO_IDS.repository,
           branch: "main",
           agentProfileId: DEMO_IDS.profile,
-          executorProfileId: null,
+          executorProfileId: DEMO_IDS.executorProfile,
           synced: true,
         },
         enablePreviewOnClick: true,
@@ -669,10 +1342,14 @@ export function createBootPayload(state: DemoState): BootPayload {
 }
 
 export function createSnapshot(tasks: Task[]) {
+  return createWorkflowSnapshot(tasks, demoWorkflow, demoSteps);
+}
+
+export function createWorkflowSnapshot(tasks: Task[], workflow: Workflow, steps: WorkflowStep[]) {
   return {
-    workflowId: DEMO_IDS.workflow,
-    workflowName: demoWorkflow.name,
-    steps: demoSteps.map((step) => ({
+    workflowId: workflow.id,
+    workflowName: workflow.name,
+    steps: steps.map((step) => ({
       id: step.id,
       title: step.name,
       color: step.color,
@@ -684,7 +1361,7 @@ export function createSnapshot(tasks: Task[]) {
       stage_type: step.stage_type,
     })),
     tasks: tasks
-      .filter((task) => !task.archived_at)
+      .filter((task) => !task.archived_at && task.workflow_id === workflow.id)
       .map((task) => ({
         id: task.id,
         workflowStepId: task.workflow_step_id,
@@ -718,6 +1395,7 @@ export function createTaskFromInput(state: DemoState, input: Record<string, unkn
     state.tasks.length,
     {
       description: String(input.description || ""),
+      workflowId: String(input.workflow_id || DEMO_IDS.workflow),
       repositories: repositories.map((repository, index) => ({
         id: `${id}-repository-${index + 1}`,
         task_id: id as never,
@@ -766,13 +1444,14 @@ function makeTask(
     primarySessionId?: string;
     primarySessionState?: Task["primary_session_state"];
     reviewStatus?: Task["review_status"];
+    workflowId?: string;
     repositories?: Task["repositories"];
   } = {},
 ): Task {
   return {
     id: id as never,
     workspace_id: WORKSPACE_ID,
-    workflow_id: WORKFLOW_ID,
+    workflow_id: (options.workflowId ?? WORKFLOW_ID) as never,
     workflow_step_id: stepId,
     position,
     title,
@@ -815,9 +1494,40 @@ export function makeSession(id: string, taskId: string, state: TaskSession["stat
     repository_id: REPOSITORY_ID,
     worktree_path: `/demo/worktrees/${taskId}`,
     worktree_branch: `kandev/${taskId}`,
+    task_environment_id: `demo-environment-${taskId}`,
     state,
     is_primary: true,
     started_at: NOW,
+    updated_at: NOW,
+  };
+}
+
+function makeAgentProfile(id: string, name: string, model: string): Agent["profiles"][number] {
+  return {
+    id: id as never,
+    name,
+    agentId: DEMO_IDS.agent,
+    agentDisplayName: "Mock agent",
+    model,
+    allowIndexing: false,
+    autoApprove: true,
+    cliFlags: [],
+    cliPassthrough: false,
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+}
+
+function makeExecutorProfile(id: string, name: string): NonNullable<Executor["profiles"]>[number] {
+  return {
+    id,
+    executor_id: DEMO_IDS.executor,
+    executor_type: "worktree",
+    executor_name: "Browser workspace",
+    name,
+    prepare_script: "",
+    cleanup_script: "",
+    created_at: NOW,
     updated_at: NOW,
   };
 }

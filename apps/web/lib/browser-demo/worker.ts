@@ -2,7 +2,12 @@
 
 /* eslint-disable complexity, max-lines, max-lines-per-function, sonarjs/cognitive-complexity, sonarjs/no-duplicate-string */
 
-import type { Message, Task, TaskSession } from "@/lib/types/http";
+import type { Message, Task, TaskPlan, TaskPlanRevision, TaskSession } from "@/lib/types/http";
+import type {
+  CumulativeDiff,
+  FileInfo,
+  SessionCommit,
+} from "@/lib/state/slices/session-runtime/types";
 import type {
   DemoHttpRequest,
   DemoHttpResponse,
@@ -15,21 +20,32 @@ import {
   createBootPayload,
   createDemoState,
   createTaskFromInput,
+  demoAgents,
   demoApiRepository,
+  demoExecutors,
   demoGitHubPR,
   demoPRFeedback,
   demoRepository,
   demoSteps,
-  demoWorkflow,
+  demoSupportSteps,
+  demoSupportWorkflow,
+  demoUpgradePlan,
+  demoWorkflows,
   makeMessage,
   makeSession,
   type DemoState,
 } from "./scenario";
 import { createDemoStats } from "./stats";
+import { createDemoFiles } from "./demo-files";
 
 const scope: DedicatedWorkerGlobalScope = self as never;
 let state = createDemoState();
 let files = createDemoFiles();
+let plansByTask = createDemoPlans();
+const fileReviewsBySession = new Map<
+  string,
+  Map<string, { reviewed: boolean; diffHash: string }>
+>();
 const socketUrls = new Map<string, string>();
 const terminalInputBySocket = new Map<string, string>();
 
@@ -61,6 +77,8 @@ scope.onmessage = (event: MessageEvent<DemoWorkerRequest>) => {
   if (message.kind === "init") {
     state = restoreState(message.persistedState);
     files = createDemoFiles();
+    plansByTask = createDemoPlans();
+    fileReviewsBySession.clear();
     post({ kind: "result", id: message.id, value: createBootPayload(state) });
     return;
   }
@@ -137,16 +155,36 @@ export async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResp
     return json({ scripts: [], total: 0 });
   if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/repositories/discover`)
     return json({ roots: [], repositories: [], total: 0 });
-  if (path === "/api/v1/workflows") return json({ workflows: [demoWorkflow], total: 1 });
+  if (path === "/api/v1/agents") return json({ agents: demoAgents, total: demoAgents.length });
+  if (path === "/api/v1/agents/available") return json({ agents: [], tools: [], total: 0 });
+  if (path === "/api/v1/executors")
+    return json({ executors: demoExecutors, total: demoExecutors.length });
+  if (path === "/api/v1/workflows")
+    return json({ workflows: demoWorkflows, total: demoWorkflows.length });
   if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/workflows`)
-    return json({ workflows: [demoWorkflow], total: 1 });
+    return json({ workflows: demoWorkflows, total: demoWorkflows.length });
   if (path === "/api/v1/workflow-templates") return json({ templates: [], total: 0 });
-  if (path === `/api/v1/workflows/${DEMO_IDS.workflow}/snapshot`)
-    return json({ workflow: demoWorkflow, steps: demoSteps, tasks: activeTasks() });
-  if (path === `/api/v1/workflows/${DEMO_IDS.workflow}/workflow/steps`)
-    return json({ steps: demoSteps, total: demoSteps.length });
+  const workflowSnapshotMatch = path.match(/^\/api\/v1\/workflows\/([^/]+)\/snapshot$/);
+  if (workflowSnapshotMatch) {
+    const workflow = demoWorkflows.find((item) => item.id === workflowSnapshotMatch[1]);
+    if (!workflow) return json({ error: "Workflow not found" }, 404);
+    const steps = workflow.id === demoSupportWorkflow.id ? demoSupportSteps : demoSteps;
+    return json({
+      workflow,
+      steps,
+      tasks: activeTasks().filter((task) => task.workflow_id === workflow.id),
+    });
+  }
+  const workflowStepsMatch = path.match(/^\/api\/v1\/workflows\/([^/]+)\/workflow\/steps$/);
+  if (workflowStepsMatch) {
+    const steps = workflowStepsMatch[1] === demoSupportWorkflow.id ? demoSupportSteps : demoSteps;
+    return json({ steps, total: steps.length });
+  }
   if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/workflow-steps`)
-    return json({ steps: demoSteps, total: demoSteps.length });
+    return json({
+      steps: [...demoSteps, ...demoSupportSteps],
+      total: demoSteps.length + demoSupportSteps.length,
+    });
   if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/tasks`)
     return json({ tasks: activeTasks(), total: activeTasks().length });
   const statsMatch = path.match(
@@ -304,13 +342,60 @@ export function handleSocketRequest(socketId: string, raw: string) {
       notify("session.agentctl_ready", {
         task_id: session.task_id,
         session_id: session.id,
-        task_environment_id: DEMO_ENVIRONMENT_ID,
+        task_environment_id: session.task_environment_id ?? DEMO_ENVIRONMENT_ID,
         agent_execution_id: `demo-execution-${session.task_id}`,
         worktree_id: `demo-worktree-${session.task_id}`,
         worktree_path: session.worktree_path,
         worktree_branch: session.worktree_branch,
       });
+      notifyGitStatus(session.id);
     }
+    return;
+  }
+  if (action === "session.focus") {
+    const sessionId = String(payload.session_id || "");
+    respond(socketId, id, { success: true });
+    notifyGitStatus(sessionId);
+    return;
+  }
+  if (action === "session.unfocus") {
+    respond(socketId, id, { success: true });
+    return;
+  }
+  if (action.startsWith("task.plan.")) {
+    handlePlanRequest(socketId, id, action, payload);
+    return;
+  }
+  if (action === "session.git.commits") {
+    const sessionId = String(payload.session_id || "");
+    respond(socketId, id, { commits: demoGitData(sessionId).commits, ready: true });
+    return;
+  }
+  if (action === "session.cumulative_diff") {
+    const sessionId = String(payload.session_id || "");
+    respond(socketId, id, { cumulative_diff: demoGitData(sessionId).cumulativeDiff, ready: true });
+    return;
+  }
+  if (action === "session.file_review.get") {
+    const sessionId = String(payload.session_id || "");
+    respond(socketId, id, { reviews: serializeFileReviews(sessionId) });
+    return;
+  }
+  if (action === "session.file_review.update") {
+    const sessionId = String(payload.session_id || "");
+    const filePath = String(payload.file_path || "");
+    const reviews = fileReviewsBySession.get(sessionId) ?? new Map();
+    reviews.set(filePath, {
+      reviewed: payload.reviewed === true,
+      diffHash: String(payload.diff_hash || ""),
+    });
+    fileReviewsBySession.set(sessionId, reviews);
+    respond(socketId, id, { success: true });
+    return;
+  }
+  if (action === "session.file_review.reset") {
+    fileReviewsBySession.delete(String(payload.session_id || ""));
+    respond(socketId, id, { success: true });
     return;
   }
   if (action === "workspace.tree.get") {
@@ -456,6 +541,293 @@ export function handleSocketRequest(socketId: string, raw: string) {
   respond(socketId, id, { success: true, demo_mode: true });
 }
 
+function createDemoPlans(): Record<string, TaskPlan> {
+  return { [demoUpgradePlan.task_id]: { ...demoUpgradePlan } };
+}
+
+function handlePlanRequest(
+  socketId: string,
+  id: string,
+  action: string,
+  payload: Record<string, unknown>,
+) {
+  const taskId = String(payload.task_id || "");
+  const plan = plansByTask[taskId];
+  if (action === "task.plan.get") {
+    respond(socketId, id, plan ?? null);
+    return;
+  }
+  if (action === "task.plan.revisions.list") {
+    respond(socketId, id, { revisions: plan ? [demoPlanRevision(plan, false)] : [] });
+    return;
+  }
+  if (action === "task.plan.revision.get") {
+    const revision = Object.values(plansByTask)
+      .map((candidate) => demoPlanRevision(candidate, true))
+      .find((candidate) => candidate.id === payload.revision_id);
+    respond(socketId, id, revision ?? null);
+    return;
+  }
+  if (action === "task.plan.delete") {
+    delete plansByTask[taskId];
+    respond(socketId, id, { success: true });
+    notify("task.plan.deleted", { task_id: taskId });
+    return;
+  }
+  if (action === "task.plan.revert") {
+    const revision = plan ? demoPlanRevision(plan, true) : null;
+    respond(socketId, id, revision);
+    return;
+  }
+  if (action === "task.plan.implementation_started") {
+    if (!plan) {
+      respond(socketId, id, { message: "Task plan not found" }, true);
+      return;
+    }
+    const updated = {
+      ...plan,
+      implementation_started_at: new Date().toISOString(),
+      implementation_started_session_id: String(payload.session_id || ""),
+      implementation_started_by: String(payload.actor || "user"),
+    };
+    plansByTask[taskId] = updated;
+    respond(socketId, id, updated);
+    notify("task.plan.updated", updated);
+    return;
+  }
+  if (action === "task.plan.create" || action === "task.plan.update") {
+    const now = new Date().toISOString();
+    const updated: TaskPlan = {
+      id: plan?.id ?? `demo-plan-${taskId}`,
+      task_id: taskId,
+      title: String(payload.title || plan?.title || "Plan"),
+      content: String(payload.content ?? plan?.content ?? ""),
+      created_by: payload.created_by === "agent" ? "agent" : "user",
+      created_at: plan?.created_at ?? now,
+      updated_at: now,
+    };
+    plansByTask[taskId] = updated;
+    respond(socketId, id, updated);
+    notify(action === "task.plan.create" ? "task.plan.created" : "task.plan.updated", updated);
+    return;
+  }
+  respond(socketId, id, { message: `Unsupported plan action: ${action}` }, true);
+}
+
+function demoPlanRevision(plan: TaskPlan, includeContent: boolean): TaskPlanRevision {
+  return {
+    id: `${plan.id}-revision-1`,
+    task_id: plan.task_id,
+    revision_number: 1,
+    title: plan.title,
+    ...(includeContent ? { content: plan.content } : {}),
+    author_kind: plan.created_by,
+    author_name: plan.created_by === "agent" ? "Mock agent" : "Demo user",
+    created_at: plan.created_at,
+    updated_at: plan.updated_at,
+  };
+}
+
+type DemoGitData = {
+  status: {
+    branch: string;
+    remote_branch: string;
+    modified: string[];
+    added: string[];
+    deleted: string[];
+    untracked: string[];
+    renamed: string[];
+    ahead: number;
+    behind: number;
+    files: Record<string, FileInfo>;
+    branch_additions: number;
+    branch_deletions: number;
+  };
+  commits: SessionCommit[];
+  cumulativeDiff: CumulativeDiff | null;
+};
+
+function demoGitData(sessionId: string): DemoGitData {
+  const task = state.tasks.find((candidate) => candidate.primary_session_id === sessionId);
+  if (task?.id === "demo-task-checkout") return checkoutGitData(sessionId);
+  if (task?.id === "demo-task-audit") return auditGitData(sessionId);
+  return emptyGitData(sessionId, task?.id ?? "task");
+}
+
+function checkoutGitData(sessionId: string): DemoGitData {
+  const files: Record<string, FileInfo> = {
+    "src/checkout/complete-order.ts": {
+      path: "src/checkout/complete-order.ts",
+      status: "modified",
+      staged: false,
+      additions: 8,
+      deletions: 4,
+      diff: "@@ -42,7 +42,11 @@ export async function completeOrder(order: Order) {\n-  await withOrderLock(order.id, completeOrder);\n+  await completePayment(order);\n+  await withOrderLock(order.id, async () => {\n+    await reserveInventory(order);\n+  });",
+    },
+    "tests/checkout/concurrent-inventory.test.ts": {
+      path: "tests/checkout/concurrent-inventory.test.ts",
+      status: "added",
+      staged: true,
+      additions: 34,
+      deletions: 0,
+      diff: '@@ -0,0 +1,5 @@\n+describe("concurrent checkout", () => {\n+  it("does not hold the order lock during payment", async () => {\n+    await expect(runConcurrentCheckout()).resolves.toEqual(["paid", "reserved"]);\n+  });\n+});',
+    },
+  };
+  return {
+    status: makeGitStatus("kandev/fix-checkout-timeout", files, 1, 0),
+    commits: [
+      makeCommit(sessionId, {
+        sha: "8f73b42",
+        message: "test: cover concurrent checkout",
+        filesChanged: 1,
+        insertions: 34,
+        deletions: 0,
+      }),
+    ],
+    cumulativeDiff: makeCumulativeDiff(sessionId, files, 1),
+  };
+}
+
+function auditGitData(sessionId: string): DemoGitData {
+  const files: Record<string, FileInfo> = {
+    "src/audit/record-event.ts": {
+      path: "src/audit/record-event.ts",
+      status: "modified",
+      staged: false,
+      additions: 12,
+      deletions: 5,
+      diff: "@@ -44,7 +44,9 @@ export async function recordEvent(input: AuditInput) {\n-    actorIp: input.ip,\n+    actorRegion: await privacyFilter.regionFor(input.ip),\n+    retentionDays: 90,",
+    },
+    "src/pages/admin/activity-page.tsx": {
+      path: "src/pages/admin/activity-page.tsx",
+      status: "added",
+      staged: true,
+      additions: 68,
+      deletions: 0,
+      diff: "@@ -0,0 +1,6 @@\n+export function ActivityFeed({ events }: Props) {\n+  return events.map((event) => (\n+    <AuditEventRow key={event.id} event={event} />\n+  ));\n+}",
+    },
+  };
+  return {
+    status: makeGitStatus("kandev/audit-logging", files, 2, 0),
+    commits: [
+      makeCommit(sessionId, {
+        sha: "c24e18a",
+        message: "feat: persist privileged audit events",
+        filesChanged: 4,
+        insertions: 116,
+        deletions: 19,
+      }),
+      makeCommit(sessionId, {
+        sha: "41ac09d",
+        message: "feat: add admin activity feed",
+        filesChanged: 3,
+        insertions: 68,
+        deletions: 8,
+      }),
+    ],
+    cumulativeDiff: makeCumulativeDiff(sessionId, files, 2),
+  };
+}
+
+function emptyGitData(sessionId: string, taskId: string): DemoGitData {
+  return {
+    status: makeGitStatus(`kandev/${taskId}`, {}, 0, 0),
+    commits: [],
+    cumulativeDiff: null,
+  };
+}
+
+function makeGitStatus(
+  branch: string,
+  files: Record<string, FileInfo>,
+  ahead: number,
+  behind: number,
+) {
+  const values = Object.values(files);
+  return {
+    branch,
+    remote_branch: `origin/${branch}`,
+    modified: values.filter((file) => file.status === "modified").map((file) => file.path),
+    added: values.filter((file) => file.status === "added").map((file) => file.path),
+    deleted: values.filter((file) => file.status === "deleted").map((file) => file.path),
+    untracked: values.filter((file) => file.status === "untracked").map((file) => file.path),
+    renamed: values.filter((file) => file.status === "renamed").map((file) => file.path),
+    ahead,
+    behind,
+    files,
+    branch_additions: values.reduce((total, file) => total + (file.additions ?? 0), 0),
+    branch_deletions: values.reduce((total, file) => total + (file.deletions ?? 0), 0),
+  };
+}
+
+function makeCommit(
+  sessionId: string,
+  input: {
+    sha: string;
+    message: string;
+    filesChanged: number;
+    insertions: number;
+    deletions: number;
+  },
+): SessionCommit {
+  return {
+    id: `demo-commit-${input.sha}`,
+    session_id: sessionId,
+    commit_sha: input.sha,
+    parent_sha: "6c12a90",
+    author_name: "Kandev Demo",
+    author_email: "demo@kandev.com",
+    commit_message: input.message,
+    committed_at: "2026-07-18T11:45:00.000Z",
+    files_changed: input.filesChanged,
+    insertions: input.insertions,
+    deletions: input.deletions,
+    created_at: "2026-07-18T11:45:00.000Z",
+    pushed: false,
+  };
+}
+
+function makeCumulativeDiff(
+  sessionId: string,
+  files: Record<string, FileInfo>,
+  totalCommits: number,
+): CumulativeDiff {
+  return {
+    session_id: sessionId,
+    base_commit: "6c12a90",
+    head_commit: "8f73b42",
+    total_commits: totalCommits,
+    files,
+  };
+}
+
+function notifyGitStatus(sessionId: string) {
+  const session = state.sessions.find((candidate) => candidate.id === sessionId);
+  if (!session) return;
+  notify("session.git.event", {
+    type: "status_update",
+    session_id: sessionId,
+    task_id: session.task_id,
+    agent_id: DEMO_IDS.agent,
+    timestamp: new Date().toISOString(),
+    status: demoGitData(sessionId).status,
+  });
+}
+
+function serializeFileReviews(sessionId: string) {
+  const now = "2026-07-18T12:00:00.000Z";
+  return Array.from(fileReviewsBySession.get(sessionId) ?? [], ([filePath, review], index) => ({
+    id: `demo-review-${index + 1}`,
+    session_id: sessionId,
+    file_path: filePath,
+    reviewed: review.reviewed,
+    diff_hash: review.diffHash,
+    reviewed_at: review.reviewed ? now : null,
+    created_at: now,
+    updated_at: now,
+  }));
+}
+
 function startAgent(task: Task, prompt: string) {
   const sessionId = `demo-session-${task.id}`;
   const session = makeSession(sessionId, task.id, "RUNNING");
@@ -489,7 +861,7 @@ function demoWorkspace() {
 }
 
 function withDemoEnvironment(session: TaskSession): TaskSession {
-  return { ...session, task_environment_id: DEMO_ENVIRONMENT_ID };
+  return { ...session, task_environment_id: session.task_environment_id ?? DEMO_ENVIRONMENT_ID };
 }
 
 function demoTerminal() {
@@ -504,30 +876,6 @@ function demoTerminal() {
     pty_status: "running",
     label: "Terminal 1",
     closable: true,
-  };
-}
-
-function createDemoFiles(): Record<string, string> {
-  return {
-    "README.md":
-      "# Acme Web\n\nCustomer administration frontend used by the Kandev browser demo.\n",
-    "package.json": JSON.stringify(
-      {
-        name: "acme-web",
-        private: true,
-        scripts: { dev: "vite", test: "vitest run", lint: "eslint ." },
-      },
-      null,
-      2,
-    ),
-    "src/app.tsx":
-      'import { AuditLog } from "./components/audit-log";\n\nexport function App() {\n  return <AuditLog />;\n}\n',
-    "src/api/audit.ts":
-      'export type AuditEvent = { action: string; actor: string };\n\nexport async function listAuditEvents(): Promise<AuditEvent[]> {\n  return [{ action: "role.updated", actor: "mira" }];\n}\n',
-    "src/components/audit-log.tsx":
-      'import { useEffect, useState } from "react";\nimport { listAuditEvents, type AuditEvent } from "../api/audit";\n\nexport function AuditLog() {\n  const [events, setEvents] = useState<AuditEvent[]>([]);\n  useEffect(() => { void listAuditEvents().then(setEvents); }, []);\n  return <ul>{events.map((event) => <li key={event.action}>{event.action}</li>)}</ul>;\n}\n',
-    "tests/audit-log.test.tsx":
-      'import { describe, expect, it } from "vitest";\n\ndescribe("AuditLog", () => {\n  it("lists privileged actions", () => {\n    expect("role.updated").toContain("role");\n  });\n});\n',
   };
 }
 

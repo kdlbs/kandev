@@ -1,6 +1,7 @@
 /* eslint-disable complexity, max-lines-per-function */
 
 import type { BootPayload } from "@/src/boot-payload";
+import { resetKanbanPreviewState } from "@/lib/local-storage";
 import type { DemoHttpResponse, DemoWorkerRequest, DemoWorkerResponse } from "./protocol";
 import { DEMO_STORAGE_KEY } from "./scenario";
 
@@ -11,6 +12,7 @@ type PendingRequest = {
 
 export async function installBrowserDemo(): Promise<void> {
   history.replaceState({}, "", "/");
+  resetKanbanPreviewState();
   localStorage.setItem("kandev.onboarding.completed", "true");
   const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
   const pending = new Map<string, PendingRequest>();
