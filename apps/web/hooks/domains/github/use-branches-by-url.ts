@@ -242,14 +242,14 @@ function branchRequestForURL(rawURL: string, workspaceId: string): BranchRequest
     const parts = parsed.pathname.split("/").filter(Boolean);
     if (parts.length === 4 && parts[2] === "_git") {
       return (signal) =>
-        listAzureDevOpsBranches(workspaceId, parts[1], parts[3], { init: { signal } });
+        listAzureDevOpsBranches(workspaceId, parts[0], parts[1], parts[3], { init: { signal } });
     }
   }
   if (parsed.hostname === "ssh.dev.azure.com" && workspaceId) {
     const parts = parsed.pathname.split("/").filter(Boolean);
     if (parts.length === 4 && parts[0] === "v3") {
       return (signal) =>
-        listAzureDevOpsBranches(workspaceId, parts[2], parts[3], { init: { signal } });
+        listAzureDevOpsBranches(workspaceId, parts[1], parts[2], parts[3], { init: { signal } });
     }
   }
   return null;

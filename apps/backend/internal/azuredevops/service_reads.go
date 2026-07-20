@@ -56,15 +56,22 @@ type branchClient interface {
 }
 
 func (s *Service) ListBranchesForWorkspace(
-	ctx context.Context, workspaceID, projectID, repositoryID string,
+	ctx context.Context, workspaceID, organization, projectID, repositoryID string,
 ) ([]Branch, error) {
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(repositoryID) == "" {
 		return nil, fmt.Errorf("%w: project and repository required", ErrInvalidConfig)
 	}
-	client, err := s.clientForWorkspace(ctx, workspaceID)
+	cfg, pat, err := s.resolveCredentials(ctx, workspaceID, &SetConfigRequest{})
 	if err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(organization) != "" {
+		requestedURL, validationErr := ValidateOrganizationURL("https://dev.azure.com/" + organization)
+		if validationErr != nil || !strings.EqualFold(requestedURL, cfg.OrganizationURL) {
+			return nil, fmt.Errorf("%w: requested organization does not match workspace configuration", ErrInvalidConfig)
+		}
+	}
+	client := s.clientFn(cfg, pat)
 	reader, ok := client.(branchClient)
 	if !ok {
 		return nil, errors.New("azure devops: branch listing is unavailable")

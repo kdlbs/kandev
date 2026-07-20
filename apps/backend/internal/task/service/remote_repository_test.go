@@ -14,6 +14,7 @@ func TestParseRemoteRepositoryURL(t *testing.T) {
 	}{
 		{"github", "https://github.com/acme/api/pull/12", "github", "acme", "api", "https://github.com/acme/api.git"},
 		{"gitlab subgroup", "https://gitlab.com/acme/platform/api.git", "gitlab", "acme/platform", "api", "https://gitlab.com/acme/platform/api.git"},
+		{"gitlab merge request", "https://gitlab.com/acme/platform/api/-/merge_requests/12", "gitlab", "acme/platform", "api", "https://gitlab.com/acme/platform/api.git"},
 		{"azure devops", "https://dev.azure.com/acme/Platform/_git/api", "azure_devops", "Platform", "api", "https://dev.azure.com/acme/Platform/_git/api"},
 		{"github ssh", "git@github.com:acme/api.git", "github", "acme", "api", "git@github.com:acme/api.git"},
 		{"azure ssh", "git@ssh.dev.azure.com:v3/acme/Platform/api", "azure_devops", "Platform", "api", "git@ssh.dev.azure.com:v3/acme/Platform/api"},

@@ -157,7 +157,8 @@ func (c *Controller) listRepositories(ctx *gin.Context) {
 
 func (c *Controller) listBranches(ctx *gin.Context) {
 	branches, err := c.service.ListBranchesForWorkspace(
-		ctx.Request.Context(), workspaceID(ctx), ctx.Query("project"), ctx.Query("repository"),
+		ctx.Request.Context(), workspaceID(ctx), ctx.Query("organization"), ctx.Query("project"),
+		ctx.Query("repository"),
 	)
 	if err != nil {
 		c.writeError(ctx, err)

@@ -110,6 +110,29 @@ func TestOrganizationURLValidation(t *testing.T) {
 	}
 }
 
+func TestListBranchesRejectsOrganizationMismatch(t *testing.T) {
+	t.Parallel()
+	clientCalls := 0
+	service, _, _ := newTestService(t, func(*Config, string) Client {
+		clientCalls++
+		return &invalidClient{}
+	})
+	if _, err := service.SetConfigForWorkspace(t.Context(), "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme",
+		PAT:             "secret",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	_, err := service.ListBranchesForWorkspace(t.Context(), "ws-a", "other", "project", "repo")
+	if !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("ListBranchesForWorkspace() error = %v, want ErrInvalidConfig", err)
+	}
+	if clientCalls != 0 {
+		t.Fatalf("client factory called %d times for mismatched organization", clientCalls)
+	}
+}
+
 func TestConfigWorkspaceIsolationAndReconstruction(t *testing.T) {
 	svc, store, secrets := newTestService(t, nil)
 	ctx := context.Background()

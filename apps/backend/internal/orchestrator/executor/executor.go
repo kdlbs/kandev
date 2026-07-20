@@ -712,6 +712,7 @@ func (e *Executor) ensureClonedWithWorkspaceAuth(
 	if err != nil {
 		return "", fmt.Errorf("read Azure DevOps clone credential: %w", err)
 	}
+	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
 	return authCloner.EnsureClonedWithBasicAuth(ctx, cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat)
 }
 

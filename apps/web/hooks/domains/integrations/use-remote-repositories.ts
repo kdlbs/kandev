@@ -40,7 +40,7 @@ async function loadAzureRepositories(workspaceId: string): Promise<RemoteReposit
           name: repo.name,
           fullName: `${repo.projectName}/${repo.name}`,
           url: repo.webUrl,
-          defaultBranch: repo.defaultBranch.replace(/^refs\/heads\//, ""),
+          defaultBranch: (repo.defaultBranch || "").replace(/^refs\/heads\//, ""),
           private: true,
         })),
       ),

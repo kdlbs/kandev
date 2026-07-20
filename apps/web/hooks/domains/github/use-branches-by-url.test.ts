@@ -28,6 +28,7 @@ afterEach(() => {
 
 const REPO_A = "https://github.com/acme/site";
 const REPO_B = "https://github.com/acme/api";
+const WORKSPACE_ID = "workspace-1";
 
 describe("useBranchesByURL", () => {
   it("fetches branches once per unique URL when ensure() is called", async () => {
@@ -62,8 +63,8 @@ describe("useBranchesByURL", () => {
     const azure = "https://dev.azure.com/acme/Platform/_git/api";
 
     act(() => {
-      result.current.ensure(gitlab, "workspace-1");
-      result.current.ensure(azure, "workspace-1");
+      result.current.ensure(gitlab, WORKSPACE_ID);
+      result.current.ensure(azure, WORKSPACE_ID);
     });
 
     await waitFor(() => {
@@ -73,7 +74,25 @@ describe("useBranchesByURL", () => {
     expect(fetchRepoBranchesMock).not.toHaveBeenCalled();
     expect(listProjectBranchesMock).toHaveBeenCalledWith("acme/platform/api", expect.anything());
     expect(listAzureDevOpsBranchesMock).toHaveBeenCalledWith(
-      "workspace-1",
+      WORKSPACE_ID,
+      "acme",
+      "Platform",
+      "api",
+      expect.anything(),
+    );
+  });
+
+  it("passes the organization parsed from an Azure SSH URL", async () => {
+    listAzureDevOpsBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
+    const { result } = renderHook(() => useBranchesByURL());
+    const azure = "git@ssh.dev.azure.com:v3/acme/Platform/api";
+
+    act(() => result.current.ensure(azure, WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.branches(azure)).toHaveLength(1));
+    expect(listAzureDevOpsBranchesMock).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      "acme",
       "Platform",
       "api",
       expect.anything(),

@@ -54,6 +54,13 @@ describe("useRemoteRepositories", () => {
           webUrl: "https://dev.azure.com/acme/Platform/_git/api",
           defaultBranch: "refs/heads/trunk",
         },
+        {
+          id: "repo-empty",
+          name: "empty",
+          projectId: "project-1",
+          projectName: "Platform",
+          webUrl: "https://dev.azure.com/acme/Platform/_git/empty",
+        },
       ],
     });
 
@@ -63,8 +70,10 @@ describe("useRemoteRepositories", () => {
     expect(result.current.repos.map((repo) => `${repo.provider}:${repo.fullName}`)).toEqual([
       "github:acme/web",
       "azure_devops:Platform/api",
+      "azure_devops:Platform/empty",
     ]);
     expect(result.current.repos[1].defaultBranch).toBe("trunk");
+    expect(result.current.repos[2].defaultBranch).toBe("");
     expect(result.current.unavailable).toBe(false);
   });
 

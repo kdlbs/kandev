@@ -801,6 +801,12 @@ func parseGitHubRemote(host string, parts []string, sshStyle bool) (string, stri
 }
 
 func parseGitLabRemote(host string, parts []string, sshStyle bool) (string, string, string, string, error) {
+	for index, part := range parts {
+		if part == "-" {
+			parts = parts[:index]
+			break
+		}
+	}
 	if len(parts) < 2 {
 		return "", "", "", "", fmt.Errorf("invalid GitLab repository URL: expected gitlab.com/namespace/repo")
 	}

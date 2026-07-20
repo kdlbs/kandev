@@ -281,7 +281,7 @@ function useAzureSavedViewControls({
     filters.projectId && (mode === WORK_ITEMS_MODE ? filters.wiql.trim() : filters.repositoryId),
   );
   const saveCurrentView = useCallback(
-    (label: string) => {
+    async (label: string) => {
       const view: AzureDevOpsSavedView = {
         id: `az_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
         kind: kindForMode(mode),
@@ -295,7 +295,7 @@ function useAzureSavedViewControls({
         reviewer: mode === PULL_REQUESTS_MODE ? filters.reviewer : undefined,
         createdAt: new Date().toISOString(),
       };
-      void savedViews.replace([...savedViews.views, view]);
+      await savedViews.replace([...savedViews.views, view]);
       setSelection({ kind: view.kind, source: "saved", id: view.id });
     },
     [filters, mode, savedViews, setSelection],

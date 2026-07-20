@@ -20,11 +20,25 @@ function SaveViewForm({
   onClose,
 }: {
   kind: AzureDevOpsPresetKind;
-  onSave: (label: string) => void;
+  onSave: (label: string) => Promise<void>;
   onClose: () => void;
 }) {
   const [label, setLabel] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const trimmed = label.trim();
+  const handleSave = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await onSave(trimmed);
+      onClose();
+    } catch {
+      setError("Could not save this view. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <>
       <DialogHeader>
@@ -40,24 +54,35 @@ function SaveViewForm({
           id="azure-devops-view-name"
           autoFocus
           value={label}
-          onChange={(event) => setLabel(event.target.value)}
+          onChange={(event) => {
+            setLabel(event.target.value);
+            setError("");
+          }}
           placeholder="e.g. Platform triage"
         />
+        {error && (
+          <p role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        )}
       </div>
       <DialogFooter>
-        <Button type="button" variant="outline" className="cursor-pointer" onClick={onClose}>
+        <Button
+          type="button"
+          variant="outline"
+          className="cursor-pointer"
+          disabled={saving}
+          onClick={onClose}
+        >
           Cancel
         </Button>
         <Button
           type="button"
           className="cursor-pointer"
-          disabled={!trimmed}
-          onClick={() => {
-            onSave(trimmed);
-            onClose();
-          }}
+          disabled={!trimmed || saving}
+          onClick={() => void handleSave()}
         >
-          Save
+          {saving ? "Saving..." : "Save"}
         </Button>
       </DialogFooter>
     </>
@@ -73,7 +98,7 @@ export function AzureDevOpsSaveViewDialog({
   open: boolean;
   kind: AzureDevOpsPresetKind;
   onOpenChange: (open: boolean) => void;
-  onSave: (label: string) => void;
+  onSave: (label: string) => Promise<void>;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

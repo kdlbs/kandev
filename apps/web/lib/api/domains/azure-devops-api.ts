@@ -113,11 +113,12 @@ export function listAzureDevOpsRepositories(
 
 export function listAzureDevOpsBranches(
   workspaceId: string,
+  organization: string,
   project: string,
   repository: string,
   options?: ApiRequestOptions,
 ) {
-  const search = new URLSearchParams({ project, repository });
+  const search = new URLSearchParams({ organization, project, repository });
   appendWorkspace(search, workspaceId);
   return fetchJson<{ branches: Array<{ name: string }> }>(`${BASE}/branches?${search}`, options);
 }
