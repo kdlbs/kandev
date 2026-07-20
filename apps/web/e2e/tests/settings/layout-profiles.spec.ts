@@ -181,6 +181,8 @@ test.describe("Task layout profile defaults", () => {
         '[data-testid="layout-saved-delete"][data-layout-id="layout-override-default"]',
       ),
     ).toHaveCount(0);
+    await testPage.locator('[data-testid="layout-preset-item"][data-preset-id="default"]').click();
+    await expect(testPage.getByTestId("terminal-panel")).toHaveCount(0);
   });
 
   test("resets a customized built-in layout to its original definition", async ({

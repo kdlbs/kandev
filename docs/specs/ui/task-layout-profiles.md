@@ -75,6 +75,7 @@ The frontend treats the returned settings payload as authoritative after each su
 - **GIVEN** the user opens General settings on desktop or mobile, **WHEN** they select Layouts, **THEN** the built-in templates, custom profiles, and effective default are visible.
 - **GIVEN** the built-in Default layout, **WHEN** the user removes Terminal and saves with the shared floating control, **THEN** the same Default row is marked `Customized` and its hidden default override persists without requiring a duplicate step.
 - **GIVEN** a customized built-in layout, **WHEN** the user chooses Reset and saves, **THEN** its hidden override is removed and the original code-defined layout is restored.
+- **GIVEN** a customized built-in layout, **WHEN** the user selects that built-in from the task workbench layout menu, **THEN** the saved override is applied instead of the original code-defined template.
 - **GIVEN** a valid custom profile, **WHEN** the user reorders tabs or moves a panel into a new split and saves, **THEN** reopening the profile shows the same tab order, active tab, split order, and proportions.
 - **GIVEN** a default profile without Terminal and a task environment with no saved layout, **WHEN** the user first opens that task, **THEN** the workbench has no Terminal tab and no default user shell is created.
 - **GIVEN** an existing task with a task-specific layout, **WHEN** the user changes the default profile and returns to that task, **THEN** the task-specific layout is unchanged.

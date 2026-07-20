@@ -46,12 +46,14 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Badge } from "@kandev/ui/badge";
-import { useDockviewStore, type BuiltInPreset } from "@/lib/state/dockview-store";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
   BUILT_IN_LAYOUT_PROFILES,
   createLayoutProfile,
   createLayoutProfileId,
   deleteLayoutProfile,
+  getBuiltInLayoutOverride,
+  getLayoutProfileCompatibility,
   isBuiltInLayoutOverride,
   type BuiltInLayoutProfileId,
 } from "@/lib/layout/layout-profiles";
@@ -63,7 +65,7 @@ import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { resolveLayoutApplySessionIds } from "./layout-preset-selector-session-ids";
 
 type PresetOption = {
-  id: BuiltInPreset;
+  id: BuiltInLayoutProfileId;
   label: string;
   description: string;
   icon: React.ElementType;
@@ -220,9 +222,9 @@ function SavedLayoutItems({
   ));
 }
 
-/** The built-in preset menu items. Applying any preset resets widths
- *  (resetWidths=true), which is how a user clears a custom sidebar width. */
-function BuiltInPresetItems({ onApply }: { onApply: (presetId: BuiltInPreset) => void }) {
+/** Built-in preset menu items. Code-defined presets reset widths; customized
+ *  built-ins restore the dimensions saved in their override. */
+function BuiltInPresetItems({ onApply }: { onApply: (presetId: BuiltInLayoutProfileId) => void }) {
   return BUILT_IN_PRESETS.map((preset) => {
     const Icon = preset.icon;
     return (
@@ -272,6 +274,24 @@ function useApplySavedLayout() {
       );
     },
     [activeSessionId, activeTaskId, appStore, applyCustomLayout, loadSessions, taskSessionsLoaded],
+  );
+}
+
+function useApplyBuiltInLayout(
+  savedLayouts: SavedLayout[],
+  applySavedLayout: (layout: SavedLayout) => Promise<void>,
+) {
+  const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
+  return useCallback(
+    (presetId: BuiltInLayoutProfileId) => {
+      const override = getBuiltInLayoutOverride(savedLayouts, presetId);
+      if (override && getLayoutProfileCompatibility(override).status === "editable") {
+        void applySavedLayout(override);
+        return;
+      }
+      applyBuiltInPreset(presetId, true);
+    },
+    [applyBuiltInPreset, applySavedLayout, savedLayouts],
   );
 }
 
@@ -334,11 +354,11 @@ export function LayoutPresetSelector() {
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const [deleteCandidate, setDeleteCandidate] = useState<SavedLayout | null>(null);
   const recentlyClosedRef = useRef(false);
-  const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
   const resetLayout = useDockviewStore((s) => s.resetLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
   const setUserSettings = useAppStore((s) => s.setUserSettings);
   const handleApplyCustom = useApplySavedLayout();
+  const handleApplyBuiltIn = useApplyBuiltInLayout(savedLayouts, handleApplyCustom);
 
   const handleDeleteLayout = useCallback(
     async (layoutId: string) => {
@@ -390,7 +410,7 @@ export function LayoutPresetSelector() {
         <DropdownMenuContent align="end" className="w-60">
           <DropdownMenuGroup>
             <DropdownMenuLabel className="text-xs">Presets</DropdownMenuLabel>
-            <BuiltInPresetItems onApply={(id) => applyBuiltInPreset(id, true)} />
+            <BuiltInPresetItems onApply={handleApplyBuiltIn} />
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem
