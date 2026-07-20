@@ -180,10 +180,14 @@ func (m *Manifest) validateCategories() []error {
 // scheme (e.g. "javascript:") is rejected at registration rather than relying
 // solely on the frontend href guard. An empty repo_url is valid (optional).
 func (m *Manifest) validateRepoURL() []error {
+	// Normalise in place so the stored/serialised value matches what was
+	// validated (a manifest with surrounding whitespace would otherwise pass
+	// the check but keep the spaces in the href).
+	m.RepoURL = strings.TrimSpace(m.RepoURL)
 	if m.RepoURL == "" {
 		return nil
 	}
-	u := strings.ToLower(strings.TrimSpace(m.RepoURL))
+	u := strings.ToLower(m.RepoURL)
 	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
 		return []error{fmt.Errorf("repo_url %q must be an http(s) URL", m.RepoURL)}
 	}

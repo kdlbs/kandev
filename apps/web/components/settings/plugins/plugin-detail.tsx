@@ -102,7 +102,7 @@ function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
             <span className="font-mono">
               {plugin.id} · v{plugin.version}
             </span>
-            {plugin.repo_url && <PluginRepoLink url={plugin.repo_url} />}
+            <PluginRepoLink url={plugin.repo_url} />
           </div>
           {plugin.description && (
             <p className="text-sm text-muted-foreground">{plugin.description}</p>

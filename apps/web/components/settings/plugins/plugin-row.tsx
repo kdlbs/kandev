@@ -66,7 +66,7 @@ export function PluginRow({
             <span className="font-mono truncate">
               {plugin.id} · v{plugin.version}
             </span>
-            {plugin.repo_url && <PluginRepoLink url={plugin.repo_url} />}
+            <PluginRepoLink url={plugin.repo_url} />
           </div>
           {plugin.description && (
             <div className="text-xs text-muted-foreground">{plugin.description}</div>

@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
  * `javascript:` (or other) scheme would execute in the operator's session on
  * click, and `rel`/`target` do NOT block it.
  */
-export function isHttpUrl(url: string): boolean {
+export function isHttpUrl(url: string | undefined | null): boolean {
+  if (!url) return false;
   return /^https?:\/\//i.test(url.trim());
 }
 
@@ -18,11 +19,11 @@ export function isHttpUrl(url: string): boolean {
  * catalog card and the installed-plugin list/detail so the scheme guard and
  * link markup live in one place.
  */
-export function PluginRepoLink({ url, className }: { url: string; className?: string }) {
+export function PluginRepoLink({ url, className }: { url?: string | null; className?: string }) {
   if (!isHttpUrl(url)) return null;
   return (
     <a
-      href={url}
+      href={url ?? undefined}
       target="_blank"
       rel="noreferrer"
       data-testid="plugin-repo-link"

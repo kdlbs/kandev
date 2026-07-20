@@ -12,6 +12,8 @@ describe("isHttpUrl", () => {
     expect(isHttpUrl("javascript:alert(1)")).toBe(false);
     expect(isHttpUrl("ftp://example.com")).toBe(false);
     expect(isHttpUrl("")).toBe(false);
+    expect(isHttpUrl(undefined)).toBe(false);
+    expect(isHttpUrl(null)).toBe(false);
   });
 });
 

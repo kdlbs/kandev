@@ -97,6 +97,17 @@ func TestValidate_AcceptsHTTPRepoURL(t *testing.T) {
 	}
 }
 
+func TestValidate_TrimsRepoURLInPlace(t *testing.T) {
+	m := validManifest(t)
+	m.RepoURL = "  https://github.com/kdlbs/kandev-plugin-slack  "
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+	if m.RepoURL != "https://github.com/kdlbs/kandev-plugin-slack" {
+		t.Fatalf("m.RepoURL = %q, want the surrounding whitespace trimmed", m.RepoURL)
+	}
+}
+
 func TestValidate_RejectsBadIDPattern(t *testing.T) {
 	m := validManifest(t)
 	m.ID = "Kandev_Plugin!"
