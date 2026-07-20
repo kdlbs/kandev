@@ -9,6 +9,7 @@ import type {
 import { RemoteRepoChip } from "./task-create-dialog-remote-repo-chip";
 
 const AZURE_PROVIDER = "azure_devops" as const;
+const AZURE_PROVIDER_LABEL = "Azure DevOps";
 const AZURE_REPO_NAME = "Platform/api";
 const GITLAB_REPO_NAME = "acme/worker";
 
@@ -90,6 +91,10 @@ describe("RemoteRepoChip provider tabs", () => {
 
     expect(screen.getAllByRole("tab")).toHaveLength(3);
     expect(screen.getByRole("tab", { name: "GitHub" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByText("GitHub")).toBeNull();
+    expect(screen.queryByText("GitLab")).toBeNull();
+    expect(screen.queryByText(AZURE_PROVIDER_LABEL)).toBeNull();
+    expect(screen.getByTestId("remote-repo-provider-tabs").className).toContain("overflow-hidden");
     expect(screen.getByText("acme/site")).toBeTruthy();
     expect(screen.queryByText(GITLAB_REPO_NAME)).toBeNull();
     expect(screen.queryByText(AZURE_REPO_NAME)).toBeNull();
@@ -97,7 +102,7 @@ describe("RemoteRepoChip provider tabs", () => {
     activateProvider("GitLab");
     expect(screen.getByText(GITLAB_REPO_NAME)).toBeTruthy();
 
-    activateProvider("Azure DevOps");
+    activateProvider(AZURE_PROVIDER_LABEL);
     expect(screen.queryByText("acme/site")).toBeNull();
     expect(screen.getByText(AZURE_REPO_NAME)).toBeTruthy();
   });
@@ -105,7 +110,9 @@ describe("RemoteRepoChip provider tabs", () => {
   it("keeps a tab for an available provider that currently has no repositories", () => {
     renderPicker(accessibleRepos([GITHUB_REPO], ["github", AZURE_PROVIDER]));
 
-    activateProvider("Azure DevOps");
+    expect(screen.getByText("GitHub")).toBeTruthy();
+    expect(screen.getByText(AZURE_PROVIDER_LABEL)).toBeTruthy();
+    activateProvider(AZURE_PROVIDER_LABEL);
     expect(screen.getByText("No repositories found.")).toBeTruthy();
   });
 

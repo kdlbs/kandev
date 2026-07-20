@@ -546,6 +546,13 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
 
     const tabs = testPage.getByTestId("remote-repo-provider-tabs");
     await expect(tabs.getByRole("tab", { name: "GitHub" })).toBeVisible();
+    const tabOverflow = await tabs.evaluate((element) => ({
+      overflowY: getComputedStyle(element).overflowY,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
+    expect(tabOverflow.overflowY).toBe("hidden");
+    expect(tabOverflow.scrollHeight).toBeLessThanOrEqual(tabOverflow.clientHeight);
     await expect(
       testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/alpha" }),
     ).toBeVisible();

@@ -98,6 +98,13 @@ test.describe("Create task Remote repo picker on mobile", () => {
     const azureTabBox = await azureTab.boundingBox();
     expect(azureTabBox).not.toBeNull();
     expect(azureTabBox!.height).toBeGreaterThanOrEqual(44);
+    const tabOverflow = await providerTabs.evaluate((element) => ({
+      overflowY: getComputedStyle(element).overflowY,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
+    expect(tabOverflow.overflowY).toBe("hidden");
+    expect(tabOverflow.scrollHeight).toBeLessThanOrEqual(tabOverflow.clientHeight);
     await azureTab.click();
     const option = testPage.getByTestId("remote-repo-option").filter({ hasText: "Platform/api" });
     await expect(option).toBeVisible({ timeout: 10_000 });

@@ -54,7 +54,9 @@ authenticating the GitHub CLI.
   configured source-control provider: GitHub, GitLab, and Azure DevOps. Users
   can still paste a supported HTTPS or SSH repository URL manually. When more
   than one repository provider is available, bottom tabs switch the visible
-  provider results; no provider tab bar is shown for a single provider.
+  provider results; no provider tab bar is shown for a single provider. When
+  all three providers are available, compact icon tabs retain accessible names
+  and expose provider names on hover.
 - Azure DevOps private repositories can be materialized with the workspace PAT
   by the Kandev backend. The PAT is never added to task metadata, clone URLs,
   agent environment variables, logs, or persisted repository rows. Push access
@@ -249,7 +251,8 @@ hint and revalidated from the configured provider before persistence or clone.
   the Remote repository picker, **THEN** a bottom tab is shown for each
   available repository provider, only the active provider's matching results
   are visible, and selections retain the correct provider icon and branch
-  source on desktop and mobile.
+  source on desktop and mobile. The tab footer does not scroll vertically, and
+  three-provider tabs compact to icons with accessible provider names.
 - **GIVEN** only one configured source-control provider, **WHEN** a user opens
   the Remote repository picker, **THEN** its repositories are shown without a
   provider tab bar.
