@@ -235,7 +235,7 @@ func validateLinkedWorktreeMetadata(repoPath, gitPath string) error {
 	}
 	worktreesDir := filepath.Join(commonDir, "worktrees")
 	rel, err := filepath.Rel(worktreesDir, canonicalGitDir)
-	if err != nil || rel == "." || filepath.Dir(rel) != "." {
+	if err != nil || rel == "." || rel == ".." || filepath.Dir(rel) != "." {
 		return errors.New("linked-worktree metadata is outside its common directory")
 	}
 	return nil

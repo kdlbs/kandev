@@ -833,6 +833,31 @@ func TestListBranches_SavedLinkedWorktreeOutsideDiscoveryRoots(t *testing.T) {
 	}
 }
 
+func TestValidateLinkedWorktreeMetadataRejectsSelfReferentialCommonDir(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "linked")
+	gitDir := filepath.Join(t.TempDir(), "metadata")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll repo: %v", err)
+	}
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll metadata: %v", err)
+	}
+	gitPath := filepath.Join(repoPath, ".git")
+	if err := os.WriteFile(gitPath, []byte("gitdir: "+gitDir+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "gitdir"), []byte(gitPath+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile gitdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "commondir"), []byte(".\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile commondir: %v", err)
+	}
+
+	if err := validateLinkedWorktreeMetadata(repoPath, gitPath); err == nil {
+		t.Fatal("expected self-referential common directory to be rejected")
+	}
+}
+
 func TestListBranches_FallsThroughWhenNoRemoteListerWired(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

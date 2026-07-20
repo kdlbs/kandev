@@ -215,6 +215,10 @@ func (h *RepositoryHandlers) httpListBranches(c *gin.Context) {
 	}
 	result, err := h.service.ListBranchesWithCurrent(c.Request.Context(), repoID, path)
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidRepositoryPath) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to list branches", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list branches"})
 		return

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -137,6 +138,22 @@ func TestHTTPListBranchesRejectsRepositoryFromAnotherWorkspace(t *testing.T) {
 	}
 	if lister.calls != 1 {
 		t.Fatalf("provider lister calls = %d, want 1", lister.calls)
+	}
+}
+
+func TestHTTPListBranchesRejectsInvalidExplicitPath(t *testing.T) {
+	router, _ := newRepositoryHTTPTestRouter(t)
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/workspaces/ws-1/branches?path="+url.QueryEscape(t.TempDir()),
+		nil,
+	)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusBadRequest, response.Body.String())
 	}
 }
 

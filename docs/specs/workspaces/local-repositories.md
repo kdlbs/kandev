@@ -80,6 +80,7 @@ directly rather than treating discovery roots as an authorization mechanism.
 | Canonicalization or access fails | The operation fails without persisting or mutating repository state. |
 | `.git` metadata points at an unrelated repository or unverifiable external metadata | Validation fails and the path is not persisted. |
 | A saved path later resolves to a different canonical location | Identity-bound reads and mutations fail closed. |
+| A pre-canonical saved path contains symbolic-link components | The user re-saves it once to persist its canonical location. |
 | Saved repository later disappears | Read and Git operations surface the filesystem error; the stored grant remains until edited or deleted. |
 | Automatic scan requests an unconfigured root | Discovery rejects the request and does not scan it. |
 | Destructive request supplies only an untrusted raw path | The operation fails closed and does not run Git. |
