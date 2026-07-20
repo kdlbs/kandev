@@ -52,6 +52,7 @@ test.describe("mobile: Plan toolbar implement", () => {
     const toolbarButton = testPage.getByTestId("plan-toolbar-implement-button");
     await expect(toolbarButton).toBeVisible({ timeout: 10_000 });
     await expect(toolbarButton).toBeInViewport();
+    await expect(toolbarButton).toBeEnabled({ timeout: 10_000 });
 
     const toolbarSpacing = await testPage
       .getByTestId("plan-toolbar-implement-control")

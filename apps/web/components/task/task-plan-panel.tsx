@@ -7,6 +7,7 @@ import dynamic from "@/lib/routing/client-dynamic";
 import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
+import { useSession } from "@/hooks/domains/session/use-session";
 import { useAppStore } from "@/components/state-provider";
 import { PlanSelectionPopover } from "./plan-selection-popover";
 import { usePlanComments } from "@/hooks/domains/comments/use-plan-comments";
@@ -60,9 +61,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     clearComparePair,
   } = useTaskPlan(taskId, { visible });
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const activeSession = useAppStore((state) =>
-    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
-  );
+  const { session: activeSession } = useSession(activeSessionId);
   const sessionState = activeSession?.state;
   const isAgentBusy = sessionState === "STARTING" || sessionState === "RUNNING";
 
