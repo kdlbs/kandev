@@ -25,6 +25,8 @@ export function TaskUnarchiveButton({
       toast(unarchiveToastPayload(result));
       if (result.success && result.unarchived_ids.includes(taskId)) {
         onUnarchived?.(taskId);
+      } else if (result.success) {
+        console.warn("[TaskUnarchiveButton] task missing from successful response", taskId);
       }
     } catch (err) {
       toast({

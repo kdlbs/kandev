@@ -230,12 +230,22 @@ describe("syncActiveTaskSession", () => {
 describe("resolveEffectiveTask archived state", () => {
   it("keeps fetched archived state when a stale matching kanban card remains", () => {
     const taskDetails = makeArchivedTaskDetails();
-    const kanbanTask = makeKanbanTask();
+    const kanbanTask = makeKanbanTask({ updatedAt: "2026-07-18T00:00:00Z" });
 
     const resolved = resolveEffectiveTask(taskDetails, null, kanbanTask, "task-1");
 
     expect(resolved?.archived_at).toBe(ARCHIVED_AT);
     expect(buildArchivedValue(resolved, null).isArchived).toBe(true);
+  });
+
+  it("clears fetched archived state when a matching kanban card is newer", () => {
+    const taskDetails = makeArchivedTaskDetails();
+    const kanbanTask = makeKanbanTask({ updatedAt: "2026-07-20T00:00:00Z" });
+
+    const resolved = resolveEffectiveTask(taskDetails, null, kanbanTask, "task-1");
+
+    expect(resolved?.archived_at).toBeNull();
+    expect(buildArchivedValue(resolved, null).isArchived).toBe(false);
   });
 
   it("keeps archived_at when the task is absent from the kanban (still archived)", () => {

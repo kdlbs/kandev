@@ -127,6 +127,13 @@ export function mergeBaseWithKanban(
   kanbanTask: KanbanState["tasks"][number] | null,
 ): Task {
   if (!kanbanTask) return baseTask;
+  const kanbanUpdatedAt = Date.parse(kanbanTask.updatedAt ?? "");
+  const baseUpdatedAt = Date.parse(baseTask.updated_at ?? "");
+  const hasNewerKanbanState =
+    Boolean(baseTask.archived_at) &&
+    Number.isFinite(kanbanUpdatedAt) &&
+    Number.isFinite(baseUpdatedAt) &&
+    kanbanUpdatedAt > baseUpdatedAt;
   return {
     ...baseTask,
     title: kanbanTask.title ?? baseTask.title,
@@ -136,6 +143,7 @@ export function mergeBaseWithKanban(
     position: kanbanTask.position ?? baseTask.position,
     state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
     repositories: baseTask.repositories,
+    archived_at: hasNewerKanbanState ? null : baseTask.archived_at,
   };
 }
 

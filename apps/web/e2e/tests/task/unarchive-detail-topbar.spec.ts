@@ -31,5 +31,5 @@ test("unarchiving from the detail top bar clears the archived UI in place", asyn
   // proves the detail view observed the unarchive without a navigation/refetch.
   await expect(unarchiveButton).toHaveCount(0);
   // No redirect away — unarchive keeps the user on the same task route.
-  expect(new URL(testPage.url()).pathname).toBe(`/t/${task.id}`);
+  await expect(testPage).toHaveURL((url) => url.pathname === `/t/${task.id}`);
 });
