@@ -1,5 +1,8 @@
+import { execSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import { makeGitEnv } from "../../helpers/git-helper";
 
 test.describe("GitHub PR task launcher", () => {
   test("opens the create task dialog in Remote mode when the matching repo is a stale task worktree", async ({
@@ -29,17 +32,24 @@ test.describe("GitHub PR task launcher", () => {
       },
     ]);
 
-    await apiClient.createRepository(
-      seedData.workspaceId,
-      path.join(backend.tmpDir, ".kandev", "tasks", "pr-1541-fix-skip-cle_3bm", "stalerepo"),
-      "main",
-      {
-        name: `${owner}/${repo}`,
-        provider: "github",
-        provider_owner: owner,
-        provider_name: repo,
-      },
+    const staleWorktreePath = path.join(
+      backend.tmpDir,
+      ".kandev",
+      "tasks",
+      "pr-1541-fix-skip-cle_3bm",
+      "stalerepo",
     );
+    fs.mkdirSync(staleWorktreePath, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: staleWorktreePath, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: staleWorktreePath, env: gitEnv });
+
+    await apiClient.createRepository(seedData.workspaceId, staleWorktreePath, "main", {
+      name: `${owner}/${repo}`,
+      provider: "github",
+      provider_owner: owner,
+      provider_name: repo,
+    });
 
     await testPage.goto("/github");
     await expect(testPage.getByTestId("github-presets-scope-bar")).toBeVisible({

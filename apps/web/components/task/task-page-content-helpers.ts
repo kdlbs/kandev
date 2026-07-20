@@ -1,4 +1,4 @@
-import type { Repository, Task } from "@/lib/types/http";
+import { type Repository, type Task } from "@/lib/types/http";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 
 type ACPDebugInfo = {
@@ -91,6 +91,51 @@ export function deriveIsAgentWorking(
   if (taskSessionState !== null)
     return taskSessionState === "STARTING" || taskSessionState === "RUNNING";
   return isAgentRunning && (taskState === "IN_PROGRESS" || taskState === "SCHEDULING");
+}
+
+/**
+ * Resolve the task the detail view should render, layering the freshest of
+ * three sources: the Query task detail, the SSR/`initialTask`, and the live
+ * workflow snapshot. The base (details/initial) carries detail-only fields;
+ * the workflow snapshot carries live task state.
+ */
+export function resolveEffectiveTask(
+  taskDetails: Task | null,
+  initialTask: Task | null,
+  snapshotTask: Task | null,
+  effectiveTaskId: string | null,
+): Task | null {
+  const matchingTaskDetails = taskDetails?.id === effectiveTaskId ? taskDetails : null;
+  const matchingInitialTask = initialTask?.id === effectiveTaskId ? initialTask : null;
+  const baseTask = matchingTaskDetails ?? matchingInitialTask;
+
+  const matchingSnapshotTask = snapshotTask?.id === effectiveTaskId ? snapshotTask : null;
+
+  if (!baseTask && !matchingSnapshotTask) return null;
+  if (baseTask) return mergeBaseWithSnapshot(baseTask, matchingSnapshotTask);
+  if (matchingSnapshotTask) return matchingSnapshotTask;
+  return null;
+}
+
+export function mergeBaseWithSnapshot(baseTask: Task, snapshotTask: Task | null): Task {
+  if (!snapshotTask) return baseTask;
+  const snapshotUpdatedAt = Date.parse(snapshotTask.updated_at ?? "");
+  const baseUpdatedAt = Date.parse(baseTask.updated_at ?? "");
+  const hasNewerSnapshotState =
+    Boolean(baseTask.archived_at) &&
+    Number.isFinite(snapshotUpdatedAt) &&
+    Number.isFinite(baseUpdatedAt) &&
+    snapshotUpdatedAt > baseUpdatedAt;
+  return {
+    ...baseTask,
+    title: snapshotTask.title ?? baseTask.title,
+    description: snapshotTask.description ?? baseTask.description,
+    workflow_step_id: snapshotTask.workflow_step_id ?? baseTask.workflow_step_id,
+    position: snapshotTask.position ?? baseTask.position,
+    state: snapshotTask.state ?? baseTask.state,
+    repositories: baseTask.repositories,
+    archived_at: hasNewerSnapshotState ? (snapshotTask.archived_at ?? null) : baseTask.archived_at,
+  };
 }
 
 export function buildArchivedValue(task: Task | null, repository: Repository | null) {

@@ -18,6 +18,18 @@ export const RIGHT_BOTTOM_GROUP = "group-right-bottom";
 export const TERMINAL_DEFAULT_ID = "terminal-default";
 export const SIDEBAR_LOCK = "no-drop-target" as const;
 
+/** Canonical single-instance panels supported by reusable layout profiles. */
+export const REUSABLE_PANEL_IDS = [
+  "chat",
+  "files",
+  "changes",
+  TERMINAL_DEFAULT_ID,
+  "plan",
+  "browser",
+  "vscode",
+] as const;
+export type ReusablePanelId = (typeof REUSABLE_PANEL_IDS)[number];
+
 /** Fixed panel IDs that can be saved in layout configs. */
 export const KNOWN_PANEL_IDS = new Set([
   "chat",

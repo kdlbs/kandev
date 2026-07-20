@@ -22,6 +22,7 @@ import {
   deriveIsAgentWorking,
   buildArchivedValue,
   hasResolvedTaskDetails,
+  resolveEffectiveTask,
   resolveTaskContentState,
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
@@ -39,18 +40,6 @@ type TaskPageContentProps = {
   initialLayout?: string | null;
   officeTaskHref?: string | null;
 };
-
-function resolveEffectiveTask(
-  taskDetails: Task | null,
-  initialTask: Task | null,
-  snapshotTask: Task | null,
-  effectiveTaskId: string | null,
-): Task | null {
-  const matchingTaskDetails = taskDetails?.id === effectiveTaskId ? taskDetails : null;
-  const matchingInitialTask = initialTask?.id === effectiveTaskId ? initialTask : null;
-  const matchingSnapshotTask = snapshotTask?.id === effectiveTaskId ? snapshotTask : null;
-  return matchingTaskDetails ?? matchingInitialTask ?? matchingSnapshotTask ?? null;
-}
 
 export function useWorkflowStepsMapped(workflowIdOverride?: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -289,7 +278,14 @@ function useTaskPageData(
     [effectiveRepositories, task?.repositories],
   );
 
-  return { task, taskLoadError, agent, effectiveSessionId, repository, ensureSession };
+  return {
+    task,
+    taskLoadError,
+    agent,
+    effectiveSessionId,
+    repository,
+    ensureSession,
+  };
 }
 
 export function TaskPageContent({

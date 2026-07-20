@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   IconLayout,
   IconCheck,
@@ -9,12 +11,23 @@ import {
   IconFileText,
   IconDeviceDesktop,
   IconBrandVscode,
+  IconRestore,
   IconTrash,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Checkbox } from "@kandev/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@kandev/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -34,46 +47,70 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Badge } from "@kandev/ui/badge";
-import { useDockviewStore, type BuiltInPreset } from "@/lib/state/dockview-store";
+import { useDockviewStore } from "@/lib/state/dockview-store";
+import {
+  BUILT_IN_LAYOUT_PROFILES,
+  createLayoutProfile,
+  createLayoutProfileId,
+  deleteLayoutProfile,
+  getBuiltInLayoutOverride,
+  getLayoutProfileCompatibility,
+  isBuiltInLayoutOverride,
+  type BuiltInLayoutProfileId,
+} from "@/lib/layout/layout-profiles";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { qk } from "@/lib/query/keys";
 import type { SavedLayout } from "@/lib/types/http";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { resolveLayoutApplySessionIds } from "./layout-preset-selector-session-ids";
 
 type PresetOption = {
-  id: BuiltInPreset;
+  id: BuiltInLayoutProfileId;
   label: string;
   description: string;
   icon: React.ElementType;
 };
 
-const BUILT_IN_PRESETS: PresetOption[] = [
-  {
-    id: "default",
-    label: "Default",
-    description: "Sidebar + Agent + Changes/Files/Terminal",
-    icon: IconColumns3,
-  },
-  {
-    id: "plan",
-    label: "Plan Mode",
-    description: "Sidebar + Agent + Plan (side-by-side)",
-    icon: IconFileText,
-  },
-  {
-    id: "preview",
-    label: "Preview Mode",
-    description: "Sidebar + Agent + Browser (side-by-side)",
-    icon: IconDeviceDesktop,
-  },
-  {
-    id: "vscode",
-    label: "VS Code",
-    description: "Sidebar + Agent/VS Code (tabbed)",
-    icon: IconBrandVscode,
-  },
-];
+const PRESET_ICONS: Record<BuiltInLayoutProfileId, React.ElementType> = {
+  default: IconColumns3,
+  plan: IconFileText,
+  preview: IconDeviceDesktop,
+  vscode: IconBrandVscode,
+};
+
+const BUILT_IN_PRESETS: PresetOption[] = BUILT_IN_LAYOUT_PROFILES.map((profile) => ({
+  id: profile.id,
+  label: profile.name,
+  description: profile.description,
+  icon: PRESET_ICONS[profile.id],
+}));
+
+function mutationError(error: unknown): string {
+  return error instanceof Error ? error.message : "Please try again.";
+}
+
+function DefaultLayoutCheckbox({
+  checked,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Checkbox
+        id="layout-default"
+        checked={checked}
+        onCheckedChange={(next) => onCheckedChange(next === true)}
+      />
+      <Label htmlFor="layout-default" className="text-sm font-normal cursor-pointer">
+        Set as default layout
+      </Label>
+    </div>
+  );
+}
 
 function SaveLayoutDialog({
   open,
@@ -87,6 +124,8 @@ function SaveLayoutDialog({
   const [saving, setSaving] = useState(false);
   const captureCurrentLayout = useDockviewStore((s) => s.captureCurrentLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const setUserSettings = useAppStore((s) => s.setUserSettings);
+  const queryClient = useQueryClient();
 
   const handleSave = useCallback(async () => {
     const trimmed = name.trim();
@@ -94,25 +133,34 @@ function SaveLayoutDialog({
     setSaving(true);
     try {
       const layout = captureCurrentLayout();
-      const newLayout: SavedLayout = {
-        id: `layout-${Date.now()}`,
-        name: trimmed,
-        is_default: isDefault,
-        layout,
-        created_at: new Date().toISOString(),
-      };
-      // If this layout is the default, unset other defaults
-      const updated = savedLayouts.map((l) => (isDefault ? { ...l, is_default: false } : l));
-      await updateUserSettings({
-        saved_layouts: [...updated, newLayout],
+      const response = await updateUserSettings({
+        saved_layouts: createLayoutProfile(savedLayouts, {
+          id: createLayoutProfileId(),
+          name: trimmed,
+          isDefault,
+          layout,
+          createdAt: new Date().toISOString(),
+        }),
       });
+      queryClient.setQueryData(qk.settings.user(), response);
+      setUserSettings(mapUserSettingsResponse(response));
       setName("");
       setIsDefault(false);
       onOpenChange(false);
+    } catch (error) {
+      toast.error("Failed to save layout", { description: mutationError(error) });
     } finally {
       setSaving(false);
     }
-  }, [name, isDefault, captureCurrentLayout, savedLayouts, onOpenChange]);
+  }, [
+    name,
+    isDefault,
+    captureCurrentLayout,
+    savedLayouts,
+    queryClient,
+    setUserSettings,
+    onOpenChange,
+  ]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -134,16 +182,7 @@ function SaveLayoutDialog({
               autoFocus
             />
           </div>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="layout-default"
-              checked={isDefault}
-              onCheckedChange={(checked) => setIsDefault(checked === true)}
-            />
-            <Label htmlFor="layout-default" className="text-sm font-normal cursor-pointer">
-              Set as default layout
-            </Label>
-          </div>
+          <DefaultLayoutCheckbox checked={isDefault} onCheckedChange={setIsDefault} />
         </div>
         <DialogFooter>
           <Button
@@ -175,43 +214,41 @@ function SavedLayoutItems({
 }: {
   layouts: SavedLayout[];
   onApply: (layout: SavedLayout) => void | Promise<void>;
-  onDelete: (layoutId: string) => void;
+  onDelete: (layout: SavedLayout) => void;
 }) {
   if (layouts.length === 0) {
     return <div className="px-2 py-1.5 text-xs text-muted-foreground">No saved layouts</div>;
   }
   return layouts.map((layout) => (
-    <DropdownMenuItem
-      key={layout.id}
-      className="cursor-pointer group/layout"
-      onClick={() => {
-        void onApply(layout);
-      }}
-    >
-      <IconCheck className="h-3.5 w-3.5 mr-2 shrink-0 opacity-0" />
-      <span className="text-xs truncate flex-1">{layout.name}</span>
-      {layout.is_default && (
-        <Badge variant="secondary" className="text-[9px] px-1 py-0 ml-1">
-          default
-        </Badge>
-      )}
-      <button
-        type="button"
-        className="ml-1 text-destructive/60 hover:text-destructive opacity-0 group-hover/layout:opacity-100 transition-opacity cursor-pointer"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(layout.id);
-        }}
+    <div key={layout.id} className="flex items-stretch" role="presentation">
+      <DropdownMenuItem
+        className="min-w-0 flex-1 cursor-pointer"
+        onSelect={() => void onApply(layout)}
+      >
+        <IconCheck className="mr-2 h-3.5 w-3.5 shrink-0 opacity-0" />
+        <span className="flex-1 truncate text-xs">{layout.name}</span>
+        {layout.is_default && (
+          <Badge variant="secondary" className="ml-1 px-1 py-0 text-[9px]">
+            default
+          </Badge>
+        )}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className="min-h-11 min-w-11 shrink-0 cursor-pointer justify-center px-2 text-destructive/60 focus:text-destructive sm:min-h-7 sm:min-w-7"
+        aria-label={`Delete ${layout.name}`}
+        data-testid="layout-saved-delete"
+        data-layout-id={layout.id}
+        onSelect={() => onDelete(layout)}
       >
         <IconTrash className="h-3.5 w-3.5" />
-      </button>
-    </DropdownMenuItem>
+      </DropdownMenuItem>
+    </div>
   ));
 }
 
-/** The built-in preset menu items. Applying any preset resets widths
- *  (resetWidths=true), which is how a user clears a custom sidebar width. */
-function BuiltInPresetItems({ onApply }: { onApply: (presetId: BuiltInPreset) => void }) {
+/** Built-in preset menu items. Code-defined presets reset widths; customized
+ *  built-ins restore the dimensions saved in their override. */
+function BuiltInPresetItems({ onApply }: { onApply: (presetId: BuiltInLayoutProfileId) => void }) {
   return BUILT_IN_PRESETS.map((preset) => {
     const Icon = preset.icon;
     return (
@@ -264,20 +301,99 @@ function useApplySavedLayout() {
   );
 }
 
+function useApplyBuiltInLayout(
+  savedLayouts: SavedLayout[],
+  applySavedLayout: (layout: SavedLayout) => Promise<void>,
+) {
+  const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
+  return useCallback(
+    (presetId: BuiltInLayoutProfileId) => {
+      const override = getBuiltInLayoutOverride(savedLayouts, presetId);
+      if (override && getLayoutProfileCompatibility(override).status === "editable") {
+        void applySavedLayout(override);
+        return;
+      }
+      applyBuiltInPreset(presetId, true);
+    },
+    [applyBuiltInPreset, applySavedLayout, savedLayouts],
+  );
+}
+
+function DeleteLayoutDialog({
+  layout,
+  onClose,
+  onDelete,
+}: {
+  layout: SavedLayout | null;
+  onClose: () => void;
+  onDelete: (layoutId: string) => Promise<void>;
+}) {
+  const [deleting, setDeleting] = useState(false);
+  const handleDelete = async () => {
+    if (!layout) return;
+    setDeleting(true);
+    try {
+      await onDelete(layout.id);
+      onClose();
+    } catch (error) {
+      toast.error("Failed to delete layout", { description: mutationError(error) });
+    } finally {
+      setDeleting(false);
+    }
+  };
+  return (
+    <AlertDialog open={Boolean(layout)} onOpenChange={(open) => !open && !deleting && onClose()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {layout?.name ?? "saved layout"}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {layout?.is_default
+              ? "The built-in Default layout will become the default."
+              : "This saved layout will be permanently removed."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="cursor-pointer" disabled={deleting}>
+            Cancel
+          </AlertDialogCancel>
+          <AlertDialogAction
+            className="cursor-pointer"
+            disabled={deleting}
+            onClick={(event) => {
+              event.preventDefault();
+              void handleDelete();
+            }}
+          >
+            {deleting ? "Deleting..." : "Delete"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function LayoutPresetSelector() {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState<SavedLayout | null>(null);
   const recentlyClosedRef = useRef(false);
-  const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
+  const resetLayout = useDockviewStore((s) => s.resetLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const setUserSettings = useAppStore((s) => s.setUserSettings);
+  const queryClient = useQueryClient();
   const handleApplyCustom = useApplySavedLayout();
+  const handleApplyBuiltIn = useApplyBuiltInLayout(savedLayouts, handleApplyCustom);
 
   const handleDeleteLayout = useCallback(
     async (layoutId: string) => {
-      await updateUserSettings({ saved_layouts: savedLayouts.filter((l) => l.id !== layoutId) });
+      const response = await updateUserSettings({
+        saved_layouts: deleteLayoutProfile(savedLayouts, layoutId),
+      });
+      queryClient.setQueryData(qk.settings.user(), response);
+      setUserSettings(mapUserSettingsResponse(response));
     },
-    [savedLayouts],
+    [queryClient, savedLayouts, setUserSettings],
   );
 
   const handleDropdownOpenChange = useCallback((open: boolean) => {
@@ -320,15 +436,24 @@ export function LayoutPresetSelector() {
         <DropdownMenuContent align="end" className="w-60">
           <DropdownMenuGroup>
             <DropdownMenuLabel className="text-xs">Presets</DropdownMenuLabel>
-            <BuiltInPresetItems onApply={(id) => applyBuiltInPreset(id, true)} />
+            <BuiltInPresetItems onApply={handleApplyBuiltIn} />
           </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            data-testid="layout-reset-item"
+            onClick={resetLayout}
+            className="cursor-pointer"
+          >
+            <IconRestore className="h-4 w-4 mr-2 shrink-0" />
+            <span className="text-xs">Reset Layout</span>
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
             <DropdownMenuLabel className="text-xs">Saved Layouts</DropdownMenuLabel>
             <SavedLayoutItems
-              layouts={savedLayouts}
+              layouts={savedLayouts.filter((layout) => !isBuiltInLayoutOverride(layout))}
               onApply={handleApplyCustom}
-              onDelete={handleDeleteLayout}
+              onDelete={setDeleteCandidate}
             />
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
@@ -339,6 +464,11 @@ export function LayoutPresetSelector() {
         </DropdownMenuContent>
       </DropdownMenu>
       <SaveLayoutDialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen} />
+      <DeleteLayoutDialog
+        layout={deleteCandidate}
+        onClose={() => setDeleteCandidate(null)}
+        onDelete={handleDeleteLayout}
+      />
     </>
   );
 }

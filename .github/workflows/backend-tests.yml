@@ -252,3 +252,8 @@ jobs:
       # every platform.
       - name: Test windows-sensitive packages
         run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...
+
+      # Keep this targeted: the service package has broad subprocess coverage,
+      # while this native test is the Windows path-semantics regression.
+      - name: Test explicit local repository paths
+        run: go test -race -v -run '^TestExplicitLocalRepositoryWindowsPathSemantics$' ./internal/task/service

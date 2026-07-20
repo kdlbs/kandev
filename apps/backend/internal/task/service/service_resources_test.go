@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,6 +17,236 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
+
+func TestService_CreateRepositoryCanonicalizesExplicitLocalPath(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	discoveryRoot := t.TempDir()
+	svc.discoveryConfig.Roots = []string{discoveryRoot}
+	repoPath := filepath.Join(t.TempDir(), "outside-repo")
+	makeRepo(t, repoPath)
+	uncleanPath := repoPath + string(os.PathSeparator) + ".." + string(os.PathSeparator) + filepath.Base(repoPath)
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Outside Repo",
+		SourceType:  sourceTypeLocal,
+		LocalPath:   uncleanPath,
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	canonicalPath, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if created.LocalPath != canonicalPath {
+		t.Fatalf("LocalPath = %q, want canonical path %q", created.LocalPath, canonicalPath)
+	}
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.LocalPath != canonicalPath {
+		t.Fatalf("stored LocalPath = %q, want %q", stored.LocalPath, canonicalPath)
+	}
+}
+
+func TestService_CreateRepositoryRejectsInvalidLocalPathWithoutPersistence(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	missingPath := filepath.Join(t.TempDir(), "missing")
+	filePath := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(filePath, []byte("not a repository"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	type invalidPathCase struct {
+		name string
+		path string
+	}
+	invalidPaths := []invalidPathCase{
+		{name: "missing", path: missingPath},
+		{name: "file", path: filePath},
+		{name: "plain directory", path: t.TempDir()},
+	}
+	metadataOwner := filepath.Join(t.TempDir(), "metadata-owner")
+	makeRepo(t, metadataOwner)
+	forgedWorktree := filepath.Join(t.TempDir(), "forged-worktree")
+	if err := os.MkdirAll(forgedWorktree, 0o755); err != nil {
+		t.Fatalf("MkdirAll forged worktree: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(forgedWorktree, ".git"),
+		[]byte("gitdir: "+filepath.Join(metadataOwner, ".git")+"\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile forged .git pointer: %v", err)
+	}
+	invalidPaths = append(invalidPaths, invalidPathCase{name: "forged gitdir pointer", path: forgedWorktree})
+	forgedCommonDir := filepath.Join(t.TempDir(), "forged-common-dir")
+	makeRepo(t, forgedCommonDir)
+	if err := os.WriteFile(
+		filepath.Join(forgedCommonDir, ".git", "commondir"),
+		[]byte(filepath.Join(metadataOwner, ".git")+"\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile forged commondir: %v", err)
+	}
+	invalidPaths = append(invalidPaths, invalidPathCase{name: "forged common directory", path: forgedCommonDir})
+	loopPath := filepath.Join(t.TempDir(), "loop")
+	if err := os.Symlink(loopPath, loopPath); err == nil {
+		invalidPaths = append(invalidPaths, invalidPathCase{name: "symlink loop", path: loopPath})
+	}
+
+	for _, testCase := range invalidPaths {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+				WorkspaceID: "ws-1",
+				Name:        "Invalid Repo",
+				SourceType:  sourceTypeLocal,
+				LocalPath:   testCase.path,
+			})
+			if !errors.Is(err, ErrInvalidRepositorySettings) || !errors.Is(err, ErrInvalidRepositoryPath) {
+				t.Fatalf("CreateRepository error = %v, want typed invalid path error", err)
+			}
+		})
+	}
+	repositories, err := repo.ListRepositories(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(repositories) != 0 {
+		t.Fatalf("invalid repository was persisted: %+v", repositories)
+	}
+}
+
+func TestService_UpdateRepositoryRejectsInvalidLocalPathWithoutPersistence(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Provider Repo",
+		SourceType:  sourceTypeProvider,
+		Provider:    "github",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	invalidPath := t.TempDir()
+	_, err = svc.UpdateRepository(ctx, created.ID, &UpdateRepositoryRequest{LocalPath: &invalidPath})
+	if !errors.Is(err, ErrInvalidRepositorySettings) {
+		t.Fatalf("UpdateRepository error = %v, want ErrInvalidRepositorySettings", err)
+	}
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.LocalPath != "" {
+		t.Fatalf("invalid LocalPath persisted as %q", stored.LocalPath)
+	}
+}
+
+func TestService_UpdateRepositoryCanonicalizesExplicitLocalPath(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Provider Repo",
+		SourceType:  sourceTypeProvider,
+		Provider:    "github",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	repoPath := filepath.Join(t.TempDir(), "outside-repo")
+	makeRepo(t, repoPath)
+	uncleanPath := repoPath + string(os.PathSeparator) + ".." + string(os.PathSeparator) + filepath.Base(repoPath)
+	updated, err := svc.UpdateRepository(ctx, created.ID, &UpdateRepositoryRequest{LocalPath: &uncleanPath})
+	if err != nil {
+		t.Fatalf("UpdateRepository: %v", err)
+	}
+	canonicalPath, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if updated.LocalPath != canonicalPath {
+		t.Fatalf("LocalPath = %q, want canonical path %q", updated.LocalPath, canonicalPath)
+	}
+}
+
+func TestService_CreateRepositoryAllowsPathlessProvider(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "owner/repo",
+		SourceType:  sourceTypeProvider,
+		Provider:    "github",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if created.LocalPath != "" {
+		t.Fatalf("LocalPath = %q, want empty", created.LocalPath)
+	}
+}
+
+func TestService_FindOrCreateRepositoryRejectsInvalidLocalPathBackfill(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Name:          "owner/repo",
+		SourceType:    sourceTypeProvider,
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	invalidPath := t.TempDir()
+	_, _, err = svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+		LocalPath:     invalidPath,
+	})
+	if !errors.Is(err, ErrInvalidRepositorySettings) {
+		t.Fatalf("FindOrCreateRepository error = %v, want ErrInvalidRepositorySettings", err)
+	}
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.LocalPath != "" {
+		t.Fatalf("invalid LocalPath backfill persisted as %q", stored.LocalPath)
+	}
+}
 
 // errWorkspaceRepo is a WorkspaceRepository that always returns an error from
 // ListWorkspaces. Used to exercise the DB-error path of GetOfficeWorkflowIDs.

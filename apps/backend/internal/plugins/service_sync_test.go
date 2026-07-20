@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -247,6 +248,39 @@ func TestServiceSync_MissingInstallAlreadyErrorIsIdempotent(t *testing.T) {
 	}
 	if got.Status != StatusError {
 		t.Fatalf("Status after second Sync() = %q, want %q", got.Status, StatusError)
+	}
+}
+
+// TestServiceSync_EmptyResultSerializesEmptyArraysNotNull proves that a
+// no-op Sync (nothing added/installed/missing/errored) round-trips through
+// JSON as `[]`, not `null`. The frontend's SyncResult type
+// (apps/web/lib/types/plugins.ts) declares these fields as non-nullable
+// arrays and reads result.added.length unconditionally
+// (apps/web/lib/plugins/sync-summary.ts) — a `null` there throws
+// "can't access property 'length', e.added is null".
+func TestServiceSync_EmptyResultSerializesEmptyArraysNotNull(t *testing.T) {
+	svc, _, _ := newTestService(t)
+
+	result, err := svc.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("Sync() unexpected error: %v", err)
+	}
+	if result.Added == nil || result.Installed == nil || result.Missing == nil || result.Errors == nil {
+		t.Fatalf("Sync() left a nil slice field: %+v", result)
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	for _, key := range []string{"added", "installed", "missing", "errors"} {
+		if raw, ok := fields[key]; !ok || string(raw) == "null" {
+			t.Fatalf("Sync() JSON field %q = %s, want an empty array: %s", key, raw, data)
+		}
 	}
 }
 

@@ -532,6 +532,7 @@ export type RepositoryPathValidationResponse = {
   path: string;
   exists: boolean;
   is_git: boolean;
+  /** @deprecated Compatibility field; manual validity is determined by `exists` and `is_git`. */
   allowed: boolean;
   default_branch?: string;
   message?: string;

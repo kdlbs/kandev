@@ -158,6 +158,7 @@ function buildTaskLayoutProps(params: {
     remoteCreatedAt: params.remote.remoteCreatedAt,
     remoteCheckedAt: params.remote.remoteCheckedAt,
     remoteStatusError: params.remote.remoteStatusError,
+    isArchived: taskProps.isArchived,
   };
 }
 

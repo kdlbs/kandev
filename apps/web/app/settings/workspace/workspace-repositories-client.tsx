@@ -43,6 +43,7 @@ import {
   type RepositoryWithScripts,
 } from "@/app/settings/workspace/workspace-repositories-dirty";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
+import { isValidManualRepository } from "@/app/settings/workspace/workspace-repositories-validation";
 
 type RepositoryItem = RepositoryWithScripts & { __autoOpen?: boolean };
 type WorkspaceRepositoriesClientProps = {
@@ -348,7 +349,7 @@ function useDiscoverDialog(
     setManualValidation({ status: "loading" });
     try {
       const result = await validateRequest.run(workspace.id, manualRepoPath.trim());
-      if (result.allowed && result.exists && result.is_git)
+      if (isValidManualRepository(result))
         setManualValidation({
           status: "success",
           isValid: true,

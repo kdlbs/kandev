@@ -11,6 +11,7 @@ display_name: "Kandev E2E Fixture Plugin"
 description: "SDK-based plugin backend used by backend integration tests and Playwright e2e tests"
 author: "kandev"
 categories: ["tools"]
+repo_url: "https://github.com/kdlbs/kandev-plugin-template"
 
 runtime:
   type: binary

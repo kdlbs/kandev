@@ -80,3 +80,45 @@ describe("PluginRow update button", () => {
     expect(screen.queryByTestId("plugin-update-acme")).toBeNull();
   });
 });
+
+describe("PluginRow repo link", () => {
+  it("renders a Repo link when the plugin declares an http(s) repo_url", () => {
+    render(
+      <PluginRow
+        plugin={plugin({ repo_url: "https://github.com/kdlbs/kandev-plugin-acme" })}
+        busy={false}
+        onEnable={noop}
+        onDisable={noop}
+        onUninstall={noop}
+      />,
+    );
+    const link = screen.getByTestId("plugin-repo-link");
+    expect(link.getAttribute("href")).toBe("https://github.com/kdlbs/kandev-plugin-acme");
+  });
+
+  it("renders no Repo link when the plugin declares no repo_url", () => {
+    render(
+      <PluginRow
+        plugin={plugin()}
+        busy={false}
+        onEnable={noop}
+        onDisable={noop}
+        onUninstall={noop}
+      />,
+    );
+    expect(screen.queryByTestId("plugin-repo-link")).toBeNull();
+  });
+
+  it("renders no Repo link for a non-http(s) repo_url scheme", () => {
+    render(
+      <PluginRow
+        plugin={plugin({ repo_url: "javascript:alert(document.cookie)" })}
+        busy={false}
+        onEnable={noop}
+        onDisable={noop}
+        onUninstall={noop}
+      />,
+    );
+    expect(screen.queryByTestId("plugin-repo-link")).toBeNull();
+  });
+});

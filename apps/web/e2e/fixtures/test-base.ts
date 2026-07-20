@@ -187,6 +187,7 @@ export const test = backendFixture.extend<
       confirm_task_archive: true,
       mcp_task_agent_profile_default: "current_task",
       sidebar_views: [],
+      saved_layouts: [],
       // Reset to default kanban view. Pipeline-view tests switch this to
       // "graph2", which persists per-workspace; without this reset the next
       // test renders cards with data-testid="pipeline-task-<id>" instead of
@@ -280,6 +281,7 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     confirm_task_archive: true,
     mcp_task_agent_profile_default: "current_task",
     sidebar_views: [],
+    saved_layouts: [],
     kanban_view_mode: "",
     task_create_last_used: defaultTaskCreateLastUsed(seedData),
   });

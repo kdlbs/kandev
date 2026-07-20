@@ -22,6 +22,7 @@ display_name: "Slack Notifications"
 description: "Post to Slack on task events, relay messages to agents"
 author: "kandev"
 categories: ["connector"]                    # connector | automation | tools | analytics
+repo_url: "https://github.com/kdlbs/kandev-plugin-slack"  # optional; "Repo" link in Settings > Plugins
 
 runtime:
   type: binary                               # only supported value today
@@ -72,6 +73,7 @@ ui:                                           # optional native frontend plugin
 | `author` | no | string | Free-form. |
 | `categories` | no | string[] | Each entry must be one of `connector`, `automation`, `tools`, `analytics`. Unknown values are rejected. |
 | `icon` | no | string | Package-relative path (e.g. `icon.svg`) to an image the package ships, rendered on the [marketplace](plugins-marketplace.md) card and in plugin lists. The registry index-build resolves it to an absolute `icon_url`; for an installed plugin it is served from the extracted package. Omit it and the card falls back to a letter tile. |
+| `repo_url` | no | string | Absolute `http(s)` URL to the plugin's source repository. Rendered as a "Repo" link in Settings > Plugins (both the installed list and the plugin detail). Any other scheme (e.g. `javascript:`) is rejected at registration. Distinct from the marketplace card's `repo_url`, which the registry derives from `plugins.yaml`; declare this in the manifest so sideloaded and directly-installed plugins also carry the link. |
 | `runtime.type` | conditionally | string | `"binary"` is the only supported value. Setting it (vs. leaving it empty) makes the manifest **runtime-managed** — see "Managed vs. legacy" below. |
 | `runtime.executables` | required when `runtime.type: binary` | map\<string,string\> | Key is `<goos>-<goarch>` (e.g. `linux-amd64`, `darwin-arm64`, `windows-amd64`); value is a clean, package-relative path under `server/` (no leading `/`, no `..` segments). At least one entry required; the running host's key must be present at install time. Windows values end in `.exe`. |
 | `min_kandev_version` | no | string | Optional advisory; not currently enforced by the installer. |

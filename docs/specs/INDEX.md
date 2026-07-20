@@ -93,6 +93,7 @@ Per-workspace credentials and triage triggers for external services.
 | Spec | Status |
 |---|---|
 | [deletion](workspaces/deletion.md) | shipped |
+| [local-repositories](workspaces/local-repositories.md) | shipped |
 
 ## costs/ — cost tracking & budgets
 
@@ -118,6 +119,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
 | [tanstack-query-server-state](ui/tanstack-query-server-state.md) | done |
+| [task-layout-profiles](ui/task-layout-profiles.md) | draft |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

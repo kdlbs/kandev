@@ -2,6 +2,114 @@
 
 All notable changes to Kandev.
 
+## 0.80.0 - 2026-07-20
+
+### Features
+
+- show source repo link on installed plugin list and settings ([#1821](https://github.com/kdlbs/kandev/pull/1821))
+- add configurable task layout profiles ([#1799](https://github.com/kdlbs/kandev/pull/1799))
+- configure profiles for MCP-created tasks ([#1797](https://github.com/kdlbs/kandev/pull/1797))
+- add parent-controlled task stopping via MCP ([#1803](https://github.com/kdlbs/kandev/pull/1803))
+- add plugin marketplace with curated registry and updates ([#1798](https://github.com/kdlbs/kandev/pull/1798))
+- add explicit save for settings ([#1686](https://github.com/kdlbs/kandev/pull/1686))
+- add chat-input-actions slot for plugin toolbar icons ([#1794](https://github.com/kdlbs/kandev/pull/1794))
+- bind HTTP server to multiple addresses ([#1792](https://github.com/kdlbs/kandev/pull/1792))
+- unify configuration chat sessions ([#1695](https://github.com/kdlbs/kandev/pull/1695))
+- allow detaching subtasks from parent tasks ([#1781](https://github.com/kdlbs/kandev/pull/1781))
+- add idle storage maintenance ([#1699](https://github.com/kdlbs/kandev/pull/1699))
+- add Grok CLI driver ([#1745](https://github.com/kdlbs/kandev/pull/1745)) by @zensi-dev
+- link mobile Kandev brand to workspace home ([#1755](https://github.com/kdlbs/kandev/pull/1755))
+- improve mobile task navigation ([#1769](https://github.com/kdlbs/kandev/pull/1769))
+- surface Integrations section in mobile nav ([#1771](https://github.com/kdlbs/kandev/pull/1771))
+- allow plugin nav items in the sidebar Integrations section ([#1767](https://github.com/kdlbs/kandev/pull/1767))
+- add direct sidebar view creation ([#1763](https://github.com/kdlbs/kandev/pull/1763))
+- per-plugin settings pages driven by manifest config_schema ([#1761](https://github.com/kdlbs/kandev/pull/1761))
+- show context window data source ([#1752](https://github.com/kdlbs/kandev/pull/1752))
+- improve ACP model configuration summaries ([#1723](https://github.com/kdlbs/kandev/pull/1723))
+- warn about workflow replay cycles ([#1720](https://github.com/kdlbs/kandev/pull/1720))
+- route agents through execution profiles ([#1725](https://github.com/kdlbs/kandev/pull/1725))
+- richer frontend SDK — page chrome, nav icons, more host UI ([#1759](https://github.com/kdlbs/kandev/pull/1759))
+- add repository defaults to saved GitHub queries ([#1758](https://github.com/kdlbs/kandev/pull/1758))
+- add cmd+shift+g shortcut to open the task's github pr ([#1757](https://github.com/kdlbs/kandev/pull/1757))
+- typed capability-gated Host data API (ADR 0043) ([#1753](https://github.com/kdlbs/kandev/pull/1753))
+- add quick chat entry points on mobile ([#1751](https://github.com/kdlbs/kandev/pull/1751))
+- add plugin system with grpc runtime and native ui plugins ([#1742](https://github.com/kdlbs/kandev/pull/1742))
+- persist ACP session id in session metadata ([#1748](https://github.com/kdlbs/kandev/pull/1748))
+- choose worktree when opening IDE on multi-repo tasks ([#1743](https://github.com/kdlbs/kandev/pull/1743))
+- lazy load shell command output ([#1739](https://github.com/kdlbs/kandev/pull/1739))
+- session spawning, sibling messaging, and renameable tabs ([#1734](https://github.com/kdlbs/kandev/pull/1734))
+- unify project repository pickers across create and edit ([#1722](https://github.com/kdlbs/kandev/pull/1722)) by @Aulma
+
+### Bug Fixes
+
+- show github review and issue watches after strictmode remount ([#1823](https://github.com/kdlbs/kandev/pull/1823))
+- preserve shared worktrees during task cleanup ([#1819](https://github.com/kdlbs/kandev/pull/1819))
+- serialize empty sync-result arrays instead of null ([#1817](https://github.com/kdlbs/kandev/pull/1817))
+- harden agentctl bind, git clone args, and powershell sound escaping ([#1811](https://github.com/kdlbs/kandev/pull/1811))
+- report storage usage and reclaim archived workspaces ([#1813](https://github.com/kdlbs/kandev/pull/1813))
+- ignore echoed user ACP chunks ([#1804](https://github.com/kdlbs/kandev/pull/1804))
+- repair incomplete code-server installations ([#1800](https://github.com/kdlbs/kandev/pull/1800))
+- harden submodule init against malicious .gitmodules ([#1802](https://github.com/kdlbs/kandev/pull/1802))
+- validate destination parent chain in copyfiles byte copy ([#1801](https://github.com/kdlbs/kandev/pull/1801))
+- keep queued messages parked after agent cancellation ([#1796](https://github.com/kdlbs/kandev/pull/1796))
+- gate gitlab/linear fetches on integration being configured ([#1789](https://github.com/kdlbs/kandev/pull/1789))
+- attribute model configuration to turns ([#1784](https://github.com/kdlbs/kandev/pull/1784))
+- restore multi-repo review diffs ([#1795](https://github.com/kdlbs/kandev/pull/1795))
+- hide workspace ownership marker from git status ([#1783](https://github.com/kdlbs/kandev/pull/1783))
+- prevent command injection via untrusted git branch names ([#1791](https://github.com/kdlbs/kandev/pull/1791))
+- prevent AppleScript injection RCE in macOS notifications ([#1790](https://github.com/kdlbs/kandev/pull/1790))
+- treat git-describe builds as ahead of latest release ([#1787](https://github.com/kdlbs/kandev/pull/1787))
+- stop async client component error on automations settings ([#1788](https://github.com/kdlbs/kandev/pull/1788))
+- point About documentation link to kandev.ai/docs ([#1786](https://github.com/kdlbs/kandev/pull/1786))
+- indent multi-repo change trees ([#1779](https://github.com/kdlbs/kandev/pull/1779))
+- align install-dialog footer actions ([#1780](https://github.com/kdlbs/kandev/pull/1780))
+- navigate to Settings on the first gear click from a session view ([#1775](https://github.com/kdlbs/kandev/pull/1775)) by @ClemDNL
+- freeze archived task state against late REVIEW writes ([#1706](https://github.com/kdlbs/kandev/pull/1706)) by @ClemDNL
+- render conversation markdown ([#1750](https://github.com/kdlbs/kandev/pull/1750))
+- hide system templates ([#1765](https://github.com/kdlbs/kandev/pull/1765))
+- provide bounded access to CREATED sibling task descriptions ([#1773](https://github.com/kdlbs/kandev/pull/1773))
+- show border-only highlight in PR picker dialog ([#1766](https://github.com/kdlbs/kandev/pull/1766))
+- stabilize sidebar toggle animation ([#1762](https://github.com/kdlbs/kandev/pull/1762))
+- stabilize remote repository picker ([#1747](https://github.com/kdlbs/kandev/pull/1747))
+- don't split streaming messages on subagent tool calls ([#1756](https://github.com/kdlbs/kandev/pull/1756))
+- preserve settings sidebar on first click ([#1744](https://github.com/kdlbs/kandev/pull/1744))
+- align sidebar resize handle ([#1728](https://github.com/kdlbs/kandev/pull/1728))
+- prioritize subscription usage ([#1741](https://github.com/kdlbs/kandev/pull/1741))
+- ignore late terminal tool updates ([#1740](https://github.com/kdlbs/kandev/pull/1740))
+- refresh agent capability status ([#1736](https://github.com/kdlbs/kandev/pull/1736))
+- preserve office workspace mode in task routes ([#1738](https://github.com/kdlbs/kandev/pull/1738))
+- prevent duplicate asset uploads ([#1737](https://github.com/kdlbs/kandev/pull/1737))
+- use macOS app updater target ([#1735](https://github.com/kdlbs/kandev/pull/1735))
+- build macOS updater bundles ([#1733](https://github.com/kdlbs/kandev/pull/1733))
+- dereference tags for updater dates ([#1732](https://github.com/kdlbs/kandev/pull/1732))
+- install xdg-open for Linux bundles ([#1731](https://github.com/kdlbs/kandev/pull/1731))
+- use Bash 3.2-safe artifact verifier ([#1730](https://github.com/kdlbs/kandev/pull/1730))
+- keep settings section actions aligned on narrow screens ([#1727](https://github.com/kdlbs/kandev/pull/1727))
+- validate updater signing from workflow revision ([#1726](https://github.com/kdlbs/kandev/pull/1726))
+
+### Performance
+
+- scale workspace git status for large worktrees ([#1814](https://github.com/kdlbs/kandev/pull/1814))
+
+### Refactoring
+
+- remove the unused tools feature ([#1776](https://github.com/kdlbs/kandev/pull/1776))
+- detect absent secret via ErrNotFound sentinel ([#1770](https://github.com/kdlbs/kandev/pull/1770))
+
+### Documentation
+
+- reference kandev-plugin-template starter repo in plugin guides ([#1818](https://github.com/kdlbs/kandev/pull/1818))
+- define cinematic landing capture ([#1768](https://github.com/kdlbs/kandev/pull/1768))
+- document cross-task agent communication and MCP tools ([#1793](https://github.com/kdlbs/kandev/pull/1793)) by @yattdev
+- document the plugin marketplace ([#1805](https://github.com/kdlbs/kandev/pull/1805))
+- add plugin system guide, authoring tutorial, and manifest reference ([#1774](https://github.com/kdlbs/kandev/pull/1774))
+- require PR screenshots for UI changes in pr skill ([#1782](https://github.com/kdlbs/kandev/pull/1782))
+- place Office warnings within feature sections ([#1764](https://github.com/kdlbs/kandev/pull/1764))
+- reframe feature guides and mark experimental surfaces ([#1760](https://github.com/kdlbs/kandev/pull/1760))
+- overhaul public product guides ([#1749](https://github.com/kdlbs/kandev/pull/1749))
+- decentralize ADR identifiers ([#1746](https://github.com/kdlbs/kandev/pull/1746))
+- separate user and contributor documentation paths ([#1729](https://github.com/kdlbs/kandev/pull/1729))
+
 ## 0.79.0 - 2026-07-16
 
 ### Features

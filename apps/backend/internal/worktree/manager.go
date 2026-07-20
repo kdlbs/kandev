@@ -100,6 +100,9 @@ type Store interface {
 	// non-deleted worktree row that has a non-empty path. Used by the
 	// office GC to identify live worktrees that must not be swept.
 	ListActiveWorktreePaths(ctx context.Context) ([]string, error)
+	// CountActiveWorktreeReferences counts non-terminal session associations
+	// for a physical worktree, excluding associations owned by the caller.
+	CountActiveWorktreeReferences(ctx context.Context, worktreeID string, excludeSessionIDs []string) (int, error)
 }
 
 // MultiRepoStore is an optional capability some stores implement to support
@@ -174,6 +177,16 @@ func (m *Manager) SetScriptMessageHandler(handler ScriptMessageHandler) {
 // authoritative inventory of paths that must not be swept.
 func (m *Manager) ListActiveWorktreePaths(ctx context.Context) ([]string, error) {
 	return m.store.ListActiveWorktreePaths(ctx)
+}
+
+// CountActiveWorktreeReferences returns the number of live session
+// associations for a physical worktree outside the supplied sessions.
+func (m *Manager) CountActiveWorktreeReferences(
+	ctx context.Context,
+	worktreeID string,
+	excludeSessionIDs []string,
+) (int, error) {
+	return m.store.CountActiveWorktreeReferences(ctx, worktreeID, excludeSessionIDs)
 }
 
 // IsEnabled returns whether worktree mode is enabled.

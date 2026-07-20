@@ -44,6 +44,7 @@ func (m *Manifest) Validate() error {
 		errs = append(errs, m.validateEndpoints()...)
 	}
 	errs = append(errs, m.validateCategories()...)
+	errs = append(errs, m.validateRepoURL()...)
 	errs = append(errs, m.validateUIPages()...)
 	errs = append(errs, m.validateUIBundle()...)
 	errs = append(errs, m.validateWebhooks()...)
@@ -172,6 +173,25 @@ func (m *Manifest) validateCategories() []error {
 		}
 	}
 	return errs
+}
+
+// validateRepoURL checks that repo_url, when set, is an http(s) URL. It is
+// surfaced as a clickable "Repo" link in the plugin UI, so a non-http(s)
+// scheme (e.g. "javascript:") is rejected at registration rather than relying
+// solely on the frontend href guard. An empty repo_url is valid (optional).
+func (m *Manifest) validateRepoURL() []error {
+	// Normalise in place so the stored/serialised value matches what was
+	// validated (a manifest with surrounding whitespace would otherwise pass
+	// the check but keep the spaces in the href).
+	m.RepoURL = strings.TrimSpace(m.RepoURL)
+	if m.RepoURL == "" {
+		return nil
+	}
+	u := strings.ToLower(m.RepoURL)
+	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+		return []error{fmt.Errorf("repo_url %q must be an http(s) URL", m.RepoURL)}
+	}
+	return nil
 }
 
 // validateUIPages checks each declared UI page's surface against the known

@@ -292,6 +292,9 @@ function cachedArchivedAtFromPayload(
   existing: CachedTask,
 ): unknown {
   if (payload.archived_at !== undefined) return payload.archived_at;
+  // Unarchive notifications omit nil archived_at values. If this cache entry
+  // was archived, a subsequent visible task update is the authoritative clear.
+  if (existing.archived_at) return null;
   return existing.archived_at;
 }
 

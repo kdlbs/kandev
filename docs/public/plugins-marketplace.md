@@ -111,15 +111,22 @@ drift from what actually ships.
 ### 1. Publish the plugin package as a release
 
 Package your plugin as usual (see [Authoring a plugin →
-Packaging](plugins-authoring.md#packaging)) and cut a GitHub **Release** whose
-assets include both:
+Packaging](plugins-authoring.md#packaging)) and cut a GitHub **Release**. One
+asset is required; a second is optional:
 
-- `<id>-<version>.tar.gz` — the plugin package, and
-- `checksums.txt` — the integrity manifest the install pipeline verifies.
+- `<id>-<version>.tar.gz` (**required**) — the plugin package. It carries its
+  own internal `checksums.txt` covering every packaged file, which the install
+  pipeline verifies on extraction.
+- `checksums.txt` (optional) — the sha256 of the tarball itself. Advisory
+  provenance: the catalog reserves a `package_sha256` field for it, but the
+  index builder does not populate or enforce the digest yet, so it is included
+  only for forward compatibility.
 
 The release must pass the standard package integrity gate. The
-`kdlbs/kandev-plugin-template` starter repo is the recommended way to bootstrap
-a repo with the right layout and a release workflow.
+[`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template)
+starter repo is the recommended way to bootstrap a repo with the right layout —
+its `.github/workflows/release.yml` produces both assets automatically when you
+push a version tag.
 
 ### 2. Add an icon (optional)
 
@@ -152,9 +159,9 @@ a PR that lists it.
    [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json).
 2. Open a pull request. The registry index-build workflow runs on your PR
    (build + tests, no Pages deploy), resolving your entry against the GitHub API
-   — your repo must have a latest release that publishes a `.tar.gz` package and
-   its `checksums.txt`. An entry whose repo has no release or no package asset is
-   skipped.
+   — your repo must have a latest release that publishes a `.tar.gz` package
+   asset (an accompanying `checksums.txt` asset is optional). An entry whose repo
+   has no release or no package asset is skipped.
 3. A maintainer reviews and merges — maintainer approval is what gates the
    official catalog. The index-build workflow then picks up your entry and your
    plugin appears in the in-app catalog on the next build.

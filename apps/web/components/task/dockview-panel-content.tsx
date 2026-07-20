@@ -4,14 +4,11 @@ import React, { useCallback, useEffect, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 import { useAppStore } from "@/components/state-provider";
-import { useActiveTaskHasRepos } from "@/hooks/domains/kanban/use-active-task-has-repos";
-import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useFileEditors } from "@/hooks/use-file-editors";
-import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -28,8 +25,6 @@ import { TaskChatPanel } from "./task-chat-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
 import { TerminalPanel } from "./terminal-panel";
 import { VscodePanel } from "./vscode-panel";
-
-const debugChangesVisibility = createDebugLogger("changes:visibility");
 
 export const CHAT_PANEL_FALLBACK_LABEL = "Agent";
 
@@ -127,22 +122,6 @@ function DiffViewerContent({
   );
 }
 
-function describeTaskRepositoriesForDebug(
-  task: { repositoryId?: string; repositories?: Array<{ repository_id: string }> } | null,
-  taskId: string | null,
-) {
-  if (!taskId) return { source: "none", repositoryId: "-", repoCount: -1, repoIds: "-" };
-  if (task) {
-    return {
-      source: "taskQuery",
-      repositoryId: task.repositoryId ?? "-",
-      repoCount: task.repositories?.length ?? -1,
-      repoIds: task.repositories?.map((repo) => repo.repository_id).join(",") || "-",
-    };
-  }
-  return { source: "missing", repositoryId: "-", repoCount: -1, repoIds: "-" };
-}
-
 function ChangesContent({ panelId }: { panelId: string }) {
   const addDiffViewerPanel = useDockviewStore((s) => s.addDiffViewerPanel);
   const addFileDiffPanel = useDockviewStore((s) => s.addFileDiffPanel);
@@ -153,40 +132,6 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
   const totalCount = useSessionChangesCount(activeSessionId);
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const activeUiSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const activeTask = useTaskById(activeTaskId);
-
-  // Repo-less tasks have no git changes ever - auto-close the panel so users
-  // don't see a permanently empty Changes tab. Gate on a confirmed `false`:
-  // `null` means the task hasn't loaded yet, and removing the panel during
-  // that window is unrecoverable in the same session.
-  const taskHasRepos = useActiveTaskHasRepos();
-  useEffect(() => {
-    const dockApi = useDockviewStore.getState().api;
-    const panel = dockApi?.getPanel(panelId);
-    if (isDebug()) {
-      const repoDebug = describeTaskRepositoriesForDebug(activeTask, activeTaskId);
-      let action = "keep";
-      if (taskHasRepos === false) {
-        action = panel ? "remove" : "remove-missing-panel";
-      }
-      debugChangesVisibility("auto-close decision", {
-        panelId,
-        taskHasRepos: taskHasRepos === null ? "unknown" : String(taskHasRepos),
-        action,
-        activeTaskId: activeTaskId ?? "-",
-        sessionId: activeUiSessionId ?? "-",
-        taskSource: repoDebug.source,
-        repositoryId: repoDebug.repositoryId,
-        repoCount: repoDebug.repoCount,
-        repoIds: repoDebug.repoIds,
-        livePanelIds: dockApi?.panels.map((p) => p.id).join(",") ?? "-",
-      });
-    }
-    if (taskHasRepos !== false) return;
-    if (dockApi && panel) dockApi.removePanel(panel);
-  }, [activeTask, activeTaskId, activeUiSessionId, taskHasRepos, panelId]);
 
   useEffect(() => {
     const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";
