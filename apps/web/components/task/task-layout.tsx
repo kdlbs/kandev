@@ -36,6 +36,7 @@ type TaskLayoutProps = {
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
   initialLayout?: string | null;
+  isArchived?: boolean;
 };
 
 export const TaskLayout = memo(function TaskLayout({
@@ -57,6 +58,7 @@ export const TaskLayout = memo(function TaskLayout({
   remoteCheckedAt,
   remoteStatusError,
   initialLayout,
+  isArchived,
 }: TaskLayoutProps) {
   const { isMobile, usesDesktopWorkbench, isFullDesktop } = useResponsiveBreakpoint();
 
@@ -77,6 +79,7 @@ export const TaskLayout = memo(function TaskLayout({
         remoteCreatedAt={remoteCreatedAt}
         remoteCheckedAt={remoteCheckedAt}
         remoteStatusError={remoteStatusError}
+        isArchived={isArchived}
       />
     );
   }

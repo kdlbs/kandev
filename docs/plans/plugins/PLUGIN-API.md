@@ -123,11 +123,15 @@ interface PluginRegistry {
 
   // Named slot injection. Host renders all components registered for a slot via
   // <PluginSlot name="..." props={...}/>. Initial slots: "task-sidebar",
-  // "settings-nav", "main-nav-footer", "chat-input-actions". The last renders
-  // icon buttons in the chat composer toolbar (beside the model picker, mic,
-  // and send) and forwards `{ taskId, taskTitle, activeSessionId, sessionIds }`
-  // as `slotProps` — the active session plus every kandev session id on the
-  // task. Resolving a session id to an agent/ACP transcript id (e.g. to key
+  // "settings-nav", "main-nav-footer", "chat-input-actions", "chat-top-bar".
+  // "chat-input-actions" renders icon buttons in the chat composer toolbar
+  // (beside the model picker, mic, and send) and forwards
+  // `{ taskId, taskTitle, activeSessionId, sessionIds }` as `slotProps`.
+  // "chat-top-bar" renders status in the session top bar (beside the CPU/DB
+  // metrics and the document/editor/debug controls) and forwards
+  // `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }`. Both
+  // carry the active session plus every kandev session id on the task.
+  // Resolving a session id to an agent/ACP transcript id (e.g. to key
   // tokscale cost data on a session) is the plugin's job, done server-side in
   // the plugin backend via the Host data API; the host only propagates ids.
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;

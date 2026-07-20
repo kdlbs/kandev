@@ -41,6 +41,7 @@ type SessionMobileLayoutProps = {
   remoteCreatedAt?: string | null;
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
+  isArchived?: boolean;
 };
 
 function MobileChatPanelContent({
@@ -201,6 +202,7 @@ type MobileTopBarStickyProps = {
   remoteCreatedAt?: string | null;
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
+  isArchived?: boolean;
 };
 
 function MobileTopBarSticky(props: MobileTopBarStickyProps) {
@@ -226,6 +228,7 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
         remoteCreatedAt={props.remoteCreatedAt}
         remoteCheckedAt={props.remoteCheckedAt}
         remoteStatusError={props.remoteStatusError}
+        isArchived={props.isArchived}
       />
     </div>
   );
@@ -373,6 +376,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
   remoteCreatedAt,
   remoteCheckedAt,
   remoteStatusError,
+  isArchived,
 }: SessionMobileLayoutProps) {
   const {
     activeTaskId,
@@ -415,6 +419,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         remoteCreatedAt={remoteCreatedAt}
         remoteCheckedAt={remoteCheckedAt}
         remoteStatusError={remoteStatusError}
+        isArchived={isArchived}
       />
 
       <MobilePanelArea

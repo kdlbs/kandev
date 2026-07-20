@@ -332,6 +332,7 @@ plugins at once. Available slots:
 | `settings-nav` | Settings navigation tree | — |
 | `main-nav-footer` | Footer of the main sidebar | — |
 | `chat-input-actions` | Chat composer toolbar, beside the model picker, mic, and send button | `{ taskId, taskTitle, activeSessionId, sessionIds }` |
+| `chat-top-bar` | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
 
 ### Chat toolbar actions
 
@@ -395,6 +396,34 @@ Match the first-party toolbar buttons: `Button` from `host.ui` with
 (`h-4 w-4`) icon. Wrap it in `host.ui.Tooltip` so it reads like the native
 mic/attach controls. `kandev-plugin-hello/ui/bundle.js` ships a working
 example.
+
+### Session top bar
+
+Register a `chat-top-bar` component to surface at-a-glance status in the
+session top bar, beside the first-party CPU/DB metrics and the
+document/editor/debug controls. The host passes the current context as
+`slotProps`:
+
+```ts
+type ChatTopBarSlotProps = {
+  taskId: string | null;
+  taskTitle?: string;
+  workspaceId: string | null;
+  activeSessionId: string | null; // session the top bar is bound to
+  sessionIds: string[];           // every kandev session id on the task
+};
+```
+
+Like `chat-input-actions`, both the active session and the full `sessionIds`
+list are provided (see the note above about resolving kandev session ids to
+ACP transcript ids server-side). The top bar is a compact horizontal strip, so
+keep contributions to small badges or `h-7` buttons that match the native
+metric chips.
+
+```js
+// inside initialize(registry, host):
+registry.registerComponent("chat-top-bar", makeTopBarStatus(host));
+```
 
 ## Three integration patterns
 
