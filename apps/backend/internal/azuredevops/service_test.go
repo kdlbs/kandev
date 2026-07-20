@@ -96,6 +96,9 @@ func TestOrganizationURLValidation(t *testing.T) {
 			t.Errorf("ValidateOrganizationURL(%q) = %q, %v", raw, got, err)
 		}
 	}
+	if got, err := ValidateOrganizationURL("https://dev.azure.com/acme/"); err != nil || got != "https://dev.azure.com/acme" {
+		t.Errorf("ValidateOrganizationURL() = %q, %v, want canonical URL", got, err)
+	}
 	invalid := []string{
 		"", "http://dev.azure.com/acme", "https://example.com/acme",
 		"https://dev.azure.com", "https://dev.azure.com/acme/project",

@@ -67,10 +67,11 @@ func (s *Service) Store() *Store {
 	return s.store
 }
 
-// ValidateOrganizationURL accepts only canonical Azure DevOps Services
-// organization URLs: https://dev.azure.com/<organization>.
+// ValidateOrganizationURL accepts Azure DevOps Services organization URLs and
+// returns the canonical form without a trailing slash.
 func ValidateOrganizationURL(raw string) (string, error) {
-	parsed, err := url.Parse(raw)
+	normalized := strings.TrimSuffix(raw, "/")
+	parsed, err := url.Parse(normalized)
 	if err != nil || parsed.Scheme != "https" || parsed.Host != "dev.azure.com" {
 		return "", errors.New("organizationUrl must use https://dev.azure.com")
 	}
@@ -78,10 +79,10 @@ func ValidateOrganizationURL(raw string) (string, error) {
 		return "", errors.New("organizationUrl must be a canonical organization URL")
 	}
 	organization := strings.TrimPrefix(parsed.Path, "/")
-	if parsed.Path != "/"+organization || !organizationNameRE.MatchString(organization) || parsed.String() != raw {
+	if parsed.Path != "/"+organization || !organizationNameRE.MatchString(organization) || parsed.String() != normalized {
 		return "", errors.New("organizationUrl must contain exactly one valid organization name")
 	}
-	return raw, nil
+	return normalized, nil
 }
 
 // GetConfigForWorkspace returns a redacted workspace configuration.

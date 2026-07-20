@@ -85,7 +85,8 @@ test("mobile settings explain PAT scopes and link to the organization token page
   );
 
   await testPage.getByTestId("azure-devops-organization").fill("https://dev.azure.com/acme");
-  const createTokenLink = testPage.getByRole("link", { name: "Create personal access token" });
+  await testPage.getByRole("button", { name: "How to create a personal access token" }).click();
+  const createTokenLink = testPage.getByTestId("azure-devops-pat-help").locator(":scope > a");
   await expect(createTokenLink).toBeVisible();
   await expect(createTokenLink).toHaveAttribute(
     "href",
@@ -113,9 +114,10 @@ test("mobile filters expose both Azure browse modes without horizontal overflow"
   });
   await testPage.goto("/azure-devops");
 
-  await testPage.getByTestId("azure-devops-mobile-filter-button").click();
-  await testPage.getByTestId("azure-devops-search-button-mobile").click();
   await expect(testPage.getByText("Handle token rotation")).toBeVisible();
+  await testPage.getByTestId("azure-devops-mobile-filter-button").click();
+  await expect(testPage.getByTestId("azure-devops-search-button-mobile")).toBeVisible();
+  await testPage.getByTestId("azure-devops-search-button-mobile").click();
 
   await testPage.getByRole("button", { name: "Pull requests" }).click();
   await testPage.getByTestId("azure-devops-mobile-filter-button").click();

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AzureDevOpsConfig } from "@/lib/types/azure-devops";
 
@@ -33,9 +33,11 @@ vi.mock("@/lib/api/domains/azure-devops-api", () => ({
 
 import { AzureDevOpsConnectionSection } from "./azure-devops-settings";
 
+const OLD_ORGANIZATION_URL = "https://dev.azure.com/old-org";
+
 const config: AzureDevOpsConfig = {
   workspaceId: "workspace-a",
-  organizationUrl: "https://dev.azure.com/old-org",
+  organizationUrl: OLD_ORGANIZATION_URL,
   defaultProjectId: "project-old",
   defaultProjectName: "Old project",
   authMethod: "pat",
@@ -62,11 +64,19 @@ describe("AzureDevOpsConnectionSection", () => {
   it("links to the organization PAT page and explains the required read scopes", async () => {
     render(<AzureDevOpsConnectionSection workspaceId="workspace-a" />);
 
+    const patHelpButton = await screen.findByRole("button", {
+      name: "How to create a personal access token",
+    });
+    expect(screen.queryByTestId("azure-devops-pat-help")).toBeNull();
+    fireEvent.focus(patHelpButton);
+
     const patHelp = await screen.findByTestId("azure-devops-pat-help");
-    const createTokenLink = screen.getByRole("link", { name: "Create personal access token" });
+    const [createTokenLink] = within(patHelp).getAllByRole("link", {
+      name: "Create personal access token",
+    });
 
     expect(createTokenLink.getAttribute("href")).toBe(
-      "https://dev.azure.com/old-org/_usersSettings/tokens",
+      `${OLD_ORGANIZATION_URL}/_usersSettings/tokens`,
     );
     expect(patHelp.textContent).toContain("Custom defined");
     expect(patHelp.textContent).toContain("Work Items");
@@ -79,21 +89,43 @@ describe("AzureDevOpsConnectionSection", () => {
 
     const organization = await screen.findByTestId("azure-devops-organization");
     await waitFor(() =>
-      expect((organization as HTMLInputElement).value).toBe("https://dev.azure.com/old-org"),
+      expect((organization as HTMLInputElement).value).toBe(OLD_ORGANIZATION_URL),
     );
     fireEvent.change(organization, { target: { value: "https://example.com/old-org" } });
+    fireEvent.focus(screen.getByRole("button", { name: "How to create a personal access token" }));
 
-    expect(screen.queryByRole("link", { name: "Create personal access token" })).toBeNull();
-    expect(screen.getByTestId("azure-devops-pat-help").textContent).toContain(
-      "Enter a valid organization URL",
+    const patHelp = screen.getByTestId("azure-devops-pat-help");
+    expect(
+      within(patHelp).queryByRole("link", { name: "Create personal access token" }),
+    ).toBeNull();
+    expect(patHelp.textContent).toContain("Enter a valid organization URL");
+  });
+
+  it("removes trailing slashes before saving an organization URL", async () => {
+    render(<AzureDevOpsConnectionSection workspaceId="workspace-a" />);
+    const organization = await screen.findByTestId("azure-devops-organization");
+    await waitFor(() =>
+      expect((organization as HTMLInputElement).value).toBe(OLD_ORGANIZATION_URL),
     );
+
+    fireEvent.change(organization, { target: { value: "https://dev.azure.com/old-org/" } });
+    fireEvent.click(screen.getByTestId("azure-devops-save-button"));
+
+    await waitFor(() => expect(mocks.setConfig).toHaveBeenCalledTimes(1));
+    expect(mocks.setConfig).toHaveBeenCalledWith("workspace-a", {
+      organizationUrl: OLD_ORGANIZATION_URL,
+      defaultProjectId: "project-old",
+      defaultProjectName: "Old project",
+      authMethod: "pat",
+      pat: undefined,
+    });
   });
 
   it("omits a project selected for the previous organization", async () => {
     render(<AzureDevOpsConnectionSection workspaceId="workspace-a" />);
     const organization = await screen.findByTestId("azure-devops-organization");
     await waitFor(() =>
-      expect((organization as HTMLInputElement).value).toBe("https://dev.azure.com/old-org"),
+      expect((organization as HTMLInputElement).value).toBe(OLD_ORGANIZATION_URL),
     );
 
     fireEvent.change(organization, { target: { value: "https://dev.azure.com/new-org" } });

@@ -59,6 +59,13 @@ authenticating the GitHub CLI.
   remains the responsibility of the selected executor's Git credentials.
 - The Azure DevOps browse and settings surfaces provide equivalent desktop and
   mobile workflows.
+- Organization URL inputs accept an optional trailing slash and persist the
+  canonical URL without it.
+- PAT setup instructions and the organization-specific token-settings link are
+  available from an info control beside the PAT field on hover, focus, or tap.
+- Opening the Azure DevOps browser runs the default work-item query as soon as
+  the connected project's filters are ready; users do not need to submit the
+  initial search manually.
 
 ## Data Model
 

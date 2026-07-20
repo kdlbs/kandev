@@ -5,6 +5,7 @@ import {
   IconBrandAzure,
   IconDeviceFloppy,
   IconExternalLink,
+  IconInfoCircle,
   IconPlugConnected,
   IconTrash,
 } from "@tabler/icons-react";
@@ -15,6 +16,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
@@ -114,7 +116,7 @@ function requestFromForm(
     normalizedOrganization(form.organizationUrl) ===
     normalizedOrganization(savedConfig?.organizationUrl ?? "");
   return {
-    organizationUrl: form.organizationUrl.trim(),
+    organizationUrl: normalizedOrganization(form.organizationUrl),
     defaultProjectId: organizationMatches ? form.defaultProjectId : undefined,
     defaultProjectName: organizationMatches ? form.defaultProjectName : undefined,
     authMethod: "pat",
@@ -250,48 +252,59 @@ type ProjectsState = ReturnType<typeof useAzureDevOpsProjects>;
 
 function PATSetupHelp({ organizationUrl }: { organizationUrl: string }) {
   const patURL = azureDevOpsPATURL(organizationUrl);
+  const [open, setOpen] = useState(false);
 
   return (
-    <div
-      id="azure-devops-pat-help"
-      className="space-y-2 text-sm"
-      data-testid="azure-devops-pat-help"
-    >
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="font-medium">Create a read-only personal access token</p>
-          <p className="text-muted-foreground">
-            Use a short expiration and grant only the access Kandev needs.
-          </p>
-        </div>
-        {patURL ? (
+    <TooltipProvider disableHoverableContent={false}>
+      <Tooltip open={open} onOpenChange={setOpen}>
+        <TooltipTrigger asChild>
           <Button
-            asChild
-            variant="outline"
-            className="min-h-11 w-full cursor-pointer sm:min-h-0 sm:w-auto"
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="size-11 shrink-0 cursor-help text-muted-foreground sm:size-7"
+            aria-label="How to create a personal access token"
+            onClick={() => setOpen((current) => !current)}
           >
-            <a href={patURL} target="_blank" rel="noreferrer">
-              <IconExternalLink className="h-4 w-4" />
+            <IconInfoCircle className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent
+          id="azure-devops-pat-help"
+          side="top"
+          align="end"
+          className="pointer-events-auto max-w-sm space-y-2 p-3 text-left text-xs leading-relaxed"
+          data-testid="azure-devops-pat-help"
+        >
+          <p className="font-medium text-foreground">Create a read-only personal access token</p>
+          <ol className="list-decimal space-y-1 pl-4 text-muted-foreground">
+            <li>Open token settings and select New Token.</li>
+            <li>Choose this organization, a short expiration, and Custom defined scopes.</li>
+            <li>
+              Under <span className="font-medium text-foreground">Work Items</span>, check Read.
+              Under <span className="font-medium text-foreground">Code</span>, check Read. Leave all
+              other scopes unchecked.
+            </li>
+            <li>Create the token, copy it, and paste it into this field.</li>
+          </ol>
+          {patURL ? (
+            <a
+              href={patURL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex cursor-pointer items-center gap-1 font-medium text-foreground underline underline-offset-4"
+            >
+              <IconExternalLink className="size-3.5" />
               Create personal access token
             </a>
-          </Button>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            Enter a valid organization URL to open its token settings.
-          </p>
-        )}
-      </div>
-      <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
-        <li>Open token settings and select New Token.</li>
-        <li>Choose this organization, an expiration, and Custom defined scopes.</li>
-        <li>
-          Under <span className="font-medium text-foreground">Work Items</span>, check Read. Under{" "}
-          <span className="font-medium text-foreground">Code</span>, check Read. Leave all other
-          scopes unchecked.
-        </li>
-        <li>Create the token, copy it, and paste it into the field above.</li>
-      </ol>
-    </div>
+          ) : (
+            <p className="text-muted-foreground">
+              Enter a valid organization URL to open its token settings.
+            </p>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -351,7 +364,10 @@ function ConnectionFields({
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="azure-devops-pat">Personal Access Token</Label>
+          <div className="flex items-center gap-1">
+            <Label htmlFor="azure-devops-pat">Personal Access Token</Label>
+            <PATSetupHelp organizationUrl={state.form.organizationUrl} />
+          </div>
           <Input
             id="azure-devops-pat"
             type="password"
@@ -365,7 +381,6 @@ function ConnectionFields({
           />
         </div>
       </div>
-      <PATSetupHelp organizationUrl={state.form.organizationUrl} />
       {projects.error && (
         <p className="text-sm text-destructive" role="alert">
           {projects.error}

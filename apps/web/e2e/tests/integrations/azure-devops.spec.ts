@@ -89,7 +89,8 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   );
 
   await testPage.getByTestId("azure-devops-organization").fill("https://dev.azure.com/acme");
-  const createTokenLink = testPage.getByRole("link", { name: "Create personal access token" });
+  await testPage.getByRole("button", { name: "How to create a personal access token" }).hover();
+  const createTokenLink = testPage.getByTestId("azure-devops-pat-help").locator(":scope > a");
   await expect(createTokenLink).toHaveAttribute(
     "href",
     "https://dev.azure.com/acme/_usersSettings/tokens",
@@ -106,7 +107,6 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   await testPage.getByTestId("azure-devops-save-button").click();
 
   await testPage.goto("/azure-devops");
-  await testPage.getByTestId("azure-devops-search-button").click();
   await expect(testPage.getByText("Handle token rotation")).toBeVisible();
 
   await testPage.getByRole("button", { name: "Pull requests" }).click();

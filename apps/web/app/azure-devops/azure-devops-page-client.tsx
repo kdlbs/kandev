@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "@/components/routing/app-link";
-import { useCallback, useEffect, useState, type ComponentProps } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
 import { IconAdjustments, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
@@ -224,6 +224,30 @@ type RunAzureSearch = (
   override?: { mode: AzureDevOpsBrowseMode; filters: AzureDevOpsFiltersState },
 ) => void;
 
+function useInitialAzureSearch({
+  connection,
+  filters,
+  runSearch,
+}: {
+  connection: ReturnType<typeof useAzureDevOpsConnection>;
+  filters: AzureDevOpsFiltersState;
+  runSearch: RunAzureSearch;
+}) {
+  const searchedWorkspace = useRef("");
+  const connectedWorkspaceId = connection.data?.hasSecret ? connection.data.workspaceId : undefined;
+  useEffect(() => {
+    if (
+      !connectedWorkspaceId ||
+      !filters.projectId ||
+      searchedWorkspace.current === connectedWorkspaceId
+    ) {
+      return;
+    }
+    searchedWorkspace.current = connectedWorkspaceId;
+    runSearch(0);
+  }, [connectedWorkspaceId, filters.projectId, runSearch]);
+}
+
 function useAzureScopeControls({
   filters,
   replace,
@@ -351,6 +375,8 @@ function useAzureDevOpsPageState(workspaceId?: string) {
     },
     [filters, mode, pullRequests, workItems],
   );
+
+  useInitialAzureSearch({ connection, filters, runSearch });
 
   const openFeedback = (pullRequest: AzureDevOpsPullRequest) => {
     setFeedbackOpen(true);
