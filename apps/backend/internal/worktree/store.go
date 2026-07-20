@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // SQLiteStore implements Store interface using SQLite.
@@ -450,6 +451,42 @@ func (s *SQLiteStore) ListActiveWorktreePaths(ctx context.Context) ([]string, er
 		paths = append(paths, p)
 	}
 	return paths, rows.Err()
+}
+
+// CountActiveWorktreeReferences counts non-deleted worktree associations whose
+// sessions are not terminal, excluding associations owned by the caller.
+func (s *SQLiteStore) CountActiveWorktreeReferences(
+	ctx context.Context,
+	worktreeID string,
+	excludeSessionIDs []string,
+) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM task_session_worktrees tsw
+		INNER JOIN task_sessions s ON s.id = tsw.session_id
+		WHERE tsw.worktree_id = ?
+		  AND tsw.status <> ?
+		  AND tsw.deleted_at IS NULL
+		  AND s.state NOT IN (?, ?, ?)
+	`
+	args := []interface{}{
+		worktreeID,
+		StatusDeleted,
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+	}
+	if len(excludeSessionIDs) > 0 {
+		query += ` AND tsw.session_id NOT IN (?)`
+		args = append(args, excludeSessionIDs)
+	}
+	query, args, err := sqlx.In(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	err = s.ro.QueryRowContext(ctx, s.ro.Rebind(query), args...).Scan(&count)
+	return count, err
 }
 
 // scanWorktrees is a helper to scan multiple worktree rows.
