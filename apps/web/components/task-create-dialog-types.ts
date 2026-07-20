@@ -52,7 +52,10 @@ export type TaskRemoteRepoRow = {
   prBaseBranch?: string;
   prHeadBranch?: string;
   // Optional metadata when source === "picker":
-  provider?: "github" | "gitlab";
+  provider?: "github" | "gitlab" | "azure_devops";
+  providerRepoId?: string;
+  providerOwner?: string;
+  providerName?: string;
   fullName?: string; // "owner/name"
 };
 

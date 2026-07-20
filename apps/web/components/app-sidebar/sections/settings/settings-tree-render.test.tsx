@@ -25,12 +25,47 @@ const state = {
   },
 };
 
+const integrationAvailability = vi.hoisted(() => ({
+  azureDevOps: true,
+  github: false,
+  gitlab: false,
+  jira: false,
+  linear: false,
+  sentry: false,
+  slack: false,
+}));
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
 }));
 
 vi.mock("@/hooks/domains/settings/use-available-agents", () => ({
   useAvailableAgents: () => undefined,
+}));
+
+vi.mock("@/hooks/domains/azure-devops/use-azure-devops-availability", () => ({
+  useAzureDevOpsAvailable: () => integrationAvailability.azureDevOps,
+}));
+vi.mock("@/hooks/domains/github/use-github-status", () => ({
+  useGitHubStatus: () => ({
+    status: integrationAvailability.github ? { authenticated: true } : null,
+    loading: false,
+  }),
+}));
+vi.mock("@/hooks/domains/gitlab/use-task-mr", () => ({
+  useGitLabAvailable: () => integrationAvailability.gitlab,
+}));
+vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({
+  useJiraAuthed: () => integrationAvailability.jira,
+}));
+vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
+  useLinearAuthed: () => integrationAvailability.linear,
+}));
+vi.mock("@/hooks/domains/sentry/use-sentry-availability", () => ({
+  useSentryAvailable: () => integrationAvailability.sentry,
+}));
+vi.mock("@/hooks/domains/slack/use-slack-availability", () => ({
+  useSlackAuthed: () => integrationAvailability.slack,
 }));
 
 vi.mock("@kandev/ui/collapsible", async () => {
@@ -56,6 +91,13 @@ describe("SettingsTree rendering", () => {
     state.setActiveWorkspace.mockClear();
     state.settingsAgents.items = [];
     state.executors.items = [];
+    integrationAvailability.azureDevOps = true;
+    integrationAvailability.github = false;
+    integrationAvailability.gitlab = false;
+    integrationAvailability.jira = false;
+    integrationAvailability.linear = false;
+    integrationAvailability.sentry = false;
+    integrationAvailability.slack = false;
   });
 
   afterEach(() => cleanup());
@@ -156,6 +198,31 @@ describe("SettingsTree rendering", () => {
     );
     expect(screen.getByRole("button", { name: "Expand Main Workspace" })).toBeTruthy();
   });
+});
+
+describe("SettingsTree integration status", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+    integrationAvailability.azureDevOps = true;
+    integrationAvailability.github = false;
+  });
+
+  afterEach(() => cleanup());
+
+  it("labels configured integrations as enabled", () => {
+    render(
+      <WorkspacesGroup pathname="/settings/workspace/ws-1/integrations/azure-devops" expanded />,
+    );
+
+    expect(screen.getByRole("link", { name: "Azure DevOps Enabled" })).toBeTruthy();
+    expect(screen.getByTestId("azure-devops-icon")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "GitHub" })).toBeTruthy();
+  });
+});
+
+describe("SettingsTree standalone leaves", () => {
+  afterEach(() => cleanup());
 
   it("keeps Voice Mode in the settings tree as a standalone active leaf", () => {
     render(<SettingsTree pathname="/settings" />);

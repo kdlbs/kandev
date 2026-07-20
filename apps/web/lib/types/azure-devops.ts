@@ -45,6 +45,20 @@ export type AzureDevOpsRepository = {
   webUrl: string;
 };
 
+export type AzureDevOpsSavedView = {
+  id: string;
+  kind: "work_item" | "pull_request";
+  label: string;
+  projectId: string;
+  repositoryId?: string;
+  wiql?: string;
+  top?: number;
+  status?: string;
+  creator?: string;
+  reviewer?: string;
+  createdAt: string;
+};
+
 export type AzureDevOpsIdentity = {
   id: string;
   displayName: string;

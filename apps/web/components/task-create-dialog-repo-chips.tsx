@@ -174,6 +174,7 @@ function ModeBody({
         onUpdateRow={fs.updateRemoteRepo}
         onAddRow={fs.addRemoteRepo}
         onRemoveRow={fs.removeRemoteRepo}
+        workspaceId={workspaceId ?? undefined}
       />
     );
   }

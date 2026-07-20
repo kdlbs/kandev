@@ -2,6 +2,7 @@ package azuredevops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -50,6 +51,27 @@ func (s *Service) ListRepositoriesForWorkspace(ctx context.Context, workspaceID,
 	return client.ListRepositories(ctx, projectID)
 }
 
+type branchClient interface {
+	ListBranches(ctx context.Context, projectID, repositoryID string) ([]Branch, error)
+}
+
+func (s *Service) ListBranchesForWorkspace(
+	ctx context.Context, workspaceID, projectID, repositoryID string,
+) ([]Branch, error) {
+	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(repositoryID) == "" {
+		return nil, fmt.Errorf("%w: project and repository required", ErrInvalidConfig)
+	}
+	client, err := s.clientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	reader, ok := client.(branchClient)
+	if !ok {
+		return nil, errors.New("azure devops: branch listing is unavailable")
+	}
+	return reader.ListBranches(ctx, projectID, repositoryID)
+}
+
 func (s *Service) SearchWorkItemsForWorkspace(
 	ctx context.Context,
 	workspaceID, projectID, wiql string,
@@ -88,7 +110,37 @@ func (s *Service) ListPullRequestsForWorkspace(
 	if err != nil {
 		return nil, err
 	}
+	filter, err = resolveCurrentUserPullRequestFilters(ctx, client, filter)
+	if err != nil {
+		return nil, err
+	}
 	return client.ListPullRequests(ctx, filter)
+}
+
+func resolveCurrentUserPullRequestFilters(
+	ctx context.Context,
+	client Client,
+	filter PullRequestFilter,
+) (PullRequestFilter, error) {
+	creatorIsMe := strings.EqualFold(strings.TrimSpace(filter.CreatorID), "@me")
+	reviewerIsMe := strings.EqualFold(strings.TrimSpace(filter.ReviewerID), "@me")
+	if !creatorIsMe && !reviewerIsMe {
+		return filter, nil
+	}
+	identity, err := client.TestAuth(ctx)
+	if err != nil {
+		return filter, err
+	}
+	if identity == nil || !identity.OK || strings.TrimSpace(identity.ID) == "" {
+		return filter, fmt.Errorf("%w: authenticated Azure DevOps identity is unavailable", ErrInvalidConfig)
+	}
+	if creatorIsMe {
+		filter.CreatorID = identity.ID
+	}
+	if reviewerIsMe {
+		filter.ReviewerID = identity.ID
+	}
+	return filter, nil
 }
 
 func (s *Service) GetPullRequestForWorkspace(

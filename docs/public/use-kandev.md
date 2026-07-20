@@ -69,7 +69,7 @@ New local repository records default to:
 
 Scripts execute in agent workspaces and therefore belong to the trust boundary. Do not add an unreviewed command or copy pattern. Repository deletion is irreversible in the UI and is blocked while an active task session still references the repository.
 
-Remote repository and issue/PR URLs are not added from this settings page. Use the **Remote** tab in **New Task** after configuring GitHub, or paste a supported GitHub URL there. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
+Remote repository and issue/PR URLs are not added from this settings page. Use the **Remote** tab in **New Task** to search configured GitHub, GitLab, and Azure DevOps repositories, or paste a supported provider URL. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
 
 ## Configure an agent profile
 

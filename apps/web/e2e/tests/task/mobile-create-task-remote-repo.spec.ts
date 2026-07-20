@@ -59,4 +59,37 @@ test.describe("Create task Remote repo picker on mobile", () => {
       { timeout: 10_000 },
     );
   });
+
+  test("selects an Azure DevOps repository from the unified picker", async ({
+    apiClient,
+    seedData,
+    testPage,
+  }) => {
+    await apiClient.mockAzureDevOpsSeed({
+      authenticated: true,
+      projects: [{ id: "project-1", name: "Platform", url: "https://dev.azure.com/acme/Platform" }],
+      repositories: [
+        {
+          id: "azure-repo-1",
+          name: "api",
+          projectId: "project-1",
+          projectName: "Platform",
+          defaultBranch: "refs/heads/main",
+          webUrl: "https://dev.azure.com/acme/Platform/_git/api",
+        },
+      ],
+    });
+    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
+      organizationUrl: "https://dev.azure.com/acme",
+      pat: "azure-test-pat",
+    });
+
+    await openRemotePicker(testPage);
+    const option = testPage.getByTestId("remote-repo-option").filter({ hasText: "Platform/api" });
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click();
+    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
+      "Platform/api",
+    );
+  });
 });

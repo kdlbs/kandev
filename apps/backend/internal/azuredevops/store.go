@@ -26,6 +26,7 @@ const createConfigTableSQL = `
 		last_checked_at DATETIME,
 		last_ok BOOLEAN NOT NULL DEFAULT 0,
 		last_error TEXT NOT NULL DEFAULT '',
+		saved_views TEXT NOT NULL DEFAULT '[]',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	)`
@@ -59,7 +60,7 @@ const createTaskPRTableSQL = `
 
 const selectConfigColumns = `workspace_id, organization_url, default_project_id,
 	default_project_name, auth_method, last_checked_at, last_ok, last_error,
-	created_at, updated_at`
+	created_at, updated_at, saved_views`
 
 // NewStore creates the store and initializes its replay-safe schema.
 func NewStore(writer, reader *sqlx.DB) (*Store, error) {
@@ -73,10 +74,38 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	if _, err := store.db.Exec(createConfigTableSQL); err != nil {
 		return nil, fmt.Errorf("azure devops schema init: %w", err)
 	}
+	if err := store.ensureSavedViewsColumn(); err != nil {
+		return nil, fmt.Errorf("azure devops saved views schema init: %w", err)
+	}
 	if _, err := store.db.Exec(createTaskPRTableSQL); err != nil {
 		return nil, fmt.Errorf("azure devops task PR schema init: %w", err)
 	}
 	return store, nil
+}
+
+func (s *Store) ensureSavedViewsColumn() error {
+	rows, err := s.db.Query(`PRAGMA table_info(azure_devops_configs)`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if scanErr := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); scanErr != nil {
+			return scanErr
+		}
+		if name == "saved_views" {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE azure_devops_configs ADD COLUMN saved_views TEXT NOT NULL DEFAULT '[]'`)
+	return err
 }
 
 // GetConfig returns a workspace's configuration, or nil when none exists.
@@ -174,4 +203,37 @@ func (s *Store) ResetAuthHealth(ctx context.Context, workspaceID string) error {
 		SET last_checked_at = NULL, last_ok = 0, last_error = ''
 		WHERE workspace_id = ?`, workspaceID)
 	return err
+}
+
+func (s *Store) GetSavedViewsJSON(ctx context.Context, workspaceID string) (string, error) {
+	if err := validateWorkspaceID(workspaceID); err != nil {
+		return "", err
+	}
+	var raw string
+	err := s.ro.GetContext(ctx, &raw,
+		`SELECT saved_views FROM azure_devops_configs WHERE workspace_id = ?`, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotConfigured
+	}
+	return raw, err
+}
+
+func (s *Store) PutSavedViewsJSON(ctx context.Context, workspaceID, raw string) error {
+	if err := validateWorkspaceID(workspaceID); err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE azure_devops_configs SET saved_views = ?, updated_at = ?
+		WHERE workspace_id = ?`, raw, time.Now().UTC(), workspaceID)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return ErrNotConfigured
+	}
+	return nil
 }

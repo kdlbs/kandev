@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import {
   IconArrowsShuffle,
   IconBolt,
   IconBrandGithub,
   IconBrandGitlab,
-  IconBrandAzure,
   IconBrandSentry,
   IconBrandSlack,
   IconFolder,
@@ -15,14 +14,23 @@ import {
   IconPlugConnected,
   IconTicket,
 } from "@tabler/icons-react";
-import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
+import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-devops-availability";
+import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
+import { useJiraAuthed } from "@/hooks/domains/jira/use-jira-availability";
+import { useLinearAuthed } from "@/hooks/domains/linear/use-linear-availability";
+import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
+import { useSlackAuthed } from "@/hooks/domains/slack/use-slack-availability";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 
 const ROOT_HREF = "/settings/workspace";
 
-const INTEGRATIONS: Array<{ slug: string; label: string; icon: TablerIcon }> = [
-  { slug: "azure-devops", label: "Azure DevOps", icon: IconBrandAzure },
+type IntegrationIcon = ComponentType<{ className?: string }>;
+
+const INTEGRATIONS: Array<{ slug: string; label: string; icon: IntegrationIcon }> = [
+  { slug: "azure-devops", label: "Azure DevOps", icon: AzureDevOpsIcon },
   { slug: "github", label: "GitHub", icon: IconBrandGithub },
   { slug: "gitlab", label: "GitLab", icon: IconBrandGitlab },
   { slug: "jira", label: "Jira", icon: IconTicket },
@@ -36,6 +44,54 @@ const ACTIVE_WORKSPACE_LABEL = (
     Active
   </span>
 );
+
+const ENABLED_LABEL = (
+  <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/10 px-1 py-0.5 text-[9px] font-medium leading-none text-emerald-600 dark:text-emerald-400">
+    Enabled
+  </span>
+);
+
+function WorkspaceIntegrationItems({
+  workspaceId,
+  integrationsPath,
+  pathname,
+}: {
+  workspaceId: string;
+  integrationsPath: string;
+  pathname: string;
+}) {
+  const azureDevOps = useAzureDevOpsAvailable(workspaceId);
+  const { status: githubStatus } = useGitHubStatus();
+  const gitlab = useGitLabAvailable();
+  const jira = useJiraAuthed(workspaceId);
+  const linear = useLinearAuthed(workspaceId);
+  const sentry = useSentryAvailable(workspaceId);
+  const slack = useSlackAuthed(workspaceId);
+  const enabled = new Set([
+    ...(azureDevOps ? ["azure-devops"] : []),
+    ...(githubStatus?.authenticated || githubStatus?.token_configured ? ["github"] : []),
+    ...(gitlab ? ["gitlab"] : []),
+    ...(jira ? ["jira"] : []),
+    ...(linear ? ["linear"] : []),
+    ...(sentry ? ["sentry"] : []),
+    ...(slack ? ["slack"] : []),
+  ]);
+
+  return INTEGRATIONS.map(({ slug, label, icon }) => {
+    const href = `${integrationsPath}/${slug}`;
+    return (
+      <SettingsLeaf
+        key={href}
+        href={href}
+        label={label}
+        labelSuffix={enabled.has(slug) ? ENABLED_LABEL : undefined}
+        icon={icon}
+        isActive={pathname === href}
+        depth={3}
+      />
+    );
+  });
+}
 
 type WorkspacesGroupProps = {
   pathname: string;
@@ -136,19 +192,11 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
               defaultExpanded={integrationsActive}
               depth={2}
             >
-              {INTEGRATIONS.map(({ slug, label, icon }) => {
-                const href = `${integrationsPath}/${slug}`;
-                return (
-                  <SettingsLeaf
-                    key={href}
-                    href={href}
-                    label={label}
-                    icon={icon}
-                    isActive={pathname === href}
-                    depth={3}
-                  />
-                );
-              })}
+              <WorkspaceIntegrationItems
+                workspaceId={workspace.id}
+                integrationsPath={integrationsPath}
+                pathname={pathname}
+              />
             </SettingsGroup>
             <SettingsLeaf
               href={automationsPath}

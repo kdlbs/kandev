@@ -14,13 +14,19 @@ import (
 
 type fakeReadClient struct {
 	invalidClient
-	projects  []Project
-	work      *WorkItemSearchResult
-	pr        *PullRequest
-	reviewers []Reviewer
-	threads   []Thread
-	refs      []WorkItemRef
-	policies  []PolicyEvaluation
+	projects   []Project
+	work       *WorkItemSearchResult
+	pr         *PullRequest
+	reviewers  []Reviewer
+	threads    []Thread
+	refs       []WorkItemRef
+	policies   []PolicyEvaluation
+	lastFilter PullRequestFilter
+}
+
+func (f *fakeReadClient) ListPullRequests(_ context.Context, filter PullRequestFilter) (*PullRequestPage, error) {
+	f.lastFilter = filter
+	return &PullRequestPage{}, nil
 }
 
 func (f *fakeReadClient) TestAuth(context.Context) (*TestConnectionResult, error) {
@@ -93,6 +99,32 @@ func TestControllerConfigAndWorkspaceScopedReads(t *testing.T) {
 	}
 }
 
+func TestControllerPersistsWorkspaceSavedViews(t *testing.T) {
+	router, _ := newControllerFixture(t)
+	path := "/api/v1/azure-devops/views?workspace_id=ws-1"
+	created := performRequest(t, router, http.MethodPut, path, map[string]any{
+		"views": []map[string]any{{
+			"id": "mine", "kind": "work_item", "label": "Assigned to me",
+			"projectId": "project-1", "wiql": "SELECT [System.Id] FROM WorkItems", "top": 50,
+		}},
+	})
+	if created.Code != http.StatusOK || !bytes.Contains(created.Body.Bytes(), []byte("Assigned to me")) {
+		t.Fatalf("save views response %d: %s", created.Code, created.Body.String())
+	}
+	loaded := performRequest(t, router, http.MethodGet, path, nil)
+	if loaded.Code != http.StatusOK || !bytes.Contains(loaded.Body.Bytes(), []byte("Assigned to me")) {
+		t.Fatalf("get views response %d: %s", loaded.Code, loaded.Body.String())
+	}
+	invalid := performRequest(t, router, http.MethodPut, path, map[string]any{
+		"views": []map[string]any{{
+			"id": "bad", "kind": "pull_request", "label": "Bad", "projectId": "project-1",
+		}},
+	})
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid views response %d: %s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestControllerPullRequestFeedbackAggregation(t *testing.T) {
 	router, _ := newControllerFixture(t)
 	path := "/api/v1/azure-devops/pull-requests/project-1/repo-1/42/feedback?workspace_id=ws-1"
@@ -106,6 +138,21 @@ func TestControllerPullRequestFeedbackAggregation(t *testing.T) {
 	}
 	if feedback.PullRequest.ID != 42 || feedback.ReviewState != "approved" || feedback.PolicyState != "success" || len(feedback.Threads) != 1 {
 		t.Fatalf("feedback = %+v", feedback)
+	}
+}
+
+func TestPullRequestSearchResolvesCurrentUserSentinel(t *testing.T) {
+	router, service := newControllerFixture(t)
+	client := service.clientFn(nil, "").(*fakeReadClient)
+	response := performRequest(
+		t, router, http.MethodGet,
+		"/api/v1/azure-devops/pull-requests?workspace_id=ws-1&project=project-1&repository=repo-1&reviewer=%40me", nil,
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("pull request response %d: %s", response.Code, response.Body.String())
+	}
+	if client.lastFilter.ReviewerID != "me" {
+		t.Fatalf("reviewer filter = %q, want authenticated identity", client.lastFilter.ReviewerID)
 	}
 }
 

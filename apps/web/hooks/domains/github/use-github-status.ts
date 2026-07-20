@@ -3,6 +3,7 @@
 import { useEffect, useCallback } from "react";
 import { fetchGitHubStatus } from "@/lib/api/domains/github-api";
 import { useAppStore } from "@/components/state-provider";
+import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 
 export function useGitHubStatus() {
   const status = useAppStore((state) => state.githubStatus.status);
@@ -30,6 +31,8 @@ export function useGitHubStatus() {
     if (loaded || loading) return;
     doFetch();
   }, [loaded, loading, doFetch]);
+
+  useEffect(() => subscribeIntegrationAvailability(doFetch), [doFetch]);
 
   const refresh = useCallback(() => {
     // Also invalidate system health so the header indicator refetches

@@ -11,6 +11,7 @@ import type {
   TestJiraConnectionResult,
   UpdateJiraIssueWatchInput,
 } from "@/lib/types/jira";
+import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
 type WorkspaceApiOptions = ApiRequestOptions & { workspaceId?: string };
 
@@ -37,17 +38,21 @@ export async function getJiraConfig(options?: WorkspaceApiOptions): Promise<Jira
 }
 
 export async function setJiraConfig(payload: SetJiraConfigRequest, options?: WorkspaceApiOptions) {
-  return fetchJson<JiraConfig>(withWorkspace(`/api/v1/jira/config`, options), {
-    ...requestOptions(options),
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<JiraConfig>(withWorkspace(`/api/v1/jira/config`, options), {
+      ...requestOptions(options),
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+    }),
+  );
 }
 
 export async function deleteJiraConfig(options?: WorkspaceApiOptions) {
-  return fetchJson<{ deleted: boolean }>(withWorkspace(`/api/v1/jira/config`, options), {
-    ...requestOptions(options),
-    init: { ...(options?.init ?? {}), method: "DELETE" },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<{ deleted: boolean }>(withWorkspace(`/api/v1/jira/config`, options), {
+      ...requestOptions(options),
+      init: { ...(options?.init ?? {}), method: "DELETE" },
+    }),
+  );
 }
 
 export async function testJiraConnection(
@@ -63,10 +68,16 @@ export async function testJiraConnection(
 // copyJiraConfig copies the Jira config + credential from the workspace in
 // options (source) to targetWorkspaceId.
 export async function copyJiraConfig(targetWorkspaceId: string, options?: WorkspaceApiOptions) {
-  return fetchJson<JiraConfig>(withWorkspace(`/api/v1/jira/config/copy`, options), {
-    ...requestOptions(options),
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ targetWorkspaceId }) },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<JiraConfig>(withWorkspace(`/api/v1/jira/config/copy`, options), {
+      ...requestOptions(options),
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        body: JSON.stringify({ targetWorkspaceId }),
+      },
+    }),
+  );
 }
 
 export async function listJiraProjects(options?: WorkspaceApiOptions) {

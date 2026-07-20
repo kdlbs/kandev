@@ -96,13 +96,17 @@ Unlike GitHub, Kandev does not automatically inject the stored GitLab integratio
 
 Azure DevOps configuration is workspace-specific. The current integration supports Azure DevOps Services organizations at a canonical `https://dev.azure.com/<organization>` URL. It does not support Azure DevOps Server/TFS or alternate organization URL forms.
 
-Create a personal access token with **Work Items (Read)** and **Code (Read)** access, then enter it on the Azure DevOps settings page. Kandev stores the PAT in its encrypted secret store and calls Azure DevOps REST API 7.1 directly. The connection, work-item, and pull-request paths do not require GitHub, `gh`, `az`, or Azure CLI authentication. When editing a saved connection, a blank PAT preserves that workspace's existing credential. Copy configuration transfers the encrypted credential to the target workspace.
+Enter the canonical organization URL on the Azure DevOps settings page, then follow its **Create personal access token** link. In Azure DevOps, select **New Token**, choose the organization and an expiration, and select **Custom defined** scopes. Under **Work Items**, check **Read**; under **Code**, check **Read**; leave every other scope unchecked. Create the token, copy it while Azure DevOps still displays it, and paste it into Kandev.
 
-Use `/azure-devops` to run WIQL work-item queries or browse pull requests by project, repository, status, creator, and reviewer. Pull-request feedback includes reviewers and votes, comment threads, linked work items, and branch-policy results. Provider content is read-only in this release: Kandev does not edit work items, vote, comment, complete pull requests, or change policies.
+Kandev stores the PAT in its encrypted secret store and calls Azure DevOps REST API 7.1 directly. The connection, work-item, and pull-request paths do not require GitHub, `gh`, `az`, or Azure CLI authentication. When editing a saved connection, a blank PAT preserves that workspace's existing credential. Copy configuration transfers the encrypted credential to the target workspace.
+
+Use `/azure-devops` to browse work items and pull requests with built-in scopes or saved views. Raw WIQL remains available under **Advanced** for custom work-item searches. Pull-request feedback includes reviewers and votes, comment threads, linked work items, and branch-policy results. Provider content is read-only in this release: Kandev does not edit work items, vote, comment, complete pull requests, or change policies.
 
 You can launch a task from a work item or pull request. When the selected Kandev repository is configured with matching Azure project and repository identifiers, launching from a pull request also stores a durable task association. Task surfaces show its normalized status, review, and policy summary while Azure-native feedback remains in the Azure DevOps browser. Synchronization uses the backend REST client and does not depend on tools installed in the task environment.
 
-This release has no Entra OAuth flow, webhook, or watch poller. Configure executor Git credentials independently when a launched task must fetch from or push to an Azure Repos repository; the integration PAT is not injected into task environments.
+The **Remote** picker in **New Task** searches configured GitHub, GitLab, and Azure DevOps repositories and keeps manual supported URLs available. For a private Azure repository, the backend uses the workspace PAT only while initially cloning or fetching the managed checkout. The PAT is not written into the remote URL, task metadata, command arguments, or agent environment. Configure executor Git credentials independently for pushes and for repository access outside that backend materialization path.
+
+This release has no Entra OAuth flow, webhook, or watch poller.
 
 ## Jira
 
@@ -201,7 +205,7 @@ Issue bodies, pull-request comments, commit messages, Slack threads, and inciden
 - **Cleared token but connection remains:** a higher-priority CLI or environment credential is still active for GitHub or GitLab.
 - **Repository, project, or team is missing:** confirm the connected identity can see it and check workspace filters/defaults.
 - **Kandev can read but cannot write:** add only the specific provider write scope needed, then repeat the test.
-- **Task cannot fetch or push:** fix Git/SSH credentials in the executor. Azure DevOps, GitLab, Jira, Linear, Sentry, and Slack integration credentials are not task Git credentials. GitHub remote launches are the exception: inspect the profile's `GITHUB_TOKEN`/`GH_TOKEN`, then the globally stored GitHub token or local `gh` fallback that Kandev may have injected.
+- **Task cannot fetch or push:** fix Git/SSH credentials in the executor. The Azure PAT can authenticate the backend's initial managed clone/fetch but is not exposed to the task for later pushes. GitHub remote launches can resolve profile/global tokens or a local `gh` fallback; other integration credentials are not task Git credentials.
 - **A watch still runs after disabling the provider:** the Enabled switch is browser-local. Pause/delete the watch, or remove the backend configuration.
 - **Unexpected work is created:** pause the watch or automation, inspect its query, last-polled/status fields, and created-task list, then narrow provider filters before resetting or polling again. Watch tables do not provide a separate run/import history.
 

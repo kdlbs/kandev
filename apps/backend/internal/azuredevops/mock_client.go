@@ -3,6 +3,7 @@ package azuredevops
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -67,6 +68,16 @@ func (c *MockClient) ListRepositories(_ context.Context, projectID string) ([]Re
 		}
 	}
 	return items, nil
+}
+
+func (c *MockClient) ListBranches(_ context.Context, projectID, repositoryID string) ([]Branch, error) {
+	state := c.snapshot()
+	for _, repo := range state.Repositories {
+		if repo.ProjectID == projectID && repo.ID == repositoryID {
+			return []Branch{{Name: strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")}}, nil
+		}
+	}
+	return []Branch{}, nil
 }
 
 func (c *MockClient) QueryWIQL(_ context.Context, projectID, _ string, top int) (*WorkItemSearchResult, error) {

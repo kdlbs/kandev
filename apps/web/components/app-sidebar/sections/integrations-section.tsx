@@ -2,6 +2,7 @@
 
 import Link from "@/components/routing/app-link";
 import { usePathname } from "@/lib/routing/client-router";
+import type { ComponentType } from "react";
 import {
   IconBrandGithub,
   IconBrandGitlab,
@@ -9,7 +10,6 @@ import {
   IconPlugConnected,
   IconTicket,
 } from "@tabler/icons-react";
-import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useConfiguredIntegrationLinks } from "@/components/integrations/integrations-menu";
 import { useFeature } from "@/hooks/domains/features/use-feature";
@@ -22,12 +22,16 @@ import {
   SIDEBAR_ITEM_INACTIVE,
 } from "../app-sidebar-constants";
 import { AppSidebarSection } from "../app-sidebar-section";
+import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 
 type IntegrationsSectionProps = {
   collapsed: boolean;
 };
 
-const INTEGRATION_ICONS: Record<string, TablerIcon> = {
+type IntegrationIcon = ComponentType<{ className?: string }>;
+
+const INTEGRATION_ICONS: Record<string, IntegrationIcon> = {
+  "azure-devops": AzureDevOpsIcon,
   github: IconBrandGithub,
   gitlab: IconBrandGitlab,
   jira: IconTicket,
@@ -66,7 +70,7 @@ function IntegrationHeaderShortcuts({ links }: { links: ConfiguredIntegrationLin
 type IntegrationRowProps = {
   href: string;
   label: string;
-  icon: TablerIcon;
+  icon: IntegrationIcon;
   active: boolean;
   testId?: string;
 };

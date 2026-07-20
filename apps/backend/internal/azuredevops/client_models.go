@@ -22,6 +22,10 @@ type Repository struct {
 	WebURL        string `json:"webUrl"`
 }
 
+type Branch struct {
+	Name string `json:"name"`
+}
+
 // Identity is the stable subset shared by Azure authors, reviewers, and
 // comment authors.
 type Identity struct {

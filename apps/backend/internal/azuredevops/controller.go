@@ -26,8 +26,11 @@ func RegisterRoutes(router *gin.Engine, service *Service, log *logger.Logger) {
 	api.DELETE("/config", controller.deleteConfig)
 	api.POST("/config/test", controller.testConfig)
 	api.POST("/config/copy", controller.copyConfig)
+	api.GET("/views", controller.getSavedViews)
+	api.PUT("/views", controller.setSavedViews)
 	api.GET("/projects", controller.listProjects)
 	api.GET("/repositories", controller.listRepositories)
+	api.GET("/branches", controller.listBranches)
 	api.POST("/work-items/search", controller.searchWorkItems)
 	api.GET("/work-items/:id", controller.getWorkItem)
 	api.GET("/pull-requests", controller.listPullRequests)
@@ -36,6 +39,33 @@ func RegisterRoutes(router *gin.Engine, service *Service, log *logger.Logger) {
 	api.GET("/workspaces/:workspaceId/task-prs", controller.listWorkspaceTaskPRs)
 	api.POST("/tasks/:taskId/pull-requests", controller.associateTaskPR)
 	api.POST("/tasks/:taskId/pull-requests/sync", controller.syncTaskPR)
+}
+
+func (c *Controller) getSavedViews(ctx *gin.Context) {
+	views, err := c.service.GetSavedViewsForWorkspace(ctx.Request.Context(), workspaceID(ctx))
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"views": views})
+}
+
+func (c *Controller) setSavedViews(ctx *gin.Context) {
+	var request struct {
+		Views []SavedView `json:"views"`
+	}
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	views, err := c.service.SetSavedViewsForWorkspace(
+		ctx.Request.Context(), workspaceID(ctx), request.Views,
+	)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"views": views})
 }
 
 func (c *Controller) getConfig(ctx *gin.Context) {
@@ -123,6 +153,17 @@ func (c *Controller) listRepositories(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"repositories": repositories})
+}
+
+func (c *Controller) listBranches(ctx *gin.Context) {
+	branches, err := c.service.ListBranchesForWorkspace(
+		ctx.Request.Context(), workspaceID(ctx), ctx.Query("project"), ctx.Query("repository"),
+	)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"branches": branches})
 }
 
 func (c *Controller) searchWorkItems(ctx *gin.Context) {

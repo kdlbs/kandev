@@ -59,6 +59,36 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AzureDevOpsConnectionSection", () => {
+  it("links to the organization PAT page and explains the required read scopes", async () => {
+    render(<AzureDevOpsConnectionSection workspaceId="workspace-a" />);
+
+    const patHelp = await screen.findByTestId("azure-devops-pat-help");
+    const createTokenLink = screen.getByRole("link", { name: "Create personal access token" });
+
+    expect(createTokenLink.getAttribute("href")).toBe(
+      "https://dev.azure.com/old-org/_usersSettings/tokens",
+    );
+    expect(patHelp.textContent).toContain("Custom defined");
+    expect(patHelp.textContent).toContain("Work Items");
+    expect(patHelp.textContent).toContain("Code");
+    expect(patHelp.textContent).toContain("Read");
+  });
+
+  it("does not create a token link from a non-Azure organization URL", async () => {
+    render(<AzureDevOpsConnectionSection workspaceId="workspace-a" />);
+
+    const organization = await screen.findByTestId("azure-devops-organization");
+    await waitFor(() =>
+      expect((organization as HTMLInputElement).value).toBe("https://dev.azure.com/old-org"),
+    );
+    fireEvent.change(organization, { target: { value: "https://example.com/old-org" } });
+
+    expect(screen.queryByRole("link", { name: "Create personal access token" })).toBeNull();
+    expect(screen.getByTestId("azure-devops-pat-help").textContent).toContain(
+      "Enter a valid organization URL",
+    );
+  });
+
   it("omits a project selected for the previous organization", async () => {
     render(<AzureDevOpsConnectionSection workspaceId="workspace-a" />);
     const organization = await screen.findByTestId("azure-devops-organization");

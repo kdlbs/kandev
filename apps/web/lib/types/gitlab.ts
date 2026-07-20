@@ -250,6 +250,8 @@ export type GitLabProject = {
   path: string;
   name: string;
   visibility: string;
+  web_url?: string;
+  default_branch?: string;
 };
 
 /** Project allowed merge methods. */

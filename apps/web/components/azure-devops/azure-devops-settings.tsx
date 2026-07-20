@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   IconBrandAzure,
   IconDeviceFloppy,
+  IconExternalLink,
   IconPlugConnected,
   IconTrash,
 } from "@tabler/icons-react";
@@ -70,6 +71,32 @@ function configToHealth(config: AzureDevOpsConfig | null): IntegrationAuthHealth
 
 function normalizedOrganization(value: string): string {
   return value.trim().replace(/\/+$/, "");
+}
+
+function azureDevOpsPATURL(value: string): string | null {
+  let organizationURL: URL;
+  try {
+    organizationURL = new URL(value.trim());
+  } catch {
+    return null;
+  }
+
+  const organization = organizationURL.pathname.split("/").filter(Boolean);
+  if (
+    organizationURL.protocol !== "https:" ||
+    organizationURL.hostname.toLowerCase() !== "dev.azure.com" ||
+    organizationURL.port ||
+    organizationURL.username ||
+    organizationURL.password ||
+    organizationURL.search ||
+    organizationURL.hash ||
+    organization.length !== 1 ||
+    !/^[a-z0-9-]+$/i.test(organization[0])
+  ) {
+    return null;
+  }
+
+  return `https://dev.azure.com/${organization[0]}/_usersSettings/tokens`;
 }
 
 function savedPATMatches(config: AzureDevOpsConfig | null, form: FormState): boolean {
@@ -221,6 +248,53 @@ function TestResult({ result }: { result: TestAzureDevOpsConnectionResult | null
 type SettingsState = ReturnType<typeof useAzureDevOpsSettings>;
 type ProjectsState = ReturnType<typeof useAzureDevOpsProjects>;
 
+function PATSetupHelp({ organizationUrl }: { organizationUrl: string }) {
+  const patURL = azureDevOpsPATURL(organizationUrl);
+
+  return (
+    <div
+      id="azure-devops-pat-help"
+      className="space-y-2 text-sm"
+      data-testid="azure-devops-pat-help"
+    >
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="font-medium">Create a read-only personal access token</p>
+          <p className="text-muted-foreground">
+            Use a short expiration and grant only the access Kandev needs.
+          </p>
+        </div>
+        {patURL ? (
+          <Button
+            asChild
+            variant="outline"
+            className="min-h-11 w-full cursor-pointer sm:min-h-0 sm:w-auto"
+          >
+            <a href={patURL} target="_blank" rel="noreferrer">
+              <IconExternalLink className="h-4 w-4" />
+              Create personal access token
+            </a>
+          </Button>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Enter a valid organization URL to open its token settings.
+          </p>
+        )}
+      </div>
+      <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
+        <li>Open token settings and select New Token.</li>
+        <li>Choose this organization, an expiration, and Custom defined scopes.</li>
+        <li>
+          Under <span className="font-medium text-foreground">Work Items</span>, check Read. Under{" "}
+          <span className="font-medium text-foreground">Code</span>, check Read. Leave all other
+          scopes unchecked.
+        </li>
+        <li>Create the token, copy it, and paste it into the field above.</li>
+      </ol>
+    </div>
+  );
+}
+
 function ConnectionFields({
   state,
   projects,
@@ -286,10 +360,12 @@ function ConnectionFields({
             placeholder={canReusePAT ? "Saved credential" : "Paste PAT"}
             disabled={state.loading}
             autoComplete="new-password"
+            aria-describedby="azure-devops-pat-help"
             data-testid="azure-devops-pat"
           />
         </div>
       </div>
+      <PATSetupHelp organizationUrl={state.form.organizationUrl} />
       {projects.error && (
         <p className="text-sm text-destructive" role="alert">
           {projects.error}

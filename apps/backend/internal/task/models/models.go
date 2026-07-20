@@ -860,6 +860,7 @@ type Repository struct {
 	ProviderRepoID         string     `json:"provider_repo_id"`
 	ProviderOwner          string     `json:"provider_owner"`
 	ProviderName           string     `json:"provider_name"`
+	RemoteURL              string     `json:"remote_url"`
 	DefaultBranch          string     `json:"default_branch"`
 	WorktreeBranchPrefix   string     `json:"worktree_branch_prefix"`
 	WorktreeBranchTemplate string     `json:"worktree_branch_template"`

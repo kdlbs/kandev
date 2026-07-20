@@ -1,6 +1,8 @@
 // Package azuredevops implements the Azure DevOps Services integration.
 package azuredevops
 
+import "github.com/kandev/kandev/internal/integrations/cloneauth"
+
 import "time"
 
 const AuthMethodPAT = "pat"
@@ -19,6 +21,23 @@ type Config struct {
 	LastError          string     `json:"lastError,omitempty" db:"last_error"`
 	CreatedAt          time.Time  `json:"createdAt" db:"created_at"`
 	UpdatedAt          time.Time  `json:"updatedAt" db:"updated_at"`
+	SavedViewsJSON     string     `json:"-" db:"saved_views"`
+}
+
+// SavedView is a workspace-scoped Azure browse query. It contains only
+// provider-native filters; credentials and result data are never persisted.
+type SavedView struct {
+	ID           string    `json:"id"`
+	Kind         string    `json:"kind"`
+	Label        string    `json:"label"`
+	ProjectID    string    `json:"projectId"`
+	RepositoryID string    `json:"repositoryId,omitempty"`
+	WIQL         string    `json:"wiql,omitempty"`
+	Top          int       `json:"top,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	Creator      string    `json:"creator,omitempty"`
+	Reviewer     string    `json:"reviewer,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 // SetConfigRequest creates or updates a workspace connection. An empty PAT on
@@ -72,5 +91,5 @@ type TaskPRsResponse struct {
 
 // SecretKeyForWorkspace returns the workspace-isolated encrypted PAT key.
 func SecretKeyForWorkspace(workspaceID string) string {
-	return "azure_devops:" + workspaceID + ":pat"
+	return cloneauth.AzureDevOpsPATKey(workspaceID)
 }

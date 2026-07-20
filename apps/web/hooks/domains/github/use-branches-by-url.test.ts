@@ -2,9 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 
 const fetchRepoBranchesMock = vi.fn();
+const listProjectBranchesMock = vi.fn();
+const listAzureDevOpsBranchesMock = vi.fn();
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   fetchRepoBranches: (...args: unknown[]) => fetchRepoBranchesMock(...args),
+}));
+vi.mock("@/lib/api/domains/gitlab-api", () => ({
+  listProjectBranches: (...args: unknown[]) => listProjectBranchesMock(...args),
+}));
+vi.mock("@/lib/api/domains/azure-devops-api", () => ({
+  listAzureDevOpsBranches: (...args: unknown[]) => listAzureDevOpsBranchesMock(...args),
 }));
 
 // Import after mocks so the hook picks up the mocked module.
@@ -13,6 +21,8 @@ import { useBranchesByURL } from "./use-branches-by-url";
 afterEach(() => {
   cleanup();
   fetchRepoBranchesMock.mockReset();
+  listProjectBranchesMock.mockReset();
+  listAzureDevOpsBranchesMock.mockReset();
   vi.useRealTimers();
 });
 
@@ -42,6 +52,32 @@ describe("useBranchesByURL", () => {
     expect(fetchRepoBranchesMock).toHaveBeenCalledTimes(2);
     expect(result.current.branches(REPO_A)[0]).toMatchObject({ name: "main", type: "remote" });
     expect(result.current.branches(REPO_B)[0]).toMatchObject({ name: "develop", type: "remote" });
+  });
+
+  it("dispatches GitLab and Azure URLs without calling GitHub", async () => {
+    listProjectBranchesMock.mockResolvedValue({ branches: [{ name: "develop" }] });
+    listAzureDevOpsBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
+    const { result } = renderHook(() => useBranchesByURL());
+    const gitlab = "https://gitlab.com/acme/platform/api.git";
+    const azure = "https://dev.azure.com/acme/Platform/_git/api";
+
+    act(() => {
+      result.current.ensure(gitlab, "workspace-1");
+      result.current.ensure(azure, "workspace-1");
+    });
+
+    await waitFor(() => {
+      expect(result.current.branches(gitlab)).toHaveLength(1);
+      expect(result.current.branches(azure)).toHaveLength(1);
+    });
+    expect(fetchRepoBranchesMock).not.toHaveBeenCalled();
+    expect(listProjectBranchesMock).toHaveBeenCalledWith("acme/platform/api", expect.anything());
+    expect(listAzureDevOpsBranchesMock).toHaveBeenCalledWith(
+      "workspace-1",
+      "Platform",
+      "api",
+      expect.anything(),
+    );
   });
 
   it("dedupes concurrent ensure() calls for the same URL into a single fetch", async () => {
@@ -83,7 +119,9 @@ describe("useBranchesByURL", () => {
     await waitFor(() => expect(result.current.loading(REPO_A)).toBe(false));
     expect(result.current.branches(REPO_A)).toHaveLength(1);
   });
+});
 
+describe("useBranchesByURL cache behavior", () => {
   it("ignores ensure() with empty string and treats it as a clear", async () => {
     fetchRepoBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
 

@@ -452,6 +452,11 @@ type httpTaskRepositoryInput struct {
 	Name           string `json:"name"`
 	DefaultBranch  string `json:"default_branch"`
 	GitHubURL      string `json:"github_url"`
+	RemoteURL      string `json:"remote_url"`
+	Provider       string `json:"provider"`
+	ProviderRepoID string `json:"provider_repo_id"`
+	ProviderOwner  string `json:"provider_owner"`
+	ProviderName   string `json:"provider_name"`
 
 	// Fresh-branch flow (local executor only): when FreshBranch is true the
 	// handler discards uncommitted changes in the local clone and creates
@@ -855,8 +860,8 @@ func (h *TaskHandlers) respondFreshBranchError(c *gin.Context, err error) {
 func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryInput) ([]dto.TaskRepositoryInput, bool) {
 	var repos []dto.TaskRepositoryInput
 	for _, r := range inputs {
-		if r.RepositoryID == "" && r.LocalPath == "" && r.GitHubURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "repository_id, local_path, or github_url is required"})
+		if r.RepositoryID == "" && r.LocalPath == "" && r.RemoteURL == "" && r.GitHubURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "repository_id, local_path, or remote_url is required"})
 			return nil, false
 		}
 		repos = append(repos, dto.TaskRepositoryInput{
@@ -868,6 +873,11 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			Name:           r.Name,
 			DefaultBranch:  r.DefaultBranch,
 			GitHubURL:      r.GitHubURL,
+			RemoteURL:      r.RemoteURL,
+			Provider:       r.Provider,
+			ProviderRepoID: r.ProviderRepoID,
+			ProviderOwner:  r.ProviderOwner,
+			ProviderName:   r.ProviderName,
 		})
 	}
 	return repos, true
@@ -1014,11 +1024,19 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	if body.Repositories != nil {
 		for _, r := range body.Repositories {
 			repos = append(repos, dto.TaskRepositoryInput{
-				RepositoryID:  r.RepositoryID,
-				BaseBranch:    r.BaseBranch,
-				LocalPath:     r.LocalPath,
-				Name:          r.Name,
-				DefaultBranch: r.DefaultBranch,
+				RepositoryID:   r.RepositoryID,
+				BaseBranch:     r.BaseBranch,
+				CheckoutBranch: r.CheckoutBranch,
+				PRNumber:       r.PRNumber,
+				LocalPath:      r.LocalPath,
+				Name:           r.Name,
+				DefaultBranch:  r.DefaultBranch,
+				GitHubURL:      r.GitHubURL,
+				RemoteURL:      r.RemoteURL,
+				Provider:       r.Provider,
+				ProviderRepoID: r.ProviderRepoID,
+				ProviderOwner:  r.ProviderOwner,
+				ProviderName:   r.ProviderName,
 			})
 		}
 	}

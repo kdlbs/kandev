@@ -1,10 +1,12 @@
 ---
-status: shipped
+status: building
 created: 2026-07-17
 owner: tbd
 ---
 
 # Azure DevOps Integration
+
+Decision: [ADR-2026-07-20-provider-neutral-remote-repositories](../../decisions/2026-07-20-provider-neutral-remote-repositories.md)
 
 ## Why
 
@@ -29,6 +31,9 @@ authenticating the GitHub CLI.
 - Users can browse work items returned by WIQL, inspect their core fields, and
   launch the existing task-creation flow with the work-item title, description,
   URL, project, type, state, and identifier available to the launcher.
+- The work-item and pull-request browse surface leads with named, provider-aware
+  presets and supports workspace-scoped saved views. Raw WIQL remains available
+  in an Advanced section instead of occupying the primary filter surface.
 - Users can browse active pull requests by project and repository, including
   pull requests authored by them and pull requests where they are a reviewer.
 - Pull-request detail includes branches, author, reviewers and votes, comment
@@ -39,6 +44,19 @@ authenticating the GitHub CLI.
 - Azure DevOps failures are isolated from GitHub, GitLab, Jira, and other
   integrations. An absent or invalid Azure connection does not prevent Kandev
   from starting.
+- Saving, copying, replacing, or deleting any integration configuration updates
+  integration navigation immediately. The 90-second health poll remains a
+  recovery mechanism, not the expected propagation path after a local mutation.
+- Configured integrations show an Enabled status in the expanded workspace
+  settings navigation. Azure DevOps uses the official product mark consistently
+  in settings, browse, and task-creation surfaces.
+- The task-creation repository picker combines repositories from every
+  configured source-control provider: GitHub, GitLab, and Azure DevOps. Users
+  can still paste a supported HTTPS or SSH repository URL manually.
+- Azure DevOps private repositories can be materialized with the workspace PAT
+  by the Kandev backend. The PAT is never added to task metadata, clone URLs,
+  agent environment variables, logs, or persisted repository rows. Push access
+  remains the responsibility of the selected executor's Git credentials.
 - The Azure DevOps browse and settings surfaces provide equivalent desktop and
   mobile workflows.
 
@@ -100,6 +118,18 @@ on demand and are not flattened into GitHub review/check records.
 Azure repositories use the existing repository fields with
 `provider = "azure_devops"`, the Azure repository GUID in `provider_repo_id`,
 the project ID in `provider_owner`, and the repository name in `provider_name`.
+Provider-backed repositories also persist the provider-returned canonical HTTPS
+clone URL in `remote_url`. This avoids reconstructing URLs from GitHub-specific
+owner/name assumptions and allows remote executors to address Azure organizations
+and GitLab self-managed hosts correctly. Credentials are never embedded in this
+field.
+
+### Saved Azure views
+
+Saved Azure views are workspace-scoped JSON records containing an ID, label,
+kind (`work_item` or `pull_request`), provider-native query/filter values, and a
+creation timestamp. Invalid entries are ignored when read. Saving a view never
+persists result data or credentials.
 
 ## API Surface
 
@@ -115,6 +145,9 @@ is present in the path.
 | `POST`   | `/api/v1/azure-devops/config/copy`                                                    | Copy configuration and credential to another workspace                   |
 | `GET`    | `/api/v1/azure-devops/projects`                                                       | List accessible projects                                                 |
 | `GET`    | `/api/v1/azure-devops/repositories`                                                   | List repositories, optionally filtered by project                        |
+| `GET`    | `/api/v1/azure-devops/repositories/:projectId/:repositoryId/branches`                 | List repository branches for task creation                               |
+| `GET`    | `/api/v1/azure-devops/views`                                                          | Return workspace-scoped saved Azure views                                |
+| `PUT`    | `/api/v1/azure-devops/views`                                                          | Replace workspace-scoped saved Azure views                               |
 | `POST`   | `/api/v1/azure-devops/work-items/search`                                              | Execute WIQL and return hydrated work items                              |
 | `GET`    | `/api/v1/azure-devops/work-items/:id`                                                 | Return one hydrated work item                                            |
 | `GET`    | `/api/v1/azure-devops/pull-requests`                                                  | List PRs by project, repository, status, author, or reviewer             |
@@ -128,6 +161,11 @@ Search requests contain `project`, `wiql`, and an optional `top` value. The
 service hydrates WIQL references in batches no larger than 200. Descriptions
 returned as HTML are sanitized before display.
 
+Task repository inputs use the provider-neutral `remote_url` field. The legacy
+`github_url` field remains accepted during migration and is normalized to the
+same internal input. Provider metadata supplied by the browser is treated as a
+hint and revalidated from the configured provider before persistence or clone.
+
 ## Permissions
 
 - Any user who can configure a Kandev workspace can manage that workspace's
@@ -136,6 +174,9 @@ returned as HTML are sanitized before display.
 - The initial PAT requires read access to Work Items and Code. Kandev does not
   request or exercise work-item write, thread write, or code write permissions
   in this release.
+- The backend may use the Code Read permission for a one-time authenticated Git
+  clone. It supplies the PAT through an ephemeral Git credential mechanism and
+  clears that mechanism when the child process exits.
 - Credentials from one workspace must never be used to answer a request for a
   different workspace.
 
@@ -154,6 +195,10 @@ returned as HTML are sanitized before display.
   one omitted/deleted work item does not corrupt the rest of the page.
 - PR association fails closed when the repository is not attached to the task
   or is not an `azure_devops` repository.
+- A repository selected from an integration is rejected if its canonical URL or
+  provider identity no longer matches data returned for the active workspace.
+- Failure to resolve or use server-side Azure clone credentials fails the clone
+  without falling back to an unauthenticated URL containing a secret.
 - Integration initialization errors are logged as non-fatal and the rest of
   the backend remains available.
 
@@ -188,6 +233,19 @@ returned as HTML are sanitized before display.
 - **GIVEN** an expired PAT, **WHEN** the health poller checks the connection,
   **THEN** settings shows the connection as unhealthy with a reconnect action
   and existing PR associations remain stored.
+- **GIVEN** a user saves or deletes an integration configuration, **WHEN** the
+  request succeeds, **THEN** settings status and home integration navigation
+  update without waiting for the periodic health poll.
+- **GIVEN** multiple configured source-control providers, **WHEN** a user opens
+  the Remote repository picker, **THEN** repositories are grouped by provider,
+  searchable in one control, and retain the correct provider icon and branch
+  source on desktop and mobile.
+- **GIVEN** a private Azure repository selected for a task, **WHEN** Kandev
+  materializes it, **THEN** the backend uses the workspace PAT for the clone and
+  no task or agent-visible value contains the PAT.
+- **GIVEN** a user chooses an Azure preset or saved view, **WHEN** they search,
+  **THEN** Kandev applies the preset's provider-native query while Advanced WIQL
+  remains available for custom work-item searches.
 - **GIVEN** a narrow mobile viewport, **WHEN** a user configures Azure DevOps or
   browses work items and PRs, **THEN** all filters and primary actions remain
   reachable without horizontal page scrolling.
@@ -199,7 +257,10 @@ returned as HTML are sanitized before display.
 - Creating, updating, or transitioning work items.
 - Creating, approving, commenting on, abandoning, or completing pull requests.
 - Automatic CI repair, auto-merge, and Azure Pipelines log streaming.
-- Service-hook/webhook ingestion; v1 reads and refreshes by request or polling.
+- Service-hook/webhook ingestion; reads and refreshes use requests, local
+  invalidation after configuration mutations, and polling for recovery.
+- Using the Azure PAT for agent-authored pushes, pull-request creation, or any
+  other write operation.
 - Requiring Azure CLI or the Azure DevOps CLI extension. The existing optional
   agentctl PR-create fallback remains separate until write support is added.
 

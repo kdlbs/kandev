@@ -112,6 +112,23 @@ func (c *RESTClient) ListRepositories(ctx context.Context, projectID string) ([]
 	return result, nil
 }
 
+func (c *RESTClient) ListBranches(ctx context.Context, projectID, repositoryID string) ([]Branch, error) {
+	var response struct {
+		Value []struct {
+			Name string `json:"name"`
+		} `json:"value"`
+	}
+	endpoint := fmt.Sprintf("/%s/_apis/git/repositories/%s/refs?filter=heads/&api-version=%s", pathPart(projectID), pathPart(repositoryID), restAPIVersion)
+	if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+	branches := make([]Branch, 0, len(response.Value))
+	for _, ref := range response.Value {
+		branches = append(branches, Branch{Name: strings.TrimPrefix(ref.Name, "refs/heads/")})
+	}
+	return branches, nil
+}
+
 func (c *RESTClient) QueryWIQL(ctx context.Context, projectID, wiql string, top int) (*WorkItemSearchResult, error) {
 	if top <= 0 {
 		top = workItemBatchSize

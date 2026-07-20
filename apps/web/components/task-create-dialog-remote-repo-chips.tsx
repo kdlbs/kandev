@@ -9,7 +9,7 @@ import {
   RemoteRepoChip,
   type RemoteRepoChipProps,
 } from "@/components/task-create-dialog-remote-repo-chip";
-import { useAccessibleRepos } from "@/hooks/domains/github/use-accessible-repos";
+import { useRemoteRepositories } from "@/hooks/domains/integrations/use-remote-repositories";
 
 /**
  * Chip row for the Remote tab. Renders one `RemoteRepoChip` per row in
@@ -27,6 +27,7 @@ export type RemoteRepoChipsRowProps = {
   onUpdateRow: (key: string, update: Partial<TaskRemoteRepoRow>) => void;
   onAddRow: () => void;
   onRemoveRow: (key: string) => void;
+  workspaceId?: string;
 };
 
 export function RemoteRepoChipsRow({
@@ -34,6 +35,7 @@ export function RemoteRepoChipsRow({
   onUpdateRow,
   onAddRow,
   onRemoveRow,
+  workspaceId = "",
 }: RemoteRepoChipsRowProps) {
   // Keep the per-URL caches warm. Destructure the stable `ensure` callbacks
   // out of the parent cache objects so the effect deps array doesn't churn
@@ -47,10 +49,10 @@ export function RemoteRepoChipsRow({
   useEffect(() => {
     for (const row of fs.remoteRepos) {
       if (!row.url) continue;
-      ensureBranches(row.url);
+      ensureBranches(row.url, workspaceId);
       ensurePRInfo(row.url);
     }
-  }, [fs.remoteRepos, ensureBranches, ensurePRInfo]);
+  }, [fs.remoteRepos, ensureBranches, ensurePRInfo, workspaceId]);
 
   // Hoist the accessible-repos hook to the row level so a single backend
   // request serves every chip's popover. Previously each chip called the
@@ -59,7 +61,7 @@ export function RemoteRepoChipsRow({
   // popover doesn't reset another), at the cost of the shared cache: if
   // two popovers are open with different searches, both see the latest
   // search's results. In practice only one popover is open at a time.
-  const accessibleRepos = useAccessibleRepos();
+  const accessibleRepos = useRemoteRepositories(workspaceId);
 
   const rows = fs.remoteRepos;
   return (
@@ -101,6 +103,9 @@ function makeURLChange(
         source,
         provider: metadata.provider,
         fullName: metadata.fullName,
+        providerRepoId: metadata.providerRepoId,
+        providerOwner: metadata.providerOwner,
+        providerName: metadata.providerName,
         branch: metadata.defaultBranch ?? "",
       });
       return;
@@ -110,6 +115,9 @@ function makeURLChange(
       source,
       provider: undefined,
       fullName: undefined,
+      providerRepoId: undefined,
+      providerOwner: undefined,
+      providerName: undefined,
       branch: "",
     });
   };

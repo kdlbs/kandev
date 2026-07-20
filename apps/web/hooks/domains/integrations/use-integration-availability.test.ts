@@ -1,6 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useIntegrationAuthed, type IntegrationConfigStatus } from "./use-integration-availability";
+import {
+  invalidateIntegrationAvailability,
+  useIntegrationAuthed,
+  type IntegrationConfigStatus,
+} from "./use-integration-availability";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -81,5 +85,22 @@ describe("useIntegrationAuthed", () => {
     rerender({ active: false });
 
     expect(result.current).toBe(false);
+  });
+
+  it("re-probes immediately when integration availability is invalidated", async () => {
+    const fetchConfig = vi
+      .fn<() => Promise<IntegrationConfigStatus | null>>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ hasSecret: true, lastOk: true });
+
+    const { result } = renderHook(() => useIntegrationAuthed(fetchConfig));
+
+    await waitFor(() => expect(fetchConfig).toHaveBeenCalledTimes(1));
+    expect(result.current).toBe(false);
+
+    act(() => invalidateIntegrationAvailability());
+
+    await waitFor(() => expect(result.current).toBe(true));
+    expect(fetchConfig).toHaveBeenCalledTimes(2);
   });
 });

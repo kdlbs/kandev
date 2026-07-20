@@ -5,8 +5,10 @@
 Implement the read-only Azure DevOps Services integration defined in
 [`../../specs/azure-devops-integration/spec.md`](../../specs/azure-devops-integration/spec.md):
 workspace-scoped PAT configuration, direct REST work-item and pull-request
-reads, persistent task PR links, and responsive settings/browse surfaces. No
-runtime path may require `gh` or `az`.
+reads, persistent task PR links, responsive settings/browse surfaces, immediate
+integration availability updates, provider-neutral remote repository selection,
+and server-side authenticated Azure clones. No Azure runtime path may require
+`gh` or `az`.
 
 ## Architecture
 
@@ -16,6 +18,12 @@ runtime path may require `gh` or `az`.
   source-host REST/task-review patterns.
 - Persist provider-native Azure identifiers. Normalize only the summary fields
   required by shared task UI.
+- Persist canonical credential-free remote URLs for provider repositories and
+  normalize new `remote_url` task inputs alongside the legacy `github_url`
+  compatibility field.
+- Resolve Azure clone credentials by workspace inside the backend clone path.
+  Never expose the PAT to task metadata, an agent environment, a persisted URL,
+  or command output.
 - Use Azure DevOps REST API 7.1, an injected HTTP client for deterministic
   tests, bounded response bodies, context-aware requests, and typed API errors.
 - Register the service as non-fatal during backend boot and expose mock routes
@@ -42,6 +50,12 @@ runtime path may require `gh` or `az`.
   desktop filter rail, and mobile filter sheet.
 - Task PR summary integration through a provider-tagged view model; Azure
   detail remains in Azure-specific components.
+- A shared integration availability invalidation channel updates every consumer
+  after configuration mutations while retaining periodic health polling.
+- A shared source-control repository picker merges GitHub, GitLab, and Azure
+  discovery and dispatches branch reads to the selected provider.
+- Azure browse presets and saved views reuse the interaction model of GitHub and
+  GitLab, with raw WIQL contained in an Advanced disclosure.
 - No required action may be hover-only or desktop-only.
 
 ## Tests
@@ -56,6 +70,10 @@ runtime path may require `gh` or `az`.
   connect, browse work items, browse PRs, and open PR feedback.
 - Security review of secret isolation, URL/SSRF validation, response-size
   bounds, and error redaction before final verification.
+- Go tests for provider-neutral task inputs, canonical remote URLs, and
+  credential cleanup around Azure clone processes.
+- Component and Playwright coverage for immediate availability, Enabled chips,
+  provider grouping, preset/saved-view behavior, and mobile parity.
 
 ## Verification
 
@@ -66,8 +84,8 @@ runtime path may require `gh` or `az`.
 - `rtk pnpm --filter @kandev/web typecheck` from `apps`
 - `rtk pnpm --filter @kandev/web test -- --run` from `apps`
 - `rtk pnpm --filter @kandev/web lint` from `apps`
-- `rtk pnpm e2e -- --project=chrome e2e/azure-devops/azure-devops.spec.ts` from `apps/web`
-- `rtk pnpm e2e -- --project=mobile-chrome e2e/azure-devops/mobile-azure-devops.spec.ts` from `apps/web`
+- `pnpm e2e:run --host --project chromium -- e2e/tests/integrations/azure-devops.spec.ts` from `apps/web`
+- `pnpm e2e:run --host --project mobile-chrome -- e2e/tests/integrations/mobile-azure-devops.spec.ts e2e/tests/task/mobile-create-task-remote-repo.spec.ts` from `apps/web`
 
 ## Risks
 
@@ -81,6 +99,13 @@ runtime path may require `gh` or `az`.
 - Existing task PR UI is GitHub-heavy. The implementation must extract only the
   smallest provider-tagged presentation contract required for Azure, not begin
   a broad GitHub/GitLab refactor.
+- The task creation API and branch loader are GitHub-named today. Compatibility
+  fields must remain accepted while internal contracts become provider-neutral.
+- Azure PAT clone auth must not leak through process arguments, persisted remote
+  URLs, executor metadata, structured logs, or agent-visible environment state.
+- Remote executors receive credential-free clone URLs. A private Azure repo is
+  guaranteed to clone through the backend materialization path; remote executor
+  push/clone credentials remain separately configured.
 
 ## Task Waves
 
@@ -102,6 +127,21 @@ Wave 3: frontend
 Wave 4: integrated validation
 
 - [x] [Task 07: E2E, security review, and documentation](task-07-e2e-security-docs.md)
+
+Wave 5: integration navigation and Azure browse UX
+
+- [x] [Task 08: Immediate availability and integration identity](task-08-availability-and-identity.md)
+- [x] [Task 09: Azure presets and saved views](task-09-azure-presets.md)
+
+Wave 6: provider-neutral repository selection
+
+- [x] [Task 10: Remote repository contracts and discovery](task-10-remote-repository-contracts.md)
+- [x] [Task 11: Secure Azure repository materialization](task-11-secure-azure-clone.md)
+- [x] [Task 12: Unified task repository picker](task-12-unified-repository-picker.md)
+
+Wave 7: integrated validation
+
+- [x] [Task 13: Cross-provider E2E, security review, and documentation](task-13-enhancement-validation.md)
 
 Tasks within a wave are listed separately for ownership clarity but should run
 sequentially in the current workspace when they touch the same package or state

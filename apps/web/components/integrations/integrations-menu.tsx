@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
 import {
@@ -14,7 +14,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   IconBrandGithub,
   IconBrandGitlab,
-  IconBrandAzure,
   IconHexagon,
   IconPlugConnected,
   IconTicket,
@@ -25,11 +24,11 @@ import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
 import { useAppStore } from "@/components/state-provider";
-import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { GitHubStatus } from "@/lib/types/github";
+import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 
 type MobileIntegrationsSectionProps = {
   onNavigate: () => void;
@@ -60,12 +59,12 @@ const INTEGRATION_LINKS: IntegrationLink[] = [
 ];
 
 const INTEGRATION_ICONS = {
-  "azure-devops": IconBrandAzure,
+  "azure-devops": AzureDevOpsIcon,
   github: IconBrandGithub,
   gitlab: IconBrandGitlab,
   jira: IconTicket,
   linear: IconHexagon,
-} satisfies Record<IntegrationId, typeof IconBrandGithub>;
+} satisfies Record<IntegrationId, ComponentType<{ className?: string }>>;
 
 const HOVER_CLOSE_DELAY_MS = 180;
 
@@ -232,7 +231,7 @@ function MobileIntegrationRow({
 }: {
   href: string;
   label: string;
-  icon: TablerIcon;
+  icon: ComponentType<{ className?: string }>;
   testId?: string;
   onNavigate: () => void;
 }) {

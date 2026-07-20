@@ -76,6 +76,31 @@ const MOCK_STATE = {
   },
 };
 
+test("mobile settings explain PAT scopes and link to the organization token page", async ({
+  seedData,
+  testPage,
+}) => {
+  await testPage.goto(
+    `/settings/workspace/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
+  );
+
+  await testPage.getByTestId("azure-devops-organization").fill("https://dev.azure.com/acme");
+  const createTokenLink = testPage.getByRole("link", { name: "Create personal access token" });
+  await expect(createTokenLink).toBeVisible();
+  await expect(createTokenLink).toHaveAttribute(
+    "href",
+    "https://dev.azure.com/acme/_usersSettings/tokens",
+  );
+  await expect(testPage.getByTestId("azure-devops-pat-help")).toContainText(
+    "Leave all other scopes unchecked",
+  );
+
+  const viewportFits = await testPage.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth,
+  );
+  expect(viewportFits).toBe(true);
+});
+
 test("mobile filters expose both Azure browse modes without horizontal overflow", async ({
   apiClient,
   seedData,
@@ -92,7 +117,7 @@ test("mobile filters expose both Azure browse modes without horizontal overflow"
   await testPage.getByTestId("azure-devops-search-button-mobile").click();
   await expect(testPage.getByText("Handle token rotation")).toBeVisible();
 
-  await testPage.getByRole("tab", { name: "Pull requests" }).click();
+  await testPage.getByRole("button", { name: "Pull requests" }).click();
   await testPage.getByTestId("azure-devops-mobile-filter-button").click();
   await testPage.getByTestId("azure-devops-search-button-mobile").click();
   await expect(testPage.getByText("Rotate integration credentials")).toBeVisible();

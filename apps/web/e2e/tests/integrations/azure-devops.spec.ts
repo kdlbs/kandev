@@ -89,6 +89,15 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   );
 
   await testPage.getByTestId("azure-devops-organization").fill("https://dev.azure.com/acme");
+  const createTokenLink = testPage.getByRole("link", { name: "Create personal access token" });
+  await expect(createTokenLink).toHaveAttribute(
+    "href",
+    "https://dev.azure.com/acme/_usersSettings/tokens",
+  );
+  await expect(testPage.getByTestId("azure-devops-pat-help")).toContainText(
+    "Work Items, check Read",
+  );
+  await expect(testPage.getByTestId("azure-devops-pat-help")).toContainText("Code, check Read");
   await testPage.getByTestId("azure-devops-pat").fill("azure-test-pat");
   await testPage.getByTestId("azure-devops-test-button").click();
   await expect(testPage.getByTestId("azure-devops-test-result")).toContainText(
@@ -100,7 +109,7 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   await testPage.getByTestId("azure-devops-search-button").click();
   await expect(testPage.getByText("Handle token rotation")).toBeVisible();
 
-  await testPage.getByRole("tab", { name: "Pull requests" }).click();
+  await testPage.getByRole("button", { name: "Pull requests" }).click();
   await testPage.getByTestId("azure-devops-search-button").click();
   await expect(testPage.getByText("Rotate integration credentials")).toBeVisible();
   await testPage.getByRole("button", { name: "Feedback" }).click();

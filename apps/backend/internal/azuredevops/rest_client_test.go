@@ -28,6 +28,8 @@ func TestRESTClientAuthAndDiscovery(t *testing.T) {
 			_, _ = w.Write([]byte(`{"count":1,"value":[{"id":"project-1","name":"Platform","url":"https://api/project-1"}]}`))
 		case "/acme/project-1/_apis/git/repositories":
 			_, _ = w.Write([]byte(`{"count":1,"value":[{"id":"repo-1","name":"widgets","defaultBranch":"refs/heads/main","webUrl":"https://dev.azure.com/acme/Platform/_git/widgets","project":{"id":"project-1","name":"Platform"}}]}`))
+		case "/acme/project-1/_apis/git/repositories/repo-1/refs":
+			_, _ = w.Write([]byte(`{"count":1,"value":[{"name":"refs/heads/main"}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -46,6 +48,10 @@ func TestRESTClientAuthAndDiscovery(t *testing.T) {
 	repos, err := client.ListRepositories(context.Background(), "project-1")
 	if err != nil || len(repos) != 1 || repos[0].DefaultBranch != "main" {
 		t.Fatalf("ListRepositories = %+v, %v", repos, err)
+	}
+	branches, err := client.ListBranches(context.Background(), "project-1", "repo-1")
+	if err != nil || len(branches) != 1 || branches[0].Name != "main" {
+		t.Fatalf("ListBranches = %+v, %v", branches, err)
 	}
 }
 

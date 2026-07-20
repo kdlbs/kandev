@@ -6,12 +6,14 @@ import type {
   AzureDevOpsPullRequestFeedback,
   AzureDevOpsPullRequestPage,
   AzureDevOpsRepository,
+  AzureDevOpsSavedView,
   AzureDevOpsTaskPullRequest,
   AzureDevOpsWorkItem,
   AzureDevOpsWorkItemSearchResult,
   SetAzureDevOpsConfigRequest,
   TestAzureDevOpsConnectionResult,
 } from "@/lib/types/azure-devops";
+import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
 const BASE = "/api/v1/azure-devops";
 
@@ -41,17 +43,21 @@ export function setAzureDevOpsConfig(
   payload: SetAzureDevOpsConfigRequest,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<AzureDevOpsConfig>(withWorkspace(`${BASE}/config`, workspaceId), {
-    ...options,
-    init: { ...options?.init, method: "POST", body: JSON.stringify(payload) },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<AzureDevOpsConfig>(withWorkspace(`${BASE}/config`, workspaceId), {
+      ...options,
+      init: { ...options?.init, method: "POST", body: JSON.stringify(payload) },
+    }),
+  );
 }
 
 export function deleteAzureDevOpsConfig(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ deleted: boolean }>(withWorkspace(`${BASE}/config`, workspaceId), {
-    ...options,
-    init: { ...options?.init, method: "DELETE" },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<{ deleted: boolean }>(withWorkspace(`${BASE}/config`, workspaceId), {
+      ...options,
+      init: { ...options?.init, method: "DELETE" },
+    }),
+  );
 }
 
 export function testAzureDevOpsConnection(
@@ -73,14 +79,16 @@ export function copyAzureDevOpsConfig(
   targetWorkspaceId: string,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<AzureDevOpsConfig>(withWorkspace(`${BASE}/config/copy`, sourceWorkspaceId), {
-    ...options,
-    init: {
-      ...options?.init,
-      method: "POST",
-      body: JSON.stringify({ targetWorkspaceId }),
-    },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<AzureDevOpsConfig>(withWorkspace(`${BASE}/config/copy`, sourceWorkspaceId), {
+      ...options,
+      init: {
+        ...options?.init,
+        method: "POST",
+        body: JSON.stringify({ targetWorkspaceId }),
+      },
+    }),
+  );
 }
 
 export function listAzureDevOpsProjects(workspaceId: string, options?: ApiRequestOptions) {
@@ -101,6 +109,35 @@ export function listAzureDevOpsRepositories(
     `${BASE}/repositories?${search}`,
     options,
   );
+}
+
+export function listAzureDevOpsBranches(
+  workspaceId: string,
+  project: string,
+  repository: string,
+  options?: ApiRequestOptions,
+) {
+  const search = new URLSearchParams({ project, repository });
+  appendWorkspace(search, workspaceId);
+  return fetchJson<{ branches: Array<{ name: string }> }>(`${BASE}/branches?${search}`, options);
+}
+
+export function getAzureDevOpsSavedViews(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ views: AzureDevOpsSavedView[] }>(
+    withWorkspace(`${BASE}/views`, workspaceId),
+    options,
+  );
+}
+
+export function setAzureDevOpsSavedViews(
+  workspaceId: string,
+  views: AzureDevOpsSavedView[],
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ views: AzureDevOpsSavedView[] }>(withWorkspace(`${BASE}/views`, workspaceId), {
+    ...options,
+    init: { ...options?.init, method: "PUT", body: JSON.stringify({ views }) },
+  });
 }
 
 export function searchAzureDevOpsWorkItems(

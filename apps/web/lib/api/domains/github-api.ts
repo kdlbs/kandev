@@ -35,6 +35,7 @@ import type {
   TaskCIAutomationOptions,
   TaskCIAutomationPatch,
 } from "@/lib/types/github";
+import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
 // Status
 export async function fetchGitHubStatus(options?: ApiRequestOptions) {
@@ -43,18 +44,22 @@ export async function fetchGitHubStatus(options?: ApiRequestOptions) {
 
 // Token configuration
 export async function configureGitHubToken(token: string) {
-  return fetchJson<{ configured: boolean }>("/api/v1/github/token", {
-    init: {
-      method: "POST",
-      body: JSON.stringify({ token }),
-    },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<{ configured: boolean }>("/api/v1/github/token", {
+      init: {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      },
+    }),
+  );
 }
 
 export async function clearGitHubToken() {
-  return fetchJson<{ cleared: boolean }>("/api/v1/github/token", {
-    init: { method: "DELETE" },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<{ cleared: boolean }>("/api/v1/github/token", {
+      init: { method: "DELETE" },
+    }),
+  );
 }
 
 // Task PR associations

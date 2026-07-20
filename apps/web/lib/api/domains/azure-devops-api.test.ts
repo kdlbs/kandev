@@ -11,6 +11,7 @@ import {
   getAzureDevOpsConfig,
   getAzureDevOpsPullRequestFeedback,
   listAzureDevOpsProjects,
+  listAzureDevOpsBranches,
   listAzureDevOpsPullRequests,
   listAzureDevOpsRepositories,
   listWorkspaceAzureDevOpsTaskPullRequests,
@@ -96,6 +97,12 @@ describe("Azure DevOps read API", () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ repositories: [] }));
     await listAzureDevOpsRepositories("ws-1", "project / one");
     expect(lastCall().url).toBe(`${BASE}/repositories?project=project+%2F+one&workspace_id=ws-1`);
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ branches: [] }));
+    await listAzureDevOpsBranches("ws-1", "project / one", "repo / one");
+    expect(lastCall().url).toBe(
+      `${BASE}/branches?project=project+%2F+one&repository=repo+%2F+one&workspace_id=ws-1`,
+    );
   });
 
   it("posts WIQL and builds pull request filters", async () => {
