@@ -59,6 +59,31 @@ function renderRequestHook(ready = true) {
   );
 }
 
+async function expectQuerySessionStatePreferred() {
+  mockStoreState = storeState("RUNNING");
+  queryClient.setQueryData(qk.taskSession.byId("session-1"), {
+    id: "session-1",
+    task_id: "task-1",
+    state: "WAITING_FOR_INPUT",
+  });
+  mockRequest.mockResolvedValueOnce(undefined);
+  const { result } = renderRequestHook();
+
+  await act(async () => {
+    await result.current();
+  });
+
+  expect(mockRequest).toHaveBeenCalledWith(
+    "message.add",
+    expect.objectContaining({
+      task_id: "task-1",
+      session_id: "session-1",
+    }),
+    10000,
+  );
+  expect(mockQueueMessage).not.toHaveBeenCalled();
+}
+
 describe("useRequestChangesWalkthrough", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -75,7 +100,6 @@ describe("useRequestChangesWalkthrough", () => {
       ],
     });
   });
-
   it("sends a walkthrough request directly when the agent is waiting", async () => {
     queryClient.setQueryData(qk.session.messages("session-1"), {
       messages: [],
@@ -124,6 +148,8 @@ describe("useRequestChangesWalkthrough", () => {
       expect.objectContaining({ title: "Walkthrough request sent" }),
     );
   });
+
+  it("prefers query state over a stale store snapshot", expectQuerySessionStatePreferred);
 
   it("queues a walkthrough request when the agent is running", async () => {
     mockStoreState = storeState("RUNNING", true);

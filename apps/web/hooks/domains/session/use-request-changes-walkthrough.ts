@@ -9,7 +9,7 @@ import {
   buildChangesWalkthroughPrompt,
   CHANGES_WALKTHROUGH_PROMPT_NAME,
 } from "@/lib/walkthrough-request";
-import type { Message } from "@/lib/types/http";
+import type { Message, TaskSession } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 import { qk } from "@/lib/query/keys";
 import { upsertSessionMessageCaches } from "@/lib/query/bridge/session";
@@ -95,7 +95,10 @@ export function useRequestChangesWalkthrough({
     if (!taskId || !sessionId) return;
 
     const state = storeApi.getState();
-    const activeSession = state.taskSessions.items[sessionId] ?? null;
+    const activeSession =
+      queryClient.getQueryData<TaskSession>(qk.taskSession.byId(sessionId)) ??
+      state.taskSessions.items[sessionId] ??
+      null;
     const shouldQueue = isAgentBusy(activeSession?.state);
     const planModeEnabled = state.chatInput.planModeBySessionId[sessionId] ?? false;
     if (!ready) {
