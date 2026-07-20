@@ -20,6 +20,13 @@ import { Dialog } from "@kandev/ui/dialog";
 - For data tables, use `@kandev/ui/table` with TanStack Table; use shadcn Pagination components.
 - Only create custom components when shadcn doesn't provide what's needed.
 
+### Responsive and touch surfaces
+
+- Use `hooks/use-responsive-breakpoint.ts` for application layout decisions. Its phone boundary is 640px and it also models tablet, compact desktop, full desktop, and pointer precision; do not substitute the UI package's generic `useIsMobile` hook.
+- Use `useTouchDrawer` when a hover/popover disclosure needs a coarse-pointer `Drawer` alternative. Width-based phone composition and pointer-based disclosure behavior are related but not interchangeable.
+- Existing Radix DropdownMenu and ContextMenu surfaces receive inset, safe-area-aware bottom-sheet treatment below 640px in `app/globals.css`. Reuse those primitives for contextual actions and add focused coverage for long or nested menus instead of creating a parallel mobile menu.
+- Mobile capability parity does not require desktop layout parity. Load `/mobile-parity` for the Kandev surface decision guide, mobile design contract, and verification requirements.
+
 ## Data Flow Pattern (Critical)
 
 ```text
