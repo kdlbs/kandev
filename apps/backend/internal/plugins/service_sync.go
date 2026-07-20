@@ -60,6 +60,7 @@ func (s *Service) sync(ctx context.Context, includeTarballs bool) *SyncResult {
 
 	result := &SyncResult{}
 	if s.pluginsDir == "" {
+		normalizeSyncResult(result)
 		return result
 	}
 
@@ -76,7 +77,28 @@ func (s *Service) sync(ctx context.Context, includeTarballs bool) *SyncResult {
 	result.Missing = s.scanMissingInstalls()
 
 	s.notifyDeliverer()
+	normalizeSyncResult(result)
 	return result
+}
+
+// normalizeSyncResult replaces any nil slice field with an empty slice.
+// encoding/json marshals a nil slice as JSON null, but SyncResult's fields
+// are typed as non-nullable arrays on the frontend
+// (apps/web/lib/types/plugins.ts) — a null there crashes
+// summarizeSyncResult's unconditional `.length` reads.
+func normalizeSyncResult(result *SyncResult) {
+	if result.Added == nil {
+		result.Added = []string{}
+	}
+	if result.Installed == nil {
+		result.Installed = []string{}
+	}
+	if result.Missing == nil {
+		result.Missing = []string{}
+	}
+	if result.Errors == nil {
+		result.Errors = []SyncError{}
+	}
 }
 
 // scanDirSideloads finds every <pluginsDir>/<id>/<version>/manifest.yaml
