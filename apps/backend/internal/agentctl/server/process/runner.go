@@ -474,6 +474,12 @@ func (r *ProcessRunner) StopAllAndWait(ctx context.Context) error {
 	for _, proc := range processes {
 		select {
 		case <-proc.done:
+			proc.mu.Lock()
+			reapErr := proc.reapErr
+			proc.mu.Unlock()
+			if reapErr == nil {
+				continue
+			}
 			if err := r.ensureProcessGroupReaped(ctx, proc); err != nil {
 				waitErrs = append(waitErrs, err)
 			}

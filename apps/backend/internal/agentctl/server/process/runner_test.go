@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -174,6 +175,31 @@ func TestProcessRunnerStopAllAndWaitBlocksUntilReaped(t *testing.T) {
 	}
 }
 
+func TestProcessRunnerStopAllAndWaitSkipsCompletedReap(t *testing.T) {
+	runner := NewProcessRunner(nil, newTestLogger(t), 1024)
+	done := make(chan struct{})
+	close(done)
+	proc := &commandProcess{
+		info:       ProcessInfo{ID: "completed-reap"},
+		stopSignal: make(chan struct{}),
+		done:       done,
+		pgid:       424243,
+	}
+	runner.processes[proc.info.ID] = proc
+	reapChecks := 0
+	runner.groupAliveFn = func(int) bool {
+		reapChecks++
+		return false
+	}
+
+	if err := runner.StopAllAndWait(context.Background()); err != nil {
+		t.Fatalf("StopAllAndWait() error = %v", err)
+	}
+	if reapChecks != 0 {
+		t.Fatalf("process group rechecked %d times after completed reap", reapChecks)
+	}
+}
+
 func TestProcessRunnerStopAllAndWaitRetainsLiveProcessGroupForRetry(t *testing.T) {
 	runner := NewProcessRunner(nil, newTestLogger(t), 1024)
 	done := make(chan struct{})
@@ -183,6 +209,7 @@ func TestProcessRunnerStopAllAndWaitRetainsLiveProcessGroupForRetry(t *testing.T
 		stopSignal: make(chan struct{}),
 		done:       done,
 		pgid:       424244,
+		reapErr:    errors.New("initial reap failed"),
 	}
 	runner.processes[proc.info.ID] = proc
 	groupAlive := true
