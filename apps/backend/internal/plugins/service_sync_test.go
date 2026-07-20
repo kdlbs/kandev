@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
-	"strings"
 	"testing"
 	"time"
 )
@@ -274,8 +273,14 @@ func TestServiceSync_EmptyResultSerializesEmptyArraysNotNull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
-	if strings.Contains(string(data), "null") {
-		t.Fatalf("Sync() JSON contains null, want empty arrays: %s", data)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	for _, key := range []string{"added", "installed", "missing", "errors"} {
+		if raw, ok := fields[key]; !ok || string(raw) == "null" {
+			t.Fatalf("Sync() JSON field %q = %s, want an empty array: %s", key, raw, data)
+		}
 	}
 }
 

@@ -58,47 +58,35 @@ func (s *Service) sync(ctx context.Context, includeTarballs bool) *SyncResult {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
-	result := &SyncResult{}
+	// Slices start non-nil: encoding/json marshals a nil slice as JSON null,
+	// but SyncResult's fields are typed as non-nullable arrays on the
+	// frontend (apps/web/lib/types/plugins.ts) — a null there crashes
+	// summarizeSyncResult's unconditional `.length` reads. append()-ing a
+	// possibly-nil result onto these keeps them non-nil.
+	result := &SyncResult{
+		Added:     []string{},
+		Installed: []string{},
+		Missing:   []string{},
+		Errors:    []SyncError{},
+	}
 	if s.pluginsDir == "" {
-		normalizeSyncResult(result)
 		return result
 	}
 
 	added, sideloadErrs := s.scanDirSideloads()
-	result.Added = added
+	result.Added = append(result.Added, added...)
 	result.Errors = append(result.Errors, sideloadErrs...)
 
 	if includeTarballs {
 		installed, tarballErrs := s.scanTarballs(ctx)
-		result.Installed = installed
+		result.Installed = append(result.Installed, installed...)
 		result.Errors = append(result.Errors, tarballErrs...)
 	}
 
-	result.Missing = s.scanMissingInstalls()
+	result.Missing = append(result.Missing, s.scanMissingInstalls()...)
 
 	s.notifyDeliverer()
-	normalizeSyncResult(result)
 	return result
-}
-
-// normalizeSyncResult replaces any nil slice field with an empty slice.
-// encoding/json marshals a nil slice as JSON null, but SyncResult's fields
-// are typed as non-nullable arrays on the frontend
-// (apps/web/lib/types/plugins.ts) — a null there crashes
-// summarizeSyncResult's unconditional `.length` reads.
-func normalizeSyncResult(result *SyncResult) {
-	if result.Added == nil {
-		result.Added = []string{}
-	}
-	if result.Installed == nil {
-		result.Installed = []string{}
-	}
-	if result.Missing == nil {
-		result.Missing = []string{}
-	}
-	if result.Errors == nil {
-		result.Errors = []SyncError{}
-	}
 }
 
 // scanDirSideloads finds every <pluginsDir>/<id>/<version>/manifest.yaml
