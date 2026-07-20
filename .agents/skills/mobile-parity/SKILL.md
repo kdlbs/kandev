@@ -96,7 +96,7 @@ Good mobile tests assert real user outcomes, not only visibility. Prefer:
 
 ## Playwright Routing
 
-Create `mobile-*.spec.ts` files and let the `mobile-chrome` project apply its configured Pixel 5 device; do not add per-test device overrides. Follow `/e2e` for fixtures, page objects, selectors, build requirements, and local reproduction. Mobile parity owns which interaction and geometry contracts need proof; `/e2e` owns test mechanics.
+Create `mobile-*.spec.ts` files and let the `mobile-chrome` project apply its configured Pixel 5 device; do not add per-test device overrides. Follow `/e2e` for fixtures, page objects, selectors, build requirements, and local reproduction. Top-level `tests/mobile-*.spec.ts` files import `../fixtures/test-base`; nested specs adjust the depth, commonly using `../../fixtures/test-base`. Mobile parity owns which interaction and geometry contracts need proof; `/e2e` owns test mechanics.
 
 ## Done Checklist
 
