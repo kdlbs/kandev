@@ -2,12 +2,15 @@ package process
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/logger"
+	"go.uber.org/zap"
 )
 
 func TestIsBinaryContent(t *testing.T) {
@@ -40,9 +43,36 @@ func TestTotalDiffBytes(t *testing.T) {
 			"c.go": {Diff: ""},
 		},
 	}
-	got := totalDiffBytes(update)
+	got, err := totalDiffBytes(context.Background(), update)
+	if err != nil {
+		t.Fatalf("totalDiffBytes() error = %v", err)
+	}
 	if got != 8 {
 		t.Errorf("totalDiffBytes = %d, want 8", got)
+	}
+}
+
+func TestDiffBudget_TracksReplacedContentAtBoundary(t *testing.T) {
+	update := &streams.GitStatusUpdate{
+		Files: map[string]streams.FileInfo{
+			"existing.go": {Diff: strings.Repeat("x", maxTotalDiffBytes-1)},
+		},
+	}
+	budget, err := newDiffBudget(context.Background(), update)
+	if err != nil {
+		t.Fatalf("newDiffBudget() error = %v", err)
+	}
+
+	if budget.exhausted() {
+		t.Fatal("budget exhausted before reaching the total limit")
+	}
+	budget.replace("", "x")
+	if !budget.exhausted() {
+		t.Fatal("budget not exhausted at the total limit")
+	}
+	budget.replace("x", "")
+	if budget.exhausted() {
+		t.Fatal("budget remained exhausted after replacing content with an empty diff")
 	}
 }
 
@@ -218,6 +248,210 @@ func TestEnrichUntrackedFileDiffs_SmallTextFile(t *testing.T) {
 	}
 }
 
+func TestEnrichUntrackedFileDiffs_CanceledContextStopsBeforeEnrichment(t *testing.T) {
+	isolateTestGitEnv(t)
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	writeFile(t, repoDir, "first.txt", "must not be read\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	update := &streams.GitStatusUpdate{
+		Files: map[string]streams.FileInfo{
+			"first.txt": {Path: "first.txt", Status: fileStatusUntracked},
+		},
+	}
+
+	err := wt.enrichUntrackedFileDiffs(ctx, update)
+
+	got := update.Files["first.txt"]
+	if err != context.Canceled {
+		t.Fatalf("enrichUntrackedFileDiffs error = %v, want %v", err, context.Canceled)
+	}
+	if got.Diff != "" || got.Additions != 0 || got.DiffSkipReason != "" {
+		t.Fatalf("canceled enrichment mutated file info: %+v", got)
+	}
+}
+
+func TestEnrichWithDiffData_CanceledContextReturnsErrorForTrackedFiles(t *testing.T) {
+	isolateTestGitEnv(t)
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	update := &streams.GitStatusUpdate{
+		Files: map[string]streams.FileInfo{
+			"tracked.txt": {Path: "tracked.txt", Status: "modified"},
+		},
+	}
+
+	err := wt.enrichWithDiffData(ctx, update, streams.GitStatusUpdate{})
+	if err != context.Canceled {
+		t.Fatalf("enrichWithDiffData error = %v, want %v", err, context.Canceled)
+	}
+}
+
+type cancelAfterErrChecksContext struct {
+	context.Context
+	remaining int
+	cancel    context.CancelFunc
+}
+
+func (c *cancelAfterErrChecksContext) Err() error {
+	c.remaining--
+	if c.remaining <= 0 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
+func TestBuildUntrackedDiff_CancellationDuringLineConstruction(t *testing.T) {
+	baseCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ctx := &cancelAfterErrChecksContext{Context: baseCtx, remaining: 2, cancel: cancel}
+
+	diff, additions, truncated, err := buildUntrackedDiff(ctx, "lines.txt", []byte("first\nsecond\nthird\n"))
+
+	if err != context.Canceled {
+		t.Fatalf("buildUntrackedDiff error = %v, want %v", err, context.Canceled)
+	}
+	if diff != "" || additions != 0 || truncated {
+		t.Fatalf("canceled diff = %q, additions = %d, truncated = %v", diff, additions, truncated)
+	}
+}
+
+func TestBranchDiffTotals_CancellationStopsNumstatLoop(t *testing.T) {
+	baseCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ctx := &cancelAfterErrChecksContext{Context: baseCtx, remaining: 2, cancel: cancel}
+
+	additions, deletions, err := branchDiffTotals(
+		ctx,
+		[]byte("1\t2\tfirst.txt\n3\t4\tsecond.txt\n5\t6\tthird.txt\n"),
+		nil,
+	)
+
+	if err != context.Canceled {
+		t.Fatalf("branchDiffTotals() error = %v, want %v", err, context.Canceled)
+	}
+	if additions != 0 || deletions != 0 {
+		t.Fatalf("canceled totals = (%d, %d), want no publishable partial result", additions, deletions)
+	}
+}
+
+func TestDiffBudgetAndCarryForwardHonorCancellation(t *testing.T) {
+	files := map[string]streams.FileInfo{
+		"first.go":  {Path: "first.go", Diff: "first"},
+		"second.go": {Path: "second.go", Diff: "second"},
+		"third.go":  {Path: "third.go", Diff: "third"},
+	}
+
+	baseCtx, cancel := context.WithCancel(context.Background())
+	ctx := &cancelAfterErrChecksContext{Context: baseCtx, remaining: 2, cancel: cancel}
+	if _, err := newDiffBudget(ctx, &streams.GitStatusUpdate{Files: files}); err != context.Canceled {
+		t.Fatalf("newDiffBudget() error = %v, want %v", err, context.Canceled)
+	}
+
+	baseCtx, cancel = context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ctx = &cancelAfterErrChecksContext{Context: baseCtx, remaining: 2, cancel: cancel}
+	update := &streams.GitStatusUpdate{
+		HeadCommit: "head",
+		Files: map[string]streams.FileInfo{
+			"first.go": {}, "second.go": {}, "third.go": {},
+		},
+	}
+	prior := streams.GitStatusUpdate{HeadCommit: "head", Files: files}
+	if err := carryForwardFileDiffs(ctx, update, prior); err != context.Canceled {
+		t.Fatalf("carryForwardFileDiffs() error = %v, want %v", err, context.Canceled)
+	}
+}
+
+func TestEnrichUntrackedFileDiffs_CancellationAfterFirstFileLeavesRemainingFilesUntouched(t *testing.T) {
+	isolateTestGitEnv(t)
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	files := make(map[string]streams.FileInfo, 3)
+	for _, path := range []string{"first.txt", "second.txt", "third.txt"} {
+		writeFile(t, repoDir, path, path+" content\n")
+		files[path] = streams.FileInfo{Path: path, Status: fileStatusUntracked}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	update := &streams.GitStatusUpdate{Files: files}
+	budget, err := newDiffBudget(ctx, update)
+	if err != nil {
+		t.Fatalf("newDiffBudget() error = %v", err)
+	}
+	readCount := 0
+	enrichFile := func(ctx context.Context, path string, fileInfo streams.FileInfo) (streams.FileInfo, error) {
+		enriched, err := wt.enrichUntrackedFile(ctx, path, fileInfo)
+		if err == nil {
+			readCount++
+			cancel()
+		}
+		return enriched, err
+	}
+
+	err = enrichUntrackedFileDiffs(ctx, update, &budget, enrichFile)
+
+	if err != context.Canceled {
+		t.Fatalf("enrichUntrackedFileDiffs error = %v, want %v", err, context.Canceled)
+	}
+	if readCount != 1 {
+		t.Fatalf("filesystem enrichments = %d, want 1", readCount)
+	}
+	enrichedCount := 0
+	untouchedCount := 0
+	for _, fileInfo := range update.Files {
+		if fileInfo.Diff != "" && fileInfo.Additions == 1 {
+			enrichedCount++
+			continue
+		}
+		if fileInfo.Diff == "" && fileInfo.Additions == 0 && fileInfo.DiffSkipReason == "" {
+			untouchedCount++
+		}
+	}
+	if enrichedCount != 1 || untouchedCount != 2 {
+		t.Fatalf("enriched files = %d, untouched files = %d; want 1 and 2", enrichedCount, untouchedCount)
+	}
+}
+
+func BenchmarkEnrichUntrackedFileDiffs(b *testing.B) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		b.Fatalf("create logger: %v", err)
+	}
+
+	for _, fileCount := range []int{1_000, 10_000} {
+		b.Run(fmt.Sprintf("files-%d", fileCount), func(b *testing.B) {
+			files := make(map[string]streams.FileInfo, fileCount+1)
+			files["existing.go"] = streams.FileInfo{Diff: strings.Repeat("x", maxTotalDiffBytes)}
+			for i := 0; i < fileCount; i++ {
+				path := fmt.Sprintf("cache/%05d", i)
+				files[path] = streams.FileInfo{Path: path, Status: fileStatusUntracked}
+			}
+
+			wt := NewWorkspaceTracker(b.TempDir(), log)
+			update := &streams.GitStatusUpdate{Files: files}
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if err := wt.enrichUntrackedFileDiffs(context.Background(), update); err != nil {
+					b.Fatalf("enrich untracked files: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveNumstatPath(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -356,7 +590,9 @@ func TestCarryForwardFileDiffs(t *testing.T) {
 				"foo.go": {Path: "foo.go"},
 			},
 		}
-		carryForwardFileDiffs(update, prior)
+		if err := carryForwardFileDiffs(context.Background(), update, prior); err != nil {
+			t.Fatalf("carryForwardFileDiffs() error = %v", err)
+		}
 		got := update.Files["foo.go"]
 		if got.Diff != priorDiff {
 			t.Errorf("Diff = %q, want %q", got.Diff, priorDiff)
@@ -379,7 +615,9 @@ func TestCarryForwardFileDiffs(t *testing.T) {
 				"foo.go": {Path: "foo.go"},
 			},
 		}
-		carryForwardFileDiffs(update, prior)
+		if err := carryForwardFileDiffs(context.Background(), update, prior); err != nil {
+			t.Fatalf("carryForwardFileDiffs() error = %v", err)
+		}
 		got := update.Files["foo.go"]
 		if got.Diff != "" || got.Additions != 0 || got.Deletions != 0 {
 			t.Errorf("expected zeroed FileInfo on head mismatch, got %+v", got)
@@ -392,7 +630,9 @@ func TestCarryForwardFileDiffs(t *testing.T) {
 			HeadCommit: head,
 			Files:      map[string]streams.FileInfo{"new.go": {Path: "new.go"}},
 		}
-		carryForwardFileDiffs(update, prior)
+		if err := carryForwardFileDiffs(context.Background(), update, prior); err != nil {
+			t.Fatalf("carryForwardFileDiffs() error = %v", err)
+		}
 		got := update.Files["new.go"]
 		if got.Diff != "" {
 			t.Errorf("expected no carry-forward for new file, got Diff=%q", got.Diff)
@@ -413,7 +653,9 @@ func TestCarryForwardFileDiffs(t *testing.T) {
 				"foo.go": {Path: "foo.go", Diff: newDiff, Additions: 1, Deletions: 0},
 			},
 		}
-		carryForwardFileDiffs(update, prior)
+		if err := carryForwardFileDiffs(context.Background(), update, prior); err != nil {
+			t.Fatalf("carryForwardFileDiffs() error = %v", err)
+		}
 		got := update.Files["foo.go"]
 		if got.Diff != newDiff {
 			t.Errorf("Diff overwritten; got %q, want %q", got.Diff, newDiff)
@@ -443,7 +685,9 @@ func TestCarryForwardFileDiffs(t *testing.T) {
 						"foo.go": {Path: "foo.go", DiffSkipReason: reason},
 					},
 				}
-				carryForwardFileDiffs(update, prior)
+				if err := carryForwardFileDiffs(context.Background(), update, prior); err != nil {
+					t.Fatalf("carryForwardFileDiffs() error = %v", err)
+				}
 				got := update.Files["foo.go"]
 				if got.Diff != "" {
 					t.Errorf("Diff carried forward despite skip reason %q; got %q", reason, got.Diff)

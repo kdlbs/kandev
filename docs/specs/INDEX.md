@@ -38,6 +38,7 @@ Product-wide capabilities that are not tied to a single feature area.
 |---|---|
 | [plugins](plugins/spec.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
+| [workspace-git-status](platform/workspace-git-status.md) | shipped |
 
 ## tasks/ — task & workflow model
 

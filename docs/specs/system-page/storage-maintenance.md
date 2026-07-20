@@ -138,6 +138,29 @@ Decision: [ADR-2026-07-19-workspace-symlink-entries](../../decisions/2026-07-19-
   previously managed cache. Scheduled cleanup and a global manual run with no resource selection
   leave it untouched; only a manual run whose non-empty selection includes `go_cache` may rotate it.
 
+### Agent session temporary data
+
+- Each agent instance receives an isolated operating-system temporary directory at
+  `<system-temp>/kandev-agent/<readable-prefix>-<identity-digest>` through `TMPDIR`, `TMP`, and
+  `TEMP`. The deterministic name includes the raw session ID, instance ID, and port so distinct
+  instance identities cannot collide after unsafe characters are sanitized.
+- The directory is owned by that agent instance and remains available while its agent, shell,
+  VS Code, or workspace subprocesses may still be running.
+- Instance teardown first closes every process-start admission path, including requests already in
+  flight, then removes the owned session directory only after each process leader and its owned
+  process tree are reaped. On Unix this includes verified process-group disappearance; Windows uses
+  the executor's existing process-tree termination primitive.
+  Teardown validates that the target is a non-root child of the Kandev agent-temp root and never
+  removes the shared root or a sibling session directory.
+- Cleanup runs whenever the owning agentctl instance is permanently deleted, including task/session
+  archive and delete stops and when teardown observes that the main agent process has already
+  stopped. A later resume creates a new instance and does not depend on the prior instance's scratch
+  files. A cleanup failure is reported without broadening deletion to another path. The instance
+  and port remain reserved only when HTTP shutdown or process reaping is unresolved; a
+  temporary-directory-only failure retains a retry tombstone but releases the execution port.
+- Session temporary data is ephemeral and is not quarantined, restored, or included in task
+  recovery. See [ADR 0045](../../decisions/0045-install-wide-storage-maintenance.md).
+
 ### Docker storage
 
 - Kandev-owned container cleanup lists only containers labeled `kandev.managed=true`. It removes

@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,6 +28,9 @@ func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
 	status, err := wt.getGitStatus(ctx)
 	if err != nil {
 		wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
+		return
+	}
+	if ctx.Err() != nil || wt.cancelCtx.Err() != nil {
 		return
 	}
 
@@ -58,16 +62,17 @@ func (wt *WorkspaceTracker) RefreshGitStatus(ctx context.Context) {
 	wt.updateGitStatus(ctx)
 }
 
-// GetCurrentGitStatus returns the current cached git status.
-// If no status has been cached yet, it fetches fresh status.
+// GetCurrentGitStatus returns the current cached git status. If no status has
+// been cached yet, it starts or joins a live observation without caching it.
 func (wt *WorkspaceTracker) GetCurrentGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
 	return wt.GetGitStatus(ctx, false)
 }
 
 // GetGitStatus returns git status. When fresh is false, the cached value is
-// returned (with a fresh fallback if no cache exists). When fresh is true, a
-// new git query is always executed, bypassing the cache. Callers that need
-// up-to-date data after the agent just committed changes should pass fresh=true.
+// returned (with a live fallback if no cache exists). When fresh is true, the
+// caller starts or joins a live observation while bypassing the cache. Callers
+// that need up-to-date data after the agent just committed changes should pass
+// fresh=true.
 func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types.GitStatusUpdate, error) {
 	if fresh {
 		return wt.getGitStatus(ctx)
@@ -84,13 +89,93 @@ func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types
 	return status, nil
 }
 
-// getGitStatus retrieves the current git status. Secondary commands
+// getGitStatus coalesces live status observations for this tracker. The
+// computation is owned by the tracker rather than the first caller, while each
+// waiter can still return promptly when its own context is canceled.
+func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
+	if err := ctx.Err(); err != nil {
+		return types.GitStatusUpdate{}, err
+	}
+
+	resultCh := wt.gitStatusGroup.DoChan("live", func() (interface{}, error) {
+		sharedCtx, finish, err := wt.beginGitStatusObservation()
+		if err != nil {
+			return types.GitStatusUpdate{}, err
+		}
+		defer finish()
+
+		observer := wt.gitStatusObserver
+		if observer == nil {
+			observer = wt.computeGitStatus
+		}
+		status, err := observer(sharedCtx)
+		if err != nil {
+			return types.GitStatusUpdate{}, err
+		}
+		if err := sharedCtx.Err(); err != nil {
+			return types.GitStatusUpdate{}, err
+		}
+		return status, nil
+	})
+	if wt.gitStatusWaiterJoined != nil {
+		wt.gitStatusWaiterJoined()
+	}
+
+	select {
+	case <-ctx.Done():
+		return types.GitStatusUpdate{}, ctx.Err()
+	case result := <-resultCh:
+		if err := ctx.Err(); err != nil {
+			return types.GitStatusUpdate{}, err
+		}
+		if result.Err != nil {
+			return types.GitStatusUpdate{}, result.Err
+		}
+		status, ok := result.Val.(types.GitStatusUpdate)
+		if !ok {
+			return types.GitStatusUpdate{}, fmt.Errorf("unexpected git status observation result %T", result.Val)
+		}
+		return status, nil
+	}
+}
+
+// beginGitStatusObservation admits one singleflight body into the tracker
+// lifecycle. Stop holds the same mutex while canceling tracker context, which
+// prevents WaitGroup Add from racing with shutdown's Wait.
+func (wt *WorkspaceTracker) beginGitStatusObservation() (context.Context, func(), error) {
+	wt.gitStatusObserveMu.Lock()
+	defer wt.gitStatusObserveMu.Unlock()
+
+	baseCtx := wt.cancelCtx
+	if baseCtx != nil {
+		if err := baseCtx.Err(); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		// Preserve the pre-singleflight zero-value behavior for direct status
+		// reads. Constructed trackers always use their cancellable lifetime.
+		baseCtx = context.Background()
+	}
+
+	timeout := wt.gitStatusObserveTimeout
+	if timeout == 0 && wt.cancelCtx == nil {
+		timeout = workspaceGitStatusObserveTimeout
+	}
+	sharedCtx, cancel := context.WithTimeout(baseCtx, timeout)
+	wt.gitStatusObserveWG.Add(1)
+	return sharedCtx, func() {
+		cancel()
+		wt.gitStatusObserveWG.Done()
+	}, nil
+}
+
+// computeGitStatus retrieves the current git status. Secondary commands
 // (ahead/behind counts, diff enrichment) that fail or time out carry their
 // values forward from the prior cached status rather than overwriting them
 // with zero. The two primary commands (branch info and `git status
 // --porcelain`) still propagate errors upward; on those, updateGitStatus
 // skips the cache write entirely so the prior state stays visible to the UI.
-func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
+func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
 	update := types.GitStatusUpdate{
 		Timestamp:      time.Now(),
 		RepositoryName: wt.repositoryName,
@@ -122,18 +207,37 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 	if err := wt.getGitBranchInfo(ctx, &update); err != nil {
 		return update, err
 	}
+	if err := ctx.Err(); err != nil {
+		return update, err
+	}
 
 	wt.getAheadBehindCounts(ctx, &update, prior)
+	if err := ctx.Err(); err != nil {
+		return update, err
+	}
 
 	if err := wt.parseGitStatusOutput(ctx, &update); err != nil {
 		return update, err
 	}
+	if err := ctx.Err(); err != nil {
+		return update, err
+	}
 
 	// Enrich file info with diff data (additions, deletions, and actual diff content)
-	wt.enrichWithDiffData(ctx, &update, prior)
+	if err := wt.enrichWithDiffData(ctx, &update, prior); err != nil {
+		return update, err
+	}
+	if err := ctx.Err(); err != nil {
+		return update, err
+	}
 
 	// Compute full branch totals vs merge-base (committed + staged + unstaged + untracked)
-	wt.enrichWithBranchDiff(ctx, &update, prior)
+	if err := wt.enrichWithBranchDiff(ctx, &update, prior); err != nil {
+		return types.GitStatusUpdate{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return update, err
+	}
 
 	return update, nil
 }
@@ -386,11 +490,22 @@ func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *ty
 		return err
 	}
 
+	return wt.applyPorcelainOutput(ctx, statusOut, update)
+}
+
+func (wt *WorkspaceTracker) applyPorcelainOutput(
+	ctx context.Context,
+	statusOut []byte,
+	update *types.GitStatusUpdate,
+) error {
 	// Git status --porcelain format: XY filename
 	// X = index (staged) status, Y = working tree (unstaged) status
 	// ' ' = unmodified, M = modified, A = added, D = deleted, R = renamed, ? = untracked
 	lines := strings.Split(string(statusOut), "\n")
 	for _, line := range lines {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if len(line) < 3 {
 			continue
 		}
