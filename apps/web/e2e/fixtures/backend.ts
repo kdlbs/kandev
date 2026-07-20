@@ -200,7 +200,10 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const homeDir = path.join(tmpDir, ".kandev");
       const dbPath = path.join(tmpDir, "kandev.db");
       const worktreeBase = path.join(tmpDir, "worktrees");
-      const repoCloneBase = path.join(tmpDir, "repos");
+      // Keep managed provider clones separate from hand-built local fixtures in
+      // tmpDir/repos. Workspace clone isolation intentionally rematerializes
+      // paths under this root, while local fixtures must remain in place.
+      const repoCloneBase = path.join(tmpDir, "managed-repos");
 
       fs.mkdirSync(homeDir, { recursive: true });
       fs.mkdirSync(worktreeBase, { recursive: true });

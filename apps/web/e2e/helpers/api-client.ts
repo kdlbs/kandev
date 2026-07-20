@@ -994,6 +994,22 @@ export class ApiClient {
 
   async mockGitHubSetUser(username: string): Promise<void> {
     await this.request("PUT", "/api/v1/github/mock/user", { username });
+
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+
+    await Promise.all([
+      this.mockGitHubSetWorkspaceConnection(workspaceId, {
+        source: "legacy_shared",
+        status: "active",
+      }),
+      this.mockGitHubSetPersonalConnection(workspaceId, {
+        login: username,
+        status: "active",
+        github_user_id: 1,
+        access_expires_at: "2100-01-01T00:00:00Z",
+      }),
+    ]);
   }
 
   async mockGitHubSetWorkspaceConnection(
@@ -1053,10 +1069,12 @@ export class ApiClient {
 
   async mockGitHubAddPRs(prs: MockPR[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/prs", { prs });
+    await this.seedMockGitHubRepositoryAccess(prs);
   }
 
   async mockGitHubAddIssues(issues: MockIssue[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/issues", { issues });
+    await this.seedMockGitHubRepositoryAccess(issues);
   }
 
   async mockGitHubAddOrgs(orgs: MockOrg[]): Promise<void> {
@@ -1065,6 +1083,25 @@ export class ApiClient {
 
   async mockGitHubAddRepos(org: string, repos: MockRepo[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/repos", { org, repos });
+  }
+
+  private async seedMockGitHubRepositoryAccess(
+    items: Array<{ repo_owner: string; repo_name: string }>,
+  ): Promise<void> {
+    const reposByOwner = new Map<string, Map<string, MockRepo>>();
+    for (const item of items) {
+      const owner = item.repo_owner.trim();
+      const name = item.repo_name.trim();
+      if (!owner || !name) continue;
+      const repos = reposByOwner.get(owner) ?? new Map<string, MockRepo>();
+      repos.set(name, { full_name: `${owner}/${name}`, owner, name });
+      reposByOwner.set(owner, repos);
+    }
+    await Promise.all(
+      Array.from(reposByOwner, ([owner, repos]) =>
+        this.mockGitHubAddRepos(owner, Array.from(repos.values())),
+      ),
+    );
   }
 
   async mockGitHubAddReviews(
@@ -1243,6 +1280,7 @@ export class ApiClient {
     }>;
   }): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/pr-feedback", data);
+    await this.seedMockGitHubRepositoryAccess([{ repo_owner: data.owner, repo_name: data.repo }]);
   }
 
   async mockGitHubSetAuthHealth(data: { authenticated: boolean; error?: string }): Promise<void> {
