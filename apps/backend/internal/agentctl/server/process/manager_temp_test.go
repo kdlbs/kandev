@@ -437,16 +437,16 @@ func TestManager_BeginStopWaitsForInFlightTempOwnerAdmission(t *testing.T) {
 	release()
 	<-stopAdmissionDone
 
-	if err := mgr.Start(context.Background()); !errors.Is(err, errManagerStopping) {
+	if err := mgr.Start(context.Background()); !errors.Is(err, ErrManagerStopping) {
 		t.Fatalf("Start() error = %v, want manager-stopping error", err)
 	}
-	if _, err := mgr.StartProcess(context.Background(), StartProcessRequest{}); !errors.Is(err, errManagerStopping) {
+	if _, err := mgr.StartProcess(context.Background(), StartProcessRequest{}); !errors.Is(err, ErrManagerStopping) {
 		t.Fatalf("StartProcess() error = %v, want manager-stopping error", err)
 	}
-	if err := mgr.StartShell(); !errors.Is(err, errManagerStopping) {
+	if err := mgr.StartShell(); !errors.Is(err, ErrManagerStopping) {
 		t.Fatalf("StartShell() error = %v, want manager-stopping error", err)
 	}
-	if err := mgr.StartVscode(context.Background(), "dark"); !errors.Is(err, errManagerStopping) {
+	if err := mgr.StartVscode(context.Background(), "dark"); !errors.Is(err, ErrManagerStopping) {
 		t.Fatalf("StartVscode() error = %v, want manager-stopping error", err)
 	}
 	if _, err := mgr.ShellManager().Start("terminal", shell.DefaultConfig(t.TempDir())); err == nil {

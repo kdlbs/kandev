@@ -210,13 +210,14 @@ type Manager struct {
 	managerWaitFn    func(context.Context, <-chan struct{}, time.Duration) bool
 }
 
-var errManagerStopping = errors.New("process manager is stopping")
+// ErrManagerStopping indicates that process admission is closed for teardown.
+var ErrManagerStopping = errors.New("process manager is stopping")
 
 func (m *Manager) admitStart() (func(), error) {
 	m.admissionMu.Lock()
 	if m.stopping {
 		m.admissionMu.Unlock()
-		return nil, errManagerStopping
+		return nil, ErrManagerStopping
 	}
 	if m.admissionCount == 0 {
 		m.admissionDrained = make(chan struct{})

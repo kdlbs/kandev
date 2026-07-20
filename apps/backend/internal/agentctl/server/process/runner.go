@@ -240,7 +240,7 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 	r.admission.RLock()
 	defer r.admission.RUnlock()
 	if r.stopping {
-		return nil, errManagerStopping
+		return nil, ErrManagerStopping
 	}
 	if req.SessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
