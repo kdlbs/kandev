@@ -235,6 +235,22 @@ func (s *Service) claimForegroundTurn(sessionID string) *foregroundClaim {
 	}
 }
 
+// isForegroundClaimCurrent reports whether claim still owns sessionID's prompt
+// admission window. The guarded session-state recheck uses this to distinguish
+// its own claim from a competing prompt that has already taken the foreground.
+func (s *Service) isForegroundClaimCurrent(sessionID string, claim *foregroundClaim) bool {
+	if sessionID == "" || claim == nil || claim.activity == nil {
+		return false
+	}
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil || ta != claim.activity {
+		return false
+	}
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	return ta.promptInFlight && ta.claimGeneration == claim.claimGeneration
+}
+
 // completeForegroundClaim ends the admission window: the prompt has been handed to
 // the agent, so this is now an ordinary foreground turn and the background set
 // governs promptability again (a subagent spawned by *this* turn may legitimately
