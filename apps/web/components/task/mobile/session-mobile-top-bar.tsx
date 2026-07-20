@@ -35,6 +35,7 @@ type SessionMobileTopBarProps = {
   remoteCreatedAt?: string | null;
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
+  isArchived?: boolean;
 };
 
 function MobileTaskTitle({
@@ -131,6 +132,7 @@ type MobileTopBarActionsProps = {
   uncommittedCount: number;
   baseBranch?: string;
   taskTitle?: string;
+  isArchived?: boolean;
   onCommitClick: () => void;
   onPRClick: () => void;
   onPull: () => void;
@@ -157,6 +159,7 @@ function MobileTopBarActions({
   uncommittedCount,
   baseBranch,
   taskTitle,
+  isArchived,
   onCommitClick,
   onPRClick,
   onPull,
@@ -168,12 +171,14 @@ function MobileTopBarActions({
   return (
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MobileRepoPill taskId={taskId ?? null} workspaceId={workspaceId ?? null} />
-      <TaskTopBarPluginActions
-        sessionId={sessionId ?? null}
-        taskId={taskId ?? null}
-        taskTitle={taskTitle}
-        workspaceId={workspaceId ?? null}
-      />
+      {!isArchived && (
+        <TaskTopBarPluginActions
+          sessionId={sessionId ?? null}
+          taskId={taskId ?? null}
+          taskTitle={taskTitle}
+          workspaceId={workspaceId ?? null}
+        />
+      )}
       {isRemoteExecutor && (
         <RemoteExecutorIndicator
           taskId={taskId}
@@ -286,6 +291,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
   remoteCreatedAt,
   remoteCheckedAt,
   remoteStatusError,
+  isArchived,
 }: SessionMobileTopBarProps) {
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [prDialogOpen, setPrDialogOpen] = useState(false);
@@ -343,6 +349,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
         uncommittedCount={uncommittedCount}
         baseBranch={baseBranch}
         taskTitle={taskTitle}
+        isArchived={isArchived}
         onCommitClick={() => setCommitDialogOpen(true)}
         onPRClick={() => setPrDialogOpen(true)}
         onPull={handlePull}
