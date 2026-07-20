@@ -355,7 +355,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		}, nil
 	}
 	if len(resp.Models) == 0 && isOpenCodeACPCommand(cfg.Command) {
-		e.applyOpenCodeModelsFallback(ctx, resp, resolvedCmd, workDir)
+		e.applyOpenCodeModelsFallback(ctx, resp, resolvedCmd, workDir, req.Refresh)
 	}
 
 	resp.Success = true
@@ -373,8 +373,14 @@ func isOpenCodeACPCommand(command []string) bool {
 
 // applyOpenCodeModelsFallback fills an otherwise empty probe model list from
 // OpenCode's CLI model listing.
-func (e *ACPInferenceExecutor) applyOpenCodeModelsFallback(ctx context.Context, resp *ProbeResponse, resolvedCmd, workDir string) {
-	models, err := probeOpenCodeModels(ctx, resolvedCmd, workDir)
+func (e *ACPInferenceExecutor) applyOpenCodeModelsFallback(
+	ctx context.Context,
+	resp *ProbeResponse,
+	resolvedCmd string,
+	workDir string,
+	refresh bool,
+) {
+	models, err := probeOpenCodeModels(ctx, resolvedCmd, workDir, refresh)
 	if err != nil {
 		e.logger.Warn("ACP probe: failed to list opencode models",
 			zap.String("command", resolvedCmd),
@@ -389,11 +395,19 @@ func (e *ACPInferenceExecutor) applyOpenCodeModelsFallback(ctx context.Context, 
 	resp.Models = models
 }
 
-// probeOpenCodeModels runs the OpenCode model-listing command and converts its
-// output into probe model entries.
-func probeOpenCodeModels(ctx context.Context, resolvedCmd, workDir string) ([]ProbeModel, error) {
+// probeOpenCodeModels lists OpenCode's models, optionally refreshing its cache.
+func probeOpenCodeModels(
+	ctx context.Context,
+	resolvedCmd string,
+	workDir string,
+	refresh bool,
+) ([]ProbeModel, error) {
+	args := []string{"models"}
+	if refresh {
+		args = append(args, "--refresh")
+	}
 	//nolint:gosec // resolvedCmd is from the same hard-coded allow-list used to launch the ACP probe.
-	cmd := exec.CommandContext(ctx, resolvedCmd, "models")
+	cmd := exec.CommandContext(ctx, resolvedCmd, args...)
 	cmd.Dir = workDir
 	cmd.Env = environWithNoColor(os.Environ())
 	out, err := cmd.Output()

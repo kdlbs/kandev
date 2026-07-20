@@ -66,6 +66,34 @@ func TestProbeCleansUpDescendantProcessOnTimeout(t *testing.T) {
 	}
 }
 
+func TestProbeOpenCodeModelsHonorsRefresh(t *testing.T) {
+	tmp := t.TempDir()
+	agentPath := filepath.Join(tmp, openCodeCommand)
+	writeExecutable(t, agentPath, `#!/bin/sh
+if [ "$1" = "models" ] && [ "$2" = "--refresh" ]; then
+  echo "opencode/fresh"
+else
+  echo "opencode/stale"
+fi
+`)
+
+	cached, err := probeOpenCodeModels(context.Background(), agentPath, tmp, false)
+	if err != nil {
+		t.Fatalf("probeOpenCodeModels returned error: %v", err)
+	}
+	if len(cached) != 1 || cached[0].ID != "opencode/stale" {
+		t.Fatalf("cached models = %#v, want cached model list", cached)
+	}
+
+	refreshed, err := probeOpenCodeModels(context.Background(), agentPath, tmp, true)
+	if err != nil {
+		t.Fatalf("refresh probeOpenCodeModels returned error: %v", err)
+	}
+	if len(refreshed) != 1 || refreshed[0].ID != "opencode/fresh" {
+		t.Fatalf("refreshed models = %#v, want refreshed model list", refreshed)
+	}
+}
+
 func TestWaitForACPProcessGroupExitHonorsContextCancellation(t *testing.T) {
 	cmd := exec.Command("sleep", "30")
 	setACPCommandProcAttr(cmd)
