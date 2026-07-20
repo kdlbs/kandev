@@ -63,7 +63,7 @@ export function TaskDeleteConfirmDialog({
 
   const [cascade, setCascade] = useState(false);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
-  const storeInFlight = useTaskInFlight(taskId, taskIds);
+  const storeInFlight = useTaskInFlight(taskId, taskIds, open);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setCascade(false);

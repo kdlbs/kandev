@@ -78,6 +78,13 @@ describe("useTaskInFlight", () => {
     expect(result.current).toBe(true);
   });
 
+  it("skips in-flight lookup while the consuming surface is hidden", () => {
+    const { result } = renderHook(() => useTaskInFlight("t-1", undefined, false), {
+      wrapper: wrapper([task("t-1", "background")]),
+    });
+    expect(result.current).toBe(false);
+  });
+
   it("resolves tasks from cross-workflow snapshots too", () => {
     const { result } = renderHook(() => useTaskInFlight("t-9"), {
       wrapper: snapshotWrapper([task("t-9", "background")]),

@@ -105,7 +105,8 @@ export function TaskArchiveConfirmDialog({
     onOpenChange,
   );
   const subtaskCount = useSubtaskCount(open && requiresConfirmation, taskId, taskIds);
-  const storeInFlight = useTaskInFlight(taskId, taskIds);
+  const shouldCheckInFlight = [open, requiresConfirmation].every(Boolean);
+  const storeInFlight = useTaskInFlight(taskId, taskIds, shouldCheckInFlight);
   const taskIsInFlight = [isInFlight, storeInFlight].includes(true);
 
   const handleOpenChange = (next: boolean) => {

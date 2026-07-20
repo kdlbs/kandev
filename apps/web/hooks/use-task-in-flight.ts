@@ -7,8 +7,8 @@ type Task = KanbanState["tasks"][number];
 
 // Resolve the same active-or-snapshot task records used by board indicators.
 // Bulk actions warn when any selected task is still working.
-export function useTaskInFlight(taskId?: string, taskIds?: string[]): boolean {
-  const ids = taskIds ?? (taskId ? [taskId] : []);
+export function useTaskInFlight(taskId?: string, taskIds?: string[], enabled = true): boolean {
+  const ids = enabled ? (taskIds ?? (taskId ? [taskId] : [])) : [];
 
   return useAppStore((state) =>
     ids.some((id) => {
