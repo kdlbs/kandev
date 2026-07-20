@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Task } from "@/lib/types/http";
+import {
+  taskId as toTaskId,
+  workflowId as toWorkflowId,
+  workspaceId as toWorkspaceId,
+  type Task,
+} from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import {
   buildArchivedValue,
@@ -12,6 +17,7 @@ import {
 } from "./task-page-content-helpers";
 
 type KanbanTask = KanbanState["tasks"][number];
+const ARCHIVED_AT = "2026-07-19T00:00:00Z";
 
 function makeArchivedTaskDetails(overrides: Partial<Task> = {}): Task {
   return {
@@ -26,8 +32,8 @@ function makeArchivedTaskDetails(overrides: Partial<Task> = {}): Task {
     priority: 0,
     repositories: [],
     created_at: "",
-    updated_at: "2026-07-19T00:00:00Z",
-    archived_at: "2026-07-19T00:00:00Z",
+    updated_at: ARCHIVED_AT,
+    archived_at: ARCHIVED_AT,
     ...overrides,
   } as Task;
 }
@@ -222,20 +228,14 @@ describe("syncActiveTaskSession", () => {
 });
 
 describe("resolveEffectiveTask archived state", () => {
-  // Regression: unarchiving from the detail top bar publishes
-  // task.updated(archived_at=null) which re-adds the task to the kanban, but
-  // the one-shot fetchTask details still carry the old archived_at. The
-  // resolved task must reflect the live kanban entry so the top bar stops
-  // showing the archived UI / Unarchive button — otherwise the task "never
-  // comes back" after a successful unarchive.
-  it("clears a stale archived_at when the task is present in the kanban", () => {
+  it("keeps fetched archived state when a stale matching kanban card remains", () => {
     const taskDetails = makeArchivedTaskDetails();
     const kanbanTask = makeKanbanTask();
 
     const resolved = resolveEffectiveTask(taskDetails, null, kanbanTask, "task-1");
 
-    expect(resolved?.archived_at).toBeNull();
-    expect(buildArchivedValue(resolved, null).isArchived).toBe(false);
+    expect(resolved?.archived_at).toBe(ARCHIVED_AT);
+    expect(buildArchivedValue(resolved, null).isArchived).toBe(true);
   });
 
   it("keeps archived_at when the task is absent from the kanban (still archived)", () => {
@@ -243,7 +243,7 @@ describe("resolveEffectiveTask archived state", () => {
 
     const resolved = resolveEffectiveTask(taskDetails, null, null, "task-1");
 
-    expect(resolved?.archived_at).toBe("2026-07-19T00:00:00Z");
+    expect(resolved?.archived_at).toBe(ARCHIVED_AT);
     expect(buildArchivedValue(resolved, null).isArchived).toBe(true);
   });
 
@@ -256,5 +256,19 @@ describe("resolveEffectiveTask archived state", () => {
     expect(resolved?.title).toBe("Live title");
     expect(resolved?.state).toBe("IN_PROGRESS");
     expect(resolved?.workspace_id).toBe("ws-1");
+  });
+
+  it("does not copy IDs from rejected task details into a kanban-only placeholder", () => {
+    const unrelatedTask = makeArchivedTaskDetails({
+      id: toTaskId("other-task"),
+      workspace_id: toWorkspaceId("other-workspace"),
+      workflow_id: toWorkflowId("other-workflow"),
+    });
+    const kanbanTask = makeKanbanTask({ id: toTaskId("task-1") });
+
+    const resolved = resolveEffectiveTask(unrelatedTask, null, kanbanTask, "task-1");
+
+    expect(resolved?.workspace_id).toBe("");
+    expect(resolved?.workflow_id).toBe("");
   });
 });

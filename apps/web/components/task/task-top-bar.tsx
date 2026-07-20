@@ -43,6 +43,7 @@ type TaskTopBarProps = {
   isAgentctlReady?: boolean;
   remoteExecutorType?: string | null;
   officeTaskHref?: string | null;
+  onTaskUnarchived?: (taskId: string) => void;
 };
 
 type TopBarLeftProps = {
@@ -70,6 +71,7 @@ const TaskTopBar = memo(function TaskTopBar({
   issueNumber,
   remoteExecutorType,
   officeTaskHref,
+  onTaskUnarchived,
 }: TaskTopBarProps) {
   return (
     <header
@@ -107,6 +109,7 @@ const TaskTopBar = memo(function TaskTopBar({
         issueUrl={issueUrl}
         issueNumber={issueNumber}
         officeTaskHref={officeTaskHref}
+        onTaskUnarchived={onTaskUnarchived}
       />
     </header>
   );
@@ -336,6 +339,7 @@ function TopBarRight({
   issueUrl,
   issueNumber,
   officeTaskHref,
+  onTaskUnarchived,
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
@@ -349,13 +353,14 @@ function TopBarRight({
   issueUrl?: string;
   issueNumber?: number;
   officeTaskHref?: string | null;
+  onTaskUnarchived?: (taskId: string) => void;
 }) {
   return (
     <div className="flex items-center justify-self-end gap-2 [&_button]:whitespace-nowrap">
       <TopbarMetrics activeSessionId={activeSessionId} size="sm" />
       {isArchived && (
         <TopbarCluster label="Unarchive task" className="[&_button]:h-7 [&_button]:text-xs">
-          <TaskUnarchiveButton taskId={taskId} />
+          <TaskUnarchiveButton taskId={taskId} onUnarchived={onTaskUnarchived} />
         </TopbarCluster>
       )}
       {officeTaskHref && (

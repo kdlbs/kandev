@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
@@ -217,7 +217,18 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     setTaskDetails,
   ]);
 
-  return { task, kanbanTask, taskLoadError: hasTaskDetails ? null : taskLoadError };
+  const onTaskUnarchived = useCallback((taskId: string) => {
+    setTaskDetails((current) =>
+      current?.id === taskId ? { ...current, archived_at: null } : current,
+    );
+  }, []);
+
+  return {
+    task,
+    kanbanTask,
+    taskLoadError: hasTaskDetails ? null : taskLoadError,
+    onTaskUnarchived,
+  };
 }
 
 function useTaskPageData(
@@ -239,7 +250,7 @@ function useTaskPageData(
     return session?.task_id === activeTaskId ? sid : null;
   });
 
-  const { task, taskLoadError } = useTaskDetails(activeTaskId, initialTask);
+  const { task, taskLoadError, onTaskUnarchived } = useTaskDetails(activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
   const ensureSession = useEnsureTaskSession(task);
@@ -266,7 +277,15 @@ function useTaskPageData(
     [effectiveRepositories, task?.repositories],
   );
 
-  return { task, taskLoadError, agent, effectiveSessionId, repository, ensureSession };
+  return {
+    task,
+    taskLoadError,
+    agent,
+    effectiveSessionId,
+    repository,
+    ensureSession,
+    onTaskUnarchived,
+  };
 }
 
 export function TaskPageContent({
@@ -285,8 +304,15 @@ export function TaskPageContent({
   const { isMobile } = useResponsiveBreakpoint();
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  const { task, taskLoadError, agent, effectiveSessionId, repository, ensureSession } =
-    useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
+  const {
+    task,
+    taskLoadError,
+    agent,
+    effectiveSessionId,
+    repository,
+    ensureSession,
+    onTaskUnarchived,
+  } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
 
   const workflowSteps = useWorkflowStepsMapped();
   const sessionPanel = useSessionPanelState(effectiveSessionId);
@@ -334,6 +360,7 @@ export function TaskPageContent({
       initialLayout={initialLayout}
       officeTaskHref={officeTaskHref}
       ensureSession={ensureSession}
+      onTaskUnarchived={onTaskUnarchived}
     />
   );
 }

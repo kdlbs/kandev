@@ -50,6 +50,7 @@ export type TaskPageInnerProps = {
   initialLayout?: string | null;
   officeTaskHref?: string | null;
   ensureSession: UseEnsureTaskSessionResult;
+  onTaskUnarchived: (taskId: string) => void;
 };
 
 type RemoteExecutorStatus = {
@@ -100,6 +101,7 @@ function buildTaskTopBarProps(params: {
   sessionWorkflowStepId: string | null;
   agentctlReady: boolean;
   officeTaskHref?: string | null;
+  onTaskUnarchived: (taskId: string) => void;
 }) {
   const { taskProps, agent, merged, workflowSteps, showDebugOverlay, onToggleDebugOverlay } =
     params;
@@ -124,6 +126,7 @@ function buildTaskTopBarProps(params: {
     isAgentctlReady: params.agentctlReady,
     remoteExecutorType: params.remote.remoteExecutorType,
     officeTaskHref: params.officeTaskHref,
+    onTaskUnarchived: params.onTaskUnarchived,
   };
 }
 
@@ -212,6 +215,7 @@ export function TaskPageInner({
   initialLayout,
   officeTaskHref,
   ensureSession,
+  onTaskUnarchived,
 }: TaskPageInnerProps) {
   const taskProps = resolveTaskProps(task, repository);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
@@ -241,6 +245,7 @@ export function TaskPageInner({
     sessionWorkflowStepId: sessionPanel.sessionWorkflowStepId,
     agentctlReady: agentctlStatus.isReady,
     officeTaskHref,
+    onTaskUnarchived,
   });
   const layoutProps = buildTaskLayoutProps({
     taskProps,
