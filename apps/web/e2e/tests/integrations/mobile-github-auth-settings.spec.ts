@@ -25,8 +25,15 @@ test.describe("Mobile GitHub authentication settings", () => {
     const automation = testPage.getByTestId("github-workspace-automation");
     await automation.getByRole("button", { name: "Change connection" }).click();
     const connectionDialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });
+    await connectionDialog.getByRole("combobox", { name: "Connection method" }).click();
+    await testPage.getByRole("option", { name: "GitHub App", exact: true }).click();
     await expect(
-      connectionDialog.getByText("GitHub App requires deployment configuration."),
+      connectionDialog.getByText(
+        "This Kandev deployment does not have a GitHub App yet. Create it once in System Settings, then return here to install it for this workspace.",
+      ),
+    ).toBeVisible();
+    await expect(
+      connectionDialog.getByRole("link", { name: "Set up deployment App" }),
     ).toBeVisible();
     await connectionDialog.getByRole("combobox", { name: "Connection method" }).click();
     await testPage.getByRole("option", { name: "GitHub CLI", exact: true }).click();
