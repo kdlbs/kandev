@@ -15,7 +15,7 @@ Build it with:
 
 The default output is `apps/web/dist-browser-demo`. Pass a destination as the
 first argument when a release workflow needs to stage the bundle for another
-repository.
+repository. Relative destinations are resolved from the repository root.
 
 Supported demo behavior:
 
@@ -25,4 +25,3 @@ Supported demo behavior:
 - restore browser-local scenario state after a reload
 
 Host-only operations return HTTP 501 with `demo_mode: true`.
-
