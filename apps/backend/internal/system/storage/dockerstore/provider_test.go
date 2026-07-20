@@ -32,7 +32,7 @@ func TestAnalysisJSONUsesStorageAPISnakeCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal Analysis: %v", err)
 	}
-	want := `{"available":true,"managed_container_count":1,"managed_container_bytes":2,"build_cache_bytes":3,"unused_image_bytes":4,"warnings":["warn"]}`
+	want := `{"available":true,"managed_container_count":1,"managed_container_bytes":2,"image_layer_bytes":0,"build_cache_bytes":3,"unused_image_bytes":4,"warnings":["warn"]}`
 	if string(encoded) != want {
 		t.Fatalf("Analysis JSON = %s, want %s", encoded, want)
 	}
@@ -76,6 +76,7 @@ func TestCleanupContainersFailsClosedOnInventoryError(t *testing.T) {
 func TestAnalyzeIsReadOnlyAndReportsUnavailableWithoutError(t *testing.T) {
 	t.Run("read only", func(t *testing.T) {
 		docker := &fakeDockerClient{usage: agentdocker.DiskUsage{
+			ImageLayerBytes: 150,
 			BuildCacheBytes: 200,
 			Containers: []agentdocker.ContainerUsage{
 				{ID: "managed", WritableBytes: 25, Labels: map[string]string{"kandev.managed": "true"}},
@@ -91,7 +92,7 @@ func TestAnalyzeIsReadOnlyAndReportsUnavailableWithoutError(t *testing.T) {
 		provider.now = func() time.Time { return time.Unix(2000000, 0) }
 
 		got := provider.Analyze(context.Background())
-		if !got.Available || got.BuildCacheBytes != 200 || got.UnusedImageBytes != 300 ||
+		if !got.Available || got.ImageLayerBytes != 150 || got.BuildCacheBytes != 200 || got.UnusedImageBytes != 300 ||
 			got.ManagedContainerCount != 2 || got.ManagedContainerBytes != 25 {
 			t.Fatalf("analysis = %#v", got)
 		}

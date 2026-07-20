@@ -27,7 +27,7 @@ func (i *storageInventory) LoadWorkspaceInventory(ctx context.Context) (workspac
 	if i.worktrees == nil || i.lifecycle == nil {
 		return workspaces.Inventory{}, workspaces.ErrInventoryIncomplete
 	}
-	paths, err := i.worktrees.ListActiveWorktreePaths(ctx)
+	paths, err := i.activeWorktreePaths(ctx)
 	if err != nil {
 		return workspaces.Inventory{}, err
 	}
@@ -52,12 +52,30 @@ func (i *storageInventory) LoadWorkspaceInventory(ctx context.Context) (workspac
 	return inventory, nil
 }
 
+func (i *storageInventory) activeWorktreePaths(ctx context.Context) ([]string, error) {
+	paths := make([]string, 0)
+	query := "SELECT w.worktree_path FROM task_session_worktrees w " +
+		"INNER JOIN task_sessions s ON s.id = w.session_id " +
+		"INNER JOIN tasks t ON t.id = s.task_id " +
+		"WHERE t.archived_at IS NULL AND w.status = 'active' " +
+		"AND w.deleted_at IS NULL AND w.worktree_path <> ''"
+	if err := i.reader.SelectContext(ctx, &paths, query); err != nil {
+		return nil, err
+	}
+	return paths, nil
+}
+
 func (i *storageInventory) activeWorkspaceRows(ctx context.Context) ([]activeWorkspaceRow, error) {
 	rows := make([]activeWorkspaceRow, 0)
 	query := "SELECT te.task_id AS taskid, COALESCE(t.workspace_id, '') AS workspaceid, " +
 		"te.workspace_path AS workspacepath FROM task_environments te " +
 		"LEFT JOIN tasks t ON t.id = te.task_id " +
-		"WHERE te.status IN ('creating', 'ready') AND te.workspace_path <> ''"
+		"WHERE te.status IN ('creating', 'ready') AND te.workspace_path <> '' AND (" +
+		"(t.id IS NOT NULL AND t.archived_at IS NULL) OR EXISTS (" +
+		"SELECT 1 FROM task_sessions borrower " +
+		"INNER JOIN tasks borrower_task ON borrower_task.id = borrower.task_id " +
+		"WHERE borrower.task_environment_id = te.id AND borrower_task.archived_at IS NULL " +
+		"AND borrower.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')))"
 	if err := i.reader.SelectContext(ctx, &rows, query); err != nil {
 		return nil, err
 	}

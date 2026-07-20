@@ -67,8 +67,8 @@ function storageResources(overview: StorageOverviewResponse): StorageResource[] 
     {
       id: "workspaces",
       label: "Task workspaces",
-      value: formatGigabytes(summary.workspaces.candidate_bytes ?? 0),
-      detail: `Active workspaces use ${formatGigabytes(summary.workspaces.active_bytes ?? 0)}`,
+      value: formatGigabytes(summary.workspaces.total_bytes ?? 0),
+      detail: `${formatGigabytes(summary.workspaces.candidate_bytes ?? 0)} reclaimable after the grace period · ${formatGigabytes(summary.workspaces.active_bytes ?? 0)} active`,
       warning: summary.workspaces.warning,
     },
     quarantineResource(summary.quarantine),
@@ -88,6 +88,26 @@ function storageResources(overview: StorageOverviewResponse): StorageResource[] 
       value: formatGigabytes(summary.go_cache.size_bytes ?? 0),
       detail: summary.go_cache.path ?? overview.capabilities.managed_go_cache_path,
       warning: summary.go_cache.warning,
+    },
+    ...(summary.go_cache.unmanaged_path
+      ? [
+          {
+            id: "unmanaged-go-cache",
+            label: "User Go build cache",
+            value: formatGigabytes(summary.go_cache.unmanaged_size_bytes ?? 0),
+            detail: summary.go_cache.unmanaged_path,
+          },
+        ]
+      : []),
+    {
+      id: "docker-image-layers",
+      label: "Docker image layers",
+      ...dockerMeasurement(
+        summary.docker.available,
+        formatGigabytes(summary.docker.image_layer_bytes ?? 0),
+        overview.capabilities.docker_host || "Default Docker host",
+      ),
+      warning: dockerWarning,
     },
     {
       id: "docker-build-cache",

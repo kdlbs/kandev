@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -12,6 +13,87 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func TestWorkspaceInventoryOnlyProtectsActiveTaskEnvironments(t *testing.T) {
+	database := newContainerInventoryDatabase(t)
+	insertContainerInventoryTask(t, database, "active", v1.TaskStateInProgress, false)
+	insertContainerInventoryTask(t, database, "archived", v1.TaskStateInProgress, true)
+	insertContainerInventoryTask(t, database, "borrowed-owner", v1.TaskStateInProgress, true)
+	insertContainerInventoryTask(t, database, "borrower", v1.TaskStateInProgress, false)
+	for _, item := range []struct {
+		taskID string
+		path   string
+	}{
+		{taskID: "active", path: "/tasks/active_abc"},
+		{taskID: "archived", path: "/tasks/archived_def"},
+		{taskID: "borrowed-owner", path: "/tasks/borrowed_jkl"},
+		{taskID: "deleted", path: "/tasks/deleted_ghi"},
+	} {
+		if _, err := database.Exec(
+			"INSERT INTO task_environments (id, task_id, status, workspace_path) VALUES (?, ?, ?, ?)",
+			"env-"+item.taskID, item.taskID, models.TaskEnvironmentStatusReady, item.path,
+		); err != nil {
+			t.Fatalf("insert task environment for %q: %v", item.taskID, err)
+		}
+	}
+	if _, err := database.Exec(
+		"INSERT INTO task_sessions (id, task_id, state, task_environment_id) VALUES (?, ?, ?, ?)",
+		"session-borrower", "borrower", models.TaskSessionStateRunning, "env-borrowed-owner",
+	); err != nil {
+		t.Fatalf("insert borrowed environment session: %v", err)
+	}
+
+	rows, err := (&storageInventory{reader: database}).activeWorkspaceRows(context.Background())
+	if err != nil {
+		t.Fatalf("activeWorkspaceRows: %v", err)
+	}
+	want := []activeWorkspaceRow{
+		{TaskID: "active", WorkspaceID: "workspace-active", WorkspacePath: "/tasks/active_abc"},
+		{
+			TaskID: "borrowed-owner", WorkspaceID: "workspace-borrowed-owner",
+			WorkspacePath: "/tasks/borrowed_jkl",
+		},
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("active workspace rows = %#v, want %#v", rows, want)
+	}
+}
+
+func TestWorkspaceInventoryOnlyProtectsActiveTaskWorktrees(t *testing.T) {
+	database := newContainerInventoryDatabase(t)
+	insertContainerInventoryTask(t, database, "active", v1.TaskStateInProgress, false)
+	insertContainerInventoryTask(t, database, "archived", v1.TaskStateInProgress, true)
+	for _, item := range []struct {
+		taskID string
+		path   string
+	}{
+		{taskID: "active", path: "/tasks/active_abc/repo"},
+		{taskID: "archived", path: "/tasks/archived_def/repo"},
+		{taskID: "deleted", path: "/tasks/deleted_ghi/repo"},
+	} {
+		sessionID := "session-" + item.taskID
+		if _, err := database.Exec(
+			"INSERT INTO task_sessions (id, task_id) VALUES (?, ?)", sessionID, item.taskID,
+		); err != nil {
+			t.Fatalf("insert task session for %q: %v", item.taskID, err)
+		}
+		if _, err := database.Exec(
+			"INSERT INTO task_session_worktrees (id, session_id, status, worktree_path) VALUES (?, ?, 'active', ?)",
+			"worktree-"+item.taskID, sessionID, item.path,
+		); err != nil {
+			t.Fatalf("insert task worktree for %q: %v", item.taskID, err)
+		}
+	}
+
+	paths, err := (&storageInventory{reader: database}).activeWorktreePaths(context.Background())
+	if err != nil {
+		t.Fatalf("activeWorktreePaths: %v", err)
+	}
+	want := []string{"/tasks/active_abc/repo"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("active worktree paths = %#v, want %#v", paths, want)
+	}
+}
 
 func TestContainerInventoryRemovability(t *testing.T) {
 	tests := []struct {
@@ -134,12 +216,27 @@ func newContainerInventoryDatabase(t *testing.T) *sqlx.DB {
 		CREATE TABLE tasks (
 			id TEXT PRIMARY KEY,
 			state TEXT NOT NULL,
+			workspace_id TEXT NOT NULL DEFAULT '',
 			archived_at TIMESTAMP
 		);
 		CREATE TABLE task_environments (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
-			status TEXT NOT NULL
+			status TEXT NOT NULL,
+			workspace_path TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE task_sessions (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'CREATED',
+			task_environment_id TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE task_session_worktrees (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			worktree_path TEXT NOT NULL DEFAULT '',
+			deleted_at TIMESTAMP
 		);
 		CREATE TABLE executors_running (
 			id TEXT PRIMARY KEY,
@@ -166,8 +263,8 @@ func insertContainerInventoryTask(
 		archivedAt = time.Now().UTC()
 	}
 	if _, err := database.Exec(
-		"INSERT INTO tasks (id, state, archived_at) VALUES (?, ?, ?)",
-		taskID, state, archivedAt,
+		"INSERT INTO tasks (id, state, workspace_id, archived_at) VALUES (?, ?, ?, ?)",
+		taskID, state, "workspace-"+taskID, archivedAt,
 	); err != nil {
 		t.Fatalf("insert task %q: %v", taskID, err)
 	}

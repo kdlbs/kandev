@@ -201,6 +201,7 @@ export interface StorageCapabilities {
 }
 
 export interface StorageWorkspaceSummary {
+  total_bytes?: number;
   active_bytes?: number;
   candidate_bytes?: number;
   warnings?: string[];
@@ -213,12 +214,15 @@ export interface StorageGoCacheSummary {
   size_bytes?: number;
   owned?: boolean;
   enabled?: boolean;
+  unmanaged_path?: string;
+  unmanaged_size_bytes?: number;
   available?: boolean;
   warning?: string;
 }
 
 export interface StorageDockerSummary {
   available: boolean;
+  image_layer_bytes?: number;
   build_cache_bytes: number;
   unused_image_bytes: number;
   managed_container_count: number;
