@@ -1,15 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconAlertTriangle } from "@tabler/icons-react";
-import {
-  taskId as toTaskId,
-  workflowId as toWorkflowId,
-  workspaceId as toWorkspaceId,
-  type Repository,
-  type RepositoryScript,
-  type Task,
-} from "@/lib/types/http";
+import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { KanbanState } from "@/lib/state/slices";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -27,6 +20,7 @@ import {
   deriveIsAgentWorking,
   buildArchivedValue,
   hasResolvedTaskDetails,
+  resolveEffectiveTask,
   resolveTaskContentState,
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
@@ -44,62 +38,6 @@ type TaskPageContentProps = {
   initialLayout?: string | null;
   officeTaskHref?: string | null;
 };
-
-function resolveEffectiveTask(
-  taskDetails: Task | null,
-  initialTask: Task | null,
-  kanbanTask: KanbanState["tasks"][number] | null,
-  effectiveTaskId: string | null,
-): Task | null {
-  const matchingTaskDetails = taskDetails?.id === effectiveTaskId ? taskDetails : null;
-  const matchingInitialTask = initialTask?.id === effectiveTaskId ? initialTask : null;
-  const baseTask = matchingTaskDetails ?? matchingInitialTask;
-
-  if (!baseTask && !kanbanTask) return null;
-  if (baseTask) return mergeBaseWithKanban(baseTask, kanbanTask);
-  if (kanbanTask) return buildTaskFromKanban(kanbanTask, taskDetails, initialTask);
-  return null;
-}
-
-function mergeBaseWithKanban(
-  baseTask: Task,
-  kanbanTask: KanbanState["tasks"][number] | null,
-): Task {
-  if (!kanbanTask) return baseTask;
-  return {
-    ...baseTask,
-    title: kanbanTask.title ?? baseTask.title,
-    description: kanbanTask.description ?? baseTask.description,
-    workflow_step_id:
-      (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
-    position: kanbanTask.position ?? baseTask.position,
-    state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
-    repositories: baseTask.repositories,
-  };
-}
-
-function buildTaskFromKanban(
-  kanbanTask: KanbanState["tasks"][number],
-  taskDetails: Task | null,
-  initialTask: Task | null,
-): Task {
-  const prevWorkspaceId = taskDetails?.workspace_id ?? initialTask?.workspace_id;
-  const prevBoardId = taskDetails?.workflow_id ?? initialTask?.workflow_id;
-  return {
-    id: toTaskId(kanbanTask.id),
-    title: kanbanTask.title,
-    description: kanbanTask.description ?? "",
-    workflow_step_id: kanbanTask.workflowStepId,
-    position: kanbanTask.position,
-    state: kanbanTask.state ?? "CREATED",
-    workspace_id: prevWorkspaceId ?? toWorkspaceId(""),
-    workflow_id: prevBoardId ?? toWorkflowId(""),
-    priority: 0,
-    repositories: [],
-    created_at: "",
-    updated_at: kanbanTask.updatedAt ?? "",
-  };
-}
 
 export function useWorkflowStepsMapped() {
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
@@ -279,7 +217,18 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     setTaskDetails,
   ]);
 
-  return { task, kanbanTask, taskLoadError: hasTaskDetails ? null : taskLoadError };
+  const onTaskUnarchived = useCallback((taskId: string) => {
+    setTaskDetails((current) =>
+      current?.id === taskId ? { ...current, archived_at: null } : current,
+    );
+  }, []);
+
+  return {
+    task,
+    kanbanTask,
+    taskLoadError: hasTaskDetails ? null : taskLoadError,
+    onTaskUnarchived,
+  };
 }
 
 function useTaskPageData(
@@ -301,7 +250,7 @@ function useTaskPageData(
     return session?.task_id === activeTaskId ? sid : null;
   });
 
-  const { task, taskLoadError } = useTaskDetails(activeTaskId, initialTask);
+  const { task, taskLoadError, onTaskUnarchived } = useTaskDetails(activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
   const ensureSession = useEnsureTaskSession(task);
@@ -328,7 +277,15 @@ function useTaskPageData(
     [effectiveRepositories, task?.repositories],
   );
 
-  return { task, taskLoadError, agent, effectiveSessionId, repository, ensureSession };
+  return {
+    task,
+    taskLoadError,
+    agent,
+    effectiveSessionId,
+    repository,
+    ensureSession,
+    onTaskUnarchived,
+  };
 }
 
 export function TaskPageContent({
@@ -347,8 +304,15 @@ export function TaskPageContent({
   const { isMobile } = useResponsiveBreakpoint();
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  const { task, taskLoadError, agent, effectiveSessionId, repository, ensureSession } =
-    useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
+  const {
+    task,
+    taskLoadError,
+    agent,
+    effectiveSessionId,
+    repository,
+    ensureSession,
+    onTaskUnarchived,
+  } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
 
   const workflowSteps = useWorkflowStepsMapped();
   const sessionPanel = useSessionPanelState(effectiveSessionId);
@@ -396,6 +360,7 @@ export function TaskPageContent({
       initialLayout={initialLayout}
       officeTaskHref={officeTaskHref}
       ensureSession={ensureSession}
+      onTaskUnarchived={onTaskUnarchived}
     />
   );
 }

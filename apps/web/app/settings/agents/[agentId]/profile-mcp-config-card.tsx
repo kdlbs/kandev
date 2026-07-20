@@ -1,11 +1,12 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { useProfileMcpConfig } from "./use-profile-mcp-config";
 import type { AgentProfileMcpConfig } from "@/lib/types/http";
 
@@ -161,6 +162,7 @@ type McpServersEditorProps = {
   profileId: string;
   currentServers: string;
   currentError: string | null;
+  isDirty: boolean;
   isDraft: boolean;
   isEditableProfile: boolean;
   cliPassthrough?: boolean;
@@ -173,6 +175,7 @@ function McpServersEditor({
   profileId,
   currentServers,
   currentError,
+  isDirty,
   isDraft,
   isEditableProfile,
   cliPassthrough,
@@ -211,6 +214,8 @@ function McpServersEditor({
           handleMcpServersChange(event.target.value);
         }}
         disabled={!isEditableProfile && !isDraft}
+        data-settings-dirty={isDirty}
+        data-testid={`mcp-servers-${profileId}`}
       />
       <p className="text-xs text-muted-foreground">
         MCP definitions are stored in the database and resolved per executor at runtime. This does
@@ -262,6 +267,8 @@ type McpConfigState = {
   currentServers: string;
   currentError: string | null;
   currentDirty: boolean;
+  enabledDirty: boolean;
+  serversDirty: boolean;
 };
 
 type ResolveMcpConfigInput = {
@@ -269,26 +276,36 @@ type ResolveMcpConfigInput = {
   profileId: string;
   mcpEnabled: boolean;
   mcpServers: string;
+  mcpBaselineEnabled: boolean;
+  mcpBaselineServers: string;
   mcpError: string | null;
-  mcpDirty: boolean;
 };
 
 function resolveMcpConfigState(input: ResolveMcpConfigInput): McpConfigState {
   const isDraft = Boolean(input.draftState);
   const isEditableProfile =
     !isDraft && Boolean(input.profileId) && !input.profileId.startsWith("draft-");
+  const baselineEnabled = isDraft ? false : input.mcpBaselineEnabled;
+  const baselineServers = isDraft ? '{\n  "mcpServers": {}\n}' : input.mcpBaselineServers;
+  const currentEnabled = isDraft ? (input.draftState?.enabled ?? false) : input.mcpEnabled;
+  const currentServers = isDraft ? (input.draftState?.servers ?? "") : input.mcpServers;
+  const enabledDirty = currentEnabled !== baselineEnabled;
+  const serversDirty = currentServers !== baselineServers;
   return {
     isDraft,
     isEditableProfile,
-    currentEnabled: isDraft ? (input.draftState?.enabled ?? false) : input.mcpEnabled,
-    currentServers: isDraft ? (input.draftState?.servers ?? "") : input.mcpServers,
+    currentEnabled,
+    currentServers,
     currentError: isDraft ? (input.draftState?.error ?? null) : input.mcpError,
-    currentDirty: isDraft ? (input.draftState?.dirty ?? false) : input.mcpDirty,
+    currentDirty: enabledDirty || serversDirty,
+    enabledDirty,
+    serversDirty,
   };
 }
 
 type McpEnableToggleProps = {
   currentEnabled: boolean;
+  isDirty: boolean;
   isDraft: boolean;
   isEditableProfile: boolean;
   onDraftStateChange?: (next: { enabled?: boolean; dirty?: boolean }) => void;
@@ -297,13 +314,19 @@ type McpEnableToggleProps = {
 
 function McpEnableToggle({
   currentEnabled,
+  isDirty,
   isDraft,
   isEditableProfile,
   onDraftStateChange,
   setMcpEnabled,
 }: McpEnableToggleProps) {
   return (
-    <div className="flex items-center justify-between rounded-md border p-3">
+    <div
+      className="flex items-center justify-between rounded-md border p-3"
+      data-settings-dirty={isDirty}
+      data-settings-dirty-level="container"
+      data-testid="mcp-enabled-row"
+    >
       <div className="space-y-1">
         <Label>Enable MCP</Label>
         <p className="text-xs text-muted-foreground">
@@ -312,6 +335,8 @@ function McpEnableToggle({
       </div>
       <Switch
         checked={currentEnabled}
+        data-settings-dirty={isDirty}
+        data-testid="mcp-enabled"
         onCheckedChange={(checked) => {
           if (isDraft) {
             onDraftStateChange?.({ enabled: checked, dirty: true });
@@ -355,37 +380,49 @@ export function ProfileMcpConfigCard({
   const {
     mcpEnabled,
     mcpServers,
+    mcpBaselineEnabled,
+    mcpBaselineServers,
     mcpError,
-    mcpDirty,
-    mcpStatus,
     setMcpEnabled,
     handleMcpServersChange,
     handleSaveMcp,
+    resetMcpDraft,
   } = useProfileMcpConfig({ profileId, supportsMcp, initialConfig, onToastError });
-
-  if (!supportsMcp) return null;
 
   const state = resolveMcpConfigState({
     draftState,
     profileId,
     mcpEnabled,
     mcpServers,
+    mcpBaselineEnabled,
+    mcpBaselineServers,
     mcpError,
-    mcpDirty,
+  });
+  useSettingsSaveContributor({
+    id: `agent-profile-mcp:${profileId}`,
+    revision: JSON.stringify({
+      enabled: state.currentEnabled,
+      servers: state.currentServers,
+    }),
+    isDirty: supportsMcp && state.isEditableProfile && state.currentDirty,
+    canSave: !state.currentError,
+    invalidReason: state.currentError ?? undefined,
+    save: handleSaveMcp,
+    discard: resetMcpDraft,
   });
 
+  if (!supportsMcp) return null;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div className="flex items-center gap-2">
-          <CardTitle>MCP Configuration</CardTitle>
-          {state.currentDirty && <UnsavedChangesBadge />}
-        </div>
+    <SettingsCard isDirty={state.currentDirty}>
+      <CardHeader>
+        <CardTitle>MCP Configuration</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <McpProfileHint isDraft={state.isDraft} isEditableProfile={state.isEditableProfile} />
         <McpEnableToggle
           currentEnabled={state.currentEnabled}
+          isDirty={state.enabledDirty}
           isDraft={state.isDraft}
           isEditableProfile={state.isEditableProfile}
           onDraftStateChange={onDraftStateChange}
@@ -395,6 +432,7 @@ export function ProfileMcpConfigCard({
           profileId={profileId}
           currentServers={state.currentServers}
           currentError={state.currentError}
+          isDirty={state.serversDirty}
           isDraft={state.isDraft}
           isEditableProfile={state.isEditableProfile}
           cliPassthrough={cliPassthrough}
@@ -403,16 +441,6 @@ export function ProfileMcpConfigCard({
           handleMcpServersChange={handleMcpServersChange}
         />
       </CardContent>
-      <div className="flex justify-end px-6 pb-6">
-        {state.isEditableProfile ? (
-          <UnsavedSaveButton
-            isDirty={state.currentDirty}
-            isLoading={mcpStatus === "loading"}
-            status={mcpStatus}
-            onClick={handleSaveMcp}
-          />
-        ) : null}
-      </div>
-    </Card>
+    </SettingsCard>
   );
 }

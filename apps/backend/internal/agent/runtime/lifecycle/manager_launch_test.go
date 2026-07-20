@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -826,6 +827,50 @@ func TestLaunchResolveWorkspacePath_NonEphemeralRepoLessGetsScratchDir(t *testin
 	require.Equal(t, "task-xyz", marker.TaskID)
 	require.Equal(t, "ws-xyz", marker.WorkspaceID)
 	require.Equal(t, storageworkspaces.LayoutVersionScratch, marker.LayoutVersion)
+
+	statusCmd := exec.Command("git", "status", "--porcelain", "--", storageworkspaces.OwnershipMarkerFilename)
+	statusCmd.Dir = workspacePath
+	status, err := statusCmd.CombinedOutput()
+	require.NoError(t, err, "git status failed: %s", status)
+	require.Empty(t, status, "workspace ownership marker should be excluded from git status")
+}
+
+func TestInitGitRepoPreservesExistingLocalExcludes(t *testing.T) {
+	mgr := newTestManager(t)
+	workspacePath := t.TempDir()
+	require.NoError(t, mgr.initGitRepo(context.Background(), workspacePath))
+
+	excludePath := filepath.Join(workspacePath, ".git", "info", "exclude")
+	require.NoError(t, os.WriteFile(excludePath, []byte("custom.cache"), 0644))
+	require.NoError(t, mgr.initGitRepo(context.Background(), workspacePath))
+	require.NoError(t, mgr.initGitRepo(context.Background(), workspacePath))
+
+	exclude, err := os.ReadFile(excludePath)
+	require.NoError(t, err)
+	require.Contains(t, string(exclude), "custom.cache\n")
+	require.Equal(t, 1, strings.Count(string(exclude), "/"+storageworkspaces.OwnershipMarkerFilename))
+}
+
+func TestInitGitRepoRejectsSymlinkedGitDirectory(t *testing.T) {
+	mgr := newTestManager(t)
+	workspacePath := t.TempDir()
+	require.NoError(t, os.Symlink(t.TempDir(), filepath.Join(workspacePath, ".git")))
+
+	err := mgr.initGitRepo(context.Background(), workspacePath)
+	require.ErrorContains(t, err, "invalid git directory")
+}
+
+func TestInitGitRepoRejectsSymlinkedExcludeFile(t *testing.T) {
+	mgr := newTestManager(t)
+	workspacePath := t.TempDir()
+	require.NoError(t, mgr.initGitRepo(context.Background(), workspacePath))
+
+	excludePath := filepath.Join(workspacePath, ".git", "info", "exclude")
+	require.NoError(t, os.Remove(excludePath))
+	require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "external"), excludePath))
+
+	err := mgr.initGitRepo(context.Background(), workspacePath)
+	require.ErrorContains(t, err, "invalid git exclude file")
 }
 
 func TestLaunchResolveWorkspacePath_NonEphemeralWithoutWorkspaceIDReturnsEmpty(t *testing.T) {

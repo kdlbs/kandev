@@ -581,6 +581,10 @@ func (s *Service) ReorderWorkflows(ctx context.Context, workspaceID string, work
 // Repository operations
 
 func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryRequest) (*models.Repository, error) {
+	localPath, err := canonicalRepositoryLocalPath(req.LocalPath)
+	if err != nil {
+		return nil, err
+	}
 	sourceType := req.SourceType
 	if sourceType == "" {
 		sourceType = sourceTypeLocal
@@ -608,7 +612,7 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		WorkspaceID:            req.WorkspaceID,
 		Name:                   req.Name,
 		SourceType:             sourceType,
-		LocalPath:              req.LocalPath,
+		LocalPath:              localPath,
 		Provider:               req.Provider,
 		ProviderRepoID:         req.ProviderRepoID,
 		ProviderOwner:          req.ProviderOwner,
@@ -675,7 +679,11 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		existing = replacement
 		dirty := false
 		if existing.LocalPath == "" && req.LocalPath != "" {
-			existing.LocalPath = req.LocalPath
+			localPath, pathErr := canonicalRepositoryLocalPath(req.LocalPath)
+			if pathErr != nil {
+				return nil, false, pathErr
+			}
+			existing.LocalPath = localPath
 			dirty = true
 		}
 		// Backfill default_branch when the caller carries one and the existing
@@ -727,7 +735,15 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 	if err != nil {
 		return nil, err
 	}
-	if err := applyRepositoryUpdates(repository, req); err != nil {
+	updates := *req
+	if req.LocalPath != nil {
+		localPath, pathErr := canonicalRepositoryLocalPath(*req.LocalPath)
+		if pathErr != nil {
+			return nil, pathErr
+		}
+		updates.LocalPath = &localPath
+	}
+	if err := applyRepositoryUpdates(repository, &updates); err != nil {
 		return nil, err
 	}
 	repository.UpdatedAt = time.Now().UTC()
@@ -740,6 +756,17 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 	s.publishRepositoryEvent(ctx, events.RepositoryUpdated, repository)
 	s.logger.Info("repository updated", zap.String("repository_id", repository.ID))
 	return repository, nil
+}
+
+func canonicalRepositoryLocalPath(localPath string) (string, error) {
+	if localPath == "" {
+		return "", nil
+	}
+	canonicalPath, _, err := resolveExplicitLocalRepositoryPath(localPath)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidRepositorySettings, err)
+	}
+	return canonicalPath, nil
 }
 
 // applyRepositoryUpdates applies the non-nil fields from req onto repository.

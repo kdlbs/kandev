@@ -19,6 +19,8 @@ import (
 // manual recovery banner.
 const transientMaxAttempts = 3
 
+const transientRetryStopTimeout = 30 * time.Second
+
 // recoverActionCancelRetry is the session.recover action that stops an
 // in-progress transient retry loop and surfaces manual recovery.
 const recoverActionCancelRetry = "cancel_retry"
@@ -225,7 +227,14 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 	cp, _ := v.(capturedPrompt)
 
 	if execID != "" {
-		if err := s.executor.StopExecution(ctx, execID, "transient retry: relaunching agent", true); err != nil {
+		if !s.claimForcedExecutionCleanup(sessionID, execID) {
+			s.logger.Debug("skipping transient retry because execution teardown is already owned",
+				zap.String("session_id", sessionID),
+				zap.String("execution_id", execID))
+			s.resetTransientRetry(sessionID)
+			return
+		}
+		if err := s.stopTransientRetryExecution(ctx, execID); err != nil {
 			s.logger.Debug("failed to stop failed execution before transient retry",
 				zap.String("session_id", sessionID),
 				zap.String("execution_id", execID),
@@ -252,6 +261,12 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 			ErrorMessage:     "Provider overloaded — automatic retry could not be started. Resume or start fresh to continue.",
 		})
 	}
+}
+
+func (s *Service) stopTransientRetryExecution(ctx context.Context, executionID string) error {
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), transientRetryStopTimeout)
+	defer cancel()
+	return s.executor.StopExecution(stopCtx, executionID, "transient retry: relaunching agent", true)
 }
 
 // createTransientRetryStatusMessage emits the calm yellow "retrying" status

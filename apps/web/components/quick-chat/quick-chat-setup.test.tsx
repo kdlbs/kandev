@@ -66,10 +66,11 @@ vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
 
 const props = {
   workspaceId: "workspace-1",
-  showIntroduction: true,
+  canCreateConfigurationChat: true,
   pendingAgentId: null,
   onStart: vi.fn(),
   onCancel: vi.fn(),
+  onKindChange: vi.fn(),
 };
 
 beforeEach(() => {
@@ -80,6 +81,27 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("QuickChatSetup default agent", () => {
+  it("explains when to use Quick Chat instead of a task", () => {
+    render(<QuickChatSetup {...props} />);
+
+    expect(screen.getByText(/idea, question, or codebase/i)).toBeTruthy();
+    expect(screen.getByText(/outside your task board/i)).toBeTruthy();
+  });
+
+  it("offers configuration mode in the setup panel", () => {
+    render(<QuickChatSetup {...props} />);
+
+    fireEvent.click(screen.getByRole("switch", { name: "Configuration chat" }));
+
+    expect(props.onKindChange).toHaveBeenCalledWith("config");
+  });
+
+  it("hides configuration mode when the workspace already has one", () => {
+    render(<QuickChatSetup {...props} canCreateConfigurationChat={false} />);
+
+    expect(screen.queryByRole("switch", { name: "Configuration chat" })).toBeNull();
+  });
+
   it("renders the agent selector with a visible field border", () => {
     render(<QuickChatSetup {...props} />);
 

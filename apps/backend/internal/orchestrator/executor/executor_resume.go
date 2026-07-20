@@ -233,6 +233,7 @@ func (e *Executor) backfillRepoDefaultBranch(ctx context.Context, repo *models.R
 // metadata merge, both of which are session-row concerns the lifecycle manager
 // doesn't know about.
 func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time) error {
+	expectedState := session.State
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 	}
@@ -253,7 +254,7 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	if startAgent {
 		updateErr = e.updateSessionStarting(ctx, taskID, session, true)
 	} else {
-		updateErr = e.repo.UpdateTaskSession(ctx, session)
+		updateErr = e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 	}
 	if updateErr != nil {
 		e.logger.Error("failed to update agent session after launch",
@@ -400,7 +401,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 
 	if err := e.persistResumeState(ctx, task.ID, session, startAgent); err != nil {
-		e.stopUnstartedExecution(ctx, session.ID, resp.AgentExecutionID)
+		e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
 		return nil, err
 	}
 	e.persistWorktreeAssociation(ctx, task.ID, session, repositoryID, resp)
@@ -569,9 +570,9 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)
 
-	// Activate config-mode MCP tools when config_mode is set in session metadata.
-	if isConfigModeSession(session) {
-		req.McpMode = McpModeConfig
+	req.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session)
+	if err != nil {
+		return nil, "", execConfig, nil, nil, err
 	}
 
 	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
@@ -851,6 +852,7 @@ func resolveResumeTaskDirName(existingEnv *models.TaskEnvironment, task *v1.Task
 // orchestrator's only remaining responsibility is the session-row state
 // machine (STARTING / CompletedAt-clear).
 func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, startAgent bool) error {
+	expectedState := session.State
 	session.ErrorMessage = ""
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
@@ -861,7 +863,7 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 	if startAgent {
 		updateErr = e.updateSessionStarting(ctx, taskID, session, false)
 	} else {
-		updateErr = e.repo.UpdateTaskSession(ctx, session)
+		updateErr = e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 	}
 	if updateErr != nil {
 		e.logger.Error("failed to update task session for resume",
@@ -921,6 +923,9 @@ func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string,
 }
 
 func (e *Executor) writeTaskInProgressForRuntime(ctx context.Context, taskID, sessionID string) error {
+	if e.onTaskRuntimeStateReconcile != nil {
+		return e.onTaskRuntimeStateReconcile(ctx, taskID, sessionID, v1.TaskStateInProgress)
+	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return err
@@ -953,4 +958,18 @@ func (e *Executor) writeTaskInProgressForRuntime(ctx context.Context, taskID, se
 		}
 	}
 	return e.updateTaskState(ctx, taskID, v1.TaskStateInProgress)
+}
+
+func (e *Executor) writeTaskFailedForRuntime(ctx context.Context, taskID, sessionID string) error {
+	if e.onTaskRuntimeStateReconcile != nil {
+		return e.onTaskRuntimeStateReconcile(ctx, taskID, sessionID, v1.TaskStateFailed)
+	}
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.State != models.TaskSessionStateFailed {
+		return nil
+	}
+	return e.updateTaskState(ctx, taskID, v1.TaskStateFailed)
 }

@@ -3,6 +3,7 @@ import {
   IconBell,
   IconCommand,
   IconCode,
+  IconLayoutDashboard,
   IconPalette,
   IconTerminal2,
 } from "@tabler/icons-react";
@@ -21,6 +22,12 @@ export const GENERAL_NAV_ITEMS: GeneralNavItem[] = [
     label: "Appearance",
     description: "Theme, metrics, and changes panel preferences",
     icon: IconPalette,
+  },
+  {
+    href: "/settings/general/layouts",
+    label: "Layouts",
+    description: "Task workbench layout profiles and defaults",
+    icon: IconLayoutDashboard,
   },
   {
     href: "/settings/general/terminal",
@@ -49,7 +56,7 @@ export const GENERAL_NAV_ITEMS: GeneralNavItem[] = [
   {
     href: "/settings/general/task-actions",
     label: "Task Actions",
-    description: "Archive safeguards and task action preferences",
+    description: "MCP task defaults and archive safeguards",
     icon: IconArchive,
   },
 ];

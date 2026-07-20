@@ -52,12 +52,12 @@ pipeline view makes the complete trigger path easy to miss.
 - Existing persisted workflows with a replay cycle display the diagnostic as
   soon as their steps load. This visibility does not retroactively stop active
   tasks or prevent edits that remove the cycle.
-- Existing workflows keep their current immediate step persistence. Before a
-  step update, add, delete, or reorder request is sent, the editor analyzes the
-  proposed complete shape:
-  - a newly introduced fully automatic cycle cancels the request and offers no
+- Existing workflows use the settings route's manual-save drafts. Before a
+  topology edit is applied to the local draft, the editor analyzes the proposed
+  complete shape:
+  - a newly introduced fully automatic cycle cancels the edit and offers no
     override;
-  - a newly introduced user-mediated cycle holds the request until the user
+  - a newly introduced user-mediated cycle holds the draft edit until the user
     chooses **Apply anyway** or cancels it;
   - a change that removes a cycle proceeds without confirmation.
 - A mutation is considered newly introduced only when its resulting diagnostic
@@ -112,11 +112,10 @@ deterministic and has no persisted state.
 
 - If workflow steps fail to load, the editor keeps its existing load error and
   does not claim that the workflow is safe.
-- If a confirmed remote mutation fails, the existing error toast remains the
-  source of truth and the editor retains its last server-backed shape. A
-  successful add, update, or reorder applies the authoritative mutation
-  response before the guard accepts another topology edit. Confirmation never
-  implies persistence succeeded.
+- If a confirmed draft is later saved and persistence fails, the shared
+  settings Save error remains the source of truth and the editor retains the
+  local dirty shape. Confirmation accepts the topology edit but never implies
+  persistence succeeded.
 - If a workflow already contains a fully automatic cycle, opening settings
   surfaces the blocking diagnostic but does not interrupt running tasks. The
   author must remove the cycle to prevent future re-entry.
@@ -159,8 +158,8 @@ deterministic and has no persisted state.
   prompt source before the author edits it.
 - **GIVEN** an existing workflow already has a replay-cycle diagnostic, **WHEN**
   the author changes only its name or prompt without changing the diagnostic
-  identity, **THEN** the mutation is not reconfirmed and the inline alert
-  remains accurate.
+  identity, **THEN** the draft edit is not reconfirmed, the inline alert remains
+  accurate, and persistence still waits for the route-level Save action.
 - **GIVEN** an existing replay cycle, **WHEN** an edit removes the return path or
   removes `auto_start_agent`, **THEN** the edit persists without confirmation
   and the diagnostic disappears after refresh.

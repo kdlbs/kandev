@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isRepositoryDirty,
+  mergeSavedRepositoryDraft,
   type RepositoryWithScripts,
 } from "@/app/settings/workspace/workspace-repositories-dirty";
 import { repositoryId as toRepositoryId, workspaceId as toWorkspaceId } from "@/lib/types/http";
@@ -74,3 +75,47 @@ describe("isRepositoryDirty", () => {
     expect(isRepositoryDirty(repo, saved)).toBe(true);
   });
 });
+
+describe("mergeSavedRepositoryDraft", () => {
+  it("preserves client-only row state when the submitted draft is unchanged", () => {
+    const current = { ...makeRepo(), __autoOpen: true };
+    const saved = makeRepo({ name: "saved name" });
+
+    const merged = mergeSavedRepositoryDraft(current, current, saved);
+
+    expect((merged as RepositoryWithScripts & { __autoOpen?: boolean }).__autoOpen).toBe(true);
+    expect(merged.name).toBe("saved name");
+  });
+
+  it("remaps created script IDs while preserving edits made during save", () => {
+    const submittedScript = makeScript("temp-script-1", "submitted");
+    const submitted = makeRepo({ scripts: [submittedScript] });
+    const current = makeRepo({
+      name: "newer repository name",
+      scripts: [{ ...submittedScript, command: "newer command" }],
+    });
+    const saved = makeRepo({
+      id: toRepositoryId("persisted-repo"),
+      scripts: [makeScript("persisted-script", "submitted")],
+    });
+
+    const merged = mergeSavedRepositoryDraft(current, submitted, saved);
+
+    expect(merged.id).toBe(toRepositoryId("persisted-repo"));
+    expect(merged.name).toBe("newer repository name");
+    expect(merged.scripts[0].id).toBe("persisted-script");
+    expect(merged.scripts[0].command).toBe("newer command");
+  });
+});
+
+function makeScript(id: string, command: string) {
+  return {
+    id,
+    repository_id: toRepositoryId("repo-1"),
+    name: "script",
+    command,
+    position: 0,
+    created_at: "",
+    updated_at: "",
+  };
+}

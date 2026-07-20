@@ -32,7 +32,9 @@ describe("hydrateUI — quick chat name overlay", () => {
         quickChat: {
           isOpen: false,
           activeSessionId: null,
-          sessions: [{ sessionId: "sess-1", workspaceId: "ws-1", name: "Agent A - Chat 1" }],
+          sessions: [
+            { sessionId: "sess-1", workspaceId: "ws-1", name: "Agent A - Chat 1", kind: "chat" },
+          ],
         },
       });
     });
@@ -46,12 +48,59 @@ describe("hydrateUI — quick chat name overlay", () => {
         quickChat: {
           isOpen: false,
           activeSessionId: null,
-          sessions: [{ sessionId: "sess-2", workspaceId: "ws-1", name: "Agent A - Chat 1" }],
+          sessions: [
+            { sessionId: "sess-2", workspaceId: "ws-1", name: "Agent A - Chat 1", kind: "chat" },
+          ],
         },
       });
     });
 
     expect(result.quickChat.sessions[0].name).toBe("Agent A - Chat 1");
+  });
+});
+
+describe("hydrateUI — typed quick chat sessions", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("normalizes a legacy session without kind to an ordinary chat", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [
+            {
+              sessionId: "legacy",
+              workspaceId: "ws-1",
+            } as unknown as (typeof draft.quickChat.sessions)[number],
+          ],
+        },
+      });
+    });
+
+    expect((result.quickChat.sessions[0] as { kind?: string }).kind).toBe("chat");
+  });
+
+  it("preserves a restored configuration session kind", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [
+            {
+              sessionId: "config-session",
+              workspaceId: "ws-1",
+              kind: "config",
+            } as (typeof draft.quickChat.sessions)[number],
+          ],
+        },
+      });
+    });
+
+    expect((result.quickChat.sessions[0] as { kind?: string }).kind).toBe("config");
   });
 
   it("only overlays sessions that have a stored rename, leaving siblings untouched", () => {
@@ -66,8 +115,8 @@ describe("hydrateUI — quick chat name overlay", () => {
           isOpen: false,
           activeSessionId: null,
           sessions: [
-            { sessionId: "sess-a", workspaceId: "ws-1", name: "Original A" },
-            { sessionId: "sess-b", workspaceId: "ws-1", name: "Original B" },
+            { sessionId: "sess-a", workspaceId: "ws-1", name: "Original A", kind: "chat" },
+            { sessionId: "sess-b", workspaceId: "ws-1", name: "Original B", kind: "chat" },
           ],
         },
       });
@@ -81,7 +130,9 @@ describe("hydrateUI — quick chat name overlay", () => {
       draft.quickChat = {
         isOpen: true,
         activeSessionId: "stale-session",
-        sessions: [{ sessionId: "stale-session", workspaceId: "ws-1", name: "Stale" }],
+        sessions: [
+          { sessionId: "stale-session", workspaceId: "ws-1", name: "Stale", kind: "chat" },
+        ],
       };
       hydrateUI(draft, {
         quickChat: {
@@ -114,8 +165,18 @@ describe("mergeInitialState — quick chat name overlay", () => {
         isOpen: false,
         activeSessionId: null,
         sessions: [
-          { sessionId: "sess-boot", workspaceId: "ws-1", name: "Backend task title" },
-          { sessionId: "sess-other", workspaceId: "ws-1", name: "Other title" },
+          {
+            sessionId: "sess-boot",
+            workspaceId: "ws-1",
+            name: "Backend task title",
+            kind: "chat",
+          },
+          {
+            sessionId: "sess-other",
+            workspaceId: "ws-1",
+            name: "Other title",
+            kind: "chat",
+          },
         ],
       },
     });

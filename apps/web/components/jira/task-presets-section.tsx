@@ -7,6 +7,8 @@ import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useJiraTaskPresets } from "@/components/jira/my-jira/use-task-presets";
 import {
   DEFAULT_JIRA_PRESETS,
@@ -84,29 +86,45 @@ function IconSelect({ value, onChange }: { value: string; onChange: (v: string) 
 
 function PresetRow({
   preset,
+  savedPreset,
   expanded,
   onToggle,
   onPatch,
   onRemove,
 }: {
   preset: JiraStoredPreset;
+  savedPreset?: JiraStoredPreset;
   expanded: boolean;
   onToggle: () => void;
   onPatch: (patch: Partial<JiraStoredPreset>) => void;
   onRemove: () => void;
 }) {
+  const fieldIsDirty = <K extends keyof JiraStoredPreset>(field: K) =>
+    !savedPreset || preset[field] !== savedPreset[field];
+  const isDirty = !savedPreset || JSON.stringify(preset) !== JSON.stringify(savedPreset);
+
   return (
-    <div className="rounded-md border">
+    <div
+      className="rounded-md border"
+      data-settings-dirty={isDirty}
+      data-testid={`jira-task-preset-${preset.id}`}
+    >
       <div className="flex items-end gap-2 p-2">
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] text-muted-foreground">Icon</span>
-          <IconSelect value={preset.icon} onChange={(v) => onPatch({ icon: v })} />
+          <div
+            data-settings-dirty={fieldIsDirty("icon")}
+            className="rounded-md border border-transparent"
+          >
+            <IconSelect value={preset.icon} onChange={(v) => onPatch({ icon: v })} />
+          </div>
         </div>
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] text-muted-foreground">Label</span>
           <Input
             className="h-8 w-40"
             value={preset.label}
+            data-settings-dirty={fieldIsDirty("label")}
             placeholder="Label"
             onChange={(e) => onPatch({ label: e.target.value })}
           />
@@ -116,6 +134,7 @@ function PresetRow({
           <Input
             className="h-8"
             value={preset.hint}
+            data-settings-dirty={fieldIsDirty("hint")}
             placeholder="Hint (optional)"
             onChange={(e) => onPatch({ hint: e.target.value })}
           />
@@ -140,7 +159,10 @@ function PresetRow({
       </div>
       {expanded && (
         <div className="px-2 pb-2 space-y-1">
-          <div className="rounded-md border overflow-hidden">
+          <div
+            className="rounded-md border overflow-hidden"
+            data-settings-dirty={fieldIsDirty("prompt_template")}
+          >
             <ScriptEditor
               value={preset.prompt_template}
               onChange={(v) => onPatch({ prompt_template: v })}
@@ -165,29 +187,41 @@ function PresetRow({
 }
 
 function usePresetDraft() {
-  const { stored, save: persistSave, reset: persistReset, loaded } = useJiraTaskPresets();
+  const { stored, save: persistSave, loaded } = useJiraTaskPresets();
   const [draft, setDraft] = useState<JiraStoredPreset[]>(stored);
   // Render-time conditional setState is React's documented "adjust state
   // during render" pattern; it resets the draft when the hook's stored value
   // changes (e.g. after reset or a backend refresh). Gate the sync on `loaded`
   // so an in-progress edit isn't wiped when the initial settings read lands.
+  const [baseline, setBaseline] = useState(stored);
+  const dirty = useMemo(
+    () => JSON.stringify(baseline) !== JSON.stringify(draft),
+    [baseline, draft],
+  );
   const [synced, setSynced] = useState(stored);
-  if (loaded && stored !== synced) {
+  if (loaded && stored !== synced && !dirty) {
     setSynced(stored);
+    setBaseline(stored);
     setDraft(stored);
   }
-  const dirty = useMemo(() => JSON.stringify(stored) !== JSON.stringify(draft), [stored, draft]);
-  const save = useCallback(() => persistSave(draft), [persistSave, draft]);
+  const save = useCallback(async () => {
+    const submitted = draft;
+    await persistSave(submitted);
+    setBaseline(submitted);
+    setDraft((current) =>
+      JSON.stringify(current) === JSON.stringify(submitted) ? submitted : current,
+    );
+  }, [persistSave, draft]);
   const reset = useCallback(() => {
-    persistReset();
     setDraft(DEFAULT_JIRA_PRESETS);
-  }, [persistReset]);
-  return { draft, setDraft, dirty, save, reset, loaded };
+  }, []);
+  const discard = useCallback(() => setDraft(baseline), [baseline]);
+  return { draft, baseline, setDraft, dirty, save, reset, discard, loaded };
 }
 
 export function TaskPresetsSection() {
   const { toast } = useToast();
-  const { draft, setDraft, dirty, save, reset, loaded } = usePresetDraft();
+  const { draft, baseline, setDraft, dirty, save, reset, discard, loaded } = usePresetDraft();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const patch = useCallback(
@@ -206,14 +240,24 @@ export function TaskPresetsSection() {
     setExpandedId(created.id);
   }, [draft, setDraft]);
 
-  const handleSave = () => {
-    save();
-    toast({ description: "Task presets saved", variant: "success" });
-  };
-  const handleReset = () => {
-    reset();
-    toast({ description: "Task presets reset to defaults", variant: "success" });
-  };
+  const handleSave = useCallback(async () => {
+    try {
+      await save();
+      toast({ description: "Task presets saved", variant: "success" });
+    } catch {
+      toast({ description: "Failed to save task presets", variant: "error" });
+      throw new Error("Failed to save task presets");
+    }
+  }, [save, toast]);
+
+  useSettingsSaveContributor({
+    id: "jira-task-presets",
+    revision: JSON.stringify(draft),
+    isDirty: dirty,
+    canSave: loaded,
+    save: handleSave,
+    discard,
+  });
 
   return (
     <SettingsSection
@@ -224,24 +268,22 @@ export function TaskPresetsSection() {
           <Button
             size="sm"
             variant="outline"
-            onClick={handleReset}
+            onClick={reset}
             disabled={!loaded}
             className="cursor-pointer"
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />
             Reset
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={!dirty} className="cursor-pointer">
-            Save changes
-          </Button>
         </div>
       }
     >
-      <div className="space-y-2">
+      <SettingsCard isDirty={dirty} className="space-y-2 p-4" data-testid="jira-task-presets-card">
         {draft.map((preset, index) => (
           <PresetRow
             key={preset.id}
             preset={preset}
+            savedPreset={baseline.find((saved) => saved.id === preset.id)}
             expanded={expandedId === preset.id}
             onToggle={() => setExpandedId((id) => (id === preset.id ? null : preset.id))}
             onPatch={(p) => patch(index, p)}
@@ -252,7 +294,7 @@ export function TaskPresetsSection() {
           <IconPlus className="h-3.5 w-3.5 mr-1" />
           Add preset
         </Button>
-      </div>
+      </SettingsCard>
     </SettingsSection>
   );
 }

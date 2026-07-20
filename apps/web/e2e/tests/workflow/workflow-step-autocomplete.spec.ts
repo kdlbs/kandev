@@ -85,6 +85,7 @@ test.describe("Workflow step prompt autocomplete", () => {
     const updatedText = await agentSelect.textContent();
     expect(updatedText).toContain(profileName?.trim() ?? "");
     expect(updatedText).not.toContain("No profile override");
+    await page.saveChanges();
 
     // Reload the page and verify it persisted
     await page.goto(seedData.workspaceId);

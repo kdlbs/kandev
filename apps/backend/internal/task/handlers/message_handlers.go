@@ -292,8 +292,17 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// wall of MCP-tool boilerplate prepended to "hello".
 	storedContent := req.Content
 	if isCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
+		task, err := h.service.GetTask(ctx, req.TaskID)
+		if err != nil {
+			h.logger.Error("failed to resolve first-turn MCP capabilities", zap.String("task_id", req.TaskID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
+		}
+		configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
 		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
-		storedContent = sysprompt.InjectKandevContext(req.TaskID, req.TaskSessionID, req.Content, requiresSignal)
+		storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, req.Content, sysprompt.KandevContextOptions{
+			RequiresCompletionSignal:       requiresSignal,
+			IncludeCoordinatorTaskControls: task.AssigneeAgentProfileID == "" && !configMode,
+		})
 		req.Content = storedContent
 	}
 

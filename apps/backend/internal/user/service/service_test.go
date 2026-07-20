@@ -140,6 +140,45 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettingsMCPTaskAgentProfileDefault(t *testing.T) {
+	t.Run("omission preserves saved value", func(t *testing.T) {
+		settings := &models.UserSettings{MCPTaskAgentProfileDefault: models.MCPTaskAgentProfileDefaultWorkspaceDefault}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if settings.MCPTaskAgentProfileDefault != models.MCPTaskAgentProfileDefaultWorkspaceDefault {
+			t.Fatalf("MCPTaskAgentProfileDefault = %q, want workspace_default", settings.MCPTaskAgentProfileDefault)
+		}
+	})
+
+	t.Run("valid values are accepted", func(t *testing.T) {
+		for _, value := range []string{
+			models.MCPTaskAgentProfileDefaultCurrentTask,
+			models.MCPTaskAgentProfileDefaultWorkspaceDefault,
+		} {
+			settings := &models.UserSettings{MCPTaskAgentProfileDefault: models.MCPTaskAgentProfileDefaultCurrentTask}
+			err := applyBasicSettings(settings, &UpdateUserSettingsRequest{MCPTaskAgentProfileDefault: ptr(value)})
+			if err != nil {
+				t.Fatalf("apply %q: %v", value, err)
+			}
+			if settings.MCPTaskAgentProfileDefault != value {
+				t.Fatalf("MCPTaskAgentProfileDefault = %q, want %q", settings.MCPTaskAgentProfileDefault, value)
+			}
+		}
+	})
+
+	t.Run("invalid value is rejected without mutation", func(t *testing.T) {
+		settings := &models.UserSettings{MCPTaskAgentProfileDefault: models.MCPTaskAgentProfileDefaultWorkspaceDefault}
+		err := applyBasicSettings(settings, &UpdateUserSettingsRequest{MCPTaskAgentProfileDefault: ptr("expensive_profile")})
+		if err == nil {
+			t.Fatal("expected validation error")
+		}
+		if settings.MCPTaskAgentProfileDefault != models.MCPTaskAgentProfileDefaultWorkspaceDefault {
+			t.Fatalf("MCPTaskAgentProfileDefault = %q after invalid update, want workspace_default", settings.MCPTaskAgentProfileDefault)
+		}
+	})
+}
+
 func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
 	t.Run("sets valid sort and group", func(t *testing.T) {
 		settings := &models.UserSettings{}
@@ -354,6 +393,49 @@ func TestApplySavedLayouts(t *testing.T) {
 			wantApplied: true,
 		},
 		{
+			name: "valid layout with one default is applied",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "l1", Name: "Default layout", IsDefault: true, Layout: json.RawMessage(`{}`)},
+					{ID: "l2", Name: "Other layout", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   2,
+			wantApplied: true,
+		},
+		{
+			name: "valid reserved override default is applied",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "layout-override-default", Name: "Default", IsDefault: true, Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   1,
+			wantApplied: true,
+		},
+		{
+			name: "valid mixed custom and reserved override layouts are applied",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "layout-custom", Name: "Custom", Layout: json.RawMessage(`{}`)},
+					{ID: "layout-override-plan", Name: "Plan Mode", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   2,
+			wantApplied: true,
+		},
+		{
+			name: "valid mixed layouts allow one reserved override default",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "layout-custom", Name: "Custom", Layout: json.RawMessage(`{}`)},
+					{ID: "layout-override-default", Name: "Default", IsDefault: true, Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   2,
+			wantApplied: true,
+		},
+		{
 			name: "exactly max layouts is accepted",
 			req: &UpdateUserSettingsRequest{
 				SavedLayouts: ptr(makeLayouts(maxSavedLayouts)),
@@ -385,6 +467,44 @@ func TestApplySavedLayouts(t *testing.T) {
 				}),
 			},
 			wantErr: "saved_layouts: layout name must not be empty",
+		},
+		{
+			name: "empty id returns error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "", Name: "Layout", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: "saved_layouts: layout id must not be empty",
+		},
+		{
+			name: "whitespace-only id returns error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "   ", Name: "Layout", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: "saved_layouts: layout id must not be empty",
+		},
+		{
+			name: "duplicate ids return error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "l1", Name: "First", Layout: json.RawMessage(`{}`)},
+					{ID: "l1", Name: "Second", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: `saved_layouts: duplicate layout id "l1"`,
+		},
+		{
+			name: "mixed custom and reserved override defaults return error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "layout-custom", Name: "Custom", IsDefault: true, Layout: json.RawMessage(`{}`)},
+					{ID: "layout-override-default", Name: "Default", IsDefault: true, Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: "saved_layouts: at most one default layout allowed",
 		},
 	}
 
@@ -710,6 +830,57 @@ func TestPublishUserSettingsEventIncludesArchiveConfirmation(t *testing.T) {
 	}
 	if confirmTaskArchive, ok := eventData["confirm_task_archive"].(bool); !ok || confirmTaskArchive {
 		t.Fatalf("confirm_task_archive = %#v, want false", eventData["confirm_task_archive"])
+	}
+}
+
+func TestPublishUserSettingsEventIncludesNormalizedMCPTaskAgentProfileDefault(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(&recordingUserRepository{}, eventBus, log)
+	svc.publishUserSettingsEvent(context.Background(), &models.UserSettings{
+		MCPTaskAgentProfileDefault: "future_value",
+	})
+
+	if len(eventBus.publishedEvents) != 1 {
+		t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
+	}
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data map, got %T", eventBus.publishedEvents[0].Data)
+	}
+	if got := eventData["mcp_task_agent_profile_default"]; got != models.MCPTaskAgentProfileDefaultCurrentTask {
+		t.Fatalf("mcp_task_agent_profile_default = %#v, want current_task", got)
+	}
+}
+
+func TestUpdateUserSettingsRejectsInvalidMCPTaskAgentProfileDefaultWithoutPersisting(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &recordingUserRepository{getSettings: &models.UserSettings{
+		MCPTaskAgentProfileDefault: models.MCPTaskAgentProfileDefaultWorkspaceDefault,
+	}}
+	eventBus := &recordingEventBus{}
+	svc := NewService(repo, eventBus, log)
+
+	_, err = svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		MCPTaskAgentProfileDefault: ptr("unknown"),
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpdateUserSettings error = %v, want validation error", err)
+	}
+	if repo.upsertUserSettingsPreservingLastUsedCalls != 0 {
+		t.Fatalf("persist calls = %d, want 0", repo.upsertUserSettingsPreservingLastUsedCalls)
+	}
+	if repo.getSettings.MCPTaskAgentProfileDefault != models.MCPTaskAgentProfileDefaultWorkspaceDefault {
+		t.Fatalf("saved preference = %q, want workspace_default", repo.getSettings.MCPTaskAgentProfileDefault)
+	}
+	if len(eventBus.publishedEvents) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventBus.publishedEvents))
 	}
 }
 

@@ -1,11 +1,14 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
+import type { SettingsSaveContributor } from "../settings-save-provider";
 import { FeatureTogglesSettings } from "./feature-toggles-settings";
 
 const fetchRuntimeFlagsMock = vi.fn();
+const updateRuntimeFlagMock = vi.fn();
 const toastMock = vi.fn();
+let saveContributor: SettingsSaveContributor | null = null;
 const DEBUG_MODE_LABEL = "Debug mode";
 const FEATURE_TOGGLES_LOAD_FAILURE = "Feature toggles could not be loaded.";
 
@@ -14,11 +17,27 @@ vi.mock("@kandev/ui/switch", () => ({
     checked,
     disabled,
     "aria-label": ariaLabel,
+    onCheckedChange,
   }: {
     checked: boolean;
     disabled: boolean;
     "aria-label": string;
-  }) => <button aria-label={ariaLabel} aria-pressed={checked} disabled={disabled} type="button" />,
+    onCheckedChange: (checked: boolean) => void;
+  }) => (
+    <button
+      aria-label={ariaLabel}
+      aria-pressed={checked}
+      disabled={disabled}
+      type="button"
+      onClick={() => onCheckedChange(!checked)}
+    />
+  ),
+}));
+
+vi.mock("../settings-save-provider", () => ({
+  useSettingsSaveContributor: (contributor: SettingsSaveContributor) => {
+    saveContributor = contributor;
+  },
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -27,12 +46,14 @@ vi.mock("@/components/toast-provider", () => ({
 
 vi.mock("@/lib/api/domains/runtime-flags-api", () => ({
   fetchRuntimeFlags: (...args: unknown[]) => fetchRuntimeFlagsMock(...args),
-  updateRuntimeFlag: vi.fn(),
+  updateRuntimeFlag: (...args: unknown[]) => updateRuntimeFlagMock(...args),
 }));
 
 beforeEach(() => {
   fetchRuntimeFlagsMock.mockReset();
+  updateRuntimeFlagMock.mockReset();
   toastMock.mockReset();
+  saveContributor = null;
 });
 
 afterEach(() => {
@@ -41,6 +62,36 @@ afterEach(() => {
 });
 
 describe("FeatureTogglesSettings", () => {
+  it("stages an override until the route save contributor runs", async () => {
+    const initial = flagState({
+      override_value: null,
+      effective_value: false,
+      source: "default",
+      requires_restart_to_apply: false,
+    });
+    const persisted = flagState({ override_value: true, effective_value: true });
+    updateRuntimeFlagMock.mockResolvedValueOnce({ flags: [persisted] });
+
+    render(
+      <TooltipProvider>
+        <FeatureTogglesSettings initialFlags={[initial]} restartCapability={null} />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: `Toggle ${DEBUG_MODE_LABEL}` }));
+
+    expect(updateRuntimeFlagMock).not.toHaveBeenCalled();
+    expect(saveContributor?.isDirty).toBe(true);
+    expect(
+      screen.getByTestId(`feature-toggle-${initial.key}`).getAttribute("data-settings-dirty"),
+    ).toBe("true");
+    if (!saveContributor) throw new Error("Save contributor was not registered");
+
+    await saveContributor.save(saveContributor.revision);
+
+    expect(updateRuntimeFlagMock).toHaveBeenCalledWith(initial.key, true);
+  });
+
   it("shows restart support details without offering restart when unsupported", () => {
     render(
       <TooltipProvider>
@@ -76,7 +127,9 @@ describe("FeatureTogglesSettings", () => {
     expect(await screen.findByText(DEBUG_MODE_LABEL)).not.toBeNull();
     expect(screen.queryByText(FEATURE_TOGGLES_LOAD_FAILURE)).toBeNull();
   });
+});
 
+describe("FeatureTogglesSettings bootstrap reload", () => {
   it("shows a loading state while the empty initial runtime flags payload reloads", async () => {
     let resolveFlags: (value: { flags: RuntimeFlagState[] }) => void = () => {};
     fetchRuntimeFlagsMock.mockReturnValueOnce(

@@ -43,6 +43,7 @@ type Analysis struct {
 	Available             bool     `json:"available"`
 	ManagedContainerCount int      `json:"managed_container_count"`
 	ManagedContainerBytes int64    `json:"managed_container_bytes"`
+	ImageLayerBytes       int64    `json:"image_layer_bytes"`
 	BuildCacheBytes       int64    `json:"build_cache_bytes"`
 	UnusedImageBytes      int64    `json:"unused_image_bytes"`
 	Warnings              []string `json:"warnings"`
@@ -96,6 +97,7 @@ func (p *Provider) Analyze(ctx context.Context) Analysis {
 		Available:             true,
 		ManagedContainerCount: managedCount,
 		ManagedContainerBytes: managedBytes,
+		ImageLayerBytes:       usage.ImageLayerBytes,
 		BuildCacheBytes:       usage.BuildCacheBytes,
 		UnusedImageBytes:      unusedImageBytes(usage.Images, cutoff),
 	}

@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type {
   Agent,
   AgentDiscovery,
@@ -86,7 +87,7 @@ function useAgentFormState(
   availableAgents: AvailableAgent[],
 ) {
   const [draftAgent, setDraftAgent] = useState<DraftAgent>(initialAgent);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [_saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
 
   const resolveDisplayName = (name: string) =>
     availableAgents.find((item: AvailableAgent) => item.name === name)?.display_name ?? "";
@@ -125,6 +126,7 @@ function useAgentFormState(
     if (draftAgent.profiles.length !== savedAgent.profiles.length) return true;
     const savedProfiles = new Map(savedAgent.profiles.map((p) => [p.id, p]));
     for (const profile of draftAgent.profiles) {
+      if (profile.mcp_config?.dirty) return true;
       if (!savedProfiles.has(profile.id) || isProfileDirty(profile, savedProfiles.get(profile.id)))
         return true;
     }
@@ -134,7 +136,6 @@ function useAgentFormState(
   return {
     draftAgent,
     setDraftAgent,
-    saveStatus,
     setSaveStatus,
     resolveDisplayName,
     currentAgentModelConfig,
@@ -185,7 +186,7 @@ type AgentSaveHandlersProps = {
   currentAgentModelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   resolveDisplayName: (name: string) => string;
-  setDraftAgent: (agent: DraftAgent) => void;
+  setDraftAgent: (agent: DraftAgent | ((current: DraftAgent) => DraftAgent)) => void;
   setSaveStatus: (status: "idle" | "loading" | "success" | "error") => void;
   upsertAgent: (agent: Agent) => void;
   onToastError: (error: unknown) => void;
@@ -232,15 +233,18 @@ function useAgentSaveHandlers({
       replaceRoute,
     };
     try {
+      let savedDraft: DraftAgent;
       if (!savedAgent) {
-        await saveNewAgent(draftAgent, callbacks);
+        savedDraft = await saveNewAgent(draftAgent, callbacks);
       } else {
-        await saveExistingAgent(draftAgent, savedAgent, isCreateMode, callbacks);
+        savedDraft = await saveExistingAgent(draftAgent, savedAgent, isCreateMode, callbacks);
       }
       setSaveStatus("success");
+      return savedDraft;
     } catch (error) {
       setSaveStatus("error");
       onToastError(error);
+      throw error;
     }
   };
 
@@ -345,6 +349,17 @@ function useProfileHandlers(
   };
 }
 
+function areAgentProfilesValid(agent: DraftAgent): boolean {
+  return agent.profiles.every((profile) => profile.name.trim() && profile.model.trim());
+}
+
+function useAgentSaveRevision(agent: DraftAgent) {
+  const revision = JSON.stringify(agent);
+  const initial = agent.profiles.some((profile) => profile.mcp_config?.dirty) ? "" : revision;
+  const [saved, setSaved] = useState(initial);
+  return { revision, saved, setSaved };
+}
+
 function AgentSetupForm({
   initialAgent,
   savedAgent,
@@ -359,7 +374,6 @@ function AgentSetupForm({
   const {
     draftAgent,
     setDraftAgent,
-    saveStatus,
     setSaveStatus,
     resolveDisplayName,
     currentAgentModelConfig,
@@ -396,6 +410,24 @@ function AgentSetupForm({
     onToastError,
     replaceRoute: (path: string) => router.replace(path),
   });
+  const saveRevision = useAgentSaveRevision(draftAgent);
+  const handleCoordinatedSave = async () => {
+    const savedDraft = await handleSave();
+    if (savedDraft) saveRevision.setSaved(JSON.stringify(savedDraft));
+  };
+  const profilesValid = areAgentProfilesValid(draftAgent);
+  let saveInvalidReason: string | undefined;
+  if (!profilesValid) saveInvalidReason = "Every profile needs a name and model.";
+  else if (hasInvalidMcpConfig) saveInvalidReason = "Fix invalid MCP configuration before saving.";
+  useSettingsSaveContributor({
+    id: `agent:${draftAgent.id}`,
+    revision: saveRevision.revision,
+    isDirty: isCreateMode ? isAgentDirty : saveRevision.revision !== saveRevision.saved,
+    canSave: profilesValid && !hasInvalidMcpConfig,
+    invalidReason: saveInvalidReason,
+    save: handleCoordinatedSave,
+    discard: () => undefined,
+  });
 
   const displayName = draftAgent.profiles[0]?.agentDisplayName ?? draftAgent.name;
 
@@ -414,18 +446,16 @@ function AgentSetupForm({
         isCreateMode={isCreateMode}
         isAgentDirty={isAgentDirty}
         draftAgent={draftAgent}
+        savedAgent={savedAgent}
         newProfileId={newProfileId}
         currentAgentModelConfig={currentAgentModelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
-        saveStatus={saveStatus}
-        hasInvalidMcpConfig={hasInvalidMcpConfig}
         onAddProfile={handleAddProfile}
         onProfileChange={handleProfileChange}
         onProfileMcpChange={handleProfileMcpChange}
         onRemoveProfile={handleRemoveProfile}
         onToastError={onToastError}
-        onSave={handleSave}
       />
     </div>
   );

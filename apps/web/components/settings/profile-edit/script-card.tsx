@@ -1,14 +1,16 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
+import { SettingsCard } from "@/components/settings/settings-card";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
 
 type ScriptCardProps = {
   title: string;
   description: string;
   value: string;
+  baselineValue?: string;
   onChange: (v: string) => void;
   height?: string;
   placeholders: ScriptPlaceholder[];
@@ -19,6 +21,7 @@ export function ScriptCard({
   title,
   description,
   value,
+  baselineValue,
   onChange,
   height = "300px",
   placeholders,
@@ -40,8 +43,10 @@ export function ScriptCard({
     return () => observer.disconnect();
   }, []);
 
+  const isDirty = baselineValue !== undefined && value !== baselineValue;
+
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
@@ -50,6 +55,8 @@ export function ScriptCard({
         <div
           ref={containerRef}
           className="overflow-hidden rounded-md border resize-y"
+          data-settings-dirty={isDirty}
+          data-settings-dirty-level="container"
           style={{ height, minHeight: "120px", maxHeight: "80vh" }}
         >
           <ScriptEditor
@@ -61,6 +68,6 @@ export function ScriptCard({
           />
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }

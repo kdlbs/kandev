@@ -4,6 +4,11 @@ import { renderHook } from "@testing-library/react";
 const mockOpenSessionInEditor = vi.fn();
 const mockOpenFileInVscode = vi.fn();
 const mockOpenInternalVscode = vi.fn();
+const mockToast = vi.fn();
+
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: mockToast }),
+}));
 
 vi.mock("@/lib/api", () => ({
   openSessionInEditor: (...args: unknown[]) => mockOpenSessionInEditor(...args),
@@ -62,5 +67,18 @@ describe("useOpenSessionInEditor", () => {
     await result.current.open({ editorId: "editor-1", worktreeId: "wt-2" });
 
     expect(mockOpenSessionInEditor).not.toHaveBeenCalled();
+  });
+
+  it("reports editor API failures instead of leaving the button silently idle", async () => {
+    mockOpenSessionInEditor.mockRejectedValueOnce(new Error("workspace path not found"));
+    const { result } = renderHook(() => useOpenSessionInEditor("session-1"));
+
+    await expect(result.current.open({ editorId: "editor-1" })).resolves.toBeNull();
+
+    expect(mockToast).toHaveBeenCalledWith({
+      title: "Failed to open editor",
+      description: "workspace path not found",
+      variant: "error",
+    });
   });
 });

@@ -14,6 +14,7 @@ import type {
   SidebarViewDraftApi,
   SidebarTaskPrefsApi,
   TaskCreateLastUsedApi,
+  MCPTaskAgentProfileDefault,
   TaskPendingAction,
   TaskSessionState,
   StepEvents,
@@ -341,6 +342,7 @@ export type UserSettingsUpdatedPayload = {
   chat_submit_key?: string;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
+  mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
   lsp_auto_start_languages?: string[];

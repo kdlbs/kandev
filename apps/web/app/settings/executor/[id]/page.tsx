@@ -21,6 +21,8 @@ import { updateExecutorAction, deleteExecutorAction } from "@/app/actions/execut
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
 import { ExecutorProfilesCard } from "@/components/settings/executor-profiles-card";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type { Executor, ExecutorType } from "@/lib/types/http";
 import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
 
@@ -86,10 +88,12 @@ function McpPresetButton({ label, onClick }: { label: string; onClick: () => voi
 
 function McpPolicyCard({
   mcpPolicy,
+  isDirty,
   mcpPolicyError,
   onPolicyChange,
 }: {
   mcpPolicy: string;
+  isDirty: boolean;
   mcpPolicyError: string | null;
   onPolicyChange: (value: string) => void;
 }) {
@@ -100,7 +104,7 @@ function McpPolicyCard({
   };
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           MCP Policy
@@ -115,6 +119,7 @@ function McpPolicyCard({
         <Textarea
           id="mcp-policy"
           value={mcpPolicy}
+          data-settings-dirty={isDirty}
           onChange={(event) => onPolicyChange(event.target.value)}
           placeholder='{"allow_stdio":true,"allow_http":true}'
           rows={8}
@@ -168,7 +173,7 @@ function McpPolicyCard({
           />
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -278,7 +283,6 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
   const setExecutors = useAppStore((state) => state.setExecutors);
   const [mcpPolicy, setMcpPolicy] = useState(executor.config?.mcp_policy ?? "");
   const [savedMcpPolicy, setSavedMcpPolicy] = useState(executor.config?.mcp_policy ?? "");
-  const [isSaving, setIsSaving] = useState(false);
 
   const isSystem = executor.is_system ?? false;
   const ExecutorIcon = EXECUTOR_ICON_MAP[executor.type] ?? EXECUTOR_ICON_MAP.local;
@@ -286,24 +290,26 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
   const isDirty = mcpPolicy !== savedMcpPolicy;
 
   const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      const config = { ...(executor.config ?? {}), mcp_policy: mcpPolicy };
-      const payload = isSystem ? { config } : { name: executor.name, config };
-      const client = getWebSocketClient();
-      const updated = client
-        ? await client.request<Executor>("executor.update", { id: executor.id, ...payload })
-        : await updateExecutorAction(executor.id, payload);
-      setSavedMcpPolicy(updated.config?.mcp_policy ?? "");
-      setExecutors(
-        executors.map((item: Executor) =>
-          item.id === updated.id ? { ...item, ...updated } : item,
-        ),
-      );
-    } finally {
-      setIsSaving(false);
-    }
+    const config = { ...(executor.config ?? {}), mcp_policy: mcpPolicy };
+    const payload = isSystem ? { config } : { name: executor.name, config };
+    const client = getWebSocketClient();
+    const updated = client
+      ? await client.request<Executor>("executor.update", { id: executor.id, ...payload })
+      : await updateExecutorAction(executor.id, payload);
+    setSavedMcpPolicy(updated.config?.mcp_policy ?? "");
+    setExecutors(
+      executors.map((item: Executor) => (item.id === updated.id ? { ...item, ...updated } : item)),
+    );
   };
+  useSettingsSaveContributor({
+    id: `executor:${executor.id}`,
+    revision: mcpPolicy,
+    isDirty,
+    canSave: !mcpPolicyError,
+    invalidReason: mcpPolicyError ?? undefined,
+    save: handleSave,
+    discard: () => setMcpPolicy(savedMcpPolicy),
+  });
 
   return (
     <div className="space-y-8">
@@ -332,28 +338,10 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
 
       <McpPolicyCard
         mcpPolicy={mcpPolicy}
+        isDirty={isDirty}
         mcpPolicyError={mcpPolicyError}
         onPolicyChange={setMcpPolicy}
       />
-
-      {isDirty && (
-        <div className="flex items-center justify-end gap-2">
-          <Button
-            variant="outline"
-            onClick={() => setMcpPolicy(savedMcpPolicy)}
-            className="cursor-pointer"
-          >
-            Discard
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={Boolean(mcpPolicyError) || isSaving}
-            className="cursor-pointer"
-          >
-            {isSaving ? "Saving..." : "Save Changes"}
-          </Button>
-        </div>
-      )}
 
       {!isSystem && <DeleteExecutorSection executor={executor} />}
     </div>

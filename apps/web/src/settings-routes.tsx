@@ -40,6 +40,7 @@ import {
   TaskActionsSettings,
 } from "@/components/settings/general-settings";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
+import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
 import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
@@ -129,6 +130,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   ),
   "/settings/general/editors": () => <EditorsSettings />,
   "/settings/general/keyboard-shortcuts": () => <KeyboardShortcutsSettings />,
+  "/settings/general/layouts": () => <LayoutSettings />,
   "/settings/general/notifications": () => <NotificationsSettings />,
   "/settings/general/resource-metrics": () => (
     <SettingsRedirect to="/settings/general/appearance" />
@@ -357,7 +359,7 @@ function renderWorkspaceSettingsRoute(pathname: string) {
     if (section === "workflows") {
       return <WorkspaceWorkflowsRoute workspaceId={id} />;
     }
-    return <AutomationsPage params={Promise.resolve({ id })} />;
+    return <AutomationsPage workspaceId={id} />;
   }
 
   const workspaceId = matchSingle(pathname, /^\/settings\/workspace\/([^/]+)$/);

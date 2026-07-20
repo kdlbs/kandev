@@ -8,10 +8,16 @@ import type { Repository } from "@/lib/types/http";
 type CopyFilesFieldProps = {
   repositoryId: string;
   copyFiles: string;
+  isDirty?: boolean;
   onUpdate: (repoId: string, updates: Partial<Repository>) => void;
 };
 
-export function CopyFilesField({ repositoryId, copyFiles, onUpdate }: CopyFilesFieldProps) {
+export function CopyFilesField({
+  repositoryId,
+  copyFiles,
+  isDirty = false,
+  onUpdate,
+}: CopyFilesFieldProps) {
   const inputId = `copy-files-${repositoryId}`;
   const helpId = `copy-files-help-${repositoryId}`;
   return (
@@ -26,6 +32,7 @@ export function CopyFilesField({ repositoryId, copyFiles, onUpdate }: CopyFilesF
         placeholder=".env, .env.*, apps/**/.env, .env.local:symlink"
         rows={2}
         className="font-mono text-sm"
+        data-settings-dirty={isDirty}
       />
       <p id={helpId} className="text-xs text-muted-foreground">
         Gitignored paths copied into new worktrees. Append{" "}

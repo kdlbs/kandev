@@ -28,12 +28,69 @@ test.describe("Workflow settings on mobile", () => {
     await childCompletionSelect.click();
     await testPage.getByRole("option", { name: "Move to next step" }).click();
 
-    await page.saveButton(card).click();
-    await expect
-      .poll(async () => {
-        const { steps } = await apiClient.listWorkflowSteps(workflow.id);
-        return steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed;
-      })
-      .toEqual([{ type: "move_to_next" }]);
+    const beforeSave = await apiClient.listWorkflowSteps(workflow.id);
+    expect(
+      beforeSave.steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed,
+    ).toBeUndefined();
+
+    const floatingSave = page.floatingSave;
+    await expect(floatingSave).toBeVisible();
+    const saveButton = floatingSave.getByRole("button", { name: "Save changes" });
+    const saveBox = await saveButton.boundingBox();
+    expect(saveBox).not.toBeNull();
+    expect(saveBox!.height).toBeGreaterThanOrEqual(44);
+    await page.saveChanges();
+    const afterSave = await apiClient.listWorkflowSteps(workflow.id);
+    expect(
+      afterSave.steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed,
+    ).toEqual([{ type: "move_to_next" }]);
+
+    const viewportWidth = await testPage.evaluate(() => window.innerWidth);
+    const editorControls = [
+      card.getByPlaceholder("Step name"),
+      childCompletionSelect,
+      card.getByRole("button", { name: "Delete", exact: true }),
+    ];
+    for (const control of editorControls) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth);
+    }
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+  });
+
+  test("keeps workflow controls within the mobile viewport", async ({ testPage, seedData }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard("E2E Workflow");
+    const nameInput = card.locator("input").first();
+    await nameInput.fill("Mobile Workflow Draft");
+    await expect(page.floatingSave).toBeVisible();
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
+    await expect(card).toHaveAttribute("data-settings-dirty", "true");
+
+    const viewportWidth = await testPage.evaluate(() => window.innerWidth);
+    const controls = [
+      page.addWorkflowButton,
+      card.locator("input").first(),
+      page.workflowAgentProfileSelect(card),
+      page.deleteWorkflowButton(card),
+      page.floatingSave.getByRole("button", { name: "Save changes" }),
+    ];
+    for (const control of controls) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth);
+    }
+
+    const hasDocumentOverflow = await testPage.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    );
+    expect(hasDocumentOverflow).toBe(false);
   });
 });

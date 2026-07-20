@@ -13,13 +13,16 @@ import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import type { QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { Repository } from "@/lib/types/http";
+import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
+import { ConfigurationChatToggle } from "./configuration-chat-toggle";
 
 type QuickChatSetupProps = {
   workspaceId: string;
-  showIntroduction: boolean;
+  canCreateConfigurationChat: boolean;
   pendingAgentId: string | null;
   onStart: (agentId: string, repositories: QuickChatRepositoryInput[]) => void;
   onCancel: () => void;
+  onKindChange: (kind: QuickChatSessionKind) => void;
 };
 
 function repositoryAddState(isLoading: boolean, repositoryCount: number, rowCount: number) {
@@ -33,8 +36,7 @@ function repositoryAddState(isLoading: boolean, repositoryCount: number, rowCoun
   return { canAddMore: true, addHint: undefined };
 }
 
-function QuickChatIntroduction({ show }: { show: boolean }) {
-  if (!show) return null;
+function QuickChatIntroduction() {
   return (
     <div className="space-y-1" data-testid="quick-chat-introduction">
       <p className="text-sm text-foreground">
@@ -183,10 +185,11 @@ function SetupFooter({
 
 export function QuickChatSetup({
   workspaceId,
-  showIntroduction,
+  canCreateConfigurationChat,
   pendingAgentId,
   onStart,
   onCancel,
+  onKindChange,
 }: QuickChatSetupProps) {
   const agentProfiles = useAppStore((state) => state.agentProfiles.items ?? []);
   const defaultAgentId = useAppStore(
@@ -232,8 +235,15 @@ export function QuickChatSetup({
         <div className="mx-auto w-full max-w-2xl space-y-7">
           <header className="space-y-1">
             <h2 className="text-lg font-semibold">Quick Chat</h2>
-            <QuickChatIntroduction show={showIntroduction} />
+            <QuickChatIntroduction />
           </header>
+          {canCreateConfigurationChat && (
+            <ConfigurationChatToggle
+              checked={false}
+              disabled={isStarting}
+              onCheckedChange={(checked) => checked && onKindChange("config")}
+            />
+          )}
           <AgentField
             profiles={agentProfiles}
             value={agentProfileId}

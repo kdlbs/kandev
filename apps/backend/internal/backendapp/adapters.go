@@ -67,6 +67,15 @@ func (a *taskRepositoryAdapter) UpdateTaskStateIfNotArchived(
 	return a.svc.UpdateTaskStateIfNotArchived(ctx, taskID, state)
 }
 
+func (a *taskRepositoryAdapter) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	return a.svc.UpdateTaskStateIfSessionState(ctx, taskID, sessionID, expectedSessionState, state)
+}
+
 // lifecycleAdapter adapts the lifecycle manager as an AgentManagerClient
 type lifecycleAdapter struct {
 	mgr      *lifecycle.Manager
@@ -496,6 +505,8 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		AgentID:                    info.AgentID,
 		AgentName:                  info.AgentName,
 		Model:                      info.Model,
+		Mode:                       info.Mode,
+		ConfigOptions:              info.ConfigOptions,
 		AutoApprove:                info.AutoApprove,
 		DangerouslySkipPermissions: info.DangerouslySkipPermissions,
 		CLIPassthrough:             info.CLIPassthrough,

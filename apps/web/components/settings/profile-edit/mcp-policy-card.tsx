@@ -1,8 +1,9 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
+import { SettingsCard } from "@/components/settings/settings-card";
 
 function parseMcpPolicyJson(currentPolicy: string | undefined): Record<string, unknown> {
   try {
@@ -42,11 +43,18 @@ export function validateMcpPolicy(value: string | undefined): string | null {
 
 type McpPolicyCardProps = {
   mcpPolicy: string;
+  baselinePolicy?: string;
   mcpPolicyError: string | null;
   onPolicyChange: (value: string) => void;
 };
 
-export function McpPolicyCard({ mcpPolicy, mcpPolicyError, onPolicyChange }: McpPolicyCardProps) {
+export function McpPolicyCard({
+  mcpPolicy,
+  baselinePolicy,
+  mcpPolicyError,
+  onPolicyChange,
+}: McpPolicyCardProps) {
+  const isDirty = baselinePolicy !== undefined && mcpPolicy !== baselinePolicy;
   const applyPreset = (updater: (parsed: Record<string, unknown>) => Record<string, unknown>) => {
     const parsed = parseMcpPolicyJson(mcpPolicy);
     const next = updater(parsed);
@@ -54,7 +62,7 @@ export function McpPolicyCard({ mcpPolicy, mcpPolicyError, onPolicyChange }: Mcp
   };
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           MCP Policy
@@ -72,6 +80,7 @@ export function McpPolicyCard({ mcpPolicy, mcpPolicyError, onPolicyChange }: Mcp
           onChange={(event) => onPolicyChange(event.target.value)}
           placeholder='{"allow_stdio":true,"allow_http":true}'
           rows={8}
+          data-settings-dirty={isDirty}
         />
         {mcpPolicyError && <p className="text-xs text-destructive">{mcpPolicyError}</p>}
         <div className="flex flex-wrap items-center gap-2">
@@ -122,6 +131,6 @@ export function McpPolicyCard({ mcpPolicy, mcpPolicyError, onPolicyChange }: Mcp
           />
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }

@@ -36,11 +36,19 @@ type WorktreeBatchCleaner interface {
 	CleanupWorktrees(ctx context.Context, worktrees []*worktree.Worktree) error
 }
 
+type worktreeReferenceGuard interface {
+	CountActiveWorktreeReferences(ctx context.Context, worktreeID string, excludeSessionIDs []string) (int, error)
+	ReleaseWorktreeReference(ctx context.Context, wt *worktree.Worktree) error
+}
+
 // TaskExecutionStopper stops active task execution (agent session + instance).
 type TaskExecutionStopper interface {
 	StopTask(ctx context.Context, taskID, reason string, force bool) error
 	StopSession(ctx context.Context, sessionID, reason string, force bool) error
 	StopExecution(ctx context.Context, executionID, reason string, force bool) error
+	// RegisterExecutionStopOwner records exact teardown ownership before a
+	// terminal session mutation. It never replaces the explicit stop call.
+	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
 }
 
 // TaskResourceCleanupActivityGate serializes durable cleanup with install-wide maintenance.

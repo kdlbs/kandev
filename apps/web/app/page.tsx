@@ -73,6 +73,7 @@ function mapQuickChatSessions(tasks: QuickChatTask[]): AppState["quickChat"]["se
       // sorts by max(task/session updated_at) and is the authoritative SPA path.
       .sort((a, b) => quickChatUpdatedAt(b) - quickChatUpdatedAt(a))
       .map((task) => ({
+        kind: "chat" as const,
         sessionId: task.primary_session_id!,
         workspaceId: task.workspace_id,
         name: task.title !== "Quick Chat" ? task.title : undefined,

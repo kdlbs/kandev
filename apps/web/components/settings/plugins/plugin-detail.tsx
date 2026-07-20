@@ -3,14 +3,16 @@
 import { IconArrowLeft } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { PluginConfigForm } from "./plugin-config-form";
 import { PluginManifestCard } from "./plugin-manifest-card";
+import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
 import { UninstallPluginDialog } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
@@ -32,6 +34,15 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
   const actions = usePluginActions();
   const plugin = items.find((p) => p.id === pluginId) ?? null;
   const form = usePluginConfigForm(plugin);
+  useSettingsSaveContributor({
+    id: `plugin-config:${pluginId}`,
+    revision: form.revision,
+    isDirty: form.isDirty,
+    canSave: form.canSave,
+    invalidReason: form.invalidReason,
+    save: form.handleSave,
+    discard: form.discard,
+  });
 
   if (!plugin) {
     return loaded ? <PluginNotFound pluginId={pluginId} /> : null;
@@ -39,13 +50,7 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
 
   return (
     <div className="space-y-6" data-testid={`plugin-detail-${plugin.id}`}>
-      <PluginDetailHeader
-        plugin={plugin}
-        showSave={form.fields.length > 0}
-        isDirty={form.isDirty}
-        saveStatus={form.saveStatus}
-        onSave={form.handleSave}
-      />
+      <PluginDetailHeader plugin={plugin} />
       <Separator />
 
       <PluginSettingsCard plugin={plugin} form={form} busy={actions.busyId === plugin.id} />
@@ -67,19 +72,9 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
 
 type PluginDetailHeaderProps = {
   plugin: PluginRecord;
-  showSave: boolean;
-  isDirty: boolean;
-  saveStatus: "idle" | "loading" | "success" | "error";
-  onSave: () => void;
 };
 
-function PluginDetailHeader({
-  plugin,
-  showSave,
-  isDirty,
-  saveStatus,
-  onSave,
-}: PluginDetailHeaderProps) {
+function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
   return (
     <div className="space-y-3">
       <Link
@@ -103,24 +98,16 @@ function PluginDetailHeader({
               </Badge>
             )}
           </div>
-          <div className="text-xs text-muted-foreground font-mono">
-            {plugin.id} · v{plugin.version}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span className="font-mono">
+              {plugin.id} · v{plugin.version}
+            </span>
+            <PluginRepoLink url={plugin.repo_url} />
           </div>
           {plugin.description && (
             <p className="text-sm text-muted-foreground">{plugin.description}</p>
           )}
         </div>
-        {showSave && (
-          <div className="flex items-center gap-3 shrink-0">
-            {isDirty && <UnsavedChangesBadge />}
-            <UnsavedSaveButton
-              isDirty={isDirty}
-              isLoading={saveStatus === "loading"}
-              status={saveStatus}
-              onClick={onSave}
-            />
-          </div>
-        )}
       </div>
     </div>
   );
@@ -134,14 +121,14 @@ type PluginSettingsCardProps = {
 
 function PluginSettingsCard({ plugin, form, busy }: PluginSettingsCardProps) {
   return (
-    <Card data-testid="plugin-settings-card">
+    <SettingsCard isDirty={form.isDirty} data-testid="plugin-settings-card">
       <CardHeader>
         <CardTitle className="text-base">Settings</CardTitle>
       </CardHeader>
       <CardContent>
         <PluginSettingsBody plugin={plugin} form={form} busy={busy} />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -164,6 +151,7 @@ function PluginSettingsBody({ plugin, form, busy }: PluginSettingsCardProps) {
       <PluginConfigForm
         fields={form.fields}
         values={form.values}
+        initialValues={form.initialValues}
         disabled={busy || form.saveStatus === "loading"}
         onChange={form.handleChange}
       />

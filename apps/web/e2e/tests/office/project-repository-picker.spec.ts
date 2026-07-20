@@ -1,6 +1,8 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/office-fixture";
+import { makeGitEnv } from "../../helpers/git-helper";
 
 /**
  * Project page — repository picker (chip-style, popover-driven).
@@ -110,6 +112,9 @@ test.describe("Project repository picker", () => {
     // we'll type — the classic /work/app vs /work/app-old overlap.
     const oldPath = path.join(backend.tmpDir, "repos", "app-old");
     fs.mkdirSync(oldPath, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: oldPath, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: oldPath, env: gitEnv });
     await apiClient.createRepository(officeSeed.workspaceId, oldPath, "main", { name: "app-old" });
 
     await testPage.goto(`/office/projects/${projectId}`);

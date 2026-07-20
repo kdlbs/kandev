@@ -16,6 +16,22 @@ type Manifest struct {
 	Author      string   `yaml:"author" json:"author"`
 	Categories  []string `yaml:"categories" json:"categories"`
 
+	// Icon is an optional package-relative path (e.g. "icon.svg") to an
+	// image the plugin ships for display in the marketplace and plugin
+	// lists. The registry index-build resolves it to an absolute icon_url;
+	// for an installed plugin it is served from the extracted package.
+	Icon string `yaml:"icon,omitempty" json:"icon,omitempty"`
+
+	// RepoURL is an optional URL to the plugin's source repository (e.g.
+	// "https://github.com/owner/plugin"). kandev renders it as a "Repo" link
+	// in the installed-plugin list and detail. Unlike the marketplace
+	// catalog's repo_url — which the registry index-build derives from
+	// plugins.yaml — this is author-declared in the manifest, so sideloaded
+	// and directly-installed plugins carry the link too. When set it must be
+	// an http(s) URL (see Validate); the frontend href guard is enforced here
+	// as well so a bad scheme fails registration rather than reaching the UI.
+	RepoURL string `yaml:"repo_url,omitempty" json:"repo_url,omitempty"`
+
 	BaseURL string `yaml:"base_url" json:"base_url"`
 
 	Endpoints    Endpoints    `yaml:"endpoints" json:"endpoints"`

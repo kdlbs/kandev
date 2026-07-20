@@ -58,6 +58,12 @@ test.describe("Workflow cycle guardrails", () => {
     await settings.setTurnCompleteTransition(card, "Review", "Move to previous step");
     await dialog.getByRole("button", { name: "Apply anyway" }).click();
     await expect(dialog).not.toBeVisible();
+    persistedSteps = await apiClient.listWorkflowSteps(workflow.id);
+    expect(
+      persistedSteps.steps.find((step) => step.id === review.id)?.events?.on_turn_complete,
+    ).toBeFalsy();
+
+    await settings.saveChanges();
     await expect
       .poll(async () => {
         persistedSteps = await apiClient.listWorkflowSteps(workflow.id);
@@ -88,7 +94,7 @@ test.describe("Workflow cycle guardrails", () => {
     await settings.setTurnCompleteTransition(card, "Todo", "Move to next step");
     await settings.setAutoStart(card, "In Progress", true);
     await settings.setTurnCompleteTransition(card, "In Progress", "Move to previous step");
-    await settings.saveButton(card).click();
+    await settings.submitSaveChanges();
 
     const dialog = settings.cycleGuardDialog;
     await expect(dialog.getByRole("heading", { name: "Workflow cycle blocked" })).toBeVisible();
@@ -114,7 +120,7 @@ test.describe("Workflow cycle guardrails", () => {
     await settings.setTurnCompleteTransition(card, "Todo", "Move to next step");
     await settings.setTurnCompleteTransition(card, "In Progress", "Move to previous step");
     await expect(card.locator('[data-testid^="workflow-cycle-diagnostic-"]')).toHaveCount(0);
-    await settings.saveButton(card).click();
+    await settings.submitSaveChanges();
 
     await expect(settings.cycleGuardDialog).not.toBeVisible();
     await expect

@@ -154,6 +154,7 @@ func (o *storageOverview) Summary(ctx context.Context) (storagepkg.Summary, erro
 		Quarantine: summaryValue(quarantineSummary, quarantineErr),
 		Docker: map[string]any{
 			"available": dockerSummary.Available, "build_cache_bytes": dockerSummary.BuildCacheBytes,
+			"image_layer_bytes":  dockerSummary.ImageLayerBytes,
 			"unused_image_bytes": dockerSummary.UnusedImageBytes, "warnings": dockerSummary.Warnings,
 			"managed_container_count": dockerSummary.ManagedContainerCount,
 			"managed_container_bytes": dockerSummary.ManagedContainerBytes,

@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ type mockAgentManager struct {
 	launchAgentFunc                  func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
 	startAgentProcessFunc            func(ctx context.Context, agentExecutionID string) error
 	stopAgentFunc                    func(ctx context.Context, agentExecutionID string, force bool) error
+	stopAgentWithReasonFunc          func(ctx context.Context, agentExecutionID string, reason string, force bool) error
 	resolveAgentProfileFunc          func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
 	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
@@ -94,6 +96,9 @@ func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID strin
 }
 
 func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID string, reason string, force bool) error {
+	if m.stopAgentWithReasonFunc != nil {
+		return m.stopAgentWithReasonFunc(ctx, agentExecutionID, reason, force)
+	}
 	return m.StopAgent(ctx, agentExecutionID, force)
 }
 
@@ -256,8 +261,10 @@ type mockRepository struct {
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
-	getTaskSessionFunc    func(ctx context.Context, id string) (*models.TaskSession, error)
-	createTaskSessionFunc func(ctx context.Context, session *models.TaskSession) error
+	getTaskSessionFunc                 func(ctx context.Context, id string) (*models.TaskSession, error)
+	createTaskSessionFunc              func(ctx context.Context, session *models.TaskSession) error
+	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
+	listActiveTaskSessionsByTaskIDFunc func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	// Optional hook invoked at the top of UpdateTaskStateIfCurrentIn, before
 	// it reads task state/archived_at. Lets tests simulate the exact TOCTOU
 	// window this CAS closes: an earlier (non-transactional) archived-state
@@ -365,7 +372,9 @@ func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if session, ok := m.sessions[id]; ok {
-		return session, nil
+		// SQLite scans each query into a fresh value. Match that ownership
+		// boundary so concurrent executor paths cannot share mutable rows.
+		return cloneMockTaskSession(session), nil
 	}
 	return nil, nil
 }
@@ -378,6 +387,82 @@ func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.
 	return nil
 }
 
+func (m *mockRepository) UpdateTaskSessionIfCurrentState(
+	_ context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.sessions[session.ID]
+	if !ok {
+		return false, models.ErrTaskSessionNotFound
+	}
+	if current.State != expected {
+		return false, nil
+	}
+	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
+	m.sessions[session.ID] = session
+	return true, nil
+}
+
+func cloneMockTaskSession(session *models.TaskSession) *models.TaskSession {
+	if session == nil {
+		return nil
+	}
+	clone := *session
+	clone.Metadata = cloneMockSessionMap(session.Metadata)
+	clone.AgentProfileSnapshot = cloneMockSessionMap(session.AgentProfileSnapshot)
+	clone.ExecutorSnapshot = cloneMockSessionMap(session.ExecutorSnapshot)
+	clone.EnvironmentSnapshot = cloneMockSessionMap(session.EnvironmentSnapshot)
+	clone.RepositorySnapshot = cloneMockSessionMap(session.RepositorySnapshot)
+	if session.Worktrees != nil {
+		clone.Worktrees = make([]*models.TaskSessionWorktree, len(session.Worktrees))
+		for i, worktree := range session.Worktrees {
+			if worktree == nil {
+				continue
+			}
+			worktreeClone := *worktree
+			clone.Worktrees[i] = &worktreeClone
+		}
+	}
+	if session.CompletedAt != nil {
+		completedAt := *session.CompletedAt
+		clone.CompletedAt = &completedAt
+	}
+	return &clone
+}
+
+func cloneMockSessionMap(values map[string]interface{}) map[string]interface{} {
+	if values == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		panic(fmt.Sprintf("marshal mock task session map: %v", err))
+	}
+	var clone map[string]interface{}
+	if err := json.Unmarshal(encoded, &clone); err != nil {
+		panic(fmt.Sprintf("unmarshal mock task session map: %v", err))
+	}
+	return clone
+}
+
+func (m *mockRepository) UpdateTaskSessionAgentProfileSnapshot(
+	_ context.Context,
+	sessionID string,
+	snapshot map[string]interface{},
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session, ok := m.sessions[sessionID]
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.AgentProfileSnapshot = snapshot
+	return nil
+}
+
 func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -386,6 +471,12 @@ func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string
 }
 
 func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error {
+	m.mu.Lock()
+	fn := m.updateTaskSessionStateFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, sessionID, state, errorMessage)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if session, ok := m.sessions[sessionID]; ok {
@@ -694,6 +785,12 @@ func (m *mockRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.
 	return nil, nil
 }
 func (m *mockRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	m.mu.Lock()
+	fn := m.listActiveTaskSessionsByTaskIDFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, taskID)
+	}
 	return nil, nil
 }
 func (m *mockRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {

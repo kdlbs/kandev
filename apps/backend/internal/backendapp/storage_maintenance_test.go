@@ -42,7 +42,7 @@ func TestStorageOverviewIncludesQuarantineAndManagedContainers(t *testing.T) {
 		t.Fatalf("CreateQuarantineEntry: %v", err)
 	}
 	docker := dockerstore.NewProvider(
-		&overviewDockerClient{usage: agentdocker.DiskUsage{Containers: []agentdocker.ContainerUsage{
+		&overviewDockerClient{usage: agentdocker.DiskUsage{ImageLayerBytes: 128, Containers: []agentdocker.ContainerUsage{
 			{ID: "managed", WritableBytes: 64, Labels: map[string]string{"kandev.managed": "true"}},
 		}}},
 		overviewContainerInventory{}, settings,
@@ -72,7 +72,9 @@ func TestStorageOverviewIncludesQuarantineAndManagedContainers(t *testing.T) {
 		t.Fatalf("quarantine summary = %#v", summary.Quarantine)
 	}
 	dockerSummary, ok := summary.Docker.(map[string]any)
-	if !ok || dockerSummary["managed_container_count"] != 1 || dockerSummary["managed_container_bytes"] != int64(64) {
+	if !ok || dockerSummary["managed_container_count"] != 1 ||
+		dockerSummary["managed_container_bytes"] != int64(64) ||
+		dockerSummary["image_layer_bytes"] != int64(128) {
 		t.Fatalf("docker summary = %#v", summary.Docker)
 	}
 

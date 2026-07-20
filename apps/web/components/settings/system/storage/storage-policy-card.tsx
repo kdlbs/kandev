@@ -14,22 +14,40 @@ import { bytesToGigabytes, gigabytesToBytes } from "./storage-units";
 
 type Props = {
   settings: StorageMaintenanceSettings;
+  savedSettings: StorageMaintenanceSettings;
   capabilities: StorageCapabilities;
   pending: boolean;
   onChange: (settings: StorageMaintenanceSettings) => void;
-  onSave: () => Promise<void>;
-  onDedicatedConfirm: (settings: StorageMaintenanceSettings) => Promise<void>;
   onAdopt: (path: string) => Promise<void>;
 };
 
-type PolicySectionProps = Pick<Props, "settings" | "capabilities" | "onChange" | "pending">;
+type PolicySectionProps = Pick<
+  Props,
+  "settings" | "savedSettings" | "capabilities" | "onChange" | "pending"
+>;
 
-function ScheduleSection({ settings, pending, onChange }: PolicySectionProps) {
+function settingIsDirty<T>(
+  settings: StorageMaintenanceSettings,
+  savedSettings: StorageMaintenanceSettings,
+  select: (value: StorageMaintenanceSettings) => T,
+): boolean {
+  return !Object.is(select(settings), select(savedSettings));
+}
+
+function ScheduleSection({ settings, savedSettings, pending, onChange }: PolicySectionProps) {
+  const enabledDirty = settingIsDirty(settings, savedSettings, (value) => value.enabled);
+  const intervalDirty = settingIsDirty(
+    settings,
+    savedSettings,
+    (value) => value.check_interval_hours,
+  );
+  const idleDirty = settingIsDirty(settings, savedSettings, (value) => value.idle_for_minutes);
   return (
     <PolicySection
       sectionId="schedule"
       title="Schedule"
       description="Controls when automatic maintenance is allowed to start. Manual actions remain available when scheduling is off."
+      isDirty={enabledDirty || intervalDirty || idleDirty}
     >
       <SettingRow
         title="Scheduled maintenance"
@@ -42,6 +60,7 @@ function ScheduleSection({ settings, pending, onChange }: PolicySectionProps) {
             onCheckedChange={(enabled) => onChange({ ...settings, enabled })}
             aria-label="Scheduled maintenance"
             data-testid="storage-scheduling-enabled"
+            data-settings-dirty={enabledDirty}
           />
         }
       />
@@ -55,6 +74,7 @@ function ScheduleSection({ settings, pending, onChange }: PolicySectionProps) {
           disabled={pending || !settings.enabled}
           onChange={(check_interval_hours) => onChange({ ...settings, check_interval_hours })}
           testId="storage-check-interval"
+          isDirty={intervalDirty}
         />
         <NumberField
           label="Require idle for (minutes)"
@@ -65,18 +85,31 @@ function ScheduleSection({ settings, pending, onChange }: PolicySectionProps) {
           disabled={pending || !settings.enabled}
           onChange={(idle_for_minutes) => onChange({ ...settings, idle_for_minutes })}
           testId="storage-idle-period"
+          isDirty={idleDirty}
         />
       </div>
     </PolicySection>
   );
 }
 
-function WorkspaceSection({ settings, pending, onChange }: PolicySectionProps) {
+function WorkspaceSection({ settings, savedSettings, pending, onChange }: PolicySectionProps) {
+  const workspacesDirty = settingIsDirty(
+    settings,
+    savedSettings,
+    (value) => value.workspaces.enabled,
+  );
+  const graceDirty = settingIsDirty(settings, savedSettings, (value) => value.orphan_grace_hours);
+  const containersDirty = settingIsDirty(
+    settings,
+    savedSettings,
+    (value) => value.kandev_containers.enabled,
+  );
   return (
     <PolicySection
       sectionId="workspaces"
       title="Workspaces and containers"
       description="Reclaim resources that Kandev can positively identify as no longer in use."
+      isDirty={workspacesDirty || graceDirty || containersDirty}
     >
       <SettingRow
         title="Orphan task workspaces"
@@ -88,6 +121,7 @@ function WorkspaceSection({ settings, pending, onChange }: PolicySectionProps) {
             disabled={pending}
             onCheckedChange={(enabled) => onChange({ ...settings, workspaces: { enabled } })}
             aria-label="Clean orphan task workspaces"
+            data-settings-dirty={workspacesDirty}
           />
         }
       />
@@ -101,6 +135,7 @@ function WorkspaceSection({ settings, pending, onChange }: PolicySectionProps) {
           disabled={pending || !settings.workspaces.enabled}
           onChange={(orphan_grace_hours) => onChange({ ...settings, orphan_grace_hours })}
           testId="storage-orphan-grace"
+          isDirty={graceDirty}
         />
       </div>
       <SettingRow
@@ -113,6 +148,7 @@ function WorkspaceSection({ settings, pending, onChange }: PolicySectionProps) {
             disabled={pending}
             onCheckedChange={(enabled) => onChange({ ...settings, kandev_containers: { enabled } })}
             aria-label="Clean Kandev containers"
+            data-settings-dirty={containersDirty}
           />
         }
       />
@@ -175,6 +211,7 @@ function AdoptionField({
 
 function GoCacheSection({
   settings,
+  savedSettings,
   capabilities,
   pending,
   onChange,
@@ -186,11 +223,18 @@ function GoCacheSection({
   setAdoptionPath: (path: string) => void;
   onOpenAdoption: () => void;
 }) {
+  const enabledDirty = settingIsDirty(settings, savedSettings, (value) => value.go_cache.enabled);
+  const maxBytesDirty = settingIsDirty(
+    settings,
+    savedSettings,
+    (value) => value.go_cache.max_bytes,
+  );
   return (
     <PolicySection
       sectionId="go-cache"
       title="Go build cache"
       description="Use and trim a Kandev-owned cache for new host-local Go executions."
+      isDirty={enabledDirty || maxBytesDirty}
     >
       <SettingRow
         title="Managed Go cache"
@@ -205,6 +249,7 @@ function GoCacheSection({
             }
             aria-label="Enable managed Go cache"
             data-testid="storage-go-cache-enabled"
+            data-settings-dirty={enabledDirty}
           />
         }
       />
@@ -222,6 +267,7 @@ function GoCacheSection({
             })
           }
           testId="storage-go-cache-max"
+          isDirty={maxBytesDirty}
         />
       </div>
       {capabilities.go_cache_adoption_available && (
@@ -241,13 +287,18 @@ type DockerSettings = StorageMaintenanceSettings["docker"];
 
 function DockerBuildCacheSettings({
   docker,
+  savedDocker,
   disabledReason,
   updateDocker,
 }: {
   docker: DockerSettings;
+  savedDocker: DockerSettings;
   disabledReason?: string;
   updateDocker: (docker: DockerSettings) => void;
 }) {
+  const enabledDirty = docker.build_cache_enabled !== savedDocker.build_cache_enabled;
+  const keepBytesDirty = docker.build_cache_keep_bytes !== savedDocker.build_cache_keep_bytes;
+  const unusedHoursDirty = docker.build_cache_unused_hours !== savedDocker.build_cache_unused_hours;
   return (
     <>
       <SettingRow
@@ -263,6 +314,7 @@ function DockerBuildCacheSettings({
             }
             aria-label="Clean Docker build cache"
             data-testid="storage-docker-build-cache"
+            data-settings-dirty={enabledDirty}
           />
         }
       />
@@ -280,6 +332,7 @@ function DockerBuildCacheSettings({
             })
           }
           testId="storage-docker-build-cache-keep-bytes"
+          isDirty={keepBytesDirty}
         />
         <NumberField
           label="Build cache must be unused for (hours)"
@@ -292,6 +345,7 @@ function DockerBuildCacheSettings({
             updateDocker({ ...docker, build_cache_unused_hours })
           }
           testId="storage-docker-build-cache-unused-hours"
+          isDirty={unusedHoursDirty}
         />
       </div>
     </>
@@ -300,13 +354,17 @@ function DockerBuildCacheSettings({
 
 function DockerImageSettings({
   docker,
+  savedDocker,
   disabledReason,
   updateDocker,
 }: {
   docker: DockerSettings;
+  savedDocker: DockerSettings;
   disabledReason?: string;
   updateDocker: (docker: DockerSettings) => void;
 }) {
+  const enabledDirty = docker.unused_images_enabled !== savedDocker.unused_images_enabled;
+  const hoursDirty = docker.unused_images_hours !== savedDocker.unused_images_hours;
   return (
     <>
       <SettingRow
@@ -322,6 +380,7 @@ function DockerImageSettings({
             }
             aria-label="Clean unused Docker images"
             data-testid="storage-docker-unused-images"
+            data-settings-dirty={enabledDirty}
           />
         }
       />
@@ -335,6 +394,7 @@ function DockerImageSettings({
           disabled={Boolean(disabledReason) || !docker.unused_images_enabled}
           onChange={(unused_images_hours) => updateDocker({ ...docker, unused_images_hours })}
           testId="storage-docker-unused-images-hours"
+          isDirty={hoursDirty}
         />
       </div>
     </>
@@ -343,11 +403,16 @@ function DockerImageSettings({
 
 function DockerSection({
   settings,
+  savedSettings,
   capabilities,
   pending,
   onChange,
   onOpenDedicated,
 }: PolicySectionProps & { onOpenDedicated: () => void }) {
+  const dockerDirty = JSON.stringify(settings.docker) !== JSON.stringify(savedSettings.docker);
+  const dedicatedDirty =
+    settings.docker.dedicated_daemon_acknowledged !==
+    savedSettings.docker.dedicated_daemon_acknowledged;
   const unavailable = capabilities.docker_available
     ? undefined
     : "Docker is unavailable on the configured host.";
@@ -364,6 +429,7 @@ function DockerSection({
       sectionId="docker"
       title="Docker cleanup"
       description="Optional daemon-wide cleanup. Enable it only when this Docker daemon is dedicated to Kandev."
+      isDirty={dockerDirty}
     >
       <SettingRow
         title="Dedicated Docker daemon"
@@ -379,6 +445,7 @@ function DockerSection({
             }}
             aria-label="Dedicated Docker daemon"
             data-testid="storage-docker-dedicated"
+            data-settings-dirty={dedicatedDirty}
           />
         }
       />
@@ -389,11 +456,13 @@ function DockerSection({
       )}
       <DockerBuildCacheSettings
         docker={settings.docker}
+        savedDocker={savedSettings.docker}
         disabledReason={disabledReason}
         updateDocker={updateDocker}
       />
       <DockerImageSettings
         docker={settings.docker}
+        savedDocker={savedSettings.docker}
         disabledReason={disabledReason}
         updateDocker={updateDocker}
       />
@@ -402,12 +471,18 @@ function DockerSection({
   );
 }
 
-function QuarantineSection({ settings, pending, onChange }: PolicySectionProps) {
+function QuarantineSection({ settings, savedSettings, pending, onChange }: PolicySectionProps) {
+  const retentionDirty = settingIsDirty(
+    settings,
+    savedSettings,
+    (value) => value.quarantine_retention_hours,
+  );
   return (
     <PolicySection
       sectionId="quarantine"
       title="Quarantine safety"
       description="Keep recoverable resources for a grace period before permanent deletion."
+      isDirty={retentionDirty}
     >
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <NumberField
@@ -421,6 +496,7 @@ function QuarantineSection({ settings, pending, onChange }: PolicySectionProps) 
             onChange({ ...settings, quarantine_retention_hours })
           }
           testId="storage-quarantine-retention"
+          isDirty={retentionDirty}
         />
       </div>
     </PolicySection>
@@ -429,11 +505,10 @@ function QuarantineSection({ settings, pending, onChange }: PolicySectionProps) 
 
 export function StoragePolicyCard({
   settings,
+  savedSettings,
   capabilities,
   pending,
   onChange,
-  onSave,
-  onDedicatedConfirm,
   onAdopt,
 }: Props) {
   const [dockerDialogOpen, setDockerDialogOpen] = useState(false);
@@ -450,18 +525,21 @@ export function StoragePolicyCard({
       <div className="space-y-3">
         <ScheduleSection
           settings={settings}
+          savedSettings={savedSettings}
           capabilities={capabilities}
           pending={pending}
           onChange={onChange}
         />
         <WorkspaceSection
           settings={settings}
+          savedSettings={savedSettings}
           capabilities={capabilities}
           pending={pending}
           onChange={onChange}
         />
         <GoCacheSection
           settings={settings}
+          savedSettings={savedSettings}
           capabilities={capabilities}
           pending={pending}
           onChange={onChange}
@@ -471,6 +549,7 @@ export function StoragePolicyCard({
         />
         <DockerSection
           settings={settings}
+          savedSettings={savedSettings}
           capabilities={capabilities}
           pending={pending}
           onChange={onChange}
@@ -478,19 +557,11 @@ export function StoragePolicyCard({
         />
         <QuarantineSection
           settings={settings}
+          savedSettings={savedSettings}
           capabilities={capabilities}
           pending={pending}
           onChange={onChange}
         />
-      </div>
-      <div className="flex justify-end">
-        <StorageActionButton
-          disabledReason={pending ? "Wait for the current storage action to finish." : undefined}
-          onClick={() => void onSave()}
-          data-testid="storage-save-settings"
-        >
-          Save policy
-        </StorageActionButton>
       </div>
       <DedicatedDockerDialog
         open={dockerDialogOpen}
@@ -498,7 +569,6 @@ export function StoragePolicyCard({
         onConfirm={() => {
           const next = settingsWithDockerAcknowledgement(settings, true);
           onChange(next);
-          void onDedicatedConfirm(next);
           setDockerDialogOpen(false);
         }}
       />

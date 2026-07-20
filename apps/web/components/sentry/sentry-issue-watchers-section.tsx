@@ -3,11 +3,12 @@
 import { useCallback, useState } from "react";
 import { IconBellRinging, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { WatcherSettingsCard } from "@/components/integrations/watcher-settings-card";
 import { useToast } from "@/components/toast-provider";
 import { useSentryIssueWatches } from "@/hooks/domains/sentry/use-sentry-issue-watches";
 import { useSentryInstances } from "@/hooks/domains/sentry/use-sentry-availability";
+import { useWatcherEnabledDrafts } from "@/components/integrations/use-watcher-enabled-drafts";
 import { ResetWatchDialog, useWatchResetController } from "@/components/watches/reset-watch-dialog";
 import { SentryIssueWatchTable } from "./sentry-issue-watch-table";
 import { SentryIssueWatchDialog } from "./sentry-issue-watch-dialog";
@@ -81,17 +82,6 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
     [trigger, toast],
   );
 
-  const toggleEnabled = useCallback(
-    async (w: SentryIssueWatch) => {
-      try {
-        await update(w.id, w.workspaceId, { enabled: !w.enabled });
-      } catch (err) {
-        toast({ description: `Toggle failed: ${String(err)}`, variant: "error" });
-      }
-    },
-    [update, toast],
-  );
-
   const wrappedReset = useCallback(
     async (id: string, workspaceId: string) => {
       try {
@@ -118,7 +108,6 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
     remove: wrappedDelete,
     trigger: wrappedTrigger,
     reset: wrappedReset,
-    toggleEnabled,
   };
 }
 
@@ -134,6 +123,17 @@ export function SentryIssueWatchersSection({ workspaceId }: { workspaceId: strin
     [instances],
   );
   const actions = useToastedActions({ create, update, remove, trigger, reset });
+  const saveEnabled = useCallback(
+    async (watch: SentryIssueWatch, enabled: boolean) => {
+      await update(watch.id, watch.workspaceId, { enabled });
+    },
+    [update],
+  );
+  const enabledDrafts = useWatcherEnabledDrafts({
+    id: `sentry-watch-enabled:${workspaceId}`,
+    items,
+    saveEnabled,
+  });
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<SentryIssueWatch | null>(null);
@@ -172,23 +172,23 @@ export function SentryIssueWatchersSection({ workspaceId }: { workspaceId: strin
         </Button>
       }
     >
-      <Card>
-        <CardContent className="pt-6">
-          {loading && items.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">Loading…</p>
-          ) : (
-            <SentryIssueWatchTable
-              watches={items}
-              instanceName={instanceName}
-              onEdit={openEdit}
-              onDelete={actions.remove}
-              onTrigger={actions.trigger}
-              onReset={handleReset}
-              onToggleEnabled={actions.toggleEnabled}
-            />
-          )}
-        </CardContent>
-      </Card>
+      <WatcherSettingsCard
+        isDirty={enabledDrafts.dirtyIds.size > 0}
+        isLoading={loading}
+        isEmpty={items.length === 0}
+        testId="sentry-watchers-card"
+      >
+        <SentryIssueWatchTable
+          watches={enabledDrafts.items}
+          dirtyIds={enabledDrafts.dirtyIds}
+          instanceName={instanceName}
+          onEdit={openEdit}
+          onDelete={actions.remove}
+          onTrigger={actions.trigger}
+          onReset={handleReset}
+          onToggleEnabled={enabledDrafts.toggleEnabled}
+        />
+      </WatcherSettingsCard>
       <SentryIssueWatchDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}

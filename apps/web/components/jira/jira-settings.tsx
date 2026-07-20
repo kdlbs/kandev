@@ -3,18 +3,19 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { IconTicket, IconCode } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { TaskPresetsSection } from "@/components/jira/task-presets-section";
 import { JiraIssueWatchersSection } from "@/components/jira/jira-issue-watchers-section";
-import { useJiraEnabled } from "@/hooks/domains/jira/use-jira-enabled";
+import { JiraEnabledControl } from "@/components/jira/jira-enabled-control";
 import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
@@ -97,13 +98,9 @@ function authAllowedForInstance(auth: JiraAuthMethod, instance: JiraInstanceType
   return false;
 }
 
-function saveLabel(saving: boolean, hasConfig: boolean): string {
-  if (saving) return "Saving...";
-  return hasConfig ? "Update" : "Save";
-}
-
 type FieldsRowProps = {
   form: FormState;
+  baseline: FormState;
   loading: boolean;
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 };
@@ -112,7 +109,7 @@ type InstanceFieldsProps = FieldsRowProps & {
   setForm: Dispatch<SetStateAction<FormState>>;
 };
 
-function InstanceFields({ form, loading, setForm }: InstanceFieldsProps) {
+function InstanceFields({ form, baseline, loading, setForm }: InstanceFieldsProps) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div className="space-y-1.5">
@@ -133,7 +130,11 @@ function InstanceFields({ form, loading, setForm }: InstanceFieldsProps) {
           }}
           disabled={loading}
         >
-          <SelectTrigger id="jira-instance" className="w-full cursor-pointer">
+          <SelectTrigger
+            id="jira-instance"
+            className="w-full cursor-pointer"
+            data-settings-dirty={form.instanceType !== baseline.instanceType}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -154,6 +155,7 @@ function InstanceFields({ form, loading, setForm }: InstanceFieldsProps) {
           data-testid="jira-project-input"
           placeholder="PROJ"
           value={form.defaultProjectKey}
+          data-settings-dirty={form.defaultProjectKey !== baseline.defaultProjectKey}
           onChange={(e) =>
             setForm((prev) => ({ ...prev, defaultProjectKey: e.target.value.toUpperCase() }))
           }
@@ -164,7 +166,7 @@ function InstanceFields({ form, loading, setForm }: InstanceFieldsProps) {
   );
 }
 
-function SiteFields({ form, loading, update }: FieldsRowProps) {
+function SiteFields({ form, baseline, loading, update }: FieldsRowProps) {
   const placeholder =
     form.instanceType === "server" ? "https://jira.your-company.com" : "https://acme.atlassian.net";
   return (
@@ -175,6 +177,7 @@ function SiteFields({ form, loading, update }: FieldsRowProps) {
         data-testid="jira-site-input"
         placeholder={placeholder}
         value={form.siteUrl}
+        data-settings-dirty={form.siteUrl !== baseline.siteUrl}
         onChange={(e) => update("siteUrl", e.target.value)}
         disabled={loading}
       />
@@ -182,7 +185,7 @@ function SiteFields({ form, loading, update }: FieldsRowProps) {
   );
 }
 
-function AuthFields({ form, loading, update }: FieldsRowProps) {
+function AuthFields({ form, baseline, loading, update }: FieldsRowProps) {
   const showEmail = form.instanceType === "cloud" && form.authMethod === "api_token";
   return (
     <div className="grid gap-4 sm:grid-cols-2">
@@ -193,7 +196,11 @@ function AuthFields({ form, loading, update }: FieldsRowProps) {
           onValueChange={(v) => update("authMethod", v as JiraAuthMethod)}
           disabled={loading}
         >
-          <SelectTrigger id="jira-auth" className="w-full cursor-pointer">
+          <SelectTrigger
+            id="jira-auth"
+            className="w-full cursor-pointer"
+            data-settings-dirty={form.authMethod !== baseline.authMethod}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -217,6 +224,7 @@ function AuthFields({ form, loading, update }: FieldsRowProps) {
             type="email"
             placeholder="you@example.com"
             value={form.email}
+            data-settings-dirty={form.email !== baseline.email}
             onChange={(e) => update("email", e.target.value)}
             disabled={loading}
           />
@@ -301,6 +309,7 @@ type SecretFieldPropsWithExpiry = SecretFieldProps & { secretExpiresAt?: string 
 
 function SecretField({
   form,
+  baseline,
   loading,
   update,
   hasSavedSecret,
@@ -325,6 +334,7 @@ function SecretField({
         type="password"
         placeholder={secretPlaceholder(method, hasSavedSecret)}
         value={form.secret}
+        data-settings-dirty={form.secret !== baseline.secret}
         onChange={(e) => update("secret", e.target.value)}
         disabled={loading}
       />
@@ -396,28 +406,15 @@ function configToHealth(config: JiraConfig | null): IntegrationAuthHealth | null
 }
 
 type ActionBarProps = {
-  saving: boolean;
   testing: boolean;
   loading: boolean;
   hasConfig: boolean;
-  disableSave: boolean;
   disableTest: boolean;
   onTest: () => void;
-  onSave: () => void;
   onDelete: () => void;
 };
 
-function ActionBar({
-  saving,
-  testing,
-  loading,
-  hasConfig,
-  disableSave,
-  disableTest,
-  onTest,
-  onSave,
-  onDelete,
-}: ActionBarProps) {
+function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete }: ActionBarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
@@ -430,15 +427,6 @@ function ActionBar({
         data-testid="jira-test-button"
       >
         {testing ? "Testing..." : "Test connection"}
-      </Button>
-      <Button
-        type="button"
-        onClick={onSave}
-        disabled={disableSave}
-        className="cursor-pointer"
-        data-testid="jira-save-button"
-      >
-        {saveLabel(saving, hasConfig)}
       </Button>
       {hasConfig && (
         <Button
@@ -520,6 +508,7 @@ function useJiraSettings(workspaceId: string) {
   }, [workspaceId, form]);
 
   const handleSave = useCallback(async () => {
+    const submitted = form;
     setSaving(true);
     try {
       const saved = await setJiraConfig(
@@ -534,13 +523,16 @@ function useJiraSettings(workspaceId: string) {
         { workspaceId },
       );
       setConfig(saved);
-      setForm(configToForm(saved));
+      setForm((current) =>
+        JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
+      );
       // Clear any inline test result from the previous credentials so the
       // alert reflects only the currently-saved state.
       setTestResult(null);
       toast({ description: "Jira configuration saved", variant: "success" });
     } catch (err) {
       toast({ description: `Save failed: ${String(err)}`, variant: "error" });
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -558,6 +550,7 @@ function useJiraSettings(workspaceId: string) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
   }, [workspaceId, toast]);
+  const discard = useCallback(() => setForm(configToForm(config)), [config]);
 
   return {
     config,
@@ -572,30 +565,10 @@ function useJiraSettings(workspaceId: string) {
     handleTest,
     handleSave,
     handleDelete,
+    discard,
   };
 }
 
-function EnabledPill() {
-  const { enabled, setEnabled } = useJiraEnabled();
-  return (
-    <div className="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1">
-      <Switch
-        id="jira-enabled"
-        checked={enabled}
-        onCheckedChange={setEnabled}
-        className="cursor-pointer"
-      />
-      <Label htmlFor="jira-enabled" className="text-xs cursor-pointer">
-        {enabled ? "Enabled" : "Disabled"}
-      </Label>
-    </div>
-  );
-}
-
-// normalizeComparableSiteUrl mirrors the backend's normalizeSiteURL (strip
-// trailing slash, prepend https:// if no scheme) so that
-// "acme.atlassian.net" and "https://acme.atlassian.net" don't read as
-// different hosts in savedSecretMatches.
 function normalizeComparableSiteUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, "");
   if (!trimmed) return "";
@@ -622,30 +595,52 @@ function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean
 
 export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) {
   const s = useJiraSettings(workspaceId);
+  const baseline = configToForm(s.config);
   const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
   const missingSecret = !savedSecretMatchesMode && !s.form.secret;
-  // Email is only required for the Cloud + api_token combination. Server PAT
-  // and session cookies authenticate the user out of the token itself.
   const emailRequired = s.form.instanceType === "cloud" && s.form.authMethod === "api_token";
   const disableSave =
     s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || missingSecret;
   const disableTest = missingSecret;
+  const revision = JSON.stringify(s.form);
+  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
+  let invalidReason: string | undefined;
+  if (!s.form.siteUrl) invalidReason = "A Jira site URL is required.";
+  else if (emailRequired && !s.form.email) invalidReason = "An email address is required.";
+  else if (missingSecret) invalidReason = "A credential is required.";
+
+  useSettingsSaveContributor({
+    id: `jira-config:${workspaceId}`,
+    revision,
+    isDirty: dirty,
+    canSave: !disableSave,
+    invalidReason,
+    save: s.handleSave,
+    discard: s.discard,
+  });
 
   return (
     <SettingsSection
       icon={<IconTicket className="h-5 w-5" />}
       title="Jira integration"
       description="Connect this workspace to Atlassian Cloud or a self-hosted Jira Server / Data Center instance. Credentials are stored encrypted server-side for the selected workspace."
-      action={<EnabledPill />}
+      action={<JiraEnabledControl />}
     >
-      <Card>
+      <SettingsCard isDirty={dirty}>
         <CardContent className="space-y-4 pt-6">
           <IntegrationAuthStatusBanner health={s.health} />
-          <InstanceFields form={s.form} loading={s.loading} update={s.update} setForm={s.setForm} />
-          <SiteFields form={s.form} loading={s.loading} update={s.update} />
-          <AuthFields form={s.form} loading={s.loading} update={s.update} />
+          <InstanceFields
+            form={s.form}
+            baseline={baseline}
+            loading={s.loading}
+            update={s.update}
+            setForm={s.setForm}
+          />
+          <SiteFields form={s.form} baseline={baseline} loading={s.loading} update={s.update} />
+          <AuthFields form={s.form} baseline={baseline} loading={s.loading} update={s.update} />
           <SecretField
             form={s.form}
+            baseline={baseline}
             loading={s.loading}
             update={s.update}
             hasSavedSecret={savedSecretMatchesMode}
@@ -654,18 +649,15 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
           <TestResultAlert result={s.testResult} />
           <Separator />
           <ActionBar
-            saving={s.saving}
             testing={s.testing}
             loading={s.loading}
             hasConfig={!!s.config}
-            disableSave={disableSave}
             disableTest={disableTest}
             onTest={s.handleTest}
-            onSave={s.handleSave}
             onDelete={s.handleDelete}
           />
         </CardContent>
-      </Card>
+      </SettingsCard>
     </SettingsSection>
   );
 }

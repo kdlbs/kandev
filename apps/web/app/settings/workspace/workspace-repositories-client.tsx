@@ -38,9 +38,11 @@ import {
   areRepositoryScriptsDirty,
   cloneRepository,
   isRepositoryDirty,
+  mergeSavedRepositoryDraft,
   type RepositoryWithScripts,
 } from "@/app/settings/workspace/workspace-repositories-dirty";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
+import { isValidManualRepository } from "@/app/settings/workspace/workspace-repositories-validation";
 
 type RepositoryItem = RepositoryWithScripts & { __autoOpen?: boolean };
 type WorkspaceRepositoriesClientProps = {
@@ -127,7 +129,11 @@ async function saveNewRepository(
     ),
   );
   const nextRepo: RepositoryWithScripts = { ...created, scripts };
-  setRepositoryItems((prev) => prev.map((item) => (item.id === repoId ? nextRepo : item)));
+  setRepositoryItems((prev) =>
+    prev.map((item) =>
+      item.id === repoId ? mergeSavedRepositoryDraft(item, repo, nextRepo) : item,
+    ),
+  );
   setSavedRepositoryItems((prev) => [cloneRepository(nextRepo), ...prev]);
 }
 
@@ -189,7 +195,11 @@ async function saveExistingRepository({
     }),
   );
   const nextRepo: RepositoryWithScripts = { ...updated, scripts: nextScripts };
-  setRepositoryItems((prev) => prev.map((item) => (item.id === repoId ? nextRepo : item)));
+  setRepositoryItems((prev) =>
+    prev.map((item) =>
+      item.id === repoId ? mergeSavedRepositoryDraft(item, repo, nextRepo) : item,
+    ),
+  );
   setSavedRepositoryItems((prev) =>
     prev.some((item) => item.id === repoId)
       ? prev.map((item) => (item.id === repoId ? cloneRepository(nextRepo) : item))
@@ -338,7 +348,7 @@ function useDiscoverDialog(
     setManualValidation({ status: "loading" });
     try {
       const result = await validateRequest.run(workspace.id, manualRepoPath.trim());
-      if (result.allowed && result.exists && result.is_git)
+      if (isValidManualRepository(result))
         setManualValidation({
           status: "success",
           isValid: true,
@@ -554,6 +564,7 @@ export function WorkspaceRepositoriesClient({
             <RepositoryCard
               key={repo.id}
               repository={repo}
+              savedRepository={savedRepositoriesById.get(repo.id)}
               isRepositoryDirty={isRepositoryDirty(repo, savedRepositoriesById.get(repo.id))}
               areScriptsDirty={areRepositoryScriptsDirty(repo, savedRepositoriesById.get(repo.id))}
               autoOpen={Boolean(repo.__autoOpen)}

@@ -155,8 +155,23 @@ export function useSaveRequest(state: NotificationsState) {
     pendingDeletes,
     setPendingDeletes,
     setNotificationProviders,
+    showAppriseForm,
+    appriseFormMode,
+    appriseName,
+    setAppriseName,
+    appriseUrls,
+    setAppriseUrls,
+    setShowAppriseForm,
+    setActiveAppriseId,
   } = state;
   return useRequest(async () => {
+    const createDraft =
+      showAppriseForm && appriseFormMode === "create"
+        ? { name: appriseName, urls: parseAppriseUrls(appriseUrls) }
+        : null;
+    if (createDraft && createDraft.urls.length === 0) {
+      throw new Error("At least one Apprise service URL is required.");
+    }
     const updates: Array<Promise<NotificationProvider>> = [];
     for (const provider of providers) {
       const baseline = baselineProviders.find((item) => item.id === provider.id);
@@ -169,8 +184,22 @@ export function useSaveRequest(state: NotificationsState) {
       await deleteNotificationProvider(providerId);
     }
     const updated = await Promise.all(updates);
+    const created = createDraft
+      ? await createNotificationProvider({
+          name: createDraft.name.trim() || "Apprise",
+          type: "apprise",
+          config: { urls: createDraft.urls },
+          enabled: true,
+          events:
+            state.notificationEvents.length > 0
+              ? state.notificationEvents
+              : DEFAULT_NOTIFICATION_EVENTS,
+        })
+      : null;
     const updatedById = new Map(updated.map((provider) => [provider.id, provider]));
-    const nextProviders = providers.map((provider) => updatedById.get(provider.id) ?? provider);
+    const nextProviders = providers
+      .map((provider) => updatedById.get(provider.id) ?? provider)
+      .concat(created ? [created] : []);
     setNotificationProviders({
       items: nextProviders,
       events: state.notificationEvents,
@@ -178,11 +207,6 @@ export function useSaveRequest(state: NotificationsState) {
       loaded: true,
       loading: false,
     });
-    if (updated.length === 0) {
-      setBaselineProviders(nextProviders);
-      setPendingDeletes(new Set());
-      return [] as NotificationProvider[];
-    }
     setProviders(nextProviders);
     setBaselineProviders(nextProviders);
     setAppriseEdits((prev) => {
@@ -200,13 +224,28 @@ export function useSaveRequest(state: NotificationsState) {
       return next;
     });
     setPendingDeletes(new Set());
-    return updated;
+    if (created) {
+      setAppriseName("");
+      setAppriseUrls("");
+      setShowAppriseForm(false);
+      setActiveAppriseId(null);
+    }
+    return created ? [...updated, created] : updated;
   });
 }
 
 export function useIsDirty(state: NotificationsState) {
-  const { providers, baselineProviders, appriseEdits, appriseNameEdits, pendingDeletes } = state;
+  const {
+    providers,
+    baselineProviders,
+    appriseEdits,
+    appriseNameEdits,
+    pendingDeletes,
+    showAppriseForm,
+    appriseFormMode,
+  } = state;
   return (
+    (showAppriseForm && appriseFormMode === "create") ||
     pendingDeletes.size > 0 ||
     providers.some((provider) => {
       const baseline = baselineProviders.find((item) => item.id === provider.id);
@@ -225,13 +264,12 @@ export function useIsDirty(state: NotificationsState) {
 
 function useAppriseProviderActions(state: NotificationsState) {
   const {
-    notificationEvents,
-    appriseName,
-    appriseUrls,
+    baselineProviders,
     appriseEdits,
     appriseNameEdits,
+    appriseFormMode,
+    activeAppriseId,
     setProviders,
-    setBaselineProviders,
     setAppriseEdits,
     setAppriseNameEdits,
     setAppriseName,
@@ -247,30 +285,6 @@ function useAppriseProviderActions(state: NotificationsState) {
     updater: (p: NotificationProvider) => NotificationProvider,
   ) => {
     setProviders((prev) => prev.map((p) => (p.id === providerId ? updater(p) : p)));
-  };
-
-  const handleCreateAppriseProvider = async () => {
-    const urls = parseAppriseUrls(appriseUrls);
-    if (urls.length === 0) return;
-    const defaultEvents =
-      notificationEvents.length > 0 ? notificationEvents : DEFAULT_NOTIFICATION_EVENTS;
-    try {
-      const created = await createNotificationProvider({
-        name: appriseName.trim() || "Apprise",
-        type: "apprise",
-        config: { urls },
-        enabled: true,
-        events: defaultEvents,
-      });
-      setProviders((prev) => [...prev, created]);
-      setBaselineProviders((prev) => [...prev, created]);
-      setAppriseEdits((prev) => ({ ...prev, [created.id]: urls.join("\n") }));
-      setAppriseNameEdits((prev) => ({ ...prev, [created.id]: created.name }));
-      setAppriseUrls("");
-      setShowAppriseForm(false);
-    } catch (error) {
-      console.error("[NotificationsSettings] Failed to create apprise provider", error);
-    }
   };
 
   const handleAppriseEdit = (providerId: string, value: string) => {
@@ -307,15 +321,42 @@ function useAppriseProviderActions(state: NotificationsState) {
   const closeAppriseForm = () => {
     setShowAppriseForm(false);
     setActiveAppriseId(null);
+    setAppriseName("");
+    setAppriseUrls("");
+  };
+
+  const cancelAppriseForm = () => {
+    if (appriseFormMode === "edit" && activeAppriseId) {
+      const baseline = baselineProviders.find((provider) => provider.id === activeAppriseId);
+      if (baseline) {
+        setProviders((current) =>
+          current.map((provider) =>
+            provider.id === baseline.id
+              ? {
+                  ...provider,
+                  name: baseline.name,
+                  config: { ...provider.config, urls: baseline.config?.urls },
+                }
+              : provider,
+          ),
+        );
+        setAppriseEdits((current) => ({
+          ...current,
+          [baseline.id]: formatAppriseUrls(baseline.config?.urls),
+        }));
+        setAppriseNameEdits((current) => ({ ...current, [baseline.id]: baseline.name }));
+      }
+    }
+    closeAppriseForm();
   };
 
   return {
-    handleCreateAppriseProvider,
     handleAppriseEdit,
     handleAppriseNameEdit,
     openAppriseForm,
     handleDeleteProvider,
     closeAppriseForm,
+    cancelAppriseForm,
     updateProviderState,
   };
 }
@@ -366,12 +407,25 @@ export function useNotificationsActions(state: NotificationsState, bumpPermissio
     }
   };
 
+  const discard = () => {
+    const edits = buildAppriseEdits(state.baselineProviders);
+    state.setProviders(state.baselineProviders);
+    state.setAppriseEdits(edits.urls);
+    state.setAppriseNameEdits(edits.names);
+    state.setPendingDeletes(new Set());
+    state.setAppriseName("");
+    state.setAppriseUrls("");
+    state.setShowAppriseForm(false);
+    state.setActiveAppriseId(null);
+  };
+
   return {
     handleToggleEvent,
     handleRequestPermission,
     handleRefreshPermission,
     handleTestNotification,
     handleTestProvider,
+    discard,
     ...appriseActions,
   };
 }

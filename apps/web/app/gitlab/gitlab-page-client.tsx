@@ -121,7 +121,7 @@ function useProjectOptions(
   }, [knownProjects, projectFilter]);
 }
 
-function useGitLabPageState() {
+function useGitLabPageState(searchEnabled: boolean) {
   const [selection, setSelection] = useState<SidebarSelection>(() => ({
     kind: "mr",
     source: "preset",
@@ -143,13 +143,14 @@ function useGitLabPageState() {
   } = useSavedPresets();
 
   const presets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
-  const search = useGitLabSearch(
-    selection.kind,
+  const search = useGitLabSearch({
+    kind: selection.kind,
     presets,
-    selection.source === "preset" ? selection.id : "",
-    committedQuery,
+    preset: selection.source === "preset" ? selection.id : "",
+    customQuery: committedQuery,
     projectFilter,
-  );
+    enabled: searchEnabled,
+  });
   const projectOptions = useProjectOptions(
     selection,
     committedQuery,
@@ -299,13 +300,12 @@ function useGitLabStatusFetch() {
 
 export function GitLabPageClient(_props: { workspaceId?: string } = {}) {
   const { status, loading: statusLoading } = useGitLabStatusFetch();
-  const state = useGitLabPageState();
+  const connected = !!(status?.authenticated || status?.token_configured);
+  const host = status?.host ?? "https://gitlab.com";
+  const state = useGitLabPageState(!statusLoading && connected);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => resetKnownProjectsStore, []);
-
-  const connected = !!(status?.authenticated || status?.token_configured);
-  const host = status?.host ?? "https://gitlab.com";
 
   const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
   const { onSelect, onOpenSaveDialog } = state;

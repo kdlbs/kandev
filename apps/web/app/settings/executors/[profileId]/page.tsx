@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
+import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { IconShieldLock } from "@tabler/icons-react";
@@ -16,6 +17,7 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
+import { getExecutorDescription } from "@/components/settings/executor-description";
 import {
   McpPolicyCard,
   validateMcpPolicy,
@@ -24,6 +26,7 @@ import {
   EnvVarsCard,
   useEnvVarRows,
   rowsToEnvVars,
+  envVarsToRows,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ScriptCard } from "@/components/settings/profile-edit/script-card";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
@@ -45,6 +48,15 @@ import {
   type SaveStatus,
 } from "@/components/settings/profile-edit/profile-edit-page-chrome";
 import { useToast } from "@/components/toast-provider";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
+import {
+  deriveSpritesSecretId,
+  getGitIdentityBaseline,
+  parseNetworkPolicyRules,
+  parseRemoteAuthSecrets,
+  parseRemoteCredentials,
+} from "@/components/settings/profile-edit/executor-profile-baselines";
 import type { Executor, ExecutorProfile, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 
@@ -58,31 +70,6 @@ function useProfileFromStore(profileId: string) {
   );
   const profile = executor?.profiles?.find((p: ExecutorProfile) => p.id === profileId) ?? null;
   return executor && profile ? { executor, profile } : null;
-}
-
-function deriveSpritesSecretId(envVars?: ProfileEnvVar[]): string | null {
-  const row = envVars?.find((ev) => ev.key === SPRITES_TOKEN_KEY && ev.secret_id);
-  return row?.secret_id ?? null;
-}
-
-function parseNetworkPolicyRules(config?: Record<string, string>): NetworkPolicyRule[] {
-  const raw = config?.sprites_network_policy_rules;
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as NetworkPolicyRule[];
-  } catch {
-    return [];
-  }
-}
-
-function parseRemoteCredentials(config?: Record<string, string>): string[] {
-  const raw = config?.remote_credentials;
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as string[];
-  } catch {
-    return [];
-  }
 }
 
 function useRemoteExecutorFlags(executorType: ExecutorType) {
@@ -109,15 +96,9 @@ function useRemoteAuthState(profile: ExecutorProfile) {
   const [remoteCredentials, setRemoteCredentials] = useState<string[]>(() =>
     parseRemoteCredentials(profile.config),
   );
-  const [agentEnvVars, setAgentEnvVars] = useState<Record<string, string | null>>(() => {
-    const raw = profile.config?.remote_auth_secrets;
-    if (!raw) return {};
-    try {
-      return JSON.parse(raw) as Record<string, string | null>;
-    } catch {
-      return {};
-    }
-  });
+  const [agentEnvVars, setAgentEnvVars] = useState<Record<string, string | null>>(() =>
+    parseRemoteAuthSecrets(profile.config),
+  );
 
   const handleAgentEnvVarChange = useCallback((agentId: string, secretId: string | null) => {
     setAgentEnvVars((prev) => ({ ...prev, [agentId]: secretId }));
@@ -142,9 +123,14 @@ function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
   const [gitIdentityMode, setGitIdentityMode] = useState<GitIdentityMode>("override");
   const [gitUserName, setGitUserName] = useState(profile.config?.git_user_name ?? "");
   const [gitUserEmail, setGitUserEmail] = useState(profile.config?.git_user_email ?? "");
+  const [loaded, setLoaded] = useState(!isRemote);
 
   useEffect(() => {
-    if (!isRemote) return;
+    if (!isRemote) {
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
     fetchLocalGitIdentity()
       .then((identity) => {
         const local: GitIdentityState = {
@@ -169,7 +155,8 @@ function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
         }
         setGitIdentityMode("override");
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoaded(true));
   }, [isRemote, profile.config?.git_user_email, profile.config?.git_user_name]);
 
   return {
@@ -180,6 +167,7 @@ function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
     setGitUserName,
     gitUserEmail,
     setGitUserEmail,
+    loaded,
   };
 }
 
@@ -238,6 +226,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         setError(message);
         setSaveStatus("error");
         toast({ title: "Failed to save profile", description: message, variant: "error" });
+        throw err;
       }
     },
     [executor, profile.id, executors, setExecutors, toast],
@@ -256,7 +245,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
               : e,
           ),
         );
-        router.push(EXECUTORS_ROUTE);
+        runWithNavigationBlockerBypassed(() => router.push(EXECUTORS_ROUTE));
       } catch {
         setDeleting(false);
         setDeleteDialogOpen(false);
@@ -275,6 +264,7 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
   const [dockerfile, setDockerfile] = useState(profile.config?.dockerfile ?? "");
   const [imageTag, setImageTag] = useState(profile.config?.image_tag ?? "");
+  const [sshShell, setSshShell] = useState(profile.config?.ssh_shell ?? "");
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows(profile.env_vars);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(() =>
@@ -316,6 +306,8 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setDockerfile,
     imageTag,
     setImageTag,
+    sshShell,
+    setSshShell,
     envVarRows,
     addEnvVar,
     removeEnvVar,
@@ -330,6 +322,7 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     agentEnvVars: remoteAuth.agentEnvVars,
     handleAgentEnvVarChange: remoteAuth.handleAgentEnvVarChange,
     localGitIdentity: gitIdentity.localGitIdentity,
+    gitIdentityLoaded: gitIdentity.loaded,
     gitIdentityMode: gitIdentity.gitIdentityMode,
     setGitIdentityMode: gitIdentity.setGitIdentityMode,
     gitUserName: gitIdentity.gitUserName,
@@ -339,6 +332,7 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     isRemote: flags.isRemote,
     isDocker: flags.isDocker,
     isSprites: flags.isSprites,
+    isSSH: executor.type === "ssh",
     mcpPolicyError,
     buildEnvVars,
     prepareDesc,
@@ -387,6 +381,8 @@ function buildSaveConfig(
     delete config.git_user_email;
   }
   applyDockerConfig(config, form);
+  if (form.isSSH && form.sshShell.trim()) config.ssh_shell = form.sshShell.trim();
+  else delete config.ssh_shell;
   return config;
 }
 
@@ -407,37 +403,34 @@ function applyDockerConfig(
   }
 }
 
-function ProfileEditSections({
-  executor,
-  profile,
-  form,
-  secrets,
-  onShellChange,
-}: {
+type ProfileEditSectionsProps = {
   executor: Executor;
   profile: ExecutorProfile;
   form: ReturnType<typeof useProfileFormState>;
   secrets: ReturnType<typeof useSecrets>["items"];
-  onShellChange?: (shell: string) => Promise<void>;
-}) {
-  const isSSH = executor.type === "ssh";
+};
+
+function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSectionsProps) {
+  const gitIdentityBaseline = getGitIdentityBaseline(profile, form.localGitIdentity);
   return (
     <>
-      <ProfileDetailsCard name={form.name} onNameChange={form.setName} />
-      {isSSH && (
-        // SSH-specific: lives right after profile details (top of the page)
-        // because the very next question after "name this profile" on an
-        // SSH host is "which agents are installed here". Drives the shell
-        // selector that governs every subsequent SSH command run by kandev.
+      <ProfileDetailsCard
+        name={form.name}
+        baselineName={profile.name}
+        onNameChange={form.setName}
+      />
+      {executor.type === "ssh" && (
         <SSHAgentReadinessCard
           executorId={executor.id}
-          shell={profile.config?.ssh_shell}
-          onShellChange={onShellChange}
+          shell={form.sshShell}
+          baselineShell={profile.config?.ssh_shell ?? ""}
+          onShellChange={form.setSshShell}
         />
       )}
       {form.isSprites && (
         <SpritesApiKeyCard
           secretId={form.spritesSecretId}
+          baselineSecretId={deriveSpritesSecretId(profile.env_vars)}
           onSecretIdChange={form.setSpritesSecretId}
           secrets={secrets}
         />
@@ -457,15 +450,21 @@ function ProfileEditSections({
           isSprites={form.isSprites}
           secretId={form.spritesSecretId}
           networkRules={form.networkPolicyRules}
+          baselineNetworkRules={parseNetworkPolicyRules(profile.config)}
           onNetworkRulesChange={form.setNetworkPolicyRules}
           remoteCredentials={form.remoteCredentials}
+          baselineRemoteCredentials={parseRemoteCredentials(profile.config)}
           onRemoteCredentialsChange={form.setRemoteCredentials}
           agentEnvVars={form.agentEnvVars}
+          baselineAgentEnvVars={parseRemoteAuthSecrets(profile.config)}
           onAgentEnvVarChange={form.handleAgentEnvVarChange}
           gitIdentityMode={form.gitIdentityMode}
+          baselineGitIdentityMode={gitIdentityBaseline.mode}
           onGitIdentityModeChange={form.setGitIdentityMode}
           gitUserName={form.gitUserName}
           gitUserEmail={form.gitUserEmail}
+          baselineGitUserName={gitIdentityBaseline.userName}
+          baselineGitUserEmail={gitIdentityBaseline.userEmail}
           onGitUserNameChange={form.setGitUserName}
           onGitUserEmailChange={form.setGitUserEmail}
           localGitIdentity={form.localGitIdentity}
@@ -474,6 +473,7 @@ function ProfileEditSections({
       )}
       <EnvVarsCard
         rows={form.envVarRows}
+        baselineRows={envVarsToRows(profile.env_vars)}
         secrets={secrets}
         onAdd={form.addEnvVar}
         onUpdate={form.updateEnvVar}
@@ -483,6 +483,7 @@ function ProfileEditSections({
         title="Prepare Script"
         description={form.prepareDesc}
         value={form.prepareScript}
+        baselineValue={profile.prepare_script ?? ""}
         onChange={form.setPrepareScript}
         height="300px"
         placeholders={form.placeholders}
@@ -493,6 +494,7 @@ function ProfileEditSections({
           title="Cleanup Script"
           description="Runs after the agent session ends for cleanup tasks."
           value={form.cleanupScript}
+          baselineValue={profile.cleanup_script ?? ""}
           onChange={form.setCleanupScript}
           height="200px"
           placeholders={form.placeholders}
@@ -501,6 +503,7 @@ function ProfileEditSections({
       )}
       <McpPolicyCard
         mcpPolicy={form.mcpPolicy}
+        baselinePolicy={profile.mcp_policy ?? ""}
         mcpPolicyError={form.mcpPolicyError}
         onPolicyChange={form.setMcpPolicy}
       />
@@ -529,39 +532,43 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       </Button>
     ) : undefined;
 
-  const handleSave = () => {
-    if (!form.name.trim() || form.mcpPolicyError || spritesTokenMissing) return;
-    void persistence.save({
-      name: form.name.trim(),
-      mcp_policy: form.mcpPolicy || undefined,
-      config: buildSaveConfig(form, profile.config),
-      prepare_script: form.prepareScript,
-      cleanup_script: form.cleanupScript,
-      env_vars: form.buildEnvVars(),
-    });
+  const savePayload = {
+    name: form.name.trim(),
+    mcp_policy: form.mcpPolicy || undefined,
+    config: buildSaveConfig(form, profile.config),
+    prepare_script: form.prepareScript,
+    cleanup_script: form.cleanupScript,
+    env_vars: form.buildEnvVars(),
   };
-
-  // Shell selector lives on the SSH readiness card and persists out-of-band
-  // from the main Save button — users twiddling the dropdown shouldn't have
-  // to remember to press Save afterwards. The PATCH carries the full
-  // (merged) config so the backend's config-replace semantics don't wipe
-  // adjacent keys (workdir_root, prepare_script env, etc.). Key name is
-  // ssh_shell to match MetadataKeySSHShell — buildLaunchMetadata copies
-  // profile.config keys verbatim into req.Metadata, so the same string
-  // has to identify the shell on both sides.
-  const handleShellChange = useCallback(
-    async (next: string) => {
-      const mergedConfig = { ...(profile.config ?? {}), ssh_shell: next };
-      await persistence.save({
-        name: profile.name,
-        config: mergedConfig,
-        prepare_script: profile.prepare_script ?? "",
-        cleanup_script: profile.cleanup_script ?? "",
-        env_vars: profile.env_vars ?? [],
-      });
-    },
-    [persistence, profile],
-  );
+  const saveRevision = serializeSettingsRevision(savePayload);
+  const [savedRevision, setSavedRevision] = useState(saveRevision);
+  const [baselineReady, setBaselineReady] = useState(!form.isRemote);
+  useEffect(() => {
+    if (!baselineReady && form.gitIdentityLoaded) {
+      setSavedRevision(saveRevision);
+      setBaselineReady(true);
+    }
+  }, [baselineReady, form.gitIdentityLoaded, saveRevision]);
+  const handleSave = async () => {
+    const submittedPayload = savePayload;
+    const submittedRevision = saveRevision;
+    await persistence.save(submittedPayload);
+    setSavedRevision(submittedRevision);
+  };
+  let invalidReason: string | undefined;
+  if (!form.name.trim()) invalidReason = "Profile name is required.";
+  else if (form.mcpPolicyError) invalidReason = form.mcpPolicyError;
+  else if (spritesTokenMissing) invalidReason = "Sprites token is required.";
+  useSettingsSaveContributor({
+    id: `executor-profile:${profile.id}`,
+    revision: saveRevision,
+    isDirty: baselineReady && saveRevision !== savedRevision,
+    canSave:
+      baselineReady && Boolean(form.name.trim()) && !form.mcpPolicyError && !spritesTokenMissing,
+    invalidReason,
+    save: handleSave,
+    discard: () => undefined,
+  });
 
   const handleDelete = (options?: { removeRelatedDockerContainers?: boolean }) => {
     const beforeDelete = options?.removeRelatedDockerContainers
@@ -583,28 +590,17 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         description={getExecutorDescription(executor.type)}
         actions={headerActions}
       />
-      <ProfileEditSections
-        executor={executor}
-        profile={profile}
-        form={form}
-        secrets={secrets}
-        onShellChange={handleShellChange}
-      />
+      <fieldset
+        disabled={!baselineReady || persistence.saveStatus === "loading"}
+        className="contents"
+      >
+        <ProfileEditSections executor={executor} profile={profile} form={form} secrets={secrets} />
+      </fieldset>
       {spritesTokenMissing && (
         <p className="text-sm text-destructive">Sprites API key is required.</p>
       )}
       {persistence.error && <p className="text-sm text-destructive">{persistence.error}</p>}
-      <ProfileFormActions
-        saveStatus={persistence.saveStatus}
-        saveDisabled={
-          !form.name.trim() ||
-          Boolean(form.mcpPolicyError) ||
-          spritesTokenMissing ||
-          persistence.saveStatus === "loading"
-        }
-        onSave={handleSave}
-        onDelete={() => persistence.setDeleteDialogOpen(true)}
-      />
+      <ProfileFormActions onDelete={() => persistence.setDeleteDialogOpen(true)} />
       <DeleteProfileDialog
         open={persistence.deleteDialogOpen}
         onOpenChange={persistence.setDeleteDialogOpen}
@@ -614,14 +610,4 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       />
     </div>
   );
-}
-
-function getExecutorDescription(type: ExecutorType): string {
-  if (type === "local_pc") return "Runs agents directly in the repository folder.";
-  if (type === "worktree") return "Creates git worktrees for isolated agent sessions.";
-  if (type === "local_docker") return "Runs Docker containers on this machine.";
-  if (type === "remote_docker") return "Connects to a remote Docker host.";
-  if (type === "sprites") return "Runs agents in Sprites.dev cloud sandboxes.";
-  if (type === "ssh") return "Runs agents on a trusted Linux amd64 or macOS host over SSH.";
-  return "Custom executor.";
 }

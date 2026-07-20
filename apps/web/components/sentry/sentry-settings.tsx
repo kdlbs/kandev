@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IconBrandSentry, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
-import { Switch } from "@kandev/ui/switch";
+import { CardContent } from "@kandev/ui/card";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { useSentryEnabled } from "@/hooks/domains/sentry/use-sentry-enabled";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { DraftedIntegrationEnabledControl } from "@/components/integrations/drafted-integration-enabled-control";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   deleteSentryInstance,
@@ -76,6 +76,7 @@ type InstanceListProps = {
   onDelete: (instance: SentryConfig) => void;
   onSaved: () => void;
   onCancel: () => void;
+  onDirtyChange: (isDirty: boolean) => void;
 };
 
 function InstanceList({
@@ -86,6 +87,7 @@ function InstanceList({
   onDelete,
   onSaved,
   onCancel,
+  onDirtyChange,
 }: InstanceListProps) {
   if (instances.length === 0 && mode.kind !== "add") {
     return (
@@ -105,6 +107,7 @@ function InstanceList({
             idPrefix="sentry-edit"
             onSaved={onSaved}
             onCancel={onCancel}
+            onDirtyChange={onDirtyChange}
           />
         ) : (
           <SentryInstanceCard
@@ -121,29 +124,22 @@ function InstanceList({
 
 function EnabledPill() {
   const { enabled, setEnabled } = useSentryEnabled();
-  return (
-    <div className="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1">
-      <Switch
-        id="sentry-enabled"
-        checked={enabled}
-        onCheckedChange={setEnabled}
-        className="cursor-pointer"
-      />
-      <Label htmlFor="sentry-enabled" className="text-xs cursor-pointer">
-        {enabled ? "Enabled" : "Disabled"}
-      </Label>
-    </div>
-  );
+  return <DraftedIntegrationEnabledControl id="sentry" enabled={enabled} persist={setEnabled} />;
 }
 
 export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { instances, loading, reload } = useInstanceList(workspaceId);
   const { toast } = useToast();
   const [mode, setMode] = useState<EditMode>({ kind: "none" });
+  const [formDirty, setFormDirty] = useState(false);
 
-  const closeForm = useCallback(() => setMode({ kind: "none" }), []);
+  const closeForm = useCallback(() => {
+    setMode({ kind: "none" });
+    setFormDirty(false);
+  }, []);
   const handleSaved = useCallback(async () => {
     setMode({ kind: "none" });
+    setFormDirty(false);
     await reload();
   }, [reload]);
 
@@ -181,7 +177,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
       description="Connect this workspace to Sentry. Add a named instance for each Sentry org or self-hosted host; credentials are stored encrypted server-side."
       action={<EnabledPill />}
     >
-      <Card>
+      <SettingsCard isDirty={formDirty}>
         <CardContent className="space-y-3 pt-6">
           <h3 className="text-sm font-semibold" data-testid="sentry-instances-heading">
             Instances
@@ -193,10 +189,14 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
               instances={instances}
               mode={mode}
               workspaceId={workspaceId}
-              onEdit={(id) => setMode({ kind: "edit", id })}
+              onEdit={(id) => {
+                setFormDirty(false);
+                setMode({ kind: "edit", id });
+              }}
               onDelete={handleDelete}
               onSaved={handleSaved}
               onCancel={closeForm}
+              onDirtyChange={setFormDirty}
             />
           )}
           {mode.kind === "add" && (
@@ -206,13 +206,17 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
               idPrefix="sentry-add"
               onSaved={handleSaved}
               onCancel={closeForm}
+              onDirtyChange={setFormDirty}
             />
           )}
           {canAddInstance && (
             <Button
               type="button"
               variant="outline"
-              onClick={() => setMode({ kind: "add" })}
+              onClick={() => {
+                setFormDirty(false);
+                setMode({ kind: "add" });
+              }}
               className="cursor-pointer gap-1"
               data-testid="sentry-add-instance-button"
             >
@@ -221,7 +225,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
             </Button>
           )}
         </CardContent>
-      </Card>
+      </SettingsCard>
     </SettingsSection>
   );
 }

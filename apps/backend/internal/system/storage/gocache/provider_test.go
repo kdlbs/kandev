@@ -13,11 +13,14 @@ import (
 )
 
 func TestAnalysisJSONUsesStorageAPISnakeCase(t *testing.T) {
-	encoded, err := json.Marshal(Analysis{Path: "/cache", SizeBytes: 42, Owned: true, Enabled: false})
+	encoded, err := json.Marshal(Analysis{
+		Path: "/cache", SizeBytes: 42, Owned: true, Enabled: false,
+		UnmanagedPath: "/user-cache", UnmanagedSizeBytes: 24,
+	})
 	if err != nil {
 		t.Fatalf("Marshal Analysis: %v", err)
 	}
-	want := `{"path":"/cache","size_bytes":42,"owned":true,"enabled":false}`
+	want := `{"path":"/cache","size_bytes":42,"owned":true,"enabled":false,"unmanaged_path":"/user-cache","unmanaged_size_bytes":24}`
 	if string(encoded) != want {
 		t.Fatalf("Analysis JSON = %s, want %s", encoded, want)
 	}
@@ -133,6 +136,45 @@ func TestExecutionEnvironmentCreatesOwnedManagedCache(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(want, markerName)); err != nil {
 		t.Fatalf("ownership marker was not created: %v", err)
+	}
+}
+
+func TestAnalyzeReportsUnmanagedDefaultGoCacheReadOnly(t *testing.T) {
+	home := t.TempDir()
+	userCache := filepath.Join(t.TempDir(), "go-build")
+	if err := os.MkdirAll(userCache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(userCache, "artifact")
+	if err := os.WriteFile(artifact, []byte("user cache bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	externalArtifact := filepath.Join(t.TempDir(), "external")
+	if err := os.WriteFile(externalArtifact, []byte("external bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(externalArtifact, filepath.Join(userCache, "external-link")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOCACHE", userCache)
+	provider := New(Config{
+		HomeDir: home, TrashDir: filepath.Join(home, "trash"),
+		Settings: staticSettings{settings: storage.DefaultSettings()},
+	})
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if analysis.UnmanagedPath != userCache ||
+		analysis.UnmanagedSizeBytes != int64(len("user cache bytes")) {
+		t.Fatalf("analysis = %#v, want unmanaged cache %s", analysis, userCache)
+	}
+	if _, err := os.Stat(artifact); err != nil {
+		t.Fatalf("Analyze modified unmanaged cache: %v", err)
+	}
+	if _, err := os.Stat(externalArtifact); err != nil {
+		t.Fatalf("Analyze followed or modified unmanaged cache symlink: %v", err)
 	}
 }
 

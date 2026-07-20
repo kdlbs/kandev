@@ -3,6 +3,7 @@
 package process
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/windows"
 )
@@ -29,6 +31,15 @@ func TestWindowsSetProcGroupDoesNotSuspendSharedHelpers(t *testing.T) {
 func TestWindowsSetAgentProcGroupStartsSuspended(t *testing.T) {
 	cmd := exec.Command("kandev")
 	setAgentProcGroup(cmd)
+
+	require.NotNil(t, cmd.SysProcAttr)
+	require.NotZero(t, cmd.SysProcAttr.CreationFlags&syscall.CREATE_NEW_PROCESS_GROUP)
+	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED)
+}
+
+func TestWindowsSetManagedProcGroupStartsSuspended(t *testing.T) {
+	cmd := exec.Command("kandev")
+	setManagedProcGroup(cmd)
 
 	require.NotNil(t, cmd.SysProcAttr)
 	require.NotZero(t, cmd.SysProcAttr.CreationFlags&syscall.CREATE_NEW_PROCESS_GROUP)
@@ -63,6 +74,77 @@ func TestWindowsProcessLifecycleJobKillsDescendants(t *testing.T) {
 		return !windowsProcessAlive(childPID)
 	}, 5*time.Second, 50*time.Millisecond,
 		"child process %d should be killed when the job handle is released", childPID)
+}
+
+func TestWindowsManagedLifecycleReapsDescendantAfterLeaderExit(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	cmd := fixtureCmd(fmt.Sprintf("exit-with-child %s 30", pidFile))
+	setManagedProcGroup(cmd)
+	require.NoError(t, cmd.Start())
+	parentPID := cmd.Process.Pid
+	waited := false
+	t.Cleanup(func() {
+		if waited {
+			return
+		}
+		_ = killProcessGroup(parentPID)
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	lifecycle, err := installProcessLifecycle(cmd)
+	require.NoError(t, err)
+	childPID := waitForWindowsChildPID(t, pidFile, 5*time.Second)
+	require.NoError(t, cmd.Wait())
+	waited = true
+	require.True(t, windowsProcessAlive(childPID), "descendant should outlive its leader before job reap")
+
+	require.NoError(t, reapProcessLifecycle(lifecycle))
+	require.Eventually(t, func() bool {
+		return !windowsProcessAlive(childPID)
+	}, 5*time.Second, 50*time.Millisecond,
+		"child process %d should be gone before job reap completes", childPID)
+}
+
+func TestWindowsProcessRunnerReapsDescendantAfterLeaderExit(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "runner-child.pid")
+	command, env := fixtureShellExec(fmt.Sprintf("exit-with-child %s 30", pidFile))
+	runner := NewProcessRunner(nil, newTestLogger(t), 1024)
+	info, err := runner.Start(context.Background(), StartProcessRequest{
+		SessionID: "windows-job-reap",
+		Kind:      types.ProcessKind("test"),
+		Command:   command,
+		Env:       env,
+	})
+	require.NoError(t, err)
+	childPID := waitForWindowsChildPID(t, pidFile, 5*time.Second)
+	t.Cleanup(func() {
+		_ = runProcessTaskkill("/F", "/T", "/PID", strconv.Itoa(childPID))
+	})
+
+	require.Eventually(t, func() bool {
+		_, ok := runner.Get(info.ID, false)
+		return !ok
+	}, 5*time.Second, 20*time.Millisecond, "runner should retain the process until job reap completes")
+	require.False(t, windowsProcessAlive(childPID), "runner returned ownership before its descendant exited")
+}
+
+func TestWindowsVscodeLifecycleReapsDescendantAfterLeaderExit(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "vscode-child.pid")
+	cmd := fixtureCmd(fmt.Sprintf("exit-with-child %s 30", pidFile))
+	setManagedProcGroup(cmd)
+	require.NoError(t, cmd.Start())
+	lifecycle, err := installProcessLifecycle(cmd)
+	require.NoError(t, err)
+	childPID := waitForWindowsChildPID(t, pidFile, 5*time.Second)
+	require.NoError(t, cmd.Wait())
+	t.Cleanup(func() {
+		_ = runProcessTaskkill("/F", "/T", "/PID", strconv.Itoa(childPID))
+	})
+
+	vscode := &VscodeManager{logger: newTestLogger(t), lifecycle: lifecycle}
+	require.NoError(t, vscode.ensureProcessGroupReaped(cmd.Process.Pid))
+	require.False(t, windowsProcessAlive(childPID), "VS Code returned ownership before its descendant exited")
 }
 
 func TestWindowsProcessLifecycleInstallFailsForInvalidPID(t *testing.T) {

@@ -1,15 +1,19 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StorageOverviewResponse } from "@/lib/types/system";
+import { SettingsSaveProvider } from "../../settings-save-provider";
 import { StorageMaintenanceSettings } from "./storage-maintenance-settings";
 
 const mocks = vi.hoisted(() => ({
   useStorageMaintenance: vi.fn(),
   useSystemJob: vi.fn(),
 }));
+const IDLE_PERIOD_TEST_ID = "storage-idle-period";
 
-vi.mock("@/hooks/domains/system/use-storage-maintenance", () => ({
+vi.mock("@/hooks/domains/system/use-storage-maintenance", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/domains/system/use-storage-maintenance")>()),
   useStorageMaintenance: mocks.useStorageMaintenance,
 }));
 
@@ -71,12 +75,20 @@ function controller(currentOverview: StorageOverviewResponse) {
     deleteJob: undefined,
     analyze: vi.fn(),
     runNow: vi.fn(),
-    save: vi.fn(),
+    save: vi.fn().mockResolvedValue(undefined),
     adopt: vi.fn(),
     restore: vi.fn(),
     permanentlyDelete: vi.fn(),
     reload: vi.fn(),
   };
+}
+
+function Providers({ children }: { children: ReactNode }) {
+  return (
+    <SettingsSaveProvider>
+      <TooltipProvider>{children}</TooltipProvider>
+    </SettingsSaveProvider>
+  );
 }
 
 describe("StorageMaintenanceSettings", () => {
@@ -100,11 +112,7 @@ describe("StorageMaintenanceSettings", () => {
       analysisJob,
     });
 
-    render(
-      <TooltipProvider>
-        <StorageMaintenanceSettings />
-      </TooltipProvider>,
-    );
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
 
     const analyzeButton = screen.getByTestId("storage-analyze");
     expect(analyzeButton.textContent?.trim()).toBe("Analysis complete");
@@ -124,11 +132,7 @@ describe("StorageMaintenanceSettings", () => {
       analysisJob,
     });
 
-    render(
-      <TooltipProvider>
-        <StorageMaintenanceSettings />
-      </TooltipProvider>,
-    );
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
 
     const analyzeButton = screen.getByTestId("storage-analyze") as HTMLButtonElement;
     expect(analyzeButton.textContent?.trim()).toBe("Analyzing...");
@@ -136,12 +140,8 @@ describe("StorageMaintenanceSettings", () => {
   });
 
   it("preserves a dirty policy draft when refreshed overview data arrives", () => {
-    const { rerender } = render(
-      <TooltipProvider>
-        <StorageMaintenanceSettings />
-      </TooltipProvider>,
-    );
-    const idlePeriod = screen.getByTestId("storage-idle-period") as HTMLInputElement;
+    const { rerender } = render(<StorageMaintenanceSettings />, { wrapper: Providers });
+    const idlePeriod = screen.getByTestId(IDLE_PERIOD_TEST_ID) as HTMLInputElement;
     fireEvent.change(idlePeriod, { target: { value: "31" } });
 
     mocks.useStorageMaintenance.mockReturnValue(
@@ -150,12 +150,71 @@ describe("StorageMaintenanceSettings", () => {
         settings: { ...overview.settings, check_interval_hours: 48 },
       }),
     );
-    rerender(
-      <TooltipProvider>
-        <StorageMaintenanceSettings />
-      </TooltipProvider>,
-    );
+    rerender(<StorageMaintenanceSettings />);
 
-    expect((screen.getByTestId("storage-idle-period") as HTMLInputElement).value).toBe("31");
+    expect((screen.getByTestId(IDLE_PERIOD_TEST_ID) as HTMLInputElement).value).toBe("31");
+  });
+});
+
+describe("StorageMaintenanceSettings coordinated save", () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    mocks.useSystemJob.mockReturnValue(undefined);
+  });
+
+  it("stages policy edits until the shared save action runs", async () => {
+    const currentController = controller(overview);
+    mocks.useStorageMaintenance.mockReturnValue(currentController);
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
+
+    fireEvent.change(screen.getByTestId(IDLE_PERIOD_TEST_ID), { target: { value: "31" } });
+
+    expect(currentController.save).not.toHaveBeenCalled();
+    expect(screen.getByTestId(IDLE_PERIOD_TEST_ID).getAttribute("data-settings-dirty")).toBe(
+      "true",
+    );
+    expect(
+      screen.getByTestId("storage-policy-section-schedule").getAttribute("data-settings-dirty"),
+    ).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(currentController.save).toHaveBeenCalledWith(
+        { ...overview.settings, idle_for_minutes: 31 },
+        undefined,
+      ),
+    );
+  });
+
+  it("stages the Docker acknowledgement and confirms it through the shared save", async () => {
+    const currentController = controller(overview);
+    mocks.useStorageMaintenance.mockReturnValue(currentController);
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
+
+    fireEvent.click(screen.getByTestId("storage-docker-dedicated"));
+    fireEvent.change(screen.getByLabelText("Type DEDICATED to confirm"), {
+      target: { value: "DEDICATED" },
+    });
+    fireEvent.click(screen.getByTestId("storage-docker-confirm"));
+
+    expect(currentController.save).not.toHaveBeenCalled();
+    expect(screen.getByTestId("storage-docker-dedicated").getAttribute("data-settings-dirty")).toBe(
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(currentController.save).toHaveBeenCalledWith(
+        {
+          ...overview.settings,
+          docker: {
+            ...overview.settings.docker,
+            dedicated_daemon_acknowledged: true,
+          },
+        },
+        "DEDICATED",
+      ),
+    );
   });
 });

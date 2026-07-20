@@ -338,6 +338,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"chat_submit_key":                 settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":      settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":            settings.ConfirmTaskArchive,
+		"mcp_task_agent_profile_default":  models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_release_notification":       settings.ShowReleaseNotification,
 		"release_notes_last_seen_version": settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":        lspAutoStart,
@@ -455,6 +456,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ShowReleaseNotification = true
 		settings.ReviewAutoMarkOnScroll = true
 		settings.ConfirmTaskArchive = true
+		settings.MCPTaskAgentProfileDefault = models.MCPTaskAgentProfileDefaultCurrentTask
 		settings.ChatSubmitKey = "cmd_enter"
 		settings.KeyboardShortcuts = map[string]interface{}{}
 		settings.TerminalLinkBehavior = "new_tab"
@@ -478,6 +480,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ChatSubmitKey               string                              `json:"chat_submit_key"`
 		ReviewAutoMarkOnScroll      *bool                               `json:"review_auto_mark_on_scroll"`
 		ConfirmTaskArchive          *bool                               `json:"confirm_task_archive"`
+		MCPTaskAgentProfileDefault  string                              `json:"mcp_task_agent_profile_default"`
 		ShowReleaseNotification     *bool                               `json:"show_release_notification"`
 		ReleaseNotesLastSeenVersion string                              `json:"release_notes_last_seen_version"`
 		LspAutoStartLanguages       []string                            `json:"lsp_auto_start_languages"`
@@ -533,6 +536,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	} else {
 		settings.ConfirmTaskArchive = true
 	}
+	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
 	if payload.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *payload.ShowReleaseNotification
 	} else {

@@ -534,7 +534,7 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, reason string, force bool) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
-		return fmt.Errorf("execution %q not found", executionID)
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {

@@ -38,8 +38,7 @@ func (s *Server) handleShellTerminalStart(c *gin.Context) {
 		cfg.Rows = req.Rows
 	}
 
-	mgr := s.procMgr.ShellManager()
-	if _, err := mgr.Start(req.TerminalID, cfg); err != nil {
+	if _, err := s.procMgr.StartTerminalShell(req.TerminalID, cfg); err != nil {
 		s.logger.Error("failed to start terminal shell",
 			zap.String("terminal_id", req.TerminalID),
 			zap.Error(err))

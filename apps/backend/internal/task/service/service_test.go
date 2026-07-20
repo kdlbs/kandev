@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -420,6 +421,104 @@ func TestService_CreateTask(t *testing.T) {
 	}
 	if got := data["workspace_id"]; got != "ws-1" {
 		t.Errorf("expected workspace_id 'ws-1' in event payload, got %v", got)
+	}
+}
+
+func TestService_CreateTaskProbesDefaultBranchForExplicitRepositoryOutsideDiscoveryRoots(t *testing.T) {
+	isolateGitEnvForTest(t)
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	repoPath := filepath.Join(t.TempDir(), "explicit-repo")
+	initRealGitRepo(t, repoPath)
+	cmd := exec.Command("git", "checkout", "-b", "feature/current")
+	cmd.Dir = repoPath
+	cmd.Env = isolatedGitEnv()
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout feature branch: %v: %s", err, output)
+	}
+
+	const workspaceID = "ws-explicit"
+	const workflowID = "wf-explicit"
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    workspaceID,
+		WorkflowID:     workflowID,
+		WorkflowStepID: "step-1",
+		Title:          "Explicit repository",
+		Repositories: []TaskRepositoryInput{{
+			LocalPath: repoPath, BaseBranch: "feature/current", Name: "explicit-repo",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if len(task.Repositories) != 1 {
+		t.Fatalf("task repositories = %d, want 1", len(task.Repositories))
+	}
+	saved, err := repo.GetRepository(ctx, task.Repositories[0].RepositoryID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if saved.DefaultBranch != "main" {
+		t.Fatalf("DefaultBranch = %q, want main", saved.DefaultBranch)
+	}
+}
+
+func TestResolveRepoInputLocalDeduplicatesCanonicalPathAliases(t *testing.T) {
+	isolateGitEnvForTest(t)
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	const workspaceID = "ws-canonical-alias"
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	repoPath := filepath.Join(t.TempDir(), "canonical-repo")
+	initRealGitRepo(t, repoPath)
+	aliasPath := filepath.Join(t.TempDir(), "repository-alias")
+	if err := os.Symlink(repoPath, aliasPath); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	canonicalPath, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	repoByPath := map[string]*models.Repository{}
+	aliasID, _, aliasCreated, err := svc.resolveRepoInputLocal(
+		ctx,
+		workspaceID,
+		TaskRepositoryInput{LocalPath: aliasPath},
+		repoByPath,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("resolve alias: %v", err)
+	}
+	if !aliasCreated {
+		t.Fatal("expected alias lookup to create repository")
+	}
+
+	canonicalID, _, canonicalCreated, err := svc.resolveRepoInputLocal(
+		ctx,
+		workspaceID,
+		TaskRepositoryInput{LocalPath: canonicalPath},
+		repoByPath,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("resolve canonical path: %v", err)
+	}
+	if canonicalCreated {
+		t.Fatal("canonical alias created a duplicate repository")
+	}
+	if canonicalID != aliasID {
+		t.Fatalf("canonical repository ID = %q, want %q", canonicalID, aliasID)
 	}
 }
 
@@ -1744,6 +1843,61 @@ func TestService_ArchiveTaskStopsExecutorRunningForTerminalSession(t *testing.T)
 	}
 }
 
+func TestService_ArchiveTaskClaimsExactExecutionBeforeCancellingSession(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	stopper := newRecordingTaskExecutionStopper()
+	stateAtClaim := make(chan models.TaskSessionState, 1)
+	stopper.claimExecutionFunc = func(sessionID, executionID string, force bool) bool {
+		if sessionID != "session-running" || executionID != "exec-running" || !force {
+			t.Fatalf("teardown claim = (%q, %q, %v)", sessionID, executionID, force)
+		}
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("load session at teardown claim: %v", err)
+		}
+		stateAtClaim <- session.State
+		return true
+	}
+	svc.SetExecutionStopper(stopper)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-running", TaskID: "task-123", State: models.TaskSessionStateRunning,
+	})
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "session-running",
+		SessionID:        "session-running",
+		TaskID:           "task-123",
+		ExecutorID:       "executor-1",
+		Runtime:          agentruntime.RuntimeStandalone,
+		Status:           models.ExecutorRunningStatusStarting,
+		AgentExecutionID: "exec-running",
+	}); err != nil {
+		t.Fatalf("seed executor running: %v", err)
+	}
+
+	if err := svc.ArchiveTask(ctx, "task-123"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+	select {
+	case state := <-stateAtClaim:
+		if state != models.TaskSessionStateRunning {
+			t.Fatalf("session state at teardown claim = %q, want RUNNING", state)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("archive did not claim its exact execution")
+	}
+	call := stopper.waitForStopExecution(t)
+	if call.executionID != "exec-running" || !call.force {
+		t.Fatalf("StopExecution call = %#v", call)
+	}
+	waitForCleanupDone(t, svc)
+}
+
 func TestService_DeleteTaskFailsClosedWhenRuntimeInventoryFails(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -1902,6 +2056,7 @@ type recordingTaskExecutionStopper struct {
 	stopExecutionCh      chan stopExecutionCall
 	stopExecutionErr     error
 	stopExecutionErrByID map[string]error
+	claimExecutionFunc   func(sessionID, executionID string, force bool) bool
 }
 
 func newRecordingTaskExecutionStopper() *recordingTaskExecutionStopper {
@@ -1924,6 +2079,13 @@ func (s *recordingTaskExecutionStopper) StopExecution(_ context.Context, executi
 		}
 	}
 	return s.stopExecutionErr
+}
+
+func (s *recordingTaskExecutionStopper) RegisterExecutionStopOwner(sessionID, executionID string, force bool) {
+	if s.claimExecutionFunc == nil {
+		return
+	}
+	s.claimExecutionFunc(sessionID, executionID, force)
 }
 
 func (s *recordingTaskExecutionStopper) waitForStopExecution(t *testing.T) stopExecutionCall {
@@ -1951,6 +2113,9 @@ type recordingWorktreeCleanup struct {
 	worktrees         []*worktree.Worktree
 	worktreesByTaskID map[string][]*worktree.Worktree
 	cleaned           []*worktree.Worktree
+	referenceCounts   map[string]int
+	released          []*worktree.Worktree
+	excludedSessions  []string
 }
 
 func (c *recordingWorktreeCleanup) OnTaskDeleted(context.Context, string) error {
@@ -1971,6 +2136,20 @@ func (c *recordingWorktreeCleanup) CleanupWorktrees(_ context.Context, worktrees
 	return nil
 }
 
+func (c *recordingWorktreeCleanup) CountActiveWorktreeReferences(_ context.Context, worktreeID string, excludeSessionIDs []string) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.excludedSessions = append([]string(nil), excludeSessionIDs...)
+	return c.referenceCounts[worktreeID], nil
+}
+
+func (c *recordingWorktreeCleanup) ReleaseWorktreeReference(_ context.Context, wt *worktree.Worktree) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.released = append(c.released, wt)
+	return nil
+}
+
 func (c *recordingWorktreeCleanup) cleanedIDs() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1981,6 +2160,50 @@ func (c *recordingWorktreeCleanup) cleanedIDs() []string {
 		}
 	}
 	return ids
+}
+
+func (c *recordingWorktreeCleanup) releasedIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ids := make([]string, 0, len(c.released))
+	for _, wt := range c.released {
+		if wt != nil {
+			ids = append(ids, wt.ID)
+		}
+	}
+	return ids
+}
+
+func TestService_CleanupDestructiveTaskResourcesPreservesSharedWorktree(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	cleanup := &recordingWorktreeCleanup{
+		referenceCounts: map[string]int{"worktree-shared": 1},
+	}
+	svc.SetWorktreeCleanup(cleanup)
+
+	session := &models.TaskSession{ID: "session-owner", TaskID: "task-owner"}
+	wt := &worktree.Worktree{
+		ID:        "worktree-shared",
+		TaskID:    session.TaskID,
+		SessionID: session.ID,
+	}
+	errs := svc.cleanupDestructiveTaskResources(
+		context.Background(), session.TaskID, []*models.TaskSession{session},
+		[]*worktree.Worktree{wt}, taskEnvironmentCleanup{}, nil,
+	)
+
+	if len(errs) != 0 {
+		t.Fatalf("cleanup errors = %v, want none", errs)
+	}
+	if got := cleanup.cleanedIDs(); len(got) != 0 {
+		t.Fatalf("physically cleaned worktrees = %v, want none", got)
+	}
+	if got := cleanup.releasedIDs(); len(got) != 1 || got[0] != wt.ID {
+		t.Fatalf("released worktrees = %v, want [%s]", got, wt.ID)
+	}
+	if got := cleanup.excludedSessions; len(got) != 1 || got[0] != session.ID {
+		t.Fatalf("excluded sessions = %v, want [%s]", got, session.ID)
+	}
 }
 
 func waitForCleanupDone(t *testing.T, svc *Service) {

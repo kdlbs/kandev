@@ -15,6 +15,7 @@ import type { SentryIssueWatch, SentrySearchFilter } from "@/lib/types/sentry";
 
 type SentryIssueWatchTableProps = {
   watches: SentryIssueWatch[];
+  dirtyIds: ReadonlySet<string>;
   // instanceName resolves a watch's bound sentryInstanceId to its display name.
   // The table is workspace-scoped, so it shows which instance each watch polls
   // (not which workspace it belongs to).
@@ -60,12 +61,14 @@ function summarizeFilter(filter: SentrySearchFilter | undefined): string {
 
 function WatchActions({
   watch,
+  isDirty,
   onToggleEnabled,
   onTrigger,
   onReset,
   onDelete,
 }: {
   watch: SentryIssueWatch;
+  isDirty: boolean;
   onToggleEnabled: (watch: SentryIssueWatch) => void;
   onTrigger: (id: string, workspaceId: string) => void;
   onReset: (id: string, workspaceId: string) => void;
@@ -79,6 +82,8 @@ function WatchActions({
             variant="ghost"
             size="sm"
             className="h-7 w-7 p-0 cursor-pointer"
+            data-settings-dirty={isDirty}
+            data-testid={`sentry-watch-enabled-${watch.id}`}
             onClick={(e) => {
               e.stopPropagation();
               onToggleEnabled(watch);
@@ -149,6 +154,7 @@ function WatchActions({
 
 export function SentryIssueWatchTable({
   watches,
+  dirtyIds,
   instanceName,
   onEdit,
   onDelete,
@@ -178,7 +184,14 @@ export function SentryIssueWatchTable({
       </TableHeader>
       <TableBody>
         {watches.map((watch) => (
-          <TableRow key={watch.id} className="cursor-pointer" onClick={() => onEdit(watch)}>
+          <TableRow
+            key={watch.id}
+            className="cursor-pointer"
+            data-settings-dirty={dirtyIds.has(watch.id)}
+            data-settings-dirty-level="container"
+            data-testid={`sentry-watch-row-${watch.id}`}
+            onClick={() => onEdit(watch)}
+          >
             <TableCell className="text-xs text-muted-foreground" data-testid="watch-instance">
               {instanceName(watch.sentryInstanceId)}
             </TableCell>
@@ -202,6 +215,7 @@ export function SentryIssueWatchTable({
             <TableCell className="text-right">
               <WatchActions
                 watch={watch}
+                isDirty={dirtyIds.has(watch.id)}
                 onToggleEnabled={onToggleEnabled}
                 onTrigger={onTrigger}
                 onReset={onReset}

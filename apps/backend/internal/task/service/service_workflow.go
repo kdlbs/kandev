@@ -259,6 +259,36 @@ func (s *Service) UpdateTaskStateIfNotArchived(
 	return true, nil
 }
 
+// UpdateTaskStateIfSessionState transitions task state only while its owning
+// session remains in the expected state and the task remains unarchived.
+// Publishes task.state_changed only when the guarded write changes state.
+func (s *Service) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	oldState, updated, err := s.tasks.UpdateTaskStateIfSessionState(
+		ctx, taskID, sessionID, expectedSessionState, state,
+	)
+	if err != nil || !updated {
+		return false, err
+	}
+	if oldState == state {
+		return false, nil
+	}
+
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return true, err
+	}
+	// Pin the state written by the guarded CAS so a later transition between
+	// commit and reload cannot produce a mismatched event payload.
+	task.State = state
+	s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+	return true, nil
+}
+
 // UpdateTaskMetadata updates only the metadata of a task (merges with existing)
 func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata map[string]interface{}) (*models.Task, error) {
 	task, err := s.tasks.GetTask(ctx, id)

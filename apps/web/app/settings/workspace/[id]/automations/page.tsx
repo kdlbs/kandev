@@ -1,10 +1,11 @@
+"use client";
+
 import { AutomationsListPage } from "@/components/automations/automations-list-page";
 
 type Props = {
-  params: Promise<{ id: string }>;
+  workspaceId: string;
 };
 
-export default async function AutomationsPage({ params }: Props) {
-  const { id } = await params;
-  return <AutomationsListPage workspaceId={id} />;
+export default function AutomationsPage({ workspaceId }: Props) {
+  return <AutomationsListPage workspaceId={workspaceId} />;
 }

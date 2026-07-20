@@ -3,11 +3,12 @@
 import { useCallback, useId, useState } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { ProfileEnvVar } from "@/lib/types/http";
+import { SettingsCard } from "@/components/settings/settings-card";
 
 export type EnvVarRow = {
   key: string;
@@ -42,11 +43,13 @@ function ValueOrSecretInput({
   index,
   secrets,
   onUpdate,
+  baselineRow,
 }: {
   row: EnvVarRow;
   index: number;
   secrets: { id: string; name: string }[];
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
+  baselineRow?: EnvVarRow;
 }) {
   if (row.mode === "value") {
     return (
@@ -55,12 +58,16 @@ function ValueOrSecretInput({
         onChange={(e) => onUpdate(index, "value", e.target.value)}
         placeholder="value"
         className="flex-[3] font-mono text-xs"
+        data-settings-dirty={!baselineRow || row.value !== baselineRow.value}
       />
     );
   }
   return (
     <Select value={row.secretId} onValueChange={(v) => onUpdate(index, "secretId", v)}>
-      <SelectTrigger className="flex-[3] text-xs">
+      <SelectTrigger
+        className="flex-[3] text-xs"
+        data-settings-dirty={!baselineRow || row.secretId !== baselineRow.secretId}
+      >
         <SelectValue placeholder="Select secret..." />
       </SelectTrigger>
       <SelectContent>
@@ -80,23 +87,34 @@ function EnvVarRowComponent({
   secrets,
   onUpdate,
   onRemove,
+  baselineRow,
 }: {
   row: EnvVarRow;
   index: number;
   secrets: { id: string; name: string }[];
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
+  baselineRow?: EnvVarRow;
 }) {
   return (
-    <li className="flex items-center gap-2" data-testid={`env-var-row-${index}`}>
+    <li
+      className="flex items-center gap-2"
+      data-testid={`env-var-row-${index}`}
+      data-settings-dirty={!baselineRow || JSON.stringify(row) !== JSON.stringify(baselineRow)}
+      data-settings-dirty-level="container"
+    >
       <Input
         value={row.key}
         onChange={(e) => onUpdate(index, "key", e.target.value)}
         placeholder="KEY"
         className="flex-[2] font-mono text-xs"
+        data-settings-dirty={!baselineRow || row.key !== baselineRow.key}
       />
       <Select value={row.mode} onValueChange={(v) => onUpdate(index, "mode", v)}>
-        <SelectTrigger className="w-[100px] text-xs">
+        <SelectTrigger
+          className="w-[100px] text-xs"
+          data-settings-dirty={!baselineRow || row.mode !== baselineRow.mode}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -104,7 +122,13 @@ function EnvVarRowComponent({
           <SelectItem value="secret">Secret</SelectItem>
         </SelectContent>
       </Select>
-      <ValueOrSecretInput row={row} index={index} secrets={secrets} onUpdate={onUpdate} />
+      <ValueOrSecretInput
+        row={row}
+        baselineRow={baselineRow}
+        index={index}
+        secrets={secrets}
+        onUpdate={onUpdate}
+      />
       <Button
         type="button"
         variant="ghost"
@@ -261,13 +285,21 @@ function EnvVarAddForm({
 
 type EnvVarsFieldProps = {
   rows: EnvVarRow[];
+  baselineRows?: EnvVarRow[];
   secrets: { id: string; name: string }[];
   onAdd: (row: EnvVarRow) => void;
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
 };
 
-function EnvVarsFieldBody({ rows, secrets, onAdd, onUpdate, onRemove }: EnvVarsFieldProps) {
+function EnvVarsFieldBody({
+  rows,
+  baselineRows,
+  secrets,
+  onAdd,
+  onUpdate,
+  onRemove,
+}: EnvVarsFieldProps) {
   return (
     <div className="space-y-3" data-testid="env-vars-field">
       {rows.length === 0 ? (
@@ -280,6 +312,7 @@ function EnvVarsFieldBody({ rows, secrets, onAdd, onUpdate, onRemove }: EnvVarsF
             <EnvVarRowComponent
               key={idx}
               row={row}
+              baselineRow={baselineRows?.[idx]}
               index={idx}
               secrets={secrets}
               onUpdate={onUpdate}
@@ -312,8 +345,11 @@ export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
 }
 
 export function EnvVarsCard(props: EnvVarsFieldProps) {
+  const isDirty =
+    props.baselineRows !== undefined &&
+    JSON.stringify(rowsToEnvVars(props.rows)) !== JSON.stringify(rowsToEnvVars(props.baselineRows));
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="env-vars-card">
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -333,6 +369,6 @@ export function EnvVarsCard(props: EnvVarsFieldProps) {
       <CardContent>
         <EnvVarsFieldBody {...props} />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }

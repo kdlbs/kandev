@@ -13,6 +13,7 @@ import { useAppStore } from "@/components/state-provider";
 import { IntegrationCopyConfigMenu } from "@/components/integrations/integration-copy-config-menu";
 import { integrationFromPathname } from "@/components/integrations/integration-copy-config";
 import { safeDecodePathSegment } from "@/lib/routing/path";
+import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
 // app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
@@ -215,25 +216,27 @@ function SettingsShell({
 
   return (
     <TooltipProvider>
-      <main className="flex min-h-0 flex-1 flex-col">
-        <PageTopbar
-          title={title}
-          backHref={backHref}
-          backLabel={backLabel}
-          parents={parents}
-          leading={<SettingsMobileMenu pathname={pathname} />}
-          className="h-10"
-          actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
-        />
-        {/* Scroll the content, not the topbar: min-h-0 lets this flex child
-            shrink below its content height so overflow-y-auto can take effect. */}
-        <div
-          data-testid="settings-scroll-container"
-          className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20"
-        >
-          {children}
-        </div>
-      </main>
+      <SettingsSaveProvider key={pathname}>
+        <main className="flex min-h-0 flex-1 flex-col">
+          <PageTopbar
+            title={title}
+            backHref={backHref}
+            backLabel={backLabel}
+            parents={parents}
+            leading={<SettingsMobileMenu pathname={pathname} />}
+            className="h-10"
+            actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
+          />
+          {/* Scroll the content, not the topbar: min-h-0 lets this flex child
+              shrink below its content height so overflow-y-auto can take effect. */}
+          <div
+            data-testid="settings-scroll-container"
+            className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[calc(6rem_+_env(safe-area-inset-bottom))]"
+          >
+            {children}
+          </div>
+        </main>
+      </SettingsSaveProvider>
     </TooltipProvider>
   );
 }

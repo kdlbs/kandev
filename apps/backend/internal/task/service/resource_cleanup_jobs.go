@@ -373,7 +373,15 @@ func (s *Service) executeTaskResourceCleanupJob(
 	job *models.TaskResourceCleanupJob,
 	snapshot taskResourceCleanupSnapshot,
 ) error {
-	targets := restoreStopTargets(snapshot.StopTargets)
+	targets, err := s.refreshTaskRuntimeStopTargets(
+		ctx,
+		job.TaskID,
+		restoreStopTargets(snapshot.StopTargets),
+	)
+	if err != nil {
+		return fmt.Errorf("refresh task cleanup runtime inventory: %w", err)
+	}
+	s.registerTaskRuntimeStopOwners(targets, true)
 	failedStops := s.stopTaskRuntimeTargets(ctx, job.TaskID, targets, taskResourceCleanupStopReason(job.Trigger), "task cleanup runtime stop failed")
 	if cancelled, err := s.cancelIfTaskUnarchived(ctx, job); err != nil || cancelled {
 		return err

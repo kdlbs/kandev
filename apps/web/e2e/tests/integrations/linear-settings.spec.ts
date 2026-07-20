@@ -12,7 +12,7 @@ test.describe("Linear settings", () => {
 
     await expect(settings.secretInput).toHaveValue("");
     await expect(settings.statusBanner).toHaveCount(0);
-    await expect(settings.saveButton).toBeDisabled();
+    await expect(settings.saveButton).toHaveCount(0);
     await expect(settings.testButton).toBeDisabled();
 
     await settings.secretInput.fill("lin_api_xxx");
@@ -34,7 +34,7 @@ test.describe("Linear settings", () => {
 
     await settings.secretInput.fill("lin_api_xxx");
     await settings.saveButton.click();
-    await expect(settings.saveButton).toHaveText(/Update/i);
+    await expect(settings.saveButton).toHaveCount(0);
     // Wait for the async post-save probe to write lastOk=true before reloading.
     await apiClient.waitForIntegrationAuthHealthy("linear");
 
@@ -63,7 +63,7 @@ test.describe("Linear settings", () => {
     await settings.gotoWorkspace(other.id);
 
     await expect(settings.secretInput).toHaveValue("");
-    await expect(settings.saveButton).toBeDisabled();
+    await expect(settings.saveButton).toHaveCount(0);
     await expect(settings.deleteButton).toHaveCount(0);
     await expect(testPage.getByText(/leave blank to keep the current value/i)).toHaveCount(0);
   });

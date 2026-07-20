@@ -10,6 +10,7 @@ import type {
 } from "@/lib/types/http";
 
 type BackendTemplateStep = {
+  id?: string;
   name: string;
   position: number;
   color?: string;
@@ -26,9 +27,10 @@ type BackendWorkflowTemplate = Omit<WorkflowTemplate, "default_steps"> & {
   default_steps?: BackendTemplateStep[];
 };
 
-const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowTemplate => {
+export const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowTemplate => {
   const steps = template.default_steps ?? template.steps ?? [];
   const default_steps: StepDefinition[] = steps.map((step) => ({
+    id: step.id,
     name: step.name,
     position: step.position,
     color: step.color,

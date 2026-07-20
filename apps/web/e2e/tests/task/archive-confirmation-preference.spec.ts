@@ -12,6 +12,11 @@ test.describe("Archive confirmation preference", () => {
     await expect(toggle).toBeChecked();
     await toggle.click();
     await expect(toggle).not.toBeChecked();
+    expect((await apiClient.getUserSettings()).settings.confirm_task_archive).toBe(true);
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
     await expect
       .poll(async () => (await apiClient.getUserSettings()).settings.confirm_task_archive)
       .toBe(false);

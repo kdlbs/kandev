@@ -1,150 +1,212 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
+import { startConfigChat } from "@/lib/api/domains/workspace-api";
+import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import {
   agentProfileId as toAgentProfileId,
   sessionId as toSessionId,
   taskId as toTaskId,
 } from "@/lib/types/ids";
 
+type StartConfigChatOptions = {
+  openInQuickChat?: boolean;
+};
+
 function useConfigChatStore() {
   return useAppStore(
-    useShallow((s) => ({
-      isOpen: s.configChat.isOpen,
-      sessions: s.configChat.sessions,
-      activeSessionId: s.configChat.activeSessionId,
-      workspaceId: s.configChat.workspaceId,
-      openConfigChat: s.openConfigChat,
-      startNewConfigChat: s.startNewConfigChat,
-      closeConfigChat: s.closeConfigChat,
-      closeConfigChatSession: s.closeConfigChatSession,
-      setActiveConfigChatSession: s.setActiveConfigChatSession,
-      renameConfigChatSession: s.renameConfigChatSession,
+    useShallow((state) => ({
+      openQuickChat: state.openQuickChat,
+      addQuickChatSession: state.addQuickChatSession,
+      closeQuickChatSession: state.closeQuickChatSession,
+      renameQuickChatSession: state.renameQuickChatSession,
+      setQuickChatInitialPrompt: state.setQuickChatInitialPrompt,
     })),
   );
 }
 
+type ConfigChatStore = ReturnType<typeof useConfigChatStore>;
+type AppStoreApi = ReturnType<typeof useAppStoreApi>;
+type StartedConfigChat = Awaited<ReturnType<typeof startConfigChat>>;
+
+const activeWorkspaceStarts = new Map<string, symbol>();
+
+type RegisterStartedSessionParams = {
+  store: ConfigChatStore;
+  storeApi: AppStoreApi;
+  response: StartedConfigChat;
+  workspaceId: string;
+  agentProfileId: string;
+  prompt: string;
+  isPassthrough: boolean;
+  openInQuickChat: boolean;
+};
+
 function useUpdateWorkspaceInStore() {
   const storeApi = useAppStoreApi();
-  return (workspaceId: string, updates: Record<string, unknown>) => {
-    const { workspaces, setWorkspaces } = storeApi.getState();
-    setWorkspaces(workspaces.items.map((w) => (w.id === workspaceId ? { ...w, ...updates } : w)));
-  };
+  return useCallback(
+    (workspaceId: string, updates: Record<string, unknown>) => {
+      const { workspaces, setWorkspaces } = storeApi.getState();
+      setWorkspaces(workspaces.items.map((w) => (w.id === workspaceId ? { ...w, ...updates } : w)));
+    },
+    [storeApi],
+  );
+}
+
+async function deleteSupersededConfigChatTask(taskId: string) {
+  const { deleteTask } = await import("@/lib/api/domains/kanban-api");
+  deleteTask(taskId).catch((error) =>
+    console.error("Failed to clean up superseded config chat task:", error),
+  );
+}
+
+function registerStartedSession({
+  store,
+  storeApi,
+  response,
+  workspaceId,
+  agentProfileId,
+  prompt,
+  isPassthrough,
+  openInQuickChat,
+}: RegisterStartedSessionParams) {
+  const now = new Date().toISOString();
+  storeApi.getState().setTaskSession({
+    id: toSessionId(response.session_id),
+    task_id: toTaskId(response.task_id),
+    state: "CREATED",
+    started_at: now,
+    updated_at: now,
+    agent_profile_id: toAgentProfileId(agentProfileId),
+  });
+  if (openInQuickChat) {
+    store.closeQuickChatSession(getQuickChatSetupSessionId(workspaceId, "config"));
+    store.openQuickChat(response.session_id, workspaceId, agentProfileId, "config");
+  } else {
+    store.addQuickChatSession(response.session_id, workspaceId, agentProfileId, "config");
+  }
+  store.renameQuickChatSession(response.session_id, prompt.slice(0, 40) || "Config Chat");
+  if (!isPassthrough) store.setQuickChatInitialPrompt(response.session_id, prompt);
+}
+
+async function saveDefaultConfigProfile(
+  workspaceId: string,
+  agentProfileId: string,
+  alreadyConfigured: boolean,
+  updateWorkspaceInStore: (workspaceId: string, updates: Record<string, unknown>) => void,
+) {
+  if (alreadyConfigured) return;
+  try {
+    const updates = { default_config_agent_profile_id: agentProfileId };
+    await updateWorkspaceAction(workspaceId, updates);
+    updateWorkspaceInStore(workspaceId, updates);
+  } catch {
+    // The chat is usable even when saving the future default fails.
+  }
 }
 
 export function useConfigChat(workspaceId: string) {
   const store = useConfigChatStore();
   const storeApi = useAppStoreApi();
+  const updateWorkspaceInStore = useUpdateWorkspaceInStore();
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
-  const updateWorkspaceInStore = useUpdateWorkspaceInStore();
-
+  const latestRequestId = useRef(0);
+  const activeRequestId = useRef<number | null>(null);
   const workspace = useAppStore(
-    (s) => s.workspaces.items.find((w) => w.id === workspaceId) ?? null,
+    (state) => state.workspaces.items.find((item) => item.id === workspaceId) ?? null,
   );
-
   const defaultProfileId =
     workspace?.default_config_agent_profile_id ?? workspace?.default_agent_profile_id ?? undefined;
 
-  const open = useCallback(() => {
-    if (store.activeSessionId && store.workspaceId === workspaceId) {
-      store.openConfigChat(store.activeSessionId, workspaceId);
-      return;
-    }
-    store.startNewConfigChat(workspaceId);
-  }, [workspaceId, store]);
+  const reset = useCallback(() => {
+    latestRequestId.current += 1;
+    activeRequestId.current = null;
+    setIsStarting(false);
+    setError(null);
+  }, []);
 
   const startSession = useCallback(
-    async (agentProfileId: string, prompt?: string) => {
-      if (isStarting) return;
+    async (
+      agentProfileId: string,
+      prompt: string,
+      options: StartConfigChatOptions = {},
+    ): Promise<string | undefined> => {
+      if (activeRequestId.current !== null) return undefined;
+      const profile = storeApi
+        .getState()
+        .agentProfiles.items.find((item) => item.id === agentProfileId);
+      if (!profile) {
+        setError("The selected agent profile is not available yet. Try again shortly.");
+        return undefined;
+      }
+      if (activeWorkspaceStarts.has(workspaceId)) return undefined;
+      const requestId = ++latestRequestId.current;
+      const workspaceStart = Symbol(workspaceId);
+      activeRequestId.current = requestId;
+      activeWorkspaceStarts.set(workspaceId, workspaceStart);
       setIsStarting(true);
       setError(null);
       try {
-        // Don't send the prompt to the backend — it will be sent via WS
-        // message.add by QuickChatContent after the WS subscription is
-        // established. This avoids a race condition where the agent completes
-        // before the frontend subscribes and events are lost.
+        const isPassthrough = profile.cli_passthrough === true;
+        // ACP chats send through the subscribed shell so a fast turn cannot
+        // finish before WS attaches. Passthrough chats render only a terminal.
         const response = await startConfigChat(workspaceId, {
           agent_profile_id: agentProfileId,
+          ...(isPassthrough ? { prompt } : {}),
         });
-
-        // Seed the task session in the main store so QuickChatContent can find it
-        // immediately. The WS event will merge on top when it arrives.
-        storeApi.getState().setTaskSession({
-          id: toSessionId(response.session_id),
-          task_id: toTaskId(response.task_id),
-          state: "CREATED",
-          started_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          agent_profile_id: toAgentProfileId(agentProfileId),
-        });
-
-        // Store the prompt so QuickChatContent can send it via WS.
-        setPendingPrompt(prompt ?? null);
-
-        store.openConfigChat(response.session_id, workspaceId);
-        store.renameConfigChatSession(response.session_id, prompt?.slice(0, 40) || "Config Chat");
-
-        // Save the selected profile as the workspace default for future sessions
-        if (!workspace?.default_config_agent_profile_id) {
-          try {
-            await updateWorkspaceAction(workspaceId, {
-              default_config_agent_profile_id: agentProfileId,
-            });
-            updateWorkspaceInStore(workspaceId, {
-              default_config_agent_profile_id: agentProfileId,
-            });
-          } catch {
-            // Non-critical — don't fail the chat start for this
-          }
+        if (latestRequestId.current !== requestId) {
+          await deleteSupersededConfigChatTask(response.task_id);
+          return undefined;
         }
+        registerStartedSession({
+          store,
+          storeApi,
+          response,
+          workspaceId,
+          agentProfileId,
+          prompt,
+          isPassthrough,
+          openInQuickChat: options.openInQuickChat !== false,
+        });
+        await saveDefaultConfigProfile(
+          workspaceId,
+          agentProfileId,
+          Boolean(workspace?.default_config_agent_profile_id),
+          updateWorkspaceInStore,
+        );
+        return response.session_id;
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Unknown error";
-        setError(message);
+        if (latestRequestId.current !== requestId) return undefined;
+        setError(err instanceof Error ? err.message : "Unknown error");
+        return undefined;
       } finally {
-        setIsStarting(false);
+        if (activeWorkspaceStarts.get(workspaceId) === workspaceStart) {
+          activeWorkspaceStarts.delete(workspaceId);
+        }
+        if (latestRequestId.current === requestId) {
+          activeRequestId.current = null;
+          setIsStarting(false);
+        }
       }
     },
     [
-      workspaceId,
-      isStarting,
       store,
       storeApi,
-      workspace?.default_config_agent_profile_id,
       updateWorkspaceInStore,
+      workspace?.default_config_agent_profile_id,
+      workspaceId,
     ],
   );
 
-  const close = useCallback(() => {
-    store.closeConfigChat();
-  }, [store]);
-
-  const newChat = useCallback(() => {
-    store.startNewConfigChat(workspaceId);
-  }, [store, workspaceId]);
-
-  const clearPendingPrompt = useCallback(() => setPendingPrompt(null), []);
-
   return {
-    isOpen: store.isOpen,
-    sessions: store.sessions,
-    activeSessionId: store.activeSessionId,
     isStarting,
     error,
-    workspace,
     defaultProfileId,
-    pendingPrompt,
-    clearPendingPrompt,
-    open,
+    reset,
     startSession,
-    close,
-    closeSession: store.closeConfigChatSession,
-    setActiveSession: store.setActiveConfigChatSession,
-    newChat,
   };
 }

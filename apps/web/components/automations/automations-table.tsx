@@ -12,6 +12,7 @@ import { formatRelativeTime } from "./format-utils";
 
 type AutomationsTableProps = {
   automations: Automation[];
+  dirtyIds: ReadonlySet<string>;
   workspaceId: string;
   onToggleEnabled: (id: string, enabled: boolean) => void;
   onTrigger: (id: string) => void;
@@ -93,6 +94,7 @@ function RowActions({
 
 export function AutomationsTable({
   automations,
+  dirtyIds,
   workspaceId,
   onToggleEnabled,
   onTrigger,
@@ -101,7 +103,12 @@ export function AutomationsTable({
   const router = useRouter();
 
   return (
-    <div className="rounded-md border" data-testid="automations-table">
+    <div
+      className="rounded-md border"
+      data-testid="automations-table"
+      data-settings-dirty={dirtyIds.size > 0}
+      data-settings-dirty-level="container"
+    >
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent focus-within:bg-transparent">
@@ -129,6 +136,8 @@ export function AutomationsTable({
               <TableRow
                 key={a.id}
                 data-testid={`automation-row-${a.id}`}
+                data-settings-dirty={dirtyIds.has(a.id)}
+                data-settings-dirty-level="container"
                 className="cursor-pointer hover:bg-muted/50"
                 onClick={() =>
                   router.push(`/settings/workspace/${workspaceId}/automations/${a.id}`)
@@ -148,6 +157,7 @@ export function AutomationsTable({
                     data-testid={`automation-enabled-${a.id}`}
                     size="sm"
                     checked={a.enabled}
+                    data-settings-dirty={dirtyIds.has(a.id)}
                     onCheckedChange={(checked) => onToggleEnabled(a.id, checked)}
                     className="cursor-pointer"
                   />

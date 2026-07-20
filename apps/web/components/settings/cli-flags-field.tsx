@@ -3,11 +3,12 @@
 import { useId, useMemo, useState } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import type { CLIFlag, PermissionSetting } from "@/lib/types/http";
+import { SettingsCard } from "@/components/settings/settings-card";
 
 /**
  * Editor-side representation of a single custom CLI flag. The persisted
@@ -393,6 +394,7 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (next: CLIFlag) => void }) {
 
 type CustomCLIFlagsCardProps = {
   flags: CLIFlag[];
+  baselineFlags?: CLIFlag[];
   onChange: (next: CLIFlag[]) => void;
   permissionSettings?: Record<string, PermissionSetting>;
 };
@@ -405,6 +407,7 @@ type CustomCLIFlagsCardProps = {
  */
 export function CustomCLIFlagsCard({
   flags,
+  baselineFlags,
   onChange,
   permissionSettings,
 }: CustomCLIFlagsCardProps) {
@@ -420,6 +423,8 @@ export function CustomCLIFlagsCard({
     [flags, curatedFlagTexts],
   );
   const enabledCount = customFlags.filter((e) => e.flag.enabled).length;
+  const isDirty =
+    baselineFlags !== undefined && JSON.stringify(flags) !== JSON.stringify(baselineFlags);
 
   const onUpdateRow = (index: number, next: CLIFlag) => {
     onChange(flags.map((f, i) => (i === index ? next : f)));
@@ -428,7 +433,7 @@ export function CustomCLIFlagsCard({
   const onAdd = (next: CLIFlag) => onChange([...flags, next]);
 
   return (
-    <Card data-testid="custom-cli-flags-card">
+    <SettingsCard isDirty={isDirty} data-testid="custom-cli-flags-card">
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -444,7 +449,7 @@ export function CustomCLIFlagsCard({
           )}
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent data-settings-dirty={isDirty} data-settings-dirty-level="container">
         <CustomFlagsSection
           customFlags={customFlags}
           onUpdateRow={onUpdateRow}
@@ -452,6 +457,6 @@ export function CustomCLIFlagsCard({
           onAdd={onAdd}
         />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }

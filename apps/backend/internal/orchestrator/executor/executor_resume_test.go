@@ -70,6 +70,53 @@ func setupLiveResumeTestFixture(repo *mockRepository) {
 	}
 }
 
+func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing.T) {
+	tests := []struct {
+		name           string
+		officeAssignee string
+		metadata       map[string]interface{}
+		wantMode       string
+	}{
+		{name: "regular task", wantMode: ""},
+		{name: "Office task", officeAssignee: "office-agent", wantMode: McpModeOffice},
+		{name: "Config session", metadata: map[string]interface{}{"config_mode": true}, wantMode: McpModeConfig},
+		{
+			name:           "Config session takes precedence for Office task",
+			officeAssignee: "office-agent",
+			metadata:       map[string]interface{}{"config_mode": true},
+			wantMode:       McpModeConfig,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			setupLiveResumeTestFixture(repo)
+			repo.tasks["task-1"].AssigneeAgentProfileID = tt.officeAssignee
+			repo.sessions["sess-1"].Metadata = tt.metadata
+
+			var capturedReq *LaunchAgentRequest
+			agentMgr := &mockAgentManager{
+				launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+					capturedReq = req
+					return &LaunchAgentResponse{AgentExecutionID: "exec-new", Status: v1.AgentStatusStarting}, nil
+				},
+			}
+			exec := newTestExecutor(t, agentMgr, repo)
+
+			if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], false); err != nil {
+				t.Fatalf("ResumeSession: %v", err)
+			}
+			if capturedReq == nil {
+				t.Fatal("LaunchAgent was not called")
+			}
+			if capturedReq.McpMode != tt.wantMode {
+				t.Fatalf("McpMode = %q, want %q", capturedReq.McpMode, tt.wantMode)
+			}
+		})
+	}
+}
+
 // TestResumeSession_LiveAgentReturnsAlreadyRunning ensures ResumeSession returns
 // ErrExecutionAlreadyRunning instead of killing the live agent subprocess when
 // a live agent is already registered for the session.

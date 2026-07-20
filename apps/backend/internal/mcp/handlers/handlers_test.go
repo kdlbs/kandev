@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
@@ -148,6 +149,17 @@ func (b *mcpRecordingEventBus) Publish(_ context.Context, _ string, event *bus.E
 	return nil
 }
 
+type mcpUserSettingsProvider struct {
+	settings *usermodels.UserSettings
+	err      error
+	calls    int
+}
+
+func (p *mcpUserSettingsProvider) GetUserSettings(context.Context) (*usermodels.UserSettings, error) {
+	p.calls++
+	return p.settings, p.err
+}
+
 // TestClassifyAddBranchError_UnresolvedBaseBranchIsValidation pins the
 // classifier's handling of the new "cannot resolve base_branch" sentinel
 // emitted by AddBranchToTask when neither base_branch nor a probed
@@ -230,6 +242,12 @@ func TestSessionStateEventsIncludeUpdatedAt(t *testing.T) {
 		{
 			name:      "waiting for input",
 			initial:   models.TaskSessionStateRunning,
+			run:       (*Handlers).setSessionWaitingForInput,
+			wantState: models.TaskSessionStateWaitingForInput,
+		},
+		{
+			name:      "fast clarification waits while starting",
+			initial:   models.TaskSessionStateStarting,
 			run:       (*Handlers).setSessionWaitingForInput,
 			wantState: models.TaskSessionStateWaitingForInput,
 		},
@@ -787,6 +805,238 @@ func TestHandleCreateTask_ExplicitAgentStillInheritsRoutedSessionExecutor(t *tes
 	require.NotNil(t, task.Metadata)
 	assert.Equal(t, "explicit-agent-profile", task.Metadata[models.MetaKeyAgentProfileID])
 	assert.Equal(t, "effective-executor-profile", task.Metadata[models.MetaKeyExecutorProfileID])
+}
+
+func TestResolveMCPAutoStartConfig_WorkspaceDefaultSkipsTaskProfilesButPreservesExecutorInheritance(t *testing.T) {
+	tests := []struct {
+		name            string
+		useParent       bool
+		workflowProfile string
+		wantProfile     string
+	}{
+		{
+			name:        "top-level source uses workspace default",
+			wantProfile: "workspace-default-profile",
+		},
+		{
+			name:        "subtask parent uses workspace default",
+			useParent:   true,
+			wantProfile: "workspace-default-profile",
+		},
+		{
+			name:            "workflow default precedes workspace default",
+			workflowProfile: "workflow-profile",
+			wantProfile:     "workflow-profile",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _ := newTestTaskService(t)
+			ctx := context.Background()
+			workspaces, err := svc.ListWorkspaces(ctx)
+			require.NoError(t, err)
+			require.Len(t, workspaces, 1)
+			workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+			require.NoError(t, err)
+			require.Len(t, workflows, 1)
+
+			workspaceProfile := "workspace-default-profile"
+			_, err = svc.UpdateWorkspace(ctx, workspaces[0].ID, &service.UpdateWorkspaceRequest{
+				DefaultAgentProfileID: &workspaceProfile,
+			})
+			require.NoError(t, err)
+			if tt.workflowProfile != "" {
+				_, err = svc.UpdateWorkflow(ctx, workflows[0].ID, &service.UpdateWorkflowRequest{
+					AgentProfileID: &tt.workflowProfile,
+				})
+				require.NoError(t, err)
+			}
+
+			source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+				WorkspaceID: workspaces[0].ID,
+				WorkflowID:  workflows[0].ID,
+				Title:       "Source task",
+				Metadata: map[string]interface{}{
+					models.MetaKeyAgentProfileID:    "source-profile",
+					models.MetaKeyExecutorProfileID: "source-executor-profile",
+				},
+			})
+			require.NoError(t, err)
+
+			task := &models.Task{
+				WorkspaceID: workspaces[0].ID,
+				WorkflowID:  workflows[0].ID,
+			}
+			sourceTaskID := source.ID
+			if tt.useParent {
+				task.ParentID = source.ID
+				sourceTaskID = ""
+			}
+			provider := &mcpUserSettingsProvider{settings: &usermodels.UserSettings{
+				MCPTaskAgentProfileDefault: usermodels.MCPTaskAgentProfileDefaultWorkspaceDefault,
+			}}
+			h := &Handlers{taskSvc: svc, userSettingsProvider: provider, logger: testLogger(t).WithFields()}
+
+			config, err := h.resolveMCPAutoStartConfigWithError(ctx, task, "", "", sourceTaskID)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantProfile, config.AgentProfileID)
+			assert.Equal(t, "source-executor-profile", config.ExecutorProfileID)
+			assert.Equal(t, 1, provider.calls)
+		})
+	}
+}
+
+func TestResolveMCPAutoStartConfig_ExplicitProfileDoesNotReadUserSettings(t *testing.T) {
+	provider := &mcpUserSettingsProvider{err: errors.New("settings unavailable")}
+	h := &Handlers{userSettingsProvider: provider, logger: testLogger(t).WithFields()}
+
+	config, err := h.resolveMCPAutoStartConfigWithError(context.Background(), &models.Task{}, "explicit-profile", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, "explicit-profile", config.AgentProfileID)
+	assert.Zero(t, provider.calls)
+}
+
+func TestResolveMCPAutoStartConfig_WorkspaceDefaultUsesTargetWorkspace(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Source task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID: "source-profile",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "target-workspace", Name: "Target"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "target-workflow", WorkspaceID: "target-workspace", Name: "Target workflow",
+	}))
+	targetProfile := "target-workspace-profile"
+	_, err = svc.UpdateWorkspace(ctx, "target-workspace", &service.UpdateWorkspaceRequest{
+		DefaultAgentProfileID: &targetProfile,
+	})
+	require.NoError(t, err)
+
+	h := &Handlers{
+		taskSvc: svc,
+		userSettingsProvider: &mcpUserSettingsProvider{settings: &usermodels.UserSettings{
+			MCPTaskAgentProfileDefault: usermodels.MCPTaskAgentProfileDefaultWorkspaceDefault,
+		}},
+		logger: testLogger(t).WithFields(),
+	}
+	config, err := h.resolveMCPAutoStartConfigWithError(ctx, &models.Task{
+		WorkspaceID: "target-workspace",
+		WorkflowID:  "target-workflow",
+	}, "", "", source.ID)
+	require.NoError(t, err)
+	assert.Equal(t, targetProfile, config.AgentProfileID)
+}
+
+func TestHandleCreateTask_WorkspaceDefaultPersistsTargetProfileAndInheritedExecutor(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	workspaceProfile := "workspace-default-profile"
+	_, err = svc.UpdateWorkspace(ctx, workspaces[0].ID, &service.UpdateWorkspaceRequest{
+		DefaultAgentProfileID: &workspaceProfile,
+	})
+	require.NoError(t, err)
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Source task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID: "source-profile",
+			models.MetaKeyExecutorID:     "source-executor",
+		},
+	})
+	require.NoError(t, err)
+
+	h := &Handlers{
+		taskSvc: svc,
+		userSettingsProvider: &mcpUserSettingsProvider{settings: &usermodels.UserSettings{
+			MCPTaskAgentProfileDefault: usermodels.MCPTaskAgentProfileDefaultWorkspaceDefault,
+		}},
+		logger: testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id": source.ID,
+		"workspace_id":   workspaces[0].ID,
+		"workflow_id":    workflows[0].ID,
+		"title":          "Deferred task",
+		"start_agent":    false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, workspaceProfile, task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "source-executor", task.Metadata[models.MetaKeyExecutorID])
+}
+
+func TestHandleCreateTask_OmittedProfileFailuresCreateNoTask(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider *mcpUserSettingsProvider
+		wantCode string
+	}{
+		{
+			name:     "settings read error",
+			provider: &mcpUserSettingsProvider{err: errors.New("settings unavailable")},
+			wantCode: ws.ErrorCodeInternalError,
+		},
+		{
+			name: "workspace policy has no default",
+			provider: &mcpUserSettingsProvider{settings: &usermodels.UserSettings{
+				MCPTaskAgentProfileDefault: usermodels.MCPTaskAgentProfileDefaultWorkspaceDefault,
+			}},
+			wantCode: ws.ErrorCodeValidation,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _ := newTestTaskService(t)
+			ctx := context.Background()
+			workspaces, err := svc.ListWorkspaces(ctx)
+			require.NoError(t, err)
+			workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+			require.NoError(t, err)
+			h := &Handlers{taskSvc: svc, userSettingsProvider: tt.provider, logger: testLogger(t).WithFields()}
+			msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+				"workspace_id": workspaces[0].ID,
+				"workflow_id":  workflows[0].ID,
+				"title":        "Task that must not persist",
+				"start_agent":  false,
+			})
+
+			resp, err := h.handleCreateTask(ctx, msg)
+			require.NoError(t, err)
+			assertWSError(t, resp, tt.wantCode)
+			tasks, err := svc.ListTasks(ctx, workflows[0].ID)
+			require.NoError(t, err)
+			assert.Empty(t, tasks)
+		})
+	}
 }
 
 func TestInheritFromTask_PrimarySessionLookupErrorFailsClosed(t *testing.T) {

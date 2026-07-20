@@ -96,6 +96,46 @@ async function waitForQuickChatWidth(dialog: Locator) {
 }
 
 test.describe("Quick Chat", () => {
+  test("offers configuration chat in setup and hides it once one exists", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.updateWorkspace(seedData.workspaceId, {
+      default_config_agent_profile_id: seedData.agentProfileId,
+    });
+    const dialog = await openQuickChatSetup(testPage);
+    const setup = dialog.getByTestId("quick-chat-setup");
+
+    await expect(setup.getByText(/quick chats stay outside your task board/i)).toBeVisible();
+    await setup.getByRole("switch", { name: "Configuration chat" }).click();
+
+    const configSetup = dialog.getByTestId("config-chat-setup");
+    await expect(configSetup).toBeVisible();
+    await expect(configSetup.getByRole("switch", { name: "Configuration chat" })).toBeChecked();
+    await configSetup
+      .getByPlaceholder("Ask anything about your configuration...")
+      .fill("/e2e:simple-message");
+    await configSetup.getByRole("button", { name: "Start configuration chat" }).click();
+    await expect(configSetup).not.toBeVisible({ timeout: 15_000 });
+
+    await testPage.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+Shift+q`);
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    const configTab = dialog
+      .getByTestId("quick-chat-tab")
+      .filter({ has: testPage.getByRole("img", { name: "Configuration chat" }) });
+    await configTab.getByRole("button").first().click();
+    await expect(configTab).toHaveClass(/bg-background/);
+
+    await dialog.getByRole("button", { name: "Start new chat" }).click();
+    const newSetup = dialog.getByTestId("quick-chat-setup");
+    await expect(newSetup).toBeVisible();
+    await expect(newSetup.getByRole("switch", { name: "Configuration chat" })).toHaveCount(0);
+  });
+
   test("resizes from either edge, restores width, and keeps tab actions adjacent", async ({
     testPage,
   }) => {
@@ -208,6 +248,9 @@ test.describe("Quick Chat", () => {
       const dialog = await openQuickChatSetup(testPage);
       await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
         "Chat with an agent about an idea, question, or codebase.",
+      );
+      await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
+        "Quick chats stay outside your task board.",
       );
       await expect(
         dialog.getByText("Add repository context to focus on specific code and branches."),
@@ -353,7 +396,7 @@ test.describe("Quick Chat", () => {
     });
   });
 
-  test("restores multiple chat tabs in creation order after reload", async ({
+  test("restores multiple chat tabs in newest-activity order after reload", async ({
     testPage,
     apiClient,
     seedData,
@@ -398,9 +441,9 @@ test.describe("Quick Chat", () => {
     const newChatBtn = dialog.getByLabel("Start new chat");
     await newChatBtn.click();
 
-    // Setup should appear without the first-use introduction once a chat exists.
+    // Setup guidance remains visible for every new chat.
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 5_000 });
-    await expect(dialog.getByTestId("quick-chat-introduction")).not.toBeVisible();
+    await expect(dialog.getByTestId("quick-chat-introduction")).toBeVisible();
     await startQuickChatFromSetup(dialog, testPage);
 
     // Send a message in the second tab using script mode.
@@ -443,16 +486,16 @@ test.describe("Quick Chat", () => {
 
     const restoredTabs = restoredDialog.getByTestId("quick-chat-tab");
     await expect(restoredTabs).toHaveCount(2);
-    await expect(restoredTabs.locator("span")).toHaveText(originalNames);
+    await expect(restoredTabs.locator("span")).toHaveText([...originalNames].reverse());
     await expect(restoredDialog.getByTestId("quick-chat-setup")).not.toBeVisible();
 
     await restoredTabs.nth(0).locator("button").first().click();
-    await expect(restoredDialog.getByText("first tab response", { exact: true })).toBeVisible({
+    await expect(restoredDialog.getByText("second tab response", { exact: true })).toBeVisible({
       timeout: 10_000,
     });
 
     await restoredTabs.nth(1).locator("button").first().click();
-    await expect(restoredDialog.getByText("second tab response", { exact: true })).toBeVisible({
+    await expect(restoredDialog.getByText("first tab response", { exact: true })).toBeVisible({
       timeout: 10_000,
     });
   });

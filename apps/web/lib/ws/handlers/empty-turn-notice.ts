@@ -130,9 +130,7 @@ export function maybeEmitEmptyTurnNotice(
 ): void {
   const state = store.getState();
   const sid = payload.session_id;
-  const isEphemeralSurface =
-    state.quickChat.sessions.some((s) => s.sessionId === sid) ||
-    state.configChat.sessions.some((s) => s.sessionId === sid);
+  const isEphemeralSurface = state.quickChat.sessions.some((s) => s.sessionId === sid);
 
   const notice = computeEmptyTurnNotice({
     sessionId: sid,

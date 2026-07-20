@@ -77,7 +77,7 @@ vi.mock("./layout-manager", async (importOriginal) => {
   };
 });
 
-import { setEnvLayout } from "@/lib/local-storage";
+import { removeEnvMaximizeState, setEnvLayout } from "@/lib/local-storage";
 import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
 import { applyLayout } from "./layout-manager";
 
@@ -307,6 +307,53 @@ describe("applyBuiltInPreset — persistence at call site", () => {
     await flushRaf();
 
     expect(setEnvLayout).not.toHaveBeenCalled();
+  });
+});
+
+describe("resetLayout — effective default persistence", () => {
+  beforeEach(resetStoreForIntegration);
+
+  it("applies the current user default and persists it for the active environment", async () => {
+    const api = makeStoreApi();
+    const userDefaultLayout = {
+      columns: [
+        {
+          id: "center",
+          groups: [{ panels: [{ id: "chat", component: "chat", title: "Agent" }] }],
+        },
+      ],
+    };
+    useDockviewStore.setState({
+      api,
+      currentLayoutEnvId: "env-reset",
+      userDefaultLayout,
+    });
+
+    useDockviewStore.getState().resetLayout();
+
+    expect(applyLayout).toHaveBeenCalledWith(api, userDefaultLayout, expect.any(Map), 800, 600);
+    await flushRaf();
+    expect(setEnvLayout).toHaveBeenCalledWith("env-reset", expect.any(Object));
+  });
+
+  it("clears maximized state before applying and persisting the default", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({
+      api,
+      currentLayoutEnvId: "env-reset",
+      preMaximizeLayout: { columns: [{ id: "old", groups: [] }] },
+      maximizedGroupId: "group-old",
+    });
+
+    useDockviewStore.getState().resetLayout();
+
+    expect(useDockviewStore.getState()).toMatchObject({
+      preMaximizeLayout: null,
+      maximizedGroupId: null,
+    });
+    expect(removeEnvMaximizeState).toHaveBeenCalledWith("env-reset");
+    await flushRaf();
+    expect(setEnvLayout).toHaveBeenCalledWith("env-reset", expect.any(Object));
   });
 });
 

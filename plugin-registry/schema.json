@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json",
+  "title": "Kandev plugin registry list",
+  "description": "Schema for plugin-registry/plugins.yaml — the curated, PR-edited pointer list of plugin repositories in the official Kandev marketplace source. Validated in CI on every PR. Descriptive metadata (name, description, author, version, package URL) is NOT stored here; it is read from each plugin's own GitHub release at index-build time so it can never drift from what actually ships.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["plugins"],
+  "properties": {
+    "plugins": {
+      "type": "array",
+      "description": "The curated list of plugin repositories, one entry per plugin.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "repo"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable plugin identifier. MUST equal the plugin manifest `id` of the repo's latest release. Unique across the file.",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "repo": {
+            "type": "string",
+            "description": "GitHub repository in owner/name form; the release source for this plugin.",
+            "pattern": "^[^/]+/[^/]+$"
+          },
+          "featured": {
+            "type": "boolean",
+            "description": "When true, a maintainer has pinned this entry above star order in the catalog.",
+            "default": false
+          },
+          "categories": {
+            "type": "array",
+            "description": "Curation-only category tags used for filtering in the catalog.",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

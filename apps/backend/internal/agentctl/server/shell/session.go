@@ -3,6 +3,7 @@
 package shell
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,8 +28,10 @@ type Session struct {
 	config    Config   // Stored config for respawn
 
 	// PTY and process
-	pty *os.File
-	cmd *exec.Cmd
+	pty       *os.File
+	cmd       *exec.Cmd
+	lifecycle shellProcessLifecycleHandle
+	reapErr   error
 
 	// State
 	running   bool
@@ -47,19 +50,44 @@ type Session struct {
 	stopCh   chan struct{}
 	doneCh   chan struct{}
 	stopping bool // true when Stop() has been called (don't respawn)
+
+	killGroupFn     func(*os.Process) error
+	waitGroupExitFn func(*os.Process) bool
+	beforeRespawn   func()
+	afterStopClaim  func()
 }
 
 // Maximum size of output buffer (16KB should be enough for recent history)
 const maxOutputBufferSize = 16 * 1024
 const shellStopGrace = 250 * time.Millisecond
+const shellReapGrace = 2 * time.Second
+
+func killAndWaitShellCommand(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	_ = cmd.Process.Kill()
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(shellReapGrace):
+		return fmt.Errorf("shell process %d was not reaped after failed startup", cmd.Process.Pid)
+	}
+}
 
 // Config holds shell session configuration
 type Config struct {
-	WorkDir      string   // Working directory (default: workspace)
-	Cols         int      // Initial terminal columns (default: 80)
-	Rows         int      // Initial terminal rows (default: 24)
-	ShellCommand string   // Optional shell command override
-	ShellArgs    []string // Optional shell args override
+	WorkDir      string            // Working directory (default: workspace)
+	Cols         int               // Initial terminal columns (default: 80)
+	Rows         int               // Initial terminal rows (default: 24)
+	ShellCommand string            // Optional shell command override
+	ShellArgs    []string          // Optional shell args override
+	Env          map[string]string // Optional environment overrides
 }
 
 // DefaultConfig returns the default shell configuration
@@ -163,10 +191,11 @@ func defaultShellArgs(shellCommand string) []string {
 func (s *Session) start(cfg Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	doneCh := make(chan struct{})
 
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
 	s.cmd.Dir = cfg.WorkDir
-	s.cmd.Env = buildShellEnv(cfg.WorkDir)
+	s.cmd.Env = buildShellEnv(cfg.WorkDir, cfg.Env)
 	configureShellProcess(s.cmd)
 
 	// Start with PTY
@@ -178,9 +207,18 @@ func (s *Session) start(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to start PTY: %w", err)
 	}
+	lifecycle, lifecycleErr := installShellProcessLifecycle(s.cmd)
+	if lifecycleErr != nil {
+		_ = s.pty.Close()
+		reapErr := killAndWaitShellCommand(s.cmd)
+		return errors.Join(fmt.Errorf("failed to install shell process lifecycle: %w", lifecycleErr), reapErr)
+	}
 
 	s.running = true
 	s.startedAt = time.Now()
+	s.doneCh = doneCh
+	s.lifecycle = lifecycle
+	s.reapErr = nil
 
 	s.logger.Info("shell session started",
 		zap.String("shell", s.shell),
@@ -191,7 +229,7 @@ func (s *Session) start(cfg Config) error {
 	go s.readOutput()
 
 	// Wait for process exit
-	go s.waitForExit()
+	go s.waitForExit(s.cmd, doneCh, lifecycle)
 
 	return nil
 }
@@ -200,18 +238,38 @@ func (s *Session) start(cfg Config) error {
 // Called automatically when agentctl stops.
 func (s *Session) Stop() error {
 	s.mu.Lock()
+	cmd := s.cmd
+	doneCh := s.doneCh
+	var process *os.Process
+	if cmd != nil {
+		process = cmd.Process
+	}
+	pid := 0
+	if process != nil {
+		pid = process.Pid
+	}
+	lifecycle := s.lifecycle
 	if !s.running {
+		s.stopping = true
+		doneCh := s.doneCh
 		s.mu.Unlock()
+		if s.afterStopClaim != nil {
+			s.afterStopClaim()
+		}
+		if doneCh != nil {
+			select {
+			case <-doneCh:
+				return s.cleanupShellProcessGroup(process, pid, "stop_retry", lifecycle)
+			case <-time.After(shellReapGrace):
+				return fmt.Errorf("shell process was not reaped after stop")
+			}
+		}
 		return nil
 	}
 	s.running = false
 	s.stopping = true // Mark as stopping to prevent respawn
 	s.mu.Unlock()
 
-	pid := 0
-	if s.cmd != nil && s.cmd.Process != nil {
-		pid = s.cmd.Process.Pid
-	}
 	s.logger.Info("stopping shell session",
 		zap.String("shell", s.shell),
 		zap.String("cwd", s.workDir),
@@ -233,32 +291,82 @@ func (s *Session) Stop() error {
 
 	// Wait for exit with timeout
 	select {
-	case <-s.doneCh:
+	case <-doneCh:
 		s.logger.Info("shell session stopped gracefully")
-		s.cleanupShellProcessGroup(pid, "leader_exited")
+		return s.cleanupShellProcessGroup(process, pid, "leader_exited", lifecycle)
 	case <-time.After(shellStopGrace):
 		s.logger.Warn("shell session stop timeout, force killing",
 			zap.Int("pid", pid),
 			zap.Duration("grace", shellStopGrace))
-		s.cleanupShellProcessGroup(pid, "stop_timeout")
+		if err := s.cleanupShellProcessGroup(process, pid, "stop_timeout", lifecycle); err != nil {
+			return err
+		}
+	}
+	if pid == 0 {
+		return nil
 	}
 
-	return nil
+	select {
+	case <-doneCh:
+		return nil
+	case <-time.After(shellReapGrace):
+		return fmt.Errorf("shell process %d was not reaped after force kill", pid)
+	}
 }
 
-func (s *Session) cleanupShellProcessGroup(pid int, reason string) {
-	if s.cmd == nil || s.cmd.Process == nil {
-		return
+func (s *Session) cleanupShellProcessGroup(
+	process *os.Process,
+	pid int,
+	reason string,
+	lifecycle shellProcessLifecycleHandle,
+) error {
+	if process == nil {
+		return nil
 	}
 	s.logger.Debug("shell session process group cleanup requested",
 		zap.Int("pid", pid),
 		zap.String("reason", reason))
-	if err := killShellProcessGroup(s.cmd.Process); err != nil {
+	if ownsShellProcessLifecycle(lifecycle) {
+		if err := reapShellProcessLifecycle(lifecycle); err != nil {
+			return fmt.Errorf("reap shell process job: %w", err)
+		}
+		s.mu.Lock()
+		if s.lifecycle == lifecycle {
+			s.lifecycle = shellProcessLifecycleHandle{}
+			s.reapErr = nil
+		}
+		s.mu.Unlock()
+		return nil
+	}
+	killGroup := killShellProcessGroup
+	if s.killGroupFn != nil {
+		killGroup = s.killGroupFn
+	}
+	if err := killGroup(process); err != nil {
 		s.logger.Debug("shell session process group cleanup failed",
 			zap.Int("pid", pid),
 			zap.String("reason", reason),
 			zap.Error(err))
+		return err
 	}
+	if s.waitGroupExitFn != nil {
+		if !s.waitGroupExitFn(process) {
+			return fmt.Errorf("shell process group %d remains alive after force kill", pid)
+		}
+		return nil
+	}
+	deadline := time.NewTimer(shellReapGrace)
+	defer deadline.Stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for shellProcessGroupAlive(process) {
+		select {
+		case <-deadline.C:
+			return fmt.Errorf("shell process group %d remains alive after force kill", pid)
+		case <-ticker.C:
+		}
+	}
+	return nil
 }
 
 // Write sends input to the shell
@@ -395,32 +503,58 @@ func (s *Session) GetBufferedOutput() []byte {
 }
 
 // waitForExit waits for the shell process to exit and respawns if not stopping
-func (s *Session) waitForExit() {
-	if s.cmd != nil {
-		_ = s.cmd.Wait()
+func (s *Session) waitForExit(cmd *exec.Cmd, doneCh chan struct{}, lifecycle shellProcessLifecycleHandle) {
+	if cmd != nil {
+		_ = cmd.Wait()
 	}
+	pid := 0
+	var process *os.Process
+	if cmd != nil {
+		process = cmd.Process
+	}
+	if process != nil {
+		pid = process.Pid
+	}
+	reapErr := s.cleanupShellProcessGroup(process, pid, "leader_exited", lifecycle)
 
 	s.mu.Lock()
 	stopping := s.stopping
 	s.running = false
+	s.reapErr = reapErr
 	s.mu.Unlock()
+	if reapErr != nil {
+		s.logger.Error("shell process tree was not reaped", zap.Int("pid", pid), zap.Error(reapErr))
+		close(doneCh)
+		return
+	}
 
 	// If Stop() was called, don't respawn - just signal done
 	if stopping {
 		s.logger.Info("shell process exited (stopping)")
-		close(s.doneCh)
+		close(doneCh)
 		return
 	}
 
 	s.logger.Info("shell process exited unexpectedly, respawning...")
 
-	// Small delay before respawn to avoid tight loop on repeated failures
-	time.Sleep(100 * time.Millisecond)
+	// Small delay before respawn to avoid tight loop on repeated failures.
+	if s.beforeRespawn != nil {
+		s.beforeRespawn()
+	} else {
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	// Respawn the shell
 	if err := s.respawn(); err != nil {
 		s.logger.Error("failed to respawn shell", zap.Error(err))
-		close(s.doneCh)
+		close(doneCh)
+		return
+	}
+	s.mu.Lock()
+	stoppedBeforeRespawn := s.stopping && !s.running
+	s.mu.Unlock()
+	if stoppedBeforeRespawn {
+		close(doneCh)
 	}
 }
 
@@ -442,9 +576,11 @@ func (s *Session) respawn() error {
 		_ = s.pty.Close()
 	}
 
+	doneCh := make(chan struct{})
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
 	s.cmd.Dir = s.workDir
-	s.cmd.Env = buildShellEnv(s.workDir)
+	s.cmd.Env = buildShellEnv(s.workDir, s.config.Env)
+	configureShellProcess(s.cmd)
 
 	// Start with PTY
 	var err error
@@ -455,9 +591,18 @@ func (s *Session) respawn() error {
 	if err != nil {
 		return fmt.Errorf("failed to start PTY: %w", err)
 	}
+	lifecycle, lifecycleErr := installShellProcessLifecycle(s.cmd)
+	if lifecycleErr != nil {
+		_ = s.pty.Close()
+		reapErr := killAndWaitShellCommand(s.cmd)
+		return errors.Join(fmt.Errorf("failed to install shell process lifecycle: %w", lifecycleErr), reapErr)
+	}
 
 	s.running = true
 	s.startedAt = time.Now()
+	s.doneCh = doneCh
+	s.lifecycle = lifecycle
+	s.reapErr = nil
 
 	s.logger.Info("shell session respawned",
 		zap.String("shell", s.shell),
@@ -468,14 +613,17 @@ func (s *Session) respawn() error {
 	go s.readOutput()
 
 	// Wait for process exit (recursive respawn on exit)
-	go s.waitForExit()
+	go s.waitForExit(s.cmd, doneCh, lifecycle)
 
 	return nil
 }
 
 // buildShellEnv creates the environment for the shell process
-func buildShellEnv(workDir string) []string {
+func buildShellEnv(workDir string, overrides map[string]string) []string {
 	env := os.Environ()
+	for key, value := range overrides {
+		env = upsertShellEnv(env, key, value)
+	}
 
 	// Set working directory related vars
 	env = append(env, "PWD="+workDir)
@@ -486,4 +634,24 @@ func buildShellEnv(workDir string) []string {
 	env = append(env, "LC_ALL=C.UTF-8")
 
 	return env
+}
+
+func upsertShellEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	result := make([]string, 0, len(env)+1)
+	found := false
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			if !found {
+				result = append(result, prefix+value)
+				found = true
+			}
+			continue
+		}
+		result = append(result, entry)
+	}
+	if !found {
+		result = append(result, prefix+value)
+	}
+	return result
 }

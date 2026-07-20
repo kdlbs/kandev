@@ -6,6 +6,7 @@ export class WorkflowSettingsPage {
   readonly createDialog: Locator;
   readonly workflowNameInput: Locator;
   readonly confirmCreateButton: Locator;
+  readonly floatingSave: Locator;
   readonly cycleGuardDialog: Locator;
 
   constructor(page: Page) {
@@ -14,6 +15,7 @@ export class WorkflowSettingsPage {
     this.createDialog = page.getByTestId("create-workflow-dialog");
     this.workflowNameInput = page.getByTestId("workflow-name-input");
     this.confirmCreateButton = page.getByTestId("confirm-create-workflow");
+    this.floatingSave = page.getByTestId("settings-floating-save");
     this.cycleGuardDialog = page.getByTestId("workflow-cycle-guard-dialog");
   }
 
@@ -115,9 +117,24 @@ export class WorkflowSettingsPage {
     return card.getByTestId("add-step-button");
   }
 
-  /** The save button within a workflow card (matches button text "Save"). */
-  saveButton(card: Locator): Locator {
-    return card.getByRole("button", { name: "Save" });
+  /** Submit the route-level action without waiting for a possible guard dialog. */
+  async submitSaveChanges(touch = false): Promise<void> {
+    await expect(this.floatingSave).toBeVisible();
+    await this.activate(this.floatingSave.getByRole("button", { name: /save changes/i }), touch);
+  }
+
+  /** Save every dirty workflow contributor through the route-level action. */
+  async saveChanges(): Promise<void> {
+    await this.submitSaveChanges();
+    await expect
+      .poll(
+        async () =>
+          (await this.floatingSave.isVisible())
+            ? await this.floatingSave.getAttribute("data-dirty-contributors")
+            : null,
+        { timeout: 15_000 },
+      )
+      .toBeNull();
   }
 
   /** The delete workflow button within a card. */
@@ -127,7 +144,9 @@ export class WorkflowSettingsPage {
 
   /** The step delete confirmation dialog. */
   get stepDeleteDialog(): Locator {
-    return this.page.getByTestId("step-delete-confirm-dialog");
+    return this.page.getByRole("dialog").filter({
+      has: this.page.getByRole("heading", { name: "Delete step", exact: true }),
+    });
   }
 
   /** Returns the ordered names of all workflow cards on the page. */

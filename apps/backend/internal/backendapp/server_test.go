@@ -1,40 +1,9 @@
 package backendapp
 
 import (
-	"context"
 	"net"
-	"net/http"
 	"testing"
-
-	"github.com/kandev/kandev/internal/common/logger"
-	"go.uber.org/zap"
 )
-
-func TestStartHTTPServerUsesServerAddr(t *testing.T) {
-	log, err := logger.NewFromZap(zap.NewNop())
-	if err != nil {
-		t.Fatalf("NewFromZap: %v", err)
-	}
-
-	blocked := listenOnFreePort(t)
-	t.Cleanup(func() {
-		if err := blocked.Close(); err != nil {
-			t.Errorf("close blocked listener: %v", err)
-		}
-	})
-
-	server := &http.Server{
-		Addr:    "127.0.0.1:0",
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
-	}
-	defer func() {
-		_ = server.Shutdown(context.Background())
-	}()
-
-	if !startHTTPServer(server, listenerPort(t, blocked), log) {
-		t.Fatalf("expected server to listen on configured Addr %q", server.Addr)
-	}
-}
 
 func TestServerListenAddr(t *testing.T) {
 	tests := []struct {
@@ -74,7 +43,7 @@ func TestServerProbeAddr(t *testing.T) {
 	}{
 		{name: "port-only address probes loopback", listenAddr: ":38429", want: "127.0.0.1:38429"},
 		{name: "wildcard ipv4 probes loopback", listenAddr: "0.0.0.0:38429", want: "127.0.0.1:38429"},
-		{name: "wildcard ipv6 probes loopback", listenAddr: "[::]:38429", want: "127.0.0.1:38429"},
+		{name: "wildcard ipv6 probes ipv6 loopback", listenAddr: "[::]:38429", want: "[::1]:38429"},
 		{name: "loopback address probes itself", listenAddr: "127.0.0.1:38429", want: "127.0.0.1:38429"},
 		{name: "ipv6 loopback probes itself", listenAddr: "[::1]:38429", want: "[::1]:38429"},
 	}

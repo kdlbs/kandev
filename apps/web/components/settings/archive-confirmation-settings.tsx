@@ -1,41 +1,46 @@
 "use client";
 
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { useEffect, useRef, useState } from "react";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
+import { SettingsCard } from "./settings-card";
+import { useSettingsSaveContributor } from "./settings-save-provider";
 
 export function ArchiveConfirmationSettings() {
   const confirmTaskArchive = useAppStore((state) => state.userSettings.confirmTaskArchive);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
-  const [isSaving, setIsSaving] = useState(false);
+  const [saved, setSaved] = useState(confirmTaskArchive);
+  const [draft, setDraft] = useState(confirmTaskArchive);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const isDirty = draft !== saved;
 
-  const handleToggle = async (checked: boolean) => {
-    if (isSaving) return;
+  useEffect(() => {
+    setSaved((previous) => {
+      if (draftRef.current === previous) setDraft(confirmTaskArchive);
+      return confirmTaskArchive;
+    });
+  }, [confirmTaskArchive]);
 
-    const current = storeApi.getState().userSettings;
-    const previous = current.confirmTaskArchive;
-    const workspaceId = current.workspaceId;
-    setIsSaving(true);
-    setUserSettings({ ...current, confirmTaskArchive: checked });
-
-    try {
-      await updateUserSettings({ confirm_task_archive: checked });
-    } catch {
-      const latest = storeApi.getState().userSettings;
-      if (latest.workspaceId === workspaceId && latest.confirmTaskArchive === checked) {
-        setUserSettings({ ...latest, confirmTaskArchive: previous });
-      }
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  useSettingsSaveContributor({
+    id: "general-task-actions",
+    revision: Number(draft),
+    isDirty,
+    save: async (revision) => {
+      const submitted = Boolean(revision);
+      await updateUserSettings({ confirm_task_archive: submitted });
+      setSaved(submitted);
+      setUserSettings({ ...storeApi.getState().userSettings, confirmTaskArchive: submitted });
+    },
+    discard: () => setDraft(saved),
+  });
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="archive-confirmation-card">
       <CardHeader>
         <CardTitle className="text-base">Archive Confirmation</CardTitle>
       </CardHeader>
@@ -49,13 +54,13 @@ export function ArchiveConfirmationSettings() {
           </div>
           <Switch
             id="confirm-task-archive"
-            checked={confirmTaskArchive}
-            onCheckedChange={handleToggle}
-            disabled={isSaving}
+            checked={draft}
+            data-settings-dirty={isDirty}
+            onCheckedChange={setDraft}
             className="shrink-0 cursor-pointer"
           />
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }

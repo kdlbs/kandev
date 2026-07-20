@@ -13,10 +13,10 @@ type UnsavedSaveButtonProps = {
   disabled?: boolean;
 };
 
-const warningButtonClass = "border-yellow-500/60 text-yellow-500 hover:bg-yellow-500/10";
+const dirtyButtonClass = "border-success/60 text-success hover:bg-success/10";
 
 export function UnsavedChangesBadge() {
-  return <span className="text-xs text-yellow-500">Unsaved changes</span>;
+  return <span className="text-xs text-success">Unsaved changes</span>;
 }
 
 export function UnsavedSaveButton({
@@ -34,7 +34,7 @@ export function UnsavedSaveButton({
       variant={isDirty ? "secondary" : "outline"}
       onClick={onClick}
       disabled={isLoading || Boolean(disabled)}
-      className={isDirty ? warningButtonClass : "cursor-pointer"}
+      className={isDirty ? dirtyButtonClass : "cursor-pointer"}
     >
       {isDirty && <IconAlertCircle className="h-4 w-4 mr-2" />}
       {isDirty ? "Save" : cleanLabel}

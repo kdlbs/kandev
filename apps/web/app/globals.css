@@ -202,6 +202,32 @@
   }
 }
 
+@layer components {
+  [data-settings-dirty="true"] {
+    border-color: color-mix(in oklab, var(--success) 65%, var(--border)) !important;
+  }
+
+  [data-settings-dirty="true"]:not(:focus-visible) {
+    @apply ring-1 ring-success/15;
+  }
+
+  [data-settings-dirty="true"][data-settings-dirty-level="container"] {
+    @apply ring-0;
+    border-color: color-mix(in oklab, var(--success) 45%, var(--border)) !important;
+  }
+
+  [data-slot="card"]:has([data-settings-dirty="true"]),
+  [data-settings-dirty="true"][data-settings-dirty-level="card"] {
+    @apply ring-0;
+    border-color: color-mix(in oklab, var(--success) 35%, var(--border)) !important;
+  }
+
+  [data-workflow-replay-cycle="true"] {
+    @apply ring-1 ring-warning/20;
+    border-color: color-mix(in oklab, var(--warning) 65%, var(--border)) !important;
+  }
+}
+
 /* iOS Safari auto-zooms a focused form control whose computed font-size is
    < 16px (native <select> included). Force 16px on coarse-pointer (touch)
    devices to stop focus-zoom. !important because some controls are styled by

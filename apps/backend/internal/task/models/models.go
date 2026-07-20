@@ -108,6 +108,10 @@ const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
 // reconnection. It is display metadata and is not replayed to the provider.
 const SessionMetaKeyACPModelState = "acp_model_state"
 
+// TurnMetaKeyRuntimeConfigSnapshot stores the immutable effective runtime
+// configuration attributed to one prompt/response turn.
+const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
+
 // SessionRuntimeConfig is persisted as provider state or explicit overrides.
 // On resume, explicit values take precedence over the latest provider snapshot
 // so delayed provider events cannot replace user intent.
@@ -115,6 +119,43 @@ type SessionRuntimeConfig struct {
 	Model         string            `json:"model,omitempty"`
 	Mode          string            `json:"mode,omitempty"`
 	ConfigOptions map[string]string `json:"config_options,omitempty"`
+}
+
+// TurnRuntimeConfigSnapshot is the minimal display state captured when a turn
+// starts. It intentionally excludes the provider's complete option catalog.
+type TurnRuntimeConfigSnapshot struct {
+	Model          string                    `json:"model,omitempty"`
+	Mode           string                    `json:"mode,omitempty"`
+	ConfigOptions  []TurnRuntimeConfigOption `json:"config_options,omitempty"`
+	ConfigBaseline map[string]string         `json:"config_baseline,omitempty"`
+}
+
+// TurnRuntimeConfigOption preserves one selected value in provider order.
+type TurnRuntimeConfigOption struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Value     string `json:"value"`
+	ValueName string `json:"value_name,omitempty"`
+}
+
+// LoadTurnRuntimeConfigSnapshot decodes typed and JSON-rehydrated turn metadata.
+func LoadTurnRuntimeConfigSnapshot(metadata map[string]interface{}) (TurnRuntimeConfigSnapshot, bool) {
+	if metadata == nil {
+		return TurnRuntimeConfigSnapshot{}, false
+	}
+	raw := metadata[TurnMetaKeyRuntimeConfigSnapshot]
+	if snapshot, ok := raw.(TurnRuntimeConfigSnapshot); ok {
+		return snapshot, snapshot.Model != "" || snapshot.Mode != "" || len(snapshot.ConfigOptions) > 0
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return TurnRuntimeConfigSnapshot{}, false
+	}
+	var snapshot TurnRuntimeConfigSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return TurnRuntimeConfigSnapshot{}, false
+	}
+	return snapshot, snapshot.Model != "" || snapshot.Mode != "" || len(snapshot.ConfigOptions) > 0
 }
 
 // SessionMetaKeyPendingStepCompletion stores the agent's (or manual fallback's)

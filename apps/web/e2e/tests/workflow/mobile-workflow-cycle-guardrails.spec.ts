@@ -15,7 +15,7 @@ test.describe("Workflow cycle guardrails on mobile", () => {
     await settings.setTurnCompleteTransition(card, "Todo", "Move to next step", true);
     await settings.setAutoStart(card, "In Progress", true, true);
     await settings.setTurnCompleteTransition(card, "In Progress", "Move to previous step", true);
-    await settings.saveButton(card).tap();
+    await settings.submitSaveChanges(true);
 
     const dialog = settings.cycleGuardDialog;
     await expect(dialog.getByRole("heading", { name: "Workflow cycle blocked" })).toBeVisible();
@@ -62,7 +62,7 @@ test.describe("Workflow cycle guardrails on mobile", () => {
     await settings.setAutoStart(card, "Todo", true, true);
     await settings.setTurnCompleteTransition(card, "Todo", "Move to next step", true);
     await settings.setTurnCompleteTransition(card, "In Progress", "Move to previous step", true);
-    await settings.saveButton(card).tap();
+    await settings.submitSaveChanges(true);
 
     const dialog = settings.cycleGuardDialog;
     await expect(dialog.getByRole("heading", { name: "Confirm workflow cycle" })).toBeVisible();

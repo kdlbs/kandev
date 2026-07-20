@@ -2,47 +2,53 @@
 
 import { useState } from "react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
+import { useSettingsSaveContributor } from "./settings-save-provider";
+import { SettingsCard } from "./settings-card";
 
 export function ChangelogNotificationCard() {
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const [isSaving, setIsSaving] = useState(false);
+  const storeApi = useAppStoreApi();
+  const [saved, setSaved] = useState(userSettings.showReleaseNotification);
+  const [draft, setDraft] = useState(saved);
+  const [isResetting, setIsResetting] = useState(false);
 
-  const handleToggle = async (checked: boolean) => {
-    if (isSaving) return;
-    setIsSaving(true);
-    const previousValue = userSettings.showReleaseNotification;
-    try {
-      setUserSettings({ ...userSettings, showReleaseNotification: checked });
-      await updateUserSettings({ show_release_notification: checked });
-    } catch {
-      setUserSettings({ ...userSettings, showReleaseNotification: previousValue });
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  useSettingsSaveContributor({
+    id: "changelog-notifications",
+    revision: String(draft),
+    isDirty: draft !== saved,
+    save: async () => {
+      const submitted = draft;
+      await updateUserSettings({ show_release_notification: submitted });
+      setSaved(submitted);
+      setUserSettings({ ...storeApi.getState().userSettings, showReleaseNotification: submitted });
+    },
+    discard: () => setDraft(saved),
+  });
 
-  const handleResetLastSeen = async () => {
-    if (isSaving) return;
-    setIsSaving(true);
+  const resetLastSeen = async () => {
+    setIsResetting(true);
     try {
-      setUserSettings({ ...userSettings, releaseNotesLastSeenVersion: null });
       await updateUserSettings({ release_notes_last_seen_version: "" });
+      setUserSettings({
+        ...storeApi.getState().userSettings,
+        releaseNotesLastSeenVersion: null,
+      });
     } catch {
-      // Ignore — worst case the button stays hidden until next release
+      // The immediate command leaves the current persisted marker unchanged.
     } finally {
-      setIsSaving(false);
+      setIsResetting(false);
     }
   };
 
   return (
-    <Card>
+    <SettingsCard isDirty={draft !== saved}>
       <CardHeader>
         <CardTitle className="text-base">Topbar Release Notification</CardTitle>
       </CardHeader>
@@ -56,9 +62,9 @@ export function ChangelogNotificationCard() {
           </div>
           <Switch
             id="release-notification-toggle"
-            checked={userSettings.showReleaseNotification}
-            onCheckedChange={handleToggle}
-            disabled={isSaving}
+            checked={draft}
+            data-settings-dirty={draft !== saved}
+            onCheckedChange={setDraft}
             className="cursor-pointer"
           />
         </div>
@@ -73,14 +79,14 @@ export function ChangelogNotificationCard() {
           <Button
             variant="outline"
             size="sm"
-            onClick={handleResetLastSeen}
-            disabled={isSaving || !userSettings.releaseNotesLastSeenVersion}
+            onClick={() => void resetLastSeen()}
+            disabled={isResetting || !userSettings.releaseNotesLastSeenVersion}
             className="cursor-pointer"
           >
             Reset
           </Button>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }

@@ -95,6 +95,20 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		repoLock.Unlock()
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
+	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, []string{wt.SessionID})
+	if err != nil {
+		return fmt.Errorf("count active references for worktree %s: %w", wt.ID, err)
+	}
+	if activeReferences > 0 {
+		if err := m.ReleaseWorktreeReference(ctx, wt); err != nil {
+			return fmt.Errorf("release shared worktree reference %s: %w", wt.ID, err)
+		}
+		m.logger.Info("preserved worktree still referenced by another active session",
+			zap.String("worktree_id", wt.ID),
+			zap.String("session_id", wt.SessionID),
+			zap.Int("active_references", activeReferences))
+		return nil
+	}
 
 	// Execute cleanup script BEFORE removing directory
 	m.runWorktreeCleanupScript(ctx, wt)
@@ -129,11 +143,7 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 
 	// Update store
 	if m.store != nil {
-		now := time.Now()
-		wt.Status = StatusDeleted
-		wt.DeletedAt = &now
-		wt.UpdatedAt = now
-		if err := m.store.UpdateWorktree(ctx, wt); err != nil {
+		if err := m.ReleaseWorktreeReference(ctx, wt); err != nil {
 			// Record may already be deleted by another cleanup path (e.g. task deletion).
 			// This is expected and harmless - only log at debug level.
 			m.logger.Debug("failed to update worktree status (may already be deleted)",
@@ -156,6 +166,25 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		zap.String("path", wt.Path),
 		zap.Bool("branch_removed", removeBranch))
 
+	return nil
+}
+
+// ReleaseWorktreeReference marks one session's association deleted without
+// removing the shared directory or branch.
+func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) error {
+	if wt == nil || wt.SessionID == "" {
+		return fmt.Errorf("session ID is required to release worktree reference")
+	}
+	now := time.Now().UTC()
+	wt.Status = StatusDeleted
+	wt.DeletedAt = &now
+	wt.UpdatedAt = now
+	if err := m.store.UpdateWorktree(ctx, wt); err != nil && !errors.Is(err, ErrWorktreeNotFound) {
+		return err
+	}
+	m.mu.Lock()
+	delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
+	m.mu.Unlock()
 	return nil
 }
 

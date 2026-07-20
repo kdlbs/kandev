@@ -101,7 +101,7 @@ logging:
   compress: true           # gzip rotated files
 
 repositoryDiscovery:
-  roots: []                # absolute paths to scan for local git repos
+  roots: []                # automatic scan roots; explicit repository paths need not be included
   maxDepth: 5
 
 worktree:
@@ -117,6 +117,10 @@ repoClone:
 debug:
   pprofEnabled: false      # enables /debug/pprof and /api/v1/debug/memory
 ```
+
+`repositoryDiscovery.roots` and `repositoryDiscovery.maxDepth` bound automatic filesystem scans.
+They do not authorize explicitly selected repository paths. When a user enters an absolute path in
+**Add Local Repository**, Kandev validates that exact accessible Git repository before saving it.
 
 ## Required vs optional
 

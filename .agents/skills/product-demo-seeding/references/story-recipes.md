@@ -54,7 +54,11 @@ Desktop should use the current main Changes/review surface. Mobile should use th
 
 ## Integrations
 
-Prefer the real Settings integration index or real task-import surface. Mock provider health/data behind it. Famous logos may carry the visual story, but they must come from actual product assets and current supported entries.
+Prefer the real task Integrations sidebar route or current integration index. Mock provider health/data behind it. Famous logos may carry the visual story, but they must come from actual product assets and current supported entries.
+
+For GitHub/Jira task-creation films, seed one credible starting task and fixed provider rows. Desktop starts on that task, clicks Integrations in the sidebar, opens the provider, inspects the current real row/detail surface, and creates one task through the real form. Native mobile starts on the same semantic state but follows the current responsive home/menu route to Integrations; never crop the desktop sidebar into a phone.
+
+Use the current surface honestly: inspect a GitHub PR row when no internal PR-detail panel exists; inspect Jira's real issue panel when available. End on the one newly created task. Before each take, prove the board contains exactly the canonical starting tasks and no GitHub/Jira tasks accumulated by rehearsal or previous takes.
 
 ## Editor And Terminal
 

@@ -110,6 +110,13 @@ export class SSHSettingsPage {
     return this.page.getByTestId("ssh-save-button");
   }
 
+  /** Shared settings action used when editing an existing executor. */
+  get floatingSaveButton(): Locator {
+    return this.page
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: /save changes/i });
+  }
+
   get trustCheckbox(): Locator {
     return this.page.getByTestId("ssh-trust-checkbox");
   }

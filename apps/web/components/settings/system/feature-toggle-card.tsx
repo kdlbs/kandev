@@ -2,22 +2,30 @@
 
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Switch } from "@kandev/ui/switch";
 import { IconFlask, IconLock, IconRefresh } from "@tabler/icons-react";
 import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
+import { SettingsCard } from "@/components/settings/settings-card";
 
 type FeatureToggleCardProps = {
   flag: RuntimeFlagState;
+  isDirty?: boolean;
   saving: boolean;
   onChange: (next: boolean) => void;
   onReset: () => void;
 };
 
-export function FeatureToggleCard({ flag, saving, onChange, onReset }: FeatureToggleCardProps) {
+export function FeatureToggleCard({
+  flag,
+  isDirty = false,
+  saving,
+  onChange,
+  onReset,
+}: FeatureToggleCardProps) {
   const disabled = saving || flag.env_locked || !flag.mutable;
   return (
-    <Card data-testid={`feature-toggle-${flag.key}`}>
+    <SettingsCard isDirty={isDirty} data-testid={`feature-toggle-${flag.key}`}>
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-2">
           <CardTitle className="flex flex-wrap items-center gap-2 text-base">
@@ -28,6 +36,7 @@ export function FeatureToggleCard({ flag, saving, onChange, onReset }: FeatureTo
         </div>
         <Switch
           checked={flag.effective_value}
+          data-settings-dirty={isDirty}
           disabled={disabled}
           onCheckedChange={onChange}
           aria-label={`Toggle ${flag.label}`}
@@ -58,7 +67,7 @@ export function FeatureToggleCard({ flag, saving, onChange, onReset }: FeatureTo
           )}
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

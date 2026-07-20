@@ -8,6 +8,7 @@ import { SessionsDropdown } from "@/components/task/sessions-dropdown";
 import { TokenUsageDisplay } from "@/components/task/chat/token-usage-display";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { VoiceInputButton } from "./voice-input-button";
+import { ChatInputPluginActions } from "./chat-input-plugin-actions";
 import { ContextPopover } from "./context-popover";
 import { ImplementPlanButton } from "./implement-plan-button";
 import { ResetContextButton } from "./reset-context-button";
@@ -163,6 +164,13 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
         <TokenUsageDisplay sessionId={props.sessionId} />
         {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
           <ImplementPlanButton onClick={props.onImplementPlan} />
+        )}
+        {!props.hideAgentControls && (
+          <ChatInputPluginActions
+            sessionId={props.sessionId}
+            taskId={props.taskId}
+            taskTitle={props.taskTitle}
+          />
         )}
         {props.onVoiceTranscript && (
           <VoiceInputButton

@@ -241,7 +241,6 @@ export type AppState = {
   documentPanel: (typeof defaultUIState)["documentPanel"];
   systemHealth: (typeof defaultUIState)["systemHealth"];
   quickChat: (typeof defaultUIState)["quickChat"];
-  configChat: (typeof defaultUIState)["configChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   taskDeletedNotification: (typeof defaultUIState)["taskDeletedNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
@@ -385,17 +384,18 @@ export type AppState = {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
-  openQuickChat: (sessionId: string, workspaceId: string, agentProfileId?: string) => void;
+  openQuickChat: (
+    sessionId: string,
+    workspaceId: string,
+    agentProfileId?: string,
+    kind?: UISliceTypes.QuickChatSessionKind,
+  ) => void;
+  addQuickChatSession: UIA["addQuickChatSession"];
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
-  setActiveQuickChatSession: (sessionId: string) => void;
+  setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
-  openConfigChat: (sessionId: string, workspaceId: string) => void;
-  startNewConfigChat: (workspaceId: string) => void;
-  closeConfigChat: () => void;
-  closeConfigChatSession: (sessionId: string) => void;
-  setActiveConfigChatSession: (sessionId: string) => void;
-  renameConfigChatSession: (sessionId: string, name: string) => void;
+  setQuickChatInitialPrompt: UIA["setQuickChatInitialPrompt"];
   setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: UISliceTypes.TaskDeletedNotification | null) => void;
   toggleBottomTerminal: () => void;

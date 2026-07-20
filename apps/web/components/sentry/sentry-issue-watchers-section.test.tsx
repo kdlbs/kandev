@@ -2,6 +2,7 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useSentryIssueWatches } from "@/hooks/domains/sentry/use-sentry-issue-watches";
 import { SentryIssueWatchersSection } from "./sentry-issue-watchers-section";
+import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 
 // The global active workspace intentionally differs from the routed workspace.
 const h = vi.hoisted(() => ({ activeId: "ws-active" as string | null }));
@@ -55,14 +56,22 @@ afterEach(() => {
 
 describe("SentryIssueWatchersSection scoping", () => {
   it("fetches watches only for its supplied workspace (never all workspaces)", () => {
-    render(<SentryIssueWatchersSection workspaceId="ws-active" />);
+    render(
+      <SettingsSaveProvider>
+        <SentryIssueWatchersSection workspaceId="ws-active" />
+      </SettingsSaveProvider>,
+    );
     expect(vi.mocked(useSentryIssueWatches)).toHaveBeenCalledWith("ws-active");
     // never the unscoped `undefined` that would return foreign-workspace watches
     expect(vi.mocked(useSentryIssueWatches)).not.toHaveBeenCalledWith(undefined);
   });
 
   it("fetches watches for the routed workspace before the active workspace", () => {
-    render(<SentryIssueWatchersSection workspaceId="ws-route" />);
+    render(
+      <SettingsSaveProvider>
+        <SentryIssueWatchersSection workspaceId="ws-route" />
+      </SettingsSaveProvider>,
+    );
     expect(vi.mocked(useSentryIssueWatches)).toHaveBeenCalledWith("ws-route");
     expect(vi.mocked(useSentryIssueWatches)).not.toHaveBeenCalledWith("ws-active");
   });

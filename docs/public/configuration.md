@@ -107,7 +107,7 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
-### Authentication, Office, voice, and feature flags
+### Authentication, Office, Plugins, voice, and feature flags
 
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
@@ -116,6 +116,7 @@ The launcher starts `agentctl`, performs a one-time nonce handshake, and supplie
 | `office.jwtSigningKey` | `KANDEV_OFFICE_JWTSIGNINGKEY` | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts. |
 | `voice.openAIApiKey` | `KANDEV_VOICE_OPENAI_API_KEY` | empty | Server-side transcription fallback when browser speech recognition is unavailable. Empty disables the fallback and its endpoint returns unavailable. |
 | `features.office` | `KANDEV_FEATURES_OFFICE` | `false` in production | Experimental Office UI, routes, services, and automation. |
+| `features.plugins` | `KANDEV_FEATURES_PLUGINS` | `false` in production | Extensible plugin system: install/manage plugins, spawn plugin backends, and load native UI bundles. Loaded plugin code runs with backend privileges. |
 
 Do not infer security from `auth.jwtSecret`: setting it currently does not turn the local server into an authenticated public service. Office's JWT key has a narrower, active purpose. Store both active secrets and third-party API keys in your deployment secret manager; never commit them in `config.yaml`.
 
@@ -141,7 +142,7 @@ Debug output may contain repository paths, subprocess output, prompts, file cont
 
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
-| `repositoryDiscovery.roots` | `KANDEV_REPOSITORYDISCOVERY_ROOTS` | `[]` | Local roots exposed to repository discovery. Prefer absolute paths. Array encoding through environment variables is Viper-dependent; YAML is clearer. |
+| `repositoryDiscovery.roots` | `KANDEV_REPOSITORYDISCOVERY_ROOTS` | `[]` | Roots traversed by automatic repository discovery. Explicitly selected repository paths need not be included. Prefer absolute paths. Array encoding through environment variables is Viper-dependent; YAML is clearer. |
 | `repositoryDiscovery.maxDepth` | `KANDEV_REPOSITORYDISCOVERY_MAXDEPTH` | `5` | Positive directory traversal depth. |
 | `worktree.enabled` | `KANDEV_WORKTREE_ENABLED` | `true` | Enables the worktree provider. |
 | `worktree.defaultBranch` | `KANDEV_WORKTREE_DEFAULTBRANCH` | `main` | Accepted compatibility field; current task behavior uses each repository's stored/detected default branch instead. |
@@ -150,7 +151,7 @@ Debug output may contain repository paths, subprocess output, prompts, file cont
 | `worktree.pullTimeoutSeconds` | `KANDEV_WORKTREE_PULLTIMEOUTSECONDS` | `60` | Git pull timeout during worktree preparation. |
 | `repoClone.basePath` | `KANDEV_REPOCLONE_BASEPATH` | `<home>/repos` | Base directory for provider-backed clones. A leading `~/` expands. |
 
-Discovery roots grant Kandev visibility into local filesystem trees and repositories. Scope them narrowly. Worktrees and clones can contain credentials or generated files ignored by Git; review repository copy-file and setup/cleanup settings before remote execution. See [Git operations](./git-operations.md).
+Discovery roots bound automatic filesystem traversal, so scope them narrowly. They do not authorize explicitly selected repository paths: **Add Local Repository** validates and saves the exact accessible Git repository the user chooses without widening automatic scans. Worktrees and clones can contain credentials or generated files ignored by Git; review repository copy-file and setup/cleanup settings before remote execution. See [Git operations](./git-operations.md).
 
 ### Debug configuration
 
@@ -188,6 +189,9 @@ repositoryDiscovery:
   roots:
     - "/srv/repositories"
 ```
+
+This example changes automatic discovery only. An explicitly selected repository may live outside
+`/srv/repositories` if the Kandev process can access and validate it.
 
 A complete shape, including compatibility fields, is:
 
@@ -248,7 +252,7 @@ logging:
   compress: true
 
 repositoryDiscovery:
-  roots: []
+  roots: []                # automatic scan roots; explicit paths need not be included
   maxDepth: 5
 
 worktree:
@@ -273,17 +277,19 @@ voice:
 
 features:
   office: false
+  plugins: false
 ```
 
 Copying this entire file is unnecessary and can freeze old defaults in a deployment. Keep only deliberate overrides. On Windows, do not copy the Unix Docker host/path literals from this example.
 
 ## Runtime feature toggles
 
-**Settings → System → Feature Toggles** manages two startup-time flags:
+**Settings → System → Feature Toggles** manages three startup-time flags:
 
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
 | `features.office` | `KANDEV_FEATURES_OFFICE` | off | Experimental autonomous-agent Office surfaces and automation. |
+| `features.plugins` | `KANDEV_FEATURES_PLUGINS` | off | Extensible plugin system: install/manage plugins and load their backends and native UI bundles. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` (also locked by explicit legacy/debug-message vars) | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.

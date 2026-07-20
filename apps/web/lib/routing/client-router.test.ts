@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { clearNavigationBlockerForTests, setNavigationBlocker } from "./navigation-guard";
 import { useParams, usePathname, useRouter, useSearchParams } from "./client-router";
 
 function setLocation(path: string) {
@@ -7,6 +8,7 @@ function setLocation(path: string) {
 }
 
 afterEach(() => {
+  clearNavigationBlockerForTests();
   vi.unstubAllGlobals();
 });
 
@@ -57,5 +59,35 @@ describe("client router adapter", () => {
     act(() => result.current.refresh());
 
     expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("guards imperative push and history navigation", () => {
+    setLocation("/settings/general/appearance");
+    const attempts: Array<() => void> = [];
+    setNavigationBlocker((intent) => attempts.push(intent.proceed));
+    const go = vi.spyOn(window.history, "go").mockImplementation(() => undefined);
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {
+      window.dispatchEvent(
+        new PopStateEvent("popstate", {
+          state: { __kandevNavigationPosition: 0 },
+        }),
+      );
+    });
+    const { result } = renderHook(() => useRouter());
+
+    act(() => result.current.push("/tasks"));
+    expect(window.location.pathname).toBe("/settings/general/appearance");
+
+    act(() => attempts.shift()?.());
+    expect(window.location.pathname).toBe("/tasks");
+
+    act(() => result.current.back());
+    expect(back).toHaveBeenCalledOnce();
+    expect(attempts).toHaveLength(1);
+    act(() => attempts.shift()?.());
+    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    expect(attempts).toHaveLength(0);
+    expect(go).toHaveBeenCalledTimes(2);
   });
 });

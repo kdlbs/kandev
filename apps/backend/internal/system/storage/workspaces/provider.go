@@ -42,24 +42,40 @@ func New(config Config) *Provider {
 }
 
 type candidate struct {
-	path  string
-	owner OwnershipMarker
-	size  int64
+	path     string
+	owner    OwnershipMarker
+	size     int64
+	measured bool
 }
 
 func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
-	candidates, protected, warnings, err := p.classify(ctx)
+	_, trashTasks, protected, roots, warnings, err := p.classificationInputs(ctx)
 	if err != nil {
 		return Analysis{}, err
 	}
 	analysis := Analysis{Warnings: warnings}
-	for _, item := range candidates {
-		analysis.CandidateBytes += item.size
-	}
-	for path := range protected {
-		if size, sizeErr := directorySizeNoSymlinks(path); sizeErr == nil {
+	for index := range roots {
+		size, sizeErr := directorySizeNoFollow(roots[index].path)
+		if sizeErr != nil {
+			analysis.Warnings = append(
+				analysis.Warnings,
+				fmt.Sprintf("measure workspace %s: %v", roots[index].path, sizeErr),
+			)
+			continue
+		}
+		roots[index].size = size
+		roots[index].measured = true
+		analysis.TotalBytes += size
+		if _, active := protected[roots[index].path]; active {
 			analysis.ActiveBytes += size
 		}
+	}
+	candidates, err := p.eligibleCandidates(roots, protected, trashTasks)
+	if err != nil {
+		return Analysis{}, err
+	}
+	for _, item := range candidates {
+		analysis.CandidateBytes += item.size
 	}
 	return analysis, nil
 }
@@ -145,11 +161,14 @@ func (p *Provider) eligibleCandidates(
 		if info.ModTime().After(cutoff) {
 			continue
 		}
-		size, err := directorySizeNoSymlinks(root.path)
-		if err != nil {
-			return nil, fmt.Errorf("measure workspace candidate %s: %w", root.path, err)
+		if !root.measured {
+			size, err := directorySizeNoFollow(root.path)
+			if err != nil {
+				return nil, fmt.Errorf("measure workspace candidate %s: %w", root.path, err)
+			}
+			root.size = size
+			root.measured = true
 		}
-		root.size = size
 		candidates = append(candidates, root)
 	}
 	return candidates, nil
@@ -337,7 +356,7 @@ func (p *Provider) PermanentDelete(
 	if p.config.Now().Before(entry.DeleteAfter) {
 		return entry, fmt.Errorf("%w: quarantine retention deadline has not elapsed", storage.ErrConflict)
 	}
-	if _, err := directorySizeNoSymlinks(entry.QuarantinePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if _, err := directorySizeNoFollow(entry.QuarantinePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return entry, fmt.Errorf("validate quarantined workspace: %w", err)
 	}
 	if p.config.Pruner != nil && !p.config.Now().Before(entry.DeleteAfter) {
@@ -632,14 +651,15 @@ func looksSemanticTaskDir(name string) bool {
 	return index > 0 && len(name[index+1:]) == 3
 }
 
-func directorySizeNoSymlinks(root string) (int64, error) {
+// directorySizeNoFollow counts files in root while treating nested symlinks as opaque entries.
+func directorySizeNoFollow(root string) (int64, error) {
 	var size int64
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("symlink found at %s", path)
+			return nil
 		}
 		if entry.Type().IsRegular() {
 			info, err := entry.Info()
@@ -705,7 +725,34 @@ func writeJSONFile(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, encoded, 0o600)
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("unsafe JSON control file: %s", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect JSON control file %s: %w", path, err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".kandev-control-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(encoded); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("install JSON control file %s: %w", path, err)
+	}
+	return nil
 }
 
 func readQuarantineManifest(root string) (quarantineManifest, error) {

@@ -34,6 +34,26 @@ func TestUnquoteGitPath(t *testing.T) {
 	}
 }
 
+func TestApplyPorcelainOutput_CancellationStopsLargeLoop(t *testing.T) {
+	baseCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ctx := &cancelAfterErrChecksContext{Context: baseCtx, remaining: 2, cancel: cancel}
+	wt := NewWorkspaceTracker(t.TempDir(), newTestLogger(t))
+	update := &types.GitStatusUpdate{Files: make(map[string]types.FileInfo)}
+
+	err := wt.applyPorcelainOutput(ctx, []byte("?? first.txt\n?? second.txt\n?? third.txt\n"), update)
+
+	if err != context.Canceled {
+		t.Fatalf("applyPorcelainOutput() error = %v, want %v", err, context.Canceled)
+	}
+	if _, ok := update.Files["first.txt"]; !ok {
+		t.Fatal("first entry was not parsed before cancellation")
+	}
+	if _, ok := update.Files["second.txt"]; ok {
+		t.Fatal("entry parsed after cancellation")
+	}
+}
+
 func TestGetGitStatus_PathsWithSpaces(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()

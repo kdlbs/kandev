@@ -22,6 +22,7 @@ import {
 type ClarificationInputOverlayProps = {
   messages: readonly Message[] | null | undefined;
   onResolved: () => void;
+  keyboardShortcutsEnabled?: boolean;
 };
 
 type SingleQuestionMeta = {
@@ -51,6 +52,17 @@ function sortMessagesByQuestionIndex(messages: Message[]): Message[] {
     const bi = (b.metadata as ClarificationRequestMetadata | undefined)?.question_index ?? 0;
     return ai - bi;
   });
+}
+
+function isQuestionAnsweredAt(
+  messages: readonly Message[],
+  answers: Record<string, ClarificationAnswer>,
+  index: number,
+): boolean {
+  const message = messages[index];
+  if (!message) return false;
+  const questionId = readSingleQuestionMeta(message)?.questionId;
+  return questionId ? Boolean(answers[questionId]) : false;
 }
 
 type CardProps = {
@@ -156,6 +168,7 @@ function useResolveCallback(
 }
 
 type CarouselShortcutArgs = {
+  enabled: boolean;
   meta: SingleQuestionMeta;
   activeIndex: number;
   total: number;
@@ -198,10 +211,12 @@ function tryHandleMetaEnter(e: KeyboardEvent, canSubmit: boolean, onSubmit: () =
 }
 
 function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
+  const { enabled } = args;
   const optionsCount = args.meta.question.options.length;
   const isLast = args.activeIndex === args.total - 1;
   const { canSubmit, onPick, onPrev, onNext, onSkip, onSubmit } = args;
   useEffect(() => {
+    if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (tryHandleMetaEnter(e, canSubmit, onSubmit)) return;
       if (shouldIgnoreShortcut(e)) return;
@@ -229,7 +244,7 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [optionsCount, isLast, canSubmit, onPick, onPrev, onNext, onSkip, onSubmit]);
+  }, [enabled, optionsCount, isLast, canSubmit, onPick, onPrev, onNext, onSkip, onSubmit]);
   return null;
 }
 
@@ -242,6 +257,7 @@ type CarouselBodyProps = {
   setCustomDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   allAnswered: boolean;
   isSubmitting: boolean;
+  keyboardShortcutsEnabled: boolean;
   onSubmit: () => void;
 };
 
@@ -346,6 +362,7 @@ function ClarificationCarouselBody({
   setCustomDrafts,
   allAnswered,
   isSubmitting,
+  keyboardShortcutsEnabled,
   onSubmit,
 }: CarouselBodyProps) {
   const total = sortedMessages.length;
@@ -401,6 +418,7 @@ function ClarificationCarouselBody({
         />
       )}
       <CarouselKeyboardShortcuts
+        enabled={keyboardShortcutsEnabled}
         meta={meta}
         activeIndex={activeIndex}
         total={total}
@@ -418,6 +436,7 @@ function ClarificationCarouselBody({
 export function ClarificationInputOverlay({
   messages,
   onResolved,
+  keyboardShortcutsEnabled = true,
 }: ClarificationInputOverlayProps) {
   const sortedMessages = useMemo(
     () => sortMessagesByQuestionIndex(resolveQuestionMessages(messages)),
@@ -450,13 +469,6 @@ export function ClarificationInputOverlay({
   if (sortedMessages.length === 0) return null;
   const isSubmitting = group.submitState === "submitting";
 
-  const isAnsweredAt = (index: number) => {
-    const m = sortedMessages[index];
-    if (!m) return false;
-    const id = readSingleQuestionMeta(m)?.questionId;
-    return id ? Boolean(group.answers[id]) : false;
-  };
-
   return (
     <div className="relative" data-testid="clarification-overlay">
       <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-1">
@@ -466,7 +478,7 @@ export function ClarificationInputOverlay({
             <ClarificationStepper
               total={total}
               activeIndex={activeIndex}
-              isAnswered={isAnsweredAt}
+              isAnswered={(index) => isQuestionAnsweredAt(sortedMessages, group.answers, index)}
               onJump={setActiveIndex}
               isSubmitting={isSubmitting}
             />
@@ -519,6 +531,7 @@ export function ClarificationInputOverlay({
         setCustomDrafts={setCustomDrafts}
         allAnswered={allAnswered}
         isSubmitting={isSubmitting}
+        keyboardShortcutsEnabled={keyboardShortcutsEnabled}
         onSubmit={handleSubmit}
       />
     </div>

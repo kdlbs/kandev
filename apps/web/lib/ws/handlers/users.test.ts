@@ -25,6 +25,24 @@ function userSettingsMessage(
 }
 
 describe("user settings websocket handler", () => {
+  it("applies valid MCP task profile preferences and normalizes unknown values", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        mcp_task_agent_profile_default: "workspace_default",
+      }),
+    );
+    expect(store.getState().userSettings.mcpTaskAgentProfileDefault).toBe("workspace_default");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        mcp_task_agent_profile_default: "unexpected",
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(store.getState().userSettings.mcpTaskAgentProfileDefault).toBe("current_task");
+  });
+
   it("applies archive confirmation preferences and defaults missing values to enabled", () => {
     const store = makeStore();
 

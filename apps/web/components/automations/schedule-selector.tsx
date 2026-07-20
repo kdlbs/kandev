@@ -9,6 +9,7 @@ import { IconInfoCircle } from "@tabler/icons-react";
 
 type ScheduleSelectorProps = {
   config: Record<string, unknown> | null;
+  isDirty?: boolean;
   onChange: (config: Record<string, unknown>) => void;
 };
 
@@ -35,7 +36,7 @@ const PRESETS = [
   { label: "Weekly", expression: "@weekly" },
 ] as const;
 
-export function ScheduleSelector({ config, onChange }: ScheduleSelectorProps) {
+export function ScheduleSelector({ config, isDirty = false, onChange }: ScheduleSelectorProps) {
   const configExpr = (config?.cron_expression as string) ?? "";
   const [customInput, setCustomInput] = useState(configExpr);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +107,7 @@ export function ScheduleSelector({ config, onChange }: ScheduleSelectorProps) {
           }}
           onBlur={handleCustomBlur}
           data-testid="schedule-custom-input"
+          data-settings-dirty={isDirty}
           placeholder="@every 2h30m"
           className={`font-mono text-sm max-w-xs ${error ? "border-destructive" : ""}`}
         />

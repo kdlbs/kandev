@@ -91,15 +91,8 @@ export function useIntegrationEnabled(
       if (typeof window === "undefined") return;
       try {
         window.localStorage.setItem(storageKey, String(next));
-      } catch {
-        // Quota / private mode: the write failed, so a re-read via
-        // getSnapshot would still return the old value. Don't dispatch the
-        // sync event — the previous in-memory fallback is gone with
-        // useSyncExternalStore, so silently re-dispatching would just look
-        // like a no-op flip. Surface the failure by leaving the toggle stuck
-        // at its previous value; the caller can detect persistence failure
-        // by observing that `enabled` did not change.
-        return;
+      } catch (error) {
+        throw new Error(`Failed to persist ${storageKey}`, { cause: error });
       }
       window.dispatchEvent(new Event(syncEvent));
     },

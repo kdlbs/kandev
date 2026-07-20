@@ -26,6 +26,15 @@ test.describe("Mobile storage maintenance", () => {
       "Turning it off does not disable Analyze or Run now",
     );
     await testPage.keyboard.press("Escape");
+    await testPage.getByTestId("storage-scheduling-enabled").click();
+    await testPage.getByTestId("storage-idle-period").fill("12");
+    await expect(testPage.getByTestId("storage-policy-section-schedule")).toHaveAttribute(
+      "data-settings-dirty",
+      "true",
+    );
+    await expect(testPage.getByTestId("settings-floating-save")).toBeVisible();
+    await testPage.getByRole("button", { name: "Save changes" }).click();
+    await expect(testPage.getByText("Storage policy saved")).toBeVisible();
     await testPage.getByTestId("storage-analyze").click();
     await expect(testPage.getByTestId("storage-analyze")).toHaveAttribute(
       "data-job-state",
@@ -34,6 +43,10 @@ test.describe("Mobile storage maintenance", () => {
     await expect(testPage.getByTestId("storage-analyze")).toHaveText("Analysis complete");
     await testPage.getByTestId("storage-resource-workspaces-trigger").click();
     await expect(testPage.getByTestId("storage-resource-workspaces")).toBeVisible();
+    await testPage.getByTestId("storage-resource-unmanaged-go-cache-trigger").click();
+    await expect(testPage.getByTestId("storage-resource-unmanaged-go-cache")).toBeVisible();
+    await testPage.getByTestId("storage-resource-docker-image-layers-trigger").click();
+    await expect(testPage.getByTestId("storage-resource-docker-image-layers")).toBeVisible();
     await testPage.getByTestId("storage-resource-go-cache-trigger").click();
     const explicitRequest = testPage.waitForRequest(
       (request) =>

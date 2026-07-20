@@ -5,9 +5,11 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { WorkflowStep } from "@/lib/types/http";
 import { HelpTip } from "./workflow-pipeline-editor-helpers";
+import { isWorkflowStepValueDirty } from "./workflow-dirty-state";
 
 type StepWipControlsProps = {
   step: WorkflowStep;
+  savedStep?: WorkflowStep;
   steps: WorkflowStep[];
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   readOnly: boolean;
@@ -19,7 +21,13 @@ function parseWipLimit(value: string): number {
   return Math.max(0, next);
 }
 
-export function StepWipControls({ step, steps, onUpdate, readOnly }: StepWipControlsProps) {
+export function StepWipControls({
+  step,
+  savedStep,
+  steps,
+  onUpdate,
+  readOnly,
+}: StepWipControlsProps) {
   const otherSteps = steps.filter((s) => s.id !== step.id);
   const pullFromValue = step.pull_from_step_id || "none";
   const pullFromSelectID = `${step.id}-pull-from-step`;
@@ -46,6 +54,11 @@ export function StepWipControls({ step, steps, onUpdate, readOnly }: StepWipCont
           }}
           disabled={readOnly}
           className="h-8"
+          data-settings-dirty={isWorkflowStepValueDirty(
+            step,
+            savedStep,
+            (item) => item.wip_limit ?? 0,
+          )}
         />
       </div>
       <div className="space-y-1.5">
@@ -67,6 +80,11 @@ export function StepWipControls({ step, steps, onUpdate, readOnly }: StepWipCont
             id={pullFromSelectID}
             className="h-8"
             data-testid={`${step.id}-pull-from-step-select`}
+            data-settings-dirty={isWorkflowStepValueDirty(
+              step,
+              savedStep,
+              (item) => item.pull_from_step_id ?? "",
+            )}
           >
             <SelectValue placeholder="No feeder step" />
           </SelectTrigger>

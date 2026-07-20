@@ -17,6 +17,7 @@ export type {
   SidebarViewDraftApi,
   SidebarTaskPrefsApi,
   TaskCreateLastUsedApi,
+  MCPTaskAgentProfileDefault,
   UserSettings,
   UserSettingsResponse,
   UserSettingsUpdatePayload,
@@ -67,6 +68,7 @@ export type WorkflowTemplate = {
 
 // Step Definition - template step configuration
 export type StepDefinition = {
+  id?: string;
   name: string;
   position: number;
   color?: string;
@@ -530,6 +532,7 @@ export type RepositoryPathValidationResponse = {
   path: string;
   exists: boolean;
   is_git: boolean;
+  /** @deprecated Compatibility field; manual validity is determined by `exists` and `is_git`. */
   allowed: boolean;
   default_branch?: string;
   message?: string;

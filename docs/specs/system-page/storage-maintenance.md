@@ -29,10 +29,11 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
   pointer-accessible help that explains what it can change, when it runs, and which safety checks
   apply. Threshold and path fields are disabled while their parent cleanup option is disabled;
   quarantine retention remains independently editable because it also governs existing entries.
-- Read-only analysis is available even when scheduled maintenance is disabled. It reports
-  active task workspace bytes, orphan-candidate bytes, active quarantined count and bytes, the
-  managed Go cache, Kandev-managed container count and writable-layer bytes, Docker build cache,
-  and unused Docker images.
+- Read-only analysis is available even when scheduled maintenance is disabled. It reports total
+  task workspace bytes alongside active and orphan-candidate bytes, active quarantined count and
+  bytes, the managed Go cache, the service user's default Go cache when it is a distinct path,
+  Kandev-managed container count and writable-layer bytes, Docker image-layer bytes, Docker build
+  cache, and unused Docker images.
 - Scheduled maintenance is install-wide, persists in Kandev's database, and is disabled by
   default. Enabling it does not require editing the VM, a systemd unit, or environment
   variables.
@@ -66,6 +67,8 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
 
 ### Task cleanup and orphan workspaces
 
+Decision: [ADR-2026-07-19-workspace-symlink-entries](../../decisions/2026-07-19-workspace-symlink-entries.md)
+
 - Archive, delete, cascade, workspace-delete, and quick-chat expiration persist a task resource
   cleanup intent before mutating or removing the task row. Cleanup inventory needed after a
   task deletion is captured in that intent and is not dependent on foreign-keyed rows surviving.
@@ -81,6 +84,10 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
   configured orphan grace period.
 - The authoritative inventory covers both task layouts:
   `tasks/<semantic-task-dir>/<repo>` and `tasks/<workspace-id>/<task-id>`.
+- Ready environment rows and active worktree rows protect files while their owning task exists and
+  is not archived. A ready environment owned by an archived or deleted task remains protected while
+  a live session of an unarchived task borrows it. Other rows retained for archived-task branch
+  recovery are historical metadata, not live workspace references.
 - New task roots contain a Kandev ownership marker with the task ID, workspace ID, task directory
   name, layout version, and creation time. Legacy unmarked directories remain eligible only when
   the authoritative inventory and grace-period checks positively classify them as unreferenced.
@@ -121,21 +128,47 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
 - Kandev creates an ownership marker beside the managed cache. It never deletes the default user
   cache such as `/root/.cache/go-build` unless that exact path was explicitly adopted through the
   Storage page with a destructive confirmation.
-- Analysis reports the managed cache's current bytes. Cleanup rotates the owned cache into
-  Kandev trash and recreates an empty cache when its size is greater than the configured maximum.
-  The limit is a cleanup trigger, not a hard quota; the cache can temporarily grow beyond it while
-  tasks are active.
+- Analysis reports the managed cache's current bytes and read-only usage for the service user's
+  distinct default Go cache (`$GOCACHE` when absolute, otherwise the platform user-cache path).
+  Reporting the default cache does not adopt it or grant cleanup ownership. Cleanup rotates the
+  owned cache into Kandev trash and recreates an empty cache when its size is greater than the
+  configured maximum. The limit is a cleanup trigger, not a hard quota; the cache can temporarily
+  grow beyond it while tasks are active.
 - Disabling managed Go cache stops injecting `GOCACHE` into new executions. It does not delete the
   previously managed cache. Scheduled cleanup and a global manual run with no resource selection
   leave it untouched; only a manual run whose non-empty selection includes `go_cache` may rotate it.
+
+### Agent session temporary data
+
+- Each agent instance receives an isolated operating-system temporary directory at
+  `<system-temp>/kandev-agent/<readable-prefix>-<identity-digest>` through `TMPDIR`, `TMP`, and
+  `TEMP`. The deterministic name includes the raw session ID, instance ID, and port so distinct
+  instance identities cannot collide after unsafe characters are sanitized.
+- The directory is owned by that agent instance and remains available while its agent, shell,
+  VS Code, or workspace subprocesses may still be running.
+- Instance teardown first closes every process-start admission path, including requests already in
+  flight, then removes the owned session directory only after each process leader and its owned
+  process tree are reaped. On Unix this includes verified process-group disappearance; Windows uses
+  the executor's existing process-tree termination primitive.
+  Teardown validates that the target is a non-root child of the Kandev agent-temp root and never
+  removes the shared root or a sibling session directory.
+- Cleanup runs whenever the owning agentctl instance is permanently deleted, including task/session
+  archive and delete stops and when teardown observes that the main agent process has already
+  stopped. A later resume creates a new instance and does not depend on the prior instance's scratch
+  files. A cleanup failure is reported without broadening deletion to another path. The instance
+  and port remain reserved only when HTTP shutdown or process reaping is unresolved; a
+  temporary-directory-only failure retains a retry tombstone but releases the execution port.
+- Session temporary data is ephemeral and is not quarantined, restored, or included in task
+  recovery. See [ADR 0045](../../decisions/0045-install-wide-storage-maintenance.md).
 
 ### Docker storage
 
 - Kandev-owned container cleanup lists only containers labeled `kandev.managed=true`. It removes
   a stopped container only after the task/runtime inventory positively shows it is orphaned or no
   longer needed. Running containers are never removed by storage maintenance.
-- Analysis reports the count and writable-layer bytes of exactly labeled Kandev-managed containers;
-  an unavailable usage API degrades Docker analysis without failing the other resource summaries.
+- Analysis reports the daemon's image-layer bytes and the count and writable-layer bytes of exactly
+  labeled Kandev-managed containers; an unavailable usage API degrades Docker analysis without
+  failing the other resource summaries.
 - Docker build-cache and unused-image analysis may inspect the configured Docker daemon without
   changing it.
 - Docker build-cache cleanup uses the Docker API's age/storage filters and does not invoke
@@ -349,8 +382,9 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
 
 - Any authoritative workspace inventory query failure aborts workspace classification and performs
   no workspace move or deletion.
-- Any uncertainty about path ownership, containment, active descendants, symlink traversal, or
-  task activity keeps the directory and records a warning.
+- Any uncertainty about path ownership, containment, active descendants, owned control-path
+  symlinks, or task activity keeps the directory and records a warning. Nested workspace symlinks
+  are opaque entries: analysis, quarantine, and deletion never follow their targets.
 - A quarantine rename failure leaves the original directory untouched and records a failed entry
   only when the failure can be associated with a durable candidate ID.
 - A backend crash after rename but before the database update is reconciled at startup by scanning
@@ -395,6 +429,13 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
 - **GIVEN** an unreferenced task directory older than the orphan grace period contains
   `node_modules`, **WHEN** workspace cleanup runs with a successful authoritative inventory,
   **THEN** the whole task root moves to quarantine and its measured bytes appear in the run result.
+- **GIVEN** task roots include active, recent orphan, and grace-eligible orphan directories,
+  **WHEN** storage analysis runs, **THEN** total workspace bytes include every classified task root
+  while active and reclaimable bytes remain separate subsets.
+- **GIVEN** archived or deleted tasks retain ready environment or active worktree rows for recovery,
+  **WHEN** storage analysis or cleanup classifies their old directories, **THEN** those historical
+  rows do not protect the directories from normal orphan grace and quarantine rules unless a live
+  session of an unarchived task still borrows the environment.
 - **GIVEN** the worktree inventory query fails, **WHEN** workspace cleanup runs, **THEN** no task
   directory moves and the run reports the inventory error.
 - **GIVEN** a multi-repository task has one active descendant worktree, **WHEN** workspace cleanup
@@ -416,6 +457,11 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
   reports the reclaimed bytes.
 - **GIVEN** `/root/.cache/go-build` was not explicitly adopted, **WHEN** storage cleanup runs,
   **THEN** Kandev does not modify it.
+- **GIVEN** `/root/.cache/go-build` is the service user's default Go cache and is not adopted,
+  **WHEN** storage analysis runs, **THEN** its path and bytes are reported read-only while cleanup
+  remains unavailable for that path.
+- **GIVEN** the Docker daemon reports image-layer usage, **WHEN** storage analysis runs, **THEN**
+  image-layer bytes are shown separately from build-cache and managed-container writable bytes.
 - **GIVEN** an exited container has `kandev.managed=true` and its task is positively absent,
   **WHEN** container cleanup runs, **THEN** the container and its attached Kandev volumes are removed.
 - **GIVEN** an unrelated exited container exists, **WHEN** Kandev container cleanup runs, **THEN**

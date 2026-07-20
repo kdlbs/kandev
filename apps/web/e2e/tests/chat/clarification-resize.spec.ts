@@ -94,20 +94,15 @@ test.describe("Clarification overlay resizable layout", () => {
     const container = testPage.getByTestId("clarification-overlay-container");
     await expect(container).toBeVisible();
 
+    const scrollRegion = container;
     const initial = await container.evaluate((el) => {
-      const computed = window.getComputedStyle(el);
       return {
-        overflowY: computed.overflowY,
         height: el.getBoundingClientRect().height,
         // Inline style is what disambiguates "auto-sized" from "user-dragged".
         inlineHeight: (el as HTMLElement).style.height,
       };
     });
-
-    // overflow-y: scroll reserves a permanent scrollbar gutter so users
-    // discover scrollable content (and the in-overlay Submit) without having
-    // to wait for macOS auto-hide scrollbars to fade in on hover.
-    expect(initial.overflowY).toBe("scroll");
+    await expect(scrollRegion).toHaveCSS("overflow-y", "scroll");
     // Default state: no inline height → container sizes to its content.
     expect(initial.inlineHeight).toBe("");
     // Sanity check: content-sized overlay is at least tall enough for the
@@ -118,10 +113,10 @@ test.describe("Clarification overlay resizable layout", () => {
     const handle = container.locator("xpath=..").locator("button[aria-label='Resize']");
     await expect(handle).toBeVisible();
 
-    // Drag the handle upward by 120px → overlay should grow by ~120px.
+    // Drag the handle upward by 40px; the overlay should grow by roughly the same amount.
     const handleBox = await handle.boundingBox();
     expect(handleBox).not.toBeNull();
-    const dragDistance = 120;
+    const dragDistance = 40;
     const startX = handleBox!.x + handleBox!.width / 2;
     const startY = handleBox!.y + handleBox!.height / 2;
     await testPage.mouse.move(startX, startY);

@@ -127,6 +127,16 @@ describe("useStorageMaintenance", () => {
     });
   });
 
+  it("rejects failed saves so the settings coordinator can keep the draft dirty", async () => {
+    mocks.save.mockRejectedValueOnce(new Error("save unavailable"));
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+
+    await expect(result.current.save(settings)).rejects.toThrow("save unavailable");
+
+    await waitFor(() => expect(result.current.error).toBe("save unavailable"));
+  });
+
   it("clearing Docker acknowledgement also disables global cleanup", () => {
     const updated = settingsWithDockerAcknowledgement(settings, false);
     expect(updated.docker).toMatchObject({

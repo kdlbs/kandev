@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { listSentryInstances } from "@/lib/api/domains/sentry-api";
 import type { SentryConfig } from "@/lib/types/sentry";
+import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 
 const mocks = vi.hoisted(() => ({
   activeWorkspaceId: "ws-active",
@@ -66,6 +68,14 @@ vi.mock("@/lib/api/domains/sentry-api", () => ({
 
 import { SentryConnectionSection, SentryIntegrationPage } from "./sentry-settings";
 
+function SettingsHarness({ children }: { children: ReactNode }) {
+  return (
+    <SettingsSaveProvider>
+      <TooltipProvider>{children}</TooltipProvider>
+    </SettingsSaveProvider>
+  );
+}
+
 const instance: SentryConfig = {
   id: "instance-1",
   workspaceId: "workspace-1",
@@ -94,9 +104,9 @@ describe("SentryConnectionSection", () => {
     vi.mocked(listSentryInstances).mockResolvedValueOnce([instance]).mockResolvedValueOnce([]);
 
     render(
-      <TooltipProvider>
+      <SettingsHarness>
         <SentryConnectionSection workspaceId="workspace-1" />
-      </TooltipProvider>,
+      </SettingsHarness>,
     );
 
     await act(async () => {
@@ -117,9 +127,9 @@ describe("SentryConnectionSection", () => {
     vi.mocked(listSentryInstances).mockRejectedValue(new Error("offline"));
 
     render(
-      <TooltipProvider>
+      <SettingsHarness>
         <SentryConnectionSection workspaceId="workspace-1" />
-      </TooltipProvider>,
+      </SettingsHarness>,
     );
 
     await act(async () => {
@@ -140,9 +150,9 @@ describe("SentryIntegrationPage workspace scope", () => {
     vi.mocked(listSentryInstances).mockResolvedValue([]);
 
     render(
-      <TooltipProvider>
+      <SettingsHarness>
         <SentryIntegrationPage workspaceId="ws-route" />
-      </TooltipProvider>,
+      </SettingsHarness>,
     );
 
     expect(screen.getByTestId("sentry-watchers-workspace").textContent).toBe("ws-route");
@@ -152,9 +162,9 @@ describe("SentryIntegrationPage workspace scope", () => {
     vi.mocked(listSentryInstances).mockResolvedValue([]);
 
     render(
-      <TooltipProvider>
+      <SettingsHarness>
         <SentryIntegrationPage />
-      </TooltipProvider>,
+      </SettingsHarness>,
     );
 
     expect(screen.getByTestId("sentry-watchers-workspace").textContent).toBe("ws-active");

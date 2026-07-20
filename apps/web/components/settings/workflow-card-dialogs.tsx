@@ -25,7 +25,16 @@ type WorkflowDeleteDialogProps = {
   deleteLoading: boolean;
   onDelete: () => Promise<void>;
   onMigrateAndDelete: () => Promise<void>;
+  hasUnsavedChanges: boolean;
 };
+
+function workflowDeleteDescription(taskCount: number | null, hasUnsavedChanges: boolean): string {
+  const hasTasks = taskCount !== null && taskCount > 0;
+  const base = hasTasks
+    ? `This workflow has ${taskCount} task${taskCount === 1 ? "" : "s"}. Choose where to migrate them, or delete the workflow and archive the tasks.`
+    : "This will permanently delete the workflow and all its steps.";
+  return `${base}${hasUnsavedChanges ? " Unsaved workflow changes will be discarded." : ""}`;
+}
 
 export function WorkflowDeleteDialog({
   open,
@@ -41,6 +50,7 @@ export function WorkflowDeleteDialog({
   deleteLoading,
   onDelete,
   onMigrateAndDelete,
+  hasUnsavedChanges,
 }: WorkflowDeleteDialogProps) {
   const hasTasks = workflowTaskCount !== null && workflowTaskCount > 0;
   return (
@@ -49,9 +59,7 @@ export function WorkflowDeleteDialog({
         <DialogHeader>
           <DialogTitle>Delete workflow</DialogTitle>
           <DialogDescription>
-            {hasTasks
-              ? `This workflow has ${workflowTaskCount} task${workflowTaskCount === 1 ? "" : "s"}. Choose where to migrate them, or delete the workflow and archive the tasks.`
-              : "This will permanently delete the workflow and all its steps."}
+            {workflowDeleteDescription(workflowTaskCount, hasUnsavedChanges)}
           </DialogDescription>
         </DialogHeader>
         {hasTasks && otherWorkflows.length > 0 && (
@@ -127,42 +135,61 @@ export function WorkflowDeleteDialog({
 type StepDeleteDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  stepName: string;
   stepTaskCount: number | null;
   stepsForMigration: WorkflowStep[];
   targetStep: string;
   setTargetStep: (id: string) => void;
   loading: boolean;
+  pending: boolean;
   onMigrateAndDelete: () => Promise<void>;
   onDeleteAndTasks: () => Promise<void>;
+  hasUnsavedChanges: boolean;
 };
+
+function stepDeleteDescription(
+  stepName: string,
+  stepTaskCount: number | null,
+  hasMigrationTarget: boolean,
+) {
+  if (!stepTaskCount) return `This will permanently delete the ${stepName} workflow step.`;
+  const taskLabel = `${stepTaskCount} task${stepTaskCount === 1 ? "" : "s"}`;
+  if (hasMigrationTarget) {
+    return `${stepName} has ${taskLabel}. Choose where to migrate them, or delete the step and its tasks.`;
+  }
+  return `Deleting ${stepName} will also affect its ${taskLabel}.`;
+}
 
 export function StepDeleteDialog({
   open,
   onOpenChange,
+  stepName,
   stepTaskCount,
   stepsForMigration,
   targetStep,
   setTargetStep,
   loading,
+  pending,
   onMigrateAndDelete,
   onDeleteAndTasks,
+  hasUnsavedChanges,
 }: StepDeleteDialogProps) {
+  const hasTasks = stepTaskCount !== null && stepTaskCount > 0;
+  const description = stepDeleteDescription(stepName, stepTaskCount, stepsForMigration.length > 0);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Delete step</DialogTitle>
           <DialogDescription>
-            This step has {stepTaskCount} task{stepTaskCount === 1 ? "" : "s"}.
-            {stepsForMigration.length > 0
-              ? " Choose where to migrate them, or delete the step and its tasks."
-              : " Deleting this step will affect these tasks."}
+            {description}
+            {hasUnsavedChanges ? " Unsaved step changes will be discarded." : ""}
           </DialogDescription>
         </DialogHeader>
         {stepsForMigration.length > 0 && (
           <div className="space-y-2 py-2">
             <Label>Target Step</Label>
-            <Select value={targetStep} onValueChange={setTargetStep}>
+            <Select value={targetStep} onValueChange={setTargetStep} disabled={loading || pending}>
               <SelectTrigger>
                 <SelectValue placeholder="Select step" />
               </SelectTrigger>
@@ -175,6 +202,11 @@ export function StepDeleteDialog({
               </SelectContent>
             </Select>
           </div>
+        )}
+        {pending && !loading && (
+          <p className="text-sm text-muted-foreground" role="status">
+            Waiting for the failed change to be retried.
+          </p>
         )}
         <DialogFooter>
           <Button
@@ -189,7 +221,7 @@ export function StepDeleteDialog({
             <Button
               type="button"
               onClick={onMigrateAndDelete}
-              disabled={!targetStep || loading}
+              disabled={!targetStep || loading || pending}
               className="cursor-pointer"
             >
               {loading ? "Migrating..." : "Migrate & Delete Step"}
@@ -199,10 +231,10 @@ export function StepDeleteDialog({
             type="button"
             variant="destructive"
             onClick={onDeleteAndTasks}
-            disabled={loading}
+            disabled={loading || pending}
             className="cursor-pointer"
           >
-            Delete Step & Tasks
+            {hasTasks ? "Delete Step & Tasks" : "Delete Step"}
           </Button>
         </DialogFooter>
       </DialogContent>

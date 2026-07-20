@@ -3,11 +3,14 @@
 package winproc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -16,12 +19,17 @@ import (
 // KillOnCloseJob owns a Windows Job Object configured to terminate all assigned
 // processes when the handle is closed.
 type KillOnCloseJob struct {
+	state *killOnCloseJobState
+}
+
+type killOnCloseJobState struct {
+	mu     sync.Mutex
 	handle windows.Handle
 }
 
 // InstallKillOnCloseJobForSuspendedCommand assigns a suspended child process to
-// a kill-on-close Job Object before resuming it. If job setup fails, the child
-// is still resumed so callers can fall back to explicit taskkill cleanup.
+// a kill-on-close Job Object before resuming it. If job setup fails, the
+// suspended child is terminated before it can create unowned descendants.
 func InstallKillOnCloseJobForSuspendedCommand(cmd *exec.Cmd) (KillOnCloseJob, error) {
 	if cmd == nil || cmd.Process == nil {
 		return KillOnCloseJob{}, fmt.Errorf("process not started")
@@ -48,37 +56,142 @@ func InstallKillOnCloseJobForProcess(pid int) (KillOnCloseJob, error) {
 		_ = windows.CloseHandle(job)
 		return KillOnCloseJob{}, err
 	}
-	return KillOnCloseJob{handle: job}, nil
+	return newKillOnCloseJob(job), nil
 }
 
 func InstallKillOnCloseJobForSuspendedProcess(pid int) (KillOnCloseJob, error) {
 	job, err := createKillOnCloseJob()
 	if err != nil {
-		return KillOnCloseJob{}, errors.Join(err, ResumeSuspendedProcess(pid))
+		return KillOnCloseJob{}, errors.Join(err, terminateSuspendedProcess(pid))
 	}
 	if err := assignProcessToJob(job, pid); err != nil {
 		_ = windows.CloseHandle(job)
 		return KillOnCloseJob{}, errors.Join(
 			err,
-			ResumeSuspendedProcess(pid),
+			terminateSuspendedProcess(pid),
 		)
 	}
 	if err := ResumeSuspendedProcess(pid); err != nil {
 		_ = windows.CloseHandle(job)
 		return KillOnCloseJob{}, err
 	}
-	return KillOnCloseJob{handle: job}, nil
+	return newKillOnCloseJob(job), nil
+}
+
+func terminateSuspendedProcess(pid int) error {
+	process, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, uint32(pid))
+	if err != nil {
+		return fmt.Errorf("OpenProcess(pid=%d) for suspended cleanup: %w", pid, err)
+	}
+	defer windows.CloseHandle(process)
+	if err := windows.TerminateProcess(process, 1); err != nil {
+		return fmt.Errorf("TerminateProcess(pid=%d): %w", pid, err)
+	}
+	return nil
 }
 
 func (j KillOnCloseJob) Close() error {
-	if j.handle == 0 {
+	if j.state == nil {
 		return nil
 	}
-	return windows.CloseHandle(j.handle)
+	j.state.mu.Lock()
+	defer j.state.mu.Unlock()
+	if j.state.handle == 0 {
+		return nil
+	}
+	if err := windows.CloseHandle(j.state.handle); err != nil {
+		return err
+	}
+	j.state.handle = 0
+	return nil
 }
 
 func (j KillOnCloseJob) RawHandle() uintptr {
-	return uintptr(j.handle)
+	if j.state == nil {
+		return 0
+	}
+	j.state.mu.Lock()
+	defer j.state.mu.Unlock()
+	return uintptr(j.state.handle)
+}
+
+// Valid reports whether this value refers to a job lifecycle, including one
+// already reaped through another copy of the handle.
+func (j KillOnCloseJob) Valid() bool {
+	return j.state != nil
+}
+
+// TerminateAndWait terminates every process assigned to the job and waits
+// until Windows reports that the job is empty before releasing its handle.
+// On failure the handle remains owned so teardown can retry safely.
+func (j KillOnCloseJob) TerminateAndWait(ctx context.Context) error {
+	if j.state == nil {
+		return nil
+	}
+	j.state.mu.Lock()
+	defer j.state.mu.Unlock()
+	if j.state.handle == 0 {
+		return nil
+	}
+
+	active, err := activeJobProcesses(j.state.handle)
+	if err != nil {
+		return err
+	}
+	if active > 0 {
+		if err := windows.TerminateJobObject(j.state.handle, 1); err != nil {
+			return fmt.Errorf("TerminateJobObject: %w", err)
+		}
+	}
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for active > 0 {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for job processes: %w", ctx.Err())
+		case <-ticker.C:
+		}
+		active, err = activeJobProcesses(j.state.handle)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := windows.CloseHandle(j.state.handle); err != nil {
+		return err
+	}
+	j.state.handle = 0
+	return nil
+}
+
+type basicJobAccountingInformation struct {
+	TotalUserTime             int64
+	TotalKernelTime           int64
+	ThisPeriodTotalUserTime   int64
+	ThisPeriodTotalKernelTime int64
+	TotalPageFaultCount       uint32
+	TotalProcesses            uint32
+	ActiveProcesses           uint32
+	TotalTerminatedProcesses  uint32
+}
+
+func newKillOnCloseJob(handle windows.Handle) KillOnCloseJob {
+	return KillOnCloseJob{state: &killOnCloseJobState{handle: handle}}
+}
+
+func activeJobProcesses(job windows.Handle) (uint32, error) {
+	var info basicJobAccountingInformation
+	if err := windows.QueryInformationJobObject(
+		job,
+		windows.JobObjectBasicAccountingInformation,
+		uintptr(unsafe.Pointer(&info)),
+		uint32(unsafe.Sizeof(info)),
+		nil,
+	); err != nil {
+		return 0, fmt.Errorf("QueryInformationJobObject: %w", err)
+	}
+	return info.ActiveProcesses, nil
 }
 
 func createKillOnCloseJob() (windows.Handle, error) {

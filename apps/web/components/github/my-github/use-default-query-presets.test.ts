@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 import {
   fetchGitHubWorkspaceSettings,
@@ -14,6 +14,7 @@ import {
 const STORAGE_KEY = "kandev:github-default-queries:v1";
 const WORKSPACE_ID = "ws-1";
 const SETTINGS_TIMESTAMP = "2026-01-01T00:00:00Z";
+const DEFAULT_QUERIES_LOADING_ERROR = "Default queries are still loading";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   fetchUserSettings: vi.fn(),
@@ -107,14 +108,14 @@ describe("useDefaultQueryPresets workspace sync", () => {
     expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
 
-  it("does not save or reset while workspace defaults are still loading", () => {
+  it("does not save or reset while workspace defaults are still loading", async () => {
     vi.mocked(fetchGitHubWorkspaceSettings).mockReturnValue(new Promise(() => {}));
     const { result } = renderHook(() => useDefaultQueryPresets(WORKSPACE_ID));
 
-    act(() => {
-      result.current.save({ pr: [preset], issue: [] });
-      result.current.reset();
-    });
+    await expect(result.current.save({ pr: [preset], issue: [] })).rejects.toThrow(
+      DEFAULT_QUERIES_LOADING_ERROR,
+    );
+    await expect(result.current.reset()).rejects.toThrow(DEFAULT_QUERIES_LOADING_ERROR);
 
     expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
@@ -125,10 +126,10 @@ describe("useDefaultQueryPresets workspace sync", () => {
 
     await waitFor(() => expect(fetchGitHubWorkspaceSettings).toHaveBeenCalled());
 
-    act(() => {
-      result.current.save({ pr: [preset], issue: [] });
-      result.current.reset();
-    });
+    await expect(result.current.save({ pr: [preset], issue: [] })).rejects.toThrow(
+      DEFAULT_QUERIES_LOADING_ERROR,
+    );
+    await expect(result.current.reset()).rejects.toThrow(DEFAULT_QUERIES_LOADING_ERROR);
 
     expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });

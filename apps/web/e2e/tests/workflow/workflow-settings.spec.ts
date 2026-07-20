@@ -1,5 +1,14 @@
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+
+async function maxRingSpread(locator: Locator): Promise<number> {
+  const boxShadow = await locator.evaluate((element) => getComputedStyle(element).boxShadow);
+  const spreads = Array.from(boxShadow.matchAll(/0px 0px 0px ([\d.]+)px/g), (match) =>
+    Number(match[1]),
+  );
+  return Math.max(0, ...spreads);
+}
 
 test.describe("Workflow settings", () => {
   test("hides system-only templates from the add workflow dialog", async ({
@@ -29,27 +38,41 @@ test.describe("Workflow settings", () => {
     }
   });
 
-  test("creates a workflow from template and persists after save", async ({
+  test("creates a workflow from template only after Save", async ({
     testPage,
+    apiClient,
     seedData,
   }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
-    // Create a new workflow from the first available template
-    await page.createWorkflow("Template Test Workflow");
+    // Select a known template so the step-level assertions do not depend on template ordering.
+    await page.createWorkflow("Template Test Workflow", "Kanban");
 
     // Verify the new card appears
     const card = await page.findWorkflowCard("Template Test Workflow");
     await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute("data-settings-dirty", "true");
+    await expect(card.locator("input").first()).toHaveAttribute("data-settings-dirty", "true");
+    await expect(page.stepNodeByName(card, "Backlog")).toHaveAttribute(
+      "data-settings-dirty",
+      "true",
+    );
 
-    // Save the workflow
-    await page.saveButton(card).click();
+    const beforeSave = await apiClient.listWorkflows(seedData.workspaceId);
+    expect(
+      beforeSave.workflows.some((workflow) => workflow.name === "Template Test Workflow"),
+    ).toBe(false);
+    await expect(page.floatingSave).toBeVisible();
+    await page.saveChanges();
 
-    // Wait for save to complete
-    await testPage.waitForTimeout(1000);
+    const savedCard = await page.findWorkflowCard("Template Test Workflow");
+    await expect(savedCard).toHaveAttribute("data-settings-dirty", "false");
+    await expect(page.stepNodeByName(savedCard, "Backlog")).toHaveAttribute(
+      "data-settings-dirty",
+      "false",
+    );
 
-    // Reload and verify persistence
     await page.goto(seedData.workspaceId);
     const reloadedCard = await page.findWorkflowCard("Template Test Workflow");
     await expect(reloadedCard).toBeVisible();
@@ -70,18 +93,15 @@ test.describe("Workflow settings", () => {
     await expect(card.getByText("Review")).toBeVisible();
     await expect(card.getByText("Done")).toBeVisible();
 
-    // Save
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
-
-    // Reload and verify
+    await page.saveChanges();
     await page.goto(seedData.workspaceId);
     const reloadedCard = await page.findWorkflowCard("Custom Test Workflow");
     await expect(reloadedCard).toBeVisible();
   });
 
-  test("adds a step to template workflow and persists after save", async ({
+  test("adds a step locally and persists it with Save", async ({
     testPage,
+    apiClient,
     seedData,
   }) => {
     const page = new WorkflowSettingsPage(testPage);
@@ -92,18 +112,23 @@ test.describe("Workflow settings", () => {
 
     const card = await page.findWorkflowCard("Step Add Test");
     await expect(card).toBeVisible();
+    await page.saveChanges();
 
-    // Click the add step button
-    await page.addStepButton(card).click();
+    const persistedCard = await page.findWorkflowCard("Step Add Test");
+    const workflows = await apiClient.listWorkflows(seedData.workspaceId);
+    const workflow = workflows.workflows.find((item) => item.name === "Step Add Test");
+    expect(workflow).toBeDefined();
+    const stepsBefore = await apiClient.listWorkflowSteps(workflow!.id);
 
-    // A "New Step" should appear
-    await expect(card.getByText("New Step")).toBeVisible();
+    await page.addStepButton(persistedCard).click();
 
-    // Save the workflow
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
+    await expect(persistedCard.getByText("New Step")).toBeVisible();
+    expect((await apiClient.listWorkflowSteps(workflow!.id)).steps).toHaveLength(
+      stepsBefore.steps.length,
+    );
 
-    // Reload and verify the extra step persists
+    await page.saveChanges();
+
     await page.goto(seedData.workspaceId);
     const reloadedCard = await page.findWorkflowCard("Step Add Test");
     await expect(reloadedCard).toBeVisible();
@@ -140,13 +165,16 @@ test.describe("Workflow settings", () => {
       "All Children Done",
     );
 
-    await page.saveButton(card).click();
-    await expect
-      .poll(async () => {
-        const { steps } = await apiClient.listWorkflowSteps(workflow.id);
-        return steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed;
-      })
-      .toEqual([{ type: "move_to_step", config: { step_id: doneStep.id } }]);
+    const beforeSave = await apiClient.listWorkflowSteps(workflow.id);
+    expect(
+      beforeSave.steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed,
+    ).toBeUndefined();
+
+    await page.saveChanges();
+    const afterSave = await apiClient.listWorkflowSteps(workflow.id);
+    expect(
+      afterSave.steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed,
+    ).toEqual([{ type: "move_to_step", config: { step_id: doneStep.id } }]);
   });
 
   test("configures WIP limit and feeder step", async ({ testPage, apiClient, seedData }) => {
@@ -165,20 +193,24 @@ test.describe("Workflow settings", () => {
     await card.getByTestId(`${reviewStep.id}-pull-from-step-select`).click();
     await testPage.getByRole("option", { name: "Backlog" }).click();
 
-    await page.saveButton(card).click();
+    expect(
+      (await apiClient.listWorkflowSteps(workflow.id)).steps.find(
+        (step) => step.id === reviewStep.id,
+      ),
+    ).not.toMatchObject({ wip_limit: 2, pull_from_step_id: backlogStep.id });
 
-    await expect
-      .poll(async () => {
-        const { steps } = await apiClient.listWorkflowSteps(workflow.id);
-        return steps.find((step) => step.id === reviewStep.id);
-      })
-      .toMatchObject({
-        wip_limit: 2,
-        pull_from_step_id: backlogStep.id,
-      });
+    await page.saveChanges();
+    expect(
+      (await apiClient.listWorkflowSteps(workflow.id)).steps.find(
+        (step) => step.id === reviewStep.id,
+      ),
+    ).toMatchObject({
+      wip_limit: 2,
+      pull_from_step_id: backlogStep.id,
+    });
   });
 
-  test("modifies a template step name and persists after save", async ({ testPage, seedData }) => {
+  test("modifies a step name only after Save", async ({ testPage, apiClient, seedData }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
@@ -189,10 +221,7 @@ test.describe("Workflow settings", () => {
       return;
     }
 
-    // Create workflow from template
-    await page.createWorkflow("Step Edit Test");
-
-    const card = await page.findWorkflowCard("Step Edit Test");
+    const card = await page.findWorkflowCard("E2E Workflow");
     await expect(card).toBeVisible();
 
     // Click on the first step to open config panel
@@ -201,29 +230,48 @@ test.describe("Workflow settings", () => {
 
     // Find the step name input in the config panel and rename it
     const nameInput = card.getByPlaceholder("Step name");
-    await nameInput.clear();
     await nameInput.fill("Renamed Step");
 
-    // Wait for debounced name update to propagate to state (500ms debounce)
-    await testPage.waitForTimeout(600);
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
+    await expect(card).toHaveAttribute("data-settings-dirty", "true");
+    const stepPanel = card.getByTestId(`workflow-step-panel-${seedData.steps[0].id}`);
+    const dirtyStepNode = card.getByTestId(`workflow-step-node-${seedData.steps[0].id}`);
 
-    // Save the workflow
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
+    await expect(stepPanel).toHaveAttribute("data-settings-dirty", "true");
+    await expect(card).toHaveAttribute("data-settings-dirty-level", "card");
+    await expect(stepPanel).toHaveAttribute("data-settings-dirty-level", "container");
+    await expect(dirtyStepNode).toHaveAttribute("data-settings-dirty", "true");
+    await expect(dirtyStepNode).toHaveAttribute("data-settings-dirty-level", "container");
+    await nameInput.blur();
+    expect(await maxRingSpread(nameInput)).toBeGreaterThan(0);
+    expect(await maxRingSpread(card)).toBe(0);
+    expect(await maxRingSpread(stepPanel)).toBe(0);
+    expect(await maxRingSpread(dirtyStepNode)).toBe(0);
 
-    // Reload and verify the renamed step persists
+    expect((await apiClient.listWorkflowSteps(seedData.workflowId)).steps[0]?.name).toBe(
+      firstStepName,
+    );
+    await page.saveChanges();
+
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "false");
+    await expect(card).toHaveAttribute("data-settings-dirty", "false");
+
     await page.goto(seedData.workspaceId);
-    const reloadedCard = await page.findWorkflowCard("Step Edit Test");
+    const reloadedCard = await page.findWorkflowCard("E2E Workflow");
     await expect(reloadedCard).toBeVisible();
     await expect(reloadedCard.getByText("Renamed Step")).toBeVisible();
   });
 
-  test("shows delete confirmation dialog when removing a step", async ({ testPage, seedData }) => {
+  test("shows delete confirmation dialog when removing a persisted step", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Delete Step Test");
+    await apiClient.createWorkflowStep(workflow.id, "Keep", 0);
+    await apiClient.createWorkflowStep(workflow.id, "Review", 1);
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
-
-    // Create a custom workflow so we don't affect the seeded one
-    await page.createWorkflow("Delete Step Test", "Custom");
 
     const card = await page.findWorkflowCard("Delete Step Test");
     await expect(card).toBeVisible();
@@ -243,7 +291,7 @@ test.describe("Workflow settings", () => {
     // Delete again and confirm
     await page.clickDeleteStepButton(card, "Review");
     await expect(page.stepDeleteDialog).toBeVisible();
-    await page.stepDeleteDialog.getByRole("button", { name: "Delete" }).click();
+    await page.stepDeleteDialog.getByRole("button", { name: "Delete Step", exact: true }).click();
     await expect(page.stepDeleteDialog).not.toBeVisible();
 
     // Step should be removed
@@ -254,23 +302,14 @@ test.describe("Workflow settings", () => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
-    // Create and save a workflow first
     await page.createWorkflow("To Delete Workflow", "Custom");
+    await page.saveChanges();
 
     const card = await page.findWorkflowCard("To Delete Workflow");
     await expect(card).toBeVisible();
 
-    // Save it first so it's persisted
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
-
-    // Reload to get the real workflow card
-    await page.goto(seedData.workspaceId);
-    const savedCard = await page.findWorkflowCard("To Delete Workflow");
-    await expect(savedCard).toBeVisible();
-
     // Click delete workflow
-    await page.deleteWorkflowButton(savedCard).click();
+    await page.deleteWorkflowButton(card).click();
 
     // The delete dialog should appear — confirm deletion
     const deleteDialog = testPage.getByRole("dialog").filter({ hasText: "Delete" });
@@ -284,6 +323,36 @@ test.describe("Workflow settings", () => {
     // Workflow card should be removed
     const deletedCard = await page.findWorkflowCard("To Delete Workflow");
     await expect(deletedCard).not.toBeVisible();
+  });
+
+  test("keeps workflow details local until the route-level Save", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard("E2E Workflow");
+    const nameInput = card.locator("input").first();
+    await nameInput.fill("Manually Saved Workflow Name");
+
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
+    await expect(card).toHaveAttribute("data-settings-dirty", "true");
+
+    expect(
+      (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+        (workflow) => workflow.id === seedData.workflowId,
+      )?.name,
+    ).toBe("E2E Workflow");
+    await expect(page.floatingSave).toBeVisible();
+    await page.saveChanges();
+
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "false");
+    await expect(card).toHaveAttribute("data-settings-dirty", "false");
+
+    await page.goto(seedData.workspaceId);
+    await expect(await page.findWorkflowCard("Manually Saved Workflow Name")).toBeVisible();
   });
 });
 
@@ -372,6 +441,9 @@ test.describe("Seed protection", () => {
     await page.goto(seedData.workspaceId);
 
     // The seeded visible workflow is rendered before the leak attempt.
+    await expect
+      .poll(async () => (await page.findWorkflowCard("E2E Workflow")).isVisible())
+      .toBe(true);
     const visibleCard = await page.findWorkflowCard("E2E Workflow");
     await expect(visibleCard).toBeVisible();
     const baselineCount = await testPage.locator('[data-testid^="workflow-card-"]').count();

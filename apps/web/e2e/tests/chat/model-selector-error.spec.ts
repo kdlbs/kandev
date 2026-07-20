@@ -168,6 +168,77 @@ test.describe("Chat model selector — RPC failure", () => {
  * session snapshot and SSR re-served the pre-change model on reload.
  */
 test.describe("Chat model selector — persistence", () => {
+  test("completed turn metadata keeps changed options after a page reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Turn Config Reload Test",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("expected an auto-started session");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const trigger = testPage.getByRole("button", { name: "Session model settings" });
+    await trigger.click();
+    await testPage.getByTestId("config-option-trigger-effort").click();
+    await testPage.getByRole("button", { name: "High", exact: true }).click();
+    await expect(trigger).toHaveText("Mock Fast / High", { timeout: 5_000 });
+    await testPage.keyboard.press("Escape");
+
+    const prompt = "second turn uses high effort";
+    await session.sendMessage(prompt);
+    await session.expectChatResponseVisible(prompt);
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const capturedConfig = testPage.getByText("mock-fast · Effort: High", { exact: true });
+    await expect(capturedConfig.first()).toHaveText("mock-fast · Effort: High");
+
+    await testPage.reload();
+    await session.waitForLoad();
+
+    const messagesResponse = await testPage.request.get(
+      `/api/v1/task-sessions/${task.session_id}/messages?limit=50&sort=desc`,
+    );
+    const messagesPayload = (await messagesResponse.json()) as {
+      messages: { content: string; turn_id?: string }[];
+    };
+    const responseMessage = messagesPayload.messages.find((message) =>
+      message.content.includes(prompt),
+    );
+    expect(responseMessage?.turn_id).toBeTruthy();
+
+    const turnsResponse = await testPage.request.get(
+      `/api/v1/task-sessions/${task.session_id}/turns`,
+    );
+    const turnsPayload = (await turnsResponse.json()) as {
+      turns: { id: string; metadata?: Record<string, unknown> }[];
+    };
+    const responseTurn = turnsPayload.turns.find((turn) => turn.id === responseMessage?.turn_id);
+    expect(responseTurn?.metadata).toMatchObject({
+      runtime_config_snapshot: {
+        config_options: expect.arrayContaining([
+          expect.objectContaining({ id: "effort", value: "high" }),
+        ]),
+        config_baseline: { effort: "medium" },
+      },
+    });
+
+    await expect(capturedConfig.first()).toHaveText("mock-fast · Effort: High");
+  });
+
   test("profile config overrides provider defaults on the first rendered label", async ({
     testPage,
     apiClient,
