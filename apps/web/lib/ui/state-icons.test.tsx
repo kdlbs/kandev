@@ -235,6 +235,15 @@ describe("getSessionStateIcon — waiting-for-input variants (§spec:waiting-for
     );
   });
 
+  it("does not let stale pending input mask starting or terminal session states", () => {
+    expect(iconType(getSessionStateIcon("STARTING", undefined, null, true, true))).toBe(
+      IconLoader2,
+    );
+    expect(iconType(getSessionStateIcon("COMPLETED", undefined, null, true, true))).toBe(
+      IconCircleCheck,
+    );
+  });
+
   it("distinguishes both waiting variants from done and from both running affordances by SHAPE", () => {
     const clarification = iconType(getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, true));
     const permission = iconType(

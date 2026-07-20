@@ -228,8 +228,9 @@ function getSessionStateIconConfig(
   if (state === "RUNNING" && foregroundActivity === "background") {
     return SESSION_BACKGROUND_ICON;
   }
-  if (hasPendingPermission) return PENDING_PERMISSION_ICON;
-  if (hasPendingClarification) return SESSION_STATE_ICONS.WAITING_FOR_INPUT;
+  const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
+  if (canRequestInput && hasPendingPermission) return PENDING_PERMISSION_ICON;
+  if (canRequestInput && hasPendingClarification) return SESSION_STATE_ICONS.WAITING_FOR_INPUT;
   if (!state) return DEFAULT_SESSION_ICON;
   return SESSION_STATE_ICONS[state] ?? DEFAULT_SESSION_ICON;
 }
