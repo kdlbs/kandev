@@ -494,9 +494,10 @@ field](plugins-manifest.md#field-reference) at its package-relative path.
 ## Publishing to the marketplace
 
 To make your plugin discoverable and one-click installable from inside kandev,
-publish the `<id>-<version>.tar.gz` + `checksums.txt` as a GitHub **Release**
-asset and either open a PR listing your repo in the official catalog or host
-your own source. See [Plugin marketplace →
+publish the `<id>-<version>.tar.gz` as a GitHub **Release** asset and either
+open a PR listing your repo in the official catalog or host your own source. A
+separate release-level `checksums.txt` is optional; the checksum manifest inside
+the package is mandatory. See [Plugin marketplace →
 Publishing](plugins-marketplace.md#publishing-a-plugin).
 
 ## Iterate loop
