@@ -60,6 +60,31 @@ func TestCleanupWorktrees_RemovesLastActiveReference(t *testing.T) {
 	assertWorktreeReferenceStatus(t, store, wt.ID, "session-owner", StatusDeleted)
 }
 
+func TestReleaseWorktreeReference_MissingAssociationIsIdempotent(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", models.TaskSessionStateCompleted)
+	seedReferenceCleanupSession(t, store, "task-borrower", "session-borrower", models.TaskSessionStateRunning)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+	borrowed := *wt
+	borrowed.TaskID = "task-borrower"
+	borrowed.SessionID = "session-borrower"
+	if err := store.CreateWorktree(ctx, &borrowed); err != nil {
+		t.Fatalf("create borrower worktree reference: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_session_worktrees WHERE session_id = ?`, wt.SessionID); err != nil {
+		t.Fatalf("delete owner worktree reference: %v", err)
+	}
+
+	if err := mgr.ReleaseWorktreeReference(ctx, wt); err != nil {
+		t.Fatalf("release missing owner reference: %v", err)
+	}
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Fatalf("shared worktree path should be preserved: %v", err)
+	}
+	assertWorktreeReferenceStatus(t, store, wt.ID, borrowed.SessionID, StatusActive)
+}
+
 func newReferenceCleanupTestManager(t *testing.T) (*Manager, *SQLiteStore) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "cleanup.db"))

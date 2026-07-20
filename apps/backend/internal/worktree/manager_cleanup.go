@@ -179,7 +179,7 @@ func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) er
 	wt.Status = StatusDeleted
 	wt.DeletedAt = &now
 	wt.UpdatedAt = now
-	if err := m.store.UpdateWorktree(ctx, wt); err != nil {
+	if err := m.store.UpdateWorktree(ctx, wt); err != nil && !errors.Is(err, ErrWorktreeNotFound) {
 		return err
 	}
 	m.mu.Lock()

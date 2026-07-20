@@ -374,7 +374,7 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("worktree not found: %s", wt.ID)
+		return fmt.Errorf("%w: %s", ErrWorktreeNotFound, wt.ID)
 	}
 	return nil
 }
