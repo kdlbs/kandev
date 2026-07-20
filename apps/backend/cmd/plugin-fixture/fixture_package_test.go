@@ -24,6 +24,7 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.Equal(t, 1, m.APIVersion)
 	require.Equal(t, "1.0.0", m.Version)
 	require.True(t, m.IsManaged())
+	require.Equal(t, "https://github.com/kdlbs/kandev-plugin-template", m.RepoURL)
 	require.Equal(t, "/ui/bundle.js", m.UI.Bundle)
 	require.True(t, m.HasEvent("task.created"))
 	require.True(t, m.Capabilities.State)

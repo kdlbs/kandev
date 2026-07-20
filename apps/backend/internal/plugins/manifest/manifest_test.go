@@ -78,6 +78,25 @@ func validManifest(t *testing.T) *Manifest {
 	return m
 }
 
+func TestParse_DecodesRepoURL(t *testing.T) {
+	const withRepo = validManifestYAML + "\nrepo_url: \"https://github.com/kdlbs/kandev-plugin-slack\"\n"
+	m, err := Parse([]byte(withRepo))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if m.RepoURL != "https://github.com/kdlbs/kandev-plugin-slack" {
+		t.Fatalf("m.RepoURL = %q, want the manifest's repo_url", m.RepoURL)
+	}
+}
+
+func TestValidate_AcceptsHTTPRepoURL(t *testing.T) {
+	m := validManifest(t)
+	m.RepoURL = "https://github.com/kdlbs/kandev-plugin-slack"
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error for a valid http(s) repo_url: %v", err)
+	}
+}
+
 func TestValidate_RejectsBadIDPattern(t *testing.T) {
 	m := validManifest(t)
 	m.ID = "Kandev_Plugin!"
@@ -179,6 +198,16 @@ func TestValidate_RejectsInvalidManifests(t *testing.T) {
 			name:    "version contains whitespace",
 			mutate:  func(m *Manifest) { m.Version = "1.0.0 " },
 			wantErr: "version",
+		},
+		{
+			name:    "repo_url with a javascript: scheme",
+			mutate:  func(m *Manifest) { m.RepoURL = "javascript:alert(document.cookie)" },
+			wantErr: "repo_url",
+		},
+		{
+			name:    "repo_url without an http(s) scheme",
+			mutate:  func(m *Manifest) { m.RepoURL = "ftp://example.com/repo" },
+			wantErr: "repo_url",
 		},
 	}
 

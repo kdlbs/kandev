@@ -12,6 +12,7 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { PluginConfigForm } from "./plugin-config-form";
 import { PluginManifestCard } from "./plugin-manifest-card";
+import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
 import { UninstallPluginDialog } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
@@ -97,8 +98,11 @@ function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
               </Badge>
             )}
           </div>
-          <div className="text-xs text-muted-foreground font-mono">
-            {plugin.id} · v{plugin.version}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span className="font-mono">
+              {plugin.id} · v{plugin.version}
+            </span>
+            {plugin.repo_url && <PluginRepoLink url={plugin.repo_url} />}
           </div>
           {plugin.description && (
             <p className="text-sm text-muted-foreground">{plugin.description}</p>
