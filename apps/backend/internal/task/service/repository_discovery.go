@@ -124,8 +124,7 @@ func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) 
 		return result, nil
 	}
 
-	// codeql[go/path-injection] Intentional read-only diagnostics for the local path selected by the user.
-	info, statErr := os.Stat(absPath)
+	info, statErr := os.Stat(absPath) // codeql[go/path-injection] intentional diagnostics for a user-selected local path.
 	result.Exists = statErr == nil
 	switch {
 	case errors.Is(statErr, os.ErrNotExist):
@@ -154,8 +153,7 @@ func resolveExplicitLocalRepositoryPath(repoPath string) (string, string, error)
 	if err != nil {
 		return "", "", fmt.Errorf("%w: %v", ErrInvalidRepositoryPath, err)
 	}
-	// codeql[go/path-injection] Intentional validation of the canonical local repository selected by the user.
-	info, err := os.Stat(canonicalPath)
+	info, err := os.Stat(canonicalPath) // codeql[go/path-injection] intentional validation of a canonical local repository.
 	if err != nil {
 		return "", "", fmt.Errorf("%w: %v", ErrInvalidRepositoryPath, err)
 	}
@@ -180,8 +178,7 @@ func resolveExplicitLocalRepositoryPath(repoPath string) (string, string, error)
 // and turn an exact-path grant into permission to mutate unrelated Git refs.
 func validateExplicitGitMetadata(repoPath string) error {
 	gitPath := filepath.Join(repoPath, ".git")
-	// codeql[go/path-injection] The canonical repository path is validated before inspecting its exact .git child.
-	info, err := os.Lstat(gitPath)
+	info, err := os.Lstat(gitPath) // codeql[go/path-injection] inspect the canonical repository's exact .git child.
 	if err != nil {
 		return err
 	}
@@ -198,8 +195,7 @@ func validateExplicitGitMetadata(repoPath string) error {
 }
 
 func validateStandaloneGitMetadata(gitPath string) error {
-	// codeql[go/path-injection] gitPath is the validated repository's real, non-symlink .git directory.
-	if _, err := os.Lstat(filepath.Join(gitPath, "commondir")); err == nil {
+	if _, err := os.Lstat(filepath.Join(gitPath, "commondir")); err == nil { // codeql[go/path-injection] validated real .git directory.
 		return errors.New("standalone .git metadata must not redirect its common directory")
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -242,8 +238,7 @@ func validateLinkedWorktreeMetadata(repoPath, gitPath string) error {
 }
 
 func readMetadataPath(path, relativeTo string) (string, error) {
-	// codeql[go/path-injection] Linked-worktree metadata is canonicalized and verified by reciprocal pointers.
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(path) // codeql[go/path-injection] metadata is canonicalized and verified by reciprocal pointers.
 	if err != nil {
 		return "", err
 	}
