@@ -2,14 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { IconAlertTriangle } from "@tabler/icons-react";
-import {
-  taskId as toTaskId,
-  workflowId as toWorkflowId,
-  workspaceId as toWorkspaceId,
-  type Repository,
-  type RepositoryScript,
-  type Task,
-} from "@/lib/types/http";
+import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { KanbanState } from "@/lib/state/slices";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -27,6 +20,7 @@ import {
   deriveIsAgentWorking,
   buildArchivedValue,
   hasResolvedTaskDetails,
+  resolveEffectiveTask,
   resolveTaskContentState,
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
@@ -44,62 +38,6 @@ type TaskPageContentProps = {
   initialLayout?: string | null;
   officeTaskHref?: string | null;
 };
-
-function resolveEffectiveTask(
-  taskDetails: Task | null,
-  initialTask: Task | null,
-  kanbanTask: KanbanState["tasks"][number] | null,
-  effectiveTaskId: string | null,
-): Task | null {
-  const matchingTaskDetails = taskDetails?.id === effectiveTaskId ? taskDetails : null;
-  const matchingInitialTask = initialTask?.id === effectiveTaskId ? initialTask : null;
-  const baseTask = matchingTaskDetails ?? matchingInitialTask;
-
-  if (!baseTask && !kanbanTask) return null;
-  if (baseTask) return mergeBaseWithKanban(baseTask, kanbanTask);
-  if (kanbanTask) return buildTaskFromKanban(kanbanTask, taskDetails, initialTask);
-  return null;
-}
-
-function mergeBaseWithKanban(
-  baseTask: Task,
-  kanbanTask: KanbanState["tasks"][number] | null,
-): Task {
-  if (!kanbanTask) return baseTask;
-  return {
-    ...baseTask,
-    title: kanbanTask.title ?? baseTask.title,
-    description: kanbanTask.description ?? baseTask.description,
-    workflow_step_id:
-      (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
-    position: kanbanTask.position ?? baseTask.position,
-    state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
-    repositories: baseTask.repositories,
-  };
-}
-
-function buildTaskFromKanban(
-  kanbanTask: KanbanState["tasks"][number],
-  taskDetails: Task | null,
-  initialTask: Task | null,
-): Task {
-  const prevWorkspaceId = taskDetails?.workspace_id ?? initialTask?.workspace_id;
-  const prevBoardId = taskDetails?.workflow_id ?? initialTask?.workflow_id;
-  return {
-    id: toTaskId(kanbanTask.id),
-    title: kanbanTask.title,
-    description: kanbanTask.description ?? "",
-    workflow_step_id: kanbanTask.workflowStepId,
-    position: kanbanTask.position,
-    state: kanbanTask.state ?? "CREATED",
-    workspace_id: prevWorkspaceId ?? toWorkspaceId(""),
-    workflow_id: prevBoardId ?? toWorkflowId(""),
-    priority: 0,
-    repositories: [],
-    created_at: "",
-    updated_at: kanbanTask.updatedAt ?? "",
-  };
-}
 
 export function useWorkflowStepsMapped() {
   const kanbanSteps = useAppStore((state) => state.kanban.steps);

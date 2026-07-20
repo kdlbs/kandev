@@ -1,4 +1,11 @@
-import type { Repository, Task } from "@/lib/types/http";
+import {
+  taskId as toTaskId,
+  workflowId as toWorkflowId,
+  workspaceId as toWorkspaceId,
+  type Repository,
+  type Task,
+} from "@/lib/types/http";
+import type { KanbanState } from "@/lib/state/slices";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 
 type ACPDebugInfo = {
@@ -91,6 +98,77 @@ export function deriveIsAgentWorking(
   if (taskSessionState !== null)
     return taskSessionState === "STARTING" || taskSessionState === "RUNNING";
   return isAgentRunning && (taskState === "IN_PROGRESS" || taskState === "SCHEDULING");
+}
+
+/**
+ * Resolve the task the detail view should render, layering the freshest of
+ * three sources: the one-shot `fetchTask` details, the SSR/`initialTask`, and
+ * the live kanban entry. The base (details/initial) carries fields the kanban
+ * doesn't (repositories, timestamps); the kanban carries live board state.
+ */
+export function resolveEffectiveTask(
+  taskDetails: Task | null,
+  initialTask: Task | null,
+  kanbanTask: KanbanState["tasks"][number] | null,
+  effectiveTaskId: string | null,
+): Task | null {
+  const matchingTaskDetails = taskDetails?.id === effectiveTaskId ? taskDetails : null;
+  const matchingInitialTask = initialTask?.id === effectiveTaskId ? initialTask : null;
+  const baseTask = matchingTaskDetails ?? matchingInitialTask;
+
+  if (!baseTask && !kanbanTask) return null;
+  if (baseTask) return mergeBaseWithKanban(baseTask, kanbanTask);
+  if (kanbanTask) return buildTaskFromKanban(kanbanTask, taskDetails, initialTask);
+  return null;
+}
+
+export function mergeBaseWithKanban(
+  baseTask: Task,
+  kanbanTask: KanbanState["tasks"][number] | null,
+): Task {
+  if (!kanbanTask) return baseTask;
+  return {
+    ...baseTask,
+    title: kanbanTask.title ?? baseTask.title,
+    description: kanbanTask.description ?? baseTask.description,
+    workflow_step_id:
+      (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
+    position: kanbanTask.position ?? baseTask.position,
+    state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
+    repositories: baseTask.repositories,
+    // A task present in the kanban board is by definition not archived: the
+    // board never holds archived tasks, and unarchive re-adds it via
+    // task.updated(archived_at=null). The one-shot `fetchTask` that seeds
+    // baseTask only refetches on task-id change, so it keeps a stale
+    // archived_at after an in-place unarchive from the detail top bar —
+    // trust the live kanban entry instead. Without this the top bar keeps
+    // showing the Unarchive button / archived banner and the task "never
+    // comes back" even though the backend restored it.
+    archived_at: null,
+  };
+}
+
+export function buildTaskFromKanban(
+  kanbanTask: KanbanState["tasks"][number],
+  taskDetails: Task | null,
+  initialTask: Task | null,
+): Task {
+  const prevWorkspaceId = taskDetails?.workspace_id ?? initialTask?.workspace_id;
+  const prevBoardId = taskDetails?.workflow_id ?? initialTask?.workflow_id;
+  return {
+    id: toTaskId(kanbanTask.id),
+    title: kanbanTask.title,
+    description: kanbanTask.description ?? "",
+    workflow_step_id: kanbanTask.workflowStepId,
+    position: kanbanTask.position,
+    state: kanbanTask.state ?? "CREATED",
+    workspace_id: prevWorkspaceId ?? toWorkspaceId(""),
+    workflow_id: prevBoardId ?? toWorkflowId(""),
+    priority: 0,
+    repositories: [],
+    created_at: "",
+    updated_at: kanbanTask.updatedAt ?? "",
+  };
 }
 
 export function buildArchivedValue(task: Task | null, repository: Repository | null) {
