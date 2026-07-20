@@ -117,9 +117,10 @@ assets include both:
 - `<id>-<version>.tar.gz` — the plugin package. It carries its own internal
   `checksums.txt` covering every packaged file, which the install pipeline
   verifies on extraction.
-- `checksums.txt` — the sha256 of the tarball itself, which the index build
-  pins as the catalog's `package_sha256` provenance digest so a download can be
-  confirmed to match what was curated.
+- `checksums.txt` — the sha256 of the tarball itself. This is advisory
+  provenance: the catalog reserves a `package_sha256` field for it, but the
+  index builder does not populate or enforce the digest yet, so the asset is
+  optional today and included for forward compatibility.
 
 The release must pass the standard package integrity gate. The
 [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template)
