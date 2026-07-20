@@ -199,10 +199,15 @@ function useProfileActions(drafts: Drafts, selected: SelectedState) {
     const builtIn = selected.selectedBuiltIn;
     if (!builtIn) return;
     attempt(drafts.setError, () => {
+      const isDefault =
+        builtIn.id === "default"
+          ? selected.selectedBuiltInOverride?.is_default === true ||
+            !drafts.profiles.some((profile) => profile.is_default)
+          : undefined;
       drafts.replaceProfiles(
         upsertBuiltInLayoutOverride(drafts.profiles, builtIn.id, nextLayout, {
           createdAt: new Date().toISOString(),
-          isDefault: builtIn.id === "default" ? true : undefined,
+          isDefault,
         }),
       );
     });

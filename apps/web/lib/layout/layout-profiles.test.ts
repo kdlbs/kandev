@@ -27,6 +27,7 @@ const FIRST_LAYOUT_ID = "layout-one";
 const SECOND_LAYOUT_ID = "layout-two";
 const CENTER_COLUMN_ID = "center";
 const LEGACY_LAYOUT_VALUE = "old-format";
+const SESSION_PANEL_ID = "session:session-one";
 
 function reusableLayout(panelIds: string[] = ["chat", "files", "changes"]): LayoutState {
   return {
@@ -92,13 +93,13 @@ describe("validateReusableLayout", () => {
   it("normalizes a saved session Agent without changing the input", () => {
     const input = reusableLayout();
     input.columns[0].groups[0].panels[0] = {
-      id: "session:session-one",
+      id: SESSION_PANEL_ID,
       component: "chat",
       title: "Agent",
       tabComponent: "sessionTab",
       params: { sessionId: "session-one" },
     };
-    input.columns[0].groups[0].activePanel = "session:session-one";
+    input.columns[0].groups[0].activePanel = SESSION_PANEL_ID;
     const snapshot = structuredClone(input);
 
     const result = validateReusableLayout(input);
@@ -276,6 +277,47 @@ describe("built-in layout overrides", () => {
     });
     expect(isBuiltInLayoutOverride(updated[0])).toBe(true);
     expect(getBuiltInLayoutOverride(updated, DEFAULT_LAYOUT_ID)).toBe(updated[0]);
+  });
+
+  it("rejects invalid layouts when creating or updating an override", () => {
+    const invalidLayout = reusableLayout(["files"]);
+
+    expect(() =>
+      upsertBuiltInLayoutOverride([], "plan", invalidLayout, { createdAt: CREATED_AT }),
+    ).toThrow("valid reusable layout");
+
+    const existing = upsertBuiltInLayoutOverride([], "plan", reusableLayout(), {
+      createdAt: CREATED_AT,
+    });
+    expect(() =>
+      upsertBuiltInLayoutOverride(existing, "plan", invalidLayout, { createdAt: CREATED_AT }),
+    ).toThrow("valid reusable layout");
+  });
+
+  it("persists the normalized layout when creating and updating an override", () => {
+    const sessionLayout = reusableLayout();
+    sessionLayout.columns[0].groups[0].panels[0] = {
+      id: SESSION_PANEL_ID,
+      component: "chat",
+      title: "Agent",
+      params: { sessionId: "session-one" },
+    };
+    sessionLayout.columns[0].groups[0].activePanel = SESSION_PANEL_ID;
+
+    const created = upsertBuiltInLayoutOverride([], "plan", sessionLayout, {
+      createdAt: CREATED_AT,
+    });
+    const updated = upsertBuiltInLayoutOverride(created, "plan", sessionLayout, {
+      createdAt: CREATED_AT,
+    });
+
+    for (const profiles of [created, updated]) {
+      const storedLayout = profiles[0].layout as unknown as LayoutState;
+      expect(storedLayout.columns[0].groups[0]).toMatchObject({
+        activePanel: "chat",
+        panels: expect.arrayContaining([expect.objectContaining({ id: "chat" })]),
+      });
+    }
   });
 
   it("resets only the selected built-in override", () => {

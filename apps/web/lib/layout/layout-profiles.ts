@@ -376,6 +376,11 @@ export function upsertBuiltInLayoutOverride(
   layout: Record<string, unknown>,
   options: UpsertBuiltInLayoutOverrideOptions,
 ): SavedLayout[] {
+  const validation = validateReusableLayout(layout);
+  if (!validation.valid) {
+    throw new Error("Only a valid reusable layout can override a built-in layout");
+  }
+  const normalizedLayout = validation.layout as unknown as Record<string, unknown>;
   const builtIn = getBuiltInLayoutProfile(id);
   const overrideId = getBuiltInLayoutOverrideId(id);
   const existing = getBuiltInLayoutOverride(profiles, id);
@@ -384,17 +389,19 @@ export function upsertBuiltInLayoutOverride(
     return createLayoutProfile(profiles, {
       id: overrideId,
       name: builtIn.name,
-      layout,
+      layout: normalizedLayout,
       createdAt: options.createdAt,
       isDefault,
     });
   }
-  if (!validateReusableLayout(layout).valid) {
-    throw new Error("Only a valid reusable layout can override a built-in layout");
-  }
   return profiles.map((profile) => {
     if (profile.id === overrideId) {
-      return { ...profile, name: builtIn.name, layout: cloneLayout(layout), is_default: isDefault };
+      return {
+        ...profile,
+        name: builtIn.name,
+        layout: cloneLayout(normalizedLayout),
+        is_default: isDefault,
+      };
     }
     return isDefault && profile.is_default ? { ...profile, is_default: false } : profile;
   });

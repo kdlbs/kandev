@@ -222,6 +222,25 @@ describe("useLayoutSettings built-in editing", () => {
     ).not.toContain("terminal-default");
   });
 
+  it("preserves a custom default when editing the built-in Default", () => {
+    const customDefault = profile({ is_default: true });
+    const { result } = renderLayoutSettings([customDefault]);
+    const layout = getBuiltInLayoutProfile("default").layout;
+    layout.columns[0].width = 640;
+
+    act(() => result.current.setSelection({ kind: "built-in", id: "default" }));
+    act(() => result.current.updateLayout(layout));
+
+    expect(result.current.profiles).toEqual([
+      customDefault,
+      expect.objectContaining({
+        id: "layout-override-default",
+        is_default: false,
+      }),
+    ]);
+    expect(result.current.selectedIsDefault).toBe(false);
+  });
+
   it("resets a built-in override without affecting custom profiles", () => {
     const custom = profile({ id: SECOND_PROFILE_ID, name: "Custom" });
     const { result } = renderLayoutSettings([custom]);

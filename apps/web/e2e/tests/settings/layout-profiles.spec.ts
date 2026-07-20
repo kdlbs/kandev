@@ -242,7 +242,7 @@ test.describe("Task layout profile defaults", () => {
     await testPage.getByTestId("layout-preset-trigger").click();
     await testPage
       .locator('[data-testid="layout-saved-delete"][data-layout-id="focused-default"]')
-      .dispatchEvent("click");
+      .click({ force: true });
     await expect(testPage.getByRole("alertdialog")).toContainText(
       "The built-in Default layout will become the default.",
     );
