@@ -35,9 +35,13 @@ test.describe("GitHub workspace authentication", () => {
       automation.getByText("Personal access token", { exact: true }).first(),
     ).toBeVisible();
 
-    await automation.getByRole("tab", { name: "gh CLI", exact: true }).click();
-    await automation.getByRole("combobox", { name: "GitHub CLI account" }).click();
+    await automation.getByRole("button", { name: "Change connection" }).click();
+    const connectionDialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });
+    await connectionDialog.getByRole("combobox", { name: "Connection method" }).click();
+    await testPage.getByRole("option", { name: "GitHub CLI", exact: true }).click();
+    await connectionDialog.getByRole("combobox", { name: "GitHub CLI account" }).click();
     await expect(testPage.getByRole("option", { name: "bob-cli (github.com)" })).toBeVisible();
+    await testPage.keyboard.press("Escape");
     await testPage.keyboard.press("Escape");
 
     await testPage.route("**/api/v1/github/status?*", async (route) => {
@@ -74,9 +78,16 @@ test.describe("GitHub workspace authentication", () => {
     expect(statusPayload).toMatchObject({
       automation: { source: "gh_cli", login: "bob-cli", github_host: "github.com" },
     });
-    await automation.getByRole("tab", { name: "gh CLI", exact: true }).click();
-    await expect(automation.getByRole("combobox", { name: "GitHub CLI account" })).toContainText(
-      "bob-cli",
+    await automation.getByRole("button", { name: "Change connection" }).click();
+    const workspaceBDialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });
+    await expect(
+      workspaceBDialog.getByRole("combobox", { name: "Connection method" }),
+    ).toContainText("GitHub CLI");
+    await expect(
+      workspaceBDialog.getByRole("combobox", { name: "GitHub CLI account" }),
+    ).toContainText("bob-cli");
+    await expect(testPage.getByRole("heading", { name: "Personal GitHub identity" })).toHaveCount(
+      0,
     );
 
     await testPage.screenshot({
@@ -140,8 +151,12 @@ test.describe("GitHub workspace authentication", () => {
     const personal = testPage.getByTestId("github-personal-identity");
     await expect(automation.getByText("acme", { exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(automation.getByText("GitHub App", { exact: true }).first()).toBeVisible();
-    await expect(automation.getByText("Pull Request Write", { exact: true })).toBeVisible();
-    await expect(automation.getByText("Workflow Write", { exact: true })).toBeVisible();
+    await expect(automation.getByText("Pull Request Write", { exact: true })).toHaveCount(0);
+    await automation.getByRole("button", { name: "View permissions" }).click();
+    const permissionsDialog = testPage.getByRole("dialog", { name: "GitHub App permissions" });
+    await expect(permissionsDialog.getByText("Pull Request Write", { exact: true })).toBeVisible();
+    await expect(permissionsDialog.getByText("Workflow Write", { exact: true })).toBeVisible();
+    await permissionsDialog.getByRole("button", { name: "Close" }).click();
     await expect(personal.getByText("Not connected", { exact: true })).toBeVisible();
     await expect(personal.getByRole("button", { name: /Connect identity/ })).toBeVisible();
 

@@ -3,25 +3,42 @@ import { test, expect } from "../../fixtures/test-base";
 test.describe("Mobile GitHub authentication settings", () => {
   test("keeps workspace and personal identity controls usable on a narrow viewport", async ({
     testPage,
+    apiClient,
     seedData,
   }) => {
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "pat",
+      status: "active",
+      login: "mobile-user",
+    });
+
     await testPage.setViewportSize({ width: 390, height: 844 });
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
 
-    await expect(testPage.getByRole("heading", { name: "Workspace automation" })).toBeVisible({
+    await expect(testPage.getByRole("heading", { name: "Workspace GitHub access" })).toBeVisible({
       timeout: 15_000,
     });
-    await expect(testPage.getByRole("heading", { name: "My GitHub identity" })).toBeVisible();
+    await expect(testPage.getByRole("heading", { name: "Personal GitHub identity" })).toHaveCount(
+      0,
+    );
 
     const automation = testPage.getByTestId("github-workspace-automation");
-    await expect(automation.getByRole("tab", { name: "PAT", exact: true })).toBeVisible();
-    await expect(automation.getByRole("tab", { name: "gh CLI", exact: true })).toBeVisible();
-    await expect(automation.getByLabel("Personal access token")).toBeVisible();
+    await automation.getByRole("button", { name: "Change connection" }).click();
+    const connectionDialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });
+    await expect(
+      connectionDialog.getByText("GitHub App requires deployment configuration."),
+    ).toBeVisible();
+    await connectionDialog.getByRole("combobox", { name: "Connection method" }).click();
+    await testPage.getByRole("option", { name: "GitHub CLI", exact: true }).click();
 
-    const tokenHeight = await automation
-      .getByLabel("Personal access token")
-      .evaluate((element) => element.getBoundingClientRect().height);
-    expect(tokenHeight).toBeGreaterThanOrEqual(44);
+    const [accountBox, useAccountBox] = await Promise.all([
+      connectionDialog.getByRole("combobox", { name: "GitHub CLI account" }).boundingBox(),
+      connectionDialog.getByRole("button", { name: "Use account" }).boundingBox(),
+    ]);
+    expect(accountBox).not.toBeNull();
+    expect(useAccountBox).not.toBeNull();
+    expect(accountBox!.height).toBeGreaterThanOrEqual(44);
+    expect(accountBox!.height).toBeCloseTo(useAccountBox!.height, 1);
 
     const hasHorizontalOverflow = await testPage.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -62,12 +79,15 @@ test.describe("Mobile GitHub authentication settings", () => {
     await expect(automation.getByText("acme-engineering", { exact: true })).toBeVisible({
       timeout: 15_000,
     });
-    await expect(automation.getByText("Pull Request Write", { exact: true })).toBeVisible();
+    await automation.getByRole("button", { name: "View permissions" }).click();
+    const permissionsDialog = testPage.getByRole("dialog", { name: "GitHub App permissions" });
+    await expect(permissionsDialog.getByText("Pull Request Write", { exact: true })).toBeVisible();
+    await permissionsDialog.getByRole("button", { name: "Close" }).click();
     await expect(personal.getByText("revoked", { exact: true })).toBeVisible();
     await expect(personal.getByRole("button", { name: "Reconnect identity" })).toBeVisible();
 
     for (const control of [
-      automation.getByRole("tab", { name: "GitHub App", exact: true }),
+      automation.getByRole("button", { name: "Change connection" }),
       personal.getByRole("button", { name: "Reconnect identity" }),
     ]) {
       const box = await control.boundingBox();
@@ -84,7 +104,7 @@ test.describe("Mobile GitHub authentication settings", () => {
 
     const identityDescriptionBox = await testPage
       .getByText(
-        "Used for My GitHub and user-triggered actions when a personal actor is required.",
+        "Connect your GitHub user for My GitHub and human-attributed actions. Without it, automation continues as the App.",
         { exact: true },
       )
       .boundingBox();

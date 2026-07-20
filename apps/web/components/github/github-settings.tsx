@@ -253,18 +253,13 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
       </div>
       <Separator />
       <SettingsSection
-        title="Workspace automation"
-        description="Used by agents, background jobs, repository sync, and GitHub watches."
+        title="Workspace GitHub access"
+        description="Credential used for repository sync, watches, and managed agent git and gh commands. Executor profile tokens take precedence."
       >
         <GitHubAutomationSettings workspaceId={workspaceId} />
       </SettingsSection>
       <div className="pr-16 sm:pr-0">
-        <SettingsSection
-          title="My GitHub identity"
-          description="Used for My GitHub and user-triggered actions when a personal actor is required."
-        >
-          <GitHubPersonalSettings workspaceId={workspaceId} />
-        </SettingsSection>
+        <GitHubPersonalSettings workspaceId={workspaceId} />
       </div>
     </>
   );
