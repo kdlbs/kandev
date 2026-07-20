@@ -16,6 +16,7 @@ function makeAccessible(
 ): UseRemoteRepositoriesResult {
   return {
     repos: [],
+    availableProviders: [],
     loading: false,
     unavailable: false,
     error: null,

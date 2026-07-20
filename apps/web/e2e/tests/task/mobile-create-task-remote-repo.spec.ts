@@ -85,11 +85,29 @@ test.describe("Create task Remote repo picker on mobile", () => {
     });
 
     await openRemotePicker(testPage);
+    const providerTabs = testPage.getByTestId("remote-repo-provider-tabs");
+    await expect(providerTabs).toBeVisible();
+    await expect(providerTabs.getByRole("tab", { name: "GitHub" })).toBeVisible();
+    const azureTab = providerTabs.getByRole("tab", { name: "Azure DevOps" });
+    await expect(azureTab).toBeVisible();
+    await testPage.getByTestId("remote-repo-popover-content").evaluate(async (element) => {
+      await Promise.all(
+        element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
+    const azureTabBox = await azureTab.boundingBox();
+    expect(azureTabBox).not.toBeNull();
+    expect(azureTabBox!.height).toBeGreaterThanOrEqual(44);
+    await azureTab.click();
     const option = testPage.getByTestId("remote-repo-option").filter({ hasText: "Platform/api" });
     await expect(option).toBeVisible({ timeout: 10_000 });
     await option.click();
     await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
       "Platform/api",
     );
+    const hasHorizontalOverflow = await testPage.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(hasHorizontalOverflow).toBe(false);
   });
 });

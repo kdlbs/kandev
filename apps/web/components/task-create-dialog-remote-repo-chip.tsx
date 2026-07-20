@@ -24,12 +24,17 @@ import {
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import type {
   RemoteRepository,
+  RemoteRepositoryProvider,
   UseRemoteRepositoriesResult,
 } from "@/hooks/domains/integrations/use-remote-repositories";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import { parseGitHubAnyUrl, type PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
+import {
+  RemoteRepositoryProviderIcon,
+  RemoteRepoProviderTabs,
+} from "@/components/task-create-dialog-remote-repo-provider-tabs";
 
 const TRUNCATE_THRESHOLD = 30;
 
@@ -301,6 +306,7 @@ function RemoteRepoPopoverContent({
 }) {
   const [value, setValue] = useState("");
   const [urlError, setUrlError] = useState<string | null>(null);
+  const [activeProvider, setActiveProvider] = useState<RemoteRepositoryProvider | null>(null);
   const { search: triggerSearch } = accessible;
   useEffect(() => {
     triggerSearch(value);
@@ -319,6 +325,14 @@ function RemoteRepoPopoverContent({
     return true;
   };
   const visibleUrlError = accessible.unavailable ? null : urlError;
+  const showProviderTabs = accessible.availableProviders.length > 1;
+  const selectedProvider =
+    activeProvider && accessible.availableProviders.includes(activeProvider)
+      ? activeProvider
+      : accessible.availableProviders[0];
+  const visibleRepos = showProviderTabs
+    ? accessible.repos.filter((repo) => repo.provider === selectedProvider)
+    : accessible.repos;
 
   return (
     <div className="flex flex-col">
@@ -368,7 +382,18 @@ function RemoteRepoPopoverContent({
           visibleUrlError && "border-destructive focus:border-destructive",
         )}
       />
-      <PickerList accessible={accessible} onPick={onPick} urlError={visibleUrlError} />
+      <PickerList
+        accessible={{ ...accessible, repos: visibleRepos }}
+        onPick={onPick}
+        urlError={visibleUrlError}
+      />
+      {showProviderTabs && selectedProvider ? (
+        <RemoteRepoProviderTabs
+          providers={accessible.availableProviders}
+          value={selectedProvider}
+          onChange={setActiveProvider}
+        />
+      ) : null}
     </div>
   );
 }
@@ -456,7 +481,7 @@ function RepoOption({
       )}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <RepoProviderIcon provider={repo.provider} />
+        <RemoteRepositoryProviderIcon provider={repo.provider} />
         <span className="truncate">{repo.fullName}</span>
       </span>
       {repo.private ? (
@@ -466,12 +491,6 @@ function RepoOption({
       ) : null}
     </button>
   );
-}
-
-function RepoProviderIcon({ provider }: { provider: RemoteRepository["provider"] }) {
-  if (provider === "github") return <IconBrandGithub className="size-3.5 shrink-0" />;
-  if (provider === "gitlab") return <IconBrandGitlab className="size-3.5 shrink-0" />;
-  return <AzureDevOpsIcon className="size-3.5 shrink-0" />;
 }
 
 function ConnectProvidersBanner() {

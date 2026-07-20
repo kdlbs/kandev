@@ -32,6 +32,9 @@ function makeAccessible(overrides: AccessibleOverrides = {}): UseRemoteRepositor
     defaultBranch: repo.default_branch,
     private: repo.private,
   }));
+  const availableProviders = overrides.availableProviders ?? [
+    ...new Set(repos.map((repo) => repo.provider)),
+  ];
   return {
     loading: false,
     unavailable: false,
@@ -39,6 +42,7 @@ function makeAccessible(overrides: AccessibleOverrides = {}): UseRemoteRepositor
     search: () => undefined,
     ...overrides,
     repos,
+    availableProviders,
   };
 }
 

@@ -19,6 +19,7 @@ function row(): TaskRemoteRepoRow {
 function accessibleRepos(): UseRemoteRepositoriesResult {
   return {
     repos: [],
+    availableProviders: [],
     loading: false,
     unavailable: false,
     error: null,

@@ -423,7 +423,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await expect(startBtn).toBeEnabled({ timeout: 15_000 });
   });
 
-  test("scenario 5: GitHub not configured shows banner, paste still works", async ({
+  test("scenario 5: no repository provider shows banner, paste still works", async ({
     testPage,
     apiClient,
     seedData,
@@ -441,18 +441,15 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await openCreateDialog(testPage, kanban);
     await clickRemoteMode(testPage);
 
-    // Open the chip popover — picker section should show the "Connect a
-    // GitHub account" CTA pointing at the integrations settings page.
+    // Open the chip popover — picker section should show the provider-neutral
+    // CTA pointing at the integrations settings page.
     const trigger = testPage.getByTestId("remote-repo-chip-trigger").first();
     await trigger.click();
 
-    const banner = testPage.getByText(
-      "Connect a GitHub account in Settings to pick from your repositories.",
-      { exact: false },
-    );
+    const banner = testPage.getByText("Connect a source control provider", { exact: false });
     await expect(banner).toBeVisible({ timeout: 10_000 });
 
-    const settingsLink = testPage.locator('a[href="/settings/integrations/github"]');
+    const settingsLink = testPage.locator('a[href="/settings/integrations"]');
     await expect(settingsLink).toBeVisible();
 
     // The paste input is still rendered and usable — paste a URL.
@@ -514,6 +511,56 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     );
     await expect(testPage.getByTestId("remote-repo-chip-trigger").nth(1)).toContainText(
       "paste-repo",
+    );
+  });
+
+  test("switches between configured repository providers with bottom tabs", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedAccessibleRepos(apiClient);
+    await apiClient.mockAzureDevOpsSeed({
+      authenticated: true,
+      projects: [{ id: "project-1", name: "Platform" }],
+      repositories: [
+        {
+          id: "azure-repo-1",
+          name: "api",
+          projectId: "project-1",
+          projectName: "Platform",
+          defaultBranch: "refs/heads/main",
+          webUrl: "https://dev.azure.com/acme/Platform/_git/api",
+        },
+      ],
+    });
+    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
+      organizationUrl: "https://dev.azure.com/acme",
+      pat: "azure-test-pat",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await openCreateDialog(testPage, kanban);
+    await clickRemoteMode(testPage);
+    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+
+    const tabs = testPage.getByTestId("remote-repo-provider-tabs");
+    await expect(tabs.getByRole("tab", { name: "GitHub" })).toBeVisible();
+    await expect(
+      testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/alpha" }),
+    ).toBeVisible();
+    await expect(
+      testPage.getByTestId("remote-repo-option").filter({ hasText: "Platform/api" }),
+    ).toHaveCount(0);
+
+    await tabs.getByRole("tab", { name: "Azure DevOps" }).click();
+    const azureOption = testPage
+      .getByTestId("remote-repo-option")
+      .filter({ hasText: "Platform/api" });
+    await expect(azureOption).toBeVisible();
+    await azureOption.click();
+    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
+      "Platform/api",
     );
   });
 });

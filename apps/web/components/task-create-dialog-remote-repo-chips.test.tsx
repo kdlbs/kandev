@@ -9,6 +9,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 vi.mock("@/hooks/domains/integrations/use-remote-repositories", () => ({
   useRemoteRepositories: () => ({
     repos: [],
+    availableProviders: [],
     loading: false,
     unavailable: false,
     error: null,

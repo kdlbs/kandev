@@ -19,6 +19,8 @@ vi.mock("@/lib/api/domains/azure-devops-api", () => ({
 
 import { useRemoteRepositories } from "./use-remote-repositories";
 
+const WORKSPACE_ID = "workspace-1";
+
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
@@ -64,7 +66,7 @@ describe("useRemoteRepositories", () => {
       ],
     });
 
-    const { result } = renderHook(() => useRemoteRepositories("workspace-1"));
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.repos.map((repo) => `${repo.provider}:${repo.fullName}`)).toEqual([
@@ -74,17 +76,30 @@ describe("useRemoteRepositories", () => {
     ]);
     expect(result.current.repos[1].defaultBranch).toBe("trunk");
     expect(result.current.repos[2].defaultBranch).toBe("");
+    expect(result.current.availableProviders).toEqual(["github", "azure_devops"]);
     expect(result.current.unavailable).toBe(false);
   });
 
   it("does not call an empty connected provider unavailable", async () => {
     mocks.fetchAccessibleRepos.mockResolvedValue([]);
     rejectUnavailableProviders();
-    const { result } = renderHook(() => useRemoteRepositories("workspace-1"));
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.repos).toEqual([]);
+    expect(result.current.availableProviders).toEqual(["github"]);
     expect(result.current.unavailable).toBe(false);
+  });
+
+  it("reports every provider whose repository request succeeds", async () => {
+    mocks.fetchAccessibleRepos.mockResolvedValue([]);
+    mocks.listUserProjects.mockResolvedValue({ projects: [] });
+    mocks.listAzureDevOpsProjects.mockResolvedValue({ projects: [] });
+
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.availableProviders).toEqual(["github", "gitlab", "azure_devops"]);
   });
 
   it("clears repositories immediately when the workspace changes", async () => {
@@ -111,7 +126,7 @@ describe("useRemoteRepositories", () => {
     );
     const { result, rerender } = renderHook(
       ({ workspaceId }) => useRemoteRepositories(workspaceId),
-      { initialProps: { workspaceId: "workspace-1" } },
+      { initialProps: { workspaceId: WORKSPACE_ID } },
     );
     await waitFor(() => expect(result.current.repos).toHaveLength(1));
 

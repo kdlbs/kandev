@@ -52,7 +52,9 @@ authenticating the GitHub CLI.
   in settings, browse, and task-creation surfaces.
 - The task-creation repository picker combines repositories from every
   configured source-control provider: GitHub, GitLab, and Azure DevOps. Users
-  can still paste a supported HTTPS or SSH repository URL manually.
+  can still paste a supported HTTPS or SSH repository URL manually. When more
+  than one repository provider is available, bottom tabs switch the visible
+  provider results; no provider tab bar is shown for a single provider.
 - Azure DevOps private repositories can be materialized with the workspace PAT
   by the Kandev backend. The PAT is never added to task metadata, clone URLs,
   agent environment variables, logs, or persisted repository rows. Push access
@@ -244,9 +246,13 @@ hint and revalidated from the configured provider before persistence or clone.
   request succeeds, **THEN** settings status and home integration navigation
   update without waiting for the periodic health poll.
 - **GIVEN** multiple configured source-control providers, **WHEN** a user opens
-  the Remote repository picker, **THEN** repositories are grouped by provider,
-  searchable in one control, and retain the correct provider icon and branch
+  the Remote repository picker, **THEN** a bottom tab is shown for each
+  available repository provider, only the active provider's matching results
+  are visible, and selections retain the correct provider icon and branch
   source on desktop and mobile.
+- **GIVEN** only one configured source-control provider, **WHEN** a user opens
+  the Remote repository picker, **THEN** its repositories are shown without a
+  provider tab bar.
 - **GIVEN** a private Azure repository selected for a task, **WHEN** Kandev
   materializes it, **THEN** the backend uses the workspace PAT for the clone and
   no task or agent-visible value contains the PAT.

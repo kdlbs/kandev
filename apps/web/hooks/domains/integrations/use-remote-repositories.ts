@@ -8,8 +8,12 @@ import {
   listAzureDevOpsRepositories,
 } from "@/lib/api/domains/azure-devops-api";
 
+export const REMOTE_REPOSITORY_PROVIDERS = ["github", "gitlab", "azure_devops"] as const;
+
+export type RemoteRepositoryProvider = (typeof REMOTE_REPOSITORY_PROVIDERS)[number];
+
 export type RemoteRepository = {
-  provider: "github" | "gitlab" | "azure_devops";
+  provider: RemoteRepositoryProvider;
   id: string;
   owner: string;
   name: string;
@@ -21,6 +25,7 @@ export type RemoteRepository = {
 
 export type UseRemoteRepositoriesResult = {
   repos: RemoteRepository[];
+  availableProviders: RemoteRepositoryProvider[];
   loading: boolean;
   error: Error | null;
   unavailable: boolean;
@@ -51,7 +56,7 @@ async function loadAzureRepositories(workspaceId: string): Promise<RemoteReposit
 
 type RemoteRepositoryLoad = {
   repos: RemoteRepository[];
-  providerAvailable: boolean;
+  availableProviders: RemoteRepositoryProvider[];
 };
 
 async function loadRemoteRepositories(workspaceId: string): Promise<RemoteRepositoryLoad> {
@@ -85,9 +90,12 @@ async function loadRemoteRepositories(workspaceId: string): Promise<RemoteReposi
     ),
     azureRequest,
   ]);
+  const availableProviders = results.flatMap((result, index) =>
+    result.status === "fulfilled" ? [REMOTE_REPOSITORY_PROVIDERS[index]] : [],
+  );
   return {
     repos: results.flatMap((result) => (result.status === "fulfilled" ? result.value : [])),
-    providerAvailable: results.some((result) => result.status === "fulfilled"),
+    availableProviders,
   };
 }
 
@@ -96,19 +104,19 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const [providerAvailable, setProviderAvailable] = useState(false);
+  const [availableProviders, setAvailableProviders] = useState<RemoteRepositoryProvider[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     setAllRepos([]);
-    setProviderAvailable(false);
+    setAvailableProviders([]);
     setError(null);
     setLoading(true);
     loadRemoteRepositories(workspaceId)
       .then((result) => {
         if (cancelled) return;
         setAllRepos(result.repos);
-        setProviderAvailable(result.providerAvailable);
+        setAvailableProviders(result.availableProviders);
       })
       .catch((cause) => {
         if (!cancelled) setError(cause instanceof Error ? cause : new Error(String(cause)));
@@ -127,5 +135,12 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     return allRepos.filter((repo) => repo.fullName.toLowerCase().includes(needle));
   }, [allRepos, query]);
   const search = useCallback((value: string) => setQuery(value), []);
-  return { repos, loading, error, unavailable: !loading && !providerAvailable, search };
+  return {
+    repos,
+    availableProviders,
+    loading,
+    error,
+    unavailable: !loading && availableProviders.length === 0,
+    search,
+  };
 }
