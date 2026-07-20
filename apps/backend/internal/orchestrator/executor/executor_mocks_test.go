@@ -371,7 +371,9 @@ func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if session, ok := m.sessions[id]; ok {
-		return session, nil
+		// SQLite scans each query into a fresh value. Match that ownership
+		// boundary so concurrent executor paths cannot share mutable rows.
+		return cloneMockTaskSession(session), nil
 	}
 	return nil, nil
 }
@@ -401,6 +403,14 @@ func (m *mockRepository) UpdateTaskSessionIfCurrentState(
 	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
 	m.sessions[session.ID] = session
 	return true, nil
+}
+
+func cloneMockTaskSession(session *models.TaskSession) *models.TaskSession {
+	if session == nil {
+		return nil
+	}
+	clone := *session
+	return &clone
 }
 
 func (m *mockRepository) UpdateTaskSessionAgentProfileSnapshot(

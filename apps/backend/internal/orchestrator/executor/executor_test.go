@@ -335,8 +335,12 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	if execution.SessionState != v1.TaskSessionStateStarting {
 		t.Errorf("Expected session state STARTING, got %s", execution.SessionState)
 	}
-	if session.TaskEnvironmentID != launchedEnvID {
-		t.Errorf("Expected session TaskEnvironmentID %q, got %q", launchedEnvID, session.TaskEnvironmentID)
+	storedSession, err := repo.GetTaskSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession failed: %v", err)
+	}
+	if storedSession.TaskEnvironmentID != launchedEnvID {
+		t.Errorf("Expected session TaskEnvironmentID %q, got %q", launchedEnvID, storedSession.TaskEnvironmentID)
 	}
 	if len(repo.createTaskEnvironmentCalls) != 1 {
 		t.Fatalf("Expected 1 CreateTaskEnvironment call, got %d", len(repo.createTaskEnvironmentCalls))
