@@ -68,18 +68,6 @@ export function PluginRow({
             </span>
             <PluginRepoLink url={plugin.repo_url} />
           </div>
-          {plugin.description && (
-            <div className="text-xs text-muted-foreground">{plugin.description}</div>
-          )}
-          {plugin.categories.length > 0 && (
-            <div className="flex flex-wrap gap-1 pt-1">
-              {plugin.categories.map((category) => (
-                <Badge key={category} variant="secondary" className="text-[11px]">
-                  {category}
-                </Badge>
-              ))}
-            </div>
-          )}
         </div>
 
         <PluginRowActions
@@ -94,6 +82,19 @@ export function PluginRow({
           onUpdate={onUpdate}
         />
       </div>
+
+      {plugin.description && (
+        <div className="text-xs text-muted-foreground">{plugin.description}</div>
+      )}
+      {plugin.categories.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {plugin.categories.map((category) => (
+            <Badge key={category} variant="secondary" className="text-[11px]">
+              {category}
+            </Badge>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
