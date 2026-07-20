@@ -404,6 +404,38 @@ func TestApplySavedLayouts(t *testing.T) {
 			wantApplied: true,
 		},
 		{
+			name: "valid reserved override default is applied",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "layout-override-default", Name: "Default", IsDefault: true, Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   1,
+			wantApplied: true,
+		},
+		{
+			name: "valid mixed custom and reserved override layouts are applied",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "layout-custom", Name: "Custom", Layout: json.RawMessage(`{}`)},
+					{ID: "layout-override-plan", Name: "Plan Mode", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   2,
+			wantApplied: true,
+		},
+		{
+			name: "valid mixed layouts allow one reserved override default",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "layout-custom", Name: "Custom", Layout: json.RawMessage(`{}`)},
+					{ID: "layout-override-default", Name: "Default", IsDefault: true, Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   2,
+			wantApplied: true,
+		},
+		{
 			name: "exactly max layouts is accepted",
 			req: &UpdateUserSettingsRequest{
 				SavedLayouts: ptr(makeLayouts(maxSavedLayouts)),
@@ -465,11 +497,11 @@ func TestApplySavedLayouts(t *testing.T) {
 			wantErr: `saved_layouts: duplicate layout id "l1"`,
 		},
 		{
-			name: "multiple defaults return error",
+			name: "mixed custom and reserved override defaults return error",
 			req: &UpdateUserSettingsRequest{
 				SavedLayouts: ptr([]models.SavedLayout{
-					{ID: "l1", Name: "First", IsDefault: true, Layout: json.RawMessage(`{}`)},
-					{ID: "l2", Name: "Second", IsDefault: true, Layout: json.RawMessage(`{}`)},
+					{ID: "layout-custom", Name: "Custom", IsDefault: true, Layout: json.RawMessage(`{}`)},
+					{ID: "layout-override-default", Name: "Default", IsDefault: true, Layout: json.RawMessage(`{}`)},
 				}),
 			},
 			wantErr: "saved_layouts: at most one default layout allowed",

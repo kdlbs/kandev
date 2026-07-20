@@ -30,11 +30,11 @@ import { useLayoutSettings } from "./use-layout-settings";
 
 type Controller = ReturnType<typeof useLayoutSettings>;
 
-function defaultActionHelp(label: string) {
-  if (label === "Default") return "This layout is used as the starting layout for new tasks.";
-  if (label === "Use built-in Default") {
+function defaultActionHelp(selectedSavedDefault: boolean, selectedIsDefault: boolean) {
+  if (selectedSavedDefault) {
     return "Make the original Default layout the starting layout for new tasks.";
   }
+  if (selectedIsDefault) return "This layout is used as the starting layout for new tasks.";
   return "Use this layout as the starting layout for new tasks.";
 }
 
@@ -138,7 +138,9 @@ function SelectedLayoutHeader({
               </Button>
             </span>
           </TooltipTrigger>
-          <TooltipContent>{defaultActionHelp(controller.defaultActionLabel)}</TooltipContent>
+          <TooltipContent>
+            {defaultActionHelp(controller.selectedSavedDefault, controller.selectedIsDefault)}
+          </TooltipContent>
         </Tooltip>
         {controller.selectedBuiltInOverride && (
           <ResetBuiltInButton onClick={controller.resetBuiltIn} />

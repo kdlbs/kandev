@@ -45,7 +45,11 @@ export class LayoutSettingsPage {
     const button = this.actions.getByRole("button", { name: "Remove panel" });
     await expect(button).toBeEnabled();
     await button.click();
-    await expect(this.page.getByText("Customized", { exact: true }).first()).toBeVisible();
+    await expect(
+      this.page
+        .getByTestId("layout-profile-built-in-default")
+        .getByText("Customized", { exact: true }),
+    ).toBeVisible();
   }
 
   async renameSelected(name: string): Promise<void> {

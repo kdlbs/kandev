@@ -15,7 +15,7 @@ Extend the existing `saved_layouts` user setting instead of introducing new pers
 ### Saved layout validation
 
 - `apps/backend/internal/user/service/service.go`: extend `applySavedLayouts` to reject empty IDs, duplicate IDs, and more than one `is_default` profile while retaining the existing count and name checks.
-- `apps/backend/internal/user/service/service_test.go`: add table-driven validation coverage, including acceptance of zero or one custom default.
+- `apps/backend/internal/user/service/service_test.go`: add table-driven validation coverage, including acceptance of zero or one saved default across custom profiles and reserved overrides.
 
 No schema, repository, DTO, or endpoint changes are required; `users.settings.saved_layouts` and the existing GET/PATCH contract remain authoritative.
 
@@ -39,7 +39,7 @@ No schema, repository, DTO, or endpoint changes are required; `users.settings.sa
 
 ### Workbench integration
 
-- Add a compatibility resolver used by `apps/web/components/task/dockview-desktop-layout.tsx` so only a valid reusable custom default reaches `setUserDefaultLayout`; invalid legacy defaults fall back to the built-in Default.
+- Add a compatibility resolver used by `apps/web/components/task/dockview-desktop-layout.tsx` so only a valid reusable saved default, including a reserved built-in override, reaches `setUserDefaultLayout`; invalid legacy defaults fall back to the built-in Default.
 - Preserve `apps/web/lib/state/dockview-store.ts` precedence: environment layout first, effective user default for fresh/reset paths second, built-in fallback last.
 - Verify `apps/web/hooks/domains/session/use-ensure-default-terminal-ordinary.ts` remains panel-driven, so omitting `terminal-default` prevents `createUserShell`.
 - Keep `apps/web/components/task/layout-preset-selector.tsx` behavior compatible while reusing profile operations and making deletion of the selected custom default explicitly fall back to the built-in Default.

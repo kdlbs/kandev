@@ -213,6 +213,20 @@ describe("layout profile defaults", () => {
     });
   });
 
+  it("resolves a valid reserved built-in override default", () => {
+    const profile = savedLayout({
+      id: getBuiltInLayoutOverrideId(DEFAULT_LAYOUT_ID),
+      name: "Default",
+      is_default: true,
+    });
+
+    expect(resolveEffectiveDefaultLayout([profile])).toMatchObject({
+      source: "custom",
+      profile,
+      layout: reusableLayout(),
+    });
+  });
+
   it("falls back to the built-in Default when the selected profile is invalid", () => {
     const invalid = savedLayout({ is_default: true, layout: reusableLayout(["files"]) });
 

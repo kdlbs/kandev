@@ -304,7 +304,7 @@ function getDefaultActionState(drafts: Drafts, selected: SelectedState) {
     builtInDefaultSelected && selectedIsDefault
       ? "Default"
       : getDefaultActionLabel(selectedSavedDefault, selectedIsDefault);
-  return { disabled, label, selectedIsDefault };
+  return { disabled, label, selectedIsDefault, selectedSavedDefault };
 }
 
 export function useLayoutSettings() {
@@ -322,5 +322,6 @@ export function useLayoutSettings() {
     defaultActionDisabled: defaultAction.disabled,
     defaultActionLabel: defaultAction.label,
     selectedIsDefault: defaultAction.selectedIsDefault,
+    selectedSavedDefault: defaultAction.selectedSavedDefault,
   };
 }

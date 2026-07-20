@@ -15,7 +15,7 @@ Users can arrange and save the desktop task workbench only while a task is open,
 - `Settings > General > Layouts` is the central manager for reusable desktop task-layout profiles and is reachable on desktop and mobile settings navigation.
 - The page lists the built-in Default, Plan Mode, Preview Mode, and VS Code layouts as stable rows. A user edits a built-in directly; Kandev stores a hidden override while keeping the built-in row selected and marks it `Customized`. Reset removes the override and restores the code-defined layout.
 - A user can create, rename, duplicate, edit, delete, and select the default custom profile. Names must be non-empty; profile IDs must be unique.
-- Exactly one layout is effective as the user default. A custom profile marked `is_default` wins; when none is marked, the built-in Default layout is effective.
+- Exactly one layout is effective as the user default. A saved profile, including a reserved built-in override, marked `is_default` wins; when none is marked, the built-in Default layout is effective.
 - The visual editor supports one instance of each reusable panel: Agent, Files, Changes, Terminal, Plan, Browser, and VS Code. Agent is required and cannot be removed.
 - Selecting a tab makes it active and shows contextual controls next to its split. Users can reorder or remove the tab, move it between groups, create splits, and move, merge, or resize the selected split. Adding a missing panel remains a separate floating action. Every editor action provides a hover/focus description.
 - Layout changes use the shared Settings floating save control and navigation guard. The page does not render its own Save or Cancel buttons.
@@ -52,7 +52,7 @@ No new endpoint is introduced.
 
 - `GET /api/v1/user/settings` returns `settings.saved_layouts`.
 - `PATCH /api/v1/user/settings` accepts `saved_layouts` as a complete replacement list and returns the updated user settings.
-- A `saved_layouts` update returns `400 Bad Request` when it exceeds the existing limit, contains an empty ID or name, contains duplicate IDs, or marks more than one custom profile as default.
+- A `saved_layouts` update returns `400 Bad Request` when it exceeds the existing limit, contains an empty ID or name, contains duplicate IDs, or marks more than one saved profile, including reserved overrides, as default.
 
 The frontend treats the returned settings payload as authoritative after each successful mutation.
 
