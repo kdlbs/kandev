@@ -216,7 +216,9 @@ func TestResolveTaskRepoInfo_BackfillIsBestEffortWhenLocalPathBroken(t *testing.
 // fakeRepoCloner returns a fixed local path for any clone request.
 type fakeRepoCloner struct{ returnPath string }
 
-func (f *fakeRepoCloner) EnsureClonedWithAuth(_ context.Context, _, _, _, _, _ string) (string, error) {
+func (f *fakeRepoCloner) EnsureClonedForProvider(
+	_ context.Context, _, _, _, _, _, _, _ string,
+) (string, error) {
 	return f.returnPath, nil
 }
 

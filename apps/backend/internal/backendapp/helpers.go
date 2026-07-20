@@ -796,7 +796,7 @@ func resolveRepositoryIDForSubpath(ctx context.Context, taskRepo *sqliterepo.Rep
 		if err != nil || repo == nil {
 			continue
 		}
-		if repo.Name == subpath {
+		if repo.Name == subpath || worktree.SanitizeRepoDirName(repo.Name) == subpath {
 			return link.RepositoryID
 		}
 	}

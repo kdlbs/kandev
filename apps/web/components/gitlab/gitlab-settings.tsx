@@ -214,7 +214,7 @@ function useGitLabCredentialDraft({
   const validHost = isValidGitLabHost(host);
   useSettingsSaveContributor({
     id: "gitlab-credentials",
-    revision: `${method}\0${token}`,
+    revision: JSON.stringify({ host: host.trim(), method, token }),
     isDirty,
     canSave: validHost && !patNeedsToken,
     invalidReason: credentialInvalidReason(validHost, patNeedsToken),

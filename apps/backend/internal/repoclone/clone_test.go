@@ -11,6 +11,31 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+func TestProviderRepoPathSeparatesProviderHosts(t *testing.T) {
+	t.Parallel()
+
+	cloner := NewCloner(Config{}, ProtocolHTTPS, t.TempDir(), logger.Default())
+	gitHubPath, err := cloner.ProviderRepoPath("github", "https://github.com", "group", "project")
+	if err != nil {
+		t.Fatalf("GitHub ProviderRepoPath: %v", err)
+	}
+	gitLabPath, err := cloner.ProviderRepoPath("gitlab", "https://gitlab.com", "group", "project")
+	if err != nil {
+		t.Fatalf("GitLab ProviderRepoPath: %v", err)
+	}
+	selfManagedPath, err := cloner.ProviderRepoPath("gitlab", "https://gitlab.internal:8443", "group", "project")
+	if err != nil {
+		t.Fatalf("self-managed GitLab ProviderRepoPath: %v", err)
+	}
+
+	if gitHubPath == gitLabPath || gitLabPath == selfManagedPath || gitHubPath == selfManagedPath {
+		t.Fatalf("provider paths collided: github=%q gitlab=%q self-managed=%q", gitHubPath, gitLabPath, selfManagedPath)
+	}
+	if !strings.Contains(selfManagedPath, filepath.Join("gitlab", "gitlab.internal-8443")) {
+		t.Fatalf("self-managed path %q does not contain normalized provider and host", selfManagedPath)
+	}
+}
+
 func TestClone_PreservesNonDefaultRemoteBranches(t *testing.T) {
 	t.Parallel()
 

@@ -24,6 +24,7 @@ const (
 	ghCredentialHelper = "!gh auth git-credential"
 	gitNoTags          = "--no-tags"
 	protocolHTTP       = "http"
+	providerCloneDir   = "_providers"
 )
 
 // Config holds configuration for the repository cloner.
@@ -101,6 +102,54 @@ func (c *Cloner) RepoPath(owner, name string) (string, error) {
 	return targetPath, nil
 }
 
+// ProviderRepoPath returns a clone path isolated by provider and provider host.
+// Repositories can share owner/name across GitHub, GitLab.com, and self-managed
+// GitLab instances, so owner/name alone is not a stable clone identity.
+func (c *Cloner) ProviderRepoPath(provider, providerHost, owner, name string) (string, error) {
+	basePath, err := c.ExpandedBasePath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(
+		basePath,
+		providerCloneDir,
+		clonePathSegment(provider),
+		providerHostPathSegment(providerHost),
+		owner,
+		name,
+	), nil
+}
+
+func providerHostPathSegment(providerHost string) string {
+	host := strings.TrimSpace(providerHost)
+	if parsed, err := url.Parse(host); err == nil && parsed.Host != "" {
+		host = parsed.Host
+	}
+	return clonePathSegment(host)
+}
+
+func clonePathSegment(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var result strings.Builder
+	result.Grow(len(value))
+	lastWasSeparator := false
+	for _, char := range value {
+		allowed := char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '.' || char == '_'
+		if allowed {
+			result.WriteRune(char)
+			lastWasSeparator = false
+		} else if !lastWasSeparator {
+			result.WriteByte('-')
+			lastWasSeparator = true
+		}
+	}
+	segment := strings.Trim(result.String(), "-.")
+	if segment == "" {
+		return "unknown"
+	}
+	return segment
+}
+
 // EnsureCloned clones the repository if it doesn't exist locally, or fetches if it does.
 // The cloneURL is the full git URL (HTTPS or SSH) to clone from.
 // Returns the local filesystem path to the repository.
@@ -120,6 +169,26 @@ func (c *Cloner) EnsureClonedWithAuth(
 	if err != nil {
 		return "", err
 	}
+	return c.ensureClonedAtPath(ctx, cloneURL, targetPath, owner, name, credentialOrigin, token)
+}
+
+// EnsureClonedForProvider clones or fetches a provider-backed repository using
+// a path keyed by both provider and host.
+func (c *Cloner) EnsureClonedForProvider(
+	ctx context.Context,
+	cloneURL, provider, providerHost, owner, name, credentialOrigin, token string,
+) (string, error) {
+	targetPath, err := c.ProviderRepoPath(provider, providerHost, owner, name)
+	if err != nil {
+		return "", err
+	}
+	return c.ensureClonedAtPath(ctx, cloneURL, targetPath, owner, name, credentialOrigin, token)
+}
+
+func (c *Cloner) ensureClonedAtPath(
+	ctx context.Context,
+	cloneURL, targetPath, owner, name, credentialOrigin, token string,
+) (string, error) {
 
 	mu := c.repoMu(targetPath)
 	mu.Lock()

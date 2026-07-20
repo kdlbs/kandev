@@ -11,6 +11,7 @@ const updateActionPresetsMock = vi.fn();
 const deleteReviewWatchMock = vi.fn();
 const workspaceId = "workspace-1";
 const defaultHost = "https://gitlab.com";
+const credentialsContributorId = "gitlab-credentials";
 const appState = {
   gitlabReviewWatches: { items: [] as ReviewWatch[], loaded: false, loading: false },
   gitlabIssueWatches: { items: [], loaded: false, loading: false },
@@ -123,10 +124,24 @@ describe("GitLabIntegrationPage", () => {
     const card = host.closest('[data-slot="card"]');
     expect(card?.getAttribute("data-settings-dirty")).toBe("false");
 
+    const initialRevision = vi
+      .mocked(useSettingsSaveContributor)
+      .mock.calls.map(([contributor]) => contributor)
+      .reverse()
+      .find((contributor) => contributor.id === credentialsContributorId)?.revision;
+
     fireEvent.change(host, { target: { value: "https://gitlab.example.com" } });
 
     expect(host.getAttribute("data-settings-dirty")).toBe("true");
     await waitFor(() => expect(card?.getAttribute("data-settings-dirty")).toBe("true"));
+    await waitFor(() => {
+      const currentRevision = vi
+        .mocked(useSettingsSaveContributor)
+        .mock.calls.map(([contributor]) => contributor)
+        .reverse()
+        .find((contributor) => contributor.id === credentialsContributorId)?.revision;
+      expect(currentRevision).not.toBe(initialRevision);
+    });
   });
 
   it("submits a fresh self-managed host and PAT together", async () => {
@@ -151,7 +166,7 @@ describe("GitLabIntegrationPage", () => {
       .mocked(useSettingsSaveContributor)
       .mock.calls.map(([contributor]) => contributor)
       .reverse()
-      .find((contributor) => contributor.id === "gitlab-credentials");
+      .find((contributor) => contributor.id === credentialsContributorId);
     if (tokenContributor) await tokenContributor.save(tokenContributor.revision);
 
     expect(setGitLabConfigMock).toHaveBeenCalledWith(
@@ -224,7 +239,7 @@ describe("GitLabIntegrationPage workspace actions", () => {
       .mocked(useSettingsSaveContributor)
       .mock.calls.map(([value]) => value)
       .reverse()
-      .find((value) => value.id === "gitlab-credentials");
+      .find((value) => value.id === credentialsContributorId);
     if (contributor) await contributor.save(contributor.revision);
 
     expect(setGitLabConfigMock).toHaveBeenCalledWith(

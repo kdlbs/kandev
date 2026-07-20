@@ -696,7 +696,10 @@ func (e *Executor) taskEnvLock(taskID string) *sync.Mutex {
 
 // RepoCloner clones remote repositories to local disk.
 type RepoCloner interface {
-	EnsureClonedWithAuth(ctx context.Context, cloneURL, owner, name, credentialHost, token string) (string, error)
+	EnsureClonedForProvider(
+		ctx context.Context,
+		cloneURL, provider, providerHost, owner, name, credentialHost, token string,
+	) (string, error)
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
 	BuildCloneURLWithHost(provider, host, owner, name string) (string, error)
 }
@@ -713,12 +716,16 @@ func (e *Executor) ensureClonedWithWorkspaceAuth(
 		if e.gitlabCredentials != nil {
 			credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
 		}
-		return e.repoCloner.EnsureClonedWithAuth(
-			ctx, cloneURL, repo.ProviderOwner, repo.ProviderName, credentialHost, token,
+		return e.repoCloner.EnsureClonedForProvider(
+			ctx, cloneURL, repo.Provider, repo.ProviderHost,
+			repo.ProviderOwner, repo.ProviderName, credentialHost, token,
 		)
 	}
 	if repo.Provider != "azure_devops" || !strings.HasPrefix(cloneURL, "https://") {
-		return e.repoCloner.EnsureClonedWithAuth(ctx, cloneURL, repo.ProviderOwner, repo.ProviderName, "", "")
+		return e.repoCloner.EnsureClonedForProvider(
+			ctx, cloneURL, repo.Provider, repo.ProviderHost,
+			repo.ProviderOwner, repo.ProviderName, "", "",
+		)
 	}
 	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
 	if !ok || e.secretStore == nil {
