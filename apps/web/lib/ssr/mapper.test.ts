@@ -47,16 +47,20 @@ function snapshotWithPendingAction(action: unknown): WorkflowSnapshot {
 }
 
 describe("snapshotToState", () => {
-  it("keeps known primary session pending action values", () => {
-    const state = snapshotToState(snapshotWithPendingAction("permission"));
+  it("seeds workflow snapshots for Query hydration", () => {
+    const snapshot = snapshotWithPendingAction("permission");
+    const state = snapshotToState(snapshot);
 
-    expect(state.kanban?.tasks[0]?.primarySessionPendingAction).toBe("permission");
+    expect(state.workflowSnapshots?.itemsByWorkflowId?.[workflowID]).toBe(snapshot);
   });
 
-  it("drops unrecognized primary session pending action values", () => {
-    const state = snapshotToState(snapshotWithPendingAction("unknown"));
+  it("returns an empty seed when the snapshot has no workflow", () => {
+    const state = snapshotToState({
+      ...snapshotWithPendingAction("unknown"),
+      workflow: null,
+    } as unknown as WorkflowSnapshot);
 
-    expect(state.kanban?.tasks[0]?.primarySessionPendingAction).toBeUndefined();
+    expect(state).toEqual({});
   });
 
   it("preserves workflow step WIP fields", () => {
@@ -83,7 +87,7 @@ describe("snapshotToState", () => {
       tasks: [],
     } as unknown as WorkflowSnapshot);
 
-    expect(state.kanban?.steps[0]).toMatchObject({
+    expect(state.workflowSnapshots?.itemsByWorkflowId?.[workflowID]?.steps[0]).toMatchObject({
       wip_limit: 2,
       pull_from_step_id: "step-0",
     });

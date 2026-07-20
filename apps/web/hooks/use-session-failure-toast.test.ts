@@ -1,17 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
+import { qk } from "@/lib/query/keys";
 import type { SessionFailureNotification } from "@/lib/state/slices/ui/types";
 
 let mockNotification: SessionFailureNotification | null = null;
 const mockClearNotification = vi.fn();
-const mockSetNotificationProviders = vi.fn();
-const mockSetNotificationProvidersLoading = vi.fn();
 const mockToast = vi.fn();
 let mockProviders: Array<Record<string, unknown>> = [];
 let mockProvidersLoaded = true;
 const WAITING_EVENT = "session.waiting_for_input";
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api/domains/settings-api", () => ({
   listNotificationProviders: vi.fn(),
 }));
 
@@ -20,12 +21,6 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       sessionFailureNotification: mockNotification,
       setSessionFailureNotification: mockClearNotification,
-      notificationProviders: {
-        items: mockProviders,
-        loaded: mockProvidersLoaded,
-      },
-      setNotificationProviders: mockSetNotificationProviders,
-      setNotificationProvidersLoading: mockSetNotificationProvidersLoading,
     }),
 }));
 
@@ -34,7 +29,23 @@ vi.mock("@/components/toast-provider", () => ({
 }));
 
 import { useSessionFailureToast } from "./use-session-failure-toast";
-import { listNotificationProviders } from "@/lib/api";
+import { listNotificationProviders } from "@/lib/api/domains/settings-api";
+
+function renderFailureToast() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  if (mockProvidersLoaded) {
+    queryClient.setQueryData(qk.settings.notificationProviders(), {
+      providers: mockProviders,
+      events: [WAITING_EVENT],
+      apprise_available: false,
+    });
+  }
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+  return renderHook(() => useSessionFailureToast(), { wrapper });
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -47,7 +58,7 @@ beforeEach(() => {
 describe("useSessionFailureToast native delivery", () => {
   it("shows toast when notification is set", () => {
     mockNotification = { sessionId: "s-1", taskId: "t-1", message: "boom" };
-    renderHook(() => useSessionFailureToast());
+    renderFailureToast();
 
     expect(mockToast).toHaveBeenCalledWith({
       title: "Task failed to start",
@@ -73,7 +84,7 @@ describe("useSessionFailureToast native delivery", () => {
     ];
     mockNotification = { sessionId: "s-native", taskId: "t-1", message: "boom" };
 
-    const { rerender } = renderHook(() => useSessionFailureToast());
+    const { rerender } = renderFailureToast();
     rerender();
 
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -105,7 +116,7 @@ describe("useSessionFailureToast native delivery", () => {
     ];
     mockNotification = { sessionId: "s-disabled", taskId: "t-1", message: "boom" };
 
-    renderHook(() => useSessionFailureToast());
+    renderFailureToast();
 
     expect(mockToast).toHaveBeenCalledTimes(1);
     expect(invoke).not.toHaveBeenCalled();
@@ -136,23 +147,17 @@ describe("useSessionFailureToast native delivery", () => {
     });
     mockNotification = { sessionId: "s-lazy", taskId: "t-1", message: "boom" };
 
-    renderHook(() => useSessionFailureToast());
+    renderFailureToast();
 
     await waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
-    expect(mockSetNotificationProviders).toHaveBeenCalledWith({
-      items: expect.any(Array),
-      events: [WAITING_EVENT],
-      appriseAvailable: false,
-      loaded: true,
-      loading: false,
-    });
+    expect(listNotificationProviders).toHaveBeenCalledOnce();
   });
 });
 
 describe("useSessionFailureToast", () => {
   it("does not show toast when notification is null", () => {
     mockNotification = null;
-    renderHook(() => useSessionFailureToast());
+    renderFailureToast();
 
     expect(mockToast).not.toHaveBeenCalled();
     expect(mockClearNotification).not.toHaveBeenCalled();
@@ -160,7 +165,7 @@ describe("useSessionFailureToast", () => {
 
   it("deduplicates toasts for the same sessionId across rerenders", () => {
     mockNotification = { sessionId: "s-1", taskId: "t-1", message: "first" };
-    const { rerender } = renderHook(() => useSessionFailureToast());
+    const { rerender } = renderFailureToast();
     expect(mockToast).toHaveBeenCalledTimes(1);
 
     mockToast.mockClear();
@@ -175,7 +180,7 @@ describe("useSessionFailureToast", () => {
 
   it("shows toast for a different sessionId", () => {
     mockNotification = { sessionId: "s-1", taskId: "t-1", message: "first" };
-    const { rerender } = renderHook(() => useSessionFailureToast());
+    const { rerender } = renderFailureToast();
     expect(mockToast).toHaveBeenCalledTimes(1);
 
     mockToast.mockClear();

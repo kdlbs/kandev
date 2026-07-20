@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconRoute, IconX } from "@tabler/icons-react";
 import {
   AlertDialog,
@@ -14,11 +15,16 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import { deleteTaskWalkthrough, getTaskWalkthrough } from "@/lib/api/domains/walkthrough-api";
+import { deleteTaskWalkthrough } from "@/lib/api/domains/walkthrough-api";
 import { WalkthroughFloatingWindow } from "@/components/diff/walkthrough-floating-window";
+import {
+  useTaskWalkthrough,
+  useWalkthroughSeen,
+  useWalkthroughStepState,
+} from "@/hooks/domains/session/use-task-walkthrough";
+import { qk } from "@/lib/query/keys";
 import { clearOpenWalkthroughTaskId, setOpenWalkthroughTaskId } from "@/lib/walkthrough-open-state";
 import { cn } from "@kandev/ui/lib/utils";
-import type { TaskWalkthrough } from "@/lib/types/http";
 
 type WalkthroughOverlayProps = {
   /** The task whose walkthrough launcher should be shown. */
@@ -137,69 +143,26 @@ function DiscardWalkthroughDialog({
   );
 }
 
-function useWalkthroughBackfill(params: {
-  connectionStatus: string;
-  setWalkthrough: (taskId: string, walkthrough: TaskWalkthrough | null) => void;
-  taskId: string | null;
-  walkthrough: TaskWalkthrough | null | undefined;
-}) {
-  const { connectionStatus, setWalkthrough, taskId, walkthrough } = params;
-  const fetchedRef = useRef<Set<string>>(new Set());
-  const inFlightRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (
-      !taskId ||
-      walkthrough ||
-      connectionStatus !== "connected" ||
-      fetchedRef.current.has(taskId) ||
-      inFlightRef.current.has(taskId)
-    ) {
-      return;
-    }
-    let cancelled = false;
-    inFlightRef.current.add(taskId);
-    getTaskWalkthrough(taskId)
-      .then((wt) => {
-        if (cancelled) return;
-        if (wt) {
-          fetchedRef.current.add(taskId);
-          setWalkthrough(taskId, wt);
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        inFlightRef.current.delete(taskId);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [connectionStatus, setWalkthrough, taskId, walkthrough]);
-}
-
 /**
  * Task-level launcher for an agent-authored walkthrough. It (1) backfills the
- * walkthrough into the store on mount — a live `task.walkthrough.created` event
+ * walkthrough into Query on mount — a live `task.walkthrough.created` event
  * can fire before the page's WS subscription exists — and (2) toggles the
  * floating step card, which opens each step's file (current state) and reveals
  * the anchored line. Works for changed and unchanged files alike (no review
  * surface required).
  */
 export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayProps) {
-  const walkthrough = useAppStore((s) => (taskId ? s.walkthroughs.byTaskId[taskId] : null));
   const connectionStatus = useAppStore((s) => s.connection.status);
-  const activeStep = useAppStore((s) =>
-    taskId ? (s.walkthroughs.activeStepByTaskId[taskId] ?? 0) : 0,
-  );
-  const lastSeenUpdatedAt = useAppStore((s) =>
-    taskId ? s.walkthroughs.lastSeenUpdatedAtByTaskId[taskId] : undefined,
-  );
-  const setWalkthrough = useAppStore((s) => s.setWalkthrough);
+  const queryClient = useQueryClient();
+  const walkthroughQuery = useTaskWalkthrough(taskId, connectionStatus === "connected");
+  const walkthrough = walkthroughQuery.data ?? null;
+  const stepCount = walkthrough?.steps.length ?? 0;
+  const { activeStep } = useWalkthroughStepState(taskId, stepCount);
+  const { hasUnseen } = useWalkthroughSeen(taskId, walkthrough);
   const [open, setOpen] = useState(false);
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const { toast } = useToast();
-
-  useWalkthroughBackfill({ connectionStatus, setWalkthrough, taskId, walkthrough });
 
   useEffect(() => {
     if (!taskId || !open) return;
@@ -208,18 +171,13 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
   }, [open, taskId]);
 
   if (!taskId || !walkthrough) return null;
-  const hasUnseen = walkthrough.updated_at !== lastSeenUpdatedAt;
 
   // Refresh to the latest persisted walkthrough when opening the card — covers
   // the case where the agent re-emitted a walkthrough and the live WS update
   // was missed (e.g. the tab was idle), so it shows without a page reload.
   const openTour = () => {
     setOpenWalkthroughTaskId(taskId);
-    getTaskWalkthrough(taskId)
-      .then((wt) => {
-        if (wt) setWalkthrough(taskId, wt);
-      })
-      .catch(() => {});
+    void walkthroughQuery.refetch();
     setOpen(true);
   };
   const closeTour = () => {
@@ -234,7 +192,7 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
       await deleteTaskWalkthrough(taskId);
       clearOpenWalkthroughTaskId(taskId);
       setOpen(false);
-      setWalkthrough(taskId, null);
+      queryClient.setQueryData(qk.taskWalkthrough.detail(taskId), null);
       setConfirmDiscardOpen(false);
       toast({ title: "Walkthrough discarded", variant: "success" });
     } catch (error) {

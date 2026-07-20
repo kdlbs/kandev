@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import type { StoreApi } from "zustand";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { detachTask as requestDetachTask } from "@/lib/api";
 import type { Task } from "@/lib/types/http";
-import type { AppState } from "@/lib/state/store";
-import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { workflowSnapshotQueryData } from "@/lib/query/workflow-snapshot-cache";
+import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 
 type DetachTarget = {
   id: string;
@@ -49,22 +49,24 @@ export function useDetachTask() {
   return { detachTask, detachingTaskId };
 }
 
-export function useTaskDetachDialog(store: StoreApi<AppState>) {
+export function useTaskDetachDialog() {
+  const queryClient = useQueryClient();
   const { detachTask, detachingTaskId } = useDetachTask();
   const [detachingTask, setDetachingTask] = useState<DetachTarget | null>(null);
 
   const handleDetachTask = useCallback(
     (taskId: string) => {
-      const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
-      if (!task?.parentTaskId) return;
+      const task = workflowSnapshotQueryData(queryClient)
+        .flatMap((snapshot) => snapshot.tasks)
+        .find((item) => item.id === taskId);
+      if (!task?.parent_id) return;
       setDetachingTask({
         id: task.id,
         title: task.title,
-        workspaceMode: task.workspaceMode,
+        workspaceMode: workspaceModeFromMetadata(task.metadata),
       });
     },
-    [store],
+    [queryClient],
   );
 
   const handleDetachConfirm = useCallback(async () => {

@@ -1,9 +1,7 @@
 import type { AppState } from "@/lib/state/store";
+import type { WorkflowItem } from "@/lib/state/slices";
 
-type KanbanRouteHydrationState = Pick<
-  AppState,
-  "kanban" | "kanbanMulti" | "workflows" | "workspaces"
->;
+type KanbanRouteHydrationState = Pick<AppState, "workflows" | "workspaces">;
 
 export type KanbanRouteSelection = {
   workspaceId?: string;
@@ -13,12 +11,14 @@ export type KanbanRouteSelection = {
 export function hasHydratedKanbanRouteState(
   state: KanbanRouteHydrationState,
   route: KanbanRouteSelection,
+  workflows: WorkflowItem[],
+  hydratedWorkflowIds: ReadonlySet<string>,
 ): boolean {
   const activeWorkspaceId = state.workspaces.activeId;
   if (!activeWorkspaceId) return false;
   if (route.workspaceId && route.workspaceId !== activeWorkspaceId) return false;
 
-  const workspaceWorkflows = state.workflows.items.filter(
+  const workspaceWorkflows = workflows.filter(
     (workflow) => workflow.workspaceId === activeWorkspaceId,
   );
   if (workspaceWorkflows.length === 0) return false;
@@ -31,5 +31,5 @@ export function hasHydratedKanbanRouteState(
 
   const workflowId = route.workflowId ?? state.workflows.activeId;
   if (!workflowId) return false;
-  return Boolean(state.kanbanMulti.snapshots[workflowId] || state.kanban.workflowId === workflowId);
+  return hydratedWorkflowIds.has(workflowId);
 }

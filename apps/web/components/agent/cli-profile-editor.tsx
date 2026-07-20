@@ -6,8 +6,8 @@ import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { ModelCombobox } from "@/components/settings/model-combobox";
 import { ModeCombobox } from "@/components/settings/mode-combobox";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
@@ -112,7 +112,7 @@ export function CliProfileEditor({
   allowCliPassthrough = true,
 }: CliProfileEditorProps) {
   const availableAgents = useAvailableAgents();
-  const settingsAgents = useAppStore((s) => s.settingsAgents.items);
+  const { settingsAgents } = useSettingsData(true);
   const installed = useMemo(
     () => availableAgents.items.filter((a) => a.available),
     [availableAgents.items],

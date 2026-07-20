@@ -23,8 +23,8 @@ import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
 import { cn } from "@/lib/utils";
 import type { Repository } from "@/lib/types/http";
-import type { WorkflowsState } from "@/lib/state/slices";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import type { WorkflowItem } from "@/lib/state/slices";
 
 type MobileMenuSheetProps = {
   open: boolean;
@@ -63,7 +63,7 @@ function getMobileViewValue(
 
 type MobileDisplayOptionsProps = {
   activeWorkflowId: string | null;
-  workflows: WorkflowsState["items"];
+  workflows: WorkflowItem[];
   onWorkflowChange: (id: string | null) => void;
   repositoryValue: string;
   repositories: Repository[];
@@ -98,7 +98,7 @@ function MobileDisplaySelects({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All workflows</SelectItem>
-              {workflows.map((workflow: WorkflowsState["items"][number]) => (
+              {workflows.map((workflow) => (
                 <SelectItem key={workflow.id} value={workflow.id}>
                   {workflow.name}
                 </SelectItem>

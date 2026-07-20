@@ -34,7 +34,7 @@ describe("mapWorkspaceItem", () => {
       default_environment_id: null,
       default_agent_profile_id: null,
       default_config_agent_profile_id: null,
-      office_workflow_id: null,
+      office_workflow_id: undefined,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-02T00:00:00Z",
     });

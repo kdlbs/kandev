@@ -7,8 +7,8 @@ import { Badge } from "@kandev/ui/badge";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
-import type { Repository } from "@/lib/types/http";
 import { formatWipCount, isOverWipLimit } from "@/lib/kanban/wip-limit";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 
 export interface WorkflowStep {
   id: string;
@@ -69,12 +69,7 @@ export function KanbanColumn({
   });
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
 
-  // Access repositories from store to pass repository names to cards
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const repositories = useMemo(
-    () => Object.values(repositoriesByWorkspace).flat() as Repository[],
-    [repositoriesByWorkspace],
-  );
+  const repositories = useAllCachedRepositories();
 
   // Ordered ids of the cards rendered in this column — the source of truth for
   // shift-click range selection (matches exactly what the user sees).

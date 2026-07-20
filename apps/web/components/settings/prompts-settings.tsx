@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconEdit, IconTrash, IconLock } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
@@ -17,9 +18,9 @@ import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { useToast } from "@/components/toast-provider";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
-import { useAppStore } from "@/components/state-provider";
 import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
+import { qk } from "@/lib/query/keys";
 import type { CustomPrompt } from "@/lib/types/http";
 
 const defaultFormState = {
@@ -300,9 +301,7 @@ function DeletePromptDialog({ deleteTarget, onClose, onConfirm, isBusy }: Delete
 }
 
 function usePromptsState() {
-  const { loaded: promptsLoaded } = useCustomPrompts();
-  const prompts = useAppStore((state) => state.prompts.items);
-  const setPrompts = useAppStore((state) => state.setPrompts);
+  const { loaded: promptsLoaded, prompts } = useCustomPrompts();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [formState, setFormState] = useState(defaultFormState);
@@ -311,7 +310,6 @@ function usePromptsState() {
   return {
     promptsLoaded,
     prompts,
-    setPrompts,
     editingId,
     setEditingId,
     showCreate,
@@ -327,7 +325,6 @@ function usePromptsState() {
 function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
   const {
     prompts,
-    setPrompts,
     editingId,
     setEditingId,
     setShowCreate,
@@ -337,6 +334,7 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     formState,
   } = state;
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const resetForm = useCallback(() => {
     setEditingId(null);
@@ -346,9 +344,11 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
 
   const applyPrompts = useCallback(
     (next: CustomPrompt[]) => {
-      setPrompts([...next].sort((a, b) => a.name.localeCompare(b.name)));
+      queryClient.setQueryData<{ prompts: CustomPrompt[] }>(qk.settings.prompts(), {
+        prompts: [...next].sort((a, b) => a.name.localeCompare(b.name)),
+      });
     },
-    [setPrompts],
+    [queryClient],
   );
 
   const isValid = useMemo(

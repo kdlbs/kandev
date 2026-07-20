@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
+import { qk } from "@/lib/query/keys";
 import {
   createLayoutProfileId,
   deleteLayoutProfile,
@@ -248,6 +250,7 @@ function useProfileActions(drafts: Drafts, selected: SelectedState) {
 
 function useSaveProfiles(drafts: Drafts) {
   const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const queryClient = useQueryClient();
   return async () => {
     if (!drafts.isDirty || drafts.saveStatus === "loading") return;
     if (drafts.profiles.some((profile) => !profile.name.trim())) {
@@ -261,6 +264,7 @@ function useSaveProfiles(drafts: Drafts) {
       const response = await updateUserSettings({ saved_layouts: drafts.profiles });
       const authoritative = mapUserSettingsResponse(response);
       const next = structuredClone(authoritative.savedLayouts);
+      queryClient.setQueryData(qk.settings.user(), response);
       setUserSettings(authoritative);
       drafts.setBaseline(next);
       drafts.setProfiles(structuredClone(next));

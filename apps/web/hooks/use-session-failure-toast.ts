@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { nativeNotifications } from "@/lib/desktop/native-notification-client";
 import { NOTIFICATION_EVENT_TASK_SESSION_WAITING_FOR_INPUT } from "@/lib/notifications/events";
-import { listNotificationProviders } from "@/lib/api";
-import type { NotificationProvider } from "@/lib/types/http";
+import { useNotificationProviders } from "@/hooks/domains/settings/use-notification-providers";
+import { notificationProvidersQueryOptions } from "@/lib/query/query-options/settings";
 
 function localSessionNotificationsEnabled(
   providers: Array<{ type: string; enabled: boolean; events: string[] }>,
@@ -23,13 +24,11 @@ function localSessionNotificationsEnabled(
 export function useSessionFailureToast() {
   const notification = useAppStore((s) => s.sessionFailureNotification);
   const clearNotification = useAppStore((s) => s.setSessionFailureNotification);
-  const notificationProviders = useAppStore((s) => s.notificationProviders.items);
-  const notificationProvidersLoaded = useAppStore((s) => s.notificationProviders.loaded);
-  const setNotificationProviders = useAppStore((s) => s.setNotificationProviders);
-  const setNotificationProvidersLoading = useAppStore((s) => s.setNotificationProvidersLoading);
+  const { providers: notificationProviders, loaded: notificationProvidersLoaded } =
+    useNotificationProviders();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const shownRef = useRef<Set<string>>(new Set());
-  const providerLoadRef = useRef<Promise<NotificationProvider[]> | null>(null);
 
   useEffect(() => {
     if (!notification) return;
@@ -48,32 +47,8 @@ export function useSessionFailureToast() {
         try {
           let providers = notificationProviders;
           if (!notificationProvidersLoaded) {
-            if (!providerLoadRef.current) {
-              setNotificationProvidersLoading(true);
-              providerLoadRef.current = listNotificationProviders({ cache: "no-store" })
-                .then((response) => {
-                  const nextProviders = response.providers ?? [];
-                  setNotificationProviders({
-                    items: nextProviders,
-                    events: response.events ?? [],
-                    appriseAvailable: response.apprise_available ?? false,
-                    loaded: true,
-                    loading: false,
-                  });
-                  return nextProviders;
-                })
-                .catch(() => {
-                  setNotificationProviders({
-                    items: [],
-                    events: [],
-                    appriseAvailable: false,
-                    loaded: true,
-                    loading: false,
-                  });
-                  return [];
-                });
-            }
-            providers = await providerLoadRef.current;
+            const response = await queryClient.fetchQuery(notificationProvidersQueryOptions());
+            providers = response.providers ?? [];
           }
           if (!localSessionNotificationsEnabled(providers)) return;
           await nativeNotifications.show({
@@ -95,7 +70,6 @@ export function useSessionFailureToast() {
     notificationProvidersLoaded,
     toast,
     clearNotification,
-    setNotificationProviders,
-    setNotificationProvidersLoading,
+    queryClient,
   ]);
 }

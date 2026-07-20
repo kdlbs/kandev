@@ -1,45 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useState, type Dispatch } from "react";
-import {
-  INITIAL_STATE,
-  multiSelectReducer,
-  useTaskMultiSelectStore,
-} from "./use-task-multi-select";
+import { useQueryClient } from "@tanstack/react-query";
+import { INITIAL_STATE, multiSelectReducer } from "./use-task-multi-select";
 import { useTaskActions, useArchiveAndSwitchTask } from "./use-task-actions";
 import { useTaskRemoval } from "./use-task-removal";
 import { useTaskWorkflowMove } from "./use-task-workflow-move";
 import { useToast } from "@/components/toast-provider";
 import { useAppStoreApi } from "@/components/state-provider";
+import {
+  removeTasksFromWorkflowSnapshotQueries,
+  workflowSnapshotQueryData,
+} from "@/lib/query/workflow-snapshot-cache";
 
 type BulkOpts = { cascade?: boolean };
 
-/**
- * Bulk archive/delete/move that act on an explicit id list. Archive and delete
- * share one flow: remove each task, routing the currently-open task through the
- * switch-aware path last so the view doesn't strand on removed content; keep any
- * failed ids selected for retry and surface the failure via toast.
- */
-function useSidebarBulkActions(
+function useBulkRemovalRunner(
   dispatch: Dispatch<{ type: "set_selected"; ids: Set<string> }>,
   clearSelection: () => void,
 ) {
   const store = useAppStoreApi();
-  const { archiveTaskById, deleteTaskById } = useTaskActions();
-  const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
-  const { removeTaskFromBoard } = useTaskRemoval({ store, useLayoutSwitch: true });
-  const { getWorkflowIdForTask, removeTasksFromStore } = useTaskMultiSelectStore();
-  const moveTasks = useTaskWorkflowMove();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [isArchiving, setIsArchiving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-
-  const runBulkRemoval = useCallback(
+  return useCallback(
     async (
       ids: string[],
       per: (id: string) => Promise<void>,
       handleActive: (id: string) => Promise<void>,
-      setBusy: (v: boolean) => void,
+      setBusy: (value: boolean) => void,
       noun: string,
     ) => {
       if (ids.length === 0) return;
@@ -49,18 +37,19 @@ function useSidebarBulkActions(
       setBusy(true);
       try {
         const results = await Promise.allSettled(restIds.map((id) => per(id)));
-        const failed = restIds.filter((_, i) => results[i].status === "rejected");
-        const succeeded = restIds.filter((_, i) => results[i].status === "fulfilled");
-        if (succeeded.length > 0) removeTasksFromStore(new Set(succeeded));
-        if (activeInSet) {
+        const failed = restIds.filter((_, index) => results[index].status === "rejected");
+        const succeeded = restIds.filter((_, index) => results[index].status === "fulfilled");
+        if (succeeded.length > 0) {
+          removeTasksFromWorkflowSnapshotQueries(queryClient, new Set(succeeded));
+        }
+        if (activeInSet && activeId) {
           try {
-            await handleActive(activeId!);
+            await handleActive(activeId);
           } catch {
-            failed.push(activeId!);
+            failed.push(activeId);
           }
         }
         if (failed.length > 0) {
-          // Keep the failed ids selected so the user can retry, and surface it.
           dispatch({ type: "set_selected", ids: new Set(failed) });
           toast({
             title: `Failed to ${noun} ${failed.length} task${failed.length === 1 ? "" : "s"}`,
@@ -73,7 +62,35 @@ function useSidebarBulkActions(
         setBusy(false);
       }
     },
-    [store, removeTasksFromStore, dispatch, toast, clearSelection],
+    [clearSelection, dispatch, queryClient, store, toast],
+  );
+}
+
+/**
+ * Bulk archive/delete/move that act on an explicit id list. Archive and delete
+ * share one flow: remove each task, routing the currently-open task through the
+ * switch-aware path last so the view doesn't strand on removed content; keep any
+ * failed ids selected for retry and surface the failure via toast.
+ */
+function useSidebarBulkActions(
+  dispatch: Dispatch<{ type: "set_selected"; ids: Set<string> }>,
+  clearSelection: () => void,
+) {
+  const store = useAppStoreApi();
+  const queryClient = useQueryClient();
+  const { archiveTaskById, deleteTaskById } = useTaskActions();
+  const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
+  const { removeTaskFromBoard } = useTaskRemoval({ store, useLayoutSwitch: true });
+  const moveTasks = useTaskWorkflowMove();
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const runBulkRemoval = useBulkRemovalRunner(dispatch, clearSelection);
+  const getWorkflowIdForTask = useCallback(
+    (taskId: string) =>
+      workflowSnapshotQueryData(queryClient).find((snapshot) =>
+        snapshot.tasks.some((task) => task.id === taskId),
+      )?.workflow.id,
+    [queryClient],
   );
 
   const bulkArchive = useCallback(

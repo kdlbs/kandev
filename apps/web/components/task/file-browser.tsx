@@ -6,7 +6,7 @@ import type { FileTreeNode, OpenFileTab } from "@/lib/types/backend";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useRepository } from "@/hooks/domains/workspace/use-repository";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useAppStore } from "@/components/state-provider";
+import { useSessionWorktrees } from "@/hooks/domains/session/use-session-worktrees";
 import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useToast } from "@/components/toast-provider";
@@ -387,9 +387,7 @@ function useKeyboardShortcuts(
 function useFileBrowserResetKey(sessionId: string, environmentId?: string | null) {
   // Worktree count participates in the tree's reset key so an add_branch_to_task
   // call that materializes a sibling worktree forces a fresh tree load.
-  const worktreeCount = useAppStore(
-    (state) => state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0,
-  );
+  const worktreeCount = useSessionWorktrees(sessionId).length;
   return environmentId ? `${environmentId}:${worktreeCount}` : undefined;
 }
 

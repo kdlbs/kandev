@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
@@ -66,24 +67,37 @@ function mockSentryInstances(state: SentryAvailability["state"], healthy: Sentry
   });
 }
 
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
 function renderDialog(provider: "jira" | "linear" | "sentry" = "jira") {
+  const queryClient = createQueryClient();
+
   return render(
-    <StateProvider>
-      <ToastProvider>
-        <TaskExternalLinkDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          provider={provider}
-          task={{ id: TASK_ID, title: TASK_TITLE }}
-          workspaceId={WORKSPACE_ID}
-        />
-      </ToastProvider>
-    </StateProvider>,
+    <QueryClientProvider client={queryClient}>
+      <StateProvider>
+        <ToastProvider>
+          <TaskExternalLinkDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            provider={provider}
+            task={{ id: TASK_ID, title: TASK_TITLE }}
+            workspaceId={WORKSPACE_ID}
+          />
+        </ToastProvider>
+      </StateProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -243,17 +257,19 @@ describe("TaskExternalLinkDialog — Sentry sole-instance swap", () => {
     // new instance rather than link against the stale inst-1.
     mockSentryInstances("single", [instance("inst-2", "Beta")]);
     view.rerender(
-      <StateProvider>
-        <ToastProvider>
-          <TaskExternalLinkDialog
-            open={true}
-            onOpenChange={vi.fn()}
-            provider="sentry"
-            task={{ id: TASK_ID, title: TASK_TITLE }}
-            workspaceId={WORKSPACE_ID}
-          />
-        </ToastProvider>
-      </StateProvider>,
+      <QueryClientProvider client={createQueryClient()}>
+        <StateProvider>
+          <ToastProvider>
+            <TaskExternalLinkDialog
+              open={true}
+              onOpenChange={vi.fn()}
+              provider="sentry"
+              task={{ id: TASK_ID, title: TASK_TITLE }}
+              workspaceId={WORKSPACE_ID}
+            />
+          </ToastProvider>
+        </StateProvider>
+      </QueryClientProvider>,
     );
 
     fireEvent.change(screen.getByTestId(INPUT_TEST_ID), { target: { value: "PROJ-2" } });

@@ -4,11 +4,12 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 const toastMock = vi.fn();
 const handleSendMessageMock = vi.fn();
 
-const mockState = {};
+const mockState = {
+  workspaces: { activeId: "workspace-1" },
+};
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
-  useAppStoreApi: () => ({ getState: () => mockState }),
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -53,6 +54,10 @@ vi.mock("@/hooks/domains/kanban/use-plan-actions", () => ({
     proceed: vi.fn(),
     isMoving: false,
   }),
+}));
+
+vi.mock("@/hooks/domains/kanban/use-all-workflow-snapshots", () => ({
+  useAllWorkflowSnapshots: () => ({ snapshots: {} }),
 }));
 
 vi.mock("@/hooks/domains/session/use-executor-environment-availability", () => ({

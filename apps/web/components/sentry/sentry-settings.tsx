@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconBrandSentry, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
@@ -10,12 +18,9 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { useSentryEnabled } from "@/hooks/domains/sentry/use-sentry-enabled";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { DraftedIntegrationEnabledControl } from "@/components/integrations/drafted-integration-enabled-control";
-import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
-import {
-  deleteSentryInstance,
-  listSentryInstances,
-  sentryInUseWatchCount,
-} from "@/lib/api/domains/sentry-api";
+import { deleteSentryInstance, sentryInUseWatchCount } from "@/lib/api/domains/sentry-api";
+import { qk } from "@/lib/query/keys";
+import { sentryInstancesQueryOptions } from "@/lib/query/query-options/sentry";
 import type { SentryConfig } from "@/lib/types/sentry";
 import { SentryInstanceCard } from "./sentry-instance-card";
 import { SentryInstanceForm } from "./sentry-instance-form";
@@ -25,47 +30,39 @@ import { SentryIssueWatchersSection } from "./sentry-issue-watchers-section";
 // is open at a time.
 type EditMode = { kind: "none" } | { kind: "add" } | { kind: "edit"; id: string };
 
-// useInstanceList loads and polls a workspace's Sentry instances. Fetches are
-// request-versioned so a slow load for a previous workspace (or an overlapping
-// poll) can't clobber newer results.
+function upsertInstance(list: SentryConfig[] | undefined, saved: SentryConfig): SentryConfig[] {
+  const current = list ?? [];
+  const index = current.findIndex((instance) => instance.id === saved.id);
+  if (index === -1) return [...current, saved];
+  const next = [...current];
+  next[index] = saved;
+  return next;
+}
+
+// useInstanceList loads and polls a workspace's Sentry instances through Query
+// so every Sentry surface shares the same server-state cache.
 function useInstanceList(workspaceId: string) {
   const { toast } = useToast();
-  const [instances, setInstances] = useState<SentryConfig[]>([]);
-  const [loading, setLoading] = useState(true);
-  const requestId = useRef(0);
-
-  const reload = useCallback(
-    async (reportError = true) => {
-      const current = ++requestId.current;
-      try {
-        const list = await listSentryInstances(workspaceId);
-        if (current !== requestId.current) return;
-        setInstances(list);
-      } catch (err) {
-        if (current !== requestId.current) return;
-        if (reportError) {
-          toast({
-            description: `Failed to load Sentry instances: ${String(err)}`,
-            variant: "error",
-          });
-        }
-      } finally {
-        if (current === requestId.current) setLoading(false);
-      }
-    },
-    [workspaceId, toast],
-  );
+  const reportedErrorRef = useRef(false);
+  const query = useQuery(sentryInstancesQueryOptions(workspaceId));
 
   useEffect(() => {
-    setLoading(true);
-    setInstances([]);
-    void reload();
-    // Poll so per-instance health banners stay fresh without a manual refresh.
-    const id = setInterval(() => void reload(false), INTEGRATION_STATUS_REFRESH_MS);
-    return () => clearInterval(id);
-  }, [reload]);
+    if (!query.isError) {
+      reportedErrorRef.current = false;
+      return;
+    }
+    if (reportedErrorRef.current) return;
+    reportedErrorRef.current = true;
+    toast({
+      description: `Failed to load Sentry instances: ${String(query.error)}`,
+      variant: "error",
+    });
+  }, [query.error, query.isError, toast]);
 
-  return { instances, loading, reload };
+  return {
+    instances: query.data ?? [],
+    loading: query.isPending,
+  };
 }
 
 type InstanceListProps = {
@@ -74,7 +71,7 @@ type InstanceListProps = {
   workspaceId: string;
   onEdit: (id: string) => void;
   onDelete: (instance: SentryConfig) => void;
-  onSaved: () => void;
+  onSaved: (saved: SentryConfig) => void;
   onCancel: () => void;
   onDirtyChange: (isDirty: boolean) => void;
 };
@@ -127,29 +124,60 @@ function EnabledPill() {
   return <DraftedIntegrationEnabledControl id="sentry" enabled={enabled} persist={setEnabled} />;
 }
 
-export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
-  const { instances, loading, reload } = useInstanceList(workspaceId);
-  const { toast } = useToast();
-  const [mode, setMode] = useState<EditMode>({ kind: "none" });
-  const [formDirty, setFormDirty] = useState(false);
+function AddInstanceButton({ onAdd }: { onAdd: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      onClick={onAdd}
+      className="cursor-pointer gap-1"
+      data-testid="sentry-add-instance-button"
+    >
+      <IconPlus className="h-4 w-4" />
+      Add instance
+    </Button>
+  );
+}
 
+function useSentryInstanceActions(
+  workspaceId: string,
+  setMode: Dispatch<SetStateAction<EditMode>>,
+  setFormDirty: Dispatch<SetStateAction<boolean>>,
+) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const closeForm = useCallback(() => {
     setMode({ kind: "none" });
     setFormDirty(false);
   }, []);
-  const handleSaved = useCallback(async () => {
-    setMode({ kind: "none" });
-    setFormDirty(false);
-    await reload();
-  }, [reload]);
+  const handleSaved = useCallback(
+    (saved: SentryConfig) => {
+      queryClient.setQueryData<SentryConfig[]>(
+        qk.integrations.sentry.instances(workspaceId),
+        (current) => upsertInstance(current, saved),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: qk.integrations.sentry.instances(workspaceId),
+      });
+      setMode({ kind: "none" });
+      setFormDirty(false);
+    },
+    [queryClient, workspaceId],
+  );
 
   const handleDelete = useCallback(
     async (instance: SentryConfig) => {
       if (!confirm(`Remove Sentry instance "${instance.name}"?`)) return;
       try {
         await deleteSentryInstance(workspaceId, instance.id);
+        queryClient.setQueryData<SentryConfig[]>(
+          qk.integrations.sentry.instances(workspaceId),
+          (current) => (current ?? []).filter((item) => item.id !== instance.id),
+        );
+        void queryClient.invalidateQueries({
+          queryKey: qk.integrations.sentry.instances(workspaceId),
+        });
         toast({ description: "Sentry instance removed", variant: "success" });
-        await reload();
       } catch (err) {
         const watchCount = sentryInUseWatchCount(err);
         if (watchCount !== null) {
@@ -163,9 +191,21 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
         toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
       }
     },
-    [workspaceId, toast, reload],
+    [queryClient, workspaceId, toast],
   );
 
+  return { closeForm, handleSaved, handleDelete };
+}
+
+export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const { instances, loading } = useInstanceList(workspaceId);
+  const [mode, setMode] = useState<EditMode>({ kind: "none" });
+  const [formDirty, setFormDirty] = useState(false);
+  const { closeForm, handleSaved, handleDelete } = useSentryInstanceActions(
+    workspaceId,
+    setMode,
+    setFormDirty,
+  );
   const canAddInstance =
     mode.kind === "none" ||
     (mode.kind === "edit" && !instances.some((instance) => instance.id === mode.id));
@@ -183,7 +223,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
             Instances
           </h3>
           {loading && instances.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">Loading…</p>
+            <p className="text-sm text-muted-foreground py-4 text-center">Loading...</p>
           ) : (
             <InstanceList
               instances={instances}
@@ -210,19 +250,12 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
             />
           )}
           {canAddInstance && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
+            <AddInstanceButton
+              onAdd={() => {
                 setFormDirty(false);
                 setMode({ kind: "add" });
               }}
-              className="cursor-pointer gap-1"
-              data-testid="sentry-add-instance-button"
-            >
-              <IconPlus className="h-4 w-4" />
-              Add instance
-            </Button>
+            />
           )}
         </CardContent>
       </SettingsCard>

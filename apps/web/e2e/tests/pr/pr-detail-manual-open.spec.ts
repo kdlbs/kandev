@@ -98,8 +98,7 @@ test.describe("PR detail panel — manual open", () => {
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady(30_000);
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
 

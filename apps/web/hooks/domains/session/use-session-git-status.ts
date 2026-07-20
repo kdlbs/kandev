@@ -1,6 +1,8 @@
 import { useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
+import { gitStatusQueryOptions } from "@/lib/query/query-options";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
@@ -15,13 +17,17 @@ const debugSub = createDebugLogger("git-status:subscribe");
  * use useSessionGitStatusByRepo when the caller needs all repos at once.
  */
 export function useSessionGitStatus(sessionId: string | null) {
-  const gitStatus = useAppStore(
+  const envKey = useAppStore((state) =>
+    sessionId ? (state.environmentIdBySessionId[sessionId] ?? sessionId) : "",
+  );
+  const storeGitStatus = useAppStore(
     useShallow((state) => {
       if (!sessionId) return undefined;
-      const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
-      return state.gitStatus.byEnvironmentId[envKey];
+      const key = state.environmentIdBySessionId[sessionId] ?? sessionId;
+      return state.gitStatus.byEnvironmentId[key];
     }),
   );
+  const gitStatusQuery = useQuery(gitStatusQueryOptions(envKey));
   const connectionStatus = useAppStore((state) => state.connection.status);
 
   // Subscribe to session updates to receive git status via WebSocket
@@ -52,7 +58,7 @@ export function useSessionGitStatus(sessionId: string | null) {
     };
   }, [sessionId, connectionStatus]);
 
-  return gitStatus;
+  return gitStatusQuery.data?.latest ?? storeGitStatus;
 }
 
 /**
@@ -67,13 +73,18 @@ export function useSessionGitStatus(sessionId: string | null) {
 export function useSessionGitStatusByRepo(
   sessionId: string | null,
 ): Array<{ repository_name: string; status: GitStatusEntry }> {
-  const map = useAppStore(
+  const envKey = useAppStore((state) =>
+    sessionId ? (state.environmentIdBySessionId[sessionId] ?? sessionId) : "",
+  );
+  const storeMap = useAppStore(
     useShallow((state) => {
       if (!sessionId) return undefined;
-      const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
-      return state.gitStatus.byEnvironmentRepo[envKey];
+      const key = state.environmentIdBySessionId[sessionId] ?? sessionId;
+      return state.gitStatus.byEnvironmentRepo[key];
     }),
   );
+  const gitStatusQuery = useQuery(gitStatusQueryOptions(envKey));
+  const map = gitStatusQuery.data?.byRepo ?? storeMap;
   return useMemo(() => {
     if (!map) return [];
     return Object.entries(map)

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import type {
   OfficeTask,
   OfficeTaskStatus,
@@ -204,7 +204,7 @@ export function buildTaskTreeNodes({
 
 export function useIssuesTree(opts: UseIssuesTreeOptions): FlatTaskNode[] {
   const { tasks, filters, sortField, sortDir, nestingEnabled, expandedIds } = opts;
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
 
   const STATUS_ORDER = useMemo(() => {
     if (!meta) return FALLBACK_STATUS_ORDER;

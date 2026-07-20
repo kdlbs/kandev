@@ -1,146 +1,123 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
+import type { WorkflowSnapshot } from "@/lib/types/http";
+import { useWorkflowSnapshot } from "./use-workflow-snapshot";
 
-const mockHydrate = vi.fn();
 const mockFetchWorkflowSnapshot = vi.fn();
-const mockSetState = vi.fn();
 
-type MockKanban = {
-  workflowId: string | null;
-  tasks: unknown[];
-  steps: unknown[];
-  isLoading?: boolean;
-};
-type MockState = {
-  connection: { status: string };
-  kanban: MockKanban;
-  hydrate: typeof mockHydrate;
-};
-
-let mockState: MockState = {
-  connection: { status: "connected" },
-  kanban: { workflowId: null, tasks: [], steps: [], isLoading: false },
-  hydrate: mockHydrate,
-};
-
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
-  useAppStoreApi: () => ({
-    getState: () => mockState,
-    setState: (updater: (s: MockState) => MockState) => {
-      const next = updater(mockState);
-      mockSetState(next);
-      mockState = next;
-    },
-  }),
-}));
-
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api/domains/kanban-api", () => ({
   fetchWorkflowSnapshot: (...args: unknown[]) => mockFetchWorkflowSnapshot(...args),
 }));
 
-vi.mock("@/lib/ssr/mapper", () => ({
-  snapshotToState: (snapshot: unknown) => ({ snapshot }),
-}));
+const WORKFLOW_ID = "workflow-1";
+const WORKSPACE_ID = "workspace-1";
 
-import { useWorkflowSnapshot } from "./use-workflow-snapshot";
-
-function resetState(kanban: Partial<MockKanban> = {}) {
-  vi.clearAllMocks();
-  mockState = {
-    connection: { status: "connected" },
-    kanban: {
-      workflowId: null,
-      tasks: [],
-      steps: [],
-      isLoading: false,
-      ...kanban,
+function makeSnapshot(workflowId: string): WorkflowSnapshot {
+  return {
+    workflow: {
+      id: workflowId,
+      workspace_id: WORKSPACE_ID,
+      name: workflowId,
+      sort_order: 0,
+      hidden: false,
     },
-    hydrate: mockHydrate,
+    steps: [
+      {
+        id: "step-1",
+        workflow_id: workflowId,
+        name: "Todo",
+        position: 0,
+        color: "bg-blue-500",
+        allow_manual_move: true,
+      },
+    ],
+    tasks: [
+      {
+        id: "task-1",
+        workspace_id: WORKSPACE_ID,
+        workflow_id: workflowId,
+        workflow_step_id: "step-1",
+        position: 0,
+        title: "Task",
+        description: "",
+        state: "TODO",
+        priority: 0,
+        repositories: [],
+        created_at: "2026-06-24T00:00:00Z",
+        updated_at: "2026-06-24T00:00:00Z",
+      },
+    ],
+  } as unknown as WorkflowSnapshot;
+}
+
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+}
+
+function wrapperFor(queryClient: QueryClient, initialState?: Partial<AppState>) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    const tree = createElement(QueryClientProvider, { client: queryClient }, children);
+    if (!initialState) return tree;
+    return createElement(StateProvider, { initialState, children: tree });
   };
 }
 
-describe("useWorkflowSnapshot — kanban.isLoading", () => {
-  beforeEach(() => resetState());
+describe("useWorkflowSnapshot", () => {
+  beforeEach(() => {
+    mockFetchWorkflowSnapshot.mockReset();
+  });
 
-  it("flips isLoading true while a fetch for an un-hydrated workflow is in flight", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("cold-loads and converts a workflow snapshot through the query option", async () => {
+    mockFetchWorkflowSnapshot.mockResolvedValue(makeSnapshot(WORKFLOW_ID));
+    const queryClient = createQueryClient();
+
+    const { result } = renderHook(() => useWorkflowSnapshot(WORKFLOW_ID), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    await waitFor(() => expect(result.current.snapshotState?.workflowId).toBe(WORKFLOW_ID));
+    expect(result.current.snapshotState?.steps[0]?.title).toBe("Todo");
+    expect(result.current.snapshotState?.tasks[0]?.title).toBe("Task");
+    expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith(WORKFLOW_ID, expect.anything());
+  });
+
+  it("does not return boot-hydrated store data while Query loads", () => {
     mockFetchWorkflowSnapshot.mockReturnValue(new Promise(() => {}));
-    renderHook(() => useWorkflowSnapshot("wf-1"));
-    expect(mockState.kanban.isLoading).toBe(true);
-  });
+    const queryClient = createQueryClient();
+    const initialState = {
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        isLoading: false,
+        steps: [{ id: "step-1", title: "Todo", color: "bg-blue-500", position: 0 }],
+        tasks: [{ id: "task-1", workflowStepId: "step-1", title: "Task", position: 0 }],
+      },
+    } as Partial<AppState>;
 
-  it("flips isLoading back to false after the fetch resolves", async () => {
-    mockFetchWorkflowSnapshot.mockResolvedValue({ steps: [], tasks: [] });
-    renderHook(() => useWorkflowSnapshot("wf-1"));
-    await waitFor(() => expect(mockHydrate).toHaveBeenCalled());
-    await waitFor(() => expect(mockState.kanban.isLoading).toBe(false));
-  });
+    const { result } = renderHook(() => useWorkflowSnapshot(WORKFLOW_ID), {
+      wrapper: wrapperFor(queryClient, initialState),
+    });
 
-  it("flips isLoading back to false after the fetch rejects", async () => {
-    mockFetchWorkflowSnapshot.mockRejectedValue(new Error("nope"));
-    renderHook(() => useWorkflowSnapshot("wf-1"));
-    await waitFor(() => expect(mockState.kanban.isLoading).toBe(false));
-    expect(mockHydrate).not.toHaveBeenCalled();
-  });
-
-  it("does not flip isLoading true if the requested workflow is already hydrated", () => {
-    resetState({ workflowId: "wf-1", isLoading: false });
-    mockFetchWorkflowSnapshot.mockReturnValue(new Promise(() => {}));
-    renderHook(() => useWorkflowSnapshot("wf-1"));
-    expect(mockState.kanban.isLoading).toBe(false);
-  });
-
-  it("does not fetch on initial mount if the requested workflow snapshot is boot-hydrated", () => {
-    resetState({ workflowId: "wf-1", steps: [{ id: "step-1" }], tasks: [], isLoading: false });
-    renderHook(() => useWorkflowSnapshot("wf-1"));
-    expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
-    expect(mockState.kanban.isLoading).toBe(false);
-  });
-
-  it("does not clear isLoading on settle when it didn't raise the flag (already-hydrated re-fetch)", async () => {
-    // Mimic a workspace switch having set isLoading=true after the snapshot
-    // hydrated for this workflowId. A silent re-fetch (e.g. WS reconnect)
-    // must not collapse that skeleton.
-    resetState({ workflowId: "wf-1", isLoading: true });
-    mockFetchWorkflowSnapshot.mockResolvedValue({ steps: [], tasks: [] });
-    renderHook(() => useWorkflowSnapshot("wf-1"));
-    await waitFor(() => expect(mockHydrate).toHaveBeenCalled());
-    expect(mockState.kanban.isLoading).toBe(true);
+    expect(result.current.snapshotState).toBeNull();
   });
 
   it("does nothing when workflowId is null", () => {
-    renderHook(() => useWorkflowSnapshot(null));
+    const queryClient = createQueryClient();
+
+    const { result } = renderHook(() => useWorkflowSnapshot(null), {
+      wrapper: wrapperFor(queryClient),
+    });
+
     expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
-    expect(mockState.kanban.isLoading).toBe(false);
-  });
-
-  it("does not clear isLoading when an old fetch settles after workflowId changes", async () => {
-    // First fetch never settles synchronously — we resolve it manually
-    // *after* re-rendering with a new workflowId, simulating the race where
-    // the user switches workflows mid-fetch.
-    let resolveFirst!: (snapshot: { steps: unknown[]; tasks: unknown[] }) => void;
-    const firstFetch = new Promise<{ steps: unknown[]; tasks: unknown[] }>((r) => {
-      resolveFirst = r;
-    });
-    const secondFetch = new Promise<{ steps: unknown[]; tasks: unknown[] }>(() => {});
-    mockFetchWorkflowSnapshot.mockReturnValueOnce(firstFetch).mockReturnValueOnce(secondFetch);
-
-    const { rerender } = renderHook(({ id }: { id: string | null }) => useWorkflowSnapshot(id), {
-      initialProps: { id: "wf-1" as string | null },
-    });
-    expect(mockState.kanban.isLoading).toBe(true);
-
-    // User switches to wf-2 before wf-1 finishes loading
-    rerender({ id: "wf-2" });
-    expect(mockState.kanban.isLoading).toBe(true);
-
-    // Old fetch lands now; flush its .then/.finally microtask chain so we
-    // can assert the negatives without relying on waitFor (which would
-    // resolve immediately for never-true assertions).
-    resolveFirst({ steps: [], tasks: [] });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(mockHydrate).not.toHaveBeenCalled();
-    expect(mockState.kanban.isLoading).toBe(true);
+    expect(result.current.snapshotState).toBeNull();
   });
 });

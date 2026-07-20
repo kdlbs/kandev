@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   IconLayout,
@@ -60,6 +61,7 @@ import {
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { qk } from "@/lib/query/keys";
 import type { SavedLayout } from "@/lib/types/http";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { resolveLayoutApplySessionIds } from "./layout-preset-selector-session-ids";
@@ -89,6 +91,27 @@ function mutationError(error: unknown): string {
   return error instanceof Error ? error.message : "Please try again.";
 }
 
+function DefaultLayoutCheckbox({
+  checked,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Checkbox
+        id="layout-default"
+        checked={checked}
+        onCheckedChange={(next) => onCheckedChange(next === true)}
+      />
+      <Label htmlFor="layout-default" className="text-sm font-normal cursor-pointer">
+        Set as default layout
+      </Label>
+    </div>
+  );
+}
+
 function SaveLayoutDialog({
   open,
   onOpenChange,
@@ -102,6 +125,7 @@ function SaveLayoutDialog({
   const captureCurrentLayout = useDockviewStore((s) => s.captureCurrentLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
   const setUserSettings = useAppStore((s) => s.setUserSettings);
+  const queryClient = useQueryClient();
 
   const handleSave = useCallback(async () => {
     const trimmed = name.trim();
@@ -118,6 +142,7 @@ function SaveLayoutDialog({
           createdAt: new Date().toISOString(),
         }),
       });
+      queryClient.setQueryData(qk.settings.user(), response);
       setUserSettings(mapUserSettingsResponse(response));
       setName("");
       setIsDefault(false);
@@ -127,7 +152,15 @@ function SaveLayoutDialog({
     } finally {
       setSaving(false);
     }
-  }, [name, isDefault, captureCurrentLayout, savedLayouts, setUserSettings, onOpenChange]);
+  }, [
+    name,
+    isDefault,
+    captureCurrentLayout,
+    savedLayouts,
+    queryClient,
+    setUserSettings,
+    onOpenChange,
+  ]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -149,16 +182,7 @@ function SaveLayoutDialog({
               autoFocus
             />
           </div>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="layout-default"
-              checked={isDefault}
-              onCheckedChange={(checked) => setIsDefault(checked === true)}
-            />
-            <Label htmlFor="layout-default" className="text-sm font-normal cursor-pointer">
-              Set as default layout
-            </Label>
-          </div>
+          <DefaultLayoutCheckbox checked={isDefault} onCheckedChange={setIsDefault} />
         </div>
         <DialogFooter>
           <Button
@@ -357,6 +381,7 @@ export function LayoutPresetSelector() {
   const resetLayout = useDockviewStore((s) => s.resetLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
   const setUserSettings = useAppStore((s) => s.setUserSettings);
+  const queryClient = useQueryClient();
   const handleApplyCustom = useApplySavedLayout();
   const handleApplyBuiltIn = useApplyBuiltInLayout(savedLayouts, handleApplyCustom);
 
@@ -365,9 +390,10 @@ export function LayoutPresetSelector() {
       const response = await updateUserSettings({
         saved_layouts: deleteLayoutProfile(savedLayouts, layoutId),
       });
+      queryClient.setQueryData(qk.settings.user(), response);
       setUserSettings(mapUserSettingsResponse(response));
     },
-    [savedLayouts, setUserSettings],
+    [queryClient, savedLayouts, setUserSettings],
   );
 
   const handleDropdownOpenChange = useCallback((open: boolean) => {

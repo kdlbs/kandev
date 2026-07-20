@@ -3,12 +3,12 @@
 import { useEffect } from "react";
 
 import Link from "@/components/routing/app-link";
-import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useRouter } from "@/lib/routing/client-router";
 
 export default function AutomationsTopLevelPage() {
   const router = useRouter();
-  const workspaces = useAppStore((s) => s.workspaces.items);
+  const { items: workspaces } = useWorkspaces();
 
   const soleWorkspaceId = workspaces.length === 1 ? workspaces[0].id : null;
 

@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/routing/client-router";
 import type { Icon } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
-import { useAppStore } from "@/components/state-provider";
 import { createTaskPR, linkTaskIssue } from "@/lib/api/domains/github-api";
+import { qk } from "@/lib/query/keys";
 import type { Repository, Task, TaskRepository, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { GitHubPR, GitHubIssue } from "@/lib/types/github";
 
@@ -181,7 +182,7 @@ export function QuickTaskLauncher({
   onClose,
 }: QuickTaskLauncherProps) {
   const router = useRouter();
-  const upsertTaskIssue = useAppStore((state) => state.upsertTaskIssue);
+  const queryClient = useQueryClient();
 
   const defaultWorkflow = workflows[0];
   const sortedStepsForWorkflow = useMemo(
@@ -227,7 +228,11 @@ export function QuickTaskLauncher({
     if (payload?.kind === "issue") {
       void linkTaskIssue(task.id, { issue: payload.issue.html_url })
         .then((issue) => {
-          if (workspaceId) upsertTaskIssue(workspaceId, issue);
+          if (!workspaceId) return;
+          queryClient.setQueryData<Record<string, typeof issue>>(
+            qk.integrations.github.issues(workspaceId),
+            (current) => ({ ...current, [issue.task_id]: issue }),
+          );
         })
         .catch(() => {
           // Task creation succeeded; keep navigation available if GitHub linking fails.

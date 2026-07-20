@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { startQuickChat, type QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
@@ -26,16 +27,17 @@ function useQuickChatStore(workspaceId: string) {
       setActiveQuickChatSession: s.setActiveQuickChatSession,
       renameQuickChatSession: s.renameQuickChatSession,
       openQuickChat: s.openQuickChat,
-      agentProfiles: s.agentProfiles.items ?? [],
       taskSessions: s.taskSessions.items || {},
     })),
   );
+  const { agentProfiles } = useSettingsData(true);
   return useMemo(
     () => ({
       ...store,
       sessions: store.sessions.filter((session) => session.workspaceId === workspaceId),
+      agentProfiles,
     }),
-    [store, workspaceId],
+    [agentProfiles, store, workspaceId],
   );
 }
 

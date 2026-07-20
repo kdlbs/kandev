@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // --- Constants declared before vi.mock so factories can reference them ---
 const TASK_ID = "task-1";
@@ -60,12 +61,10 @@ vi.mock("@/components/state-provider", () => ({
           : {},
       },
       userSettings: { keyboardShortcuts: mockKeyboardShortcuts, chatSubmitKey: "enter" },
+      workspaces: { activeId: "workspace-1" },
     }),
   useAppStoreApi: () => ({
-    getState: () => ({
-      kanban: { steps: [] },
-      kanbanMulti: { snapshots: {} },
-    }),
+    getState: () => ({}),
   }),
 }));
 
@@ -78,6 +77,10 @@ vi.mock("@/hooks/domains/kanban/use-plan-actions", () => ({
     ...mockNextStep,
     implementPlanHandler: mockImplementPlanHandler,
   }),
+}));
+
+vi.mock("@/hooks/domains/kanban/use-all-workflow-snapshots", () => ({
+  useAllWorkflowSnapshots: () => ({ snapshots: {} }),
 }));
 
 vi.mock("@/hooks/domains/comments/use-diff-comments", () => ({
@@ -235,7 +238,12 @@ function makeDiffComment(id: string): import("@/lib/state/slices/comments").Diff
 }
 
 function renderToolbar() {
-  return render(<PassthroughToolbar sessionId={SESSION_ID} taskId={TASK_ID} />);
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <PassthroughToolbar sessionId={SESSION_ID} taskId={TASK_ID} />
+    </QueryClientProvider>,
+  );
 }
 
 async function openComposer() {

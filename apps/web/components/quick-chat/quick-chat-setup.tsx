@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconInfoCircle, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
@@ -191,12 +192,10 @@ export function QuickChatSetup({
   onCancel,
   onKindChange,
 }: QuickChatSetupProps) {
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items ?? []);
-  const defaultAgentId = useAppStore(
-    (state) =>
-      state.workspaces.items.find((workspace) => workspace.id === workspaceId)
-        ?.default_agent_profile_id ?? "",
-  );
+  const { agentProfiles } = useSettingsData(true);
+  const { items: workspaces } = useWorkspaces();
+  const defaultAgentId =
+    workspaces.find((workspace) => workspace.id === workspaceId)?.default_agent_profile_id ?? "";
   const [agentProfileId, setAgentProfileId] = useState(defaultAgentId);
   useEffect(() => {
     if (!defaultAgentId) return;

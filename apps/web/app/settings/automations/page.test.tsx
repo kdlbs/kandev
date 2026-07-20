@@ -1,5 +1,9 @@
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 
 // Regression coverage for the top-level /settings/automations page.
 //
@@ -14,14 +18,25 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 type Workspace = { id: string; name: string; description?: string | null };
 
 let mockWorkspaces: Workspace[] = [];
+let queryClient: ReturnType<typeof makeQueryClient>;
 const { replaceSpy, listWorkspacesSpy } = vi.hoisted(() => ({
   replaceSpy: vi.fn(),
   listWorkspacesSpy: vi.fn(),
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { workspaces: { items: Workspace[] } }) => unknown) =>
-    selector({ workspaces: { items: mockWorkspaces } }),
+  useAppStore: (
+    selector: (state: {
+      workspaces: { activeId: string | null };
+      setActiveWorkspace: (workspaceId: string | null) => void;
+      setActiveWorkflow: (workflowId: string | null) => void;
+    }) => unknown,
+  ) =>
+    selector({
+      workspaces: { activeId: mockWorkspaces[0]?.id ?? null },
+      setActiveWorkspace: vi.fn(),
+      setActiveWorkflow: vi.fn(),
+    }),
 }));
 
 // Mirror the production useRouter(), which returns a memoized (useMemo([]))
@@ -49,6 +64,15 @@ vi.mock("@/lib/api", () => ({
 
 import AutomationsTopLevelPage from "./page";
 
+function renderPage() {
+  queryClient = makeQueryClient();
+  queryClient.setQueryData(qk.workspaces.all(), mockWorkspaces);
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return render(<AutomationsTopLevelPage />, { wrapper });
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -62,7 +86,7 @@ describe("AutomationsTopLevelPage", () => {
       { id: "ws-2", name: "Beta", description: "second workspace" },
     ];
 
-    render(<AutomationsTopLevelPage />);
+    renderPage();
 
     expect(screen.getByText("Alpha")).toBeTruthy();
     expect(screen.getByText("Beta")).toBeTruthy();
@@ -74,7 +98,7 @@ describe("AutomationsTopLevelPage", () => {
   it("redirects to the single workspace's automations when exactly one exists", () => {
     mockWorkspaces = [{ id: "only-ws", name: "Solo" }];
 
-    render(<AutomationsTopLevelPage />);
+    renderPage();
 
     // Exactly once — `useRouter()` returns a stable (useMemo([])) reference, so the
     // effect must not re-fire and re-redirect on re-render.
@@ -89,7 +113,7 @@ describe("AutomationsTopLevelPage", () => {
   it("shows an empty state when there are no workspaces", () => {
     mockWorkspaces = [];
 
-    render(<AutomationsTopLevelPage />);
+    renderPage();
 
     expect(screen.getByText("No workspaces yet")).toBeTruthy();
     expect(listWorkspacesSpy).not.toHaveBeenCalled();

@@ -374,8 +374,7 @@ test.describe("Queue affordance", () => {
 
     // Send a slow command so the agent stays busy long enough to queue.
     const editor = dialog.locator(".tiptap.ProseMirror");
-    await editor.click();
-    await editor.fill("/slow 10s");
+    await typeWhileBusy(testPage, editor, "/slow 10s");
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await editor.press(`${modifier}+Enter`);
 

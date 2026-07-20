@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Message } from "@/lib/types/http";
 import type { PrepareStepInfo } from "@/lib/state/slices/session-runtime/types";
 
@@ -41,6 +42,15 @@ vi.mock("@/components/state-provider", () => ({
 
 import { PrepareProgress } from "./prepare-progress";
 
+function renderPrepareProgress() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <PrepareProgress sessionId="session-1" />
+    </QueryClientProvider>,
+  );
+}
+
 describe("PrepareProgress", () => {
   afterEach(() => {
     cleanup();
@@ -61,7 +71,7 @@ describe("PrepareProgress", () => {
       },
     ];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepareProgress();
 
     expect(screen.queryByText("Uploading credentials")).toBeNull();
     expect(screen.getByText("Waiting for agent controller")).toBeTruthy();
@@ -81,7 +91,7 @@ describe("PrepareProgress", () => {
       },
     ];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepareProgress();
 
     expect(screen.getByText("Reconnecting cloud sandbox")).toBeTruthy();
     expect(
@@ -105,7 +115,7 @@ describe("PrepareProgress", () => {
       { name: "Waiting for agent controller", status: "completed" },
     ];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepareProgress();
 
     expect(screen.getByText("Environment prepared on a fresh sandbox")).toBeTruthy();
     expect(screen.queryByText("Environment prepared with warnings")).toBeNull();
@@ -122,7 +132,7 @@ describe("PrepareProgress", () => {
       },
     ];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepareProgress();
 
     expect(screen.getByText("Environment prepared with warnings")).toBeTruthy();
     expect(screen.queryByText("Environment prepared on a fresh sandbox")).toBeNull();
@@ -166,7 +176,7 @@ describe("PrepareProgress per-repo setup script", () => {
     ];
     mockMessages = [makeSetupScriptMessage()];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepareProgress();
 
     expect(screen.getByText("Run repository setup script")).toBeTruthy();
     expect(screen.getByText("make install")).toBeTruthy();
@@ -179,7 +189,7 @@ describe("PrepareProgress per-repo setup script", () => {
     mockSteps = [{ name: "Create worktree", status: "completed" }];
     mockMessages = [makeSetupScriptMessage({ exit_code: 2 })];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepareProgress();
 
     expect(screen.getByText("Script exited with code 2")).toBeTruthy();
   });

@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback } from "react";
-import { fetchDynamicModels } from "@/lib/api/domains/settings-api";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
+import { dynamicModelsQueryOptions } from "@/lib/query/query-options/settings";
 import type {
   CommandEntry,
+  CapabilityStatus,
   ModeEntry,
   ModelEntry,
-  CapabilityStatus,
   DynamicModelsResponse,
   ModelConfig,
 } from "@/lib/types/http";
@@ -21,6 +23,18 @@ type UseAgentCapabilitiesState = {
   refresh: () => Promise<void>;
 };
 
+function capabilityError(
+  refreshError: string | null,
+  hasNewInitialStatus: boolean,
+  initialError: string | null | undefined,
+  queryDataError: string | null | undefined,
+  queryError: string | null,
+) {
+  if (refreshError) return refreshError;
+  if (hasNewInitialStatus) return initialError ?? null;
+  return queryDataError ?? queryError;
+}
+
 /**
  * useAgentCapabilities fetches the full ACP probe cache for an agent
  * (models, modes, current defaults) and keeps it in sync. Refresh triggers
@@ -33,74 +47,80 @@ export function useAgentCapabilities(
   initial: ModelConfig,
 ): UseAgentCapabilitiesState {
   const supportsDynamicModels = initial.supports_dynamic_models;
-  const [models, setModels] = useState<ModelEntry[]>(initial.available_models);
-  const [modes, setModes] = useState<ModeEntry[]>(initial.available_modes ?? []);
-  const [commands, setCommands] = useState<CommandEntry[]>(initial.available_commands ?? []);
-  const [currentModelId, setCurrentModelId] = useState<string | undefined>(
-    initial.current_model_id,
-  );
-  const [currentModeId, setCurrentModeId] = useState<string | undefined>(initial.current_mode_id);
-  const [status, setStatus] = useState<CapabilityStatus | undefined>(initial.status);
-  const [manualRefreshAgentName, setManualRefreshAgentName] = useState<string>();
-  const hasManualRefresh = manualRefreshAgentName === agentName;
-  const [isLoading, setIsLoading] = useState(supportsDynamicModels && !!agentName);
-  const [error, setError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const manualRefreshCompleted = useRef(false);
+  const initialStatus = useRef({ status: initial.status, error: initial.error });
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    ...dynamicModelsQueryOptions(agentName ?? ""),
+    enabled: supportsDynamicModels && Boolean(agentName),
+  });
 
-  const fetchCaps = useCallback(
-    async (forceRefresh: boolean) => {
+  const refresh = useCallback(async () => {
+    setRefreshError(null);
+    try {
       if (!agentName || !supportsDynamicModels) {
         return;
       }
-      setIsLoading(true);
-      setError(null);
-      try {
-        const response: DynamicModelsResponse = await fetchDynamicModels(agentName, {
-          refresh: forceRefresh,
+      const response = await queryClient.fetchQuery({
+        ...dynamicModelsQueryOptions(agentName, { refresh: true }),
+        staleTime: 0,
+      });
+      manualRefreshCompleted.current = true;
+      if (response.error) {
+        const previous = query.data ?? initialResponse(initial);
+        queryClient.setQueryData(qk.settings.dynamicModels(agentName), {
+          ...response,
+          models: previous.models,
+          modes: previous.modes,
+          commands: previous.commands,
+          current_model_id: previous.current_model_id,
+          current_mode_id: previous.current_mode_id,
         });
-        setStatus(response.status);
-        setError(response.error ?? null);
-        if (forceRefresh) {
-          setManualRefreshAgentName(agentName);
-        }
-        if (response.status !== "failed") {
-          setModels(response.models ?? []);
-          setModes(response.modes ?? []);
-          setCommands(response.commands ?? []);
-          setCurrentModelId(response.current_model_id);
-          setCurrentModeId(response.current_mode_id);
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to fetch capabilities");
-      } finally {
-        setIsLoading(false);
+        setRefreshError(response.error);
       }
-    },
-    [agentName, supportsDynamicModels],
-  );
-
-  useEffect(() => {
-    if (!hasManualRefresh) {
-      setStatus(initial.status);
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : "Failed to fetch capabilities");
     }
-  }, [hasManualRefresh, initial.status]);
+  }, [agentName, initial, query.data, queryClient, supportsDynamicModels]);
 
-  useEffect(() => {
-    if (supportsDynamicModels && agentName) {
-      void fetchCaps(false);
-    }
-  }, [agentName, supportsDynamicModels, fetchCaps]);
+  const capabilities = useMemo<DynamicModelsResponse>(() => {
+    return query.data ?? initialResponse(initial);
+  }, [initial, query.data]);
+  const hasNewInitialStatus =
+    !manualRefreshCompleted.current &&
+    (initial.status !== initialStatus.current.status ||
+      initial.error !== initialStatus.current.error);
 
-  const refresh = useCallback(() => fetchCaps(true), [fetchCaps]);
-
+  const queryError = query.error instanceof Error ? query.error.message : null;
   return {
-    models,
-    modes,
-    commands,
-    currentModelId,
-    currentModeId,
-    status,
-    isLoading,
-    error,
+    models: capabilities.models ?? [],
+    modes: capabilities.modes ?? [],
+    commands: capabilities.commands ?? [],
+    currentModelId: capabilities.current_model_id,
+    currentModeId: capabilities.current_mode_id,
+    status: hasNewInitialStatus ? (initial.status ?? "ok") : capabilities.status,
+    isLoading: query.isFetching,
+    error: capabilityError(
+      refreshError,
+      hasNewInitialStatus,
+      initial.error,
+      query.data?.error,
+      queryError,
+    ),
     refresh,
+  };
+}
+
+function initialResponse(initial: ModelConfig): DynamicModelsResponse {
+  return {
+    agent_name: "",
+    status: initial.status ?? "ok",
+    models: initial.available_models,
+    modes: initial.available_modes ?? [],
+    commands: initial.available_commands ?? [],
+    current_model_id: initial.current_model_id,
+    current_mode_id: initial.current_mode_id,
+    error: initial.error ?? null,
   };
 }

@@ -15,7 +15,7 @@ import {
   IconTicket,
 } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 
 const ROOT_HREF = "/settings/workspace";
@@ -64,8 +64,7 @@ function activeWorkspaceFirst<T extends { id: string }>(workspaces: T[], activeI
 }
 
 export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGroupProps) {
-  const workspaces = useAppStore((s) => s.workspaces.items);
-  const storeActiveWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { items: workspaces, activeId: storeActiveWorkspaceId } = useWorkspaces();
   const routeWorkspaceId =
     workspaces.find((workspace) => isWorkspaceRoute(pathname, workspace.id))?.id ?? null;
   const activeWorkspaceId = activeWorkspaceIdFor(workspaces, storeActiveWorkspaceId);

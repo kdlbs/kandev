@@ -8,9 +8,10 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "sonner";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole } from "@/lib/state/slices/office/types";
+import { useOfficeAgentProfiles, usePatchOfficeAgentProfileCache } from "../use-agent-detail-data";
 import { AgentRoutingCard } from "./agent-routing-card";
 
 type AgentConfigurationTabProps = {
@@ -66,9 +67,9 @@ function initialForm(agent: AgentProfile): FormState {
 }
 
 export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
-  const meta = useAppStore((s) => s.office.meta);
-  const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
-  const allOfficeAgents = useAppStore((s) => s.office.agentProfiles);
+  const meta = useOfficeMetaData().data;
+  const patchAgentCache = usePatchOfficeAgentProfileCache();
+  const allOfficeAgents = useOfficeAgentProfiles();
 
   const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;
   const executorTypes =
@@ -99,7 +100,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
         executorPreference: form.executorType ? { type: form.executorType } : undefined,
       };
       const saved = await updateAgentProfile(agent.id, update);
-      updateStore(agent.id, saved);
+      patchAgentCache(agent.id, saved);
       setForm(initialForm(saved));
       setDirty(false);
       toast.success("Agent configuration updated");
@@ -108,7 +109,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
     } finally {
       setSaving(false);
     }
-  }, [agent.id, form, updateStore]);
+  }, [agent.id, form, patchAgentCache]);
 
   return (
     <div className="space-y-4 mt-4" data-testid="agent-configuration-tab">

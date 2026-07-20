@@ -1,5 +1,5 @@
 import { EditorsSettings } from "@/components/settings/editors-settings";
-import { StateProvider } from "@/components/state-provider";
+import { StateHydrator } from "@/components/state-hydrator";
 import { fetchUserSettings, listEditors } from "@/lib/api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 
@@ -24,8 +24,9 @@ export default async function GeneralEditorsPage() {
   }
 
   return (
-    <StateProvider initialState={initialState}>
+    <>
+      <StateHydrator initialState={initialState} />
       <EditorsSettings />
-    </StateProvider>
+    </>
   );
 }

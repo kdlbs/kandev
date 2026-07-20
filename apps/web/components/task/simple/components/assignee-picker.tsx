@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
-import { useAppStore } from "@/components/state-provider";
 import { updateTask } from "@/lib/api/domains/office-extended-api";
-import { listAgentProfiles } from "@/lib/api/domains/office-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import type { Task } from "@/app/office/tasks/[id]/types";
+import { useActiveOfficeAgents } from "../use-office-reference-data";
 
 type AssigneePickerProps = {
   task: Task;
@@ -16,29 +15,8 @@ type AssigneePickerProps = {
 const NO_ASSIGNEE = "__none__";
 
 export function AssigneePicker({ task }: AssigneePickerProps) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const agents = useActiveOfficeAgents();
   const mutate = useOptimisticTaskMutation();
-
-  // The store is hydrated from /office/inbox and /office/agents pages but
-  // not from individual task pages, so navigating directly to a task
-  // leaves agentProfiles empty. Lazy-fetch on mount when missing — same
-  // pattern the parent/blockers pickers use against searchTasks.
-  useEffect(() => {
-    if (!workspaceId || agents.length > 0) return;
-    let cancelled = false;
-    listAgentProfiles(workspaceId)
-      .then((res) => {
-        if (!cancelled && res.agents) setOfficeAgentProfiles(res.agents);
-      })
-      .catch(() => {
-        /* swallow: picker just shows No assignee */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, agents.length, setOfficeAgentProfiles]);
 
   const options = useMemo<ComboboxOption[]>(() => {
     const noOpt: ComboboxOption = {

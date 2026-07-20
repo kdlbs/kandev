@@ -515,7 +515,9 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   const onModelSelect = (value: string) => {
     if (!value) return;
     onModelChange(value);
-    if (!hasExtraConfigOptions) {
+    if (hasExtraConfigOptions) {
+      window.setTimeout(() => setOpen(true), 0);
+    } else {
       setOpen(false);
     }
   };

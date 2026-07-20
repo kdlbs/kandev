@@ -1,33 +1,14 @@
 "use client";
 
-import { useEffect } from "react";
-import { listPrompts } from "@/lib/api";
-import { useAppStore } from "@/components/state-provider";
-export function useCustomPrompts() {
-  const prompts = useAppStore((state) => state.prompts.items);
-  const loaded = useAppStore((state) => state.prompts.loaded);
-  const loading = useAppStore((state) => state.prompts.loading);
-  const setPrompts = useAppStore((state) => state.setPrompts);
-  const setPromptsLoading = useAppStore((state) => state.setPromptsLoading);
+import { useQuery } from "@tanstack/react-query";
+import { promptsQueryOptions } from "@/lib/query/query-options/settings";
 
-  useEffect(() => {
-    if (loaded || loading) return;
-    setPromptsLoading(true);
-    listPrompts({ cache: "no-store" })
-      .then((response) => {
-        setPrompts(response.prompts ?? []);
-      })
-      .catch(() => {
-        setPrompts([]);
-      })
-      .finally(() => {
-        setPromptsLoading(false);
-      });
-  }, [loaded, loading, setPrompts, setPromptsLoading]);
+export function useCustomPrompts() {
+  const query = useQuery(promptsQueryOptions());
 
   return {
-    prompts,
-    loaded,
-    loading,
+    prompts: query.data?.prompts ?? [],
+    loaded: query.isSuccess,
+    loading: query.isFetching && !query.isSuccess,
   };
 }

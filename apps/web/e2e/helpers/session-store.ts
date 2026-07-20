@@ -4,13 +4,15 @@ type E2EStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
       taskSessions: { items: Record<string, Record<string, unknown>> };
-      setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
     };
     setState: (
       updater: (state: {
         taskSessions: { items: Record<string, Record<string, unknown>> };
       }) => void,
     ) => void;
+  };
+  __KANDEV_E2E_QUERY_CLIENT__?: {
+    setQueryData: (key: readonly unknown[], data: AvailableCommand[]) => void;
   };
 };
 
@@ -57,11 +59,14 @@ export async function seedAvailableCommands(
 ): Promise<void> {
   await page.evaluate(
     ({ sid, commandList }) => {
-      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-      if (!store) {
-        throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
+      const queryClient = (window as E2EStoreWindow).__KANDEV_E2E_QUERY_CLIENT__;
+      if (!queryClient) {
+        throw new Error("E2E query client bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
       }
-      store.getState().setAvailableCommands(sid, commandList);
+      queryClient.setQueryData(
+        ["sessionRuntime", "session", sid, "availableCommands"],
+        commandList,
+      );
     },
     { sid: sessionId, commandList: commands },
   );

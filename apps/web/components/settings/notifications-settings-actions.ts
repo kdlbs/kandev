@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   createNotificationProvider,
   deleteNotificationProvider,
@@ -10,8 +11,8 @@ import {
 import { useRequest } from "@/lib/http/use-request";
 import { DEFAULT_NOTIFICATION_EVENTS } from "@/lib/notifications/events";
 import { useNotificationProviders } from "@/hooks/domains/settings/use-notification-providers";
-import { useAppStore } from "@/components/state-provider";
 import type { NotificationProvider } from "@/lib/types/http";
+import { qk } from "@/lib/query/keys";
 
 type ProviderUpdatePayload = {
   enabled?: boolean;
@@ -90,12 +91,23 @@ function buildAppriseEdits(providers: NotificationProvider[]) {
 }
 
 export function useNotificationsState() {
+  const queryClient = useQueryClient();
   const {
     providers: storeProviders,
     events: storeEvents,
     appriseAvailable: storeAppriseAvailable,
   } = useNotificationProviders();
-  const setNotificationProviders = useAppStore((state) => state.setNotificationProviders);
+  const setNotificationProviders = (next: {
+    items: NotificationProvider[];
+    events: string[];
+    appriseAvailable: boolean;
+  }) => {
+    queryClient.setQueryData(qk.settings.notificationProviders(), {
+      providers: next.items,
+      events: next.events,
+      apprise_available: next.appriseAvailable,
+    });
+  };
   const [providers, setProviders] = useState<NotificationProvider[]>(() => storeProviders ?? []);
   const [baselineProviders, setBaselineProviders] = useState<NotificationProvider[]>(
     () => storeProviders ?? [],
@@ -204,8 +216,6 @@ export function useSaveRequest(state: NotificationsState) {
       items: nextProviders,
       events: state.notificationEvents,
       appriseAvailable: state.appriseAvailable,
-      loaded: true,
-      loading: false,
     });
     setProviders(nextProviders);
     setBaselineProviders(nextProviders);

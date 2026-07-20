@@ -8,6 +8,7 @@ import {
   type RefObject,
 } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskWalkthrough } from "@/hooks/domains/session/use-task-walkthrough";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { revealFileAtLine, type OpenFileFn } from "@/lib/diff/walkthrough-reveal";
 import {
@@ -197,29 +198,15 @@ export function WalkthroughFloatingWindow({
   const { position, onPointerDown } = useDraggableWindow(cardRef, isDesktop);
   const anchor = useWalkthroughEditorAnchor();
   const cardRect = useCardRect(cardRef, position, anchor?.key);
-  // Select primitives (not a fresh object) so the selector stays referentially
-  // stable — returning a new object here would loop the store subscription.
-  const stepFile = useAppStore((s) => {
-    const taskId = s.tasks.activeTaskId;
-    if (!taskId) return null;
-    const wt = s.walkthroughs.byTaskId[taskId];
-    const idx = s.walkthroughs.activeStepByTaskId[taskId] ?? 0;
-    return wt?.steps[idx]?.file ?? null;
-  });
-  const stepLine = useAppStore((s) => {
-    const taskId = s.tasks.activeTaskId;
-    if (!taskId) return 0;
-    const wt = s.walkthroughs.byTaskId[taskId];
-    const idx = s.walkthroughs.activeStepByTaskId[taskId] ?? 0;
-    return wt?.steps[idx]?.line ?? 0;
-  });
-  const stepRepo = useAppStore((s) => {
-    const taskId = s.tasks.activeTaskId;
-    if (!taskId) return undefined;
-    const wt = s.walkthroughs.byTaskId[taskId];
-    const idx = s.walkthroughs.activeStepByTaskId[taskId] ?? 0;
-    return wt?.steps[idx]?.repo;
-  });
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const walkthrough = useTaskWalkthrough(activeTaskId).data ?? null;
+  const activeStep = useAppStore((s) =>
+    activeTaskId ? (s.walkthroughs.activeStepByTaskId[activeTaskId] ?? 0) : 0,
+  );
+  const step = walkthrough?.steps[activeStep];
+  const stepFile = step?.file ?? null;
+  const stepLine = step?.line ?? 0;
+  const stepRepo = step?.repo;
 
   // Open the step's file (current state) and reveal its line whenever the step changes.
   useEffect(() => {

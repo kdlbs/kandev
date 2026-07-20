@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { postDeleteWorkspaceHref, resolvePostDeleteWorkspace } from "./danger-zone-section";
-import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
-
-type Workspace = WorkspaceState["items"][number];
+import type { Workspace } from "@/lib/types/http";
 
 function workspace(id: string, officeWorkflowId?: string | null): Workspace {
   return {
     id,
     name: id,
     description: "",
+    owner_id: "user-1",
     office_workflow_id: officeWorkflowId,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
   } as Workspace;
 }
 

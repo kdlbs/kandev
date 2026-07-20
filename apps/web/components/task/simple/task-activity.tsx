@@ -1,9 +1,9 @@
 "use client";
 
-import { useAppStore } from "@/components/state-provider";
 import { formatRelativeTime } from "@/lib/utils";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import type { TaskActivityEntry } from "@/app/office/tasks/[id]/types";
+import { useActiveOfficeAgents } from "./use-office-reference-data";
 
 type TaskActivityProps = {
   taskId: string;
@@ -11,11 +11,11 @@ type TaskActivityProps = {
 };
 
 function ActivityRow({ entry }: { entry: TaskActivityEntry }) {
-  const agentName = useAppStore((s) =>
+  const agents = useActiveOfficeAgents();
+  const agentName =
     entry.actorType === "agent"
-      ? (s.office.agentProfiles.find((a) => a.id === entry.actorId)?.name ?? "Agent")
-      : "",
-  );
+      ? (agents.find((a) => a.id === entry.actorId)?.name ?? "Agent")
+      : "";
   let actorName = "System";
   if (entry.actorType === "user") actorName = "You";
   else if (entry.actorType === "agent") actorName = agentName;

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type MouseEvent } from "react";
-import { usePathname } from "@/lib/routing/client-router";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { usePathname, useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@kandev/ui/sheet";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -10,13 +10,16 @@ import { PageTopbar } from "@/components/page-topbar";
 import Link from "@/components/routing/app-link";
 import { SettingsTree } from "@/components/app-sidebar/sections/settings/settings-tree";
 import { useAppStore } from "@/components/state-provider";
+import { WorkspaceSwitcher } from "@/components/task/workspace-switcher";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
+import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
 import { IntegrationCopyConfigMenu } from "@/components/integrations/integration-copy-config-menu";
 import { integrationFromPathname } from "@/components/integrations/integration-copy-config";
 import { safeDecodePathSegment } from "@/lib/routing/path";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
-// app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
+// app spells these (e.g. "github" -> "GitHub", not "Github"). Anything not
 // listed here falls back to dash-aware title-casing of the path segment.
 const SEGMENT_LABEL_OVERRIDES: Record<string, string> = {
   github: "GitHub",
@@ -37,7 +40,7 @@ function titleCase(segment: string): string {
 }
 
 // Derive the human-readable label for the current /settings sub-page from the
-// deepest non-id path segment. /settings → null (the topbar still shows
+// deepest non-id path segment. /settings -> null (the topbar still shows
 // "Settings" as the page itself). UUID-looking segments are skipped so e.g.
 // /settings/workspace/<uuid> resolves to "Workspace" not the raw id.
 function deriveCurrentPageLabel(pathname: string): string | null {
@@ -68,7 +71,7 @@ function deriveParents(pathname: string): Array<{ label: string; href: string }>
   );
   if (automationsMatch && automationsMatch[2]) {
     // Only inject the Automations crumb when we're on a sub-page (new or
-    // edit), not on the listing page itself — the listing page title is
+    // edit), not on the listing page itself; the listing page title is
     // already "Automations".
     parents.push({
       label: "Automations",
@@ -82,7 +85,7 @@ function deriveParents(pathname: string): Array<{ label: string; href: string }>
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
-  const showIntegrationCopyAction = integrationFromPathname(pathname) !== null;
+  const showIntegrationActions = integrationFromPathname(pathname) !== null;
 
   if (isAgentDetail) {
     return (
@@ -91,7 +94,7 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
         backHref="/settings/agents"
         backLabel="Agents"
         parents={[]}
-        showIntegrationCopyAction={showIntegrationCopyAction}
+        showIntegrationActions={showIntegrationActions}
       >
         {children}
       </SettingsShell>
@@ -108,28 +111,99 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
       backHref="/"
       backLabel="Kandev"
       parents={parents}
-      showIntegrationCopyAction={showIntegrationCopyAction}
+      showIntegrationActions={showIntegrationActions}
     >
       {children}
     </SettingsShell>
   );
 }
 
-function IntegrationCopyConfigAction() {
+// useWorkspaceQueryParamSync keeps the top-right switcher and the `?workspace`
+// query param in agreement. On load (or when a shared deep link points at a
+// valid workspace), it adopts the query param as the active workspace without
+// persisting it as the user's global default. setWorkspaceParam writes the
+// param back when the user picks a workspace.
+function useWorkspaceQueryParamSync(
+  workspaces: Array<{ id: string }>,
+  activeId: string | null,
+  setActiveWorkspace: (id: string) => void,
+) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const paramWorkspace = searchParams.get("workspace");
+
+  useEffect(() => {
+    if (!paramWorkspace || paramWorkspace === activeId) return;
+    if (!workspaces.some((w) => w.id === paramWorkspace)) return;
+    setActiveWorkspace(paramWorkspace);
+  }, [paramWorkspace, activeId, workspaces, setActiveWorkspace]);
+
+  const setWorkspaceParam = useCallback(
+    (workspaceId: string) => {
+      const next = new URLSearchParams(window.location.search);
+      next.set("workspace", workspaceId);
+      router.replace(`${window.location.pathname}?${next.toString()}`, { scroll: false });
+    },
+    [router],
+  );
+
+  return setWorkspaceParam;
+}
+
+function workspaceIdFromPathname(pathname: string): string | null {
+  const match = pathname.match(/^\/settings\/workspace\/([^/]+)(?:\/|$)/);
+  return safeDecodePathSegment(match?.[1]);
+}
+
+function IntegrationActions() {
   const pathname = usePathname();
-  const workspaces = useAppStore((s) => s.workspaces.items);
-  const activeId = useAppStore((s) => s.workspaces.activeId);
+  const { items: workspaces, activeId } = useWorkspaces();
+  const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
   const routeWorkspaceId = workspaceIdFromPathname(pathname);
-  const selected =
+  const scopedWorkspaceId =
     routeWorkspaceId && workspaces.some((workspace) => workspace.id === routeWorkspaceId)
       ? routeWorkspaceId
-      : (activeId ?? workspaces[0]?.id ?? null);
+      : null;
+  const selected = scopedWorkspaceId ?? activeId ?? workspaces[0]?.id ?? null;
   const integration = integrationFromPathname(pathname);
+  const showSwitcher = pathname.startsWith("/settings/integrations");
+  const persistWorkspace = useMemo(
+    () =>
+      createQueuedUserSettingsSync<string>((workspaceId) => ({
+        workspace_id: workspaceId,
+      })),
+    [],
+  );
+  const setWorkspaceParam = useWorkspaceQueryParamSync(workspaces, activeId, setActiveWorkspace);
+
+  const onSelect = useCallback(
+    (workspaceId: string) => {
+      setActiveWorkspace(workspaceId);
+      setWorkspaceParam(workspaceId);
+      void persistWorkspace(workspaceId);
+    },
+    [persistWorkspace, setActiveWorkspace, setWorkspaceParam],
+  );
 
   if (!integration || !selected || workspaces.length === 0) return null;
 
   return (
     <div className="flex min-w-0 items-center gap-2">
+      {showSwitcher ? (
+        <div
+          className="flex min-w-0 items-center gap-2"
+          data-testid="integration-workspace-switcher"
+        >
+          <span className="hidden text-xs whitespace-nowrap text-muted-foreground sm:inline">
+            Editing workspace
+          </span>
+          <WorkspaceSwitcher
+            workspaces={workspaces}
+            activeWorkspaceId={selected}
+            onSelect={onSelect}
+          />
+        </div>
+      ) : null}
       <IntegrationCopyConfigMenu
         slug={integration}
         sourceWorkspaceId={selected}
@@ -191,24 +265,19 @@ function SettingsMobileMenu({ pathname }: { pathname: string }) {
   );
 }
 
-function workspaceIdFromPathname(pathname: string): string | null {
-  const match = pathname.match(/^\/settings\/workspace\/([^/]+)(?:\/|$)/);
-  return safeDecodePathSegment(match?.[1]);
-}
-
 function SettingsShell({
   title,
   backHref,
   backLabel,
   parents,
-  showIntegrationCopyAction,
+  showIntegrationActions,
   children,
 }: {
   title: string;
   backHref: string;
   backLabel: string;
   parents: Array<{ label: string; href: string }>;
-  showIntegrationCopyAction: boolean;
+  showIntegrationActions: boolean;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -224,7 +293,7 @@ function SettingsShell({
             parents={parents}
             leading={<SettingsMobileMenu pathname={pathname} />}
             className="h-10"
-            actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
+            actions={showIntegrationActions ? <IntegrationActions /> : undefined}
           />
           {/* Scroll the content, not the topbar: min-h-0 lets this flex child
               shrink below its content height so overflow-y-auto can take effect. */}

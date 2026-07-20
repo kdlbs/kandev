@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -10,7 +11,10 @@ import {
 } from "./integrations-menu";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { NavItem } from "@/lib/plugins/types";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import type { GitHubStatus } from "@/lib/types/github";
+import type { Workspace } from "@/lib/types/http";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const useGitHubStatusMock = vi.hoisted(() => vi.fn());
@@ -43,15 +47,13 @@ vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: useFeatureMock,
 }));
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (
-    selector: (state: {
-      workspaces: { activeId: string | null; items: Array<{ id: string }> };
-    }) => unknown,
-  ) =>
-    selector({
-      workspaces: { activeId: activeWorkspaceRef.id, items: activeWorkspaceRef.items },
-    }),
+vi.mock("@/hooks/domains/workspace/use-workspaces", () => ({
+  useWorkspaces: () => ({
+    items: activeWorkspaceRef.items,
+    activeId: activeWorkspaceRef.id,
+    activeWorkspace:
+      activeWorkspaceRef.items.find((workspace) => workspace.id === activeWorkspaceRef.id) ?? null,
+  }),
 }));
 
 function status(overrides: Partial<GitHubStatus>): GitHubStatus {
@@ -83,6 +85,26 @@ function mockAvailability({
   useGitLabAvailableMock.mockReturnValue(gitlabReady);
   useJiraAvailableMock.mockReturnValue(jiraAvailable);
   useLinearAvailableMock.mockReturnValue(linearAvailable);
+}
+
+function workspace(id: string): Workspace {
+  return {
+    id,
+    name: id,
+    owner_id: "user-1",
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+  } as Workspace;
+}
+
+function renderWithQuery(component: Parameters<typeof render>[0]) {
+  const queryClient = makeQueryClient();
+  queryClient.setQueryDefaults(qk.workspaces.all(), { staleTime: Infinity });
+  queryClient.setQueryData(
+    qk.workspaces.all(),
+    activeWorkspaceRef.items.map((item) => workspace(item.id)),
+  );
+  return render(createElement(QueryClientProvider, { client: queryClient }, component));
 }
 
 afterEach(() => {
@@ -153,7 +175,7 @@ describe("IntegrationsMenu", () => {
   it("opens configured integration links on hover", async () => {
     mockAvailability({ githubReady: true, jiraAvailable: true, linearAvailable: false });
 
-    render(createElement(IntegrationsMenu, {}));
+    renderWithQuery(createElement(IntegrationsMenu, {}));
 
     const trigger = screen.getByRole("button", { name: "Integrations" });
     expect(screen.queryByText("GitHub")).toBeNull();
@@ -168,7 +190,7 @@ describe("IntegrationsMenu", () => {
   it("does not render when no integrations are configured", () => {
     mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
 
-    render(createElement(IntegrationsMenu, {}));
+    renderWithQuery(createElement(IntegrationsMenu, {}));
 
     expect(screen.queryByRole("button", { name: "Integrations" })).toBeNull();
   });
@@ -178,7 +200,7 @@ describe("IntegrationsMenu", () => {
     activeWorkspaceRef.items = [{ id: "ws-active" }];
     mockAvailability({ githubReady: true, jiraAvailable: true, linearAvailable: true });
 
-    render(createElement(IntegrationsMenu, {}));
+    renderWithQuery(createElement(IntegrationsMenu, {}));
 
     // Jira and Linear are per-workspace: they must be scoped to the active
     // workspace so the sidebar reflects the workspace the user is viewing.
@@ -194,7 +216,7 @@ describe("IntegrationsMenu", () => {
     activeWorkspaceRef.items = [{ id: "ws-remaining" }];
     mockAvailability({ githubReady: false, jiraAvailable: true, linearAvailable: true });
 
-    render(createElement(IntegrationsMenu, {}));
+    renderWithQuery(createElement(IntegrationsMenu, {}));
 
     expect(useJiraAvailableMock).toHaveBeenCalledWith(null);
     expect(useLinearAvailableMock).toHaveBeenCalledWith(null);
@@ -203,7 +225,7 @@ describe("IntegrationsMenu", () => {
 
 function renderWithTooltip(component: Parameters<typeof render>[0]) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TooltipProvider requires children in its type but createElement passes them as 3rd arg
-  return render(createElement(TooltipProvider, {} as any, component));
+  return renderWithQuery(createElement(TooltipProvider, {} as any, component));
 }
 
 describe("IntegrationsTopbarLinks", () => {
@@ -258,7 +280,7 @@ describe("MobileIntegrationsSection", () => {
   function renderMobileSection(onNavigate = vi.fn()) {
     return {
       onNavigate,
-      ...render(createElement(MobileIntegrationsSection, { onNavigate })),
+      ...renderWithQuery(createElement(MobileIntegrationsSection, { onNavigate })),
     };
   }
 

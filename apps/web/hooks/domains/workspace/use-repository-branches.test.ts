@@ -1,4 +1,6 @@
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const listBranchesMock = vi.fn();
@@ -19,9 +21,8 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
 }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api/domains/workspace-api", () => ({
   listBranches: (...args: unknown[]) => listBranchesMock(...args),
-  listRepositoryBranches: vi.fn(),
 }));
 
 import { useBranches, type BranchSource } from "./use-repository-branches";
@@ -49,21 +50,29 @@ describe("useBranches", () => {
       workspaceId: WORKSPACE_ID,
       repositoryId: "repo-b",
     };
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
     const { rerender } = renderHook(({ source }: { source: BranchSource }) => useBranches(source), {
       initialProps: { source: sourceA },
+      wrapper,
     });
 
     await waitFor(() =>
-      expect(listBranchesMock).toHaveBeenCalledWith(WORKSPACE_ID, {
-        repositoryId: "repo-a",
-      }),
+      expect(listBranchesMock).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        { repositoryId: "repo-a" },
+        expect.any(Object),
+      ),
     );
     rerender({ source: sourceB });
 
     await waitFor(() =>
-      expect(listBranchesMock).toHaveBeenCalledWith(WORKSPACE_ID, {
-        repositoryId: "repo-b",
-      }),
+      expect(listBranchesMock).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        { repositoryId: "repo-b" },
+        expect.any(Object),
+      ),
     );
   });
 });

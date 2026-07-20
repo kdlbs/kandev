@@ -38,12 +38,12 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
     );
     clientRef.current = client;
     client.connect();
-    setWebSocketClient(client);
 
     const handlers = registerWsHandlers(store);
     const unsubscribers = Object.entries(handlers).map(([type, handler]) =>
       client.on(type as keyof typeof handlers, handler as never),
     );
+    setWebSocketClient(client);
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());

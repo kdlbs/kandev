@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { StoreApi } from "zustand";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { useTheme } from "@/components/theme/app-theme";
 import {
   disablePlugin,
@@ -21,6 +22,21 @@ import { summarizeSyncResult } from "@/lib/plugins/sync-summary";
 import type { InstallResult } from "@/lib/api/domains/plugins-api";
 import type { PluginRecord, PluginStatus, SyncError } from "@/lib/types/plugins";
 import type { AppState } from "@/lib/state/store";
+import { qk } from "@/lib/query/keys";
+
+function upsertPlugin(queryClient: QueryClient, plugin: PluginRecord) {
+  queryClient.setQueryData<PluginRecord[]>(qk.plugins.all(), (current = []) => {
+    const index = current.findIndex((item) => item.id === plugin.id);
+    if (index < 0) return [...current, plugin];
+    return current.map((item, itemIndex) => (itemIndex === index ? plugin : item));
+  });
+}
+
+function removePlugin(queryClient: QueryClient, pluginId: string) {
+  queryClient.setQueryData<PluginRecord[]>(qk.plugins.all(), (current = []) =>
+    current.filter((plugin) => plugin.id !== pluginId),
+  );
+}
 
 function withStatus(plugin: PluginRecord, status: PluginStatus): PluginRecord {
   return { ...plugin, status };
@@ -44,7 +60,7 @@ async function loadIfActive(
  * that plugin (no full page reload); disabling calls `unloadPlugin` to
  * revoke its nav items/routes/slots immediately.
  */
-function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
+function useEnableDisableActions(queryClient: QueryClient) {
   const storeApi = useAppStoreApi();
   const { resolvedTheme } = useTheme();
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -54,7 +70,7 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
     try {
       await enablePlugin(plugin.id);
       const updated = withStatus(plugin, "active");
-      upsertPlugin(updated);
+      upsertPlugin(queryClient, updated);
       await loadIfActive(updated, storeApi, resolvedTheme);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : `Failed to enable ${plugin.display_name}`);
@@ -68,7 +84,7 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
     try {
       await disablePlugin(plugin.id);
       unloadPlugin(plugin.id);
-      upsertPlugin(withStatus(plugin, "disabled"));
+      upsertPlugin(queryClient, withStatus(plugin, "disabled"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : `Failed to disable ${plugin.display_name}`);
     } finally {
@@ -79,7 +95,7 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
   return { busyId, handleEnable, handleDisable };
 }
 
-function useUninstallAction(removePlugin: (id: string) => void) {
+function useUninstallAction(queryClient: QueryClient) {
   const [uninstallTarget, setUninstallTarget] = useState<PluginRecord | null>(null);
   const [uninstallBusy, setUninstallBusy] = useState(false);
 
@@ -90,7 +106,7 @@ function useUninstallAction(removePlugin: (id: string) => void) {
     try {
       await uninstallPlugin(target.id);
       unloadPlugin(target.id);
-      removePlugin(target.id);
+      removePlugin(queryClient, target.id);
       setUninstallTarget(null);
     } catch (err) {
       toast.error(
@@ -117,7 +133,7 @@ function useUninstallAction(removePlugin: (id: string) => void) {
  * bundle, hot-load it into the running app (no full page reload) — same as
  * the enable path.
  */
-function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
+function useInstallAction(queryClient: QueryClient) {
   const storeApi = useAppStoreApi();
   const { resolvedTheme } = useTheme();
   const [installOpen, setInstallOpenState] = useState(false);
@@ -133,7 +149,7 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   // backend leaves Plugin.Status "error") must not be masked by a green
   // "installed" toast, so it takes priority over the success toast.
   const afterInstall = async ({ plugin, warning }: InstallResult) => {
-    upsertPlugin(plugin);
+    upsertPlugin(queryClient, plugin);
     await loadIfActive(plugin, storeApi, resolvedTheme);
     if (warning) {
       toast.warning(warning);
@@ -196,7 +212,7 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
  * operator can re-enable it (or reload) to pick up the bundle; wiring a
  * silent hot-load here is out of scope for the sync button itself.
  */
-function useSyncAction(setPlugins: (plugins: PluginRecord[]) => void) {
+function useSyncAction(queryClient: QueryClient) {
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncErrors, setSyncErrors] = useState<SyncError[]>([]);
 
@@ -205,7 +221,7 @@ function useSyncAction(setPlugins: (plugins: PluginRecord[]) => void) {
     try {
       const result = await syncPlugins();
       const refreshed = await listPlugins({ cache: "no-store" });
-      setPlugins(refreshed);
+      queryClient.setQueryData(qk.plugins.all(), refreshed);
       setSyncErrors(result.errors ?? []);
       toast.success(summarizeSyncResult(result));
     } catch (err) {
@@ -219,14 +235,11 @@ function useSyncAction(setPlugins: (plugins: PluginRecord[]) => void) {
 }
 
 export function usePluginActions() {
-  const upsertPlugin = useAppStore((s) => s.upsertPlugin);
-  const removePlugin = useAppStore((s) => s.removePlugin);
-  const setPlugins = useAppStore((s) => s.setPlugins);
-
-  const enableDisable = useEnableDisableActions(upsertPlugin);
-  const uninstall = useUninstallAction(removePlugin);
-  const install = useInstallAction(upsertPlugin);
-  const sync = useSyncAction(setPlugins);
+  const queryClient = useQueryClient();
+  const enableDisable = useEnableDisableActions(queryClient);
+  const uninstall = useUninstallAction(queryClient);
+  const install = useInstallAction(queryClient);
+  const sync = useSyncAction(queryClient);
 
   return { ...enableDisable, ...uninstall, ...install, ...sync };
 }

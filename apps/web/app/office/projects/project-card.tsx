@@ -5,7 +5,7 @@ import { IconGitBranch } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
 import { Progress } from "@kandev/ui/progress";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import type { Project } from "@/lib/state/slices/office/types";
 import { normalizeRepos } from "./normalize-repos";
 
@@ -29,7 +29,7 @@ type ProjectCardProps = {
 };
 
 function useProjectStatusDisplay(status: string) {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const metaStatus = meta?.projectStatuses.find((s) => s.id === status);
   return {
     badgeClass: metaStatus?.color ?? FALLBACK_BADGE_CLASSES[status] ?? "",

@@ -1,8 +1,11 @@
+import type { ReactElement } from "react";
 import { cleanup, render, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DiffViewer } from "./diff-viewer";
 import type { FileDiffData } from "@/lib/diff/types";
+import { makeQueryClient } from "@/lib/query/client";
 
 const fileDiffProps: Array<{ options?: { overflow?: string } }> = [];
 
@@ -31,9 +34,18 @@ afterEach(() => {
   fileDiffProps.length = 0;
 });
 
+function renderWithQuery(ui: ReactElement) {
+  const queryClient = makeQueryClient();
+  return render(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+}
+
 describe("DiffViewer", () => {
   it("wraps diff lines by default", async () => {
-    render(<DiffViewer data={data} />);
+    renderWithQuery(<DiffViewer data={data} />);
 
     await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(0));
     expect(fileDiffProps.at(-1)?.options?.overflow).toBe("wrap");
@@ -42,7 +54,7 @@ describe("DiffViewer", () => {
   it("rerenders when the controlled delete handler changes", async () => {
     const firstDelete = vi.fn();
     const secondDelete = vi.fn();
-    const { rerender } = render(<DiffViewer data={data} onCommentDelete={firstDelete} />);
+    const { rerender } = renderWithQuery(<DiffViewer data={data} onCommentDelete={firstDelete} />);
 
     await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(0));
     const renderCount = fileDiffProps.length;
@@ -55,7 +67,7 @@ describe("DiffViewer", () => {
   it("rerenders when the controlled update handler changes", async () => {
     const firstUpdate = vi.fn();
     const secondUpdate = vi.fn();
-    const { rerender } = render(<DiffViewer data={data} onCommentUpdate={firstUpdate} />);
+    const { rerender } = renderWithQuery(<DiffViewer data={data} onCommentUpdate={firstUpdate} />);
 
     await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(0));
     const renderCount = fileDiffProps.length;

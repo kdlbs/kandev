@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { PRStatusChip } from "./pr-status-chip";
+import { qk } from "@/lib/query/keys";
 import type { AppState } from "@/lib/state/store";
 import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
@@ -51,13 +53,37 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: vi.fn(() => null),
 }));
 
-function renderWithStore(initialState: Partial<AppState>, ui: ReactNode) {
+type GitHubQueryTestState = Partial<AppState> & {
+  taskPRs?: { byTaskId: Record<string, TaskPR[]> };
+  taskCIAutomation?: {
+    byTaskId?: Record<string, TaskCIAutomationOptions>;
+    loading?: Record<string, boolean>;
+    saving?: Record<string, boolean>;
+    errors?: Record<string, string | null>;
+  };
+};
+
+function renderWithStore(initialState: GitHubQueryTestState, ui: ReactNode) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  for (const [taskId, prs] of Object.entries(initialState.taskPRs?.byTaskId ?? {})) {
+    queryClient.setQueryData(qk.integrations.github.taskPr(taskId), prs);
+  }
+  for (const [taskId, options] of Object.entries(initialState.taskCIAutomation?.byTaskId ?? {})) {
+    queryClient.setQueryData(qk.integrations.github.taskCiOptions(taskId), options);
+  }
+  const appState = { ...initialState };
+  delete appState.taskPRs;
+  delete appState.taskCIAutomation;
   return render(
-    <StateProvider initialState={initialState}>
-      <ToastProvider>
-        <TooltipProvider>{ui}</TooltipProvider>
-      </ToastProvider>
-    </StateProvider>,
+    <QueryClientProvider client={queryClient}>
+      <StateProvider initialState={appState}>
+        <ToastProvider>
+          <TooltipProvider>{ui}</TooltipProvider>
+        </ToastProvider>
+      </StateProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -132,7 +158,7 @@ function stateWithAutoFix(
   roundCount: number,
   exhausted = false,
   maxRounds = 10,
-): Partial<AppState> {
+): GitHubQueryTestState {
   return {
     taskPRs: { byTaskId: { "task-1": [makePR()] } },
     taskCIAutomation: {

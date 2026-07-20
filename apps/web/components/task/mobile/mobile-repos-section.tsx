@@ -4,6 +4,8 @@ import { memo, useCallback, useMemo } from "react";
 import { IconCheck, IconFolder, IconGitBranch } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { useCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import type { Repository, TaskSession } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 
@@ -57,22 +59,13 @@ function buildRepoRows(
 }
 
 function useTaskRepoRows(taskId: string | null, workspaceId: string | null): RepoRow[] {
-  const taskRepositories = useAppStore((s) => {
-    if (!taskId) return undefined;
-    const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.repositories;
-  });
-  const workspaceRepos = useAppStore((s) =>
-    workspaceId ? (s.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
-  );
+  const task = useTaskById(taskId);
+  const taskRepositories = task?.repositories;
+  const workspaceRepos = useCachedRepositories(workspaceId);
   const taskSessions = useAppStore((s) =>
     taskId ? (s.taskSessionsByTask.itemsByTaskId[taskId] ?? []) : [],
   );
-  const primarySessionId = useAppStore((s) => {
-    if (!taskId) return null;
-    const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.primarySessionId ?? null;
-  });
+  const primarySessionId = task?.primarySessionId ?? null;
   return useMemo(
     () =>
       taskRepositories
@@ -192,11 +185,6 @@ export const MobileReposSection = memo(function MobileReposSection({
 
 /** Returns the count of repositories attached to the active task. */
 export function useTaskRepoCount(taskId: string | null): number {
-  return (
-    useAppStore((s) => {
-      if (!taskId) return 0;
-      const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-      return task?.repositories?.length ?? 0;
-    }) ?? 0
-  );
+  const task = useTaskById(taskId);
+  return task?.repositories?.length ?? 0;
 }

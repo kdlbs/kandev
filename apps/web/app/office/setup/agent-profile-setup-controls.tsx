@@ -3,11 +3,11 @@
 import { useMemo } from "react";
 import { Button } from "@kandev/ui/button";
 import { CliProfileEditor } from "@/components/agent/cli-profile-editor";
-import { useAppStoreApi } from "@/components/state-provider";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Tier } from "@/lib/state/slices/office/types";
+import type { AgentProfile } from "@/lib/types/http";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 
 export type ProfileSetupChange = {
@@ -67,7 +67,7 @@ export function CreateProfilePanel({
   settingsAgents,
   wizardProfiles,
   canCancel,
-  setAgentProfiles,
+  upsertProfile,
   onAgentProfilesChange,
   onProfileSaved,
   onClose,
@@ -75,12 +75,11 @@ export function CreateProfilePanel({
   settingsAgents: { id: string; name: string }[];
   wizardProfiles: AgentProfileOption[];
   canCancel: boolean;
-  setAgentProfiles: (profiles: AgentProfileOption[]) => void;
+  upsertProfile: (profile: AgentProfile) => void;
   onAgentProfilesChange?: (profiles: AgentProfileOption[]) => void;
   onProfileSaved: (profileId: string) => void;
   onClose: () => void;
 }) {
-  const store = useAppStoreApi();
   return (
     <div className="mt-2 rounded-md border bg-muted/30 p-3">
       <CliProfileEditor
@@ -94,7 +93,7 @@ export function CreateProfilePanel({
             name: saved.agentId ?? "",
           };
           const option = toAgentProfileOption(agentForProfile, saved);
-          setAgentProfiles(upsertProfileOption(store.getState().agentProfiles.items, option));
+          upsertProfile(saved);
           onAgentProfilesChange?.(upsertProfileOption(wizardProfiles, option));
           onProfileSaved(saved.id);
           onClose();

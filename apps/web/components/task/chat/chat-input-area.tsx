@@ -11,7 +11,8 @@ import { ShareButton, shareableSessionStateClient } from "@/components/task/shar
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useMessageHandler, buildTaskMentionsContext } from "@/hooks/use-message-handler";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useAppStore } from "@/components/state-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { type ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
@@ -140,7 +141,8 @@ export function useSubmitHandler(
   onSend?: (message: string) => void,
 ) {
   const [isSending, setIsSending] = useState(false);
-  const storeApi = useAppStoreApi();
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { snapshots } = useAllWorkflowSnapshots(activeWorkspaceId);
   const { toast } = useToast();
   const {
     resolvedSessionId,
@@ -179,7 +181,7 @@ export function useSubmitHandler(
         if (onSend) {
           // Expand task mentions because onSend bypasses useMessageHandler.buildFinalMessage.
           const taskCtx = inlineTaskMentions?.length
-            ? buildTaskMentionsContext(inlineTaskMentions, storeApi.getState())
+            ? buildTaskMentionsContext(inlineTaskMentions, snapshots)
             : "";
           await onSend(finalMessage + taskCtx);
         } else {
@@ -213,7 +215,7 @@ export function useSubmitHandler(
     [
       isSending,
       onSend,
-      storeApi,
+      snapshots,
       handleSendMessage,
       markCommentsSent,
       planComments,

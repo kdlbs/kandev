@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import {
-  getWorkspaceRouting,
-  retryProvider,
-  updateWorkspaceRouting,
-} from "@/lib/api/domains/office-extended-api";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
+import { officeRoutingQueryOptions } from "@/lib/query/query-options/office";
+import { retryProvider, updateWorkspaceRouting } from "@/lib/api/domains/office-extended-api";
 import type { ExecutionProfileSummary, WorkspaceRouting } from "@/lib/state/slices/office/types";
+import { queryErrorMessage } from "./query-error";
 
 export type UseWorkspaceRoutingResult = {
   config: WorkspaceRouting | undefined;
@@ -21,57 +20,25 @@ export type UseWorkspaceRoutingResult = {
 };
 
 export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceRoutingResult {
-  const config = useAppStore((s) =>
-    workspaceName ? s.office.routing.byWorkspace[workspaceName] : undefined,
-  );
-  const knownProviders = useAppStore((s) => s.office.routing.knownProviders);
-  const setWorkspaceRouting = useAppStore((s) => s.setWorkspaceRouting);
-  const setKnownProviders = useAppStore((s) => s.setKnownProviders);
-  const [isLoading, setIsLoading] = useState(false);
-  const [executionProfiles, setExecutionProfiles] = useState<ExecutionProfileSummary[]>([]);
-  const [profilesWorkspace, setProfilesWorkspace] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const requestVersion = useRef(0);
+  const queryClient = useQueryClient();
+  const query = useQuery(officeRoutingQueryOptions(workspaceName ?? ""));
 
   const refresh = useCallback(async () => {
     if (!workspaceName) return;
-    const version = ++requestVersion.current;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await getWorkspaceRouting(workspaceName);
-      if (version !== requestVersion.current) return;
-      if (res.config) setWorkspaceRouting(workspaceName, res.config);
-      if (Array.isArray(res.known_providers)) setKnownProviders(res.known_providers);
-      setExecutionProfiles(Array.isArray(res.execution_profiles) ? res.execution_profiles : []);
-      setProfilesWorkspace(workspaceName);
-    } catch (e) {
-      if (version !== requestVersion.current) return;
-      setError(e instanceof Error ? e.message : "Failed to load routing config");
-    } finally {
-      if (version === requestVersion.current) setIsLoading(false);
-    }
-  }, [workspaceName, setWorkspaceRouting, setKnownProviders]);
-
-  useEffect(() => {
-    if (!workspaceName) {
-      requestVersion.current += 1;
-      setExecutionProfiles([]);
-      setProfilesWorkspace(null);
-      setIsLoading(false);
-      return;
-    }
-    if (profilesWorkspace === workspaceName) return;
-    void refresh();
-  }, [workspaceName, profilesWorkspace, refresh]);
+    await query.refetch();
+  }, [query, workspaceName]);
 
   const update = useCallback(
     async (cfg: WorkspaceRouting) => {
       if (!workspaceName) return;
       await updateWorkspaceRouting(workspaceName, cfg);
-      setWorkspaceRouting(workspaceName, cfg);
+      queryClient.setQueryData(qk.office.routing(workspaceName), {
+        config: cfg,
+        known_providers: query.data?.known_providers ?? [],
+        execution_profiles: query.data?.execution_profiles ?? [],
+      });
     },
-    [workspaceName, setWorkspaceRouting],
+    [query.data?.execution_profiles, query.data?.known_providers, queryClient, workspaceName],
   );
 
   const retry = useCallback(
@@ -82,5 +49,19 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
     [workspaceName],
   );
 
-  return { config, knownProviders, executionProfiles, isLoading, error, refresh, update, retry };
+  const config = query.data?.config ?? undefined;
+  const knownProviders = query.data?.known_providers ?? [];
+  const executionProfiles = query.data?.execution_profiles ?? [];
+  const error = queryErrorMessage(query.error);
+
+  return {
+    config,
+    knownProviders,
+    executionProfiles,
+    isLoading: query.isPending,
+    error,
+    refresh,
+    update,
+    retry,
+  };
 }

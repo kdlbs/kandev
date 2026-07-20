@@ -41,8 +41,8 @@ test.describe("Right pane resize — container-proportional cap", () => {
     const before = await resizeColumnViaSplitview(testPage, "right", 600);
 
     await testPage.reload();
-    await session.waitForLoad();
     await session.waitForDockviewReady();
+    await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
 
     const after = await getDockviewGroupWidth(testPage, "files");
     expectApproxWidth(after, before, 12);
@@ -111,8 +111,8 @@ test.describe("Right pane width — per-task isolation", () => {
     await kanban.taskCardByTitle("Right Width Task A").click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
     await session.waitForDockviewReady();
+    await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
 
     // Resize Task A's right column to a deliberately narrow width. The default
     // is ~450 on a 1600px viewport, so 240 is unambiguously a user override.
@@ -130,13 +130,18 @@ test.describe("Right pane width — per-task isolation", () => {
       timeout: 15_000,
     });
     await expect(testPage.locator(".dv-dockview")).toBeVisible({ timeout: 15_000 });
-    // Allow fromJSON + fixups-capture + enforcePinnedTargets to settle.
-    await testPage.waitForTimeout(500);
+    await session.waitForDockviewReady();
 
-    const widthB = await getDockviewGroupWidth(testPage, "files");
-    expect(
-      widthB,
-      `Task B right width ${widthB} should be the default (>350), not Task A's narrow ${narrowedA}`,
-    ).toBeGreaterThan(350);
+    await expect
+      .poll(
+        async () => {
+          return getDockviewGroupWidth(testPage, "files");
+        },
+        {
+          timeout: 5_000,
+          message: `Task B right width should be the default (>350), not Task A's narrow ${narrowedA}`,
+        },
+      )
+      .toBeGreaterThan(350);
   });
 });

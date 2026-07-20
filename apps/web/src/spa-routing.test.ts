@@ -4,6 +4,7 @@ import { officeRouteKey, resolveOfficeHomeSetupRedirect } from "./office-routes"
 import { getInitialPageProps } from "./spa-routing";
 import { resolveSpaRoute } from "./spa-routes";
 import { settingsRouteKey } from "./settings-routes";
+import { workflowId, workspaceId } from "@/lib/types/ids";
 
 const OFFICE_HOME_PATH = "/office";
 const OFFICE_SETUP_PATH = "/office/setup";
@@ -149,10 +150,10 @@ describe("officeRouteKey", () => {
     expect(
       resolveOfficeHomeSetupRedirect(OFFICE_HOME_PATH, true, true, [
         {
-          id: "workspace-1",
+          id: workspaceId("workspace-1"),
           name: "Workspace",
           owner_id: "user-1",
-          office_workflow_id: "workflow-1",
+          office_workflow_id: workflowId("workflow-1"),
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:00Z",
         },

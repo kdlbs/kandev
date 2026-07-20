@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Label } from "@kandev/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconInfoCircle } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
+import { useAgentsQuerySync } from "@/hooks/domains/settings/use-agents-query-sync";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Tier } from "@/lib/state/slices/office/types";
@@ -50,8 +50,7 @@ export function StepTierProfiles({
   onChange,
   onAgentProfilesChange,
 }: StepTierProfilesProps) {
-  const settingsAgents = useAppStore((s) => s.settingsAgents.items);
-  const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
+  const { settingsAgents, upsertProfile } = useAgentsQuerySync();
   const { profileOptions } = useSelectableProfileOptions(agentProfiles);
   const [showCreate, setShowCreate] = useState(profileOptions.length === 0);
 
@@ -98,7 +97,7 @@ export function StepTierProfiles({
             settingsAgents={settingsAgents}
             wizardProfiles={agentProfiles}
             canCancel={profileOptions.length > 0}
-            setAgentProfiles={setAgentProfiles}
+            upsertProfile={upsertProfile}
             onAgentProfilesChange={onAgentProfilesChange}
             onProfileSaved={(profileId) =>
               onChange({

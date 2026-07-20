@@ -5,7 +5,6 @@ import {
   workspaceId as toWorkspaceId,
   type Task,
 } from "@/lib/types/http";
-import type { KanbanState } from "@/lib/state/slices";
 import {
   buildArchivedValue,
   buildDebugEntries,
@@ -16,7 +15,6 @@ import {
   syncActiveTaskSession,
 } from "./task-page-content-helpers";
 
-type KanbanTask = KanbanState["tasks"][number];
 const ARCHIVED_AT = "2026-07-19T00:00:00Z";
 
 function makeArchivedTaskDetails(overrides: Partial<Task> = {}): Task {
@@ -38,15 +36,12 @@ function makeArchivedTaskDetails(overrides: Partial<Task> = {}): Task {
   } as Task;
 }
 
-function makeKanbanTask(overrides: Partial<KanbanTask> = {}): KanbanTask {
+function makeSnapshotTask(overrides: Partial<Task> = {}): Task {
   return {
-    id: "task-1",
+    ...makeArchivedTaskDetails({ archived_at: null }),
     title: "Restored task",
-    workflowStepId: "step-1",
-    position: 0,
-    state: "TODO",
     ...overrides,
-  } as KanbanTask;
+  };
 }
 
 function baseParams(overrides: Partial<Parameters<typeof buildDebugEntries>[0]> = {}) {
@@ -228,27 +223,27 @@ describe("syncActiveTaskSession", () => {
 });
 
 describe("resolveEffectiveTask archived state", () => {
-  it("keeps fetched archived state when a stale matching kanban card remains", () => {
+  it("keeps fetched archived state when a stale matching workflow snapshot remains", () => {
     const taskDetails = makeArchivedTaskDetails();
-    const kanbanTask = makeKanbanTask({ updatedAt: "2026-07-18T00:00:00Z" });
+    const snapshotTask = makeSnapshotTask({ updated_at: "2026-07-18T00:00:00Z" });
 
-    const resolved = resolveEffectiveTask(taskDetails, null, kanbanTask, "task-1");
+    const resolved = resolveEffectiveTask(taskDetails, null, snapshotTask, "task-1");
 
     expect(resolved?.archived_at).toBe(ARCHIVED_AT);
     expect(buildArchivedValue(resolved, null).isArchived).toBe(true);
   });
 
-  it("clears fetched archived state when a matching kanban card is newer", () => {
+  it("clears fetched archived state when a matching workflow snapshot is newer", () => {
     const taskDetails = makeArchivedTaskDetails();
-    const kanbanTask = makeKanbanTask({ updatedAt: "2026-07-20T00:00:00Z" });
+    const snapshotTask = makeSnapshotTask({ updated_at: "2026-07-20T00:00:00Z" });
 
-    const resolved = resolveEffectiveTask(taskDetails, null, kanbanTask, "task-1");
+    const resolved = resolveEffectiveTask(taskDetails, null, snapshotTask, "task-1");
 
     expect(resolved?.archived_at).toBeNull();
     expect(buildArchivedValue(resolved, null).isArchived).toBe(false);
   });
 
-  it("keeps archived_at when the task is absent from the kanban (still archived)", () => {
+  it("keeps archived_at when the task is absent from snapshots (still archived)", () => {
     const taskDetails = makeArchivedTaskDetails();
 
     const resolved = resolveEffectiveTask(taskDetails, null, null, "task-1");
@@ -257,28 +252,28 @@ describe("resolveEffectiveTask archived state", () => {
     expect(buildArchivedValue(resolved, null).isArchived).toBe(true);
   });
 
-  it("prefers live kanban title/state while preserving base-only fields", () => {
+  it("prefers live snapshot title/state while preserving base-only fields", () => {
     const taskDetails = makeArchivedTaskDetails({ archived_at: null });
-    const kanbanTask = makeKanbanTask({ title: "Live title", state: "IN_PROGRESS" });
+    const snapshotTask = makeSnapshotTask({ title: "Live title", state: "IN_PROGRESS" });
 
-    const resolved = resolveEffectiveTask(taskDetails, null, kanbanTask, "task-1");
+    const resolved = resolveEffectiveTask(taskDetails, null, snapshotTask, "task-1");
 
     expect(resolved?.title).toBe("Live title");
     expect(resolved?.state).toBe("IN_PROGRESS");
     expect(resolved?.workspace_id).toBe("ws-1");
   });
 
-  it("does not copy IDs from rejected task details into a kanban-only placeholder", () => {
+  it("returns a matching snapshot when task details belong to another task", () => {
     const unrelatedTask = makeArchivedTaskDetails({
       id: toTaskId("other-task"),
       workspace_id: toWorkspaceId("other-workspace"),
       workflow_id: toWorkflowId("other-workflow"),
     });
-    const kanbanTask = makeKanbanTask({ id: toTaskId("task-1") });
+    const snapshotTask = makeSnapshotTask({ id: toTaskId("task-1") });
 
-    const resolved = resolveEffectiveTask(unrelatedTask, null, kanbanTask, "task-1");
+    const resolved = resolveEffectiveTask(unrelatedTask, null, snapshotTask, "task-1");
 
-    expect(resolved?.workspace_id).toBe("");
-    expect(resolved?.workflow_id).toBe("");
+    expect(resolved?.workspace_id).toBe("ws-1");
+    expect(resolved?.workflow_id).toBe("wf-1");
   });
 });

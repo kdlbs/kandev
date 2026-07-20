@@ -3,8 +3,8 @@
 import { useMemo } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
 import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
+import { useActiveOfficeAgents } from "../use-office-reference-data";
 
 // computePendingApprovers returns the names of approvers who have not
 // recorded an active "approved" decision. Used to render the gated
@@ -40,7 +40,7 @@ type PendingApprovalBadgeProps = {
 };
 
 export function PendingApprovalBadge({ task }: PendingApprovalBadgeProps) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useActiveOfficeAgents();
   const agentLookup = useMemo(() => {
     const map: Record<string, string> = {};
     for (const a of agents) map[a.id] = a.name;

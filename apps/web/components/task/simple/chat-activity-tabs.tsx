@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
-import { useAppStore } from "@/components/state-provider";
 import { agentTint } from "@/app/office/components/agent-avatar";
 import { TaskChat } from "./task-chat";
 import { TaskActivity } from "./task-activity";
@@ -21,6 +20,7 @@ import type {
   TaskSession,
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
+import { useActiveOfficeAgents } from "./use-office-reference-data";
 
 // TAB_TRIGGER_BASE adds a 1px ring to the active tab on top of
 // shadcn's default bg/text active styling, so the selected tab is
@@ -32,13 +32,12 @@ const TAB_TRIGGER_BASE =
 function AgentTabTrigger({ group }: { group: SessionGroup }) {
   const live = isGroupLive(group);
   const agentProfileId = group.representative.agentProfileId;
-  // Resolve the agent's display name + role from the office store so a
+  // Resolve the agent's display name + role from the office query so a
   // rename flows through automatically and we never fall back to the
   // UUID that lands in `session.agentName` when the session's profile
   // snapshot is empty.
-  const resolved = useAppStore((s) =>
-    agentProfileId ? s.office.agentProfiles.find((a) => a.id === agentProfileId) : undefined,
-  );
+  const agents = useActiveOfficeAgents();
+  const resolved = agentProfileId ? agents.find((a) => a.id === agentProfileId) : undefined;
   const label = resolved?.name || group.representative.agentName || "Agent";
   // Apply the per-agent tint only when the tab is active, so the
   // selected state reads clearly. Inactive tabs inherit shadcn's muted

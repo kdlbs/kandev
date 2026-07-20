@@ -1,8 +1,10 @@
 import { type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
 import { getBuiltInLayoutProfile } from "@/lib/layout/layout-profiles";
+import { qk } from "@/lib/query/keys";
 import { defaultState } from "@/lib/state/default-state";
 import type { SavedLayout, UserSettingsResponse } from "@/lib/types/http";
 import { workspaceId } from "@/lib/types/ids";
@@ -44,23 +46,28 @@ function responseWith(savedLayouts: SavedLayout[]): UserSettingsResponse {
 }
 
 function renderLayoutSettings(savedLayouts: SavedLayout[] = []) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <StateProvider
-        initialState={{
-          userSettings: {
-            ...defaultState.userSettings,
-            savedLayouts,
-            loaded: true,
-          },
-        }}
-      >
-        {children}
-      </StateProvider>
+      <QueryClientProvider client={queryClient}>
+        <StateProvider
+          initialState={{
+            userSettings: {
+              ...defaultState.userSettings,
+              savedLayouts,
+              loaded: true,
+            },
+          }}
+        >
+          {children}
+        </StateProvider>
+      </QueryClientProvider>
     );
   }
 
-  return renderHook(() => useLayoutSettings(), { wrapper: Wrapper });
+  return { ...renderHook(() => useLayoutSettings(), { wrapper: Wrapper }), queryClient };
 }
 
 beforeEach(() => {
@@ -292,7 +299,7 @@ describe("useLayoutSettings persistence", () => {
   it("adopts the successful PATCH response as the authoritative baseline", async () => {
     const authoritative = profile({ name: "Server name", is_default: true });
     updateUserSettings.mockResolvedValueOnce(responseWith([authoritative]));
-    const { result } = renderLayoutSettings([profile()]);
+    const { result, queryClient } = renderLayoutSettings([profile()]);
 
     act(() => result.current.setSelection({ kind: "custom", id: PROFILE_ID }));
     act(() => result.current.updateSelected({ name: DRAFT_NAME }));
@@ -301,6 +308,7 @@ describe("useLayoutSettings persistence", () => {
     expect(updateUserSettings).toHaveBeenCalledWith({
       saved_layouts: [profile({ name: DRAFT_NAME })],
     });
+    expect(queryClient.getQueryData(qk.settings.user())).toEqual(responseWith([authoritative]));
     expect(result.current).toMatchObject({
       profiles: [authoritative],
       baseline: [authoritative],

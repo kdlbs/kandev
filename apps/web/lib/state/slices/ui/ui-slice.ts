@@ -16,7 +16,6 @@ import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
 import { DEFAULT_VIEW } from "./sidebar-view-builtins";
 import type { SidebarView, SortSpec } from "./sidebar-view-types";
-import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 import { getQuickChatSetupSessionId } from "./quick-chat-session";
 
@@ -69,13 +68,11 @@ export const defaultUIState: UISliceState = {
     urlDraftBySessionId: {},
   },
   rightPanel: { activeTabBySessionId: {} },
-  diffs: { files: [] },
   connection: { status: "disconnected", error: null },
   mobileKanban: { activeColumnIndex: 0, isMenuOpen: false, isSearchOpen: false },
   mobileSession: { activePanelBySessionId: {}, isTaskSwitcherOpen: false },
   chatInput: { planModeBySessionId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
-  systemHealth: { issues: [], checks: [], healthy: true, loaded: false, loading: false },
   quickChat: { isOpen: false, sessions: [], activeSessionId: null },
   sessionFailureNotification: null,
   taskDeletedNotification: null,
@@ -188,26 +185,6 @@ function buildBottomTerminalActions(set: ImmerSet) {
     clearBottomTerminalCommand: () =>
       set((draft) => {
         draft.bottomTerminal.pendingCommand = null;
-      }),
-  };
-}
-
-function buildSystemHealthActions(set: ImmerSet) {
-  return {
-    setSystemHealth: (response: SystemHealthResponse) =>
-      set((draft) => {
-        draft.systemHealth.issues = response.issues;
-        draft.systemHealth.checks = response.checks ?? [];
-        draft.systemHealth.healthy = response.healthy;
-        draft.systemHealth.loaded = true;
-      }),
-    setSystemHealthLoading: (loading: boolean) =>
-      set((draft) => {
-        draft.systemHealth.loading = loading;
-      }),
-    invalidateSystemHealth: () =>
-      set((draft) => {
-        draft.systemHealth.loaded = false;
       }),
   };
 }
@@ -376,7 +353,6 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildSidebarViewActions(set, get),
   ...buildSidebarTaskPrefsActions(set, get),
   ...buildCollapsedSubtaskActions(set, get),
-  ...buildSystemHealthActions(set),
   ...buildDismissedAgentErrors(set),
   ...buildNotificationActions(set),
   ...buildQuickChatActions(set),

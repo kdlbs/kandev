@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconTicket, IconCode } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
@@ -21,13 +29,9 @@ import {
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
-import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
-import {
-  getJiraConfig,
-  setJiraConfig,
-  deleteJiraConfig,
-  testJiraConnection,
-} from "@/lib/api/domains/jira-api";
+import { setJiraConfig, deleteJiraConfig, testJiraConnection } from "@/lib/api/domains/jira-api";
+import { qk } from "@/lib/query/keys";
+import { jiraConfigQueryOptions } from "@/lib/query/query-options/jira";
 import type {
   JiraAuthMethod,
   JiraConfig,
@@ -443,50 +447,29 @@ function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete 
   );
 }
 
-function useJiraConfigRefresh(workspaceId: string, setConfig: (cfg: JiraConfig | null) => void) {
-  // Background refresh so the auth-health banner picks up new probe results
-  // from the backend poller without requiring a page reload. We re-fetch the
-  // config rather than the loud full `load()` to avoid flashing the form.
-  useEffect(() => {
-    const id = setInterval(() => {
-      getJiraConfig({ workspaceId })
-        .then((cfg) => setConfig(cfg))
-        .catch(() => {
-          /* transient failures are fine — next tick retries */
-        });
-    }, INTEGRATION_STATUS_REFRESH_MS);
-    return () => clearInterval(id);
-  }, [workspaceId, setConfig]);
-}
-
 function useJiraSettings(workspaceId: string) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const configQuery = useQuery(jiraConfigQueryOptions(workspaceId));
   const [config, setConfig] = useState<JiraConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestJiraConnectionResult | null>(null);
+  const formHydratedRef = useRef(false);
   const health = configToHealth(config);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const cfg = await getJiraConfig({ workspaceId });
-      setConfig(cfg);
-      setForm(configToForm(cfg));
-    } catch (err) {
-      toast({ description: `Failed to load Jira config: ${String(err)}`, variant: "error" });
-    } finally {
-      setLoading(false);
-    }
-  }, [workspaceId, toast]);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!configQuery.isSuccess) return;
+    const cfg = configQuery.data ?? null;
+    setConfig(cfg);
+    if (!formHydratedRef.current) {
+      setForm(configToForm(cfg));
+      formHydratedRef.current = true;
+    }
+  }, [configQuery.data, configQuery.isSuccess]);
 
-  useJiraConfigRefresh(workspaceId, setConfig);
+  useJiraLoadError(configQuery.error, configQuery.isError);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -522,6 +505,7 @@ function useJiraSettings(workspaceId: string) {
         },
         { workspaceId },
       );
+      queryClient.setQueryData(qk.integrations.jira.config(workspaceId), saved);
       setConfig(saved);
       setForm((current) =>
         JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
@@ -536,12 +520,13 @@ function useJiraSettings(workspaceId: string) {
     } finally {
       setSaving(false);
     }
-  }, [workspaceId, form, toast]);
+  }, [workspaceId, form, queryClient, toast]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Jira configuration?")) return;
     try {
       await deleteJiraConfig({ workspaceId });
+      queryClient.setQueryData(qk.integrations.jira.config(workspaceId), null);
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -549,14 +534,14 @@ function useJiraSettings(workspaceId: string) {
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
-  }, [workspaceId, toast]);
+  }, [workspaceId, queryClient, toast]);
   const discard = useCallback(() => setForm(configToForm(config)), [config]);
 
   return {
     config,
     form,
     setForm,
-    loading,
+    loading: configQuery.isFetching && !configQuery.isSuccess,
     saving,
     testing,
     testResult,
@@ -567,6 +552,14 @@ function useJiraSettings(workspaceId: string) {
     handleDelete,
     discard,
   };
+}
+
+function useJiraLoadError(error: unknown, isError: boolean) {
+  const { toast } = useToast();
+  useEffect(() => {
+    if (!isError) return;
+    toast({ description: `Failed to load Jira config: ${String(error)}`, variant: "error" });
+  }, [error, isError, toast]);
 }
 
 function normalizeComparableSiteUrl(value: string): string {

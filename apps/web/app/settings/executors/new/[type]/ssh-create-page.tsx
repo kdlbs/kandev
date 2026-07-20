@@ -6,7 +6,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { IconTerminal2 } from "@tabler/icons-react";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useExecutorsQuerySync } from "@/hooks/domains/settings/use-executors-query-sync";
 import { createExecutor, createExecutorProfile } from "@/lib/api/domains/settings-api";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
@@ -30,7 +30,7 @@ const EXECUTORS_ROUTE = "/settings/executors";
  */
 export function SSHCreatePage() {
   const router = useRouter();
-  const store = useAppStoreApi();
+  const { upsertExecutor } = useExecutorsQuerySync();
 
   const handleSave = useCallback(
     async (cfg: SSHExecutorConfig) => {
@@ -58,17 +58,10 @@ export function SSHCreatePage() {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
-      // Read the latest store snapshot at write time so a concurrent
-      // updater (another fetch, a WS event, etc.) that landed while
-      // createExecutor was in-flight doesn't get overwritten. Dedupe
-      // on id so a WS event that already inserted this executor doesn't
-      // double-list it after our append.
-      const current = store.getState().executors.items;
-      const merged = current.some((e) => e.id === next.id) ? current : [...current, next];
-      store.getState().setExecutors(merged);
+      upsertExecutor(next);
       router.push(`/settings/executors/${profile.id}`);
     },
-    [router, store],
+    [router, upsertExecutor],
   );
 
   return (

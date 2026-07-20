@@ -1,7 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 
 import { StateProvider } from "@/components/state-provider";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import { AgentProfileDeleteConflictDialog } from "./agent-profile-delete-dialog";
 import type { AgentProfileDeleteConflict } from "./agent-profile-delete-dialog";
 
@@ -10,40 +13,44 @@ afterEach(cleanup);
 const FIXTURE_TIMESTAMP = "2026-01-01T00:00:00.000Z";
 
 function renderConflictDialog(conflict: AgentProfileDeleteConflict | null) {
+  const queryClient = makeQueryClient();
+  queryClient.setQueryData(qk.workspaces.all(), [
+    {
+      id: "ws-1",
+      name: "Office Workspace",
+      owner_id: "user-1",
+      created_at: FIXTURE_TIMESTAMP,
+      updated_at: FIXTURE_TIMESTAMP,
+    },
+  ]);
+  queryClient.setQueryData(qk.settings.agents(), {
+    agents: [
+      {
+        id: "codex-acp",
+        name: "Codex",
+        supports_mcp: false,
+        profiles: [],
+        created_at: FIXTURE_TIMESTAMP,
+        updated_at: FIXTURE_TIMESTAMP,
+      },
+    ],
+  });
+
   return render(
     <StateProvider
       initialState={{
         workspaces: {
           activeId: "ws-1",
-          items: [
-            {
-              id: "ws-1",
-              name: "Office Workspace",
-              owner_id: "user-1",
-              created_at: FIXTURE_TIMESTAMP,
-              updated_at: FIXTURE_TIMESTAMP,
-            },
-          ],
-        },
-        settingsAgents: {
-          items: [
-            {
-              id: "codex-acp",
-              name: "Codex",
-              supports_mcp: false,
-              profiles: [],
-              created_at: FIXTURE_TIMESTAMP,
-              updated_at: FIXTURE_TIMESTAMP,
-            },
-          ],
         },
       }}
     >
-      <AgentProfileDeleteConflictDialog
-        conflict={conflict}
-        onOpenChange={() => {}}
-        onConfirm={() => {}}
-      />
+      <QueryClientProvider client={queryClient}>
+        <AgentProfileDeleteConflictDialog
+          conflict={conflict}
+          onOpenChange={() => {}}
+          onConfirm={() => {}}
+        />
+      </QueryClientProvider>
     </StateProvider>,
   );
 }

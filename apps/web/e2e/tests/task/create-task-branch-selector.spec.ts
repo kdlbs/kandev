@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
+import type { Request, Response } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -545,9 +546,10 @@ test.describe("Fresh-branch flow", () => {
 test.describe("Branch refresh + filter", () => {
   test.describe.configure({ retries: 1 });
 
-  test("refresh button in branch dropdown triggers ?refresh=true request", async ({
+  test("refresh button in branch dropdown reloads branches for the selected repo", async ({
     testPage,
     apiClient,
+    backend,
     seedData,
   }) => {
     if (!seedData.worktreeExecutorProfileId) {
@@ -563,22 +565,16 @@ test.describe("Branch refresh + filter", () => {
       return;
     }
 
-    // Resolve the seeded repo's name via the workspace API so we can select
-    // it explicitly — earlier specs in this worker may have registered extra
-    // repos in the same workspace, and we need the asserted ?refresh URL to
-    // be unambiguous.
-    const repoListRes = await apiClient.rawRequest(
-      "GET",
-      `/api/v1/workspaces/${seedData.workspaceId}/repositories`,
-    );
-    const repoList = (await repoListRes.json()) as {
-      repositories: Array<{ id: string; name: string }>;
-    };
-    const seededRepoName = repoList.repositories.find((r) => r.id === seedData.repositoryId)?.name;
-    if (!seededRepoName) {
-      test.skip(true, "Could not resolve seeded repository name");
-      return;
-    }
+    const suffix = `${Date.now()}`;
+    const repoName = `E2E Refresh Repo ${suffix}`;
+    const repoDir = path.join(backend.tmpDir, "repos", `e2e-refresh-branches-${suffix}`);
+    const env = makeGitEnv(backend.tmpDir);
+    fs.mkdirSync(repoDir, { recursive: true });
+    execSync("git init -b main", { cwd: repoDir, env });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env });
+    const repo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: repoName,
+    });
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -588,7 +584,7 @@ test.describe("Branch refresh + filter", () => {
     await testPage.getByTestId("task-description-input").fill("triggers git fetch");
     await testPage.getByTestId("repo-chip-trigger").first().click();
     await testPage
-      .getByRole("option", { name: new RegExp(`^${escapeRe(seededRepoName)}\\b`, "i") })
+      .getByRole("option", { name: new RegExp(`^${escapeRe(repoName)}\\b`, "i") })
       .first()
       .click();
     // Worktree executor → branch selector enabled and refresh button visible.
@@ -614,25 +610,35 @@ test.describe("Branch refresh + filter", () => {
     // fires and `waitForRequest` hangs the full test timeout.
     await expect(testPage.getByRole("option").first()).toBeVisible({ timeout: 10_000 });
 
-    // Retry the click until the ?refresh=true request actually fires. Even
-    // with the button enabled and an option visible, there's a brief
-    // hydration window (documented above) where a click is swallowed before
-    // the refresh handler is wired — so a single click can never produce the
-    // request and the listener hangs the full test timeout. `toPass` re-runs
-    // the whole block: a swallowed click just clicks again next attempt, and
-    // once the handler is wired the request fires and the block passes. The
-    // refresh is idempotent, so an extra click is harmless.
-    await expect(async () => {
-      const requestPromise = testPage.waitForRequest(
-        (req) =>
-          req.url().includes(`/repositories/${seedData.repositoryId}/branches`) &&
-          req.url().includes("refresh=true") &&
-          req.method() === "GET",
-        { timeout: 4_000 },
-      );
-      await refreshButton.click();
-      await requestPromise;
-    }).toPass({ timeout: 30_000 });
+    const isRefreshRequest = (req: Request) =>
+      req.url().includes(`/repositories/${repo.id}/branches`) &&
+      req.url().includes("refresh=true") &&
+      req.method() === "GET";
+    const isRefreshResponse = (res: Response) => isRefreshRequest(res.request());
+
+    let refreshRequestSeen = false;
+    let refreshResponseSeen = false;
+    const rememberRefreshRequest = (req: Request) => {
+      if (isRefreshRequest(req)) refreshRequestSeen = true;
+    };
+    const rememberRefreshResponse = (res: Response) => {
+      if (isRefreshResponse(res)) refreshResponseSeen = true;
+    };
+    testPage.on("request", rememberRefreshRequest);
+    testPage.on("response", rememberRefreshResponse);
+    try {
+      await expect(async () => {
+        if (!refreshRequestSeen) {
+          await refreshButton.click();
+        }
+        await expect
+          .poll(() => refreshRequestSeen || refreshResponseSeen, { timeout: 10_000 })
+          .toBe(true);
+      }).toPass({ timeout: 60_000, intervals: [250, 500, 1_000, 2_000] });
+    } finally {
+      testPage.off("request", rememberRefreshRequest);
+      testPage.off("response", rememberRefreshResponse);
+    }
   });
 
   test("branch filter ranks exact match above substring matches", async ({

@@ -6,6 +6,7 @@ import {
   useIntegrationAuthed,
   useIntegrationAvailable,
 } from "../integrations/use-integration-availability";
+import { qk } from "@/lib/query/keys";
 import { useJiraEnabled } from "./use-jira-enabled";
 
 export function useJiraAuthed(workspaceId?: string | null): boolean {
@@ -13,7 +14,11 @@ export function useJiraAuthed(workspaceId?: string | null): boolean {
     () => getJiraConfig(workspaceId ? { workspaceId } : undefined),
     [workspaceId],
   );
-  return useIntegrationAuthed(fetchConfig);
+  return useIntegrationAuthed({
+    active: workspaceId !== null,
+    fetchConfig,
+    queryKey: qk.integrations.jira.config(workspaceId),
+  });
 }
 
 export function useJiraAvailable(workspaceId?: string | null): boolean {
@@ -22,7 +27,9 @@ export function useJiraAvailable(workspaceId?: string | null): boolean {
     [workspaceId],
   );
   return useIntegrationAvailable({
+    active: workspaceId !== null,
     useEnabled: useJiraEnabled,
     fetchConfig,
+    queryKey: qk.integrations.jira.config(workspaceId),
   });
 }

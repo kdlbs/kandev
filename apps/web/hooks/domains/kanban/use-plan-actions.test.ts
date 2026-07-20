@@ -1,13 +1,24 @@
+import { createElement, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import type { ContextFile } from "@/lib/state/context-files-store";
 
+const ids = vi.hoisted(() => ({
+  PLAN_STEP_ID: "plan-step",
+  SESSION_ID: "session-1",
+  TASK_ID: "task-1",
+  WORKFLOW_ID: "workflow-1",
+  WORK_STEP_ID: "work-step",
+}));
 const mockGetState = vi.fn();
 const mockMoveTask = vi.hoisted(() => vi.fn());
 const mockAppState = vi.hoisted(() => ({
   value: {
-    kanban: { workflowId: "workflow-1", steps: [], tasks: [] },
-    tasks: { activeSessionId: "session-1" },
+    kanban: { workflowId: ids.WORKFLOW_ID, steps: [], tasks: [] },
+    tasks: { activeSessionId: ids.SESSION_ID },
     taskSessions: { items: {} },
     setActiveSession: vi.fn(),
     setPlanMode: vi.fn(),
@@ -99,6 +110,41 @@ function file(path: string, name: string, pinned?: boolean): ContextFile {
   return { path, name, pinned };
 }
 
+function queryWrapper(queryClient: QueryClient) {
+  return function QueryWrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client: queryClient }, children);
+  };
+}
+
+function createPlanActionsQueryClient() {
+  const queryClient = makeQueryClient();
+  queryClient.setQueryData(qk.tasks.detail(ids.TASK_ID), {
+    id: ids.TASK_ID,
+    workflow_id: ids.WORKFLOW_ID,
+    workflow_step_id: ids.PLAN_STEP_ID,
+  });
+  queryClient.setQueryData(qk.workflows.steps(ids.WORKFLOW_ID), [
+    {
+      id: ids.PLAN_STEP_ID,
+      name: "Plan",
+      position: 1,
+      events: { on_enter: [{ type: "enable_plan_mode" }] },
+    },
+    {
+      id: ids.WORK_STEP_ID,
+      name: "Work",
+      position: 2,
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    },
+  ]);
+  return queryClient;
+}
+
+function renderPlanActions(args: Parameters<typeof usePlanActions>[0]) {
+  const queryClient = createPlanActionsQueryClient();
+  return renderHook(() => usePlanActions(args), { wrapper: queryWrapper(queryClient) });
+}
+
 describe("readContextFilesMeta", () => {
   const sessionId = "sess-1";
   const appFilePath = "src/app.ts";
@@ -162,22 +208,22 @@ describe("usePlanActions", () => {
     mockAppState.value = {
       ...mockAppState.value,
       kanban: {
-        workflowId: "workflow-1",
+        workflowId: ids.WORKFLOW_ID,
         steps: [
           {
-            id: "plan-step",
+            id: ids.PLAN_STEP_ID,
             title: "Plan",
             position: 1,
             events: { on_enter: [{ type: "enable_plan_mode" }] },
           },
           {
-            id: "work-step",
+            id: ids.WORK_STEP_ID,
             title: "Work",
             position: 2,
             events: { on_enter: [{ type: "auto_start_agent" }] },
           },
         ],
-        tasks: [{ id: "task-1", workflowStepId: "plan-step" }],
+        tasks: [{ id: ids.TASK_ID, workflowStepId: ids.PLAN_STEP_ID }],
       },
     };
   });
@@ -191,54 +237,48 @@ describe("usePlanActions", () => {
       },
     };
 
-    const { result } = renderHook(() =>
-      usePlanActions({
-        resolvedSessionId: "session-1",
-        taskId: "task-1",
-        planModeEnabled: true,
-        handlePlanModeChange: vi.fn(),
-        chatInputRef: chatInputRef as never,
-      }),
-    );
+    const { result } = renderPlanActions({
+      resolvedSessionId: ids.SESSION_ID,
+      taskId: ids.TASK_ID,
+      planModeEnabled: true,
+      handlePlanModeChange: vi.fn(),
+      chatInputRef: chatInputRef as never,
+    });
 
     expect(result.current.implementPlanHandler).toEqual(expect.any(Function));
   });
 
   it("routes implement through the next auto-start work step", async () => {
-    const { result } = renderHook(() =>
-      usePlanActions({
-        resolvedSessionId: "session-1",
-        taskId: "task-1",
-        planModeEnabled: true,
-        handlePlanModeChange: vi.fn(),
-        chatInputRef: { current: null },
-      }),
-    );
+    const { result } = renderPlanActions({
+      resolvedSessionId: ids.SESSION_ID,
+      taskId: ids.TASK_ID,
+      planModeEnabled: true,
+      handlePlanModeChange: vi.fn(),
+      chatInputRef: { current: null },
+    });
 
     await act(async () => {
       await result.current.implementPlanHandler?.(false);
     });
 
-    expect(mockMoveTask).toHaveBeenCalledWith("task-1", {
-      workflow_id: "workflow-1",
-      workflow_step_id: "work-step",
+    expect(mockMoveTask).toHaveBeenCalledWith(ids.TASK_ID, {
+      workflow_id: ids.WORKFLOW_ID,
+      workflow_step_id: ids.WORK_STEP_ID,
       position: 0,
     });
-    expect(mockAppState.value.setPlanMode).toHaveBeenCalledWith("session-1", false);
+    expect(mockAppState.value.setPlanMode).toHaveBeenCalledWith(ids.SESSION_ID, false);
   });
 
   it("keeps plan mode enabled when moving to the work step fails", async () => {
     mockMoveTask.mockRejectedValueOnce(new Error("move failed"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const { result } = renderHook(() =>
-      usePlanActions({
-        resolvedSessionId: "session-1",
-        taskId: "task-1",
-        planModeEnabled: true,
-        handlePlanModeChange: vi.fn(),
-        chatInputRef: { current: null },
-      }),
-    );
+    const { result } = renderPlanActions({
+      resolvedSessionId: ids.SESSION_ID,
+      taskId: ids.TASK_ID,
+      planModeEnabled: true,
+      handlePlanModeChange: vi.fn(),
+      chatInputRef: { current: null },
+    });
 
     await act(async () => {
       await result.current.implementPlanHandler?.(false);
@@ -249,15 +289,13 @@ describe("usePlanActions", () => {
   });
 
   it("does not expose the implement handler outside plan mode", () => {
-    const { result } = renderHook(() =>
-      usePlanActions({
-        resolvedSessionId: "session-1",
-        taskId: "task-1",
-        planModeEnabled: false,
-        handlePlanModeChange: vi.fn(),
-        chatInputRef: { current: null },
-      }),
-    );
+    const { result } = renderPlanActions({
+      resolvedSessionId: ids.SESSION_ID,
+      taskId: ids.TASK_ID,
+      planModeEnabled: false,
+      handlePlanModeChange: vi.fn(),
+      chatInputRef: { current: null },
+    });
 
     expect(result.current.implementPlanHandler).toBeUndefined();
   });

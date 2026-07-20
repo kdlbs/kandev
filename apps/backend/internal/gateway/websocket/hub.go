@@ -3,8 +3,8 @@ package websocket
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -17,7 +17,8 @@ type SessionDataProvider func(ctx context.Context, sessionID string) ([]*ws.Mess
 // Hub manages all WebSocket client connections
 type Hub struct {
 	// All registered clients
-	clients map[*Client]bool
+	clients     map[*Client]bool
+	clientsByID map[string]*Client
 
 	// Clients subscribed to specific tasks (for ACP notifications)
 	taskSubscribers map[string]map[*Client]bool
@@ -51,6 +52,8 @@ type Hub struct {
 	// effective mode (paused/slow/fast) transitions. See hub_session_mode.go.
 	sessionMode            *sessionModeTracker
 	metricsInterestTracker SystemMetricsInterestTracker
+	sessionSeqs            sync.Map
+	sessionFanoutLocks     sync.Map
 
 	// dispatchCtx is the hub's lifetime context, set by Run. Dispatched
 	// message handlers use it instead of the per-connection context so that
@@ -67,6 +70,7 @@ type Hub struct {
 func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 	return &Hub{
 		clients:                  make(map[*Client]bool),
+		clientsByID:              make(map[string]*Client),
 		taskSubscribers:          make(map[string]map[*Client]bool),
 		sessionSubscribers:       make(map[string]map[*Client]bool),
 		userSubscribers:          make(map[string]map[*Client]bool),
@@ -108,6 +112,7 @@ func (h *Hub) Run(ctx context.Context) {
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
+			h.clientsByID[client.ID] = client
 			h.mu.Unlock()
 			h.logger.Debug("Client registered", zap.String("client_id", client.ID))
 
@@ -126,6 +131,13 @@ func (h *Hub) Run(ctx context.Context) {
 func (h *Hub) closeAllClients() {
 	h.mu.Lock()
 	metricClientIDs := make([]string, 0, len(h.systemMetricsSubscribers))
+	h.clientsByID = make(map[string]*Client)
+	h.taskSubscribers = make(map[string]map[*Client]bool)
+	h.sessionSubscribers = make(map[string]map[*Client]bool)
+	h.userSubscribers = make(map[string]map[*Client]bool)
+	h.runSubscribers = make(map[string]map[*Client]bool)
+	h.systemMetricsSubscribers = make(map[*Client]bool)
+	h.sessionMode.focusByClient = make(map[string]map[*Client]bool)
 	for client := range h.clients {
 		if client.systemMetricsSubscribed {
 			metricClientIDs = append(metricClientIDs, client.ID)
@@ -135,11 +147,6 @@ func (h *Hub) closeAllClients() {
 		delete(h.clients, client)
 	}
 	tracker := h.metricsInterestTracker
-	h.taskSubscribers = make(map[string]map[*Client]bool)
-	h.sessionSubscribers = make(map[string]map[*Client]bool)
-	h.runSubscribers = make(map[string]map[*Client]bool)
-	h.systemMetricsSubscribers = make(map[*Client]bool)
-	h.sessionMode.focusByClient = make(map[string]map[*Client]bool)
 	h.mu.Unlock()
 
 	for _, clientID := range metricClientIDs {
@@ -162,6 +169,7 @@ func (h *Hub) removeClient(client *Client) {
 	}
 
 	delete(h.clients, client)
+	delete(h.clientsByID, client.ID)
 	client.closeSend()
 
 	// Remove from all task subscriptions
@@ -244,20 +252,16 @@ func removeClientFromSubscriberMap(subscribers map[string]map[*Client]bool, key 
 
 // broadcastMessage sends a message to relevant clients
 func (h *Hub) broadcastMessage(msg *ws.Message) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error("Failed to marshal broadcast message", zap.Error(err))
-		return
-	}
-
 	h.mu.RLock()
-	defer h.mu.RUnlock()
+	clients := make([]*Client, 0, len(h.clients))
+	for client := range h.clients {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
 
 	// For now, broadcast to all clients
 	// TODO: Add topic-based routing for task-specific notifications
-	for client := range h.clients {
-		client.sendBytes(data)
-	}
+	h.fanoutToClients(msg, clients)
 }
 
 // Register adds a client to the hub
@@ -295,34 +299,81 @@ func (h *Hub) getSubscribersLocked(m map[string]map[*Client]bool, id string) []*
 	return clients
 }
 
-// sendToClients delivers a pre-marshalled message to a list of clients.
-func (h *Hub) sendToClients(data []byte, clients []*Client, action string) {
-	for _, client := range clients {
-		if client.sendBytes(data) {
+func (h *Hub) fanoutToClients(msg *ws.Message, clients []*Client) {
+	h.fanoutToClientsForSession("", msg, clients)
+}
+
+func (h *Hub) fanoutToClientsForSession(sessionID string, msg *ws.Message, clients []*Client) {
+	if sessionID != "" {
+		lock := h.sessionFanoutLock(sessionID)
+		lock.Lock()
+		defer lock.Unlock()
+	}
+	h.fanoutToClientsForSessionLocked(sessionID, msg, clients)
+}
+
+func (h *Hub) fanoutToClientsForSessionLocked(sessionID string, msg *ws.Message, clients []*Client) {
+	recipients := clients
+	var sessionSeq int64
+	if sessionID != "" {
+		if len(clients) == 0 {
+			h.logger.Debug("No session subscribers for broadcast",
+				zap.String("session_id", sessionID),
+				zap.String("action", msg.Action))
+			return
+		}
+		recipients = availableClients(clients)
+		if len(recipients) == 0 {
+			h.logger.Warn("All session subscriber send buffers full, dropping message",
+				zap.String("session_id", sessionID),
+				zap.String("action", msg.Action),
+				zap.Int("subscriber_count", len(clients)))
+			return
+		}
+	}
+	// E2E accounting stamps each client with its own connection sequence, so
+	// broadcasts intentionally marshal once per recipient instead of sharing one
+	// pre-marshaled byte slice.
+	for _, client := range recipients {
+		sent, usedSessionSeq := client.sendStampedCopyForSessionSeqResult(sessionID, sessionSeq, msg)
+		if sent {
+			if sessionID != "" && sessionSeq == 0 {
+				sessionSeq = usedSessionSeq
+			}
 			h.logger.Debug("Sent message to client",
 				zap.String("client_id", client.ID),
-				zap.String("action", action))
+				zap.String("action", msg.Action))
 		} else {
 			h.logger.Warn("Client send buffer full, dropping message",
 				zap.String("client_id", client.ID),
-				zap.String("action", action))
+				zap.String("action", msg.Action))
 		}
 	}
 }
 
+func (h *Hub) sessionFanoutLock(sessionID string) *sync.Mutex {
+	value, _ := h.sessionFanoutLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	return value.(*sync.Mutex)
+}
+
+func availableClients(clients []*Client) []*Client {
+	out := make([]*Client, 0, len(clients))
+	for _, client := range clients {
+		if client.canAcceptStampedMessage() {
+			out = append(out, client)
+		}
+	}
+	return out
+}
+
 // BroadcastToTask sends a notification to clients subscribed to a specific task
 func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error("Failed to marshal message", zap.Error(err))
-		return
-	}
 	clients := h.getSubscribersLocked(h.taskSubscribers, taskID)
 	h.logger.Debug("BroadcastToTask",
 		zap.String("task_id", taskID),
 		zap.String("action", msg.Action),
 		zap.Int("subscriber_count", len(clients)))
-	h.sendToClients(data, clients, msg.Action)
+	h.fanoutToClients(msg, clients)
 }
 
 // getSessionRecipientsLocked returns the deduped set of clients that should
@@ -360,32 +411,22 @@ func (h *Hub) getSessionRecipientsLocked(sessionID string) []*Client {
 // BroadcastToSession sends a notification to clients subscribed to OR focused on
 // a specific session. See getSessionRecipientsLocked for why focus is included.
 func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error("Failed to marshal message", zap.Error(err))
-		return
-	}
 	clients := h.getSessionRecipientsLocked(sessionID)
 	h.logger.Debug("BroadcastToSession",
 		zap.String("session_id", sessionID),
 		zap.String("action", msg.Action),
 		zap.Int("recipient_count", len(clients)))
-	h.sendToClients(data, clients, msg.Action)
+	h.fanoutToClientsForSession(sessionID, msg, clients)
 }
 
 // BroadcastToUser sends a notification to clients subscribed to a specific user
 func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error("Failed to marshal message", zap.Error(err))
-		return
-	}
 	clients := h.getSubscribersLocked(h.userSubscribers, userID)
 	h.logger.Debug("BroadcastToUser",
 		zap.String("user_id", userID),
 		zap.String("action", msg.Action),
 		zap.Int("subscriber_count", len(clients)))
-	h.sendToClients(data, clients, msg.Action)
+	h.fanoutToClients(msg, clients)
 }
 
 // SubscribeToTask subscribes a client to task notifications
@@ -468,32 +509,22 @@ func (h *Hub) UnsubscribeFromUser(client *Client, userID string) {
 
 // BroadcastToRun sends a notification to clients subscribed to a specific office run id.
 func (h *Hub) BroadcastToRun(runID string, msg *ws.Message) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error("Failed to marshal message", zap.Error(err))
-		return
-	}
 	clients := h.getSubscribersLocked(h.runSubscribers, runID)
 	h.logger.Debug("BroadcastToRun",
 		zap.String("run_id", runID),
 		zap.String("action", msg.Action),
 		zap.Int("subscriber_count", len(clients)))
-	h.sendToClients(data, clients, msg.Action)
+	h.fanoutToClients(msg, clients)
 }
 
 func (h *Hub) BroadcastToSystemMetrics(msg *ws.Message) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error("Failed to marshal message", zap.Error(err))
-		return
-	}
 	h.mu.RLock()
 	clients := make([]*Client, 0, len(h.systemMetricsSubscribers))
 	for client := range h.systemMetricsSubscribers {
 		clients = append(clients, client)
 	}
 	h.mu.RUnlock()
-	h.sendToClients(data, clients, msg.Action)
+	h.fanoutToClients(msg, clients)
 }
 
 // SubscribeToRun subscribes a client to office run-event notifications.
@@ -581,6 +612,49 @@ func (h *Hub) GetClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)
+}
+
+// WsSentEvent is one stamped outbound envelope recorded for E2E receipt checks.
+type WsSentEvent struct {
+	ConnectionSeq int64 `json:"connection_seq"`
+	// SessionSeq is per-session accounting only. It may gap when a recipient
+	// send is dropped and may reset after a session pauses and later resumes.
+	SessionSeq int64     `json:"session_seq,omitempty"`
+	SessionID  string    `json:"session_id,omitempty"`
+	Type       string    `json:"type"`
+	Action     string    `json:"action"`
+	SentAt     time.Time `json:"sent_at"`
+}
+
+func (h *Hub) GetSentEventsFor(connectionID string, sinceConnectionSeq int64) ([]WsSentEvent, int64, bool) {
+	client, ok := h.getClientByID(connectionID)
+	if !ok || client.sentLog == nil {
+		return nil, 0, false
+	}
+	entries := client.sentLog.Since(sinceConnectionSeq)
+	return entries, client.sentLog.MaxConnectionSeq(), true
+}
+
+func (h *Hub) GetSentEventsForSession(connectionID, sessionID string) ([]WsSentEvent, int64, bool) {
+	client, ok := h.getClientByID(connectionID)
+	if !ok || client.sentLog == nil {
+		return nil, 0, false
+	}
+	entries := client.sentLog.SinceForSession(sessionID)
+	var maxSessionSeq int64
+	for _, entry := range entries {
+		if entry.SessionSeq > maxSessionSeq {
+			maxSessionSeq = entry.SessionSeq
+		}
+	}
+	return entries, maxSessionSeq, true
+}
+
+func (h *Hub) getClientByID(id string) (*Client, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	client, ok := h.clientsByID[id]
+	return client, ok
 }
 
 // GetDispatcher returns the message dispatcher

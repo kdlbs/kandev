@@ -16,7 +16,7 @@ import { ConfigChatProvider } from "@/components/config-chat/config-chat-provide
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
 import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
 import { LogBufferBridge } from "@/components/log-buffer-bridge";
-import { getFeatureFlagsAction, getRuntimeDebugModeAction } from "@/app/actions/features";
+import { getRuntimeDebugModeAction } from "@/app/actions/features";
 
 export const metadata = {
   title: "Kandev - AI Kanban",
@@ -38,14 +38,7 @@ export default async function RootLayout({
 }>) {
   const envDebugMode = process.env.KANDEV_DEBUG === "true";
 
-  // SSR-fetch the deployment's feature flags so the entire client tree
-  // (including the sidebar nav and gated routes) renders with the correct
-  // visibility on the first paint. Falls back to all-off when the backend
-  // is unreachable. See docs/decisions/0007-runtime-feature-flags.md.
-  const [features, runtimeDebugMode] = await Promise.all([
-    getFeatureFlagsAction(),
-    getRuntimeDebugModeAction(),
-  ]);
+  const runtimeDebugMode = await getRuntimeDebugModeAction();
   const debugMode = envDebugMode || runtimeDebugMode;
 
   const runtimeConfigScript = debugMode ? "window.__KANDEV_DEBUG = true;" : null;
@@ -70,7 +63,7 @@ export default async function RootLayout({
         />
       </head>
       <body className="antialiased font-sans">
-        <StateProvider initialState={{ features }}>
+        <StateProvider>
           <ThemeProvider>
             <DiffWorkerPoolProvider>
               <TooltipProvider>

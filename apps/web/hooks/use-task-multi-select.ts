@@ -1,101 +1,59 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+  type Dispatch,
+  type RefObject,
+} from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useTaskActions } from "@/hooks/use-task-actions";
-import { useAppStoreApi } from "@/components/state-provider";
-import type { KanbanState } from "@/lib/state/slices";
+import type { WorkflowSnapshotData } from "@/lib/state/slices";
 import { sortIdsByCreatedDesc } from "@/lib/kanban/task-order";
+import {
+  removeTasksFromWorkflowSnapshotQueries,
+  updateWorkflowSnapshotQueries,
+} from "@/lib/query/workflow-snapshot-cache";
 
-/** @internal Exported for reuse by the sidebar multi-select hook. */
-export function useTaskMultiSelectStore() {
-  const store = useAppStoreApi();
+function applyMoveInQuerySnapshots(
+  queryClient: QueryClient,
+  succeededIds: Set<string>,
+  targetStepId: string,
+): void {
+  updateWorkflowSnapshotQueries(queryClient, (snapshot) => {
+    if (!snapshot.tasks.some((task) => succeededIds.has(task.id))) return snapshot;
+    return {
+      ...snapshot,
+      tasks: snapshot.tasks.map((task) =>
+        succeededIds.has(task.id) ? { ...task, workflow_step_id: targetStepId } : task,
+      ),
+    };
+  });
+}
 
-  const removeTasksFromStore = useCallback(
-    (ids: Set<string>) => {
-      const state = store.getState();
-      // Remove from single-workflow view
-      const currentKanban = state.kanban;
-      state.hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.filter((t: KanbanState["tasks"][number]) => !ids.has(t.id)),
-        },
-      });
-      // Remove from multi-workflow snapshots
-      for (const [wfId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
-        const affected = snapshot.tasks.some((t: KanbanState["tasks"][number]) => ids.has(t.id));
-        if (affected) {
-          state.setWorkflowSnapshot(wfId, {
-            ...snapshot,
-            tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => !ids.has(t.id)),
-          });
-        }
-      }
-    },
-    [store],
-  );
+function getWorkflowIdForTask(
+  snapshots: Record<string, WorkflowSnapshotData>,
+  taskId: string,
+  fallbackWorkflowId: string | null,
+): string | null {
+  for (const [workflowId, snapshot] of Object.entries(snapshots)) {
+    if (snapshot.tasks.some((task) => task.id === taskId)) return workflowId;
+  }
+  return fallbackWorkflowId;
+}
 
-  const applyMoveInStore = useCallback(
-    (succeededIds: Set<string>, targetStepId: string) => {
-      const state = store.getState();
-      // Update single-workflow view
-      const currentKanban = state.kanban;
-      state.hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.map((t: KanbanState["tasks"][number]) =>
-            succeededIds.has(t.id) ? { ...t, workflowStepId: targetStepId } : t,
-          ),
-        },
-      });
-      // Update multi-workflow snapshots
-      for (const [wfId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
-        const affected = snapshot.tasks.filter((t: KanbanState["tasks"][number]) =>
-          succeededIds.has(t.id),
-        );
-        if (affected.length > 0) {
-          state.setWorkflowSnapshot(wfId, {
-            ...snapshot,
-            tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
-              succeededIds.has(t.id) ? { ...t, workflowStepId: targetStepId } : t,
-            ),
-          });
-        }
-      }
-    },
-    [store],
-  );
-
-  const getWorkflowIdForTask = useCallback(
-    (taskId: string): string | null => {
-      const snapshots = store.getState().kanbanMulti.snapshots;
-      for (const [wfId, snapshot] of Object.entries(snapshots)) {
-        if (snapshot.tasks.some((t: KanbanState["tasks"][number]) => t.id === taskId)) {
-          return wfId;
-        }
-      }
-      return store.getState().kanban.workflowId;
-    },
-    [store],
-  );
-
-  // Sort ids into the board's visible (created-desc) order. A backward range
-  // selection leaves `selectedIds` in anchor-first Set order, which would land
-  // scrambled when the move assigns sequential positions.
-  const sortByDisplayOrder = useCallback(
-    (ids: string[]): string[] => {
-      const state = store.getState();
-      const taskById = new Map<string, { createdAt?: string }>();
-      for (const snap of Object.values(state.kanbanMulti.snapshots)) {
-        for (const t of snap.tasks) taskById.set(t.id, t);
-      }
-      for (const t of state.kanban.tasks) if (!taskById.has(t.id)) taskById.set(t.id, t);
-      return sortIdsByCreatedDesc(ids, taskById);
-    },
-    [store],
-  );
-
-  return { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask, sortByDisplayOrder };
+function sortByDisplayOrder(
+  snapshots: Record<string, WorkflowSnapshotData>,
+  ids: string[],
+): string[] {
+  const taskById = new Map<string, { createdAt?: string }>();
+  for (const snapshot of Object.values(snapshots)) {
+    for (const task of snapshot.tasks) taskById.set(task.id, task);
+  }
+  return sortIdsByCreatedDesc(ids, taskById);
 }
 
 function useBulkOperations({
@@ -108,10 +66,10 @@ function useBulkOperations({
   moveTaskById,
   deleteTaskById,
   archiveTaskById,
-  removeTasksFromStore,
-  applyMoveInStore,
-  getWorkflowIdForTask,
-  sortByDisplayOrder,
+  removeTasksFromSnapshots,
+  applyMoveInSnapshots,
+  resolveWorkflowIdForTask,
+  sortSelectedIdsByDisplayOrder,
 }: {
   workflowId: string | null;
   selectedIdsRef: RefObject<Set<string>>;
@@ -122,10 +80,10 @@ function useBulkOperations({
   moveTaskById: ReturnType<typeof useTaskActions>["moveTaskById"];
   deleteTaskById: ReturnType<typeof useTaskActions>["deleteTaskById"];
   archiveTaskById: ReturnType<typeof useTaskActions>["archiveTaskById"];
-  removeTasksFromStore: (ids: Set<string>) => void;
-  applyMoveInStore: (ids: Set<string>, stepId: string) => void;
-  getWorkflowIdForTask: (id: string) => string | null;
-  sortByDisplayOrder: (ids: string[]) => string[];
+  removeTasksFromSnapshots: (ids: Set<string>) => void;
+  applyMoveInSnapshots: (ids: Set<string>, stepId: string) => void;
+  resolveWorkflowIdForTask: (id: string) => string | null;
+  sortSelectedIdsByDisplayOrder: (ids: string[]) => string[];
 }) {
   const runBulk = useCallback(
     async (
@@ -140,7 +98,7 @@ function useBulkOperations({
         const idList = [...ids];
         const results = await Promise.allSettled(idList.map((id) => per(id, opts)));
         const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-        removeTasksFromStore(succeeded);
+        removeTasksFromSnapshots(succeeded);
         const failed = new Set(idList.filter((_, i) => results[i].status === "rejected"));
         setSelectedIds(failed);
         if (failed.size === 0) setIsMultiSelectEnabled(false);
@@ -148,7 +106,7 @@ function useBulkOperations({
         setBusy(false);
       }
     },
-    [removeTasksFromStore, selectedIdsRef, setIsMultiSelectEnabled, setSelectedIds],
+    [removeTasksFromSnapshots, selectedIdsRef, setIsMultiSelectEnabled, setSelectedIds],
   );
 
   const bulkDelete = useCallback(
@@ -165,11 +123,11 @@ function useBulkOperations({
     async (targetStepId: string) => {
       // Move in board order so a backward range selection isn't reordered when
       // sequential positions are assigned below.
-      const idList = sortByDisplayOrder([...(selectedIdsRef.current ?? [])]);
+      const idList = sortSelectedIdsByDisplayOrder([...(selectedIdsRef.current ?? [])]);
       if (idList.length === 0) return;
       const results = await Promise.allSettled(
         idList.map((id, i) => {
-          const wfId = getWorkflowIdForTask(id) ?? workflowId;
+          const wfId = resolveWorkflowIdForTask(id) ?? workflowId;
           if (!wfId) return Promise.reject(new Error("no workflow"));
           return moveTaskById(id, {
             workflow_id: wfId,
@@ -179,15 +137,15 @@ function useBulkOperations({
         }),
       );
       const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-      applyMoveInStore(succeeded, targetStepId);
+      applyMoveInSnapshots(succeeded, targetStepId);
     },
     [
       workflowId,
       moveTaskById,
-      applyMoveInStore,
-      getWorkflowIdForTask,
-      sortByDisplayOrder,
+      applyMoveInSnapshots,
+      resolveWorkflowIdForTask,
       selectedIdsRef,
+      sortSelectedIdsByDisplayOrder,
     ],
   );
 
@@ -300,7 +258,31 @@ export function multiSelectReducer(
   }
 }
 
-export function useTaskMultiSelect(workflowId: string | null) {
+function useMultiSelectDispatchers(dispatch: Dispatch<MultiSelectAction>) {
+  const setSelectedIds = useCallback(
+    (ids: Set<string>) => dispatch({ type: "set_selected", ids }),
+    [dispatch],
+  );
+  const setIsMultiSelectEnabled = useCallback(
+    (value: boolean) => dispatch({ type: "set_enabled", value }),
+    [dispatch],
+  );
+  const setIsDeleting = useCallback(
+    (value: boolean) => dispatch({ type: "set_deleting", value }),
+    [dispatch],
+  );
+  const setIsArchiving = useCallback(
+    (value: boolean) => dispatch({ type: "set_archiving", value }),
+    [dispatch],
+  );
+  return { setSelectedIds, setIsMultiSelectEnabled, setIsDeleting, setIsArchiving };
+}
+
+export function useTaskMultiSelect(
+  workflowId: string | null,
+  snapshots: Record<string, WorkflowSnapshotData> = {},
+) {
+  const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(multiSelectReducer, INITIAL_STATE);
   const { selectedIds, isMultiSelectEnabled, isDeleting, isArchiving } = state;
   const selectedIdsRef = useRef(selectedIds);
@@ -308,31 +290,30 @@ export function useTaskMultiSelect(workflowId: string | null) {
     selectedIdsRef.current = selectedIds;
   });
   const isProcessing = isDeleting || isArchiving;
-
-  const setSelectedIds = useCallback(
-    (ids: Set<string>) => dispatch({ type: "set_selected", ids }),
-    [],
-  );
-  const setIsMultiSelectEnabled = useCallback(
-    (value: boolean) => dispatch({ type: "set_enabled", value }),
-    [],
-  );
-  const setIsDeleting = useCallback(
-    (value: boolean) => dispatch({ type: "set_deleting", value }),
-    [],
-  );
-  const setIsArchiving = useCallback(
-    (value: boolean) => dispatch({ type: "set_archiving", value }),
-    [],
-  );
+  const { setSelectedIds, setIsMultiSelectEnabled, setIsDeleting, setIsArchiving } =
+    useMultiSelectDispatchers(dispatch);
 
   useEffect(() => {
     dispatch({ type: "reset" });
   }, [workflowId]);
 
   const { moveTaskById, deleteTaskById, archiveTaskById } = useTaskActions();
-  const { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask, sortByDisplayOrder } =
-    useTaskMultiSelectStore();
+  const removeTasksFromSnapshots = useCallback(
+    (ids: Set<string>) => removeTasksFromWorkflowSnapshotQueries(queryClient, ids),
+    [queryClient],
+  );
+  const applyMoveInSnapshots = useCallback(
+    (ids: Set<string>, stepId: string) => applyMoveInQuerySnapshots(queryClient, ids, stepId),
+    [queryClient],
+  );
+  const resolveWorkflowIdForTask = useCallback(
+    (taskId: string) => getWorkflowIdForTask(snapshots, taskId, workflowId),
+    [snapshots, workflowId],
+  );
+  const sortSelectedIdsByDisplayOrder = useCallback(
+    (ids: string[]) => sortByDisplayOrder(snapshots, ids),
+    [snapshots],
+  );
 
   const toggleSelect = useCallback(
     (taskId: string) => dispatch({ type: "toggle_select", taskId }),
@@ -374,10 +355,10 @@ export function useTaskMultiSelect(workflowId: string | null) {
     moveTaskById,
     deleteTaskById,
     archiveTaskById,
-    removeTasksFromStore,
-    applyMoveInStore,
-    getWorkflowIdForTask,
-    sortByDisplayOrder,
+    removeTasksFromSnapshots,
+    applyMoveInSnapshots,
+    resolveWorkflowIdForTask,
+    sortSelectedIdsByDisplayOrder,
   });
 
   return {

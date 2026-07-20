@@ -33,8 +33,8 @@ export async function openWideTask(
   );
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
-  await session.waitForLoad();
   await session.waitForDockviewReady();
+  await expect(page.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
   return session;
 }
 

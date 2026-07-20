@@ -16,6 +16,10 @@ vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
+vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
+  useSettingsData: () => ({ agentProfiles: mockAppState.agentProfiles.items }),
+}));
+
 vi.mock("@/lib/api/domains/workspace-api", () => ({
   startQuickChat: (...args: unknown[]) => mockStartQuickChat(...args),
 }));

@@ -10,7 +10,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
-import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import type {
   ActiveSessionInfo,
   RoutingTierReference,
@@ -84,8 +85,8 @@ export function AgentProfileDeleteConflictDialog({
   const routingTiers = conflict?.routingTiers ?? [];
   const hasHardBlockers = routingTiers.length > 0;
   const watchersByKind = groupWatchersByKind(watchers);
-  const workspaces = useAppStore((s) => s.workspaces.items);
-  const providers = useAppStore((s) => s.settingsAgents.items);
+  const { items: workspaces } = useWorkspaces();
+  const { settingsAgents: providers } = useSettingsData(true);
 
   return (
     <AlertDialog open={!!conflict} onOpenChange={onOpenChange}>

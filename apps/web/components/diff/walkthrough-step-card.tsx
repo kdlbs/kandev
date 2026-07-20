@@ -13,6 +13,12 @@ import { revealFileAtLine, type OpenFileFn } from "@/lib/diff/walkthrough-reveal
 import { generateUUID } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import {
+  useActiveTaskWalkthrough,
+  useTaskWalkthrough,
+  useWalkthroughSeen,
+  useWalkthroughStepState,
+} from "@/hooks/domains/session/use-task-walkthrough";
+import {
   markdownComponents,
   normalizeMarkdown,
   remarkPlugins,
@@ -129,13 +135,11 @@ function StepNavigation({
 
 /** True when the active task has a walkthrough with a valid active step. */
 export function useHasActiveWalkthroughStep(): boolean {
-  return useAppStore((s) => {
-    const taskId = s.tasks.activeTaskId;
-    if (!taskId) return false;
-    const wt = s.walkthroughs.byTaskId[taskId];
-    const idx = s.walkthroughs.activeStepByTaskId[taskId] ?? 0;
-    return !!wt?.steps[idx];
-  });
+  const { taskId, data: walkthrough } = useActiveTaskWalkthrough();
+  const activeStep = useAppStore((s) =>
+    taskId ? (s.walkthroughs.activeStepByTaskId[taskId] ?? 0) : 0,
+  );
+  return Boolean(walkthrough?.steps[activeStep]);
 }
 
 function useWalkthroughStepFeedback(params: {
@@ -211,17 +215,12 @@ export function WalkthroughStepInner({
 }) {
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const walkthrough = useAppStore((s) =>
-    activeTaskId ? s.walkthroughs.byTaskId[activeTaskId] : null,
-  );
-  const activeStep = useAppStore((s) =>
-    activeTaskId ? (s.walkthroughs.activeStepByTaskId[activeTaskId] ?? 0) : 0,
-  );
-  const setActiveStep = useAppStore((s) => s.setWalkthroughActiveStep);
-  const markSeen = useAppStore((s) => s.markWalkthroughSeen);
+  const walkthrough = useTaskWalkthrough(activeTaskId).data ?? null;
+  const stepCount = walkthrough?.steps.length ?? 0;
+  const { activeStep, setActiveStep } = useWalkthroughStepState(activeTaskId, stepCount);
+  const { markSeen } = useWalkthroughSeen(activeTaskId, walkthrough);
   const { openFile: defaultOpenFile } = useFileEditors();
   const openFile = onSelectFile ?? defaultOpenFile;
-  const stepCount = walkthrough?.steps.length ?? 0;
   const step = walkthrough?.steps[activeStep];
   const { addWalkthroughFeedback, runWalkthroughFeedback } = useWalkthroughStepFeedback({
     activeStep,
@@ -232,7 +231,7 @@ export function WalkthroughStepInner({
     walkthrough,
   });
   useEffect(() => {
-    if (activeTaskId && walkthrough) markSeen(activeTaskId);
+    if (activeTaskId && walkthrough) markSeen();
   }, [activeTaskId, walkthrough, markSeen]);
   if (!activeTaskId || !walkthrough) return null;
   if (!step) return null;
@@ -253,8 +252,8 @@ export function WalkthroughStepInner({
       <StepNavigation
         activeStep={activeStep}
         stepCount={stepCount}
-        onPrevious={() => setActiveStep(activeTaskId, activeStep - 1)}
-        onNext={() => setActiveStep(activeTaskId, activeStep + 1)}
+        onPrevious={() => setActiveStep(activeStep - 1)}
+        onNext={() => setActiveStep(activeStep + 1)}
       />
       <div className="px-4 pb-3 pt-1">
         <CommentForm
@@ -309,12 +308,11 @@ function buildWalkthroughComment(params: {
 export function WalkthroughStepCard() {
   const hasStep = useHasActiveWalkthroughStep();
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const walkthrough = useTaskWalkthrough(activeTaskId).data ?? null;
   const activeStep = useAppStore((s) =>
     activeTaskId ? (s.walkthroughs.activeStepByTaskId[activeTaskId] ?? 0) : 0,
   );
-  const updatedAt = useAppStore((s) =>
-    activeTaskId ? s.walkthroughs.byTaskId[activeTaskId]?.updated_at : undefined,
-  );
+  const updatedAt = walkthrough?.updated_at;
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
   const stepKey = activeTaskId ? `${activeTaskId}:${updatedAt ?? ""}:${activeStep}` : "";
   if (!hasStep || dismissedKey === stepKey) return null;

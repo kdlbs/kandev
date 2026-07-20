@@ -1,6 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { editor as monacoEditor } from "monaco-editor";
+import { createElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { qk } from "@/lib/query/keys";
 
 const hookState = vi.hoisted(() => ({
   tasks: { activeTaskId: "task-1" },
@@ -30,6 +33,22 @@ vi.mock("@/lib/walkthrough-open-state", () => ({
 }));
 
 const WALKTHROUGH_FILE = "walkthrough_a.txt";
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+});
+queryClient.setQueryData(qk.taskWalkthrough.detail("task-1"), {
+  id: "walkthrough-1",
+  task_id: "task-1",
+  title: "Walkthrough",
+  steps: hookState.walkthroughs.byTaskId["task-1"].steps,
+  created_by: "agent",
+  created_at: "2026-07-20T00:00:00Z",
+  updated_at: "2026-07-20T00:00:00Z",
+});
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: queryClient }, children);
+}
 
 import {
   buildWalkthroughRangeDecorations,
@@ -137,12 +156,14 @@ describe("clampWalkthroughRangeToLineCount", () => {
 describe("useMonacoWalkthroughRange", () => {
   it("reclamps the active range after Monaco switches models", () => {
     const fake = createModelSwitchingEditor(2);
-    renderHook(() =>
-      useMonacoWalkthroughRange({
-        editor: fake.editor,
-        editorAreaRef: { current: null },
-        path: WALKTHROUGH_FILE,
-      }),
+    renderHook(
+      () =>
+        useMonacoWalkthroughRange({
+          editor: fake.editor,
+          editorAreaRef: { current: null },
+          path: WALKTHROUGH_FILE,
+        }),
+      { wrapper },
     );
     expect(fake.decoratedLines()).toEqual([2]);
 
@@ -154,12 +175,14 @@ describe("useMonacoWalkthroughRange", () => {
 
   it("reclamps when the current Monaco model line count changes", () => {
     const fake = createModelSwitchingEditor(3);
-    renderHook(() =>
-      useMonacoWalkthroughRange({
-        editor: fake.editor,
-        editorAreaRef: { current: null },
-        path: WALKTHROUGH_FILE,
-      }),
+    renderHook(
+      () =>
+        useMonacoWalkthroughRange({
+          editor: fake.editor,
+          editorAreaRef: { current: null },
+          path: WALKTHROUGH_FILE,
+        }),
+      { wrapper },
     );
 
     act(() => fake.changeLineCount(2));
@@ -170,12 +193,14 @@ describe("useMonacoWalkthroughRange", () => {
 
   it("does not recenter for same-model line count changes outside the active range", () => {
     const fake = createModelSwitchingEditor(3);
-    renderHook(() =>
-      useMonacoWalkthroughRange({
-        editor: fake.editor,
-        editorAreaRef: { current: null },
-        path: WALKTHROUGH_FILE,
-      }),
+    renderHook(
+      () =>
+        useMonacoWalkthroughRange({
+          editor: fake.editor,
+          editorAreaRef: { current: null },
+          path: WALKTHROUGH_FILE,
+        }),
+      { wrapper },
     );
     fake.revealLinesInCenter.mockClear();
 
@@ -186,12 +211,14 @@ describe("useMonacoWalkthroughRange", () => {
 
   it("reapplies the range after switching to a model with the same line count", () => {
     const fake = createModelSwitchingEditor(3);
-    renderHook(() =>
-      useMonacoWalkthroughRange({
-        editor: fake.editor,
-        editorAreaRef: { current: null },
-        path: WALKTHROUGH_FILE,
-      }),
+    renderHook(
+      () =>
+        useMonacoWalkthroughRange({
+          editor: fake.editor,
+          editorAreaRef: { current: null },
+          path: WALKTHROUGH_FILE,
+        }),
+      { wrapper },
     );
     fake.setDecorations.mockClear();
     fake.revealLinesInCenter.mockClear();
@@ -204,12 +231,14 @@ describe("useMonacoWalkthroughRange", () => {
 
   it("unsubscribes from Monaco model events on unmount", () => {
     const fake = createModelSwitchingEditor(3);
-    const { unmount } = renderHook(() =>
-      useMonacoWalkthroughRange({
-        editor: fake.editor,
-        editorAreaRef: { current: null },
-        path: WALKTHROUGH_FILE,
-      }),
+    const { unmount } = renderHook(
+      () =>
+        useMonacoWalkthroughRange({
+          editor: fake.editor,
+          editorAreaRef: { current: null },
+          path: WALKTHROUGH_FILE,
+        }),
+      { wrapper },
     );
     expect(fake.listenerCounts()).toEqual({ content: 1, model: 1 });
 

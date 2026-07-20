@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { makeQueryClient } from "@/lib/query/client";
 import { SettingsSaveProvider } from "./settings-save-provider";
 import { getPromptDraftMeta, PromptsSettings } from "./prompts-settings";
 
@@ -13,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
-  useCustomPrompts: () => ({ loaded: true }),
+  useCustomPrompts: () => ({ loaded: true, prompts: [] }),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -53,9 +55,11 @@ describe("PromptsSettings coordinated creation", () => {
 
   it("creates a prompt only when the floating route Save is pressed", async () => {
     render(
-      <SettingsSaveProvider>
-        <PromptsSettings />
-      </SettingsSaveProvider>,
+      <QueryClientProvider client={makeQueryClient()}>
+        <SettingsSaveProvider>
+          <PromptsSettings />
+        </SettingsSaveProvider>
+      </QueryClientProvider>,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Add prompt" }));

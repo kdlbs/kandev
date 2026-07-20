@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
 import { useWorkspacePRs } from "./use-task-pr";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -10,8 +9,7 @@ function prKey(owner: string, repo: string, prNumber: number): string {
 }
 
 export function usePRKeyToTasks(workspaceId: string | null): Map<string, TaskPR[]> {
-  useWorkspacePRs(workspaceId);
-  const byTaskId = useAppStore((state) => state.taskPRs.byTaskId);
+  const byTaskId = useWorkspacePRs(workspaceId);
 
   return useMemo(() => {
     const map = new Map<string, TaskPR[]>();

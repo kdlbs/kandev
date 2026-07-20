@@ -3,7 +3,6 @@
 import Link from "@/components/routing/app-link";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent } from "@kandev/ui/card";
-import { useAppStore } from "@/components/state-provider";
 import type { AgentProfile, AgentRoutePreview } from "@/lib/state/slices/office/types";
 import { AgentAvatar } from "../../components/agent-avatar";
 // (path from /agents/components/ → /office/components/ resolves correctly)
@@ -14,21 +13,12 @@ import { providerLabel } from "../../workspace/routing/components/provider-order
 
 type AgentCardProps = {
   agent: AgentProfile;
+  routingEnabled?: boolean;
+  routingPreview?: AgentRoutePreview;
 };
 
-export function AgentCard({ agent }: AgentCardProps) {
+export function AgentCard({ agent, routingEnabled = false, routingPreview }: AgentCardProps) {
   const isPending = agent.status === "pending_approval";
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const routingEnabled = useAppStore(
-    (s) => s.office.routing.byWorkspace[workspaceId ?? ""]?.enabled ?? false,
-  );
-  const preview = useAppStore((s) =>
-    workspaceId
-      ? (s.office.routing.preview.byWorkspace[workspaceId] ?? []).find(
-          (p) => p.agent_id === agent.id,
-        )
-      : undefined,
-  );
   return (
     <Link href={`/office/agents/${agent.id}`} className="cursor-pointer">
       <Card
@@ -55,7 +45,7 @@ export function AgentCard({ agent }: AgentCardProps) {
               )}
             </div>
             <BudgetGauge budgetCents={agent.budgetMonthlyCents} className="mt-2" />
-            {routingEnabled && preview && <RoutingChip preview={preview} />}
+            {routingEnabled && routingPreview && <RoutingChip preview={routingPreview} />}
           </div>
         </CardContent>
       </Card>

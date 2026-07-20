@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
@@ -140,11 +141,9 @@ function FailedSessionBanner({
   const agentProfileId = useAppStore((s) =>
     sessionId ? (s.taskSessions.items[sessionId]?.agent_profile_id ?? "") : "",
   );
-  const profileExists = useAppStore(
-    (s) =>
-      agentProfileId !== "" &&
-      s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId),
-  );
+  const { agentProfiles } = useSettingsData(Boolean(agentProfileId));
+  const profileExists =
+    agentProfileId !== "" && agentProfiles.some((profile) => profile.id === agentProfileId);
 
   const handleRecover = useCallback(
     async (action: "resume" | "fresh_start") => {

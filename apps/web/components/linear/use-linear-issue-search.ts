@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { searchLinearIssues } from "@/lib/api/domains/linear-api";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import type { LinearIssue } from "@/lib/types/linear";
+import { linearIssuesQueryOptions } from "@/lib/query/query-options";
 
 export const LINEAR_PAGE_SIZE = 25;
 
@@ -33,53 +34,21 @@ export function useLinearIssueSearch(
   assigned: string,
   enabled: boolean,
 ): LinearSearchState {
-  const [items, setItems] = useState<LinearIssue[]>([]);
   const [page, setPage] = useState(1);
-  const [isLast, setIsLast] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   // tokens[i] is the page_token for page i+1; tokens[0] is always "".
   const tokensRef = useRef<string[]>([""]);
-  const reqRef = useRef(0);
-
-  const fetchPage = useCallback(
-    (p: number) =>
-      searchLinearIssues(
-        {
-          query: query || undefined,
-          teamKey: teamKey || undefined,
-          assigned: assigned || undefined,
-          pageToken: tokensRef.current[p - 1] || undefined,
-          maxResults: LINEAR_PAGE_SIZE,
-        },
-        { workspaceId },
-      ),
-    [workspaceId, query, teamKey, assigned],
-  );
-
-  const run = useCallback(
-    async (p: number) => {
-      if (!workspaceId || !enabled) return;
-      const reqId = ++reqRef.current;
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetchPage(p);
-        if (reqId !== reqRef.current) return;
-        setItems(res.issues ?? []);
-        setIsLast(res.isLast ?? true);
-        if (!res.isLast && res.nextPageToken) {
-          tokensRef.current[p] = res.nextPageToken;
-        }
-      } catch (err) {
-        if (reqId !== reqRef.current) return;
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (reqId === reqRef.current) setLoading(false);
-      }
-    },
-    [workspaceId, enabled, fetchPage],
-  );
+  const [filters, setFilters] = useState({ query, teamKey, assigned });
+  const searchQuery = useQuery({
+    ...linearIssuesQueryOptions(workspaceId, {
+      query: filters.query || undefined,
+      teamKey: filters.teamKey || undefined,
+      assigned: filters.assigned || undefined,
+      pageToken: tokensRef.current[page - 1] || undefined,
+      maxResults: LINEAR_PAGE_SIZE,
+    }),
+    enabled: Boolean(workspaceId) && enabled,
+    placeholderData: keepPreviousData,
+  });
 
   // Reset cursor stack and snap back to page 1 when filters change.
   useEffect(() => {
@@ -87,22 +56,26 @@ export function useLinearIssueSearch(
     setPage(1);
   }, [workspaceId, query, teamKey, assigned]);
 
-  // 250ms debounce keeps the keyboard input from firing a request per char.
   useEffect(() => {
-    if (!workspaceId || !enabled) return;
-    const id = setTimeout(() => void run(page), 250);
-    return () => clearTimeout(id);
-  }, [run, page, workspaceId, enabled]);
+    const timeout = setTimeout(() => setFilters({ query, teamKey, assigned }), 250);
+    return () => clearTimeout(timeout);
+  }, [query, teamKey, assigned]);
+
+  const result = searchQuery.data;
+  const isLast = result?.isLast ?? true;
 
   return {
-    items,
-    loading,
-    error,
+    items: result?.issues ?? [],
+    loading: searchQuery.isFetching,
+    error: searchQuery.error instanceof Error ? searchQuery.error.message : null,
     page,
     pageSize: LINEAR_PAGE_SIZE,
     isLast,
     goNext: () => {
-      if (!isLast) setPage((p) => p + 1);
+      if (!isLast && result?.nextPageToken) {
+        tokensRef.current[page] = result.nextPageToken;
+        setPage((current) => current + 1);
+      }
     },
     goPrev: () => {
       setPage((p) => Math.max(1, p - 1));

@@ -20,6 +20,7 @@ const SESSION_ID = "sess";
 const REFRESH_OP = "refresh";
 const THM_OLD = "thm/old.txt";
 const THM_NEW = "thm/new.txt";
+const KANDEV_README = "kandev/README.md";
 
 beforeEach(async () => {
   vi.resetModules();
@@ -157,7 +158,7 @@ describe("applyFileChanges — cross-repo subtree preservation", () => {
           path: "kandev",
           is_dir: true,
           size: 0,
-          children: [{ name: "README.md", path: "kandev/README.md", is_dir: false, size: 0 }],
+          children: [{ name: "README.md", path: KANDEV_README, is_dir: false, size: 0 }],
         },
         {
           name: "thm",
@@ -182,9 +183,69 @@ describe("applyFileChanges — cross-repo subtree preservation", () => {
     const next = reducer(prevTree);
     const kandevNode = next.children?.find((c) => c.path === "kandev");
     // kandev's existing child must survive a refresh scoped to a different repo.
-    expect(kandevNode?.children?.map((c) => c.path)).toEqual(["kandev/README.md"]);
+    expect(kandevNode?.children?.map((c) => c.path)).toEqual([KANDEV_README]);
     const thmNode = next.children?.find((c) => c.path === "thm");
     expect(thmNode?.children?.map((c) => c.path).sort()).toEqual([THM_NEW, THM_OLD]);
+  });
+});
+
+// Regression (#982): empty directory children from depth=1 root refreshes are
+// placeholders and must not wipe the already-loaded subtree.
+describe("applyFileChanges — root refresh placeholders", () => {
+  it("treats empty root-refresh directory children as placeholders", async () => {
+    requestFileTreeMock.mockImplementation((_c: unknown, _s: string, folder: string) => {
+      if (folder === "thm") {
+        return Promise.resolve({ root: thmChildrenAfter() });
+      }
+      return Promise.resolve({
+        root: {
+          name: "",
+          path: "",
+          is_dir: true,
+          size: 0,
+          children: [
+            { name: "kandev", path: "kandev", is_dir: true, size: 0, children: [] },
+            { name: "thm", path: "thm", is_dir: true, size: 0 },
+          ],
+        },
+      });
+    });
+    const prevTree: FileTreeNode = {
+      name: "",
+      path: "",
+      is_dir: true,
+      size: 0,
+      children: [
+        {
+          name: "kandev",
+          path: "kandev",
+          is_dir: true,
+          size: 0,
+          children: [{ name: "README.md", path: KANDEV_README, is_dir: false, size: 0 }],
+        },
+        {
+          name: "thm",
+          path: "thm",
+          is_dir: true,
+          size: 0,
+          children: [{ name: "old.txt", path: THM_OLD, is_dir: false, size: 0 }],
+        },
+      ],
+    };
+    const setTree = vi.fn();
+    applyFileChanges({
+      client: client(),
+      sessionId: SESSION_ID,
+      expandedPaths: new Set(["thm"]),
+      changes: [{ path: "", operation: REFRESH_OP, repository_name: "thm" }],
+      setTree,
+      setLoadState: vi.fn(),
+    });
+    await new Promise<void>((r) => setTimeout(r, 0));
+    const reducer = setTree.mock.calls[0][0] as (prev: FileTreeNode) => FileTreeNode;
+    const next = reducer(prevTree);
+    const kandevNode = next.children?.find((c) => c.path === "kandev");
+    expect(kandevNode?.children?.map((c) => c.path)).toEqual([KANDEV_README]);
   });
 });
 

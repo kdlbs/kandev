@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -19,11 +20,26 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
-  useSettingsData: vi.fn(),
+  useSettingsData: vi.fn(() => ({
+    agentProfiles: [],
+    availableAgents: [],
+    availableTools: [],
+    executors: [],
+    settingsAgents: [],
+    settingsData: {
+      agentsLoaded: true,
+      capabilitiesLoaded: true,
+      executorsLoaded: true,
+    },
+  })),
 }));
 
 vi.mock("@/hooks/use-workflows", () => ({
-  useWorkflows: vi.fn(),
+  useWorkflows: vi.fn(() => ({ workflows: mockState.workflows.items })),
+}));
+
+vi.mock("@/hooks/use-workflow-steps", () => ({
+  useWorkflowSteps: vi.fn(() => ({ steps: [] })),
 }));
 
 vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
@@ -34,31 +50,30 @@ vi.mock("@/app/actions/workspaces", () => ({
   discoverRepositoriesAction: vi.fn().mockResolvedValue({ repositories: [] }),
 }));
 
-vi.mock("@/lib/api/domains/workflow-api", () => ({
-  listWorkflowSteps: vi.fn().mockResolvedValue({ steps: [] }),
-}));
-
 import { ConfigSection } from "./config-section";
 
 function renderConfigSection(overrides: Partial<ComponentProps<typeof ConfigSection>> = {}) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <ConfigSection
-      workspaceId="workspace-1"
-      workflowId=""
-      workflowStepId=""
-      agentProfileId=""
-      executorProfileId=""
-      repositorySelection={{ kind: "none" }}
-      executionMode="task"
-      conditionType={null}
-      onWorkflowChange={() => {}}
-      onStepChange={() => {}}
-      onAgentProfileChange={() => {}}
-      onExecutorProfileChange={() => {}}
-      onRepositoryChange={() => {}}
-      onExecutionModeChange={() => {}}
-      {...overrides}
-    />,
+    <QueryClientProvider client={queryClient}>
+      <ConfigSection
+        workspaceId="workspace-1"
+        workflowId=""
+        workflowStepId=""
+        agentProfileId=""
+        executorProfileId=""
+        repositorySelection={{ kind: "none" }}
+        executionMode="task"
+        conditionType={null}
+        onWorkflowChange={() => {}}
+        onStepChange={() => {}}
+        onAgentProfileChange={() => {}}
+        onExecutorProfileChange={() => {}}
+        onRepositoryChange={() => {}}
+        onExecutionModeChange={() => {}}
+        {...overrides}
+      />
+    </QueryClientProvider>,
   );
 }
 

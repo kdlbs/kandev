@@ -112,6 +112,7 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
     repository_id: incoming.repository_id ?? existing.repository_id,
     base_branch: incoming.base_branch ?? existing.base_branch,
     task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
+    is_passthrough: incoming.is_passthrough ?? existing.is_passthrough,
   };
 }
 
@@ -124,29 +125,16 @@ export const defaultSessionState: SessionSliceState = {
   taskSessions: { items: {} },
   taskSessionsByTask: { itemsByTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {} },
   sessionAgentctl: { itemsBySessionId: {} },
-  worktrees: { items: {} },
-  sessionWorktreesBySessionId: { itemsBySessionId: {} },
-  pendingModel: { bySessionId: {} },
   activeModel: { bySessionId: {} },
   taskPlans: {
-    byTaskId: {},
-    loadingByTaskId: {},
-    loadedByTaskId: {},
-    savingByTaskId: {},
-    revisionsByTaskId: {},
-    revisionsLoadingByTaskId: {},
-    revisionsLoadedByTaskId: {},
-    revisionContentCache: {},
     previewRevisionIdByTaskId: {},
     comparePairByTaskId: {},
     lastSeenUpdatedAtByTaskId: {},
   },
   walkthroughs: {
-    byTaskId: {},
     activeStepByTaskId: {},
     lastSeenUpdatedAtByTaskId: {},
   },
-  queue: { bySessionId: {}, metaBySessionId: {}, isLoading: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionSlice>[0];
@@ -256,132 +244,45 @@ function buildMessageActions(set: ImmerSet) {
 
 function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
   return {
-    setTaskPlan: (taskId: string, plan: Parameters<SessionSlice["setTaskPlan"]>[1]) => {
-      const shouldHydrateLastSeen = get().taskPlans.lastSeenUpdatedAtByTaskId[taskId] === undefined;
-      const storedLastSeen = shouldHydrateLastSeen ? getPlanLastSeen(taskId) : null;
+    hydrateTaskPlanLastSeen: (taskId: string) => {
+      if (get().taskPlans.lastSeenUpdatedAtByTaskId[taskId] !== undefined) return;
+      const storedLastSeen = getPlanLastSeen(taskId);
+      if (storedLastSeen === null) return;
       set((draft) => {
-        draft.taskPlans.byTaskId[taskId] = plan;
-        draft.taskPlans.loadingByTaskId[taskId] = false;
-        draft.taskPlans.loadedByTaskId[taskId] = true;
-        if (shouldHydrateLastSeen && storedLastSeen !== null) {
-          draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = storedLastSeen;
-        }
+        draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = storedLastSeen;
       });
     },
-    setTaskPlanLoading: (taskId: string, loading: boolean) =>
-      set((draft) => {
-        draft.taskPlans.loadingByTaskId[taskId] = loading;
-      }),
-    setTaskPlanSaving: (taskId: string, saving: boolean) =>
-      set((draft) => {
-        draft.taskPlans.savingByTaskId[taskId] = saving;
-      }),
-    clearTaskPlan: (taskId: string) => {
-      setPlanLastSeen(taskId, null);
-      set((draft) => {
-        // revisionContentCache is keyed by revisionId, so pick the IDs for this
-        // task before deleting the revisions list and drop their cache entries.
-        const revs = draft.taskPlans.revisionsByTaskId[taskId];
-        if (revs) {
-          for (const r of revs) {
-            delete draft.taskPlans.revisionContentCache[r.id];
-          }
-        }
-        delete draft.taskPlans.byTaskId[taskId];
-        delete draft.taskPlans.loadingByTaskId[taskId];
-        delete draft.taskPlans.loadedByTaskId[taskId];
-        delete draft.taskPlans.savingByTaskId[taskId];
-        delete draft.taskPlans.revisionsByTaskId[taskId];
-        delete draft.taskPlans.revisionsLoadingByTaskId[taskId];
-        delete draft.taskPlans.revisionsLoadedByTaskId[taskId];
-        delete draft.taskPlans.previewRevisionIdByTaskId[taskId];
-        delete draft.taskPlans.comparePairByTaskId[taskId];
-        delete draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId];
-      });
-    },
-    markTaskPlanSeen: (taskId: string) => {
-      const plan = get().taskPlans.byTaskId[taskId];
-      const lastSeen = plan?.updated_at ?? "";
+    markTaskPlanSeen: (taskId: string, updatedAt?: string | null) => {
+      const lastSeen = updatedAt ?? "";
       setPlanLastSeen(taskId, lastSeen);
       set((draft) => {
         draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = lastSeen;
       });
     },
-    setPlanRevisions: (
-      taskId: string,
-      revisions: Parameters<SessionSlice["setPlanRevisions"]>[1],
-    ) =>
-      set((draft) => {
-        draft.taskPlans.revisionsByTaskId[taskId] = [...revisions].sort(
-          (a, b) => b.revision_number - a.revision_number,
-        );
-        draft.taskPlans.revisionsLoadedByTaskId[taskId] = true;
-        draft.taskPlans.revisionsLoadingByTaskId[taskId] = false;
-      }),
-    upsertPlanRevision: (
-      taskId: string,
-      revision: Parameters<SessionSlice["upsertPlanRevision"]>[1],
-    ) =>
-      set((draft) => {
-        const list = draft.taskPlans.revisionsByTaskId[taskId] ?? [];
-        const idx = list.findIndex((r) => r.id === revision.id);
-        if (idx === -1) {
-          list.unshift(revision);
-        } else {
-          list[idx] = { ...list[idx], ...revision };
-          // Coalesced writes update an existing revision's content on the
-          // backend, but the WS payload carries metadata only — drop any
-          // cached content so the next preview refetches.
-          delete draft.taskPlans.revisionContentCache[revision.id];
-        }
-        list.sort((a, b) => b.revision_number - a.revision_number);
-        draft.taskPlans.revisionsByTaskId[taskId] = list;
-      }),
-    setPlanRevisionsLoading: (taskId: string, loading: boolean) =>
-      set((draft) => {
-        draft.taskPlans.revisionsLoadingByTaskId[taskId] = loading;
-      }),
-    cachePlanRevisionContent: (revisionId: string, content: string) =>
-      set((draft) => {
-        draft.taskPlans.revisionContentCache[revisionId] = content;
-      }),
     ...buildPreviewCompareActions(set),
   };
 }
 
 function buildWalkthroughActions(set: ImmerSet, get: ImmerGet) {
   return {
-    setWalkthrough: (
-      taskId: string,
-      walkthrough: Parameters<SessionSlice["setWalkthrough"]>[1],
-    ) => {
-      const shouldHydrateLastSeen =
-        get().walkthroughs.lastSeenUpdatedAtByTaskId[taskId] === undefined;
-      const storedLastSeen = shouldHydrateLastSeen ? getWalkthroughLastSeen(taskId) : null;
+    hydrateWalkthroughLastSeen: (taskId: string) => {
+      if (get().walkthroughs.lastSeenUpdatedAtByTaskId[taskId] !== undefined) return;
+      const storedLastSeen = getWalkthroughLastSeen(taskId);
+      if (storedLastSeen === null) return;
       set((draft) => {
-        const previous = draft.walkthroughs.byTaskId[taskId];
-        draft.walkthroughs.byTaskId[taskId] = walkthrough;
-        // Clamp the active step into the new step range (defaults to 0). A
-        // replaced/shorter tour must not leave the pointer past the last step.
-        const steps = walkthrough?.steps.length ?? 0;
-        const isReplacement = previous?.id !== walkthrough?.id;
-        const current = isReplacement ? 0 : (draft.walkthroughs.activeStepByTaskId[taskId] ?? 0);
-        draft.walkthroughs.activeStepByTaskId[taskId] =
-          steps === 0 ? 0 : Math.min(current, steps - 1);
-        if (shouldHydrateLastSeen && storedLastSeen !== null) {
-          draft.walkthroughs.lastSeenUpdatedAtByTaskId[taskId] = storedLastSeen;
-        }
+        draft.walkthroughs.lastSeenUpdatedAtByTaskId[taskId] = storedLastSeen;
       });
     },
-    setWalkthroughActiveStep: (taskId: string, stepIndex: number) =>
+    setWalkthroughActiveStep: (taskId: string, stepIndex: number, stepCount?: number) =>
       set((draft) => {
-        const steps = draft.walkthroughs.byTaskId[taskId]?.steps.length ?? 0;
-        const clamped = steps === 0 ? 0 : Math.max(0, Math.min(stepIndex, steps - 1));
+        const clamped =
+          stepCount === undefined || stepCount <= 0
+            ? Math.max(0, stepIndex)
+            : Math.max(0, Math.min(stepIndex, stepCount - 1));
         draft.walkthroughs.activeStepByTaskId[taskId] = clamped;
       }),
-    markWalkthroughSeen: (taskId: string) => {
-      const wt = get().walkthroughs.byTaskId[taskId];
-      const lastSeen = wt?.updated_at ?? "";
+    markWalkthroughSeen: (taskId: string, updatedAt?: string | null) => {
+      const lastSeen = updatedAt ?? "";
       setWalkthroughLastSeen(taskId, lastSeen);
       set((draft) => {
         draft.walkthroughs.lastSeenUpdatedAtByTaskId[taskId] = lastSeen;
@@ -541,51 +442,10 @@ export const createSessionSlice: StateCreator<
     set((draft) => {
       draft.sessionAgentctl.itemsBySessionId[sessionId] = status;
     }),
-  setWorktree: (worktree) =>
-    set((draft) => {
-      draft.worktrees.items[worktree.id] = worktree;
-    }),
-  setSessionWorktrees: (sessionId, worktreeIds) =>
-    set((draft) => {
-      draft.sessionWorktreesBySessionId.itemsBySessionId[sessionId] = worktreeIds;
-    }),
-  setPendingModel: (sessionId, modelId) =>
-    set((draft) => {
-      draft.pendingModel.bySessionId[sessionId] = modelId;
-    }),
-  clearPendingModel: (sessionId) =>
-    set((draft) => {
-      delete draft.pendingModel.bySessionId[sessionId];
-    }),
   setActiveModel: (sessionId, modelId) =>
     set((draft) => {
       draft.activeModel.bySessionId[sessionId] = modelId;
     }),
   ...buildTaskPlanActions(set, get),
   ...buildWalkthroughActions(set, get),
-  setQueueEntries: (sessionId, entries, meta) =>
-    set((draft) => {
-      draft.queue.bySessionId[sessionId] = entries;
-      draft.queue.metaBySessionId[sessionId] = meta;
-    }),
-  removeQueueEntry: (sessionId, entryId) =>
-    set((draft) => {
-      const list = draft.queue.bySessionId[sessionId];
-      if (!list) return;
-      draft.queue.bySessionId[sessionId] = list.filter((entry) => entry.id !== entryId);
-      const meta = draft.queue.metaBySessionId[sessionId];
-      if (meta) {
-        meta.count = draft.queue.bySessionId[sessionId].length;
-      }
-    }),
-  setQueueLoading: (sessionId, loading) =>
-    set((draft) => {
-      draft.queue.isLoading[sessionId] = loading;
-    }),
-  clearQueueStatus: (sessionId) =>
-    set((draft) => {
-      delete draft.queue.bySessionId[sessionId];
-      delete draft.queue.metaBySessionId[sessionId];
-      delete draft.queue.isLoading[sessionId];
-    }),
 });

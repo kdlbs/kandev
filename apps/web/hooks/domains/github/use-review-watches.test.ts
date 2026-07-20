@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { createElement, StrictMode } from "react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReviewWatch } from "@/lib/types/github";
 import { useReviewWatches } from "./use-review-watches";
 
@@ -44,15 +44,18 @@ function watch(id: string): ReviewWatch {
   };
 }
 
-// Probe renders the hook and mirrors the resulting store state into the DOM so
+// Probe renders the hook and mirrors the resulting query state into the DOM so
 // assertions can read it after StrictMode's mount -> cleanup -> mount cycle.
 function Probe() {
-  useReviewWatches("ws-1");
-  const rw = useAppStore((state) => state.reviewWatches);
+  const watches = useReviewWatches("ws-1");
   return createElement(
     "div",
     { "data-testid": "probe" },
-    JSON.stringify({ loaded: rw.loaded, loading: rw.loading, ids: rw.items.map((w) => w.id) }),
+    JSON.stringify({
+      loaded: watches.loaded,
+      loading: watches.loading,
+      ids: watches.items.map((watch) => watch.id),
+    }),
   );
 }
 
@@ -69,21 +72,36 @@ function readProbe(el: HTMLElement) {
   };
 }
 
-describe("useReviewWatches", () => {
-  it("loads watches into the store when the effect double-mounts (StrictMode)", async () => {
-    // The first mount's fetch never resolves; StrictMode cancels it. Only the
-    // re-mount's fetch resolves, so the watch reaches the store ONLY if cleanup
-    // cleared the scope guard and let the second effect re-issue the fetch.
-    mocks.listReviewWatches
-      .mockImplementationOnce(() => new Promise<{ watches: ReviewWatch[] }>(() => {}))
-      .mockResolvedValue({ watches: [watch("w-1")] });
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+}
 
-    const { getByTestId } = render(
-      createElement(StrictMode, null, createElement(StateProvider, null, createElement(Probe))),
+function renderWithQuery(child: ReturnType<typeof createElement>) {
+  return render(
+    createElement(
+      QueryClientProvider,
+      { client: createQueryClient() },
+      createElement(StrictMode, null, child),
+    ),
+  );
+}
+
+describe("useReviewWatches", () => {
+  it("reuses and publishes the in-flight query across a StrictMode remount", async () => {
+    let resolveRequest!: (response: { watches: ReviewWatch[] }) => void;
+    mocks.listReviewWatches.mockImplementationOnce(
+      () =>
+        new Promise<{ watches: ReviewWatch[] }>((resolve) => {
+          resolveRequest = resolve;
+        }),
     );
 
-    // StrictMode double-invokes the effect in dev, exercising the cleanup path.
-    await waitFor(() => expect(mocks.listReviewWatches.mock.calls.length).toBeGreaterThan(1));
+    const { getByTestId } = renderWithQuery(createElement(Probe));
+
+    await waitFor(() => expect(mocks.listReviewWatches).toHaveBeenCalledTimes(1));
+    await act(async () => resolveRequest({ watches: [watch("w-1")] }));
 
     await waitFor(() => {
       const state = readProbe(getByTestId("probe"));
@@ -94,7 +112,7 @@ describe("useReviewWatches", () => {
   });
 
   it("does not fetch when workspaceId is null", () => {
-    render(createElement(StateProvider, null, createElement(NullProbe)));
+    renderWithQuery(createElement(NullProbe));
     expect(mocks.listReviewWatches).not.toHaveBeenCalled();
   });
 });

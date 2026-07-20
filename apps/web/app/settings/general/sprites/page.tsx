@@ -1,5 +1,5 @@
 import { SpritesSettings } from "@/components/settings/sprites-settings";
-import { StateProvider } from "@/components/state-provider";
+import { StateHydrator } from "@/components/state-hydrator";
 import { getSpritesStatus, listSpritesInstances } from "@/lib/api/domains/sprites-api";
 
 export default async function GeneralSpritesPage() {
@@ -22,8 +22,9 @@ export default async function GeneralSpritesPage() {
   }
 
   return (
-    <StateProvider initialState={initialState}>
+    <>
+      <StateHydrator initialState={initialState} />
       <SpritesSettings />
-    </StateProvider>
+    </>
   );
 }

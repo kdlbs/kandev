@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
@@ -9,10 +10,13 @@ import type { GroupedSidebarList } from "@/lib/sidebar/apply-view";
 afterEach(() => cleanup());
 
 function Providers({ children }: { children: React.ReactNode }) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
-    <StateProvider>
-      <ToastProvider>{children}</ToastProvider>
-    </StateProvider>
+    <QueryClientProvider client={queryClient}>
+      <StateProvider>
+        <ToastProvider>{children}</ToastProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

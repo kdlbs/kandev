@@ -1,20 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconArchiveOff, IconLoader } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { unarchiveTask } from "@/lib/api";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
+import { reconcileUnarchiveTaskQueries } from "@/lib/query/task-cache";
 import { useToast } from "@/components/toast-provider";
 
-export function TaskUnarchiveButton({
-  taskId,
-  onUnarchived,
-}: {
-  taskId?: string | null;
-  onUnarchived?: (taskId: string) => void;
-}) {
+// Shown in the task top bar when the task is archived. The mutation response
+// reconciles Query immediately; task.updated remains the cross-client update.
+export function TaskUnarchiveButton({ taskId }: { taskId?: string | null }) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [isPending, setIsPending] = useState(false);
   if (!taskId) return null;
 
@@ -22,12 +21,8 @@ export function TaskUnarchiveButton({
     setIsPending(true);
     try {
       const result = await unarchiveTask(taskId);
+      reconcileUnarchiveTaskQueries(queryClient, result);
       toast(unarchiveToastPayload(result));
-      if (result.success && result.unarchived_ids.includes(taskId)) {
-        onUnarchived?.(taskId);
-      } else if (result.success) {
-        console.warn("[TaskUnarchiveButton] task missing from successful response", taskId);
-      }
     } catch (err) {
       toast({
         title: "Failed to unarchive task",

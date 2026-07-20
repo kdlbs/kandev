@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { GitHubPageClient } from "@/app/github/github-page-client";
 import { GitLabPageClient } from "@/app/gitlab/gitlab-page-client";
 import { JiraPageClient } from "@/app/jira/jira-page-client";
@@ -28,12 +29,16 @@ import {
   PluginRouteFallback,
 } from "@/components/plugins/plugin-error-boundary";
 import { PluginPageFrame } from "@/components/plugins/plugin-page";
+import { useCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
+import { readWorkflowsByWorkspace } from "@/hooks/use-workflow-cache";
+import { qk } from "@/lib/query/keys";
 import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type {
   ListWorkflowStepsResponse,
   Repository,
+  Workspace,
   Workflow,
   WorkflowStep,
 } from "@/lib/types/http";
@@ -45,8 +50,6 @@ const OfficeRoutes = lazy(() =>
 const SettingsRoutes = lazy(() =>
   import("./settings-routes").then((mod) => ({ default: mod.SettingsRoutes })),
 );
-
-const EMPTY_REPOSITORIES: Repository[] = [];
 
 type SpaRoute =
   | {
@@ -232,9 +235,20 @@ function KanbanRoute({ route }: { route: Extract<SpaRoute, { kind: "kanban" }> }
 
 function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
   const store = useAppStoreApi();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (hasHydratedKanbanRouteState(store.getState(), route)) return;
+    const state = store.getState();
+    const workflowSnapshot = readWorkflowsByWorkspace(queryClient);
+    const cachedWorkflows = state.workspaces.activeId
+      ? (workflowSnapshot.workflowsByWorkspace[state.workspaces.activeId] ?? [])
+      : [];
+    const hydratedWorkflowIds = new Set(
+      cachedWorkflows
+        .filter((workflow) => queryClient.getQueryData(qk.workflows.snapshot(workflow.id)))
+        .map((workflow) => workflow.id),
+    );
+    if (hasHydratedKanbanRouteState(state, route, cachedWorkflows, hydratedWorkflowIds)) return;
 
     let cancelled = false;
 
@@ -248,6 +262,7 @@ function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
       const settingsWorkspaceId = settingsResponse?.settings?.workspace_id || null;
       const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
       const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
+      queryClient.setQueryData(qk.workspaces.all(), workspaceItems);
       const kanbanWorkspaceItems = workspaceItems.filter(
         (workspace) => !workspace.office_workflow_id,
       );
@@ -259,7 +274,7 @@ function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
       );
 
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
+        workspaces: { activeId: activeWorkspaceId },
         userSettings: {
           ...mapUserSettingsResponse(settingsResponse),
           workspaceId: activeWorkspaceId,
@@ -291,18 +306,24 @@ function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
           workflowId,
         },
         workflows: {
-          items: workflowsResponse.workflows.map(mapWorkflowItem),
           activeId: workflowId,
         },
       });
-      store.getState().setRepositories(activeWorkspaceId, repositoriesResponse.repositories);
+      queryClient.setQueryData(
+        qk.workflows.all(activeWorkspaceId, { includeHidden: true }),
+        workflowsResponse.workflows,
+      );
+      queryClient.setQueryData(
+        qk.workspaces.repositories(activeWorkspaceId),
+        repositoriesResponse.repositories,
+      );
     }
 
     void bootstrap();
     return () => {
       cancelled = true;
     };
-  }, [route.workspaceId, route.workflowId, store]);
+  }, [queryClient, route.workspaceId, route.workflowId, store]);
 }
 
 function DataBackedRoute({
@@ -437,11 +458,8 @@ function useRouteData({
   const [workflows, setRouteWorkflows] = useState<Workflow[]>([]);
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const repositories = useAppStore((state) =>
-    activeWorkspaceId
-      ? (state.repositories.itemsByWorkspaceId[activeWorkspaceId] ?? EMPTY_REPOSITORIES)
-      : EMPTY_REPOSITORIES,
-  );
+  const repositories = useCachedRepositories(activeWorkspaceId);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
@@ -461,7 +479,12 @@ function useRouteData({
       const storeWorkspaceId = store.getState().workspaces.activeId;
       const cookieWorkspaceId = readActiveWorkspaceCookie();
       const workspaceItems =
-        workspacesResponse?.workspaces.map(mapWorkspaceItem) ?? store.getState().workspaces.items;
+        workspacesResponse?.workspaces.map(mapWorkspaceItem) ??
+        queryClient.getQueryData<Workspace[]>(qk.workspaces.all()) ??
+        [];
+      if (workspacesResponse) {
+        queryClient.setQueryData(qk.workspaces.all(), workspaceItems);
+      }
       const workspaceId =
         workspaceItems.length > 0
           ? resolveActiveId(
@@ -472,14 +495,16 @@ function useRouteData({
             )
           : firstKnownWorkspaceId(storeWorkspaceId, cookieWorkspaceId, settingsWorkspaceId);
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: workspaceId },
-        workflows: { items: store.getState().workflows.items, activeId: settingsWorkflowId },
+        workspaces: { activeId: workspaceId },
+        workflows: { activeId: settingsWorkflowId },
         userSettings: { ...mapUserSettingsResponse(settingsResponse), workspaceId },
       });
       if (!workspaceId) return;
 
       const [workflowsResponse, repositoriesResponse, stepsResponse] = await Promise.all([
-        listWorkflows(workspaceId, { cache: "no-store" }).catch(() => ({ workflows: [] })),
+        listWorkflows(workspaceId, { cache: "no-store", includeHidden: true }).catch(() => ({
+          workflows: [],
+        })),
         listRepositories(workspaceId, undefined, { cache: "no-store" }).catch(() => ({
           repositories: [],
         })),
@@ -487,17 +512,23 @@ function useRouteData({
       ]);
       if (cancelled) return;
 
-      const workflowItems = workflowsResponse.workflows.map(mapWorkflowItem);
       const activeWorkflowId = resolveDesiredWorkflowId({
         activeWorkflowId: store.getState().workflows.activeId,
         settingsWorkflowId,
-        workspaceWorkflows: workflowItems,
+        workspaceWorkflows: workflowsResponse.workflows,
       });
 
       store.getState().hydrate({
-        workflows: { items: workflowItems, activeId: activeWorkflowId },
+        workflows: { activeId: activeWorkflowId },
       });
-      store.getState().setRepositories(workspaceId, repositoriesResponse.repositories);
+      queryClient.setQueryData(
+        qk.workflows.all(workspaceId, { includeHidden: true }),
+        workflowsResponse.workflows,
+      );
+      queryClient.setQueryData(
+        qk.workspaces.repositories(workspaceId),
+        repositoriesResponse.repositories,
+      );
       setRouteWorkflows(workflowsResponse.workflows);
       setSteps(stepsResponse.steps);
     }
@@ -507,7 +538,7 @@ function useRouteData({
       cancelled = true;
       bootstrappedRef.current = false;
     };
-  }, [skipBootstrap, store]);
+  }, [queryClient, skipBootstrap, store]);
 
   return { activeWorkspaceId, workflows, steps, repositories };
 }
@@ -524,19 +555,6 @@ function firstKnownWorkspaceId(...ids: (string | null | undefined)[]): string | 
     if (value) return value;
   }
   return null;
-}
-
-function mapWorkflowItem(workflow: Workflow) {
-  return {
-    id: workflow.id,
-    workspaceId: workflow.workspace_id,
-    name: workflow.name,
-    description: workflow.description ?? null,
-    sortOrder: workflow.sort_order ?? 0,
-    ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
-    ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
-    ...(workflow.style !== undefined ? { style: workflow.style } : {}),
-  };
 }
 
 function normalizePath(pathname: string): string {

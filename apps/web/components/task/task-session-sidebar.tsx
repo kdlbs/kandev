@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, memo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "@/lib/routing/client-router";
 import { linkToTask } from "@/lib/links";
 import type { Repository, TaskSession, TaskSessionState, TaskState } from "@/lib/types/http";
@@ -16,11 +17,11 @@ import { SidebarDialogs } from "./task-session-sidebar-dialogs";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
+import { useCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useSidebarSelection, SidebarBulkDialogs } from "./task-session-sidebar-selection";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
-import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
 import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
@@ -30,23 +31,27 @@ import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { buildPendingFlags, readPendingFlags } from "./task-session-sidebar-aggregate";
 import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
-import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
+import { useSidebarLinkActions, type SidebarLinkTarget } from "./task-session-sidebar-link-actions";
 import { buildArchivedSidebarItem } from "./task-session-sidebar-archived-item";
 import { useSidebarTaskLinking } from "./task-session-sidebar-task-linking";
-import { useShallow } from "zustand/react/shallow";
 import { type AgentErrorOptions, agentErrorMessageForTask } from "@/lib/task-agent-error";
 import {
-  agentErrorAcknowledgementSessionIds,
   stablePrimarySessionIdsKey,
-  usePersistResolvedAgentErrorAcknowledgements,
+  usePersistTaskAgentErrorAcknowledgements,
 } from "./use-agent-error-acknowledgements";
+import {
+  updateWorkflowSnapshotQuery,
+  workflowSnapshotQueryDataForWorkflow,
+} from "@/lib/query/workflow-snapshot-cache";
+import { useSidebarMessagesBySession } from "./task-session-sidebar-messages";
 
-function useStablePrimarySessionIds(allTasks: Array<{ primarySessionId?: string | null }>) {
+function useStablePrimarySessionIds(
+  allTasks: Array<{ primarySessionId?: string | null }>,
+): string[] {
   const key = useMemo(() => stablePrimarySessionIdsKey(allTasks), [allTasks]);
   return useMemo(() => (key ? key.split("\0") : []), [key]);
 }
 
-/** Look up git status directly via primarySessionId, bypassing the session list. */
 function getGitStatusForTask(
   task: { primarySessionId?: string | null },
   envIdBySessionId: Record<string, string>,
@@ -73,7 +78,6 @@ function resolveDiffStats(
   return a > 0 || d > 0 ? { additions: a, deletions: d } : undefined;
 }
 
-/** Format PR info for display, capitalising the state. */
 function toPrInfo(pr: TaskPR | undefined): { number: number; state: string } | undefined {
   if (!pr?.state) return undefined;
   return { number: pr.pr_number, state: pr.state[0].toUpperCase() + pr.state.slice(1) };
@@ -162,6 +166,38 @@ function toSidebarItem(
   };
 }
 
+function buildSidebarLinkTargetMap(
+  tasks: Array<KanbanState["tasks"][number]>,
+): Map<string, SidebarLinkTarget> {
+  return new Map(
+    tasks.map((task) => [
+      task.id,
+      {
+        id: task.id,
+        title: task.title,
+        repositoryId: task.repositoryId,
+        issueUrl: task.issueUrl,
+        issueNumber: task.issueNumber,
+        repositories: task.repositories,
+      },
+    ]),
+  );
+}
+
+function includeArchivedSidebarItem(
+  items: TaskSwitcherItem[],
+  archivedState: ReturnType<typeof useArchivedTaskState>,
+): TaskSwitcherItem[] {
+  if (
+    !archivedState.isArchived ||
+    !archivedState.archivedTaskId ||
+    items.some((task) => task.id === archivedState.archivedTaskId)
+  ) {
+    return items;
+  }
+  return [buildArchivedSidebarItem(archivedState), ...items];
+}
+
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
   workflowId: string | null;
@@ -176,9 +212,8 @@ function useSidebarData(workspaceId: string | null) {
   const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
-  const messagesBySession = useAppStore((state) => state.messages.bySession);
+  const repositories = useCachedRepositories(workspaceId);
+  const taskPRsByTaskId = useWorkspacePRs(workspaceId);
   const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
   const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
   const archivedState = useArchivedTaskState();
@@ -198,22 +233,20 @@ function useSidebarData(workspaceId: string | null) {
 
   // Stable primary session IDs from kanban tasks feed subscriptions and pending-flag selectors.
   const primarySessionIds = useStablePrimarySessionIds(allTasks);
-  const acknowledgementSessionIds = useMemo(
-    () => agentErrorAcknowledgementSessionIds(allTasks, sessionsByTaskId),
-    [allTasks, sessionsByTaskId],
-  );
-  usePersistResolvedAgentErrorAcknowledgements({
+  const messagesBySession = useSidebarMessagesBySession(primarySessionIds);
+  usePersistTaskAgentErrorAcknowledgements({
+    tasks: allTasks,
+    sessionsByTaskId,
     sessionsById,
-    sessionIds: acknowledgementSessionIds,
     messagesBySession,
     dismissedAgentErrors,
   });
-  const pendingFlags = useAppStore(
-    useShallow((state) => buildPendingFlags(state.messages.bySession, primarySessionIds)),
+  const pendingFlags = useMemo(
+    () => buildPendingFlags(messagesBySession, primarySessionIds),
+    [messagesBySession, primarySessionIds],
   );
 
   const tasksWithRepositories = useMemo(() => {
-    const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
     const repositorySlugById = new Map(
       repositories.map((repo: Repository) => [repo.id, repositorySlug(repo)]),
     );
@@ -235,17 +268,10 @@ function useSidebarData(workspaceId: string | null) {
       acknowledgedAgentErrors,
       messagesBySession,
     };
-    const items: TaskSwitcherItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
-    if (
-      archivedState.isArchived &&
-      archivedState.archivedTaskId &&
-      !items.some((t) => t.id === archivedState.archivedTaskId)
-    ) {
-      items.unshift(buildArchivedSidebarItem(archivedState));
-    }
-    return items;
+    const items = allTasks.map((task) => toSidebarItem(task, mapCtx));
+    return includeArchivedSidebarItem(items, archivedState);
   }, [
-    repositoriesByWorkspace,
+    repositories,
     allTasks,
     allSteps,
     workflows,
@@ -261,6 +287,11 @@ function useSidebarData(workspaceId: string | null) {
     messagesBySession,
     archivedState,
   ]);
+  const taskById = useMemo(
+    () => new Map(tasksWithRepositories.map((task) => [task.id, task])),
+    [tasksWithRepositories],
+  );
+  const linkTaskById = useMemo(() => buildSidebarLinkTargetMap(allTasks), [allTasks]);
 
   return {
     activeTaskId,
@@ -269,6 +300,8 @@ function useSidebarData(workspaceId: string | null) {
     stepsByWorkflowId,
     isLoadingWorkflow,
     tasksWithRepositories,
+    taskById,
+    linkTaskById,
     primarySessionIds,
     workflows,
   };
@@ -276,30 +309,32 @@ function useSidebarData(workspaceId: string | null) {
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
 
-function useMoveToStep(store: StoreApi) {
+function useMoveToStep() {
+  const queryClient = useQueryClient();
   const { moveTaskById } = useTaskActions();
 
   return useCallback(
     async (taskId: string, workflowId: string, targetStepId: string) => {
-      const state = store.getState();
-      const snapshot = state.kanbanMulti.snapshots[workflowId];
+      const snapshot = workflowSnapshotQueryDataForWorkflow(queryClient, workflowId);
       if (!snapshot) return;
 
       const originalTask = snapshot.tasks.find((t) => t.id === taskId);
       if (!originalTask) return;
 
       const targetTasks = snapshot.tasks
-        .filter((t) => t.workflowStepId === targetStepId && t.id !== taskId)
-        .sort((a, b) => a.position - b.position);
+        .filter((t) => t.workflow_step_id === targetStepId && t.id !== taskId)
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
       const nextPosition = targetTasks.length;
+      const originalSnapshot = snapshot;
 
-      // Optimistic update
-      state.setWorkflowSnapshot(workflowId, {
-        ...snapshot,
-        tasks: snapshot.tasks.map((t) =>
-          t.id === taskId ? { ...t, workflowStepId: targetStepId, position: nextPosition } : t,
+      updateWorkflowSnapshotQuery(queryClient, workflowId, (current) => ({
+        ...current,
+        tasks: current.tasks.map((task) =>
+          task.id === taskId
+            ? { ...task, workflow_step_id: targetStepId, position: nextPosition }
+            : task,
         ),
-      });
+      }));
 
       try {
         await moveTaskById(taskId, {
@@ -308,31 +343,15 @@ function useMoveToStep(store: StoreApi) {
           position: nextPosition,
         });
       } catch (error) {
-        // Rollback only the moved task, and only if it still has the optimistic values
-        const cur = store.getState().kanbanMulti.snapshots[workflowId];
-        const curTask = cur?.tasks.find((t) => t.id === taskId);
-        if (cur && curTask?.workflowStepId === targetStepId && curTask.position === nextPosition) {
-          store.getState().setWorkflowSnapshot(workflowId, {
-            ...cur,
-            tasks: cur.tasks.map((t) =>
-              t.id === taskId
-                ? {
-                    ...t,
-                    workflowStepId: originalTask.workflowStepId,
-                    position: originalTask.position,
-                  }
-                : t,
-            ),
-          });
-        }
+        updateWorkflowSnapshotQuery(queryClient, workflowId, () => originalSnapshot);
         console.error("Failed to move task:", error);
       }
     },
-    [store, moveTaskById],
+    [queryClient, moveTaskById],
   );
 }
 
-function useArchiveActions(store: StoreApi) {
+function useArchiveActions(taskById: Map<string, TaskSwitcherItem>) {
   const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
   const [archivingTask, setArchivingTask] = useState<{
     id: string;
@@ -344,15 +363,14 @@ function useArchiveActions(store: StoreApi) {
 
   const handleArchiveTask = useCallback(
     (taskId: string) => {
-      const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = taskById.get(taskId);
       setArchivingTask({
         id: taskId,
         title: task?.title ?? "this task",
-        executorType: task?.primaryExecutorType,
+        executorType: task?.remoteExecutorType,
       });
     },
-    [store],
+    [taskById],
   );
 
   const handleArchiveConfirm = useCallback(
@@ -387,6 +405,7 @@ function useArchiveActions(store: StoreApi) {
 function useDeleteActions(
   store: StoreApi,
   removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
+  taskById: Map<string, TaskSwitcherItem>,
 ) {
   const { deleteTaskById } = useTaskActions();
   const [deletingTask, setDeletingTask] = useState<{
@@ -398,15 +417,14 @@ function useDeleteActions(
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
-      const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = taskById.get(taskId);
       setDeletingTask({
         id: taskId,
         title: task?.title ?? "this task",
-        executorType: task?.primaryExecutorType,
+        executorType: task?.remoteExecutorType,
       });
     },
-    [store],
+    [taskById],
   );
 
   const handleDeleteConfirm = useCallback(
@@ -441,7 +459,11 @@ function useDeleteActions(
   };
 }
 
-export function useSidebarActions(store: StoreApi) {
+export function useSidebarActions(
+  store: StoreApi,
+  taskById: Map<string, TaskSwitcherItem>,
+  linkTaskById: Map<string, SidebarLinkTarget>,
+) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
@@ -472,8 +494,7 @@ export function useSidebarActions(store: StoreApi) {
         router.push(linkToTask(taskId));
         return;
       }
-      const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = taskById.get(taskId);
       selectTaskWithLayout({
         taskId,
         task: task ?? undefined,
@@ -484,13 +505,13 @@ export function useSidebarActions(store: StoreApi) {
         setPreparingTaskId,
       });
     },
-    [loadTaskSessionsForTask, switchToSession, setActiveTask, store, router, pathname],
+    [loadTaskSessionsForTask, switchToSession, setActiveTask, store, router, pathname, taskById],
   );
 
-  const archiveActions = useArchiveActions(store);
-  const deleteActions = useDeleteActions(store, removeTaskFromBoard);
-  const detachActions = useTaskDetachDialog(store);
-  const linkActions = useSidebarLinkActions(store);
+  const archiveActions = useArchiveActions(taskById);
+  const deleteActions = useDeleteActions(store, removeTaskFromBoard, taskById);
+  const detachActions = useTaskDetachDialog();
+  const linkActions = useSidebarLinkActions(linkTaskById);
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
 
@@ -511,7 +532,7 @@ export function useSidebarActions(store: StoreApi) {
     [renamingTask, renameTaskById],
   );
 
-  const handleMoveToStep = useMoveToStep(store);
+  const handleMoveToStep = useMoveToStep();
 
   return {
     preparingTaskId,
@@ -559,6 +580,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     workflows,
     isLoadingWorkflow,
     tasksWithRepositories,
+    taskById,
+    linkTaskById,
     primarySessionIds,
   } = useSidebarData(workspaceId);
 
@@ -570,13 +593,10 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
 
   useBulkGitStatusSubscription(primarySessionIds);
 
-  const sidebarActions = useSidebarActions(store);
-  const { preparingTaskId } = sidebarActions;
+  const sidebarActions = useSidebarActions(store, taskById, linkTaskById);
+  const preparingTaskId = sidebarActions.preparingTaskId;
   const taskLinkHandlers = useSidebarTaskLinking(workspaceId, sidebarActions);
-  const repositories =
-    useAppStore((state) =>
-      workspaceId ? state.repositories.itemsByWorkspaceId[workspaceId] : undefined,
-    ) ?? [];
+  const repositories = useCachedRepositories(workspaceId);
 
   const displayTasks = useMemo(() => {
     if (MOCK_SIDEBAR) return MOCK_ITEMS;

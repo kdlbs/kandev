@@ -9,8 +9,6 @@ import {
   type TaskId,
   type TaskSessionState,
 } from "@/lib/types/http";
-import type { QueuedMessage } from "@/lib/state/slices/session/types";
-import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 
 const debug = createDebugLogger("session:state");
@@ -215,23 +213,6 @@ function upsertTaskSessionList(
   });
 }
 
-// Fan out the office refetch trigger only when the session's state
-// actually changed. The WS layer fires `session.state_changed` for
-// several adjacent reasons (agentctl status, context window, model
-// updates) where `new_state` is undefined or unchanged; without this
-// gate every one of those storms the dashboard-card re-render path.
-function maybeFanOutOfficeRefetch(
-  store: StoreApi<AppState>,
-  newState: TaskSessionState | undefined,
-  prevState: TaskSessionState | undefined,
-): void {
-  if (!newState || newState === prevState) return;
-  const setOfficeTrigger = store.getState().setOfficeRefetchTrigger;
-  if (!setOfficeTrigger) return;
-  setOfficeTrigger("dashboard");
-  setOfficeTrigger("agents");
-}
-
 /** Extract context window data from payload metadata and store it. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payload: any): void {
@@ -357,28 +338,6 @@ function buildAgentctlReadySessionUpdate(
   return update;
 }
 
-/** Adds the materialized worktree to the worktrees map + the per-session list. */
-function recordAgentctlReadyWorktree(
-  store: StoreApi<AppState>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
-  existingSession: { repository_id?: string; worktree_path?: string; worktree_branch?: string },
-): void {
-  if (!payload.worktree_id) return;
-  store.getState().setWorktree({
-    id: payload.worktree_id,
-    sessionId: payload.session_id,
-    repositoryId: existingSession.repository_id ?? undefined,
-    path: payload.worktree_path ?? existingSession.worktree_path ?? undefined,
-    branch: payload.worktree_branch ?? existingSession.worktree_branch ?? undefined,
-  });
-  const existing =
-    store.getState().sessionWorktreesBySessionId.itemsBySessionId[payload.session_id] ?? [];
-  if (!existing.includes(payload.worktree_id)) {
-    store.getState().setSessionWorktrees(payload.session_id, [...existing, payload.worktree_id]);
-  }
-}
-
 /** Handle the agentctl_ready event: update session worktree info.
  *
  *  Two shapes share this event:
@@ -407,8 +366,6 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
   if (Object.keys(sessionUpdate).length > 0) {
     store.getState().setTaskSession({ ...existingSession, ...sessionUpdate });
   }
-
-  recordAgentctlReadyWorktree(store, payload, existingSession);
 
   if (isSibling) {
     // Drop the pre-multi-repo git-status snapshot — the backend just
@@ -456,18 +413,6 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
 
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    "message.queue.status_changed": (message) => {
-      const payload = message.payload;
-      if (!payload?.session_id) {
-        console.warn("[Queue] Missing session_id in queue status change event");
-        return;
-      }
-      const sessionId = payload.session_id;
-      const entries = (payload.entries as QueuedMessage[] | null | undefined) ?? [];
-      const count = typeof payload.count === "number" ? payload.count : entries.length;
-      const max = typeof payload.max === "number" ? payload.max : 0;
-      store.getState().setQueueEntries(sessionId, entries, { count, max });
-    },
     "session.state_changed": (message) => {
       const payload = message.payload;
       if (!payload?.task_id) return;
@@ -504,7 +449,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       });
 
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
-      syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
       extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
 
@@ -524,8 +468,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         payload,
         previousState: existingSession?.state,
       });
-
-      maybeFanOutOfficeRefetch(store, newState, existingSession?.state);
     },
     "session.agentctl_starting": (message) => {
       const payload = message.payload;

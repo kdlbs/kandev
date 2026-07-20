@@ -1,4 +1,6 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DynamicModelsResponse, ModelConfig } from "@/lib/types/http";
@@ -32,6 +34,12 @@ function response(status: DynamicModelsResponse["status"]): DynamicModelsRespons
   };
 }
 
+function queryWrapper() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+}
+
 afterEach(() => {
   cleanup();
   fetchDynamicModelsMock.mockReset();
@@ -43,15 +51,21 @@ describe("useAgentCapabilities", () => {
       .mockResolvedValueOnce(response("not_installed"))
       .mockResolvedValueOnce(response("ok"));
 
-    const { result } = renderHook(() => useAgentCapabilities("grok-acp", initialConfig));
+    const { result } = renderHook(() => useAgentCapabilities("grok-acp", initialConfig), {
+      wrapper: queryWrapper(),
+    });
     await waitFor(() => expect(fetchDynamicModelsMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     await act(async () => {
       await result.current.refresh();
     });
 
     expect(result.current.status).toBe("ok");
-    expect(fetchDynamicModelsMock).toHaveBeenLastCalledWith("grok-acp", { refresh: true });
+    expect(fetchDynamicModelsMock).toHaveBeenLastCalledWith(
+      "grok-acp",
+      expect.objectContaining({ refresh: true }),
+    );
   });
 
   it("updates status when the probe returns status detail text", async () => {
@@ -60,7 +74,9 @@ describe("useAgentCapabilities", () => {
       error: "login required",
     });
 
-    const { result } = renderHook(() => useAgentCapabilities("grok-acp", initialConfig));
+    const { result } = renderHook(() => useAgentCapabilities("grok-acp", initialConfig), {
+      wrapper: queryWrapper(),
+    });
 
     await waitFor(() => expect(result.current.error).toBe("login required"));
     expect(result.current.status).toBe("auth_required");
@@ -71,7 +87,7 @@ describe("useAgentCapabilities", () => {
 
     const { result, rerender } = renderHook(
       ({ initial }) => useAgentCapabilities("grok-acp", initial),
-      { initialProps: { initial: initialConfig } },
+      { initialProps: { initial: initialConfig }, wrapper: queryWrapper() },
     );
     await waitFor(() => expect(fetchDynamicModelsMock).toHaveBeenCalledTimes(1));
 
@@ -94,7 +110,9 @@ describe("useAgentCapabilities", () => {
         error: "probe failed",
       });
 
-    const { result } = renderHook(() => useAgentCapabilities("grok-acp", initialConfig));
+    const { result } = renderHook(() => useAgentCapabilities("grok-acp", initialConfig), {
+      wrapper: queryWrapper(),
+    });
     await waitFor(() => expect(result.current.models).toHaveLength(1));
 
     await act(async () => {
@@ -114,7 +132,7 @@ describe("useAgentCapabilities", () => {
 
     const { result, rerender } = renderHook(
       ({ initial }) => useAgentCapabilities("grok-acp", initial),
-      { initialProps: { initial: initialConfig } },
+      { initialProps: { initial: initialConfig }, wrapper: queryWrapper() },
     );
     await waitFor(() => expect(fetchDynamicModelsMock).toHaveBeenCalledTimes(1));
 

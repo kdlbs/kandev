@@ -12,9 +12,11 @@ import {
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatDistanceToNow } from "date-fns";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useSystemMetricsSubscription } from "@/hooks/use-system-metrics-subscription";
+import { systemMetricsQueryOptions } from "@/lib/query/query-options/system";
 import type { SystemMetricSample, SystemMetricsSource } from "@/lib/types/system";
 
 type TopbarMetricsProps = {
@@ -24,7 +26,8 @@ type TopbarMetricsProps = {
 
 export function TopbarMetrics({ activeSessionId, size = "lg" }: TopbarMetricsProps) {
   const enabled = useAppStore((s) => s.userSettings.systemMetricsDisplay.showInTopbar);
-  const snapshot = useAppStore((s) => s.system.metrics);
+  const metricsQuery = useQuery(systemMetricsQueryOptions());
+  const snapshot = metricsQuery.data ?? null;
   const { usesDesktopWorkbench } = useResponsiveBreakpoint();
   const shouldRender = enabled;
   useSystemMetricsSubscription(shouldRender);

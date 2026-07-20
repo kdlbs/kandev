@@ -494,8 +494,8 @@ test.describe("Sidebar filter — draft semantics", () => {
     await filters.addFilterRow();
     await filters.setClauseDimension(0, "Title");
     await filters.setClauseTextValue(0, "zz");
-    await expect(filters.popover.getByTestId("sidebar-filter-dirty-indicator")).toBeVisible();
+    await expect(filters.dirtyIndicator).toBeVisible();
     await filters.discard();
-    await expect(filters.popover.getByTestId("sidebar-filter-dirty-indicator")).toHaveCount(0);
+    await expect(filters.dirtyIndicator).toHaveCount(0);
   });
 });

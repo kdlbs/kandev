@@ -1,10 +1,18 @@
 import { useCallback } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { KanbanState } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
+import { workflowSnapshotToKanbanData } from "@/lib/kanban/snapshot";
 import { replaceTaskUrl } from "@/lib/links";
-import { listTaskSessions } from "@/lib/api";
+import { taskSessionsQueryOptions } from "@/lib/query/query-options";
+import { taskSessionsAreNavigationReady } from "@/lib/session/task-session-navigation";
+import {
+  removeTasksFromWorkflowSnapshotQueries,
+  workflowSnapshotQueryData,
+} from "@/lib/query/workflow-snapshot-cache";
+import { useRouter } from "@/lib/routing/client-router";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import { getRecentTasks } from "@/lib/recent-tasks";
 
@@ -34,25 +42,26 @@ type RemoveFromBoardResult = {
   switchedTaskId: string | null;
 };
 
-function cachedSessionsHaveEnvIds(sessions: TaskSession[]): boolean {
-  return sessions.length === 0 || sessions.every((session) => !!session.task_environment_id);
-}
-
 async function loadTaskSessionsForTaskFromStore(
   store: StoreApi<AppState>,
   taskId: string,
+  queryClient: QueryClient,
 ): Promise<TaskSession[]> {
   const state = store.getState();
   const cachedSessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
   if (state.taskSessionsByTask.loadedByTaskId[taskId]) {
-    if (cachedSessionsHaveEnvIds(cachedSessions)) return cachedSessions;
+    if (taskSessionsAreNavigationReady(cachedSessions)) return cachedSessions;
   }
-  if (state.taskSessionsByTask.loadingByTaskId[taskId]) {
-    return cachedSessions;
-  }
+  // Do not return partial WS-seeded rows while a Query fetch is in flight.
+  // fetchQuery dedupes against the active request and resolves with the
+  // canonical API payload, including fields needed for layout decisions such
+  // as is_passthrough.
   store.getState().setTaskSessionsLoading(taskId, true);
   try {
-    const response = await listTaskSessions(taskId, { cache: "no-store" });
+    const response = await queryClient.fetchQuery({
+      ...taskSessionsQueryOptions(taskId),
+      staleTime: 0,
+    });
     store.getState().setTaskSessionsForTask(taskId, response.sessions ?? []);
     return response.sessions ?? [];
   } catch (error) {
@@ -64,39 +73,17 @@ async function loadTaskSessionsForTaskFromStore(
   }
 }
 
-function removeTaskFromSnapshots(store: StoreApi<AppState>, taskId: string): void {
-  const currentSnapshots = store.getState().kanbanMulti.snapshots;
-  for (const [wfId, snapshot] of Object.entries(currentSnapshots)) {
-    const hadTask = snapshot.tasks.some((t: KanbanState["tasks"][number]) => t.id === taskId);
-    if (hadTask) {
-      store.getState().setWorkflowSnapshot(wfId, {
-        ...snapshot,
-        tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
-      });
-    }
-  }
-
-  const currentKanbanTasks = store.getState().kanban.tasks;
-  if (currentKanbanTasks.some((t: KanbanState["tasks"][number]) => t.id === taskId)) {
-    store.setState((state) => ({
-      ...state,
-      kanban: {
-        ...state.kanban,
-        tasks: state.kanban.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
-      },
-    }));
-  }
+function removeTaskFromSnapshots(queryClient: QueryClient, taskId: string): void {
+  removeTasksFromWorkflowSnapshotQueries(queryClient, new Set([taskId]));
 }
 
-function collectRemainingTasks(store: StoreApi<AppState>): KanbanState["tasks"] {
-  const allRemainingTasks: KanbanState["tasks"] = [];
-  for (const snapshot of Object.values(store.getState().kanbanMulti.snapshots)) {
-    allRemainingTasks.push(...snapshot.tasks);
-  }
-  if (allRemainingTasks.length === 0) {
-    allRemainingTasks.push(...store.getState().kanban.tasks);
-  }
-  return allRemainingTasks;
+function collectRemainingTasks(
+  store: StoreApi<AppState>,
+  queryClient: QueryClient,
+): KanbanState["tasks"] {
+  return workflowSnapshotQueryData(queryClient).flatMap(
+    (snapshot) => workflowSnapshotToKanbanData(snapshot).tasks,
+  );
 }
 
 function selectNextTaskAfterRemoval(
@@ -202,9 +189,11 @@ function shouldSwitchAfterRemoval(
  * Used by both TaskSessionSidebar and SessionTaskSwitcherSheet.
  */
 export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOptions) {
+  const queryClient = useQueryClient();
+  const router = useRouter();
   const loadTaskSessionsForTask = useCallback(
-    (taskId: string) => loadTaskSessionsForTaskFromStore(store, taskId),
-    [store],
+    (taskId: string) => loadTaskSessionsForTaskFromStore(store, taskId, queryClient),
+    [store, queryClient],
   );
 
   /**
@@ -220,8 +209,8 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
    */
   const removeTaskFromBoard = useCallback(
     async (taskId: string, opts?: RemoveFromBoardOptions): Promise<RemoveFromBoardResult> => {
-      if (!opts?.switchOnly) removeTaskFromSnapshots(store, taskId);
-      const allRemainingTasks = collectRemainingTasks(store);
+      if (!opts?.switchOnly) removeTaskFromSnapshots(queryClient, taskId);
+      const allRemainingTasks = collectRemainingTasks(store, queryClient);
 
       if (!shouldSwitchAfterRemoval(store, taskId, opts)) {
         return { switchedTaskId: null };
@@ -240,10 +229,10 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
         return { switchedTaskId: nextTask.id };
       }
 
-      window.location.href = "/";
+      router.replace("/");
       return { switchedTaskId: null };
     },
-    [store, useLayoutSwitch, loadTaskSessionsForTask],
+    [store, queryClient, router, useLayoutSwitch, loadTaskSessionsForTask],
   );
 
   return { removeTaskFromBoard, loadTaskSessionsForTask };

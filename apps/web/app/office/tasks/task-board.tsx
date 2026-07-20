@@ -2,7 +2,7 @@
 
 import { useRouter } from "@/lib/routing/client-router";
 import { ScrollArea } from "@kandev/ui/scroll-area";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "./status-icon";
 
@@ -68,7 +68,7 @@ function BoardColumn({
 }
 
 export function TaskBoard({ tasks }: TaskBoardProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const columns = meta
     ? meta.statuses.map((s) => ({ status: s.id as OfficeTaskStatus, label: s.label }))
     : FALLBACK_COLUMNS;

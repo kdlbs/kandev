@@ -1,5 +1,5 @@
 import { PromptsSettings } from "@/components/settings/prompts-settings";
-import { StateProvider } from "@/components/state-provider";
+import { StateHydrator } from "@/components/state-hydrator";
 import { listPrompts } from "@/lib/api";
 
 export default async function PromptsSettingsPage() {
@@ -18,8 +18,9 @@ export default async function PromptsSettingsPage() {
   }
 
   return (
-    <StateProvider initialState={initialState}>
+    <>
+      <StateHydrator initialState={initialState} />
       <PromptsSettings />
-    </StateProvider>
+    </>
   );
 }

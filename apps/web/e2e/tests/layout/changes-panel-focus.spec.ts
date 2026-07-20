@@ -124,6 +124,159 @@ async function setGitStatusForSession(testPage: Page, sessionId: string, changed
   );
 }
 
+function createIsolatedGitRepo(backendTmpDir: string, prefix: string) {
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const repoDir = path.join(backendTmpDir, "repos", `${prefix}-${suffix}`);
+  const gitEnv = makeGitEnv(backendTmpDir);
+  fs.mkdirSync(repoDir, { recursive: true });
+  execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+  execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+  return { suffix, repoDir, gitEnv };
+}
+
+async function clearDockviewLayoutStorage(testPage: Page) {
+  await testPage
+    .evaluate(() => {
+      window.localStorage.removeItem("dockview-layout-v3");
+      for (const key of Object.keys(window.sessionStorage)) {
+        if (key.startsWith("kandev.dockview.env-layout-v3.")) {
+          window.sessionStorage.removeItem(key);
+        }
+      }
+    })
+    .catch(() => undefined);
+}
+
+async function activeDockviewPanelId(testPage: Page): Promise<string | null> {
+  return testPage.evaluate(() => {
+    type Api = { activePanel?: { id?: string } | null };
+    const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+    return api?.activePanel?.id ?? null;
+  });
+}
+
+async function activateSessionPanelWithDockviewApi(
+  testPage: Page,
+  sessionId: string,
+): Promise<string> {
+  let activatedPanelId: string | null = null;
+  await expect
+    .poll(
+      async () => {
+        activatedPanelId = await testPage.evaluate((sessionId) => {
+          type PanelApi = { setActive: () => void };
+          type Panel = { id: string; api: PanelApi };
+          type Api = {
+            panels: Panel[];
+            getPanel: (id: string) => Panel | undefined;
+            activePanel?: Panel | null;
+          };
+          const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+          if (!api) return null;
+
+          const panel =
+            api.getPanel(`session:${sessionId}`) ??
+            api.getPanel("chat") ??
+            api.panels.find((p) => p.id.startsWith("session:"));
+          if (!panel) return null;
+
+          panel.api.setActive();
+          return api.activePanel?.id ?? panel.id;
+        }, sessionId);
+        return activatedPanelId;
+      },
+      { timeout: 20_000, message: "Activating session panel through dockview api" },
+    )
+    .not.toBeNull();
+  return activatedPanelId ?? "";
+}
+
+async function persistLayoutWithSessionActive(
+  testPage: Page,
+  sessionId: string,
+  taskEnvironmentId: string | undefined,
+) {
+  await testPage.evaluate(
+    ({ sessionId, taskEnvironmentId }) => {
+      type LeafData = { id?: string; views?: string[]; activeView?: string };
+      type SerializedNode = { data?: unknown };
+      type SerializedDockview = {
+        activeGroup?: string;
+        grid?: { root?: SerializedNode };
+        panels?: Record<string, unknown>;
+      };
+      type Api = { toJSON: () => SerializedDockview };
+
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      if (!api) throw new Error("Dockview api was not available");
+
+      const json = api.toJSON();
+      const panelIds = Object.keys(json.panels ?? {});
+      const candidates = [
+        `session:${sessionId}`,
+        "chat",
+        ...panelIds.filter((id) => id.startsWith("session:")),
+      ];
+      let activeGroup: string | undefined;
+
+      const setActiveSessionView = (node: unknown): boolean => {
+        if (!node || typeof node !== "object") return false;
+        const data = (node as SerializedNode).data;
+        if (Array.isArray(data)) return data.some(setActiveSessionView);
+
+        const leaf = data as LeafData | undefined;
+        if (!leaf || !Array.isArray(leaf.views)) return false;
+        const panelId = candidates.find((id) => leaf.views?.includes(id));
+        if (!panelId) return false;
+
+        leaf.activeView = panelId;
+        activeGroup = leaf.id;
+        return true;
+      };
+
+      if (!setActiveSessionView(json.grid?.root)) {
+        throw new Error(`No session panel found in layout: ${panelIds.join(", ")}`);
+      }
+      if (activeGroup) json.activeGroup = activeGroup;
+
+      const serialized = JSON.stringify(json);
+      window.localStorage.setItem("dockview-layout-v3", serialized);
+      if (taskEnvironmentId) {
+        window.sessionStorage.setItem(
+          `kandev.dockview.env-layout-v3.${taskEnvironmentId}`,
+          serialized,
+        );
+      }
+    },
+    { sessionId, taskEnvironmentId },
+  );
+}
+
+async function waitForTaskEnvironmentId(
+  apiClient: {
+    listTaskSessions: (taskId: string) => Promise<{
+      sessions: Array<{ id: string; task_environment_id?: string }>;
+    }>;
+  },
+  taskId: string,
+  sessionId: string,
+): Promise<string | undefined> {
+  let taskEnvironmentId: string | undefined;
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(taskId);
+        taskEnvironmentId = sessions.find(
+          (session) => session.id === sessionId,
+        )?.task_environment_id;
+        return taskEnvironmentId ?? "";
+      },
+      { timeout: 10_000, message: "Waiting for task environment id" },
+    )
+    .not.toBe("");
+  return taskEnvironmentId;
+}
+
 async function moveChangesToTerminalGroupAndFocusTerminal(testPage: Page) {
   await testPage.evaluate(() => {
     type Group = { id: string };
@@ -166,6 +319,10 @@ async function moveChangesToChatGroupAndFocusChat(testPage: Page) {
 }
 
 test.describe("Changes panel focus behavior", () => {
+  test.afterEach(async ({ testPage }) => {
+    await clearDockviewLayoutStorage(testPage);
+  });
+
   /**
    * Verifies the changes panel does NOT steal focus from the chat tab
    * on page refresh when the task has existing git changes/commits.
@@ -183,8 +340,13 @@ test.describe("Changes panel focus behavior", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = makeGitEnv(backend.tmpDir);
+    const { suffix, repoDir, gitEnv } = createIsolatedGitRepo(
+      backend.tmpDir,
+      "changes-focus-refresh",
+    );
+    const repo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: `E2E Changes Focus ${suffix}`,
+    });
     const git = new GitHelper(repoDir, gitEnv);
 
     // Create a task and wait for the agent to be ready
@@ -195,13 +357,14 @@ test.describe("Changes panel focus behavior", () => {
       {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
+        repository_ids: [repo.id],
       },
     );
-    await testPage.goto(`/t/${task.id}`);
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    await testPage.goto(`/t/${task.id}?sessionId=${task.session_id}`);
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady(30_000);
+    const taskEnvironmentId = await waitForTaskEnvironmentId(apiClient, task.id, task.session_id);
 
     // Create a file and commit so there are existing changes
     git.createFile("test-file.txt", "hello world");
@@ -214,25 +377,25 @@ test.describe("Changes panel focus behavior", () => {
     await session.expandCommitsSection();
     await expect(session.changes.getByText("test commit")).toBeVisible({ timeout: 10_000 });
 
-    // Switch back to chat tab — this is the tab that should be active after refresh
-    await session.clickSessionChatTab();
-    await expect(session.chat).toBeVisible({ timeout: 5_000 });
+    // Persist the pre-refresh layout with the session tab active. The assertion
+    // below verifies that loading git data on refresh does not override it.
+    await activateSessionPanelWithDockviewApi(testPage, task.session_id);
+    await persistLayoutWithSessionActive(testPage, task.session_id, taskEnvironmentId);
 
     // Refresh the page
     await testPage.reload();
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
 
-    // Wait for the git data to load (changes tab should show count)
-    await expect(testPage.locator(".dv-default-tab:has-text('Changes')")).toBeVisible({
-      timeout: 15_000,
-    });
-
-    // The chat/session panel should be the active tab, NOT changes
-    const changesTab = testPage.locator(".dv-default-tab:has-text('Changes')");
-    await expect(changesTab).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
-
-    // Chat should be visible (active in center group)
-    await expect(session.chat).toBeVisible({ timeout: 5_000 });
+    // Wait for the git data to load, then verify it did not move global focus.
+    await expect(
+      testPage.locator(".dv-default-tab").filter({ hasText: /^Changes \(1\)$/ }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(async () => (await activeDockviewPanelId(testPage)) ?? "", {
+        timeout: 5_000,
+        message: "Changes must not become the globally active dockview panel",
+      })
+      .toMatch(new RegExp(`^(chat|session:${task.session_id})$`));
   });
 
   test("changes panel does not auto-focus when grouped with agent session panels", async ({
@@ -243,8 +406,13 @@ test.describe("Changes panel focus behavior", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = makeGitEnv(backend.tmpDir);
+    const { suffix, repoDir, gitEnv } = createIsolatedGitRepo(
+      backend.tmpDir,
+      "changes-focus-center",
+    );
+    const repo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: `E2E Changes Center Focus ${suffix}`,
+    });
     const git = new GitHelper(repoDir, gitEnv);
 
     const task = await apiClient.createTaskWithAgent(
@@ -254,17 +422,22 @@ test.describe("Changes panel focus behavior", () => {
       {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
+        repository_ids: [repo.id],
       },
     );
-    await testPage.goto(`/t/${task.id}`);
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    await testPage.goto(`/t/${task.id}?sessionId=${task.session_id}`);
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
-    await session.waitForDockviewReady();
+    await session.waitForDockviewReady(30_000);
+    await activateSessionPanelWithDockviewApi(testPage, task.session_id);
 
     await moveChangesToChatGroupAndFocusChat(testPage);
-    await expect(session.chat).toBeVisible();
+    await expect
+      .poll(async () => (await activeDockviewPanelId(testPage)) ?? "", {
+        timeout: 5_000,
+        message: "Session panel should be active before git changes arrive",
+      })
+      .toMatch(new RegExp(`^(chat|session:${task.session_id})$`));
 
     await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
 
@@ -281,8 +454,12 @@ test.describe("Changes panel focus behavior", () => {
     await testPage.waitForTimeout(2_000);
 
     await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
-
-    await expect(session.chat).toBeVisible();
+    await expect
+      .poll(async () => (await activeDockviewPanelId(testPage)) ?? "", {
+        timeout: 5_000,
+        message: "Git updates must not steal global focus from the session panel",
+      })
+      .toMatch(new RegExp(`^(chat|session:${task.session_id})$`));
   });
 
   test("new git updates focus the changes tab in its current non-agent group", async ({
@@ -293,8 +470,13 @@ test.describe("Changes panel focus behavior", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = makeGitEnv(backend.tmpDir);
+    const { suffix, repoDir, gitEnv } = createIsolatedGitRepo(
+      backend.tmpDir,
+      "changes-focus-terminal",
+    );
+    const repo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: `E2E Changes Terminal Focus ${suffix}`,
+    });
     const git = new GitHelper(repoDir, gitEnv);
 
     const task = await apiClient.createTaskWithAgent(
@@ -304,14 +486,14 @@ test.describe("Changes panel focus behavior", () => {
       {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
+        repository_ids: [repo.id],
       },
     );
-    await testPage.goto(`/t/${task.id}`);
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    await testPage.goto(`/t/${task.id}?sessionId=${task.session_id}`);
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
-    await session.waitForDockviewReady();
+    await session.waitForDockviewReady(30_000);
+    await activateSessionPanelWithDockviewApi(testPage, task.session_id);
 
     git.createFile("first-change.txt", "one");
     await expect(

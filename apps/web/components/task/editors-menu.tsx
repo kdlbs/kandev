@@ -17,6 +17,7 @@ import { useEditors } from "@/hooks/domains/settings/use-editors";
 import { useOpenSessionInEditor } from "@/hooks/use-open-session-in-editor";
 import { useSessionWorktrees } from "@/hooks/domains/session/use-session-worktrees";
 import { useAppStore } from "@/components/state-provider";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import type { EditorOption } from "@/lib/types/http";
 import {
   buildWorktreeOptions,
@@ -31,11 +32,8 @@ type EditorsMenuProps = {
 
 function useWorktreeOptions(sessionId: string | null): WorktreeOption[] {
   const worktrees = useSessionWorktrees(sessionId);
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  return useMemo(
-    () => buildWorktreeOptions(worktrees, Object.values(repositoriesByWorkspace).flat()),
-    [worktrees, repositoriesByWorkspace],
-  );
+  const repositories = useAllCachedRepositories();
+  return useMemo(() => buildWorktreeOptions(worktrees, repositories), [worktrees, repositories]);
 }
 
 function WorktreeItems({

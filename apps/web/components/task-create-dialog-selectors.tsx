@@ -1,7 +1,16 @@
 /* eslint-disable max-lines -- groups all create-dialog selector subcomponents; splitting per-selector files is a separate refactor. */
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback, useMemo } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  memo,
+  useCallback,
+  useMemo,
+  type RefObject,
+} from "react";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPaperclip } from "@tabler/icons-react";
@@ -29,6 +38,7 @@ import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-menti
 import { cn } from "@/lib/utils";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
+const MENTION_CONTROL_KEYS = new Set(["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"]);
 
 type RepositoryOption = {
   value: string;
@@ -637,10 +647,25 @@ function useTextareaHandlers(
   mention: ReturnType<typeof useTaskCreatePromptMention>,
   onKeyDown: TaskFormInputsProps["onKeyDown"],
 ) {
-  const { handleChange: mentionHandleChange, handleKeyDown: mentionHandleKeyDown } = mention;
+  const {
+    handleChange: mentionHandleChange,
+    handleKeyDown: mentionHandleKeyDown,
+    isOpen: mentionIsOpen,
+  } = mention;
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => mentionHandleChange(e.target.value),
     [mentionHandleChange],
+  );
+  const handleKeyDownCapture = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (!mentionIsOpen || !MENTION_CONTROL_KEYS.has(e.key)) return;
+      mentionHandleKeyDown(e);
+      if (e.defaultPrevented) {
+        e.stopPropagation();
+        e.nativeEvent.stopImmediatePropagation?.();
+      }
+    },
+    [mentionHandleKeyDown, mentionIsOpen],
   );
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -650,7 +675,34 @@ function useTextareaHandlers(
     },
     [mentionHandleKeyDown, onKeyDown],
   );
-  return { handleChange, handleKeyDown };
+  return { handleChange, handleKeyDown, handleKeyDownCapture };
+}
+
+function useMentionEscapePropagationGuard(
+  textareaRef: RefObject<HTMLTextAreaElement | null>,
+  mention: ReturnType<typeof useTaskCreatePromptMention>,
+) {
+  const { closeMenu, isOpen } = mention;
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || !isOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      closeMenu();
+    };
+
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    textarea.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+      textarea.removeEventListener("keydown", handleKeyDown, { capture: true });
+    };
+  }, [closeMenu, isOpen, textareaRef]);
 }
 
 function useFileInputClick(addFiles: (files: File[]) => Promise<void> | void) {
@@ -734,7 +786,11 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     value: description,
     onChange: setDescriptionValue,
   });
-  const { handleChange, handleKeyDown } = useTextareaHandlers(mention, onKeyDown);
+  useMentionEscapePropagationGuard(textareaRef, mention);
+  const { handleChange, handleKeyDown, handleKeyDownCapture } = useTextareaHandlers(
+    mention,
+    onKeyDown,
+  );
   const { fileInputRef, handleAttachClick, handleFileInputChange } = useFileInputClick(addFiles);
   const voiceBinding = useMemo(
     () => ({ onTranscript: insertAtCursor, onAutoSend: onVoiceAutoSend }),
@@ -762,6 +818,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           }
           value={description}
           onChange={handleChange}
+          onKeyDownCapture={handleKeyDownCapture}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           data-testid="task-description-input"

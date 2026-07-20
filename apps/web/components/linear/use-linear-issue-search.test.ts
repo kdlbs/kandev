@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type PropsWithChildren } from "react";
 import type { LinearIssue, LinearSearchResult } from "@/lib/types/linear";
 
 const searchLinearIssuesMock =
@@ -46,11 +48,22 @@ function emptyResult(): LinearSearchResult {
   return { issues: [], maxResults: 25, isLast: true };
 }
 
+function createWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return function Wrapper({ children }: PropsWithChildren) {
+    return createElement(QueryClientProvider, { client: queryClient }, children);
+  };
+}
+
 describe("useLinearIssueSearch — gating", () => {
   it("does not fetch while disabled (integration not configured)", async () => {
     resetSearchMock();
     searchLinearIssuesMock.mockResolvedValue(emptyResult());
-    const { result } = renderHook(() => useLinearIssueSearch(WORKSPACE, "", "", "me", false));
+    const { result } = renderHook(() => useLinearIssueSearch(WORKSPACE, "", "", "me", false), {
+      wrapper: createWrapper(),
+    });
     await new Promise((r) => setTimeout(r, 300));
     expect(searchLinearIssuesMock).not.toHaveBeenCalled();
     expect(result.current.loading).toBe(false);
@@ -60,7 +73,9 @@ describe("useLinearIssueSearch — gating", () => {
   it("does not fetch when workspaceId is missing even if enabled", async () => {
     resetSearchMock();
     searchLinearIssuesMock.mockResolvedValue(emptyResult());
-    renderHook(() => useLinearIssueSearch(undefined, "", "", "me", true));
+    renderHook(() => useLinearIssueSearch(undefined, "", "", "me", true), {
+      wrapper: createWrapper(),
+    });
     await new Promise((r) => setTimeout(r, 300));
     expect(searchLinearIssuesMock).not.toHaveBeenCalled();
   });
@@ -70,7 +85,7 @@ describe("useLinearIssueSearch — gating", () => {
     searchLinearIssuesMock.mockResolvedValue(emptyResult());
     const { rerender } = renderHook(
       ({ enabled }: { enabled: boolean }) => useLinearIssueSearch(WORKSPACE, "", "", "me", enabled),
-      { initialProps: { enabled: false } },
+      { initialProps: { enabled: false }, wrapper: createWrapper() },
     );
     await new Promise((r) => setTimeout(r, 300));
     expect(searchLinearIssuesMock).not.toHaveBeenCalled();
@@ -84,7 +99,9 @@ describe("useLinearIssueSearch — fetch wiring", () => {
     resetSearchMock();
     const issue = fakeIssue();
     searchLinearIssuesMock.mockResolvedValue({ issues: [issue], maxResults: 25, isLast: true });
-    const { result } = renderHook(() => useLinearIssueSearch(WORKSPACE, "bug", "ENG", "me", true));
+    const { result } = renderHook(() => useLinearIssueSearch(WORKSPACE, "bug", "ENG", "me", true), {
+      wrapper: createWrapper(),
+    });
     await waitFor(() => expect(result.current.items).toEqual([issue]));
     const [params, options] = searchLinearIssuesMock.mock.calls[0] as [
       Record<string, unknown>,
@@ -99,14 +116,37 @@ describe("useLinearIssueSearch — fetch wiring", () => {
 
   it("surfaces error message without items", async () => {
     resetSearchMock();
-    // Pre-attach a catch so the rejected promise is never treated as an
-    // unhandled rejection during the debounce window; the hook still observes
-    // the rejection when it awaits the same promise.
-    const rejected = Promise.reject(new Error("boom"));
-    rejected.catch(() => {});
-    searchLinearIssuesMock.mockReturnValue(rejected);
-    const { result } = renderHook(() => useLinearIssueSearch(WORKSPACE, "", "", "me", true));
+    searchLinearIssuesMock.mockRejectedValue(new Error("boom"));
+    const { result } = renderHook(() => useLinearIssueSearch(WORKSPACE, "", "", "me", true), {
+      wrapper: createWrapper(),
+    });
     await waitFor(() => expect(result.current.error).toBe("boom"));
     expect(result.current.items).toEqual([]);
+  });
+
+  it("uses the returned cursor to fetch the next page", async () => {
+    resetSearchMock();
+    const first = fakeIssue({ id: "1", identifier: "ENG-1" });
+    const second = fakeIssue({ id: "2", identifier: "ENG-2" });
+    searchLinearIssuesMock
+      .mockResolvedValueOnce({
+        issues: [first],
+        maxResults: 25,
+        isLast: false,
+        nextPageToken: "cursor-2",
+      })
+      .mockResolvedValueOnce({ issues: [second], maxResults: 25, isLast: true });
+
+    const { result } = renderHook(() => useLinearIssueSearch(WORKSPACE, "", "", "me", true), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.items).toEqual([first]));
+
+    act(() => result.current.goNext());
+
+    await waitFor(() => expect(result.current.items).toEqual([second]));
+    expect(result.current.page).toBe(2);
+    const [params] = searchLinearIssuesMock.mock.calls[1] as [Record<string, unknown>];
+    expect(params.pageToken).toBe("cursor-2");
   });
 });

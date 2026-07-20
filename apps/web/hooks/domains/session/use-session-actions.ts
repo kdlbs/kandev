@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { qk } from "@/lib/query/keys";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import type { TaskSessionState } from "@/lib/types/http";
+import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 
 export function isSessionStoppable(s: TaskSessionState): boolean {
   return s === "RUNNING" || s === "STARTING" || s === "WAITING_FOR_INPUT";
@@ -29,6 +31,25 @@ type WsActionFn = (
   payload: Record<string, unknown>,
   timeout?: number,
 ) => Promise<boolean>;
+
+type TaskSessionsCache = {
+  sessions?: TaskSession[];
+};
+
+function removeTaskSessionFromQueryCache(
+  queryClient: QueryClient,
+  taskId: string,
+  sessionId: string,
+) {
+  queryClient.setQueryData<TaskSessionsCache>(qk.taskSession.byTask(taskId), (current) => {
+    if (!current || !Array.isArray(current.sessions)) return current;
+    const sessions = current.sessions.filter((session) => session.id !== sessionId);
+    if (sessions.length === current.sessions.length) return current;
+    return { ...current, sessions };
+  });
+  queryClient.removeQueries({ exact: true, queryKey: qk.taskSession.byId(sessionId) });
+  void queryClient.invalidateQueries({ exact: true, queryKey: qk.taskSession.byTask(taskId) });
+}
 
 function useWsAction(): WsActionFn {
   const { toast, updateToast } = useToast();
@@ -58,6 +79,7 @@ function useWsAction(): WsActionFn {
  */
 export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActionsArgs) {
   const wsAction = useWsAction();
+  const queryClient = useQueryClient();
   const removeTaskSession = useAppStore((state) => state.removeTaskSession);
   const appStoreApi = useAppStoreApi();
 
@@ -105,8 +127,9 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
     }
 
     removeTaskSession(taskId, sessionId);
+    removeTaskSessionFromQueryCache(queryClient, taskId, sessionId);
     onDeleted?.();
-  }, [sessionId, taskId, wsAction, removeTaskSession, appStoreApi, onDeleted]);
+  }, [sessionId, taskId, wsAction, removeTaskSession, queryClient, appStoreApi, onDeleted]);
 
   return { setPrimary, stop, resume, remove };
 }

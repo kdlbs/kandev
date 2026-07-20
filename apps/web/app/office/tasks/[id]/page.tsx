@@ -1,18 +1,25 @@
 "use client";
 
-import { use, useState, useEffect, useRef, useCallback, useMemo, Suspense } from "react";
+import {
+  use,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useSyncExternalStore,
+  Suspense,
+} from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
+import { type TaskCommentResponse, type TaskDecisionDTO } from "@/lib/api/domains/office-api";
 import {
-  getTask,
-  listActivityForTarget,
-  listComments,
-  type TaskCommentResponse,
-  type TaskDecisionDTO,
-} from "@/lib/api/domains/office-api";
-import { listTaskSessions } from "@/lib/api/domains/session-api";
+  officeTaskActivityQueryOptions,
+  officeTaskCommentsQueryOptions,
+  officeTaskQueryOptions,
+  taskSessionsQueryOptions,
+} from "@/lib/query/query-options";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { OfficeSimplePane } from "@/components/task/simple/OfficeSimplePane";
 import { TaskAdvancedMode } from "./task-advanced-mode";
@@ -28,6 +35,7 @@ import type {
 } from "./types";
 import type { ActivityEntry, OfficeTask } from "@/lib/state/slices/office/types";
 import type { TaskSession as ApiTaskSession } from "@/lib/types/http";
+import { readOfficeTaskFromCachedPages } from "./task-detail-query-cache";
 
 type IssueDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -158,45 +166,6 @@ function mapTaskSession(session: ApiTaskSession): TaskSession {
   };
 }
 
-type IssueDetailData = {
-  activity: TaskActivityEntry[] | null;
-  sessions: TaskSession[] | null;
-  rawSessions: ApiTaskSession[] | null;
-  comments: TaskComment[] | null;
-};
-
-// ---------------------------------------------------------------------------
-// Task fetchers — pure async functions, no React state
-// ---------------------------------------------------------------------------
-
-async function fetchIssueComments(id: string): Promise<TaskComment[]> {
-  try {
-    const res = await listComments(id);
-    return (res.comments ?? []).map(mapCommentResponse);
-  } catch {
-    return [];
-  }
-}
-
-async function fetchIssueDetailData(workspaceId: string, id: string): Promise<IssueDetailData> {
-  const [activityResult, sessionsResult, commentsResult] = await Promise.allSettled([
-    listActivityForTarget(workspaceId, id),
-    listTaskSessions(id),
-    fetchIssueComments(id),
-  ]);
-  const rawSessions =
-    sessionsResult.status === "fulfilled" ? (sessionsResult.value.sessions ?? []) : null;
-  return {
-    activity:
-      activityResult.status === "fulfilled"
-        ? (activityResult.value.activity ?? []).map(mapActivityEntry)
-        : null,
-    sessions: rawSessions ? rawSessions.map(mapTaskSession) : null,
-    rawSessions,
-    comments: commentsResult.status === "fulfilled" ? commentsResult.value : null,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Live sync — WS subscriptions + re-fetch on session state changes
 // ---------------------------------------------------------------------------
@@ -204,7 +173,7 @@ async function fetchIssueDetailData(workspaceId: string, id: string): Promise<Is
 type LiveSyncParams = {
   task: Task | null;
   baseSessions: TaskSession[];
-  onTaskRefetch: (task: Task, timeline: TimelineEvent[]) => void;
+  onTaskRefetch: () => Promise<void>;
   onCommentsRefetch: () => Promise<void>;
 };
 
@@ -243,11 +212,7 @@ function useSessionLiveSync({
   const taskId = task?.id;
   useEffect(() => {
     if (!taskId || !sessionStatesKey) return;
-    getTask(taskId)
-      .then((res) => {
-        if (res.task) onTaskRefetch(mapOfficeTaskToTask(res.task), res.timeline ?? []);
-      })
-      .catch(() => {});
+    void onTaskRefetch();
     void onCommentsRefetch();
   }, [sessionStatesKey, taskId, onTaskRefetch, onCommentsRefetch]);
 
@@ -258,30 +223,7 @@ function useSessionLiveSync({
 // Optimistic update helpers
 // ---------------------------------------------------------------------------
 
-function useTaskOptimisticHelpers(
-  id: string,
-  setTask: React.Dispatch<React.SetStateAction<Task | null>>,
-  setTimeline: React.Dispatch<React.SetStateAction<TimelineEvent[]>>,
-) {
-  // Refetch the canonical task DTO when the backend broadcasts an update
-  // (priority / project / parent / blockers / participants / assignee).
-  // The optimistic patch we applied locally gets reconciled with server
-  // state.
-  const refetchTask = useCallback(async () => {
-    try {
-      const res = await getTask(id);
-      if (res.task) {
-        setTask(mapOfficeTaskToTask(res.task));
-        if (res.timeline) setTimeline(res.timeline);
-      }
-    } catch {
-      /* swallow — next user action will retry */
-    }
-  }, [id, setTask, setTimeline]);
-  useOfficeRefetch(`task:${id}`, () => {
-    void refetchTask();
-  });
-
+function useTaskOptimisticHelpers(setTask: React.Dispatch<React.SetStateAction<Task | null>>) {
   const applyTaskPatch = useCallback(
     (patch: Partial<Task>) => {
       setTask((prev) => (prev ? { ...prev, ...patch } : prev));
@@ -299,104 +241,128 @@ function useTaskOptimisticHelpers(
   return { applyTaskPatch, restoreTask };
 }
 
+function resolveIssueError(
+  task: Task | null,
+  isSuccess: boolean,
+  hasQueryTask: boolean,
+  isError: boolean,
+): string | null {
+  if (task) return null;
+  if (isSuccess && !hasQueryTask) return "Task not found";
+  if (isError) return "Failed to load task";
+  return null;
+}
+
+function resolveTaskWorkspaceId(
+  task: Task | null,
+  queryTask: OfficeTask | undefined,
+  fallbackWorkspaceId: string,
+): string {
+  return task?.workspaceId ?? queryTask?.workspaceId ?? fallbackWorkspaceId;
+}
+
+function mergeSessionStates(
+  baseSessions: TaskSession[],
+  sessionStoreStates: Array<string | undefined>,
+): TaskSession[] {
+  return baseSessions.map((s, i) => ({
+    ...s,
+    state: (sessionStoreStates[i] ?? s.state) as TaskSession["state"],
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Primary data hook
 // ---------------------------------------------------------------------------
 
 function useIssueData(id: string) {
-  const storeIssues = useAppStore((s) => s.office.tasks.items);
+  const queryClient = useQueryClient();
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const setTaskSessionsForTask = useAppStore((s) => s.setTaskSessionsForTask);
-  // Snapshot storeIssues in a ref so the load effect can seed `task` from
-  // the store without re-running on every store update. Re-running the GET
-  // on store changes would race with in-flight optimistic mutations (the
-  // WS-driven refetch in useTaskOptimisticHelpers handles canonical
-  // refresh after a property mutation commits).
-  const storeIssuesRef = useRef(storeIssues);
-  useEffect(() => {
-    storeIssuesRef.current = storeIssues;
-  }, [storeIssues]);
+  const queryWorkspaceId = activeWorkspaceId ?? "";
+  const cachedOfficeTask = useCachedOfficeTask(queryWorkspaceId, id);
 
+  const taskQuery = useQuery(officeTaskQueryOptions(queryWorkspaceId, id));
   const [task, setTask] = useState<Task | null>(null);
-  const [comments, setComments] = useState<TaskComment[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
-  const [activity, setActivity] = useState<TaskActivityEntry[]>([]);
-  const [baseSessions, setBaseSessions] = useState<TaskSession[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  const applyDetail = useCallback(
-    (detail: IssueDetailData) => {
-      if (detail.activity) setActivity(detail.activity);
-      if (detail.sessions) setBaseSessions(detail.sessions);
-      if (detail.rawSessions) setTaskSessionsForTask(id, detail.rawSessions);
-      if (detail.comments) setComments(detail.comments);
-    },
-    [id, setTaskSessionsForTask],
+  useEffect(() => {
+    if (taskQuery.data?.task) {
+      setTask(mapOfficeTaskToTask(taskQuery.data.task));
+      setTimeline(taskQuery.data.timeline ?? []);
+      return;
+    }
+    if (cachedOfficeTask) {
+      setTask(mapOfficeTaskToTask(cachedOfficeTask));
+      setTimeline([]);
+      return;
+    }
+    setTask((current) => (current?.id === id ? current : null));
+    setTimeline([]);
+  }, [cachedOfficeTask, id, taskQuery.data]);
+
+  const taskWorkspaceId = resolveTaskWorkspaceId(task, taskQuery.data?.task, queryWorkspaceId);
+  const commentsQuery = useQuery(officeTaskCommentsQueryOptions(id));
+  const activityQuery = useQuery(officeTaskActivityQueryOptions(taskWorkspaceId, id));
+  const sessionsQuery = useQuery(taskSessionsQueryOptions(id));
+
+  const comments = useMemo(
+    () => (commentsQuery.data?.comments ?? []).map(mapCommentResponse),
+    [commentsQuery.data],
   );
 
+  const activity = useMemo(
+    () => (activityQuery.data?.activity ?? []).map(mapActivityEntry),
+    [activityQuery.data],
+  );
+
+  const rawSessions = useMemo(() => sessionsQuery.data?.sessions ?? [], [sessionsQuery.data]);
+  const baseSessions = useMemo(() => rawSessions.map(mapTaskSession), [rawSessions]);
+
   useEffect(() => {
-    let cancelled = false;
+    if (sessionsQuery.data) setTaskSessionsForTask(id, rawSessions);
+  }, [id, rawSessions, sessionsQuery.data, setTaskSessionsForTask]);
 
-    async function load() {
-      setLoading(true);
-      setError(null);
-      const fromStore = storeIssuesRef.current.find((i) => i.id === id);
-      if (fromStore && !cancelled) setTask(mapOfficeTaskToTask(fromStore));
-
-      try {
-        const res = await getTask(id);
-        if (cancelled) return;
-        if (!res.task) {
-          if (!fromStore) setError("Task not found");
-        } else {
-          const freshTask = mapOfficeTaskToTask(res.task);
-          setTask(freshTask);
-          if (res.timeline) setTimeline(res.timeline);
-          const detail = await fetchIssueDetailData(freshTask.workspaceId, id);
-          if (!cancelled) applyDetail(detail);
-        }
-      } catch {
-        if (!cancelled && !fromStore) setError("Failed to load task");
+  const refetchTask = useCallback(async () => {
+    if (!taskWorkspaceId) return;
+    try {
+      const res = await queryClient.fetchQuery({
+        ...officeTaskQueryOptions(taskWorkspaceId, id),
+        staleTime: 0,
+      });
+      if (res.task) {
+        setTask(mapOfficeTaskToTask(res.task));
+        setTimeline(res.timeline ?? []);
       }
-
-      if (!cancelled) setLoading(false);
+    } catch {
+      /* query state carries the error */
     }
+  }, [id, queryClient, taskWorkspaceId]);
 
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [id, applyDetail]);
-
+  const { refetch: refetchComments } = commentsQuery;
   const fetchComments = useCallback(async () => {
-    const result = await fetchIssueComments(id);
-    setComments(result);
-  }, [id]);
-
-  const onTaskRefetch = useCallback((updated: Task, updatedTimeline: TimelineEvent[]) => {
-    setTask(updated);
-    setTimeline(updatedTimeline);
-  }, []);
+    await refetchComments();
+  }, [refetchComments]);
 
   const sessionStoreStates = useSessionLiveSync({
     task,
     baseSessions,
-    onTaskRefetch,
+    onTaskRefetch: refetchTask,
     onCommentsRefetch: fetchComments,
   });
   const sessions = useMemo(
-    () =>
-      baseSessions.map((s, i) => ({
-        ...s,
-        state: (sessionStoreStates[i] ?? s.state) as TaskSession["state"],
-      })),
+    () => mergeSessionStates(baseSessions, sessionStoreStates),
     [baseSessions, sessionStoreStates],
   );
 
-  // Refetch comments when a new comment is created via office WS event
-  useOfficeRefetch("comments", fetchComments);
-
-  const { applyTaskPatch, restoreTask } = useTaskOptimisticHelpers(id, setTask, setTimeline);
+  const { applyTaskPatch, restoreTask } = useTaskOptimisticHelpers(setTask);
+  const loading = taskQuery.isPending && !task;
+  const error = resolveIssueError(
+    task,
+    taskQuery.isSuccess,
+    Boolean(taskQuery.data?.task),
+    taskQuery.isError,
+  );
 
   return {
     task,
@@ -410,6 +376,19 @@ function useIssueData(id: string) {
     applyTaskPatch,
     restoreTask,
   };
+}
+
+function useCachedOfficeTask(workspaceId: string, taskId: string): OfficeTask | null {
+  const queryClient = useQueryClient();
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => queryClient.getQueryCache().subscribe(onStoreChange),
+    [queryClient],
+  );
+  const getSnapshot = useCallback(
+    () => readOfficeTaskFromCachedPages(queryClient, workspaceId, taskId),
+    [queryClient, taskId, workspaceId],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, () => null);
 }
 
 export default function IssueDetailPage({ params }: IssueDetailPageProps) {

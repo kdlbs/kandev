@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { getSubtaskCount } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+import { subtaskCountQueryOptions } from "@/lib/query/query-options";
 
 // useSubtaskCount fetches the subtask count for an archive / delete
 // confirmation dialog when it opens. Returns 0 while the request for
@@ -15,6 +16,7 @@ import { getSubtaskCount } from "@/lib/api";
 // stops the bulk toolbar's per-render `[...selectedIds]` from fanning
 // out a new Promise.all on every render.
 export function useSubtaskCount(open: boolean, taskId?: string, taskIds?: string[]): number {
+  const queryClient = useQueryClient();
   const idsKey = taskIds?.join(",") ?? taskId ?? "";
   const [result, setResult] = useState<{ key: string; total: number }>({
     key: "",
@@ -28,22 +30,32 @@ export function useSubtaskCount(open: boolean, taskId?: string, taskIds?: string
       setResult({ key: "", total: 0 });
       return;
     }
-    if (!idsKey) return;
+    if (!idsKey) {
+      setResult({ key: "", total: 0 });
+      return;
+    }
     const ids = taskIds ?? (taskId ? [taskId] : []);
     let cancelled = false;
     // Per-id .catch already maps every failure to { count: 0 }, so
     // Promise.all never rejects — no outer .catch needed.
-    Promise.all(ids.map((id) => getSubtaskCount(id).catch(() => ({ count: 0 })))).then(
-      (results) => {
-        if (cancelled) return;
-        setResult({ key: idsKey, total: results.reduce((sum, r) => sum + r.count, 0) });
-      },
-    );
+    Promise.all(
+      ids.map((id) =>
+        queryClient
+          .fetchQuery({
+            ...subtaskCountQueryOptions(id),
+            staleTime: 0,
+          })
+          .catch(() => ({ count: 0 })),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      setResult({ key: idsKey, total: results.reduce((sum, r) => sum + r.count, 0) });
+    });
     return () => {
       cancelled = true;
     };
     // taskId / taskIds intentionally excluded — idsKey is their stable summary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, idsKey]);
+  }, [open, idsKey, queryClient]);
   return open && result.key === idsKey ? result.total : 0;
 }

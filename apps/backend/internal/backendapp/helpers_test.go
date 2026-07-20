@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +31,8 @@ import (
 	sqlitetaskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
+	userdto "github.com/kandev/kandev/internal/user/dto"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
 	"github.com/kandev/kandev/internal/webapp"
@@ -111,6 +115,88 @@ func decodePayload(t *testing.T, raw json.RawMessage) map[string]interface{} {
 	return payload
 }
 
+func TestMapUserSettingsStateKeys(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{}, "")
+
+	got := make([]string, 0, len(state))
+	for key := range state {
+		got = append(got, key)
+	}
+	sort.Strings(got)
+
+	want := []string{
+		"changesPanelLayout",
+		"chatSubmitKey",
+		"confirmTaskArchive",
+		"defaultEditorId",
+		"defaultUtilityAgentId",
+		"enablePreviewOnClick",
+		"kanbanViewMode",
+		"keyboardShortcuts",
+		"loaded",
+		"lspAutoInstallLanguages",
+		"lspAutoStartLanguages",
+		"lspServerConfigs",
+		"mcpTaskAgentProfileDefault",
+		"preferredShell",
+		"releaseNotesLastSeenVersion",
+		"repositoryIds",
+		"reviewAutoMarkOnScroll",
+		"savedLayouts",
+		"shellOptions",
+		"showReleaseNotification",
+		"sidebarActiveViewId",
+		"sidebarDraft",
+		"sidebarTaskPrefs",
+		"sidebarViews",
+		"systemMetricsDisplay",
+		"taskCreateLastUsed",
+		"tasksListGroup",
+		"tasksListSort",
+		"terminalFontFamily",
+		"terminalFontSize",
+		"terminalLinkBehavior",
+		"voiceMode",
+		"workflowId",
+		"workspaceId",
+	}
+	sort.Strings(want)
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mapUserSettingsState keys = %#v, want %#v", got, want)
+	}
+}
+
+func TestMapUserSettingsStateIncludesTaskCreateLastUsed(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{
+			TaskCreateLastUsed: usermodels.TaskCreateLastUsed{
+				RepositoryID:      "repo-1",
+				Branch:            "main",
+				AgentProfileID:    "agent-profile-1",
+				ExecutorProfileID: "executor-profile-1",
+			},
+		},
+	}, "")
+
+	lastUsed, ok := state["taskCreateLastUsed"].(map[string]any)
+	if !ok {
+		t.Fatalf("taskCreateLastUsed missing or wrong type: %#v", state["taskCreateLastUsed"])
+	}
+	if lastUsed["repositoryId"] != "repo-1" {
+		t.Fatalf("repositoryId = %#v, want repo-1", lastUsed["repositoryId"])
+	}
+	if lastUsed["branch"] != "main" {
+		t.Fatalf("branch = %#v, want main", lastUsed["branch"])
+	}
+	if lastUsed["agentProfileId"] != "agent-profile-1" {
+		t.Fatalf("agentProfileId = %#v, want agent-profile-1", lastUsed["agentProfileId"])
+	}
+	if lastUsed["executorProfileId"] != "executor-profile-1" {
+		t.Fatalf("executorProfileId = %#v, want executor-profile-1", lastUsed["executorProfileId"])
+	}
+}
+
 // TestAppendSessionStateMessage_IncludesTaskEnvironmentID asserts the snapshot
 // the WS hub sends on `session.subscribe` carries `task_environment_id`.
 //
@@ -143,6 +229,64 @@ func TestAppendSessionStateMessage_IncludesTaskEnvironmentID(t *testing.T) {
 	}
 	if got != "env-42" {
 		t.Fatalf("expected task_environment_id=env-42, got %v", got)
+	}
+}
+
+func TestAppendSessionStateMessage_IncludesRoutingMetadata(t *testing.T) {
+	session := &models.TaskSession{
+		ID:             "sess-1",
+		TaskID:         "task-1",
+		State:          models.TaskSessionStateRunning,
+		AgentProfileID: "profile-1",
+		AgentProfileSnapshot: map[string]interface{}{
+			"name":  "Codex",
+			"model": "gpt-5",
+		},
+		IsPassthrough: true,
+	}
+
+	msgs := appendSessionStateMessage(session.ID, session, nil)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	payload := decodePayload(t, msgs[0].Payload)
+	if got := payload["agent_profile_id"]; got != "profile-1" {
+		t.Fatalf("expected agent_profile_id=profile-1, got %v", got)
+	}
+	snapshot, ok := payload["agent_profile_snapshot"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("payload missing agent_profile_snapshot: %#v", payload["agent_profile_snapshot"])
+	}
+	if snapshot["name"] != "Codex" || snapshot["model"] != "gpt-5" {
+		t.Fatalf("unexpected agent_profile_snapshot: %#v", snapshot)
+	}
+	if got := payload["is_passthrough"]; got != true {
+		t.Fatalf("expected is_passthrough=true, got %v", got)
+	}
+}
+
+func TestAppendSessionStateMessage_EmitsFalsePassthroughAndOmitsEmptyRoutingMetadata(t *testing.T) {
+	session := &models.TaskSession{
+		ID:     "sess-1",
+		TaskID: "task-1",
+		State:  models.TaskSessionStateRunning,
+	}
+
+	msgs := appendSessionStateMessage(session.ID, session, nil)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	payload := decodePayload(t, msgs[0].Payload)
+	got, present := payload["is_passthrough"]
+	if !present || got != false {
+		t.Fatalf("expected is_passthrough=false, got present=%v value=%#v", present, got)
+	}
+	for _, key := range []string{"agent_profile_id", "agent_profile_snapshot", "task_environment_id"} {
+		if _, present := payload[key]; present {
+			t.Fatalf("expected %s to be omitted, payload=%#v", key, payload)
+		}
 	}
 }
 

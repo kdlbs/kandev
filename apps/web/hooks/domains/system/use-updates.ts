@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { checkUpdates, fetchUpdates } from "@/lib/api/domains/system-api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { checkUpdates } from "@/lib/api/domains/system-api";
+import { qk } from "@/lib/query/keys";
+import { updatesQueryOptions } from "@/lib/query/query-options/system";
 
 export function useUpdates() {
-  const updates = useAppStore((s) => s.system.updates);
-  const setSystemUpdates = useAppStore((s) => s.setSystemUpdates);
+  const queryClient = useQueryClient();
+  const query = useQuery(updatesQueryOptions());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
@@ -15,14 +17,13 @@ export function useUpdates() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetchUpdates({ cache: "no-store" });
-      setSystemUpdates(res);
+      await query.refetch();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsLoading(false);
     }
-  }, [setSystemUpdates]);
+  }, [query]);
 
   /**
    * Triggers a server-side re-poll of the GitHub releases endpoint. The
@@ -34,7 +35,7 @@ export function useUpdates() {
     setError(null);
     try {
       const res = await checkUpdates();
-      setSystemUpdates(res);
+      queryClient.setQueryData(qk.system.updates(), res);
       return res;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -42,12 +43,19 @@ export function useUpdates() {
     } finally {
       setIsChecking(false);
     }
-  }, [setSystemUpdates]);
+  }, [queryClient]);
 
   useEffect(() => {
-    if (updates) return;
-    void reload();
-  }, [updates, reload]);
+    if (!query.error) return;
+    setError(query.error instanceof Error ? query.error.message : String(query.error));
+  }, [query.error]);
 
-  return { updates, isLoading, isChecking, error, reload, check };
+  return {
+    updates: query.data ?? null,
+    isLoading: isLoading || (query.isFetching && !query.isSuccess),
+    isChecking,
+    error,
+    reload,
+    check,
+  };
 }

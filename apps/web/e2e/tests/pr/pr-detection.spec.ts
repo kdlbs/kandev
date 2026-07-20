@@ -113,7 +113,7 @@ test.describe("PR auto-detection", () => {
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
 
     // The useTaskPR hook triggers github.task_pr.sync which calls TriggerPRSync.
     // Since a PR watch was created during task start (ensureSessionPRWatch),
@@ -187,7 +187,7 @@ test.describe("PR auto-detection", () => {
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
 
     // Verify no PR button
     await expect(session.prTopbarButton()).not.toBeVisible({ timeout: 10_000 });
@@ -284,7 +284,7 @@ test.describe("PR auto-detection", () => {
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
 
     // useTaskPR triggers github.task_pr.sync -> TriggerPRSync -> FindPRByBranch
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 60_000 });
@@ -390,7 +390,7 @@ test.describe("PR external detection", () => {
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
 
     // --- Verify NO PR button initially ---
     await expect(session.prTopbarButton()).not.toBeVisible({ timeout: 5_000 });

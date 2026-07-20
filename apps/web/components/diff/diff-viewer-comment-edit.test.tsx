@@ -1,10 +1,12 @@
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import type { DiffLineAnnotation } from "@pierre/diffs";
 import { cleanup, fireEvent, render, screen, waitFor, act } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DiffViewer } from "./diff-viewer";
 import type { FileDiffData, DiffComment } from "@/lib/diff/types";
+import { makeQueryClient } from "@/lib/query/client";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
 
@@ -80,6 +82,15 @@ function latestCommentText(): string | undefined {
   return undefined;
 }
 
+function renderWithQuery(ui: ReactElement) {
+  const queryClient = makeQueryClient();
+  return render(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+}
+
 beforeEach(() => {
   window.sessionStorage.clear();
   useCommentsStore.setState({
@@ -97,7 +108,7 @@ describe("DiffViewer comment editing", () => {
   it("propagates an edited comment's new text to the renderer", async () => {
     useCommentsStore.getState().addComment(comment(ORIGINAL_TEXT));
 
-    render(<DiffViewer data={data} sessionId={SESSION_ID} enableComments />);
+    renderWithQuery(<DiffViewer data={data} sessionId={SESSION_ID} enableComments />);
 
     await waitFor(() => expect(latestCommentText()).toBe(ORIGINAL_TEXT));
 
@@ -111,7 +122,7 @@ describe("DiffViewer comment editing", () => {
   it("submits edited text from the inline comment form", async () => {
     useCommentsStore.getState().addComment(comment(ORIGINAL_TEXT));
 
-    render(<DiffViewer data={data} sessionId={SESSION_ID} enableComments />);
+    renderWithQuery(<DiffViewer data={data} sessionId={SESSION_ID} enableComments />);
 
     await waitFor(() => expect(screen.getByText(ORIGINAL_TEXT)).toBeTruthy());
 
@@ -128,7 +139,7 @@ describe("DiffViewer comment editing", () => {
   it("routes controlled inline edits to onCommentUpdate", async () => {
     const onCommentUpdate = vi.fn();
 
-    render(
+    renderWithQuery(
       <DiffViewer
         data={data}
         sessionId={SESSION_ID}

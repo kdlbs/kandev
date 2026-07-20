@@ -1,7 +1,10 @@
 import { render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Icon } from "@tabler/icons-react";
 import type { GitHubIssue, GitHubPR } from "@/lib/types/github";
+import { qk } from "@/lib/query/keys";
 import {
   repositoryId,
   workspaceId,
@@ -21,6 +24,19 @@ const TASK_WORKTREE_PATH = "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-k
 const REPO_URL = "https://github.com/kdlbs/kandev/pull/1567";
 const ISSUE_URL = "https://github.com/kdlbs/kandev/issues/1567";
 const LOCAL_REPO_ID = "local-repo";
+let queryClient = createQueryClient();
+
+function createQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+function renderWithQueryClient(node: ReactNode) {
+  return render(node, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 const mocks = vi.hoisted(() => ({
   dialogProps: undefined as
@@ -29,7 +45,6 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   createTaskPR: vi.fn(),
   linkTaskIssue: vi.fn(),
-  upsertTaskIssue: vi.fn(),
 }));
 
 vi.mock("@/components/task-create-dialog", () => ({
@@ -41,10 +56,6 @@ vi.mock("@/components/task-create-dialog", () => ({
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.push }),
-}));
-
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: typeof mocks) => unknown) => selector(mocks),
 }));
 
 vi.mock("@/lib/api/domains/github-api", () => ({
@@ -152,7 +163,7 @@ function repo(overrides: RepoOverrides): Repository {
 
 function renderLauncher(repositories: Repository[], prOverrides: Partial<GitHubPR> = {}) {
   const payload: LaunchPayload = { kind: "pr", pr: pr(prOverrides), preset };
-  render(
+  renderWithQueryClient(
     <QuickTaskLauncher
       workspaceId={WORKSPACE_ID}
       workflows={[workflow]}
@@ -170,7 +181,7 @@ function renderIssueLauncher(
   issueOverrides: Partial<GitHubIssue> = {},
 ) {
   const payload: LaunchPayload = { kind: "issue", issue: issue(issueOverrides), preset };
-  render(
+  renderWithQueryClient(
     <QuickTaskLauncher
       workspaceId={WORKSPACE_ID}
       workflows={[workflow]}
@@ -184,11 +195,12 @@ function renderIssueLauncher(
 }
 
 afterEach(() => {
+  queryClient.clear();
+  queryClient = createQueryClient();
   mocks.dialogProps = undefined;
   mocks.push.mockClear();
   mocks.createTaskPR.mockClear();
   mocks.linkTaskIssue.mockClear();
-  mocks.upsertTaskIssue.mockClear();
 });
 
 describe("QuickTaskLauncher repository defaults", () => {
@@ -267,7 +279,7 @@ describe("QuickTaskLauncher repository defaults", () => {
 });
 
 describe("QuickTaskLauncher issue linking", () => {
-  it("links and immediately stores a newly created task for the launched issue", async () => {
+  it("links and immediately caches a newly created task for the launched issue", async () => {
     const link = {
       task_id: "task-1",
       task_title: "Review: add Download option",
@@ -284,7 +296,9 @@ describe("QuickTaskLauncher issue linking", () => {
 
     expect(mocks.linkTaskIssue).toHaveBeenCalledWith("task-1", { issue: ISSUE_URL });
     await waitFor(() => {
-      expect(mocks.upsertTaskIssue).toHaveBeenCalledWith(WORKSPACE_ID, link);
+      expect(queryClient.getQueryData(qk.integrations.github.issues(WORKSPACE_ID))).toEqual({
+        "task-1": link,
+      });
     });
     expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
   });
@@ -297,6 +311,6 @@ describe("QuickTaskLauncher issue linking", () => {
 
     expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
     await waitFor(() => expect(mocks.linkTaskIssue).toHaveBeenCalledTimes(1));
-    expect(mocks.upsertTaskIssue).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData(qk.integrations.github.issues(WORKSPACE_ID))).toBeUndefined();
   });
 });

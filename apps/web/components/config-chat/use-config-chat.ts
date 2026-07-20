@@ -1,10 +1,14 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import { startConfigChat } from "@/lib/api/domains/workspace-api";
+import { patchWorkspaceCache } from "@/lib/query/workspace-cache";
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import {
   agentProfileId as toAgentProfileId,
@@ -45,14 +49,13 @@ type RegisterStartedSessionParams = {
   openInQuickChat: boolean;
 };
 
-function useUpdateWorkspaceInStore() {
-  const storeApi = useAppStoreApi();
+function usePatchWorkspaceDefaults() {
+  const queryClient = useQueryClient();
   return useCallback(
     (workspaceId: string, updates: Record<string, unknown>) => {
-      const { workspaces, setWorkspaces } = storeApi.getState();
-      setWorkspaces(workspaces.items.map((w) => (w.id === workspaceId ? { ...w, ...updates } : w)));
+      patchWorkspaceCache(queryClient, workspaceId, updates);
     },
-    [storeApi],
+    [queryClient],
   );
 }
 
@@ -96,13 +99,13 @@ async function saveDefaultConfigProfile(
   workspaceId: string,
   agentProfileId: string,
   alreadyConfigured: boolean,
-  updateWorkspaceInStore: (workspaceId: string, updates: Record<string, unknown>) => void,
+  patchWorkspaceDefaults: (workspaceId: string, updates: Record<string, unknown>) => void,
 ) {
   if (alreadyConfigured) return;
   try {
     const updates = { default_config_agent_profile_id: agentProfileId };
     await updateWorkspaceAction(workspaceId, updates);
-    updateWorkspaceInStore(workspaceId, updates);
+    patchWorkspaceDefaults(workspaceId, updates);
   } catch {
     // The chat is usable even when saving the future default fails.
   }
@@ -111,14 +114,14 @@ async function saveDefaultConfigProfile(
 export function useConfigChat(workspaceId: string) {
   const store = useConfigChatStore();
   const storeApi = useAppStoreApi();
-  const updateWorkspaceInStore = useUpdateWorkspaceInStore();
+  const patchWorkspaceDefaults = usePatchWorkspaceDefaults();
+  const { agentProfiles } = useSettingsData(true);
+  const { items: workspaces } = useWorkspaces();
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const latestRequestId = useRef(0);
   const activeRequestId = useRef<number | null>(null);
-  const workspace = useAppStore(
-    (state) => state.workspaces.items.find((item) => item.id === workspaceId) ?? null,
-  );
+  const workspace = workspaces.find((item) => item.id === workspaceId) ?? null;
   const defaultProfileId =
     workspace?.default_config_agent_profile_id ?? workspace?.default_agent_profile_id ?? undefined;
 
@@ -136,9 +139,7 @@ export function useConfigChat(workspaceId: string) {
       options: StartConfigChatOptions = {},
     ): Promise<string | undefined> => {
       if (activeRequestId.current !== null) return undefined;
-      const profile = storeApi
-        .getState()
-        .agentProfiles.items.find((item) => item.id === agentProfileId);
+      const profile = agentProfiles.find((item) => item.id === agentProfileId);
       if (!profile) {
         setError("The selected agent profile is not available yet. Try again shortly.");
         return undefined;
@@ -176,7 +177,7 @@ export function useConfigChat(workspaceId: string) {
           workspaceId,
           agentProfileId,
           Boolean(workspace?.default_config_agent_profile_id),
-          updateWorkspaceInStore,
+          patchWorkspaceDefaults,
         );
         return response.session_id;
       } catch (err) {
@@ -196,7 +197,8 @@ export function useConfigChat(workspaceId: string) {
     [
       store,
       storeApi,
-      updateWorkspaceInStore,
+      agentProfiles,
+      patchWorkspaceDefaults,
       workspace?.default_config_agent_profile_id,
       workspaceId,
     ],

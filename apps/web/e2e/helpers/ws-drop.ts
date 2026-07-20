@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { registerExpectedWsDrop } from "./ws-account";
 
 type DroppedMessage = {
   action: string;
@@ -28,10 +29,16 @@ function isTargetUserMessageAdded(
   );
 }
 
+function sessionIdFor(message: unknown): string | undefined {
+  const payload = asRecord(asRecord(message)?.payload);
+  return typeof payload?.session_id === "string" ? payload.session_id : undefined;
+}
+
 function filterServerFrame(
   message: string | Buffer,
   prompt: string | null,
   dropped: DroppedMessage[],
+  onDrop: (message: unknown) => void,
 ): string | Buffer | null {
   if (!prompt || typeof message !== "string") return message;
 
@@ -48,6 +55,7 @@ function filterServerFrame(
       if (isTargetUserMessageAdded(parsed, prompt)) {
         didDrop = true;
         dropped.push({ action: "session.message.added", content: parsed.payload.content });
+        onDrop(parsed);
         continue;
       }
     } catch {
@@ -68,7 +76,14 @@ export async function routeMainWebSocketWithPromptDrop(page: Page): Promise<Prom
   await page.routeWebSocket(/\/ws$/, (ws) => {
     const server = ws.connectToServer();
     server.onMessage((message) => {
-      const filtered = filterServerFrame(message, promptToDrop, dropped);
+      const filtered = filterServerFrame(message, promptToDrop, dropped, (parsed) => {
+        registerExpectedWsDrop(page, {
+          type: "notification",
+          action: "session.message.added",
+          sessionId: sessionIdFor(parsed),
+          reason: "intentional prompt WS-gap fault injection",
+        });
+      });
       if (filtered !== null) ws.send(filtered);
     });
   });

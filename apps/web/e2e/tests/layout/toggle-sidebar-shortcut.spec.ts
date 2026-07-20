@@ -231,9 +231,9 @@ test.describe("Toggle sidebar shortcut (global)", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
-    await testPage.goto(`/t/${task.id}`);
+    await testPage.goto(`/t/${task.id}?sessionId=${task.session_id}`);
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
 
     // Target the global rail (app-sidebar), not the dockview's per-session
     // sidebar (task-sidebar).

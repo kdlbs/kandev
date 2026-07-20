@@ -6,6 +6,7 @@ import {
   useIntegrationAuthed,
   useIntegrationAvailable,
 } from "../integrations/use-integration-availability";
+import { qk } from "@/lib/query/keys";
 import { useLinearEnabled } from "./use-linear-enabled";
 
 export function useLinearAuthed(workspaceId?: string | null): boolean {
@@ -13,7 +14,11 @@ export function useLinearAuthed(workspaceId?: string | null): boolean {
     () => getLinearConfig(workspaceId ? { workspaceId } : undefined),
     [workspaceId],
   );
-  return useIntegrationAuthed(fetchConfig);
+  return useIntegrationAuthed({
+    active: workspaceId !== null,
+    fetchConfig,
+    queryKey: qk.integrations.linear.config(workspaceId),
+  });
 }
 
 export function useLinearAvailable(workspaceId?: string | null): boolean {
@@ -22,7 +27,9 @@ export function useLinearAvailable(workspaceId?: string | null): boolean {
     [workspaceId],
   );
   return useIntegrationAvailable({
+    active: workspaceId !== null,
     useEnabled: useLinearEnabled,
     fetchConfig,
+    queryKey: qk.integrations.linear.config(workspaceId),
   });
 }

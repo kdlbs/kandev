@@ -12,10 +12,12 @@ import { useGitOperations } from "@/hooks/use-git-operations";
 import { walkthroughStepMatchesFile } from "@/lib/diff/walkthrough-match";
 import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import { useAppStore } from "@/components/state-provider";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { useToast } from "@/components/toast-provider";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
 import { normalizeFileChangeStatus } from "@/lib/utils/file-change-status";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
+import { useTaskWalkthrough } from "@/hooks/domains/session/use-task-walkthrough";
 import { ReviewTopBar } from "./review-top-bar";
 import { ReviewFileTree } from "./review-file-tree";
 import { ReviewDiffList } from "./review-diff-list";
@@ -310,14 +312,12 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
 }
 
 function useRepositoryNameToId() {
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const repositories = useAllCachedRepositories();
   return useMemo(() => {
     const m = new Map<string, string>();
-    for (const list of Object.values(reposByWorkspace)) {
-      for (const r of list) m.set(r.name, r.id);
-    }
+    for (const repository of repositories) m.set(repository.name, repository.id);
     return m;
-  }, [reposByWorkspace]);
+  }, [repositories]);
 }
 
 function useFilteredReviewFiles(allFiles: ReviewFile[], filter: string) {
@@ -447,13 +447,12 @@ function useWalkthroughFileSelection(
   setFilter: (value: string) => void,
   handleSelectFile: (key: string) => void,
 ) {
-  const step = useAppStore((state) => {
-    const taskId = state.tasks.activeTaskId;
-    if (!taskId) return null;
-    const wt = state.walkthroughs.byTaskId[taskId];
-    const idx = state.walkthroughs.activeStepByTaskId[taskId] ?? 0;
-    return wt?.steps[idx] ?? null;
-  });
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const walkthrough = useTaskWalkthrough(activeTaskId).data ?? null;
+  const activeStep = useAppStore((state) =>
+    activeTaskId ? (state.walkthroughs.activeStepByTaskId[activeTaskId] ?? 0) : 0,
+  );
+  const step = walkthrough?.steps[activeStep] ?? null;
   useEffect(() => {
     if (!open || !step) return;
     const file = allFiles.find((f) => walkthroughStepMatchesFile(f, step, allFiles));

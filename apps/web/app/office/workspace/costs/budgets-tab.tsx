@@ -1,31 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import { IconPlus } from "@tabler/icons-react";
 import { toast } from "sonner";
-import { listBudgets, deleteBudget } from "@/lib/api/domains/office-api";
-import type { BudgetPolicy } from "@/lib/state/slices/office/types";
+import { deleteBudget } from "@/lib/api/domains/office-api";
+import { qk } from "@/lib/query/keys";
+import { officeBudgetsQueryOptions } from "@/lib/query/query-options/office";
 import { BudgetPolicyCard } from "./budget-policy-card";
 import { CreateBudgetForm } from "./create-budget-form";
 
 export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
-  const [policies, setPolicies] = useState<BudgetPolicy[]>([]);
+  const queryClient = useQueryClient();
+  const budgetsQuery = useQuery(officeBudgetsQueryOptions(workspaceId));
+  const policies = budgetsQuery.data?.budgets ?? [];
   const [showCreate, setShowCreate] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    listBudgets(workspaceId)
-      .then((res) => setPolicies(res.budgets ?? []))
-      .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to load budgets");
-      });
-  }, [workspaceId, reloadKey]);
 
   const handleDelete = async (id: string) => {
     try {
       await deleteBudget(id);
-      setPolicies((prev) => prev.filter((p) => p.id !== id));
+      queryClient.setQueryData(qk.office.budgets(workspaceId), {
+        budgets: policies.filter((p) => p.id !== id),
+      });
       toast.success("Budget policy deleted");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete budget policy");
@@ -34,7 +31,7 @@ export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
 
   const handleCreated = () => {
     setShowCreate(false);
-    setReloadKey((k) => k + 1);
+    void queryClient.invalidateQueries({ queryKey: qk.office.budgets(workspaceId) });
   };
 
   return (

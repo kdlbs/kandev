@@ -22,6 +22,8 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import {
   useSessionActions,
@@ -298,12 +300,9 @@ function SessionRowItem({
 }
 
 function useSessionRows(taskId: string | null) {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  const primarySessionId = useAppStore((s) => {
-    if (!taskId) return null;
-    const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.primarySessionId ?? null;
-  });
+  const { agentProfiles } = useSettingsData(Boolean(taskId));
+  const task = useTaskById(taskId);
+  const primarySessionId = task?.primarySessionId ?? null;
   const { sessions, isLoading } = useTaskSessions(taskId);
   const rows = useMemo(
     () => buildSessionRows(sessions, agentProfiles, primarySessionId),

@@ -10,13 +10,3 @@ export type FeatureFlags = {
 };
 
 export type FeatureName = keyof FeatureFlags;
-
-export type FeaturesSliceState = {
-  features: FeatureFlags;
-};
-
-export type FeaturesSliceActions = {
-  setFeatures: (features: FeatureFlags) => void;
-};
-
-export type FeaturesSlice = FeaturesSliceState & FeaturesSliceActions;

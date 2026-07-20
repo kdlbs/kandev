@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToastProvider } from "@/components/toast-provider";
 import { MobileTaskList } from "@/components/task/mobile/session-task-switcher-sheet";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
+import { makeQueryClient } from "@/lib/query/client";
 
 const mocks = vi.hoisted(() => ({
   toggleSidebarGroupCollapsed: vi.fn(),
@@ -65,21 +67,24 @@ describe("MobileTaskList", () => {
   });
 
   it("toggles workflow-step groups from the mobile sidebar", () => {
+    const queryClient = makeQueryClient();
     render(
-      <ToastProvider>
-        <MobileTaskList
-          tasks={["1", "2", "3", "4", "5"].map(task)}
-          workflows={[]}
-          stepsByWorkflowId={{}}
-          activeTaskId={null}
-          selectedTaskId={null}
-          onSelectTask={vi.fn()}
-          onArchiveTask={vi.fn()}
-          onDeleteTask={vi.fn()}
-          onDetachTask={vi.fn()}
-          deletingTaskId={null}
-        />
-      </ToastProvider>,
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MobileTaskList
+            tasks={["1", "2", "3", "4", "5"].map(task)}
+            workflows={[]}
+            stepsByWorkflowId={{}}
+            activeTaskId={null}
+            selectedTaskId={null}
+            onSelectTask={vi.fn()}
+            onArchiveTask={vi.fn()}
+            onDeleteTask={vi.fn()}
+            onDetachTask={vi.fn()}
+            deletingTaskId={null}
+          />
+        </ToastProvider>
+      </QueryClientProvider>,
     );
 
     const header = screen.getByTestId("sidebar-group-header");
@@ -93,21 +98,24 @@ describe("MobileTaskList", () => {
 
   it("opens detach from the touch task actions button for a subtask", () => {
     const onDetachTask = vi.fn();
+    const queryClient = makeQueryClient();
     render(
-      <ToastProvider>
-        <MobileTaskList
-          tasks={[task("parent"), { ...task("child"), parentTaskId: "parent" }]}
-          workflows={[]}
-          stepsByWorkflowId={{}}
-          activeTaskId={null}
-          selectedTaskId={null}
-          onSelectTask={vi.fn()}
-          onArchiveTask={vi.fn()}
-          onDeleteTask={vi.fn()}
-          onDetachTask={onDetachTask}
-          deletingTaskId={null}
-        />
-      </ToastProvider>,
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MobileTaskList
+            tasks={[task("parent"), { ...task("child"), parentTaskId: "parent" }]}
+            workflows={[]}
+            stepsByWorkflowId={{}}
+            activeTaskId={null}
+            selectedTaskId={null}
+            onSelectTask={vi.fn()}
+            onArchiveTask={vi.fn()}
+            onDeleteTask={vi.fn()}
+            onDetachTask={onDetachTask}
+            deletingTaskId={null}
+          />
+        </ToastProvider>
+      </QueryClientProvider>,
     );
 
     const childRow = screen

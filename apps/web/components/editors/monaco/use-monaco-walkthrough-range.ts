@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { editor as monacoEditor } from "monaco-editor";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskWalkthrough } from "@/hooks/domains/session/use-task-walkthrough";
 import {
   clearWalkthroughEditorAnchor,
   isWalkthroughAnchorTargetVisible,
@@ -99,9 +100,8 @@ function useActiveWalkthroughStep() {
   const stepIndex = useAppStore((s) =>
     taskId ? (s.walkthroughs.activeStepByTaskId[taskId] ?? 0) : 0,
   );
-  const step = useAppStore((s) =>
-    taskId ? (s.walkthroughs.byTaskId[taskId]?.steps[stepIndex] ?? null) : null,
-  );
+  const walkthrough = useTaskWalkthrough(taskId).data ?? null;
+  const step = walkthrough?.steps[stepIndex] ?? null;
   return { taskId, stepIndex, step: isOpen ? step : null };
 }
 

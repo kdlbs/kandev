@@ -1,11 +1,4 @@
-import {
-  taskId as toTaskId,
-  workflowId as toWorkflowId,
-  workspaceId as toWorkspaceId,
-  type Repository,
-  type Task,
-} from "@/lib/types/http";
-import type { KanbanState } from "@/lib/state/slices";
+import { type Repository, type Task } from "@/lib/types/http";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 
 type ACPDebugInfo = {
@@ -102,65 +95,46 @@ export function deriveIsAgentWorking(
 
 /**
  * Resolve the task the detail view should render, layering the freshest of
- * three sources: the one-shot `fetchTask` details, the SSR/`initialTask`, and
- * the live kanban entry. The base (details/initial) carries fields the kanban
- * doesn't (repositories, timestamps); the kanban carries live board state.
+ * three sources: the Query task detail, the SSR/`initialTask`, and the live
+ * workflow snapshot. The base (details/initial) carries detail-only fields;
+ * the workflow snapshot carries live task state.
  */
 export function resolveEffectiveTask(
   taskDetails: Task | null,
   initialTask: Task | null,
-  kanbanTask: KanbanState["tasks"][number] | null,
+  snapshotTask: Task | null,
   effectiveTaskId: string | null,
 ): Task | null {
   const matchingTaskDetails = taskDetails?.id === effectiveTaskId ? taskDetails : null;
   const matchingInitialTask = initialTask?.id === effectiveTaskId ? initialTask : null;
   const baseTask = matchingTaskDetails ?? matchingInitialTask;
 
-  if (!baseTask && !kanbanTask) return null;
-  if (baseTask) return mergeBaseWithKanban(baseTask, kanbanTask);
-  if (kanbanTask) return buildTaskFromKanban(kanbanTask);
+  const matchingSnapshotTask = snapshotTask?.id === effectiveTaskId ? snapshotTask : null;
+
+  if (!baseTask && !matchingSnapshotTask) return null;
+  if (baseTask) return mergeBaseWithSnapshot(baseTask, matchingSnapshotTask);
+  if (matchingSnapshotTask) return matchingSnapshotTask;
   return null;
 }
 
-export function mergeBaseWithKanban(
-  baseTask: Task,
-  kanbanTask: KanbanState["tasks"][number] | null,
-): Task {
-  if (!kanbanTask) return baseTask;
-  const kanbanUpdatedAt = Date.parse(kanbanTask.updatedAt ?? "");
+export function mergeBaseWithSnapshot(baseTask: Task, snapshotTask: Task | null): Task {
+  if (!snapshotTask) return baseTask;
+  const snapshotUpdatedAt = Date.parse(snapshotTask.updated_at ?? "");
   const baseUpdatedAt = Date.parse(baseTask.updated_at ?? "");
-  const hasNewerKanbanState =
+  const hasNewerSnapshotState =
     Boolean(baseTask.archived_at) &&
-    Number.isFinite(kanbanUpdatedAt) &&
+    Number.isFinite(snapshotUpdatedAt) &&
     Number.isFinite(baseUpdatedAt) &&
-    kanbanUpdatedAt > baseUpdatedAt;
+    snapshotUpdatedAt > baseUpdatedAt;
   return {
     ...baseTask,
-    title: kanbanTask.title ?? baseTask.title,
-    description: kanbanTask.description ?? baseTask.description,
-    workflow_step_id:
-      (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
-    position: kanbanTask.position ?? baseTask.position,
-    state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
+    title: snapshotTask.title ?? baseTask.title,
+    description: snapshotTask.description ?? baseTask.description,
+    workflow_step_id: snapshotTask.workflow_step_id ?? baseTask.workflow_step_id,
+    position: snapshotTask.position ?? baseTask.position,
+    state: snapshotTask.state ?? baseTask.state,
     repositories: baseTask.repositories,
-    archived_at: hasNewerKanbanState ? null : baseTask.archived_at,
-  };
-}
-
-export function buildTaskFromKanban(kanbanTask: KanbanState["tasks"][number]): Task {
-  return {
-    id: toTaskId(kanbanTask.id),
-    title: kanbanTask.title,
-    description: kanbanTask.description ?? "",
-    workflow_step_id: kanbanTask.workflowStepId,
-    position: kanbanTask.position,
-    state: kanbanTask.state ?? "CREATED",
-    workspace_id: toWorkspaceId(""),
-    workflow_id: toWorkflowId(""),
-    priority: 0,
-    repositories: [],
-    created_at: "",
-    updated_at: kanbanTask.updatedAt ?? "",
+    archived_at: hasNewerSnapshotState ? (snapshotTask.archived_at ?? null) : baseTask.archived_at,
   };
 }
 
@@ -190,11 +164,13 @@ export function hasResolvedTaskDetails(params: {
   effectiveTaskId: string | null;
   taskDetailsId?: string | null;
   initialTaskId?: string | null;
+  snapshotTaskId?: string | null;
 }) {
   if (!params.effectiveTaskId) return false;
   return (
     params.taskDetailsId === params.effectiveTaskId ||
-    params.initialTaskId === params.effectiveTaskId
+    params.initialTaskId === params.effectiveTaskId ||
+    params.snapshotTaskId === params.effectiveTaskId
   );
 }
 

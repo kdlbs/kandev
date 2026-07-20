@@ -18,6 +18,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { cn } from "@/lib/utils";
 import {
   rememberLastOfficeWorkspace,
@@ -213,11 +214,11 @@ export function AppSidebarWorkspacePicker({
 }: WorkspacePickerProps = {}) {
   const router = useRouter();
   const officeEnabled = useFeature("office");
-  const workspaces = useAppStore((s) => s.workspaces);
+  const { items: workspaceItems, activeId: activeWorkspaceId } = useWorkspaces();
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
   const [open, setOpen] = useState(false);
 
-  const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
+  const activeWorkspace = workspaceItems.find((w) => w.id === activeWorkspaceId);
   const activeId = activeWorkspace?.id ?? null;
   const activeName = activeWorkspace?.name ?? "Workspace";
 
@@ -271,7 +272,7 @@ export function AppSidebarWorkspacePicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent align={contentAlign} className={cn("w-72", contentClassName)}>
         <WorkspacePickerContent
-          workspaces={workspaces.items}
+          workspaces={workspaceItems}
           activeId={activeId}
           itemTestIdPrefix={itemTestIdPrefix}
           officeEnabled={officeEnabled}

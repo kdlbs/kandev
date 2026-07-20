@@ -91,8 +91,8 @@ export type TaskEventPayload = {
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;
   updated_at?: string;
-  is_ephemeral: boolean;
   parent_id?: string | null;
+  is_ephemeral: boolean;
   metadata?: Record<string, unknown> | null;
   /** Deletion reason on task.deleted (e.g. "pr_approved_by_user"). Absent otherwise. */
   reason?: string;
@@ -158,6 +158,16 @@ export type WorkspacePayload = {
   default_config_agent_profile_id?: string | null;
   created_at?: string;
   updated_at?: string;
+};
+
+export type RepositoryPayload = Record<string, unknown> & {
+  id: string;
+  workspace_id?: string;
+};
+
+export type RepositoryScriptPayload = Record<string, unknown> & {
+  id: string;
+  repository_id?: string;
 };
 
 export type WorkflowPayload = {
@@ -482,6 +492,21 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "workflow.step.created": BackendMessage<"workflow.step.created", WorkflowStepEventPayload>;
     "workflow.step.updated": BackendMessage<"workflow.step.updated", WorkflowStepEventPayload>;
     "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
+    "repository.created": BackendMessage<"repository.created", RepositoryPayload>;
+    "repository.updated": BackendMessage<"repository.updated", RepositoryPayload>;
+    "repository.deleted": BackendMessage<"repository.deleted", RepositoryPayload>;
+    "repository.script.created": BackendMessage<
+      "repository.script.created",
+      RepositoryScriptPayload
+    >;
+    "repository.script.updated": BackendMessage<
+      "repository.script.updated",
+      RepositoryScriptPayload
+    >;
+    "repository.script.deleted": BackendMessage<
+      "repository.script.deleted",
+      RepositoryScriptPayload
+    >;
     "session.message.added": BackendMessage<"session.message.added", MessageAddedPayload>;
     "session.message.updated": BackendMessage<"session.message.updated", MessageAddedPayload>;
     "session.message.deleted": BackendMessage<"session.message.deleted", MessageAddedPayload>;

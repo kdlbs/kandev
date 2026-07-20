@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { makeQueryClient } from "@/lib/query/client";
+import { createElement, type ReactNode } from "react";
 
 const getPluginConfig = vi.fn();
 const updatePluginConfig = vi.fn();
@@ -50,6 +53,14 @@ function testPlugin(): PluginRecord {
   };
 }
 
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: makeQueryClient() }, children);
+}
+
+function renderPluginHook(plugin: PluginRecord | null = testPlugin()) {
+  return renderHook(() => usePluginConfigForm(plugin), { wrapper });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   getPluginConfig.mockResolvedValue({});
@@ -63,18 +74,18 @@ describe("usePluginConfigForm", () => {
   it("loads the stored config into initial values", async () => {
     getPluginConfig.mockResolvedValue({ github_token: SECRET_MASK, org: "kdlbs" });
 
-    const { result } = renderHook(() => usePluginConfigForm(testPlugin()));
+    const { result } = renderPluginHook();
 
     await waitFor(() => expect(result.current.configLoading).toBe(false));
-    expect(getPluginConfig).toHaveBeenCalledWith("kandev-plugin-github", { cache: "no-store" });
+    expect(getPluginConfig).toHaveBeenCalledWith("kandev-plugin-github", expect.any(Object));
     expect(result.current.values.github_token).toBe(SECRET_MASK);
     expect(result.current.values.org).toBe("kdlbs");
     expect(result.current.isDirty).toBe(false);
   });
 
   it("does not fetch for a null plugin or an empty schema", () => {
-    renderHook(() => usePluginConfigForm(null));
-    renderHook(() => usePluginConfigForm({ ...testPlugin(), config_schema: undefined }));
+    renderPluginHook(null);
+    renderPluginHook({ ...testPlugin(), config_schema: undefined });
     expect(getPluginConfig).not.toHaveBeenCalled();
   });
 
@@ -82,7 +93,7 @@ describe("usePluginConfigForm", () => {
     getPluginConfig.mockResolvedValue({});
     updatePluginConfig.mockResolvedValue({ updated: true });
 
-    const { result } = renderHook(() => usePluginConfigForm(testPlugin()));
+    const { result } = renderPluginHook();
     await waitFor(() => expect(result.current.configLoading).toBe(false));
 
     act(() => result.current.handleChange("github_token", "ghp_x"));
@@ -95,7 +106,7 @@ describe("usePluginConfigForm", () => {
   });
 
   it("rejects a save with missing required fields without calling the API", async () => {
-    const { result } = renderHook(() => usePluginConfigForm(testPlugin()));
+    const { result } = renderPluginHook();
     await waitFor(() => expect(result.current.configLoading).toBe(false));
 
     let saveError: unknown;
@@ -114,7 +125,7 @@ describe("usePluginConfigForm", () => {
 
   it("saves, refetches the masked config, and reports success", async () => {
     updatePluginConfig.mockResolvedValue({ updated: true });
-    const { result } = renderHook(() => usePluginConfigForm(testPlugin()));
+    const { result } = renderPluginHook();
     await waitFor(() => expect(result.current.configLoading).toBe(false));
 
     act(() => result.current.handleChange("github_token", "ghp_cleartext"));
@@ -131,7 +142,7 @@ describe("usePluginConfigForm", () => {
 
   it("reports a PATCH failure as an error and keeps saveStatus=error", async () => {
     updatePluginConfig.mockRejectedValue(new Error("boom"));
-    const { result } = renderHook(() => usePluginConfigForm(testPlugin()));
+    const { result } = renderPluginHook();
     await waitFor(() => expect(result.current.configLoading).toBe(false));
 
     act(() => result.current.handleChange("github_token", "ghp_x"));
@@ -151,7 +162,7 @@ describe("usePluginConfigForm", () => {
 
   it("discards a dirty draft back to the loaded values", async () => {
     getPluginConfig.mockResolvedValue({ github_token: SECRET_MASK, org: "kdlbs" });
-    const { result } = renderHook(() => usePluginConfigForm(testPlugin()));
+    const { result } = renderPluginHook();
     await waitFor(() => expect(result.current.configLoading).toBe(false));
 
     act(() => result.current.handleChange("org", "changed"));
@@ -165,7 +176,7 @@ describe("usePluginConfigForm", () => {
 
   it("treats a refetch failure after a successful PATCH as saved — and masks typed secrets", async () => {
     updatePluginConfig.mockResolvedValue({ updated: true });
-    const { result } = renderHook(() => usePluginConfigForm(testPlugin()));
+    const { result } = renderPluginHook();
     await waitFor(() => expect(result.current.configLoading).toBe(false));
 
     act(() => result.current.handleChange("github_token", "ghp_cleartext"));
