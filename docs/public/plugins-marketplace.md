@@ -111,16 +111,16 @@ drift from what actually ships.
 ### 1. Publish the plugin package as a release
 
 Package your plugin as usual (see [Authoring a plugin →
-Packaging](plugins-authoring.md#packaging)) and cut a GitHub **Release** whose
-assets include both:
+Packaging](plugins-authoring.md#packaging)) and cut a GitHub **Release**. One
+asset is required; a second is optional:
 
-- `<id>-<version>.tar.gz` — the plugin package. It carries its own internal
-  `checksums.txt` covering every packaged file, which the install pipeline
-  verifies on extraction.
-- `checksums.txt` — the sha256 of the tarball itself. This is advisory
+- `<id>-<version>.tar.gz` (**required**) — the plugin package. It carries its
+  own internal `checksums.txt` covering every packaged file, which the install
+  pipeline verifies on extraction.
+- `checksums.txt` (optional) — the sha256 of the tarball itself. Advisory
   provenance: the catalog reserves a `package_sha256` field for it, but the
-  index builder does not populate or enforce the digest yet, so the asset is
-  optional today and included for forward compatibility.
+  index builder does not populate or enforce the digest yet, so it is included
+  only for forward compatibility.
 
 The release must pass the standard package integrity gate. The
 [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template)
