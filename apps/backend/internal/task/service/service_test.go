@@ -469,6 +469,59 @@ func TestService_CreateTaskProbesDefaultBranchForExplicitRepositoryOutsideDiscov
 	}
 }
 
+func TestResolveRepoInputLocalDeduplicatesCanonicalPathAliases(t *testing.T) {
+	isolateGitEnvForTest(t)
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	const workspaceID = "ws-canonical-alias"
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	repoPath := filepath.Join(t.TempDir(), "canonical-repo")
+	initRealGitRepo(t, repoPath)
+	aliasPath := filepath.Join(t.TempDir(), "repository-alias")
+	if err := os.Symlink(repoPath, aliasPath); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	canonicalPath, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	repoByPath := map[string]*models.Repository{}
+	aliasID, _, aliasCreated, err := svc.resolveRepoInputLocal(
+		ctx,
+		workspaceID,
+		TaskRepositoryInput{LocalPath: aliasPath},
+		repoByPath,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("resolve alias: %v", err)
+	}
+	if !aliasCreated {
+		t.Fatal("expected alias lookup to create repository")
+	}
+
+	canonicalID, _, canonicalCreated, err := svc.resolveRepoInputLocal(
+		ctx,
+		workspaceID,
+		TaskRepositoryInput{LocalPath: canonicalPath},
+		repoByPath,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("resolve canonical path: %v", err)
+	}
+	if canonicalCreated {
+		t.Fatal("canonical alias created a duplicate repository")
+	}
+	if canonicalID != aliasID {
+		t.Fatalf("canonical repository ID = %q, want %q", canonicalID, aliasID)
+	}
+}
+
 // TestService_CreateTask_DefaultsPriorityWhenEmpty pins the regression
 // from the office priority migration. The migration added a CHECK
 // constraint that the priority column must be one of {critical, high,

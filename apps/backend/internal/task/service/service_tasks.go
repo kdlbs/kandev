@@ -609,10 +609,15 @@ func (s *Service) resolveRepoInputLocal(
 	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput,
 	repoByPath map[string]*models.Repository, baseBranch string,
 ) (string, string, bool, error) {
-	repo := repoByPath[repoInput.LocalPath]
+	lookupPath := repoInput.LocalPath
+	canonicalPath, probedBranch, pathErr := resolveExplicitLocalRepositoryPath(repoInput.LocalPath)
+	if pathErr == nil {
+		lookupPath = canonicalPath
+	}
+	repo := repoByPath[lookupPath]
 	created := false
 	if repo == nil {
-		if isKandevTaskWorktreePath(repoInput.LocalPath, s.discoveryConfig.TaskWorktreeRoots) {
+		if isKandevTaskWorktreePath(lookupPath, s.discoveryConfig.TaskWorktreeRoots) {
 			return "", "", false, fmt.Errorf("local path %q points at a Kandev task worktree; use the source repository or GitHub URL", repoInput.LocalPath)
 		}
 		name := strings.TrimSpace(repoInput.Name)
@@ -628,12 +633,12 @@ func (s *Service) resolveRepoInputLocal(
 		// branch, which would permanently pin repositories.default_branch to
 		// a feature branch and break every downstream merge-base lookup.
 		defaultBranch := repoInput.DefaultBranch
-		if defaultBranch == "" {
+		if defaultBranch == "" && pathErr == nil {
 			// A manually supplied path is an explicit read-only probe. Canonical
 			// repository validation protects the filesystem read; discovery roots
 			// only constrain automatic scans.
-			if _, probed, pathErr := resolveExplicitLocalRepositoryPath(repoInput.LocalPath); pathErr == nil && probed != "" {
-				defaultBranch = probed
+			if probedBranch != "" {
+				defaultBranch = probedBranch
 			}
 		}
 		createdRepo, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
@@ -649,6 +654,7 @@ func (s *Service) resolveRepoInputLocal(
 		repo = createdRepo
 		if repoByPath != nil {
 			repoByPath[repoInput.LocalPath] = repo
+			repoByPath[repo.LocalPath] = repo
 		}
 		created = true
 	} else {
