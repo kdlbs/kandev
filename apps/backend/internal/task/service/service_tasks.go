@@ -1763,6 +1763,9 @@ func (s *Service) cleanupDestructiveTaskResources(
 	originalWorktreeCount := len(worktrees)
 	worktrees = s.filterOwnedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees, envCleanup.env, skipOwnedEnvironment)
 	worktrees = cleanupEligibleWorktrees(worktrees, envCleanup.env, preserveExecutorRows)
+	var referenceErrs []error
+	worktrees, referenceErrs = s.filterSharedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees)
+	errs = append(errs, referenceErrs...)
 	if len(worktrees) == 0 {
 		if originalWorktreeCount > 0 {
 			s.logger.Debug("no task worktrees eligible for cleanup",
@@ -1786,6 +1789,51 @@ func (s *Service) cleanupDestructiveTaskResources(
 		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
 	}
 	return errs
+}
+
+func (s *Service) filterSharedWorktreesForTaskCleanup(
+	ctx context.Context,
+	taskID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+) ([]*worktree.Worktree, []error) {
+	guard, ok := s.worktreeCleanup.(worktreeReferenceGuard)
+	if !ok || len(worktrees) == 0 {
+		return worktrees, nil
+	}
+	excludedSessionIDs := taskSessionIDs(sessions)
+	filtered := worktrees[:0]
+	var errs []error
+	for _, wt := range worktrees {
+		count, err := guard.CountActiveWorktreeReferences(ctx, wt.ID, excludedSessionIDs)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("count active references for worktree %s: %w", wt.ID, err))
+			continue
+		}
+		if count == 0 {
+			filtered = append(filtered, wt)
+			continue
+		}
+		if err := guard.ReleaseWorktreeReference(ctx, wt); err != nil {
+			errs = append(errs, fmt.Errorf("release shared worktree reference %s: %w", wt.ID, err))
+			continue
+		}
+		s.logger.Info("preserving worktree still referenced by another active task",
+			zap.String("task_id", taskID),
+			zap.String("worktree_id", wt.ID),
+			zap.Int("active_references", count))
+	}
+	return filtered, errs
+}
+
+func taskSessionIDs(sessions []*models.TaskSession) []string {
+	ids := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && session.ID != "" {
+			ids = append(ids, session.ID)
+		}
+	}
+	return ids
 }
 
 func taskEnvironmentID(env *models.TaskEnvironment) string {

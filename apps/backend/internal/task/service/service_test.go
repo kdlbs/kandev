@@ -2014,6 +2014,9 @@ type recordingWorktreeCleanup struct {
 	worktrees         []*worktree.Worktree
 	worktreesByTaskID map[string][]*worktree.Worktree
 	cleaned           []*worktree.Worktree
+	referenceCounts   map[string]int
+	released          []*worktree.Worktree
+	excludedSessions  []string
 }
 
 func (c *recordingWorktreeCleanup) OnTaskDeleted(context.Context, string) error {
@@ -2034,6 +2037,20 @@ func (c *recordingWorktreeCleanup) CleanupWorktrees(_ context.Context, worktrees
 	return nil
 }
 
+func (c *recordingWorktreeCleanup) CountActiveWorktreeReferences(_ context.Context, worktreeID string, excludeSessionIDs []string) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.excludedSessions = append([]string(nil), excludeSessionIDs...)
+	return c.referenceCounts[worktreeID], nil
+}
+
+func (c *recordingWorktreeCleanup) ReleaseWorktreeReference(_ context.Context, wt *worktree.Worktree) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.released = append(c.released, wt)
+	return nil
+}
+
 func (c *recordingWorktreeCleanup) cleanedIDs() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -2044,6 +2061,50 @@ func (c *recordingWorktreeCleanup) cleanedIDs() []string {
 		}
 	}
 	return ids
+}
+
+func (c *recordingWorktreeCleanup) releasedIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ids := make([]string, 0, len(c.released))
+	for _, wt := range c.released {
+		if wt != nil {
+			ids = append(ids, wt.ID)
+		}
+	}
+	return ids
+}
+
+func TestService_CleanupDestructiveTaskResourcesPreservesSharedWorktree(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	cleanup := &recordingWorktreeCleanup{
+		referenceCounts: map[string]int{"worktree-shared": 1},
+	}
+	svc.SetWorktreeCleanup(cleanup)
+
+	session := &models.TaskSession{ID: "session-owner", TaskID: "task-owner"}
+	wt := &worktree.Worktree{
+		ID:        "worktree-shared",
+		TaskID:    session.TaskID,
+		SessionID: session.ID,
+	}
+	errs := svc.cleanupDestructiveTaskResources(
+		context.Background(), session.TaskID, []*models.TaskSession{session},
+		[]*worktree.Worktree{wt}, taskEnvironmentCleanup{}, nil,
+	)
+
+	if len(errs) != 0 {
+		t.Fatalf("cleanup errors = %v, want none", errs)
+	}
+	if got := cleanup.cleanedIDs(); len(got) != 0 {
+		t.Fatalf("physically cleaned worktrees = %v, want none", got)
+	}
+	if got := cleanup.releasedIDs(); len(got) != 1 || got[0] != wt.ID {
+		t.Fatalf("released worktrees = %v, want [%s]", got, wt.ID)
+	}
+	if got := cleanup.excludedSessions; len(got) != 1 || got[0] != session.ID {
+		t.Fatalf("excluded sessions = %v, want [%s]", got, session.ID)
+	}
 }
 
 func waitForCleanupDone(t *testing.T, svc *Service) {

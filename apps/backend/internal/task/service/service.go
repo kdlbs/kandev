@@ -36,6 +36,11 @@ type WorktreeBatchCleaner interface {
 	CleanupWorktrees(ctx context.Context, worktrees []*worktree.Worktree) error
 }
 
+type worktreeReferenceGuard interface {
+	CountActiveWorktreeReferences(ctx context.Context, worktreeID string, excludeSessionIDs []string) (int, error)
+	ReleaseWorktreeReference(ctx context.Context, wt *worktree.Worktree) error
+}
+
 // TaskExecutionStopper stops active task execution (agent session + instance).
 type TaskExecutionStopper interface {
 	StopTask(ctx context.Context, taskID, reason string, force bool) error
