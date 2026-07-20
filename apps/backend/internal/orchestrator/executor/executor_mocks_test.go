@@ -371,7 +371,10 @@ func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if session, ok := m.sessions[id]; ok {
-		return session, nil
+		// Match the SQLite repository boundary: callers receive a decoded
+		// snapshot, not the repository's stored object.
+		snapshot := *session
+		return &snapshot, nil
 	}
 	return nil, nil
 }
