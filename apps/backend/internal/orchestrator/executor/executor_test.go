@@ -367,7 +367,7 @@ func TestLaunchPreparedSession_AbortsWhenStartingPersistenceFails(t *testing.T) 
 				Status:           v1.AgentStatusStarting,
 			}, nil
 		},
-		startAgentProcessFunc: func(_ context.Context, _ string) error {
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
 			startCalled <- struct{}{}
 			return nil
 		},
@@ -2498,7 +2498,7 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 		// The repository mock returns shared pointers, unlike the production
 		// database store. Hold both async process-start callbacks until the
 		// serialized launch calls finish mutating their session snapshots.
-		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+		startAgentProcessFunc: func(_ context.Context, _ string) error {
 			<-startProcessGate
 			return nil
 		},
