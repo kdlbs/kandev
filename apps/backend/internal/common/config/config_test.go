@@ -73,6 +73,21 @@ func TestGitHubAppConfig_AllOrNone(t *testing.T) {
 	})
 }
 
+func TestGitHubAppConfig_SourcePresenceAndValidation(t *testing.T) {
+	if (GitHubAppConfig{}).Configured() {
+		t.Fatal("empty GitHub App config reported configured")
+	}
+	partial := GitHubAppConfig{ClientSecret: "do-not-leak"}
+	if !partial.Configured() {
+		t.Fatal("partial GitHub App config must be authoritative")
+	}
+	if err := partial.Validate(); err == nil {
+		t.Fatal("partial GitHub App config validated")
+	} else if strings.Contains(err.Error(), partial.ClientSecret) {
+		t.Fatalf("validation error exposed secret: %v", err)
+	}
+}
+
 func TestGitHubAppConfig_PrivateKeyFileAndMultiline(t *testing.T) {
 	inline := completeGitHubAppConfig(t)
 	inlineKey, err := inline.PrivateKeyPEM()

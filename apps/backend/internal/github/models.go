@@ -7,6 +7,53 @@ import (
 	"time"
 )
 
+type DeploymentAppOwnerType string
+
+const (
+	DeploymentAppOwnerUser         DeploymentAppOwnerType = "User"
+	DeploymentAppOwnerOrganization DeploymentAppOwnerType = "Organization"
+)
+
+type DeploymentAppWebhookStatus string
+
+const (
+	DeploymentAppWebhookUnverified DeploymentAppWebhookStatus = "unverified"
+	DeploymentAppWebhookVerified   DeploymentAppWebhookStatus = "verified"
+	DeploymentAppWebhookFailing    DeploymentAppWebhookStatus = "failing"
+)
+
+// DeploymentAppRegistration is the non-secret metadata for the singleton
+// GitHub App registration managed by this Kandev deployment.
+type DeploymentAppRegistration struct {
+	GitHubHost           string                     `json:"github_host" db:"github_host"`
+	AppID                int64                      `json:"app_id" db:"app_id"`
+	ClientID             string                     `json:"client_id" db:"client_id"`
+	Slug                 string                     `json:"slug" db:"slug"`
+	OwnerLogin           string                     `json:"owner_login" db:"owner_login"`
+	OwnerType            DeploymentAppOwnerType     `json:"owner_type" db:"owner_type"`
+	PublicBaseURL        string                     `json:"public_base_url" db:"public_base_url"`
+	CredentialGeneration int64                      `json:"credential_generation" db:"credential_generation"`
+	CredentialSecretID   string                     `json:"-" db:"credential_secret_id"`
+	WebhookStatus        DeploymentAppWebhookStatus `json:"webhook_status" db:"webhook_status"`
+	LastWebhookAt        *time.Time                 `json:"last_webhook_at,omitempty" db:"last_webhook_at"`
+	LastError            string                     `json:"last_error,omitempty" db:"last_error"`
+	CreatedAt            time.Time                  `json:"created_at" db:"created_at"`
+	UpdatedAt            time.Time                  `json:"updated_at" db:"updated_at"`
+}
+
+// DeploymentAppRegistrationFlow binds one manifest callback to its initiating operator.
+type DeploymentAppRegistrationFlow struct {
+	StateHash        string                 `json:"-" db:"state_hash"`
+	OperatorUserID   string                 `json:"-" db:"operator_user_id"`
+	OwnerType        DeploymentAppOwnerType `json:"owner_type" db:"owner_type"`
+	OwnerLogin       string                 `json:"owner_login" db:"owner_login"`
+	PublicBaseURL    string                 `json:"public_base_url" db:"public_base_url"`
+	ManifestRevision int                    `json:"manifest_revision" db:"manifest_revision"`
+	ExpiresAt        time.Time              `json:"expires_at" db:"expires_at"`
+	ConsumedAt       *time.Time             `json:"-" db:"consumed_at"`
+	CreatedAt        time.Time              `json:"created_at" db:"created_at"`
+}
+
 // ConnectionSource identifies the credential source selected for workspace
 // automation. Legacy shared auth is migration-only and cannot be selected for
 // a new workspace.

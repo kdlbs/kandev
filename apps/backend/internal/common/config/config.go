@@ -104,6 +104,17 @@ func (c GitHubAppConfig) configured() bool {
 		c.Slug != "" || c.PublicBaseURL != ""
 }
 
+// Configured reports whether any deployment App field is present. A partial
+// configuration is intentionally authoritative and must fail validation.
+func (c GitHubAppConfig) Configured() bool {
+	return c.configured()
+}
+
+// Validate checks the all-or-none deployment App contract.
+func (c GitHubAppConfig) Validate() error {
+	return c.validate()
+}
+
 // PrivateKeyPEM resolves inline or file-backed private key material. Inline
 // values may contain literal newlines or escaped newlines from environment
 // configuration.

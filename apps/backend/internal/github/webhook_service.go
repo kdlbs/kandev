@@ -122,6 +122,12 @@ func NewGitHubWebhookService(
 	return service
 }
 
+func (s *GitHubWebhookService) Authenticates(request GitHubWebhookRequest) bool {
+	return s != nil && len(s.secret) > 0 && request.DeliveryID != "" && request.Event != "" &&
+		len(request.Payload) <= maxGitHubWebhookPayloadSize &&
+		validGitHubWebhookSignature(s.secret, request.Payload, request.Signature)
+}
+
 func (s *GitHubWebhookService) Handle(
 	ctx context.Context,
 	request GitHubWebhookRequest,

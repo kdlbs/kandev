@@ -50,7 +50,7 @@ Open the workspace GitHub settings. **Workspace automation** offers three connec
 
 - **Personal access token (PAT):** Kandev validates the token before replacing the current connection and stores it in the encrypted secret store. A classic PAT needs `repo` and `read:org` for full behavior. Scope a fine-grained token to only the repositories and operations the workspace needs.
 - **GitHub CLI:** first run `gh auth login` as the operating-system user that runs the Kandev backend. Kandev lists every authenticated host/login pair and stores the selected `github.com` login, not its token. It resolves that exact account with `gh auth token --hostname github.com --user <login>` and never changes the host's active account with `gh auth switch`.
-- **GitHub App:** available only when the deployment operator has configured a GitHub App. The workspace binds to one verified installation on a user or organization. Kandev keeps the App private key deployment-side and mints short-lived installation tokens as needed.
+- **GitHub App:** available after a deployment operator creates or externally configures the deployment App. The workspace binds to one verified installation on a user or organization. Kandev keeps the App private key deployment-side and mints short-lived installation tokens as needed.
 
 A workspace has one active automation connection at a time. Replacing it changes the identity used by repository discovery, watches, background work, and task GitHub access in that workspace only. Disconnecting a CLI connection does not sign the host out of `gh`; disconnecting an App connection removes only the workspace binding and does not uninstall the App from GitHub.
 
@@ -81,24 +81,47 @@ must be scoped and rotated independently.
 
 ### Host a GitHub App
 
-Self-hosted companies can register one GitHub App per Kandev deployment and install it in multiple organizations or personal accounts. Each workspace binds to at most one installation. Configure the registration before users select **Install GitHub App**; see [Configuration](./configuration.md#github-app) for every startup key and a secret-file example.
+Self-hosted companies can register one public GitHub App per Kandev deployment and install it in
+multiple organizations or personal accounts. Each workspace binds to at most one installation.
+This feature currently supports `github.com`; it does not create a GitHub Enterprise Server App.
 
-In the GitHub App registration, set these public URLs, replacing `https://kandev.example.com` with `githubApp.publicBaseUrl`:
+Before setup, give Kandev a stable public HTTPS origin. GitHub must be able to reach the callback
+and webhook routes from the public internet. A private address, `localhost`, split-horizon DNS that
+resolves privately, or an HTTP URL is rejected by guided setup. For a local deployment, run a
+trusted HTTPS tunnel or reverse proxy and keep its public hostname stable for the life of the App.
+TLS termination may happen at the proxy, but all listed paths must route to the same Kandev backend.
 
-| GitHub setting | URL |
+To create the App:
+
+1. Open **Settings > System > GitHub App**.
+2. Choose **Organization** for company-managed automation or **Personal account** for a personal
+   self-hosted deployment. The selected account owns the App registration; it does not become the
+   personal identity for every Kandev user.
+3. Enter the public Kandev HTTPS origin and review the generated permissions.
+4. Select **Create on GitHub**, review GitHub's confirmation page, and create the App. GitHub must
+   return to Kandev within one hour. Kandev verifies the single-use result, encrypts the returned
+   private key and secrets, and enables the App immediately without a restart.
+5. Open each workspace's GitHub settings, choose **GitHub App**, and select **Install GitHub App**.
+   Installation owners still choose which organizations, accounts, and repositories to grant.
+
+Kandev generates these routes in the App manifest:
+
+| Purpose | URL path |
 |---|---|
-| First user authorization callback URL | `https://kandev.example.com/api/v1/github/app/install/callback` |
-| Additional user authorization callback URL | `https://kandev.example.com/api/v1/github/personal-connection/callback` |
-| Webhook URL | `https://kandev.example.com/api/v1/github/app/webhook` |
+| Manifest creation callback | `/api/v1/github/app/registration/callback` |
+| Workspace installation setup | `/api/v1/github/app/install/callback` |
+| Personal identity authorization | `/api/v1/github/personal-connection/callback` |
+| Signed webhook delivery | `/api/v1/github/app/webhook` |
 
-Enable **Request user authorization (OAuth) during installation** and expiring user authorization
-tokens. Leave **Setup URL** empty; GitHub disables that setting when OAuth during installation is
-enabled. GitHub sends the installation OAuth result to the first callback URL with `state`, `code`,
-`installation_id`, and `setup_action`. Kandev uses the additional callback URL as the explicit
-`redirect_uri` for **My GitHub identity** authorization. Both callbacks and the webhook must be
-reachable through the same HTTPS origin. Kandev validates short-lived, single-use callback state,
-verifies the authorizing GitHub user can access the selected installation, and verifies webhook
-`X-Hub-Signature-256` signatures with the configured webhook secret.
+The status starts at **Waiting for webhook**. It changes to **Webhook verified** only after Kandev
+receives and validates a signed delivery. A failing status means the public route, proxy, GitHub
+webhook configuration, or secret needs attention; completing the browser callback alone does not
+prove webhook reachability.
+
+Complete `KANDEV_GITHUB_APP_*` configuration remains available for hosted or externally managed
+deployments and has precedence over a registration stored by Kandev. System Settings labels that
+source **Externally managed** and cannot replace or remove it. See
+[Configuration](./configuration.md#github-app) for the full key set and secret-file example.
 
 For full Kandev behavior, request the smallest applicable repository/organization permissions from this list:
 
@@ -117,6 +140,13 @@ For full Kandev behavior, request the smallest applicable repository/organizatio
 
 Subscribe only to `installation`, `installation_repositories`, and `github_app_authorization`. Kandev uses these events to track installation suspension/deletion, repository access changes, and revoked personal authorizations. PR, issue, review, and CI watches continue to poll and do not require their corresponding webhooks. GitHub's [registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app), [App permission reference](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps), and [webhook guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/using-webhooks-with-github-apps) describe the provider-side settings.
 
+To remove a Kandev-managed registration, first disconnect every workspace that uses its App
+installation, then use **Remove managed App** in System Settings and type `DELETE`. Kandev blocks
+removal while any workspace is bound, deletes only its encrypted credential bundle, and does not
+delete or uninstall the provider-side App. Remove the App in GitHub separately after confirming no
+other deployment uses it. Environment-managed registration must be changed in deployment
+configuration and requires a restart.
+
 ### Upgrade and recovery
 
 Workspaces that existed when workspace authentication was introduced receive a **Legacy shared** connection so upgrades do not immediately lose GitHub access. It preserves the previous installation-wide resolution behavior while the workspace is migrated. New workspaces start disconnected. After a legacy workspace selects a PAT, named CLI account, or App installation, it cannot return to legacy mode. Copying a workspace never copies authentication or App installation bindings.
@@ -130,7 +160,7 @@ For recovery:
 - Reconnect **My GitHub identity** after authorization expiry/revocation. App automation remains available while the personal connection is invalid.
 - Ask an organization owner to unsuspend or reinstall an App, restore its repository selection, or grant a reported missing permission. Refresh the workspace status afterward.
 - Disconnect and repeat **Install GitHub App** when the workspace is bound to the wrong installation. Removing the binding does not uninstall the provider-side App.
-- Rotate a compromised App private key, client secret, or webhook secret in GitHub and deployment configuration together, then restart Kandev. Do not place deployment App secrets in workspace settings.
+- For an environment-managed App, rotate a compromised private key, client secret, or webhook secret in GitHub and deployment configuration together, then restart Kandev. A guided registration cannot import rotated provider secrets; disconnect its workspace bindings, remove it from Kandev, and create a new managed App. Do not place deployment App secrets in workspace settings.
 
 ### Configure and use the workspace
 

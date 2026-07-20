@@ -30,8 +30,11 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/components/page-topbar", () => ({
-  PageTopbar: ({ actions }: { actions?: ReactNode }) => (
-    <div data-testid="page-topbar-actions">{actions}</div>
+  PageTopbar: ({ actions, title }: { actions?: ReactNode; title: string }) => (
+    <div>
+      <span data-testid="page-topbar-title">{title}</span>
+      <div data-testid="page-topbar-actions">{actions}</div>
+    </div>
   ),
 }));
 
@@ -130,5 +133,17 @@ describe("SettingsLayoutClient integrations actions", () => {
     expect(screen.getByTestId("settings-scroll-container").className).toContain(
       "safe-area-inset-bottom",
     );
+  });
+
+  it("preserves GitHub branding in the deployment App breadcrumb", () => {
+    pathname = "/settings/system/github-app";
+
+    render(
+      <SettingsLayoutClient>
+        <div>GitHub App settings</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(screen.getByTestId("page-topbar-title").textContent).toBe("GitHub App");
   });
 });

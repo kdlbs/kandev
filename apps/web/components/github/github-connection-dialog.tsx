@@ -7,6 +7,7 @@ import {
   IconEye,
   IconEyeOff,
   IconPlug,
+  IconSettings,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -21,6 +22,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Spinner } from "@kandev/ui/spinner";
+import Link from "@/components/routing/app-link";
 import { useToast } from "@/components/toast-provider";
 import { fetchGitHubCLIAccounts, setGitHubWorkspaceConnection } from "@/lib/api/domains/github-api";
 import type { GitHubCLIAccount, GitHubStatus } from "@/lib/types/github";
@@ -28,9 +30,9 @@ import type { GitHubCLIAccount, GitHubStatus } from "@/lib/types/github";
 type AutomationMethod = "pat" | "cli" | "app";
 
 const methodDescriptions: Record<AutomationMethod, string> = {
-  pat: "Use a token owned by the GitHub account that should act for this workspace.",
-  cli: "Use one exact account already authenticated by the GitHub CLI on this host.",
-  app: "Use the deployment GitHub App installation for organization-managed automation.",
+  pat: "A human GitHub account acts for background jobs and managed agents in this workspace.",
+  cli: "One exact human account already authenticated by GitHub CLI acts for this workspace.",
+  app: "The deployment-owned App acts as organization-managed automation with short-lived credentials.",
 };
 
 function methodForStatus(status: GitHubStatus): AutomationMethod {
@@ -199,18 +201,33 @@ function AppForm({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Install the deployment GitHub App in the organization that owns this workspace's
-        repositories.
+        {available
+          ? "Install the deployment GitHub App in the organization that owns this workspace's repositories."
+          : "This Kandev deployment does not have a GitHub App yet. Create it once in System Settings, then return here to install it for this workspace."}
       </p>
-      <Button
-        disabled={!available || busy}
-        onClick={onInstall}
-        className="h-11 w-full cursor-pointer sm:w-auto"
-      >
-        <IconBrandGithub className="mr-2 h-4 w-4" />
-        Install GitHub App
-        <IconExternalLink className="ml-2 h-4 w-4" />
-      </Button>
+      {available ? (
+        <Button
+          disabled={busy}
+          onClick={onInstall}
+          className="h-11 w-full cursor-pointer sm:w-auto"
+          data-testid="github-app-install-button"
+        >
+          <IconBrandGithub className="mr-2 h-4 w-4" />
+          Install GitHub App
+          <IconExternalLink className="ml-2 h-4 w-4" />
+        </Button>
+      ) : (
+        <Button
+          asChild
+          className="h-11 w-full sm:w-auto"
+          data-testid="github-app-system-setup-link"
+        >
+          <Link href="/settings/system/github-app">
+            Set up deployment App
+            <IconSettings className="ml-2 h-4 w-4" />
+          </Link>
+        </Button>
+      )}
     </div>
   );
 }
@@ -257,8 +274,9 @@ export function GitHubConnectionDialog({
         <DialogHeader>
           <DialogTitle>{connected ? "Change GitHub connection" : "Connect GitHub"}</DialogTitle>
           <DialogDescription>
-            This credential is used for workspace automation and managed agent GitHub access.
-            Changing it takes effect immediately.
+            Workspace automation uses this connection for background jobs and managed agent GitHub
+            access. PAT and CLI act as people; the deployment App acts as automation. Changing it
+            takes effect immediately.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
@@ -271,17 +289,10 @@ export function GitHubConnectionDialog({
               <SelectContent>
                 <SelectItem value="pat">Personal access token</SelectItem>
                 <SelectItem value="cli">GitHub CLI</SelectItem>
-                <SelectItem value="app" disabled={!status.app_available}>
-                  GitHub App
-                </SelectItem>
+                <SelectItem value="app">GitHub App</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">{methodDescriptions[method]}</p>
-            {!status.app_available && (
-              <p className="text-xs text-muted-foreground">
-                GitHub App requires deployment configuration.
-              </p>
-            )}
           </div>
           {method === "pat" && <PATForm workspaceId={workspaceId} onSaved={saved} />}
           {method === "cli" && <CLIForm workspaceId={workspaceId} onSaved={saved} />}

@@ -37,6 +37,7 @@ import {
   updateTaskCIAutomationOptions,
   type AccessibleRepo,
 } from "./github-api";
+import * as githubAuthApi from "./github-auth-api";
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -161,6 +162,53 @@ describe("workspace GitHub authentication", () => {
       ["http://api.test/api/v1/github/token?workspace_id=ws%2F1", "POST"],
       ["http://api.test/api/v1/github/token?workspace_id=ws%2F1", "DELETE"],
     ]);
+  });
+});
+
+describe("deployment GitHub App registration", () => {
+  it("exposes the deployment registration API", () => {
+    expect(githubAuthApi).toMatchObject({
+      fetchDeploymentAppRegistration: expect.any(Function),
+      startDeploymentAppRegistration: expect.any(Function),
+      deleteDeploymentAppRegistration: expect.any(Function),
+    });
+  });
+
+  it("uses the system-level registration routes", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse({ source: "none", state: "unconfigured", ready: false, read_only: false }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          state: "state",
+          expires_at: "2026-07-20T22:00:00Z",
+          revision: 1,
+          registration_url: "https://github.com/organizations/acme/settings/apps/new",
+          manifest: { name: "Kandev acme" },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ deleted: true }));
+
+    await githubAuthApi.fetchDeploymentAppRegistration();
+    await githubAuthApi.startDeploymentAppRegistration({
+      owner_type: "organization",
+      owner_login: "acme",
+      public_base_url: "https://kandev.example",
+    });
+    await githubAuthApi.deleteDeploymentAppRegistration();
+
+    expect(fetchSpy.mock.calls.map((call) => [String(call[0]), call[1]?.method])).toEqual([
+      ["http://api.test/api/v1/github/app/registration", undefined],
+      ["http://api.test/api/v1/github/app/registration/start", "POST"],
+      ["http://api.test/api/v1/github/app/registration", "DELETE"],
+    ]);
+    expect(fetchSpy.mock.calls[0]?.[1]?.cache).toBe("no-store");
+    expect(JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body))).toEqual({
+      owner_type: "organization",
+      owner_login: "acme",
+      public_base_url: "https://kandev.example",
+    });
   });
 });
 

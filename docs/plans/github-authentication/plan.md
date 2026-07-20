@@ -13,10 +13,16 @@ user. Preserve existing installations through an explicit legacy source, add PAT
 account isolation, implement deployment GitHub App installation and user OAuth lifecycles, then
 route backend, background, and executor operations through the new boundary before changing the UI.
 
+The original workspace-authentication buildout (Tasks 01-10) is complete. This extension adds
+self-hosted deployment App registration through GitHub's App Manifest flow (Tasks 11-16) without
+changing the shipped workspace/personal routing model.
+
 ## Architecture
 
 - Product contract: `docs/specs/integrations/github-authentication.md`.
 - Ownership decision: `docs/decisions/0047-github-authentication-ownership.md`.
+- Managed registration amendment:
+  `docs/decisions/2026-07-20-managed-github-app-registration.md`.
 - Existing integration ownership: `docs/decisions/0030-workspace-scoped-integration-settings.md`.
 - `github.CredentialResolver.Resolve(ctx, Request)` is the only source of operational clients. A
   request carries `WorkspaceID`, optional `UserID`, purpose, and optional repository target; a
@@ -24,8 +30,9 @@ route backend, background, and executor operations through the new boundary befo
 - Automation purpose never resolves a personal credential. Personal purpose resolves the current
   user's App token, then a human PAT/CLI automation connection. Manual mutation may finally fall
   back to an App installation with explicit App attribution.
-- One deployment App registration is loaded from config/env. Workspace and personal APIs receive
-  only availability and non-secret metadata.
+- One deployment App registration resolves from complete environment configuration first, then an
+  encrypted persisted registration. Workspace and personal APIs receive only availability and
+  non-secret metadata; System Settings owns registration creation and removal.
 - Agent git transport uses a task-scoped broker lease and credential helper, not static App tokens
   or App private-key injection.
 
@@ -61,6 +68,34 @@ Create token-source-neutral REST/GraphQL construction in `apps/backend/internal/
 from the current `pat_client.go`. Add App JWT signing, installation lookup, permission mapping, and
 singleflight installation-token caching in `app_client.go` and `app_token_cache.go`. Refresh begins
 before expiry; expired tokens are never returned.
+
+### Managed Deployment App Registration
+
+Extend `apps/backend/internal/github/models.go` and `store.go`, with focused implementation in new
+`deployment_app_store.go` and `deployment_app_config.go`. Add singleton
+`github_app_registration` metadata and deployment-scoped `github_app_registration_flows`. Store the
+private key, client secret, and webhook secret in one versioned encrypted bundle at
+`github:deployment-app:credentials`. Source resolution is `environment > managed > none`; any
+partial environment override is authoritative but invalid, so it never falls through to persisted
+credentials. Metadata/secret writes use rollback compensation and never replace the active runtime
+until both are durable.
+
+Add `deployment_app_manifest.go` and `deployment_app_registration_service.go`. The manifest policy
+contains the existing minimum permissions/events and derives registration, installation, personal
+OAuth, and webhook URLs from one canonical GitHub.com HTTPS origin. The flow hashes one-hour state,
+POSTs to the personal or organization GitHub registration endpoint, exchanges the returned code at
+`POST /app-manifests/{code}/conversions`, verifies the returned App identity/config, and hot-swaps an
+immutable runtime generation. Public-origin validation rejects credentials, query/fragment,
+loopback, and private/link-local literals; it does not fetch an arbitrary operator URL.
+
+Update `apps/backend/internal/backendapp/services.go` so boot resolves the same runtime bundle used
+by registration callbacks. Refactor `ConfigureGitHubAppAuth` in `service_app_auth.go` into a
+generation-safe replace operation that updates App client, installation auth, personal auth,
+webhook verifier, and credential-resolver user provider together. Environment-managed state is
+reported read-only. Managed deletion is blocked while any `github_workspace_connections` row uses
+`github_app_installation`. Invalid webhook signatures never mutate health; only post-signature
+processing failures for the active generation or App-JWT-authenticated GitHub delivery status may
+mark webhook health failing.
 
 ### Credential Resolver
 
@@ -141,6 +176,13 @@ Change `internal/health` to report workspace GitHub status rather than a singlet
 expiring tokens, callback state, and webhook transitions. Update `backendapp/e2e_reset.go` to clear
 all new workspace/user rows and secrets deterministically.
 
+Add deployment registration routes to `controller.go` with handlers in
+`controller_app_registration.go`: status, start, public callback, and managed deletion. The callback
+redirects to `/settings/system/github-app` with a non-secret result code. Extend `mock_controller.go`
+and E2E reset behavior with deterministic unconfigured, environment-managed, registering, ready,
+invalid, and webhook-health states. Do not put registration secrets or conversion codes in status,
+logs, redirects, mock snapshots, or errors.
+
 ## Frontend
 
 ### API, Types, And State
@@ -164,6 +206,38 @@ repository selection to consume effective capabilities. App-only workspaces keep
 surfaces but show a connect-personal state for `My GitHub`; manual mutations disclose the effective
 actor. Use the existing icon system and responsive settings conventions. Mobile has the same
 states/actions in a single-column layout with no desktop-only auth capability.
+
+Add `/settings/system/github-app` to `apps/web/src/settings-routes.tsx`, the System settings sidebar,
+and the corresponding app route. `components/settings/system/github-app-settings.tsx` renders one
+deployment-level surface: identity model comparison, environment-managed status, or a guided managed
+setup. The setup asks where the App should be owned (personal account or organization), requires an
+organization login when selected, validates/normalizes the public URL, previews permissions behind a
+button/dialog, and uses a deliberate external-navigation confirmation before form-POSTing the
+manifest to GitHub. Completed callbacks show registration and webhook health plus **Install in a
+workspace** guidance; no secret value is rendered.
+
+Update `components/github/github-connection-dialog.tsx` so an unavailable App is an actionable
+method instead of a disabled unexplained option. It explains that PAT/CLI are human workspace
+identities while an App is deployment-owned automation, and links unconfigured operators to System
+Settings. A ready deployment retains the existing installation action. Personal identity remains
+visible only when workspace automation uses the App.
+
+### Mobile Design Contract
+
+- **Entry/outcome:** desktop and mobile enter through **System > GitHub App**; both can complete the
+  same registration and return to the same health state.
+- **Nearest exemplar:** use the existing single-column System settings pages and the GitHub mobile
+  connection dialog; reuse their route navigation, inset spacing, and 44px controls.
+- **Hierarchy:** deployment status first, App-versus-personal explanation second, owner/public URL
+  form third, permission disclosure and primary create action last.
+- **Presentation:** direct System route, not a nested desktop dialog. GitHub's owner confirmation is
+  external navigation; the workspace connection surface remains a dialog.
+- **Scrolling:** the settings content region is the only scroll owner. The page has no fixed footer,
+  respects safe-area padding supplied by the settings shell, and has no horizontal overflow.
+- **Shared logic:** API state, validation messages, manifest submission, and callback result parsing
+  are shared; only responsive layout classes change.
+- **Proof:** a `mobile-chrome` Playwright scenario starts setup, validates the form, observes the
+  mocked callback result, and follows the workspace handoff with all targets at least 44px.
 
 ## Tests
 
@@ -192,6 +266,18 @@ states/actions in a single-column layout with no desktop-only auth capability.
 - **Frontend unit tests:** status slice/hook tests cover workspace switching; settings and integration
   menu tests cover every source/state, effective actor, capability, reconnect, and App unavailable
   state.
+- **Managed registration persistence:** `deployment_app_store_test.go` covers singleton replay,
+  encrypted bundle compensation, generation replacement, source precedence, invalid partial env,
+  restart rehydration, and deletion blocked by App-backed workspaces.
+- **Manifest protocol:** `deployment_app_manifest_test.go` covers exact permission/event manifest,
+  personal/organization URLs, canonical public URL rules, state expiry/replay, conversion response
+  bounds, and no secrets in errors.
+- **Runtime/API integration:** `deployment_app_registration_service_test.go` and
+  `controller_app_registration_test.go` use real test stores from start through callback and runtime
+  availability, including conversion rollback and environment read-only behavior.
+- **Frontend unit tests:** `github-app-settings.test.tsx`, `github-connection-dialog.test.tsx`, and
+  GitHub API tests cover setup explanations, source states, owner validation, public URL errors,
+  permission disclosure, callback outcomes, and the System Settings handoff.
 
 ## E2E Tests
 
@@ -210,6 +296,18 @@ Extend `apps/web/e2e/tests/integrations/github-workspace-settings.spec.ts` and a
 - Desktop and mobile screenshots verify the two identity sections and all controls fit without
   overlap.
 
+Add `apps/web/e2e/tests/settings/github-app-registration.spec.ts` and
+`mobile-github-app-registration.spec.ts`:
+
+- An unconfigured deployment explains App automation versus personal identity, validates owner and
+  public origin, and submits the generated manifest to the correct mocked GitHub owner endpoint.
+- A successful callback hot-enables **Install GitHub App** in workspace settings without a backend
+  restart; invalid/replayed callbacks do not change the active registration.
+- Environment-managed registration is labeled read-only; managed deletion is blocked while a
+  workspace installation binding exists.
+- Desktop and Pixel 5 screenshots verify the direct settings page, permission dialog, callback
+  result, 44px controls, internal scrolling, and zero document horizontal overflow.
+
 ## Public Documentation
 
 Update `docs/public/integrations.md` with local PAT/CLI selection, hosted App installation, actor
@@ -217,6 +315,11 @@ semantics, permissions, migration, and disconnect behavior. Update `docs/public/
 with `KANDEV_GITHUB_APP_*` variables, secret-file guidance, callback/webhook URLs, HTTPS rules, and
 the minimum GitHub App permissions/events. Reconcile relevant scoped `AGENTS.md` guidance if the
 credential-provider pattern changes.
+
+Extend those pages with the System Settings manifest workflow, owner choice, public HTTPS and local
+tunnel/reverse-proxy guidance, environment precedence/read-only behavior, webhook verification,
+safe removal rules, GitHub.com-only scope, and the distinction between deployment App, workspace
+installation, and personal identity. Link the official GitHub manifest and setup-URL documentation.
 
 ## Implementation Waves
 
@@ -259,6 +362,29 @@ credential-helper boundary.
 Task 10 begins only after Task 09; it is listed in the same product-verification phase, not executed
 in parallel.
 
+### Wave 8: Managed registration foundations (parallel)
+
+- [x] [Task 11: Deployment App persistence and source resolution](task-11-deployment-app-persistence.md)
+- [x] [Task 12: GitHub App manifest protocol](task-12-app-manifest-protocol.md)
+
+Task 11 owns store/config source files. Task 12 owns new pure manifest, URL-validation, and
+conversion-client files; it does not edit shared store/config files.
+
+### Wave 9: Runtime and HTTP integration
+
+- [x] [Task 13: Deployment App runtime and API](task-13-deployment-app-runtime-api.md)
+
+### Wave 10: System and workspace UX
+
+- [x] [Task 14: GitHub App onboarding UI](task-14-github-app-onboarding-ui.md)
+
+### Wave 11: Product verification
+
+- [x] [Task 15: End-to-end coverage and public docs](task-15-onboarding-e2e-docs.md)
+- [x] [Task 16: Integrated security and QA](task-16-onboarding-security-qa.md)
+
+Task 16 starts only after Task 15 and owns no production implementation files.
+
 ## Final Verification
 
 Formatting runs before lint and complexity checks:
@@ -272,19 +398,23 @@ cd apps && rtk pnpm --filter @kandev/web test
 cd apps && rtk pnpm --filter @kandev/web lint
 cd apps/web && rtk pnpm exec playwright test --config e2e/playwright.config.ts e2e/tests/integrations/github-authentication.spec.ts --project=chromium
 cd apps/web && rtk pnpm exec playwright test --config e2e/playwright.config.ts e2e/tests/integrations/mobile-github-auth-settings.spec.ts --project=mobile-chrome
+cd apps/web && rtk pnpm e2e:run tests/settings/github-app-registration.spec.ts -- --project=chromium
+cd apps/web && rtk pnpm e2e:run --no-build tests/settings/mobile-github-app-registration.spec.ts -- --project=mobile-chrome
 ```
 
 The final security pass additionally verifies that logs, API responses, executor environments,
 process arguments, persisted metadata, and E2E snapshots contain no PAT, App private key, App client
 secret, webhook secret, personal access token, refresh token, or live installation token.
 
-All listed verification passed on 2026-07-19. The desktop suite passed four scenarios and the
-mobile suite passed two scenarios; both captured layouts were inspected for overflow and overlap.
-The full frontend suite passed 5,380 tests with four skipped, the complete backend and aggregate
-repository test/lint/typecheck/build checks passed, and the security review found no blocking
-issues. A real GitHub organization installation, OAuth exchange, and webhook delivery remain an
-external staging validation because those flows require deployed callback URLs and GitHub-owned
-credentials.
+The original Tasks 01-10 verification passed on 2026-07-19. Tasks 11-16 passed final verification on
+2026-07-20: format, generated metadata, typecheck, the complete backend suite, 719 web test files
+(5,614 passed and four skipped), 30 CLI test files (280 passed), script tests, full lint, and
+`git diff --check`. The new onboarding suites passed four desktop and three mobile scenarios, and
+their captured layouts were inspected for overflow and overlap. An independent security re-review
+confirmed all four initial findings were resolved with regression coverage and found no remaining
+blocker. A real GitHub organization registration/installation, OAuth exchange, and webhook delivery
+remain external staging validation because those flows require deployed callback URLs and
+GitHub-owned credentials; Task 16 records the checklist.
 
 ## Risks
 
@@ -296,8 +426,16 @@ credentials.
   validation and actionable diagnostics are required before enabling install buttons.
 - App permission subsets vary by installation. Capability checks must be operation-specific rather
   than a single broad connected flag.
+- GitHub's manifest conversion returns the only copy of the generated private key. A persistence
+  failure after conversion can leave an orphan App on GitHub, so the callback must clearly report
+  recovery steps without claiming Kandev can delete an unpersisted App.
+- The current runtime has no authenticated system-admin role. Treating `default-user` as operator is
+  acceptable only under the explicitly approved trusted-single-user deployment boundary.
+- GitHub Enterprise Server and enterprise-owned Apps are not covered by GitHub.com's manifest
+  contract and must not be inferred from a configurable host field.
 
 ## Approval
 
-Implementation was approved on 2026-07-19. Scope changes to identity ownership, App attribution,
-legacy migration, or executor secret boundaries require updating the spec and ADR before coding.
+Tasks 01-10 were approved and completed on 2026-07-19. On 2026-07-20, the user approved the amended
+spec, accepted ADR, wave graph, verification commands, trusted-single-user `default-user` operator
+boundary, and GitHub.com-only scope for Tasks 11-16.

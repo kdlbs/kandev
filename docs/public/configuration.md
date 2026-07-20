@@ -140,7 +140,18 @@ no connection or credential data; credential redemption remains a lease-authenti
 
 ### GitHub App
 
-`githubApp` is deployment-owned configuration for workspace App installations and personal GitHub App authorizations. Leave every field empty to disable GitHub App choices while retaining workspace PAT and GitHub CLI authentication. If any field is set, the configuration is treated as enabled. Startup rejects a missing required value, an invalid key, or an unsafe public URL; an invalid App slug is rejected when an installation flow starts.
+Kandev supports one deployment-owned GitHub App for workspace installations and personal GitHub
+App authorizations. With every `githubApp` field and `KANDEV_GITHUB_APP_*` variable empty, an
+operator can create it from **Settings > System > GitHub App** through GitHub's App Manifest flow.
+Guided setup requires a stable, globally reachable HTTPS origin; use a trusted tunnel or reverse
+proxy for a local deployment. The generated credentials are stored in Kandev's encrypted secret
+store and become active without a restart.
+
+The keys below provide the alternative externally managed source for hosted deployments. If any
+field is set, environment/file configuration is authoritative: it must be complete, it takes
+precedence over a Kandev-managed registration, and System Settings becomes read-only. Startup
+reports a missing required value, invalid key, or unsafe public URL as an invalid external
+configuration instead of falling back to stored credentials.
 
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
@@ -153,9 +164,13 @@ no connection or credential data; credential redemption remains a lease-authenti
 | `githubApp.slug` | `KANDEV_GITHUB_APP_SLUG` | empty | URL slug from `https://github.com/apps/<slug>`; lowercase letters, digits, and hyphens only. |
 | `githubApp.publicBaseUrl` | `KANDEV_GITHUB_APP_PUBLIC_BASE_URL` | empty | Externally reachable base URL used to build installation, OAuth, and webhook callbacks. It is also the broker URL compatibility fallback. Must be absolute HTTPS, except HTTP is allowed for loopback development. Credentials, query strings, and fragments are rejected. |
 
-The App requires `appId`, `clientId`, `clientSecret`, `webhookSecret`, `slug`, `publicBaseUrl`, and exactly one of `privateKey` or `privateKeyFile`. Kandev accepts PKCS#1 or RSA PKCS#8 PEM keys. It validates the key and public URL at startup without returning secret values through workspace APIs.
+The external source requires `appId`, `clientId`, `clientSecret`, `webhookSecret`, `slug`,
+`publicBaseUrl`, and exactly one of `privateKey` or `privateKeyFile`. Kandev accepts PKCS#1 or RSA
+PKCS#8 PEM keys. It validates the key and public URL at startup without returning secret values
+through workspace APIs. Both guided and external registration currently target `github.com`, not
+GitHub Enterprise Server.
 
-Configure the GitHub App registration with these URLs, based on the same `publicBaseUrl`:
+When configuring the external App manually, use these URLs based on the same `publicBaseUrl`:
 
 | GitHub setting | Path appended to `publicBaseUrl` |
 |---|---|
@@ -167,6 +182,10 @@ Enable **Request user authorization (OAuth) during installation**. Leave **Setup
 GitHub makes it unavailable in this mode. The first callback receives the combined installation
 and authorizer result. The additional callback is selected explicitly by Kandev's personal OAuth
 flow. Keep expiring user authorization tokens enabled.
+
+For a Kandev-managed registration, do not copy these settings by hand. The generated manifest also
+sets `/api/v1/github/app/registration/callback` as its one-hour creation callback and configures the
+installation setup route, personal callback, webhook events, and required permissions.
 
 The public URL must route those paths to the Kandev backend. For a non-local executor, configure
 `githubCredentialBroker.publicBaseUrl` so the task environment can reach
@@ -193,6 +212,13 @@ KANDEV_GITHUB_APP_WEBHOOK_SECRET="replace-at-deployment-time"
 ```
 
 Mount `/run/secrets/kandev-github-app.pem` read-only, restrict it to the Kandev service account (for example mode `0400` or `0600`), and do not include it in the image or source repository. Follow GitHub's [private-key storage and rotation guidance](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps): add a new key, update the mounted file, restart Kandev, verify connections, and then delete the old key. Rotate the client and webhook secrets in GitHub and deployment configuration together. See [Integrations](./integrations.md#host-a-github-app) for required permissions, events, identity behavior, and recovery.
+
+System Settings reports **Waiting for webhook**, **Webhook verified**, or a failing delivery after
+guided setup. A successful callback only proves the browser return path; wait for a correctly
+signed delivery before treating inbound GitHub events as healthy. To remove a Kandev-managed App,
+disconnect every bound workspace first. Kandev refuses deletion while any App installation is in
+use and does not delete the App on GitHub. Environment-managed configuration can only be removed or
+rotated through the deployment source and a restart.
 
 ### Logging
 

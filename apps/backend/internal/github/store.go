@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,8 +19,9 @@ import (
 
 // Store provides SQLite persistence for GitHub integration data.
 type Store struct {
-	db *sqlx.DB // writer
-	ro *sqlx.DB // reader
+	db                         *sqlx.DB // writer
+	ro                         *sqlx.DB // reader
+	deploymentAppPersistenceMu sync.Mutex
 }
 
 type taskIssueMetadataRow struct {
@@ -289,8 +291,52 @@ const createTablesSQL = `
 	);
 `
 
+const deploymentAppTablesSQL = `
+	CREATE TABLE IF NOT EXISTS github_app_registration (
+		singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+		github_host TEXT NOT NULL CHECK (github_host <> ''),
+		app_id BIGINT NOT NULL CHECK (app_id > 0),
+		client_id TEXT NOT NULL CHECK (client_id <> ''),
+		slug TEXT NOT NULL CHECK (slug <> ''),
+		owner_login TEXT NOT NULL CHECK (owner_login <> ''),
+		owner_type TEXT NOT NULL CHECK (owner_type IN ('User', 'Organization')),
+		public_base_url TEXT NOT NULL CHECK (public_base_url <> ''),
+		credential_generation BIGINT NOT NULL CHECK (credential_generation > 0),
+		credential_secret_id TEXT NOT NULL CHECK (credential_secret_id <> ''),
+		webhook_status TEXT NOT NULL CHECK (webhook_status IN ('unverified', 'verified', 'failing')),
+		last_webhook_at TIMESTAMP,
+		last_error TEXT,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS github_app_registration_flows (
+		state_hash TEXT PRIMARY KEY,
+		operator_user_id TEXT NOT NULL CHECK (operator_user_id <> ''),
+		owner_type TEXT NOT NULL CHECK (owner_type IN ('User', 'Organization')),
+		owner_login TEXT NOT NULL CHECK (owner_login <> ''),
+		public_base_url TEXT NOT NULL CHECK (public_base_url <> ''),
+		manifest_revision INTEGER NOT NULL CHECK (manifest_revision > 0),
+		expires_at TIMESTAMP NOT NULL,
+		consumed_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS github_app_registration_flow_head (
+		singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+		state_hash TEXT NOT NULL CHECK (state_hash <> ''),
+		updated_at TIMESTAMP NOT NULL
+	);
+`
+
 func (s *Store) initSchema(legacyUpgrade bool) error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
+		return err
+	}
+	if err := s.initDeploymentAppSchema(); err != nil {
+		return err
+	}
+	if err := s.addDeploymentAppCredentialSecretID(); err != nil {
 		return err
 	}
 	if err := s.addWorkspaceOwnershipColumns(); err != nil {
@@ -364,6 +410,28 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 		return err
 	}
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_ci_pr_state_task ON github_task_ci_pr_state (task_id)`)
+	return nil
+}
+
+func (s *Store) initDeploymentAppSchema() error {
+	if _, err := s.db.Exec(deploymentAppTablesSQL); err != nil {
+		return fmt.Errorf("initialize deployment GitHub App schema: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) addDeploymentAppCredentialSecretID() error {
+	columns, err := s.tableColumns("github_app_registration")
+	if err != nil {
+		return fmt.Errorf("read github_app_registration columns: %w", err)
+	}
+	if _, ok := columns["credential_secret_id"]; ok {
+		return nil
+	}
+	_, err = s.db.Exec(`ALTER TABLE github_app_registration ADD COLUMN credential_secret_id TEXT NOT NULL DEFAULT 'github:deployment-app:credentials'`)
+	if err != nil {
+		return fmt.Errorf("add github_app_registration.credential_secret_id: %w", err)
+	}
 	return nil
 }
 

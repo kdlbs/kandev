@@ -154,7 +154,11 @@ func (c *Controller) httpCompletePersonalAuth(ctx *gin.Context) {
 }
 
 func validGitHubCallbackState(state string) bool {
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(state))
+	trimmed := strings.TrimSpace(state)
+	if len(trimmed) != base64.RawURLEncoding.EncodedLen(oauthRandomBytes) {
+		return false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(trimmed)
 	return err == nil && len(decoded) == oauthRandomBytes
 }
 
@@ -234,6 +238,9 @@ func githubAuthErrorCode(err error) string {
 }
 
 func githubAuthErrorResponse(err error) (int, string) {
+	if status, code, ok := deploymentAppHTTPError(err); ok {
+		return status, code
+	}
 	status, code := http.StatusInternalServerError, "github_internal_error"
 	switch {
 	case errors.Is(err, ErrGitHubWorkspaceRequired):

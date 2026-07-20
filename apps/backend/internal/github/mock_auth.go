@@ -173,10 +173,26 @@ func (s *Service) setMockAppAvailable(available bool) {
 	s.mu.Unlock()
 }
 
+func (s *Service) setMockDeploymentAppStatus(status *DeploymentAppRegistrationStatus) {
+	s.mu.Lock()
+	if status == nil {
+		s.mockDeploymentAppStatus = nil
+	} else {
+		cloned := cloneDeploymentAppRegistrationStatus(*status)
+		s.mockDeploymentAppStatus = &cloned
+	}
+	s.mu.Unlock()
+}
+
 // ResetMockAuth clears in-memory mock identity state for one workspace, or
 // all workspaces when workspaceID is empty.
 func (s *Service) ResetMockAuth(workspaceID string) {
-	if s == nil || s.mockAuth == nil {
+	if s == nil {
+		return
+	}
+	s.setMockDeploymentAppStatus(nil)
+	s.setMockAppAvailable(false)
+	if s.mockAuth == nil {
 		return
 	}
 	if workspaceID == "" {
@@ -185,7 +201,6 @@ func (s *Service) ResetMockAuth(workspaceID string) {
 		s.mockAuth.DeleteWorkspace(workspaceID)
 		s.mockAuth.SetCLIAccounts(nil)
 	}
-	s.setMockAppAvailable(false)
 	if s.resolver != nil {
 		if workspaceID == "" {
 			s.resolver.InvalidateAll()

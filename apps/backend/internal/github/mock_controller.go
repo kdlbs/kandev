@@ -62,6 +62,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.DELETE("/personal-connections/:workspaceId", c.deletePersonalConnection)
 	api.PUT("/cli-accounts", c.setCLIAccounts)
 	api.PUT("/app-available", c.setAppAvailable)
+	api.PUT("/deployment-app-registration", c.setDeploymentAppRegistration)
 	api.PUT("/repos-unavailable", c.setReposUnavailable)
 	api.DELETE("/reset", c.reset)
 }
@@ -277,6 +278,61 @@ func (c *MockController) setAppAvailable(ctx *gin.Context) {
 	}
 	c.service.setMockAppAvailable(*req.Available)
 	ctx.JSON(http.StatusOK, gin.H{"available": *req.Available})
+}
+
+func (c *MockController) setDeploymentAppRegistration(ctx *gin.Context) {
+	var request struct {
+		Source            DeploymentAppSource        `json:"source"`
+		State             string                     `json:"state"`
+		Ready             bool                       `json:"ready"`
+		AppID             int64                      `json:"app_id"`
+		Slug              string                     `json:"slug"`
+		OwnerLogin        string                     `json:"owner_login"`
+		OwnerType         DeploymentAppOwnerType     `json:"owner_type"`
+		PublicBaseURL     string                     `json:"public_base_url"`
+		WebhookStatus     DeploymentAppWebhookStatus `json:"webhook_status"`
+		UnavailableCode   string                     `json:"unavailable_code"`
+		UnavailableReason string                     `json:"unavailable_reason"`
+	}
+	if err := ctx.ShouldBindJSON(&request); err != nil ||
+		!validMockDeploymentAppState(request.Source, request.State, request.WebhookStatus) {
+		respondInvalidPayload(ctx)
+		return
+	}
+	status := DeploymentAppRegistrationStatus{
+		Source: request.Source, State: request.State, Ready: request.Ready,
+		ReadOnly:        request.Source == DeploymentAppSourceEnvironment,
+		UnavailableCode: request.UnavailableCode, UnavailableReason: request.UnavailableReason,
+	}
+	if request.AppID > 0 {
+		status.Registration = &DeploymentAppRegistration{
+			GitHubHost: defaultGitHubAppHost, AppID: request.AppID, Slug: request.Slug,
+			OwnerLogin: request.OwnerLogin, OwnerType: request.OwnerType,
+			PublicBaseURL: request.PublicBaseURL, WebhookStatus: request.WebhookStatus,
+		}
+	}
+	if status.UnavailableReason == "" && status.UnavailableCode != "" {
+		status.UnavailableReason = deploymentAppUnavailableReason(status.UnavailableCode)
+	}
+	c.service.setMockDeploymentAppStatus(&status)
+	c.service.setMockAppAvailable(status.Ready)
+	ctx.JSON(http.StatusOK, status)
+}
+
+func validMockDeploymentAppState(
+	source DeploymentAppSource,
+	state string,
+	webhookStatus DeploymentAppWebhookStatus,
+) bool {
+	if source != DeploymentAppSourceNone && source != DeploymentAppSourceEnvironment &&
+		source != DeploymentAppSourceManaged {
+		return false
+	}
+	if state != "unconfigured" && state != "registering" && state != "ready" && state != "invalid" {
+		return false
+	}
+	return webhookStatus == "" || webhookStatus == DeploymentAppWebhookUnverified ||
+		webhookStatus == DeploymentAppWebhookVerified || webhookStatus == DeploymentAppWebhookFailing
 }
 
 // setReposUnavailable toggles the mock client's "list accessible repos
@@ -705,6 +761,12 @@ func (c *MockController) reset(ctx *gin.Context) {
 	}
 	if c.store != nil {
 		if err := c.store.DeleteAllMockAuthData(ctx.Request.Context()); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+	}
+	if c.service != nil {
+		if err := c.service.ResetDeploymentAppForE2E(ctx.Request.Context()); err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
 			return
 		}

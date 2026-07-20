@@ -144,6 +144,63 @@ func TestMockControllerPersonalCLIAvailabilityTransitionsAndReset(t *testing.T) 
 	}
 }
 
+func TestMockControllerResetRemovesBoundDeploymentApp(t *testing.T) {
+	router, service, store := setupWorkspaceAuthMockController(t)
+	repository := NewDeploymentAppRepository(store, service.connectionSecrets)
+	registration := testDeploymentAppRegistration(1)
+	if err := repository.SaveManagedRegistration(context.Background(), registration,
+		DeploymentAppCredentials{
+			PrivateKey: "key", ClientSecret: "client", WebhookSecret: "webhook",
+		}); err != nil {
+		t.Fatal(err)
+	}
+	service.SetDeploymentAppRegistrationService(NewDeploymentAppRegistrationService(
+		DeploymentAppRegistrationConfig{
+			Repository: repository,
+			Store:      store,
+			Runtime:    service,
+		},
+	))
+	service.deploymentAppRuntime = &githubAppRuntime{
+		source: DeploymentAppSourceManaged, appID: registration.AppID, generation: 1,
+	}
+	flow := &DeploymentAppRegistrationFlow{
+		StateHash: "pending-reset-flow", OperatorUserID: DefaultUserID,
+		OwnerType: DeploymentAppOwnerOrganization, OwnerLogin: "acme",
+		PublicBaseURL: "https://kandev.example", ManifestRevision: DeploymentAppManifestRevision,
+		ExpiresAt: time.Now().UTC().Add(time.Hour), CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateDeploymentAppRegistrationFlow(context.Background(), flow); err != nil {
+		t.Fatal(err)
+	}
+	seed := serveMockJSON(t, router, http.MethodPut,
+		"/api/v1/github/mock/workspace-connections/workspace-1",
+		`{"source":"github_app_installation","status":"active","installation_id":42,"installation_account_login":"acme"}`)
+	if seed.Code != http.StatusOK {
+		t.Fatalf("seed App binding: %d %s", seed.Code, seed.Body.String())
+	}
+
+	reset := serveMockJSON(t, router, http.MethodDelete, "/api/v1/github/mock/reset", "")
+	if reset.Code != http.StatusOK {
+		t.Fatalf("reset: %d %s", reset.Code, reset.Body.String())
+	}
+	connection, err := store.GetWorkspaceConnection(context.Background(), "workspace-1")
+	if err != nil || connection != nil {
+		t.Fatalf("connection after reset = %+v, error = %v", connection, err)
+	}
+	stored, _, err := repository.LoadManagedRegistration(context.Background())
+	if err != nil || stored != nil || service.DeploymentAppRuntimeSnapshot().Ready {
+		t.Fatalf("deployment App after reset = %+v, runtime = %+v, error = %v",
+			stored, service.DeploymentAppRuntimeSnapshot(), err)
+	}
+	storedFlow, err := store.GetDeploymentAppRegistrationFlow(
+		context.Background(), flow.StateHash,
+	)
+	if err != nil || storedFlow != nil {
+		t.Fatalf("deployment App flow after reset = %+v, error = %v", storedFlow, err)
+	}
+}
+
 func TestMockControllerDeletesWorkspaceAndPersonalConnections(t *testing.T) {
 	router, _, store := setupWorkspaceAuthMockController(t)
 	for _, seed := range []struct {

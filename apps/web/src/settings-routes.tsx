@@ -21,6 +21,7 @@ import IntegrationsSlackPage from "@/app/settings/integrations/slack/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import StoragePage from "@/app/settings/system/storage/page";
+import GitHubAppPage from "@/app/settings/system/github-app/page";
 import UtilityAgentsSettingsPage from "@/app/settings/utility-agents/page";
 import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
@@ -186,6 +187,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
     </SystemPageShell>
   ),
+  "/settings/system/github-app": () => <GitHubAppPage />,
   "/settings/system/licenses": () => (
     <SystemPageShell
       title="Licenses"

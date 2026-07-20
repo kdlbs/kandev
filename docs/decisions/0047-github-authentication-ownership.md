@@ -1,5 +1,10 @@
 # 0047 — Separate GitHub deployment, workspace automation, and personal identities
 
+> Amended by
+> [ADR-2026-07-20-managed-github-app-registration](2026-07-20-managed-github-app-registration.md):
+> deployment App registration may be environment-managed or created through Kandev's runtime App
+> Manifest onboarding flow; workspace and personal ownership boundaries are unchanged.
+
 - Status: accepted
 - Date: 2026-07-19
 - Area: backend, frontend, security

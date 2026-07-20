@@ -382,27 +382,8 @@ func initGitHubService(
 		// service needs the mutating one wired explicitly.
 		svc.SetSecretManager(adapter)
 		svc.SetConnectionSecretStore(secretadapter.New(secretsStore))
-		if cfg.GitHubApp.Availability().Available {
-			privateKey, keyErr := cfg.GitHubApp.PrivateKeyPEM()
-			if keyErr != nil {
-				log.Warn("GitHub App private key unavailable", zap.Error(keyErr))
-				return svc
-			}
-			appClient, appErr := github.NewAppClient(cfg.GitHubApp.AppID, privateKey)
-			if appErr != nil {
-				log.Warn("GitHub App client initialization failed", zap.Error(appErr))
-				return svc
-			}
-			svc.SetGitHubAppClient(appClient)
-			if authErr := svc.ConfigureGitHubAppAuth(github.GitHubAppRuntimeConfig{
-				ClientID:      cfg.GitHubApp.ClientID,
-				ClientSecret:  cfg.GitHubApp.ClientSecret,
-				WebhookSecret: cfg.GitHubApp.WebhookSecret,
-				Slug:          cfg.GitHubApp.Slug,
-				PublicBaseURL: cfg.GitHubApp.PublicBaseURL,
-			}); authErr != nil {
-				log.Warn("GitHub App authentication initialization failed", zap.Error(authErr))
-			}
+		if authErr := svc.InitializeDeploymentAppRegistration(context.Background(), cfg.GitHubApp); authErr != nil {
+			log.Warn("GitHub App authentication initialization failed", zap.Error(authErr))
 		}
 	}
 	return svc

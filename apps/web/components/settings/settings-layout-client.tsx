@@ -20,6 +20,7 @@ import { SettingsSaveProvider } from "@/components/settings/settings-save-provid
 // listed here falls back to dash-aware title-casing of the path segment.
 const SEGMENT_LABEL_OVERRIDES: Record<string, string> = {
   github: "GitHub",
+  "github-app": "GitHub App",
   jira: "Jira",
   linear: "Linear",
   slack: "Slack",

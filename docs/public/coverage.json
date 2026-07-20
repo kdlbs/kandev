@@ -198,7 +198,8 @@
         "/settings/integrations/jira",
         "/settings/integrations/linear",
         "/settings/integrations/sentry",
-        "/settings/integrations/slack"
+        "/settings/integrations/slack",
+        "/settings/system/github-app"
       ]
     },
     {

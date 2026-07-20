@@ -100,6 +100,11 @@ func handleE2EReset(
 		}
 		if githubSvc != nil {
 			githubSvc.ResetMockAuth(workspaceID)
+			if err := resetGitHubDeploymentAppForE2E(ctx, githubSvc); err != nil {
+				log.Error("e2e reset: GitHub deployment App cleanup failed", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: "GitHub deployment App cleanup failed"})
+				return
+			}
 		}
 		// The workflow-sync poller reads these rows globally; delete before
 		// task/workflow deletion so a mid-reset tick can't resync workflows.
@@ -200,6 +205,13 @@ func handleE2EReset(
 			"deleted_review_watches": deletedWatches,
 		})
 	}
+}
+
+func resetGitHubDeploymentAppForE2E(ctx context.Context, service *github.Service) error {
+	if service == nil {
+		return nil
+	}
+	return service.ResetDeploymentAppForE2E(ctx)
 }
 
 func deleteGitHubAuthForReset(ctx context.Context, database *sql.DB, workspaceID string) error {

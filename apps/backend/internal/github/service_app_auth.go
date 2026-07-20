@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/config"
 )
 
 type GitHubAppRuntimeConfig struct {
@@ -16,21 +18,89 @@ type GitHubAppRuntimeConfig struct {
 	PublicBaseURL string
 }
 
-func (s *Service) ConfigureGitHubAppAuth(config GitHubAppRuntimeConfig) error {
-	if s == nil || s.store == nil || s.connectionSecrets == nil || s.appClient == nil {
-		return errors.New("GitHub App authentication dependencies are not configured")
+type githubAppRuntime struct {
+	source               DeploymentAppSource
+	generation           int64
+	appID                int64
+	appClient            *AppClient
+	installationTokens   *InstallationTokenCache
+	installationProvider *CachedInstallationCredentialProvider
+	appInstallationAuth  *AppInstallationService
+	personalAuth         *PersonalAuthService
+	webhookAuth          *GitHubWebhookService
+	initialWebhookHealth deploymentAppWebhookHealth
+}
+
+type deploymentAppWebhookHealth struct {
+	status        DeploymentAppWebhookStatus
+	lastWebhookAt *time.Time
+	lastError     string
+}
+
+type DeploymentAppRuntimeSnapshot struct {
+	Source     DeploymentAppSource
+	Ready      bool
+	AppID      int64
+	Generation int64
+}
+
+// ApplyDeploymentAppRuntime builds every App-dependent service before making
+// the generation visible. Readers observe either the old generation or the
+// complete replacement, never a mixture of keys, OAuth clients, and webhooks.
+func (s *Service) ApplyDeploymentAppRuntime(resolved ResolvedDeploymentAppConfig) error {
+	if s == nil {
+		return errors.New("GitHub service is not configured")
 	}
+	if resolved.Source == DeploymentAppSourceNone {
+		s.swapDeploymentAppRuntime(nil)
+		return nil
+	}
+	runtime, err := s.buildDeploymentAppRuntime(resolved)
+	if err != nil {
+		return err
+	}
+	s.swapDeploymentAppRuntime(runtime)
+	return nil
+}
+
+func (s *Service) buildDeploymentAppRuntime(
+	resolved ResolvedDeploymentAppConfig,
+) (*githubAppRuntime, error) {
+	if s.store == nil || s.connectionSecrets == nil {
+		return nil, errors.New("GitHub App authentication dependencies are not configured")
+	}
+	if resolved.Source != DeploymentAppSourceEnvironment && resolved.Source != DeploymentAppSourceManaged {
+		return nil, errors.New("GitHub App runtime source is invalid")
+	}
+	if err := resolved.Config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid GitHub App runtime configuration: %w", err)
+	}
+	privateKey, err := resolved.Config.PrivateKeyPEM()
+	if err != nil {
+		return nil, fmt.Errorf("load GitHub App private key: %w", err)
+	}
+	appClient, err := NewAppClient(resolved.Config.AppID, privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("initialize GitHub App client: %w", err)
+	}
+	return s.buildDeploymentAppRuntimeWithClient(resolved, appClient)
+}
+
+func (s *Service) buildDeploymentAppRuntimeWithClient(
+	resolved ResolvedDeploymentAppConfig,
+	appClient *AppClient,
+) (*githubAppRuntime, error) {
+	config := resolved.Config
 	baseURL := strings.TrimRight(config.PublicBaseURL, "/")
-	if baseURL == "" || config.ClientID == "" || config.ClientSecret == "" ||
+	if appClient == nil || baseURL == "" || config.ClientID == "" || config.ClientSecret == "" ||
 		config.WebhookSecret == "" || config.Slug == "" {
-		return errors.New("GitHub App runtime configuration is incomplete")
+		return nil, errors.New("GitHub App runtime configuration is incomplete")
 	}
 	flows := NewOAuthFlowManager(s.store)
 	oauth := NewGitHubOAuthClient(config.ClientID, config.ClientSecret)
 	personalRepo := s.personalConnections
 	if personalRepo == nil {
 		personalRepo = NewStorePersonalConnectionRepository(s.store, s.connectionSecrets)
-		s.personalConnections = personalRepo
 	}
 	connectionStore := &serviceAppConnectionStore{service: s}
 	personal := NewPersonalAuthService(PersonalAuthConfig{
@@ -38,26 +108,277 @@ func (s *Service) ConfigureGitHubAppAuth(config GitHubAppRuntimeConfig) error {
 		CallbackURL: baseURL + "/api/v1/github/personal-connection/callback",
 	}, flows, personalRepo, oauth)
 	personal.SetWorkspaceMutationLock(s.workspaceConnectionMutationLock)
+	tokens := NewInstallationTokenCache(appClient)
+	generation := int64(0)
+	health := deploymentAppWebhookHealth{status: DeploymentAppWebhookUnverified}
+	if resolved.Registration != nil {
+		generation = resolved.Registration.CredentialGeneration
+		health.status = resolved.Registration.WebhookStatus
+		health.lastWebhookAt = resolved.Registration.LastWebhookAt
+		health.lastError = resolved.Registration.LastError
+		if health.status == "" {
+			health.status = DeploymentAppWebhookUnverified
+		}
+	}
+	return &githubAppRuntime{
+		source: resolved.Source, generation: generation, appID: config.AppID,
+		appClient: appClient, installationTokens: tokens,
+		installationProvider: NewCachedInstallationCredentialProvider(tokens),
+		appInstallationAuth: NewAppInstallationService(AppInstallationConfig{
+			Slug: config.Slug, CallbackURL: baseURL + "/api/v1/github/app/install/callback",
+		}, flows, connectionStore, appClient, oauth),
+		personalAuth: personal,
+		webhookAuth: NewGitHubWebhookService(
+			config.WebhookSecret, connectionStore,
+			&installationRepositorySettingsUpdater{service: s}, personalRepo,
+			GitHubWebhookReconciliation{Installations: appClient, Personal: personal},
+		),
+		initialWebhookHealth: health,
+	}, nil
+}
 
+func (s *Service) swapDeploymentAppRuntime(runtime *githubAppRuntime) {
 	s.mu.Lock()
-	s.appAvailable = true
-	s.appInstallationAuth = NewAppInstallationService(AppInstallationConfig{
-		Slug:        config.Slug,
-		CallbackURL: baseURL + "/api/v1/github/app/install/callback",
-	}, flows, connectionStore, s.appClient, oauth)
-	s.personalAuth = personal
-	s.webhookAuth = NewGitHubWebhookService(
-		config.WebhookSecret,
-		connectionStore,
-		&installationRepositorySettingsUpdater{service: s},
-		personalRepo,
-		GitHubWebhookReconciliation{Installations: s.appClient, Personal: personal},
-	)
+	s.deploymentAppRuntime = runtime
+	s.appAvailable = runtime != nil
+	if runtime == nil {
+		s.deploymentAppWebhookHealth = deploymentAppWebhookHealth{}
+		s.appClient = nil
+		s.installationTokens = nil
+		s.appInstallationAuth = nil
+		s.personalAuth = nil
+		s.webhookAuth = nil
+	} else {
+		s.deploymentAppWebhookHealth = runtime.initialWebhookHealth
+		s.appClient = runtime.appClient
+		s.installationTokens = runtime.installationTokens
+		s.appInstallationAuth = runtime.appInstallationAuth
+		s.personalAuth = runtime.personalAuth
+		s.webhookAuth = runtime.webhookAuth
+	}
 	s.mu.Unlock()
 	if s.resolver != nil {
-		s.resolver.SetUserProvider(&personalAuthCredentialProvider{service: personal})
+		s.resolver.InvalidateAll()
 	}
+}
+
+func (s *Service) currentDeploymentAppWebhookHealth() deploymentAppWebhookHealth {
+	if s == nil {
+		return deploymentAppWebhookHealth{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	health := s.deploymentAppWebhookHealth
+	if health.lastWebhookAt != nil {
+		lastWebhookAt := *health.lastWebhookAt
+		health.lastWebhookAt = &lastWebhookAt
+	}
+	return health
+}
+
+func (s *Service) updateDeploymentAppWebhookHealth(
+	runtime *githubAppRuntime,
+	status DeploymentAppWebhookStatus,
+	lastWebhookAt time.Time,
+	lastError string,
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.deploymentAppRuntime != runtime {
+		return
+	}
+	s.deploymentAppWebhookHealth = deploymentAppWebhookHealth{
+		status: status, lastWebhookAt: &lastWebhookAt, lastError: lastError,
+	}
+}
+
+func (s *Service) DeploymentAppRuntimeSnapshot() DeploymentAppRuntimeSnapshot {
+	if s == nil {
+		return DeploymentAppRuntimeSnapshot{Source: DeploymentAppSourceNone}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.deploymentAppRuntime == nil {
+		return DeploymentAppRuntimeSnapshot{Source: DeploymentAppSourceNone}
+	}
+	runtime := s.deploymentAppRuntime
+	return DeploymentAppRuntimeSnapshot{
+		Source: runtime.source, Ready: true, AppID: runtime.appID, Generation: runtime.generation,
+	}
+}
+
+func (s *Service) SetDeploymentAppRegistrationService(
+	registration *DeploymentAppRegistrationService,
+) {
+	s.mu.Lock()
+	s.deploymentAppRegistration = registration
+	s.mu.Unlock()
+}
+
+// InitializeDeploymentAppRegistration resolves the deployment source at boot
+// and installs the registration API service even when configuration is absent
+// or invalid, so System Settings can report and repair the state.
+func (s *Service) InitializeDeploymentAppRegistration(
+	ctx context.Context,
+	environment config.GitHubAppConfig,
+) error {
+	if s == nil || s.store == nil || s.connectionSecrets == nil {
+		return errors.New("deployment App registration dependencies are not configured")
+	}
+	registration := NewDeploymentAppRegistrationService(DeploymentAppRegistrationConfig{
+		Environment: environment,
+		Repository:  NewDeploymentAppRepository(s.store, s.connectionSecrets),
+		Store:       s.store,
+		Runtime:     s,
+		Converter:   NewManifestConversionClient(),
+	})
+	s.SetDeploymentAppRegistrationService(registration)
+	return registration.Boot(ctx)
+}
+
+func (s *Service) DeploymentAppRegistrationStatus(
+	ctx context.Context,
+	userID string,
+) (DeploymentAppRegistrationStatus, error) {
+	if err := requireDeploymentAppOperator(userID); err != nil {
+		return DeploymentAppRegistrationStatus{}, err
+	}
+	s.mu.Lock()
+	if s.mockDeploymentAppStatus != nil {
+		status := cloneDeploymentAppRegistrationStatus(*s.mockDeploymentAppStatus)
+		s.mu.Unlock()
+		return status, nil
+	}
+	s.mu.Unlock()
+	registration := s.currentDeploymentAppRegistrationService()
+	if registration == nil {
+		return DeploymentAppRegistrationStatus{}, ErrGitHubNotConfigured
+	}
+	return registration.Status(ctx, userID)
+}
+
+func cloneDeploymentAppRegistrationStatus(
+	status DeploymentAppRegistrationStatus,
+) DeploymentAppRegistrationStatus {
+	status.Registration = cloneDeploymentAppRegistration(status.Registration)
+	return status
+}
+
+func (s *Service) StartDeploymentAppRegistration(
+	ctx context.Context,
+	userID string,
+	request DeploymentAppRegistrationStartRequest,
+) (DeploymentAppRegistrationStart, error) {
+	registration := s.currentDeploymentAppRegistrationService()
+	if registration == nil {
+		return DeploymentAppRegistrationStart{}, ErrGitHubNotConfigured
+	}
+	return registration.Start(ctx, userID, request)
+}
+
+func (s *Service) CompleteDeploymentAppRegistration(
+	ctx context.Context,
+	callback DeploymentAppRegistrationCallback,
+) (DeploymentAppRegistrationResult, error) {
+	registration := s.currentDeploymentAppRegistrationService()
+	if registration == nil {
+		return DeploymentAppRegistrationResult{}, ErrGitHubNotConfigured
+	}
+	return registration.Complete(ctx, callback)
+}
+
+func (s *Service) DeleteDeploymentAppRegistration(ctx context.Context, userID string) error {
+	registration := s.currentDeploymentAppRegistrationService()
+	if registration == nil {
+		return ErrGitHubNotConfigured
+	}
+	return registration.Delete(ctx, userID)
+}
+
+// ResetDeploymentAppForE2E clears mock-controlled deployment registration
+// persistence. It is called only from endpoints gated by KANDEV_MOCK_AGENT.
+func (s *Service) ResetDeploymentAppForE2E(ctx context.Context) error {
+	registration := s.currentDeploymentAppRegistrationService()
+	if registration == nil {
+		return nil
+	}
+	return registration.resetForE2E(ctx)
+}
+
+func (s *Service) currentDeploymentAppRegistrationService() *DeploymentAppRegistrationService {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.deploymentAppRegistration
+}
+
+func (s *Service) ConfigureGitHubAppAuth(config GitHubAppRuntimeConfig) error {
+	if s == nil || s.store == nil || s.connectionSecrets == nil || s.appClient == nil {
+		return errors.New("GitHub App authentication dependencies are not configured")
+	}
+	s.mu.Lock()
+	appClient := s.appClient
+	s.mu.Unlock()
+	resolved := ResolvedDeploymentAppConfig{
+		Source: DeploymentAppSourceEnvironment,
+		Config: legacyGitHubAppConfig(config, appClient),
+	}
+	runtime, err := s.buildDeploymentAppRuntimeWithClient(resolved, appClient)
+	if err != nil {
+		return err
+	}
+	s.swapDeploymentAppRuntime(runtime)
 	return nil
+}
+
+func legacyGitHubAppConfig(runtime GitHubAppRuntimeConfig, appClient *AppClient) config.GitHubAppConfig {
+	appID := int64(1)
+	if appClient != nil {
+		appID = appClient.appID
+	}
+	return config.GitHubAppConfig{
+		AppID: appID, ClientID: runtime.ClientID, ClientSecret: runtime.ClientSecret,
+		WebhookSecret: runtime.WebhookSecret, Slug: runtime.Slug, PublicBaseURL: runtime.PublicBaseURL,
+	}
+}
+
+type runtimeInstallationCredentialProvider struct{ service *Service }
+
+func (p *runtimeInstallationCredentialProvider) ResolveInstallation(
+	ctx context.Context,
+	connection *WorkspaceConnection,
+	req ResolveCredentialRequest,
+) (*ResolvedCredential, error) {
+	runtime := p.service.currentDeploymentAppRuntime()
+	if runtime == nil || runtime.installationProvider == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+	return runtime.installationProvider.ResolveInstallation(ctx, connection, req)
+}
+
+type runtimeUserCredentialProvider struct{ service *Service }
+
+func (p *runtimeUserCredentialProvider) ResolveUser(
+	ctx context.Context,
+	connection *UserConnection,
+	req ResolveCredentialRequest,
+) (*ResolvedCredential, error) {
+	runtime := p.service.currentDeploymentAppRuntime()
+	if runtime == nil || runtime.personalAuth == nil {
+		return nil, ErrGitHubPersonalRequired
+	}
+	return (&personalAuthCredentialProvider{service: runtime.personalAuth}).ResolveUser(ctx, connection, req)
+}
+
+func (s *Service) currentDeploymentAppRuntime() *githubAppRuntime {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.deploymentAppRuntime
 }
 
 func (s *Service) SetCredentialBroker(broker *CredentialBroker) {
@@ -236,9 +557,13 @@ func (s *Service) CompleteAppInstallation(
 	ctx context.Context,
 	callback AppInstallationCallback,
 ) (AppInstallationResult, error) {
-	s.mu.Lock()
-	service := s.appInstallationAuth
-	s.mu.Unlock()
+	s.deploymentAppMutationMu.Lock()
+	defer s.deploymentAppMutationMu.Unlock()
+	runtime := s.currentDeploymentAppRuntime()
+	if runtime == nil {
+		return AppInstallationResult{}, ErrGitHubNotConfigured
+	}
+	service := runtime.appInstallationAuth
 	if service == nil {
 		return AppInstallationResult{}, ErrGitHubNotConfigured
 	}
@@ -285,13 +610,34 @@ func (s *Service) HandleAppWebhook(
 	ctx context.Context,
 	request GitHubWebhookRequest,
 ) (GitHubWebhookResult, error) {
-	s.mu.Lock()
-	service := s.webhookAuth
-	s.mu.Unlock()
+	runtime := s.currentDeploymentAppRuntime()
+	if runtime == nil {
+		return GitHubWebhookResult{}, ErrGitHubNotConfigured
+	}
+	service := runtime.webhookAuth
 	if service == nil {
 		return GitHubWebhookResult{}, ErrGitHubNotConfigured
 	}
-	return service.Handle(ctx, request)
+	signed := service.Authenticates(request)
+	result, err := service.Handle(ctx, request)
+	if !signed {
+		return result, err
+	}
+	status := DeploymentAppWebhookVerified
+	reason := ""
+	if err != nil {
+		status = DeploymentAppWebhookFailing
+		reason = "signed webhook processing failed"
+	}
+	observedAt := service.now().UTC()
+	var healthErr error
+	if runtime.source == DeploymentAppSourceManaged && s.store != nil {
+		healthErr = s.store.updateDeploymentAppWebhookHealth(
+			ctx, runtime.generation, status, observedAt, reason,
+		)
+	}
+	s.updateDeploymentAppWebhookHealth(runtime, status, observedAt, reason)
+	return result, errors.Join(err, healthErr)
 }
 
 type serviceAppConnectionStore struct {

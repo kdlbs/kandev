@@ -79,13 +79,14 @@ type SecretManager interface {
 	Delete(ctx context.Context, id string) error
 }
 
-// ConnectionSecretStore provides deterministic encrypted keys for workspace
-// and user GitHub connections.
+// ConnectionSecretStore provides encrypted storage for internal GitHub
+// credentials, including deterministic workspace keys and deployment bundles.
 type ConnectionSecretStore interface {
 	Reveal(ctx context.Context, id string) (string, error)
 	Set(ctx context.Context, id, name, value string) error
 	Delete(ctx context.Context, id string) error
 	Exists(ctx context.Context, id string) (bool, error)
+	ListIDs(ctx context.Context) ([]string, error)
 }
 
 // PromptResolver resolves editable prompt content by name.
@@ -95,27 +96,32 @@ type PromptResolver interface {
 
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu                      sync.Mutex
-	connectionMutationLocks [64]sync.Mutex
-	client                  Client
-	authMethod              string
-	secrets                 SecretProvider
-	secretManager           SecretManager
-	connectionSecrets       ConnectionSecretStore
-	personalConnections     *StorePersonalConnectionRepository
-	resolver                *CredentialResolver
-	appClient               *AppClient
-	installationTokens      *InstallationTokenCache
-	appInstallationAuth     *AppInstallationService
-	personalAuth            *PersonalAuthService
-	webhookAuth             *GitHubWebhookService
-	appAvailable            bool
-	credentialBroker        *CredentialBroker
-	store                   *Store
-	eventBus                bus.EventBus
-	logger                  *logger.Logger
-	taskDeleter             TaskDeleter
-	taskIssueStore          TaskIssueStore
+	mu                         sync.Mutex
+	deploymentAppMutationMu    sync.Mutex
+	connectionMutationLocks    [64]sync.Mutex
+	client                     Client
+	authMethod                 string
+	secrets                    SecretProvider
+	secretManager              SecretManager
+	connectionSecrets          ConnectionSecretStore
+	personalConnections        *StorePersonalConnectionRepository
+	resolver                   *CredentialResolver
+	appClient                  *AppClient
+	installationTokens         *InstallationTokenCache
+	appInstallationAuth        *AppInstallationService
+	personalAuth               *PersonalAuthService
+	webhookAuth                *GitHubWebhookService
+	appAvailable               bool
+	deploymentAppRuntime       *githubAppRuntime
+	deploymentAppRegistration  *DeploymentAppRegistrationService
+	mockDeploymentAppStatus    *DeploymentAppRegistrationStatus
+	deploymentAppWebhookHealth deploymentAppWebhookHealth
+	credentialBroker           *CredentialBroker
+	store                      *Store
+	eventBus                   bus.EventBus
+	logger                     *logger.Logger
+	taskDeleter                TaskDeleter
+	taskIssueStore             TaskIssueStore
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
 	// watch reset flow. It is distinct from taskDeleter (which only deletes
 	// a single task by ID) because reset must walk the task tree and clean
@@ -278,6 +284,8 @@ func (s *Service) SetConnectionSecretStore(store ConnectionSecretStore) {
 	}
 	if s.resolver != nil {
 		s.resolver.secrets = store
+		s.resolver.SetInstallationProvider(&runtimeInstallationCredentialProvider{service: s})
+		s.resolver.SetUserProvider(&runtimeUserCredentialProvider{service: s})
 	}
 }
 

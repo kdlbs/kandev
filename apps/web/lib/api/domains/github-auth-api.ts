@@ -1,8 +1,11 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
+  DeploymentGitHubAppStatus,
   GitHubAutomationConnection,
   GitHubCLIAccount,
   GitHubStatusResponse,
+  StartDeploymentGitHubAppRequest,
+  StartDeploymentGitHubAppResponse,
 } from "@/lib/types/github";
 
 export async function fetchGitHubStatus(workspaceId: string, options?: ApiRequestOptions) {
@@ -67,6 +70,25 @@ export async function startGitHubPersonalConnect(workspaceId: string) {
 export async function disconnectGitHubPersonal(workspaceId: string) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
   return fetchJson<{ disconnected: boolean }>(`/api/v1/github/personal-connection?${query}`, {
+    init: { method: "DELETE" },
+  });
+}
+
+export async function fetchDeploymentAppRegistration(options?: ApiRequestOptions) {
+  return fetchJson<DeploymentGitHubAppStatus>("/api/v1/github/app/registration", {
+    ...options,
+    cache: options?.cache ?? "no-store",
+  });
+}
+
+export async function startDeploymentAppRegistration(request: StartDeploymentGitHubAppRequest) {
+  return fetchJson<StartDeploymentGitHubAppResponse>("/api/v1/github/app/registration/start", {
+    init: { method: "POST", body: JSON.stringify(request) },
+  });
+}
+
+export async function deleteDeploymentAppRegistration() {
+  return fetchJson<{ deleted: boolean }>("/api/v1/github/app/registration", {
     init: { method: "DELETE" },
   });
 }

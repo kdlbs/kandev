@@ -117,6 +117,20 @@ export type MockGitHubCLIAccount = {
   state: string;
 };
 
+export type MockDeploymentGitHubAppRegistration = {
+  source: "none" | "environment" | "managed";
+  state: "unconfigured" | "registering" | "ready" | "invalid";
+  ready: boolean;
+  app_id?: number;
+  slug?: string;
+  owner_login?: string;
+  owner_type?: "User" | "Organization";
+  public_base_url?: string;
+  webhook_status?: "unverified" | "verified" | "failing";
+  unavailable_code?: string;
+  unavailable_reason?: string;
+};
+
 function setIf(body: Record<string, unknown>, key: string, value: unknown) {
   if (value !== undefined && value !== null) body[key] = value;
 }
@@ -1065,6 +1079,12 @@ export class ApiClient {
 
   async mockGitHubSetAppAvailable(available: boolean): Promise<void> {
     await this.request("PUT", "/api/v1/github/mock/app-available", { available });
+  }
+
+  async mockGitHubSetDeploymentAppRegistration(
+    registration: MockDeploymentGitHubAppRegistration,
+  ): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/deployment-app-registration", registration);
   }
 
   async mockGitHubAddPRs(prs: MockPR[]): Promise<void> {

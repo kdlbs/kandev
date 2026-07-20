@@ -57,6 +57,68 @@ export type GitHubCLIAccount = {
   selected?: boolean;
 };
 
+export type DeploymentGitHubAppSource = "none" | "environment" | "managed";
+export type DeploymentGitHubAppState = "unconfigured" | "registering" | "ready" | "invalid";
+export type DeploymentGitHubAppOwnerType = "User" | "Organization";
+export type DeploymentGitHubAppWebhookStatus = "unverified" | "verified" | "failing";
+
+export type DeploymentGitHubAppRegistration = {
+  github_host: string;
+  app_id: number;
+  client_id: string;
+  slug: string;
+  owner_login: string;
+  owner_type: DeploymentGitHubAppOwnerType;
+  public_base_url: string;
+  credential_generation: number;
+  webhook_status: DeploymentGitHubAppWebhookStatus;
+  last_webhook_at?: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DeploymentGitHubAppStatus = {
+  source: DeploymentGitHubAppSource;
+  state: DeploymentGitHubAppState;
+  ready: boolean;
+  read_only: boolean;
+  registration?: DeploymentGitHubAppRegistration;
+  callback_url?: string;
+  webhook_url?: string;
+  unavailable_code?: string;
+  unavailable_reason?: string;
+};
+
+export type DeploymentGitHubAppManifest = {
+  name: string;
+  description: string;
+  url: string;
+  hook_attributes: { url: string; active: boolean };
+  redirect_url: string;
+  callback_urls: string[];
+  setup_url: string;
+  public: boolean;
+  default_permissions: Record<string, "read" | "write">;
+  default_events: string[];
+  request_oauth_on_install: boolean;
+  setup_on_update: boolean;
+};
+
+export type StartDeploymentGitHubAppRequest = {
+  owner_type: "user" | "organization";
+  owner_login: string;
+  public_base_url: string;
+};
+
+export type StartDeploymentGitHubAppResponse = {
+  state: string;
+  expires_at: string;
+  revision: number;
+  registration_url: string;
+  manifest: DeploymentGitHubAppManifest;
+};
+
 export type AuthDiagnostics = {
   command: string;
   output: string;
