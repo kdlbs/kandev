@@ -11,7 +11,14 @@ over gRPC, with an optional native frontend bundle. See [Plugins](plugins.md)
 for the operator-facing install/enable/disable flow, and the [Plugin manifest
 reference](plugins-manifest.md) for the full `manifest.yaml` schema.
 
-Two working example plugins accompany this guide:
+The fastest way to start is the
+[`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template)
+starter repo — click **Use this template** on GitHub for a minimal, working
+plugin with the layout, build/package `Makefile`, tests, and a tag-triggered
+release workflow already wired up. This guide explains what that scaffold
+contains and how to extend it.
+
+Two more example plugins go deeper on specific surfaces:
 
 - `kandev-plugin-hello` — a nav item, native route, sidebar slot component, a
   WS-driven counter, a Host-state-backed event handler, and a webhook.
