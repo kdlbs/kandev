@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { expectElementsNotToIntersect } from "../../helpers/layout-assertions";
 
 const settingsPath = (workspaceId: string) =>
   `/settings/workspace/${workspaceId}/integrations/github`;
@@ -177,19 +178,10 @@ test.describe("GitHub workspace authentication", () => {
     const floatingSave = testPage.getByTestId("settings-floating-save");
     await expect(floatingSave).toBeVisible();
 
-    const saveBox = await floatingSave.boundingBox();
-    const configChatBox = await testPage
-      .getByRole("button", { name: "Configuration Chat" })
-      .boundingBox();
-    expect(saveBox).not.toBeNull();
-    expect(configChatBox).not.toBeNull();
-    const overlapWidth =
-      Math.min(saveBox!.x + saveBox!.width, configChatBox!.x + configChatBox!.width) -
-      Math.max(saveBox!.x, configChatBox!.x);
-    const overlapHeight =
-      Math.min(saveBox!.y + saveBox!.height, configChatBox!.y + configChatBox!.height) -
-      Math.max(saveBox!.y, configChatBox!.y);
-    expect(overlapWidth <= 0 || overlapHeight <= 0).toBe(true);
+    await expectElementsNotToIntersect(
+      floatingSave,
+      testPage.getByRole("button", { name: "Configuration Chat" }),
+    );
 
     await testPage.screenshot({
       path: testInfo.outputPath("github-app-reconnect-desktop.png"),
