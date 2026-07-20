@@ -97,18 +97,20 @@ export async function installBrowserDemo(): Promise<void> {
       this.url = String(url);
       this.socketId = `socket-${++sequence}`;
       sockets.set(this.socketId, this);
-      worker.postMessage({ kind: "ws-open", socketId: this.socketId } satisfies DemoWorkerRequest);
+      worker.postMessage({
+        kind: "ws-open",
+        socketId: this.socketId,
+        url: this.url,
+      } satisfies DemoWorkerRequest);
     }
 
     send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
       if (this.readyState !== DemoWebSocket.OPEN)
         throw new DOMException("WebSocket is not open", "InvalidStateError");
-      if (typeof data !== "string")
-        throw new TypeError("The browser demo supports text WebSocket messages only");
       worker.postMessage({
         kind: "ws-send",
         socketId: this.socketId,
-        data,
+        data: normalizeSocketData(data),
       } satisfies DemoWorkerRequest);
     }
 
@@ -139,10 +141,12 @@ export async function installBrowserDemo(): Promise<void> {
   }
 
   window.WebSocket = DemoWebSocket as unknown as typeof WebSocket;
-  const payload = (await call({
-    kind: "init",
-    persistedState: localStorage.getItem(DEMO_STORAGE_KEY) ?? undefined,
-  })) as BootPayload;
+  const payload = applyBrowserDemoDefaults(
+    (await call({
+      kind: "init",
+      persistedState: localStorage.getItem(DEMO_STORAGE_KEY) ?? undefined,
+    })) as BootPayload,
+  );
   (window as Window & { __KANDEV_BOOT_PAYLOAD__?: BootPayload }).__KANDEV_BOOT_PAYLOAD__ = payload;
   window.parent?.postMessage(
     { source: "kandev-browser-demo", kind: "ready" },
@@ -150,7 +154,33 @@ export async function installBrowserDemo(): Promise<void> {
   );
 }
 
+export function applyBrowserDemoDefaults(payload: BootPayload): BootPayload {
+  const userSettings = payload.initialState?.userSettings;
+  if (!userSettings) return payload;
+
+  return {
+    ...payload,
+    initialState: {
+      ...payload.initialState,
+      userSettings: {
+        ...userSettings,
+        enablePreviewOnClick: false,
+      },
+    },
+  };
+}
+
 function serializeBody(body: BodyInit | null | undefined): string | undefined {
   if (body == null) return undefined;
   return typeof body === "string" ? body : String(body);
+}
+
+function normalizeSocketData(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+  if (typeof data === "string" || data instanceof ArrayBuffer) return data;
+  if (ArrayBuffer.isView(data)) {
+    return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+  }
+  // Passthrough terminals only send strings and typed arrays. Keep Blob support
+  // non-throwing in demo mode even though no current caller uses it.
+  return "";
 }

@@ -14,8 +14,8 @@ export type DemoHttpResponse = {
 export type DemoWorkerRequest =
   | { kind: "init"; id: string; persistedState?: string }
   | { kind: "http"; id: string; request: DemoHttpRequest }
-  | { kind: "ws-open"; socketId: string }
-  | { kind: "ws-send"; socketId: string; data: string }
+  | { kind: "ws-open"; socketId: string; url: string }
+  | { kind: "ws-send"; socketId: string; data: string | ArrayBuffer }
   | { kind: "ws-close"; socketId: string };
 
 export type DemoWorkerResponse =

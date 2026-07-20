@@ -1,8 +1,8 @@
 /// <reference lib="webworker" />
 
-/* eslint-disable complexity, max-lines-per-function, sonarjs/cognitive-complexity, sonarjs/no-duplicate-string */
+/* eslint-disable complexity, max-lines, max-lines-per-function, sonarjs/cognitive-complexity, sonarjs/no-duplicate-string */
 
-import type { Message, Task } from "@/lib/types/http";
+import type { Message, Task, TaskSession } from "@/lib/types/http";
 import type {
   DemoHttpRequest,
   DemoHttpResponse,
@@ -15,7 +15,9 @@ import {
   createBootPayload,
   createDemoState,
   createTaskFromInput,
+  demoApiRepository,
   demoGitHubPR,
+  demoPRFeedback,
   demoRepository,
   demoSteps,
   demoWorkflow,
@@ -23,14 +25,42 @@ import {
   makeSession,
   type DemoState,
 } from "./scenario";
+import { createDemoStats } from "./stats";
 
 const scope: DedicatedWorkerGlobalScope = self as never;
 let state = createDemoState();
+let files = createDemoFiles();
+const socketUrls = new Map<string, string>();
+const terminalInputBySocket = new Map<string, string>();
+
+const DEMO_ENVIRONMENT_ID = "demo-environment";
+const DEMO_TERMINAL_ID = "demo-terminal-1";
+const DEMO_REPOSITORY_SCRIPTS = [
+  {
+    id: "demo-script-test",
+    repository_id: DEMO_IDS.repository,
+    name: "Run tests",
+    command: "pnpm test",
+    position: 0,
+    created_at: "2026-07-18T12:00:00.000Z",
+    updated_at: "2026-07-18T12:00:00.000Z",
+  },
+  {
+    id: "demo-script-lint",
+    repository_id: DEMO_IDS.repository,
+    name: "Lint",
+    command: "pnpm lint",
+    position: 1,
+    created_at: "2026-07-18T12:00:00.000Z",
+    updated_at: "2026-07-18T12:00:00.000Z",
+  },
+];
 
 scope.onmessage = (event: MessageEvent<DemoWorkerRequest>) => {
   const message = event.data;
   if (message.kind === "init") {
     state = restoreState(message.persistedState);
+    files = createDemoFiles();
     post({ kind: "result", id: message.id, value: createBootPayload(state) });
     return;
   }
@@ -41,14 +71,26 @@ scope.onmessage = (event: MessageEvent<DemoWorkerRequest>) => {
     return;
   }
   if (message.kind === "ws-open") {
+    socketUrls.set(message.socketId, message.url);
     post({ kind: "ws-event", socketId: message.socketId, event: "open" });
+    if (isTerminalSocket(message.url)) {
+      setTimeout(() => terminalOutput(message.socketId, terminalWelcome(message.url)), 25);
+    }
     return;
   }
   if (message.kind === "ws-close") {
+    socketUrls.delete(message.socketId);
+    terminalInputBySocket.delete(message.socketId);
     post({ kind: "ws-event", socketId: message.socketId, event: "close" });
     return;
   }
-  if (message.kind === "ws-send") handleSocketRequest(message.socketId, message.data);
+  if (message.kind === "ws-send") {
+    if (isTerminalSocket(socketUrls.get(message.socketId) ?? "")) {
+      handleTerminalInput(message.socketId, message.data);
+    } else if (typeof message.data === "string") {
+      handleSocketRequest(message.socketId, message.data);
+    }
+  }
 };
 
 function restoreState(persisted?: string): DemoState {
@@ -61,7 +103,7 @@ function restoreState(persisted?: string): DemoState {
   }
 }
 
-async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResponse> {
+export async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResponse> {
   const url = new URL(request.path, "https://demo.kandev.com");
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -75,15 +117,30 @@ async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResponse> {
       workspaces: createBootPayload(state).initialState?.workspaces?.items ?? [],
       total: 1,
     });
+  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}`) return json(demoWorkspace());
   if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/repositories`)
-    return json({ repositories: [demoRepository], total: 1 });
-  if (path === `/api/v1/repositories/${DEMO_IDS.repository}/branches`)
+    return json({
+      repositories: [
+        { ...demoRepository, scripts: DEMO_REPOSITORY_SCRIPTS },
+        { ...demoApiRepository, scripts: [] },
+      ],
+      total: 2,
+    });
+  if (
+    path === `/api/v1/repositories/${DEMO_IDS.repository}/branches` ||
+    path === `/api/v1/repositories/${DEMO_IDS.apiRepository}/branches`
+  )
     return json({ branches: [{ name: "main", type: "local" }], total: 1, current_branch: "main" });
+  if (path === `/api/v1/repositories/${DEMO_IDS.repository}/scripts`)
+    return json({ scripts: DEMO_REPOSITORY_SCRIPTS, total: DEMO_REPOSITORY_SCRIPTS.length });
+  if (path === `/api/v1/repositories/${DEMO_IDS.apiRepository}/scripts`)
+    return json({ scripts: [], total: 0 });
   if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/repositories/discover`)
     return json({ roots: [], repositories: [], total: 0 });
   if (path === "/api/v1/workflows") return json({ workflows: [demoWorkflow], total: 1 });
   if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/workflows`)
     return json({ workflows: [demoWorkflow], total: 1 });
+  if (path === "/api/v1/workflow-templates") return json({ templates: [], total: 0 });
   if (path === `/api/v1/workflows/${DEMO_IDS.workflow}/snapshot`)
     return json({ workflow: demoWorkflow, steps: demoSteps, tasks: activeTasks() });
   if (path === `/api/v1/workflows/${DEMO_IDS.workflow}/workflow/steps`)
@@ -92,6 +149,13 @@ async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResponse> {
     return json({ steps: demoSteps, total: demoSteps.length });
   if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/tasks`)
     return json({ tasks: activeTasks(), total: activeTasks().length });
+  const statsMatch = path.match(
+    new RegExp(`^/api/v1/workspaces/${DEMO_IDS.workspace}/stats/([^/]+)$`),
+  );
+  if (statsMatch) {
+    const stats = createDemoStats(statsMatch[1], state);
+    if (stats !== undefined) return json(stats);
+  }
   if (path === "/api/v1/github/status")
     return json({
       configured: true,
@@ -119,6 +183,7 @@ async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResponse> {
     return json({ workspace_id: DEMO_IDS.workspace, pr: [], issue: [] });
   }
   if (path === "/api/v1/github/task-prs") return json({ task_prs: state.taskPRs });
+  if (path === "/api/v1/github/prs/kandev-demo/acme-web/142") return json(demoPRFeedback);
   if (path === "/api/v1/github/watches/pr") return json({ watches: [] });
   if (path === "/api/v1/github/watches/review") return json({ watches: [] });
   if (path === "/api/v1/github/watches/issues") return json({ watches: [] });
@@ -157,13 +222,19 @@ async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResponse> {
   }
   const sessionsMatch = path.match(/^\/api\/v1\/tasks\/([^/]+)\/sessions$/);
   if (sessionsMatch) {
-    const sessions = state.sessions.filter((session) => session.task_id === sessionsMatch[1]);
+    const sessions = state.sessions
+      .filter((session) => session.task_id === sessionsMatch[1])
+      .map(withDemoEnvironment);
     return json({ sessions, total: sessions.length });
   }
+  const terminalsMatch = path.match(/^\/api\/v1\/tasks\/([^/]+)\/terminals$/);
+  if (terminalsMatch) return json({ terminals: [demoTerminal()], total: 1 });
   const sessionMatch = path.match(/^\/api\/v1\/task-sessions\/([^/]+)$/);
   if (sessionMatch) {
     const session = state.sessions.find((item) => item.id === sessionMatch[1]);
-    return session ? json({ session }) : json({ error: "Session not found" }, 404);
+    return session
+      ? json({ session: withDemoEnvironment(session) })
+      : json({ error: "Session not found" }, 404);
   }
   const messagesMatch = path.match(/^\/api\/v1\/task-sessions\/([^/]+)\/messages$/);
   if (messagesMatch)
@@ -213,7 +284,7 @@ function removeTask(task: Task): DemoHttpResponse {
   return empty();
 }
 
-function handleSocketRequest(socketId: string, raw: string) {
+export function handleSocketRequest(socketId: string, raw: string) {
   let request: { id?: string; action?: string; payload?: Record<string, unknown> };
   try {
     request = JSON.parse(raw);
@@ -224,6 +295,119 @@ function handleSocketRequest(socketId: string, raw: string) {
   const action = request.action ?? "";
   const payload = request.payload ?? {};
   if (!id) return;
+
+  if (action === "session.subscribe") {
+    const sessionId = String(payload.session_id || "");
+    const session = state.sessions.find((item) => item.id === sessionId);
+    respond(socketId, id, { success: true });
+    if (session) {
+      notify("session.agentctl_ready", {
+        task_id: session.task_id,
+        session_id: session.id,
+        task_environment_id: DEMO_ENVIRONMENT_ID,
+        agent_execution_id: `demo-execution-${session.task_id}`,
+        worktree_id: `demo-worktree-${session.task_id}`,
+        worktree_path: session.worktree_path,
+        worktree_branch: session.worktree_branch,
+      });
+    }
+    return;
+  }
+  if (action === "workspace.tree.get") {
+    respond(socketId, id, { root: buildFileTree(String(payload.path || "")) });
+    return;
+  }
+  if (action === "workspace.file.get" || action === "workspace.file.get_at_ref") {
+    const path = normalizeFilePath(payload.path);
+    const content = files[path];
+    if (content === undefined) {
+      respond(socketId, id, { message: `File not found: ${path}` }, true);
+      return;
+    }
+    respond(socketId, id, { path, content, size: content.length, is_binary: false });
+    return;
+  }
+  if (action === "workspace.files.search") {
+    const query = String(payload.query || "").toLowerCase();
+    const limit = Number(payload.limit ?? 20);
+    const matches = Object.keys(files)
+      .filter((path) => path.toLowerCase().includes(query))
+      .slice(0, limit);
+    respond(socketId, id, { files: matches });
+    return;
+  }
+  if (action === "workspace.file.update") {
+    const path = normalizeFilePath(payload.path);
+    const desiredContent = payload.desired_content;
+    if (typeof desiredContent !== "string") {
+      respond(socketId, id, { message: "The demo editor requires desired_content" }, true);
+      return;
+    }
+    files[path] = desiredContent;
+    respond(socketId, id, {
+      path,
+      success: true,
+      new_hash: simpleHash(desiredContent),
+      resolution: "applied",
+    });
+    notifyFileChange(String(payload.session_id || ""), path, "write");
+    return;
+  }
+  if (action === "workspace.file.create") {
+    const path = normalizeFilePath(payload.path);
+    files[path] = "";
+    respond(socketId, id, { path, success: true });
+    notifyFileChange(String(payload.session_id || ""), path, "create");
+    return;
+  }
+  if (action === "workspace.file.delete") {
+    const path = normalizeFilePath(payload.path);
+    for (const filePath of Object.keys(files)) {
+      if (filePath === path || filePath.startsWith(`${path}/`)) delete files[filePath];
+    }
+    respond(socketId, id, { path, success: true });
+    notifyFileChange(String(payload.session_id || ""), path, "remove");
+    return;
+  }
+  if (action === "workspace.file.rename") {
+    const oldPath = normalizeFilePath(payload.old_path);
+    const newPath = normalizeFilePath(payload.new_path);
+    for (const filePath of Object.keys(files)) {
+      if (filePath !== oldPath && !filePath.startsWith(`${oldPath}/`)) continue;
+      const renamedPath = `${newPath}${filePath.slice(oldPath.length)}`;
+      files[renamedPath] = files[filePath];
+      delete files[filePath];
+    }
+    respond(socketId, id, { old_path: oldPath, new_path: newPath, success: true });
+    notifyFileChange(String(payload.session_id || ""), newPath, "rename");
+    return;
+  }
+  if (action === "user_shell.list") {
+    respond(socketId, id, { shells: [demoTerminal()] });
+    return;
+  }
+  if (action === "user_shell.create") {
+    respond(socketId, id, {
+      terminal_id: DEMO_TERMINAL_ID,
+      kind: "ordinary",
+      seq: 1,
+      display_name: "Terminal 1",
+      state: "open",
+      pty_status: "running",
+      closable: true,
+    });
+    return;
+  }
+  if (
+    action === "user_shell.destroy" ||
+    action === "user_shell.stop" ||
+    action === "user_shell.rename" ||
+    action === "user_shell.park" ||
+    action === "user_shell.resume"
+  ) {
+    respond(socketId, id, { success: true });
+    return;
+  }
 
   if (action === "message.list") {
     respond(socketId, id, {
@@ -300,6 +484,171 @@ function startAgent(task: Task, prompt: string) {
   return session;
 }
 
+function demoWorkspace() {
+  return createBootPayload(state).initialState?.workspaces?.items[0];
+}
+
+function withDemoEnvironment(session: TaskSession): TaskSession {
+  return { ...session, task_environment_id: DEMO_ENVIRONMENT_ID };
+}
+
+function demoTerminal() {
+  return {
+    id: DEMO_TERMINAL_ID,
+    terminal_id: DEMO_TERMINAL_ID,
+    kind: "ordinary",
+    seq: 1,
+    display_name: "Terminal 1",
+    custom_name: null,
+    state: "open",
+    pty_status: "running",
+    label: "Terminal 1",
+    closable: true,
+  };
+}
+
+function createDemoFiles(): Record<string, string> {
+  return {
+    "README.md":
+      "# Acme Web\n\nCustomer administration frontend used by the Kandev browser demo.\n",
+    "package.json": JSON.stringify(
+      {
+        name: "acme-web",
+        private: true,
+        scripts: { dev: "vite", test: "vitest run", lint: "eslint ." },
+      },
+      null,
+      2,
+    ),
+    "src/app.tsx":
+      'import { AuditLog } from "./components/audit-log";\n\nexport function App() {\n  return <AuditLog />;\n}\n',
+    "src/api/audit.ts":
+      'export type AuditEvent = { action: string; actor: string };\n\nexport async function listAuditEvents(): Promise<AuditEvent[]> {\n  return [{ action: "role.updated", actor: "mira" }];\n}\n',
+    "src/components/audit-log.tsx":
+      'import { useEffect, useState } from "react";\nimport { listAuditEvents, type AuditEvent } from "../api/audit";\n\nexport function AuditLog() {\n  const [events, setEvents] = useState<AuditEvent[]>([]);\n  useEffect(() => { void listAuditEvents().then(setEvents); }, []);\n  return <ul>{events.map((event) => <li key={event.action}>{event.action}</li>)}</ul>;\n}\n',
+    "tests/audit-log.test.tsx":
+      'import { describe, expect, it } from "vitest";\n\ndescribe("AuditLog", () => {\n  it("lists privileged actions", () => {\n    expect("role.updated").toContain("role");\n  });\n});\n',
+  };
+}
+
+function buildFileTree(path: string) {
+  const normalizedPath = normalizeFilePath(path);
+  const prefix = normalizedPath ? `${normalizedPath}/` : "";
+  const childNames = new Set<string>();
+  for (const filePath of Object.keys(files)) {
+    if (!filePath.startsWith(prefix)) continue;
+    const relative = filePath.slice(prefix.length);
+    if (relative) childNames.add(relative.split("/")[0]);
+  }
+  const children = Array.from(childNames, (name) => {
+    const childPath = prefix + name;
+    const isDirectory = Object.keys(files).some((filePath) => filePath.startsWith(`${childPath}/`));
+    return {
+      name,
+      path: childPath,
+      is_dir: isDirectory,
+      size: isDirectory ? undefined : (files[childPath]?.length ?? 0),
+    };
+  });
+  return {
+    name: normalizedPath.split("/").pop() || demoRepository.name,
+    path: normalizedPath,
+    is_dir: true,
+    children,
+  };
+}
+
+function normalizeFilePath(value: unknown) {
+  return String(value || "")
+    .replaceAll("\\", "/")
+    .replace(/^\.\//, "")
+    .replace(/^\/+|\/+$/g, "");
+}
+
+function simpleHash(content: string) {
+  let hash = 0;
+  for (let index = 0; index < content.length; index += 1) {
+    hash = (hash * 31 + content.charCodeAt(index)) | 0;
+  }
+  return `demo-${Math.abs(hash).toString(16)}`;
+}
+
+function notifyFileChange(sessionId: string, path: string, operation: string) {
+  notify("session.workspace.file.changes", {
+    session_id: sessionId,
+    changes: [
+      {
+        session_id: sessionId,
+        task_id: state.sessions.find((session) => session.id === sessionId)?.task_id ?? "",
+        agent_id: DEMO_IDS.agent,
+        timestamp: new Date().toISOString(),
+        path,
+        operation,
+      },
+    ],
+  });
+}
+
+function isTerminalSocket(url: string) {
+  try {
+    return new URL(url, "https://demo.kandev.com").pathname.includes("/terminal/");
+  } catch {
+    return false;
+  }
+}
+
+function terminalWelcome(url: string) {
+  const isAgent = url.includes("/terminal/session/");
+  const heading = isAgent ? "Mock agent terminal" : "Acme Platform workspace";
+  return (
+    `\u001b[2J\u001b[H\u001b[1;36m${heading}\u001b[0m\r\n` +
+    "Browser demo shell. Commands run against simulated workspace data.\r\n\r\n" +
+    "demo@acme-web ~/acme-web $ "
+  );
+}
+
+function handleTerminalInput(socketId: string, data: string | ArrayBuffer) {
+  const bytes = typeof data === "string" ? null : new Uint8Array(data);
+  if (bytes?.[0] === 0x01) return;
+  const input = typeof data === "string" ? data : new TextDecoder().decode(new Uint8Array(data));
+  const previous = terminalInputBySocket.get(socketId) ?? "";
+  let current = previous;
+  for (const character of input) {
+    if (character === "\r" || character === "\n") {
+      terminalOutput(socketId, `\r\n${terminalCommandResult(current)}demo@acme-web ~/acme-web $ `);
+      current = "";
+    } else if (character === "\u007f") {
+      current = current.slice(0, -1);
+    } else {
+      current += character;
+      terminalOutput(socketId, character);
+    }
+  }
+  terminalInputBySocket.set(socketId, current);
+}
+
+function terminalCommandResult(command: string) {
+  const normalized = command.trim();
+  if (!normalized) return "";
+  if (normalized === "pwd") return "/demo/acme-web\r\n";
+  if (normalized === "ls") return "README.md  package.json  src  tests\r\n";
+  if (normalized === "git status")
+    return "On branch kandev/audit-logging\r\nChanges not staged for commit:\r\n  modified: src/api/audit.ts\r\n";
+  if (normalized === "pnpm test")
+    return "✓ tests/audit-log.test.tsx (1 test)\r\nTest Files  1 passed (1)\r\n";
+  if (normalized.startsWith("cat ")) {
+    const content = files[normalizeFilePath(normalized.slice(4))];
+    return content === undefined
+      ? `cat: file not found\r\n`
+      : `${content.replaceAll("\n", "\r\n")}\r\n`;
+  }
+  return `command not available in browser demo: ${normalized}\r\n`;
+}
+
+function terminalOutput(socketId: string, data: string) {
+  post({ kind: "ws-event", socketId, event: "message", data });
+}
+
 function activeTasks() {
   return state.tasks.filter((task) => !task.archived_at);
 }
@@ -362,12 +711,15 @@ function respond(socketId: string, id: string, payload: unknown, error = false) 
 }
 
 function notify(action: string, payload: unknown) {
-  socketMessage("*", {
+  const message = {
     type: "notification",
     action,
     payload,
     timestamp: new Date().toISOString(),
-  });
+  };
+  for (const [socketId, url] of socketUrls) {
+    if (!isTerminalSocket(url)) socketMessage(socketId, message);
+  }
 }
 
 function socketMessage(socketId: string, value: unknown) {
