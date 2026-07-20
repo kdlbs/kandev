@@ -65,6 +65,70 @@ func TestResumeTokenForExecutionProfile(t *testing.T) {
 	}
 }
 
+func TestMockRepositoryGetTaskSessionReturnsDetachedMutableFields(t *testing.T) {
+	completedAt := time.Now().UTC()
+	wantCompletedAt := completedAt
+	newSnapshot := func() map[string]interface{} {
+		return map[string]interface{}{
+			"top":    "original",
+			"nested": map[string]interface{}{"value": "original"},
+		}
+	}
+	session := &models.TaskSession{
+		ID:                   "session-snapshot",
+		Metadata:             newSnapshot(),
+		AgentProfileSnapshot: newSnapshot(),
+		ExecutorSnapshot:     newSnapshot(),
+		EnvironmentSnapshot:  newSnapshot(),
+		RepositorySnapshot:   newSnapshot(),
+		Worktrees: []*models.TaskSessionWorktree{
+			{ID: "worktree-1", WorktreePath: "/original"},
+			nil,
+		},
+		CompletedAt: &completedAt,
+	}
+	repo := newMockRepository()
+	repo.sessions[session.ID] = session
+
+	snapshot, err := repo.GetTaskSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession failed: %v", err)
+	}
+	for _, values := range []map[string]interface{}{
+		snapshot.Metadata,
+		snapshot.AgentProfileSnapshot,
+		snapshot.ExecutorSnapshot,
+		snapshot.EnvironmentSnapshot,
+		snapshot.RepositorySnapshot,
+	} {
+		values["top"] = "changed"
+		values["nested"].(map[string]interface{})["value"] = "changed"
+	}
+	snapshot.Worktrees[0].WorktreePath = "/changed"
+	*snapshot.CompletedAt = wantCompletedAt.Add(time.Hour)
+
+	for name, values := range map[string]map[string]interface{}{
+		"metadata":      session.Metadata,
+		"agent profile": session.AgentProfileSnapshot,
+		"executor":      session.ExecutorSnapshot,
+		"environment":   session.EnvironmentSnapshot,
+		"repository":    session.RepositorySnapshot,
+	} {
+		if values["top"] != "original" {
+			t.Errorf("%s snapshot top-level value changed: %#v", name, values)
+		}
+		if values["nested"].(map[string]interface{})["value"] != "original" {
+			t.Errorf("%s snapshot nested value changed: %#v", name, values)
+		}
+	}
+	if session.Worktrees[0].WorktreePath != "/original" {
+		t.Errorf("stored worktree path = %q, want /original", session.Worktrees[0].WorktreePath)
+	}
+	if !session.CompletedAt.Equal(wantCompletedAt) {
+		t.Errorf("stored completed time = %s, want %s", session.CompletedAt, wantCompletedAt)
+	}
+}
+
 func TestPrepareSession_Success(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{}
