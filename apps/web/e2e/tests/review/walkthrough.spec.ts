@@ -228,6 +228,30 @@ test.describe("Code walkthrough", () => {
       { timeout: 15_000 },
     );
 
+    // Move from shorter file A to longer file B. The shared Monaco preview
+    // switches models after the walkthrough step changes; B's 4-5 range must
+    // be clamped against B, not A's previous model.
+    await card.getByTestId("walkthrough-next").click();
+    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 3 / 5");
+    await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
+      "WALKTHROUGH_CHANGE_B",
+    );
+    await expect(testPage.getByTestId("walkthrough-editor-range")).toHaveAttribute(
+      "data-line-range",
+      "4-5",
+    );
+
+    // Returning to A must also restore its original multi-line range.
+    await card.getByTestId("walkthrough-prev").click();
+    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 2 / 5");
+    await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
+      "WALKTHROUGH_CHANGE_A",
+    );
+    await expect(testPage.getByTestId("walkthrough-editor-range")).toHaveAttribute(
+      "data-line-range",
+      "2-3",
+    );
+
     const before = await card.boundingBox();
     if (!before) throw new Error("walkthrough card missing before drag");
     const dragHandle = card.getByTestId("walkthrough-drag-handle");
