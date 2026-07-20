@@ -172,13 +172,24 @@ test.describe("GitHub workspace authentication", () => {
     await expect(automation.getByText("suspended", { exact: true })).toBeVisible();
     await expect(personal.getByText("revoked", { exact: true })).toBeVisible();
 
-    const saveBox = await testPage.getByTestId("github-scope-save").boundingBox();
+    await testPage.getByTestId("github-scope-mode").click();
+    await testPage.getByRole("option", { name: "Organizations" }).click();
+    const floatingSave = testPage.getByTestId("settings-floating-save");
+    await expect(floatingSave).toBeVisible();
+
+    const saveBox = await floatingSave.boundingBox();
     const configChatBox = await testPage
       .getByRole("button", { name: "Configuration Chat" })
       .boundingBox();
     expect(saveBox).not.toBeNull();
     expect(configChatBox).not.toBeNull();
-    expect(saveBox!.x + saveBox!.width).toBeLessThanOrEqual(configChatBox!.x);
+    const overlapWidth =
+      Math.min(saveBox!.x + saveBox!.width, configChatBox!.x + configChatBox!.width) -
+      Math.max(saveBox!.x, configChatBox!.x);
+    const overlapHeight =
+      Math.min(saveBox!.y + saveBox!.height, configChatBox!.y + configChatBox!.height) -
+      Math.max(saveBox!.y, configChatBox!.y);
+    expect(overlapWidth <= 0 || overlapHeight <= 0).toBe(true);
 
     await testPage.screenshot({
       path: testInfo.outputPath("github-app-reconnect-desktop.png"),
