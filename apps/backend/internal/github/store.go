@@ -330,13 +330,7 @@ const deploymentAppTablesSQL = `
 `
 
 func (s *Store) initSchema(legacyUpgrade bool) error {
-	if _, err := s.db.Exec(createTablesSQL); err != nil {
-		return err
-	}
-	if err := s.initDeploymentAppSchema(); err != nil {
-		return err
-	}
-	if err := s.addDeploymentAppCredentialSecretID(); err != nil {
+	if err := s.initCoreSchema(); err != nil {
 		return err
 	}
 	if err := s.addWorkspaceOwnershipColumns(); err != nil {
@@ -411,6 +405,16 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 	}
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_ci_pr_state_task ON github_task_ci_pr_state (task_id)`)
 	return nil
+}
+
+func (s *Store) initCoreSchema() error {
+	if _, err := s.db.Exec(createTablesSQL); err != nil {
+		return err
+	}
+	if err := s.initDeploymentAppSchema(); err != nil {
+		return err
+	}
+	return s.addDeploymentAppCredentialSecretID()
 }
 
 func (s *Store) initDeploymentAppSchema() error {

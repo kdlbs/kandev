@@ -133,7 +133,7 @@ func validateMockWorkspaceConnectionRequest(req *mockWorkspaceConnectionRequest)
 			return errors.New("installation_account_login is required for GitHub App connections")
 		}
 		if req.InstallationAccountType == "" {
-			req.InstallationAccountType = "Organization"
+			req.InstallationAccountType = string(DeploymentAppOwnerOrganization)
 		}
 	case ConnectionSourcePAT, ConnectionSourceGHCLI:
 		if strings.TrimSpace(req.Login) == "" {
