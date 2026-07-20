@@ -2,6 +2,10 @@ package gitlab
 
 import "testing"
 
+func TestGLabClientSatisfiesProviderActionContract(t *testing.T) {
+	var _ Client = (*GLabClient)(nil)
+}
+
 func TestParseGlabToken_ExtractsValue(t *testing.T) {
 	output := `Logged in to gitlab.com as alice (oauth_token)
 ✓ Token: glpat-AAAAA-BBBBB

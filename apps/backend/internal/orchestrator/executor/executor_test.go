@@ -2291,9 +2291,14 @@ func TestRepositoryCloneURL(t *testing.T) {
 			want: "https://github.com/acme/app.git",
 		},
 		{
-			name: "gitlab repo",
+			name: "gitlab self-managed repo",
+			repo: &models.Repository{Provider: "gitlab", ProviderHost: "http://gitlab.internal", ProviderOwner: "group/subgroup", ProviderName: "app"},
+			want: "http://gitlab.internal/group/subgroup/app.git",
+		},
+		{
+			name: "gitlab unknown host fails closed",
 			repo: &models.Repository{Provider: "gitlab", ProviderOwner: "acme", ProviderName: "app"},
-			want: "https://gitlab.com/acme/app.git",
+			want: "",
 		},
 		{
 			name: "bitbucket repo",

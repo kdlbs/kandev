@@ -4,7 +4,9 @@ package repoclone
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +23,7 @@ import (
 const (
 	ghCredentialHelper = "!gh auth git-credential"
 	gitNoTags          = "--no-tags"
+	protocolHTTP       = "http"
 )
 
 // Config holds configuration for the repository cloner.
@@ -75,6 +78,12 @@ func (c *Cloner) BuildCloneURL(provider, owner, name string) (string, error) {
 	return CloneURL(provider, owner, name, c.protocol)
 }
 
+// BuildCloneURLWithHost constructs a clone URL using a persisted provider
+// origin. This is required for self-managed GitLab repositories.
+func (c *Cloner) BuildCloneURLWithHost(provider, host, owner, name string) (string, error) {
+	return CloneURLWithHost(provider, host, owner, name, c.protocol)
+}
+
 // RepoPath returns the full local path for a repository.
 func (c *Cloner) RepoPath(owner, name string) (string, error) {
 	basePath, err := c.ExpandedBasePath()
@@ -97,6 +106,16 @@ func (c *Cloner) RepoPath(owner, name string) (string, error) {
 // Returns the local filesystem path to the repository.
 // Concurrent calls for the same repository are serialised to prevent double-clone races.
 func (c *Cloner) EnsureCloned(ctx context.Context, cloneURL, owner, name string) (string, error) {
+	return c.EnsureClonedWithAuth(ctx, cloneURL, owner, name, "", "")
+}
+
+// EnsureClonedWithAuth scopes an HTTPS credential to one exact provider
+// origin. The token is passed only through the child process environment and
+// is never embedded in the clone URL or persisted in .git/config.
+func (c *Cloner) EnsureClonedWithAuth(
+	ctx context.Context,
+	cloneURL, owner, name, credentialOrigin, token string,
+) (string, error) {
 	targetPath, err := c.RepoPath(owner, name)
 	if err != nil {
 		return "", err
@@ -108,11 +127,11 @@ func (c *Cloner) EnsureCloned(ctx context.Context, cloneURL, owner, name string)
 
 	gitDir := filepath.Join(targetPath, ".git")
 	if info, statErr := os.Stat(gitDir); statErr == nil && info.IsDir() {
-		c.fetch(ctx, targetPath)
+		c.fetch(ctx, targetPath, cloneURL, credentialOrigin, token)
 		return targetPath, nil
 	}
 
-	return targetPath, c.clone(ctx, cloneURL, targetPath, owner, name)
+	return targetPath, c.clone(ctx, cloneURL, targetPath, owner, name, credentialOrigin, token)
 }
 
 // EnsureClonedWithBasicAuth clones or fetches using an ephemeral HTTP
@@ -162,11 +181,20 @@ func (c *Cloner) gitCmdWithHTTPHeader(ctx context.Context, header string, args .
 // gitCmd creates a git command with non-interactive environment settings.
 // When the configured protocol is HTTPS, it adds gh CLI as the credential
 // helper so that git can authenticate using the user's gh auth token.
-func (c *Cloner) gitCmd(ctx context.Context, args ...string) *exec.Cmd {
+func (c *Cloner) gitCmd(
+	ctx context.Context,
+	cloneURL, credentialOrigin, token string,
+	args ...string,
+) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	env := os.Environ()
 	env = append(env, "GIT_TERMINAL_PROMPT=0")
-	if c.protocol == ProtocolHTTPS {
+	credentialEnv, err := gitLabCredentialEnv(cloneURL, credentialOrigin, token)
+	if err != nil {
+		return nil, err
+	}
+	env = append(env, credentialEnv...)
+	if token == "" && c.protocol == ProtocolHTTPS {
 		env = append(env,
 			"GIT_CONFIG_COUNT=1",
 			"GIT_CONFIG_KEY_0=credential.helper",
@@ -174,12 +202,85 @@ func (c *Cloner) gitCmd(ctx context.Context, args ...string) *exec.Cmd {
 		)
 	}
 	cmd.Env = env
-	return cmd
+	return cmd, nil
 }
 
-func (c *Cloner) fetch(ctx context.Context, repoPath string) {
+func gitLabCredentialEnv(cloneURL, credentialOrigin, token string) ([]string, error) {
+	if token == "" {
+		return nil, nil
+	}
+	if !isHTTPCloneURL(cloneURL) {
+		return nil, validateSSHCredentialHost(cloneURL, credentialOrigin)
+	}
+	origin, err := matchingCredentialOrigin(cloneURL, credentialOrigin)
+	if err != nil {
+		return nil, err
+	}
+	return []string{
+		"KANDEV_GIT_CREDENTIAL_TOKEN=" + token,
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=credential." + origin + ".helper",
+		`GIT_CONFIG_VALUE_0=!f() { echo "username=oauth2"; echo "password=$KANDEV_GIT_CREDENTIAL_TOKEN"; }; f`,
+	}, nil
+}
+
+func isHTTPCloneURL(cloneURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(cloneURL))
+	return err == nil && (parsed.Scheme == protocolHTTP || parsed.Scheme == ProtocolHTTPS)
+}
+
+func validateSSHCredentialHost(cloneURL, credentialOrigin string) error {
+	credential, err := url.Parse(strings.TrimRight(strings.TrimSpace(credentialOrigin), "/"))
+	if err != nil || (credential.Scheme != protocolHTTP && credential.Scheme != ProtocolHTTPS) ||
+		credential.Hostname() == "" || credential.User != nil ||
+		(credential.Path != "" && credential.Path != "/") || credential.RawQuery != "" || credential.Fragment != "" {
+		return errors.New("configured credential host is invalid")
+	}
+	remoteHost := sshCloneHostname(cloneURL)
+	if remoteHost == "" || !strings.EqualFold(remoteHost, credential.Hostname()) {
+		return errors.New("clone URL does not match the configured credential host")
+	}
+	return nil
+}
+
+func sshCloneHostname(cloneURL string) string {
+	trimmed := strings.TrimSpace(cloneURL)
+	if strings.HasPrefix(trimmed, "ssh://") {
+		parsed, err := url.Parse(trimmed)
+		if err == nil && parsed.Hostname() != "" && parsed.Path != "" {
+			return parsed.Hostname()
+		}
+		return ""
+	}
+	if _, after, ok := strings.Cut(trimmed, "@"); ok {
+		trimmed = after
+	}
+	host, path, ok := strings.Cut(trimmed, ":")
+	if !ok || host == "" || path == "" {
+		return ""
+	}
+	return host
+}
+
+func matchingCredentialOrigin(cloneURL, credentialOrigin string) (string, error) {
+	clone, cloneErr := url.Parse(strings.TrimSpace(cloneURL))
+	credential, credentialErr := url.Parse(strings.TrimRight(strings.TrimSpace(credentialOrigin), "/"))
+	if cloneErr != nil || credentialErr != nil || clone.User != nil || credential.User != nil ||
+		(clone.Scheme != protocolHTTP && clone.Scheme != ProtocolHTTPS) ||
+		clone.Scheme != credential.Scheme || !strings.EqualFold(clone.Host, credential.Host) ||
+		(credential.Path != "" && credential.Path != "/") {
+		return "", errors.New("clone URL does not match the configured credential host")
+	}
+	return credential.Scheme + "://" + credential.Host, nil
+}
+
+func (c *Cloner) fetch(ctx context.Context, repoPath, cloneURL, credentialOrigin, token string) {
 	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
-	cmd := c.gitCmd(ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags)
+	cmd, err := c.gitCmd(ctx, cloneURL, credentialOrigin, token, "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags)
+	if err != nil {
+		c.logger.Warn("git fetch credential host mismatch", zap.String("path", repoPath))
+		return
+	}
 	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
 		c.logger.Warn("git fetch failed (non-fatal)",
 			zap.String("path", repoPath),
@@ -188,18 +289,18 @@ func (c *Cloner) fetch(ctx context.Context, repoPath string) {
 	}
 }
 
-func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath, owner, name string) error {
+func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath, owner, name, credentialOrigin, token string) error {
 	parentDir := filepath.Dir(targetPath)
 	if err := os.MkdirAll(parentDir, 0o755); err != nil {
 		return fmt.Errorf("create parent directory: %w", err)
 	}
 
 	c.logger.Info("cloning repository",
-		zap.String("url", cloneURL),
+		zap.String("url", redactCloneURL(cloneURL)),
 		zap.String("target", targetPath))
 
 	// Try gh repo clone first — handles auth for both SSH and HTTPS.
-	if owner != "" && name != "" {
+	if owner != "" && name != "" && strings.Contains(cloneURL, "github.com") {
 		if err := c.ghClone(ctx, owner, name, targetPath); err == nil {
 			return nil
 		}
@@ -210,11 +311,30 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath, owner, name st
 	}
 
 	// Fallback: git clone with credential helper.
-	cmd := c.gitCmd(ctx, "clone", "--filter=blob:none", gitNoTags, cloneURL, targetPath)
+	cmd, err := c.gitCmd(ctx, cloneURL, credentialOrigin, token, "clone", "--filter=blob:none", gitNoTags, cloneURL, targetPath)
+	if err != nil {
+		return err
+	}
 	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
-		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
+		return fmt.Errorf("git clone failed: %s: %w", redactCloneOutput(string(out), token), err)
 	}
 	return nil
+}
+
+func redactCloneURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	parsed.User = nil
+	return parsed.String()
+}
+
+func redactCloneOutput(output, token string) string {
+	if token == "" {
+		return output
+	}
+	return strings.ReplaceAll(output, token, "[REDACTED]")
 }
 
 // ghClone attempts to clone using gh repo clone, which handles authentication

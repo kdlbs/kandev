@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/integrations/healthpoll"
 )
 
 const (
@@ -22,6 +23,7 @@ type Poller struct {
 	service  *Service
 	eventBus bus.EventBus
 	logger   *logger.Logger
+	auth     *healthpoll.Poller
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc
@@ -31,12 +33,21 @@ type Poller struct {
 
 // NewPoller creates a new background poller.
 func NewPoller(svc *Service, eventBus bus.EventBus, log *logger.Logger) *Poller {
-	return &Poller{service: svc, eventBus: eventBus, logger: log}
+	if svc == nil {
+		return nil
+	}
+	return &Poller{
+		service: svc, eventBus: eventBus, logger: log,
+		auth: healthpoll.New("gitlab", gitLabHealthProber{service: svc}, log),
+	}
 }
 
 // Start kicks off the polling loops. Repeated Start calls are no-ops.
 // Safe to call concurrently with Stop.
 func (p *Poller) Start(ctx context.Context) {
+	if p == nil {
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.started {
@@ -44,6 +55,7 @@ func (p *Poller) Start(ctx context.Context) {
 	}
 	p.started = true
 	ctx, p.cancel = context.WithCancel(ctx)
+	p.auth.Start(ctx)
 
 	p.wg.Add(3)
 	go p.mrMonitorLoop(ctx)
@@ -54,6 +66,9 @@ func (p *Poller) Start(ctx context.Context) {
 // Stop cancels all loops and waits for them to drain. Safe to call
 // concurrently with Start.
 func (p *Poller) Stop() {
+	if p == nil {
+		return
+	}
 	p.mu.Lock()
 	if !p.started || p.cancel == nil {
 		p.mu.Unlock()
@@ -62,10 +77,30 @@ func (p *Poller) Stop() {
 	cancel := p.cancel
 	p.mu.Unlock()
 	cancel()
+	p.auth.Stop()
 	p.wg.Wait()
 	p.mu.Lock()
 	p.started = false
 	p.mu.Unlock()
+}
+
+type gitLabHealthProber struct {
+	service *Service
+}
+
+func (p gitLabHealthProber) HasConfig(ctx context.Context) (bool, error) {
+	p.service.mu.RLock()
+	store := p.service.store
+	p.service.mu.RUnlock()
+	if store == nil {
+		return false, nil
+	}
+	ids, err := store.ListConfigWorkspaceIDs(ctx)
+	return len(ids) > 0, err
+}
+
+func (p gitLabHealthProber) RecordAuthHealth(ctx context.Context) {
+	p.service.RecordWorkspaceAuthHealth(ctx)
 }
 
 // --- MR watcher loop ---

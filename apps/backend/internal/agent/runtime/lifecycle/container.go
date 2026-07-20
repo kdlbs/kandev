@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -643,10 +644,27 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
 		)
 		gitConfigCount = 4
 	}
+	if incomingCount, err := strconv.Atoi(config.Credentials["GIT_CONFIG_COUNT"]); err == nil {
+		for i := 0; i < incomingCount; i++ {
+			key, keyOK := config.Credentials[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)]
+			value, valueOK := config.Credentials[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)]
+			if !keyOK || !valueOK {
+				continue
+			}
+			env = append(env,
+				fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", gitConfigCount, key),
+				fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", gitConfigCount, value),
+			)
+			gitConfigCount++
+		}
+	}
 	env = append(env, fmt.Sprintf("GIT_CONFIG_COUNT=%d", gitConfigCount))
 
 	// Inject credentials from the provided credentials map
 	for k, v := range config.Credentials {
+		if k == "GIT_CONFIG_COUNT" || strings.HasPrefix(k, "GIT_CONFIG_KEY_") || strings.HasPrefix(k, "GIT_CONFIG_VALUE_") {
+			continue
+		}
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 

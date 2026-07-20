@@ -41,6 +41,7 @@ import {
   useAutoSessionTab,
   useAutoPRPanel,
 } from "./dockview-session-tabs";
+import { useAutoMRPanel } from "./dockview-auto-mr-panel";
 import {
   useCompactDockviewDefault,
   useDockviewUnmountCleanup,
@@ -84,7 +85,7 @@ import type { LayoutState } from "@/lib/state/layout-manager";
  *  - vscode        — VS Code Server iframe running in the env's container
  *  - commit-detail — displays a commit from the env's git history
  *  - diff-viewer   — shows file diffs from the env's working tree
- *  - pr-detail     — PR linked to the env's task
+ *  - pr-detail / mr-detail — review linked to the env's task
  *
  * Components NOT listed here are **global** — they read `activeSessionId`
  * reactively from the store and automatically reflect the current session:
@@ -133,6 +134,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   vscode: PortalSlot,
   plan: PortalSlot,
   "pr-detail": PortalSlot,
+  "mr-detail": PortalSlot,
   // Backwards compat aliases for saved layouts
   "diff-files": PortalSlot,
   "all-files": PortalSlot,
@@ -408,6 +410,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   useChangesPanelAutoFocus(changesFocusKey);
 
   useAutoPRPanel();
+  useAutoMRPanel();
   useDockviewUnmountCleanup(saveTimerRef, readyDisposersRef);
 
   // Visual masking: hide the dockview container during slow-path layout

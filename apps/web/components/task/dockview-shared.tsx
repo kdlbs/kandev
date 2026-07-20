@@ -33,7 +33,8 @@ import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import type { OpenDiffOptions } from "./changes-diff-target";
-import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
+import { ReviewDetailPanelComponent } from "./review-detail-panel";
+import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 
 import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -63,7 +64,7 @@ import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-
  *  - vscode        — VS Code Server iframe running in the env's container
  *  - commit-detail — displays a commit from the env's git history
  *  - diff-viewer   — shows file diffs from the env's working tree
- *  - pr-detail     — PR linked to the env's task
+ *  - pr-detail / mr-detail — review linked to the env's task
  *
  * Components NOT listed here are **global** — they read `activeSessionId`
  * reactively from the store and automatically reflect the current session:
@@ -112,6 +113,7 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   vscode: PortalSlot,
   plan: PortalSlot,
   "pr-detail": PortalSlot,
+  "mr-detail": PortalSlot,
   // Backwards compat aliases for saved layouts
   "diff-files": PortalSlot,
   "all-files": PortalSlot,
@@ -388,7 +390,14 @@ export function renderPanel(
     case "plan":
       return <PlanContent />;
     case "pr-detail":
-      return <PRDetailPanelComponent panelId={panelId} />;
+      return <ReviewDetailPanelComponent panelId={panelId} params={params} />;
+    case "mr-detail":
+      return (
+        <MRDetailPanelComponent
+          panelId={panelId}
+          params={{ mrKey: typeof params.mrKey === "string" ? params.mrKey : undefined }}
+        />
+      );
     default:
       return <div className="p-4 text-muted-foreground">Unknown panel: {component}</div>;
   }

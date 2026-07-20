@@ -188,7 +188,7 @@ func writeGitRemoteWrapper(t *testing.T, scriptDir, originURL string) {
 	)
 }
 
-func TestGitOperatorCreatePR_UnsupportedGitLabRemote(t *testing.T) {
+func TestGitOperatorCreatePR_GitLabUsesGLab(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell wrapper test is Unix-only")
 	}
@@ -204,6 +204,13 @@ func TestGitOperatorCreatePR_UnsupportedGitLabRemote(t *testing.T) {
 
 	scriptDir := t.TempDir()
 	writeGitRemoteWrapper(t, scriptDir, "git@gitlab.com:acme/widgets.git")
+	writeExecutable(t, filepath.Join(scriptDir, "glab"), `#!/bin/sh
+if [ "$1" = "mr" ] && [ "$2" = "list" ]; then
+  printf '[]\n'
+  exit 0
+fi
+printf 'https://gitlab.com/acme/widgets/-/merge_requests/42\n'
+`)
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	gitOp := NewGitOperator(repoDir, log, nil)
@@ -211,11 +218,14 @@ func TestGitOperatorCreatePR_UnsupportedGitLabRemote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePR returned error: %v", err)
 	}
-	if result.Success {
-		t.Fatalf("CreatePR should fail for GitLab remote: %+v", result)
+	if !result.Success {
+		t.Fatalf("CreatePR should succeed for GitLab remote: %+v", result)
 	}
-	if !strings.Contains(result.Error, "unsupported git remote") {
-		t.Fatalf("unexpected error: %q", result.Error)
+	if result.PRURL != "https://gitlab.com/acme/widgets/-/merge_requests/42" {
+		t.Fatalf("PRURL = %q", result.PRURL)
+	}
+	if result.Provider != "gitlab" {
+		t.Fatalf("Provider = %q, want gitlab", result.Provider)
 	}
 }
 
@@ -246,8 +256,8 @@ func TestGitOperatorCreatePR_AzureMissingCLI(t *testing.T) {
 	if result.Success {
 		t.Fatalf("CreatePR should fail without az: %+v", result)
 	}
-	if result.Error != errAzureCLIMissing {
-		t.Fatalf("error = %q, want %q", result.Error, errAzureCLIMissing)
+	if !result.BranchPushed || result.Error != "branch was pushed; retry pull request creation" {
+		t.Fatalf("partial result = %+v", result)
 	}
 }
 
@@ -278,8 +288,8 @@ func TestGitOperatorCreatePR_AzureMissingExtension(t *testing.T) {
 	if result.Success {
 		t.Fatalf("CreatePR should fail without azure-devops extension: %+v", result)
 	}
-	if result.Error != errAzureDevOpsExtensionMissing {
-		t.Fatalf("error = %q, want %q", result.Error, errAzureDevOpsExtensionMissing)
+	if !result.BranchPushed || result.Error != "branch was pushed; retry pull request creation" {
+		t.Fatalf("partial result = %+v", result)
 	}
 }
 
@@ -319,6 +329,8 @@ func TestDetectPRProvider(t *testing.T) {
 		},
 		{name: "visualstudio", remote: "https://acme.visualstudio.com/platform/_git/widgets", want: prProviderAzureRepos},
 		{name: "github", remote: "https://github.com/acme/widgets.git", want: prProviderGitHub},
+		{name: "gitlab https", remote: "https://gitlab.com/acme/widgets.git", want: prProviderGitLab},
+		{name: "gitlab ssh", remote: "git@gitlab.com:acme/widgets.git", want: prProviderGitLab},
 		{
 			name:   "github path must not match azure substring",
 			remote: "git@github.com:acme/dev.azure.com-docs.git",
@@ -332,6 +344,16 @@ func TestDetectPRProvider(t *testing.T) {
 				t.Fatalf("detectPRProvider(%q) = %q, want %q", tt.remote, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetectPRProviderSelfManagedGitLabRequiresMatchingConfiguredHost(t *testing.T) {
+	t.Setenv("KANDEV_GITLAB_HOST", "http://gitlab.internal:8080")
+	if got := detectPRProvider("git@gitlab.internal:acme/widgets.git"); got != prProviderGitLab {
+		t.Fatalf("matching self-managed provider = %q, want gitlab", got)
+	}
+	if got := detectPRProvider("git@other.internal:acme/widgets.git"); got == prProviderGitLab {
+		t.Fatalf("mismatched provider = %q, must not be gitlab", got)
 	}
 }
 

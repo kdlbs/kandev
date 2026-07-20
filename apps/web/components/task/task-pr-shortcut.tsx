@@ -7,8 +7,9 @@ import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { openExternalLink } from "@/lib/desktop/external-links";
-import { resolveTaskPROpenAction } from "./task-pr-open";
+import { resolveTaskReviewOpenAction } from "./task-pr-open";
 import { TaskPRPickerDialog } from "./task-pr-picker-dialog";
+import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 
 /**
  * Task-screen keybinding (default Cmd/Ctrl+Shift+G) that jumps straight to the
@@ -18,19 +19,20 @@ import { TaskPRPickerDialog } from "./task-pr-picker-dialog";
 export function TaskPRShortcut({ taskId }: { taskId: string | null }) {
   const { toast } = useToast();
   const { prs } = useTaskPR(taskId);
+  const mrs = useTaskMRs(taskId);
   const [pickerOpen, setPickerOpen] = useState(false);
   const overrides = useAppStore((s) => s.userSettings.keyboardShortcuts);
 
   useKeyboardShortcut(
     getShortcut("OPEN_TASK_PR", overrides),
     () => {
-      const action = resolveTaskPROpenAction(prs);
+      const action = resolveTaskReviewOpenAction(prs, mrs);
       if (action.kind === "none") {
-        toast({ description: "No pull request linked to this task" });
+        toast({ description: "No pull request or merge request linked to this task" });
         return;
       }
       if (action.kind === "open") {
-        void openExternalLink(action.pr.pr_url).catch(() => undefined);
+        void openExternalLink(action.url).catch(() => undefined);
         return;
       }
       setPickerOpen(true);
@@ -41,5 +43,5 @@ export function TaskPRShortcut({ taskId }: { taskId: string | null }) {
     { capture: true, stopPropagation: true, enabled: !!taskId },
   );
 
-  return <TaskPRPickerDialog open={pickerOpen} onOpenChange={setPickerOpen} prs={prs} />;
+  return <TaskPRPickerDialog open={pickerOpen} onOpenChange={setPickerOpen} prs={prs} mrs={mrs} />;
 }

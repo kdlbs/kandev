@@ -542,11 +542,20 @@ func registerRoutes(p routeParams) {
 	if p.services.GitHub != nil {
 		p.services.GitHub.SetCascadeTaskDeleter(handoffSvc)
 	}
+	if p.services.GitLab != nil {
+		p.services.GitLab.SetCascadeTaskDeleter(handoffSvc)
+	}
 	// repoLookup validates a watcher's optional repository binding (workspace
 	// ownership + default-branch fill) on create/update. Shared across the three
 	// repo-less watchers; one concrete adapter satisfies each package's
 	// structurally-identical RepositoryLookup interface.
 	repoLookup := &repositoryLookupAdapter{svc: p.taskSvc}
+	if p.services.GitLab != nil {
+		p.services.GitLab.SetRepositoryLookup(repoLookup)
+		p.services.GitLab.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
+			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
+		})
+	}
 	if p.services.Jira != nil {
 		p.services.Jira.SetTaskDeleter(handoffSvc)
 		p.services.Jira.SetRepositoryLookup(repoLookup)
@@ -1027,7 +1036,9 @@ func registerSecondaryRoutes(
 	if p.services.Automation != nil {
 		automationSvc = p.services.Automation.Service
 	}
-	registerE2EResetRoutes(p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.log)
+	registerE2EResetRoutes(
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.log,
+	)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService

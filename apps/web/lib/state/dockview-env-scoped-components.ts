@@ -13,6 +13,7 @@ export const ENV_SCOPED_DOCKVIEW_COMPONENTS = new Set([
   "commit-detail",
   "diff-viewer",
   "pr-detail",
+  "mr-detail",
 ]);
 
 export function isEnvScopedDockviewComponent(component: string | null | undefined): boolean {

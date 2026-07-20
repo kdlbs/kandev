@@ -6,6 +6,37 @@ package gitlab
 
 import "time"
 
+// GitLabConfig is the workspace-owned GitLab connection metadata. Credentials
+// are stored separately under SecretKeyForWorkspace and never serialized.
+type GitLabConfig struct {
+	WorkspaceID   string     `json:"workspace_id" db:"workspace_id"`
+	Host          string     `json:"host" db:"host"`
+	AuthMethod    string     `json:"auth_method" db:"auth_method"`
+	Username      string     `json:"username" db:"username"`
+	HasSecret     bool       `json:"has_secret" db:"-"`
+	LastOK        bool       `json:"last_ok" db:"last_ok"`
+	LastError     string     `json:"last_error,omitempty" db:"last_error"`
+	LastCheckedAt *time.Time `json:"last_checked_at,omitempty" db:"last_checked_at"`
+	Revision      int64      `json:"-" db:"revision"`
+	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// SetConfigRequest creates or updates a workspace GitLab connection. An empty
+// token retains the existing PAT when AuthMethod is pat.
+type SetConfigRequest struct {
+	Host       string `json:"host"`
+	AuthMethod string `json:"auth_method"`
+	Token      string `json:"token,omitempty"`
+}
+
+// TestConnectionResult is returned by the non-persisting connection probe.
+type TestConnectionResult struct {
+	OK       bool   `json:"ok"`
+	Username string `json:"username,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
 // MR represents a GitLab Merge Request.
 //
 // IID is GitLab's per-project sequential ID (the number shown in the UI).
@@ -33,6 +64,7 @@ type MR struct {
 	Deletions        int          `json:"deletions"`
 	Reviewers        []MRReviewer `json:"reviewers"`
 	Assignees        []MRReviewer `json:"assignees"`
+	Labels           []string     `json:"labels"`
 	CreatedAt        time.Time    `json:"created_at"`
 	UpdatedAt        time.Time    `json:"updated_at"`
 	MergedAt         *time.Time   `json:"merged_at,omitempty"`
@@ -42,9 +74,25 @@ type MR struct {
 // MRReviewer represents a reviewer or assignee on an MR.
 // GitLab does not have team-level review requests, so Type is always "user".
 type MRReviewer struct {
+	ID       int64  `json:"id"`
 	Username string `json:"username"`
 	Name     string `json:"name"`
 	Type     string `json:"type"`
+}
+
+// ProjectMember is an active GitLab user eligible for project-level actions
+// such as merge-request reviewer assignment.
+type ProjectMember struct {
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+// SubscriptionState is the live notification subscription state owned by
+// GitLab for an issue or merge request.
+type SubscriptionState struct {
+	Subscribed bool `json:"subscribed"`
 }
 
 // MRApproval represents a single approval on a merge request.

@@ -140,6 +140,15 @@ describe("formatPRFeedbackAsMarkdown", () => {
     expect(result).toContain("Please fix the failing tests");
     expect(result).toContain("---");
   });
+
+  it("uses merge request terminology for GitLab feedback", () => {
+    const result = formatPRFeedbackAsMarkdown([
+      makePRFeedback({ provider: "gitlab", projectPath: "group/project", mrIid: 7 }),
+    ]);
+
+    expect(result).toContain("### Merge Request Feedback");
+    expect(result).not.toContain("### PR Feedback");
+  });
 });
 
 describe("formatWalkthroughCommentsAsMarkdown", () => {

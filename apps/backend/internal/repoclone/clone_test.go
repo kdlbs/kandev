@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -17,7 +18,7 @@ func TestClone_PreservesNonDefaultRemoteBranches(t *testing.T) {
 	targetPath := filepath.Join(t.TempDir(), "clone")
 
 	cloner := NewCloner(Config{}, ProtocolSSH, t.TempDir(), logger.Default())
-	if err := cloner.clone(context.Background(), originPath, targetPath, "", ""); err != nil {
+	if err := cloner.clone(context.Background(), originPath, targetPath, "", "", "", ""); err != nil {
 		t.Fatalf("clone() unexpected error: %v", err)
 	}
 
@@ -54,6 +55,67 @@ func TestRepoPathConfinesRepositoryToCloneBase(t *testing.T) {
 				t.Fatal("RepoPath() accepted a path outside the clone base")
 			}
 		})
+ 	}
+}
+
+func TestGitCmdBindsGitLabCredentialToExactOrigin(t *testing.T) {
+	cloner := NewCloner(Config{}, ProtocolHTTPS, t.TempDir(), logger.Default())
+	cmd, err := cloner.gitCmd(
+		context.Background(),
+		"https://gitlab.internal/group/repo.git",
+		"https://gitlab.internal",
+		"workspace-token",
+		"clone",
+	)
+	if err != nil {
+		t.Fatalf("gitCmd: %v", err)
+	}
+	joined := strings.Join(cmd.Env, "\n")
+	if !strings.Contains(joined, "KANDEV_GIT_CREDENTIAL_TOKEN=workspace-token") ||
+		!strings.Contains(joined, "GIT_CONFIG_KEY_0=credential.https://gitlab.internal.helper") {
+		t.Fatalf("credential env = %s", joined)
+	}
+	if _, err := cloner.gitCmd(
+		context.Background(),
+		"https://gitlab.com/group/repo.git",
+		"https://gitlab.internal",
+		"must-not-leak",
+		"clone",
+	); err == nil {
+		t.Fatal("expected cross-host credential binding to fail")
+	}
+}
+
+func TestGitCmdUsesSSHAuthForMatchingWorkspaceGitLabHost(t *testing.T) {
+	cloner := NewCloner(Config{}, ProtocolSSH, t.TempDir(), logger.Default())
+	for _, cloneURL := range []string{
+		"git@gitlab.internal:group/repo.git",
+		"ssh://git@gitlab.internal:2222/group/repo.git",
+	} {
+		cmd, err := cloner.gitCmd(
+			context.Background(), cloneURL, "https://gitlab.internal:8443", "workspace-token", "clone",
+		)
+		if err != nil {
+			t.Fatalf("gitCmd(%q): %v", cloneURL, err)
+		}
+		joined := strings.Join(cmd.Env, "\n")
+		if strings.Contains(joined, "workspace-token") || strings.Contains(joined, "credential.gitlab") {
+			t.Fatalf("SSH clone received HTTP credentials: %s", joined)
+		}
+	}
+}
+
+func TestGitCmdRejectsSSHCloneForDifferentWorkspaceGitLabHost(t *testing.T) {
+	cloner := NewCloner(Config{}, ProtocolSSH, t.TempDir(), logger.Default())
+	for _, cloneURL := range []string{
+		"git@gitlab.other:group/repo.git",
+		"ssh://git@gitlab.other:2222/group/repo.git",
+	} {
+		if _, err := cloner.gitCmd(
+			context.Background(), cloneURL, "https://gitlab.internal", "must-not-leak", "clone",
+		); err == nil {
+			t.Fatalf("gitCmd accepted mismatched SSH clone %q", cloneURL)
+		}
 	}
 }
 

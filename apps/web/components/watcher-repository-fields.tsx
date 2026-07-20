@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -25,16 +26,17 @@ function PickSelect(props: {
   items: PickItem[];
   disabled?: boolean;
 }) {
+  const id = useId();
   return (
     <div className="space-y-1.5">
-      <Label>{props.label}</Label>
+      <Label htmlFor={id}>{props.label}</Label>
       <p className="text-xs text-muted-foreground">{props.description}</p>
       <Select
         value={props.value || undefined}
         onValueChange={props.onChange}
         disabled={props.disabled}
       >
-        <SelectTrigger className="cursor-pointer">
+        <SelectTrigger id={id} className="cursor-pointer">
           <SelectValue placeholder={props.placeholder} />
         </SelectTrigger>
         <SelectContent>
@@ -85,7 +87,7 @@ export function WatcherRepositoryFields({
   // warns on duplicate keys. Dedupe by name so each branch is one option.
   const uniqueBranchNames = Array.from(new Set(branches.map((b) => b.name)));
   return (
-    <div className="grid grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <PickSelect
         label="Repository"
         description="Optional — the repository the agent works in."

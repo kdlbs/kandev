@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const mockDefaultUsername = "kandev-tester"
+
 // MockClient is an in-memory GitLab client used by E2E tests.
 // Activated when KANDEV_MOCK_GITLAB=true. It serves a small fixed set of
 // MRs/issues/discussions plus accepts dynamic seeding via mock_controller.
@@ -22,6 +24,8 @@ type MockClient struct {
 	username    string
 	mrs         map[mockMRKey]*MR
 	discussions map[mockMRKey][]MRDiscussion
+	files       map[mockMRKey][]MRFile
+	commits     map[mockMRKey][]MRCommitInfo
 	// pipelines is keyed by project — ListPipelines below returns the
 	// project's seeded set regardless of branch or iid, matching the
 	// real PATClient.ListPipelines flow (one MR head ref → all
@@ -33,11 +37,14 @@ type MockClient struct {
 	// approved_by list. Both are seeded separately because the GitLab
 	// /approvals endpoint conflates them on one payload — the mock keeps
 	// them split so tests can express e.g. "2 approvals required, 1 given".
-	approvals         map[mockMRKey][]MRApproval
-	requiredApprovals map[mockMRKey]int
-	issues            map[mockIssueKey]*Issue
-	branches          map[string][]RepoBranch
-	nextMRIID         int
+	approvals          map[mockMRKey][]MRApproval
+	requiredApprovals  map[mockMRKey]int
+	issues             map[mockIssueKey]*Issue
+	branches           map[string][]RepoBranch
+	members            map[string][]ProjectMember
+	mrSubscriptions    map[mockMRKey]bool
+	issueSubscriptions map[mockIssueKey]bool
+	nextMRIID          int
 }
 
 type mockMRKey struct {
@@ -55,19 +62,41 @@ func NewMockClient(host string) *MockClient {
 	if host == "" {
 		host = DefaultHost
 	}
-	c := &MockClient{
-		host:              host,
-		username:          "kandev-tester",
-		mrs:               make(map[mockMRKey]*MR),
-		discussions:       make(map[mockMRKey][]MRDiscussion),
-		pipelines:         make(map[string][]Pipeline),
-		approvals:         make(map[mockMRKey][]MRApproval),
-		requiredApprovals: make(map[mockMRKey]int),
-		issues:            make(map[mockIssueKey]*Issue),
-		branches:          make(map[string][]RepoBranch),
-		nextMRIID:         100,
-	}
+	c := &MockClient{host: host}
+	c.resetLocked()
 	return c
+}
+
+// Reset clears all provider state so consecutive E2E tests sharing one
+// backend worker cannot observe each other's seeded or mutated GitLab data.
+func (c *MockClient) Reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.resetLocked()
+}
+
+func (c *MockClient) resetLocked() {
+	c.username = mockDefaultUsername
+	c.mrs = make(map[mockMRKey]*MR)
+	c.discussions = make(map[mockMRKey][]MRDiscussion)
+	c.files = make(map[mockMRKey][]MRFile)
+	c.commits = make(map[mockMRKey][]MRCommitInfo)
+	c.pipelines = make(map[string][]Pipeline)
+	c.approvals = make(map[mockMRKey][]MRApproval)
+	c.requiredApprovals = make(map[mockMRKey]int)
+	c.issues = make(map[mockIssueKey]*Issue)
+	c.branches = make(map[string][]RepoBranch)
+	c.members = make(map[string][]ProjectMember)
+	c.mrSubscriptions = make(map[mockMRKey]bool)
+	c.issueSubscriptions = make(map[mockIssueKey]bool)
+	c.nextMRIID = 100
+}
+
+// SeedProjectMembers sets the reviewer candidates for a project.
+func (c *MockClient) SeedProjectMembers(projectPath string, members []ProjectMember) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.members[projectPath] = append([]ProjectMember(nil), members...)
 }
 
 // SetUser overrides the authenticated user reported by the mock.
@@ -98,6 +127,20 @@ func (c *MockClient) SeedDiscussions(projectPath string, iid int, discussions []
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.discussions[mockMRKey{Project: projectPath, IID: iid}] = discussions
+}
+
+// SeedFiles sets the file changes returned for an MR.
+func (c *MockClient) SeedFiles(projectPath string, iid int, files []MRFile) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.files[mockMRKey{Project: projectPath, IID: iid}] = append([]MRFile(nil), files...)
+}
+
+// SeedCommits sets the commits returned for an MR.
+func (c *MockClient) SeedCommits(projectPath string, iid int, commits []MRCommitInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.commits[mockMRKey{Project: projectPath, IID: iid}] = append([]MRCommitInfo(nil), commits...)
 }
 
 // SeedIssue registers an issue.
@@ -319,16 +362,54 @@ func (c *MockClient) GetMRStatus(ctx context.Context, projectPath string, iid in
 	}, nil
 }
 
-func (c *MockClient) ListMRFiles(context.Context, string, int) ([]MRFile, error) {
-	return []MRFile{}, nil
+func (c *MockClient) ListMRFiles(_ context.Context, projectPath string, iid int) ([]MRFile, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]MRFile(nil), c.files[mockMRKey{Project: projectPath, IID: iid}]...), nil
 }
 
-func (c *MockClient) ListMRCommits(context.Context, string, int) ([]MRCommitInfo, error) {
-	return []MRCommitInfo{}, nil
+func (c *MockClient) ListMRCommits(_ context.Context, projectPath string, iid int) ([]MRCommitInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]MRCommitInfo(nil), c.commits[mockMRKey{Project: projectPath, IID: iid}]...), nil
 }
 
-func (c *MockClient) SubmitMRApproval(context.Context, string, int) error   { return nil }
-func (c *MockClient) SubmitMRUnapproval(context.Context, string, int) error { return nil }
+func (c *MockClient) SubmitMRApproval(_ context.Context, projectPath string, iid int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := mockMRKey{Project: projectPath, IID: iid}
+	if _, ok := c.mrs[key]; !ok {
+		return fmt.Errorf("mock: MR %s!%d not found", projectPath, iid)
+	}
+	for _, approval := range c.approvals[key] {
+		if approval.Username == c.username {
+			return nil
+		}
+	}
+	c.approvals[key] = append(c.approvals[key], MRApproval{
+		Username:  c.username,
+		CreatedAt: time.Now().UTC(),
+	})
+	return nil
+}
+
+func (c *MockClient) SubmitMRUnapproval(_ context.Context, projectPath string, iid int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := mockMRKey{Project: projectPath, IID: iid}
+	if _, ok := c.mrs[key]; !ok {
+		return fmt.Errorf("mock: MR %s!%d not found", projectPath, iid)
+	}
+	approvals := c.approvals[key]
+	filtered := approvals[:0]
+	for _, approval := range approvals {
+		if approval.Username != c.username {
+			filtered = append(filtered, approval)
+		}
+	}
+	c.approvals[key] = filtered
+	return nil
+}
 
 func (c *MockClient) CreateMR(_ context.Context, projectPath, sourceBranch, targetBranch, title, description string, draft bool) (*MR, error) {
 	c.mu.Lock()
@@ -448,11 +529,109 @@ func (c *MockClient) SearchProjects(ctx context.Context, query string, _ int) ([
 	return out, nil
 }
 
-// SetMRLabels is a no-op in the mock (seeded MRs are accepted verbatim).
-func (c *MockClient) SetMRLabels(context.Context, string, int, []string) error { return nil }
+func (c *MockClient) SetMRLabels(_ context.Context, projectPath string, iid int, labels []string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	mr, ok := c.mrs[mockMRKey{Project: projectPath, IID: iid}]
+	if !ok {
+		return fmt.Errorf("mock: MR %s!%d not found", projectPath, iid)
+	}
+	mr.Labels = append([]string(nil), labels...)
+	return nil
+}
 
-// SetMRAssignees is a no-op in the mock.
-func (c *MockClient) SetMRAssignees(context.Context, string, int, []int) error { return nil }
+func (c *MockClient) SetMRAssignees(_ context.Context, projectPath string, iid int, assigneeIDs []int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	mr, ok := c.mrs[mockMRKey{Project: projectPath, IID: iid}]
+	if !ok {
+		return fmt.Errorf("mock: MR %s!%d not found", projectPath, iid)
+	}
+	assignees := make([]MRReviewer, 0, len(assigneeIDs))
+	for _, assigneeID := range assigneeIDs {
+		found := false
+		for _, member := range c.members[projectPath] {
+			if member.ID == int64(assigneeID) {
+				assignees = append(assignees, MRReviewer{
+					ID: member.ID, Username: member.Username, Name: member.Name, Type: "user",
+				})
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("mock: project member %d not found", assigneeID)
+		}
+	}
+	mr.Assignees = assignees
+	return nil
+}
+
+func (c *MockClient) ListProjectMembers(_ context.Context, projectPath, query string) ([]ProjectMember, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	needle := strings.ToLower(strings.TrimSpace(query))
+	members := make([]ProjectMember, 0, len(c.members[projectPath]))
+	for _, member := range c.members[projectPath] {
+		if needle != "" && !strings.Contains(strings.ToLower(member.Username), needle) &&
+			!strings.Contains(strings.ToLower(member.Name), needle) {
+			continue
+		}
+		members = append(members, member)
+	}
+	return members, nil
+}
+
+func (c *MockClient) SetMRReviewers(_ context.Context, projectPath string, iid int, reviewerIDs []int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	mr, ok := c.mrs[mockMRKey{Project: projectPath, IID: iid}]
+	if !ok {
+		return fmt.Errorf("mock: MR %s!%d not found", projectPath, iid)
+	}
+	reviewers := make([]MRReviewer, 0, len(reviewerIDs))
+	for _, reviewerID := range reviewerIDs {
+		found := false
+		for _, member := range c.members[projectPath] {
+			if member.ID == reviewerID {
+				reviewers = append(reviewers, MRReviewer{ID: member.ID, Username: member.Username, Name: member.Name, Type: "user"})
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("mock: project member %d not found", reviewerID)
+		}
+	}
+	mr.Reviewers = reviewers
+	return nil
+}
+
+func (c *MockClient) GetMRSubscription(_ context.Context, projectPath string, iid int) (*SubscriptionState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return &SubscriptionState{Subscribed: c.mrSubscriptions[mockMRKey{Project: projectPath, IID: iid}]}, nil
+}
+
+func (c *MockClient) SetMRSubscription(_ context.Context, projectPath string, iid int, subscribed bool) (*SubscriptionState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.mrSubscriptions[mockMRKey{Project: projectPath, IID: iid}] = subscribed
+	return &SubscriptionState{Subscribed: subscribed}, nil
+}
+
+func (c *MockClient) GetIssueSubscription(_ context.Context, projectPath string, iid int) (*SubscriptionState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return &SubscriptionState{Subscribed: c.issueSubscriptions[mockIssueKey{Project: projectPath, IID: iid}]}, nil
+}
+
+func (c *MockClient) SetIssueSubscription(_ context.Context, projectPath string, iid int, subscribed bool) (*SubscriptionState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.issueSubscriptions[mockIssueKey{Project: projectPath, IID: iid}] = subscribed
+	return &SubscriptionState{Subscribed: subscribed}, nil
+}
 
 // Stats returns a summary of the seeded data, useful for E2E assertions.
 func (c *MockClient) Stats() string {

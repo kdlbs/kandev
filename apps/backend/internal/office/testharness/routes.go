@@ -13,7 +13,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -93,6 +96,9 @@ func RegisterRoutes(
 	g.POST("/task-sessions", seedTaskSessionHandler(repo, eventBus, log))
 	g.POST("/messages", seedMessageHandler(repo, eventBus, log))
 	g.POST("/workflows", seedWorkflowHandler(repo, log))
+	g.PUT("/repositories/:id/git-remote", configureGitRemoteHandler(repo, log))
+	g.DELETE("/repositories/:id/git-remote", configureGitRemoteHandler(repo, log))
+	g.GET("/repositories/:id/git-push-record", gitPushRecordHandler(repo))
 	if officeRepo != nil {
 		g.POST("/comments", seedCommentHandler(officeRepo, eventBus, log))
 		g.POST("/agent-failures", seedAgentFailureHandler(officeRepo, eventBus, log))
@@ -108,6 +114,81 @@ func RegisterRoutes(
 	}
 	if agentSettings != nil {
 		g.POST("/agent-profiles/:id/desired-skills", setDesiredSkillsHandler(agentSettings, log))
+	}
+}
+
+type configureGitRemoteRequest struct {
+	RemoteURL string `json:"remote_url"`
+}
+
+func configureGitRemoteHandler(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		repository, err := repo.GetRepository(c.Request.Context(), c.Param("id"))
+		if err != nil || strings.TrimSpace(repository.LocalPath) == "" {
+			errJSON(c, http.StatusNotFound, "repository with a local path not found")
+			return
+		}
+		if c.Request.Method == http.MethodDelete {
+			_ = exec.CommandContext(c.Request.Context(), "git", "-C", repository.LocalPath,
+				"remote", "remove", "origin").Run()
+			if marker := os.Getenv("KANDEV_E2E_GITLAB_PUSH_FILE"); marker != "" {
+				_ = os.Remove(marker)
+			}
+			if record := os.Getenv("KANDEV_E2E_GITLAB_PUSH_RECORD_FILE"); record != "" {
+				_ = os.Remove(record)
+			}
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+			return
+		}
+
+		var req configureGitRemoteRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			errJSON(c, http.StatusBadRequest, errInvalidJSONPrefix+err.Error())
+			return
+		}
+		remote, err := url.Parse(strings.TrimSpace(req.RemoteURL))
+		if err != nil || (remote.Hostname() != "localhost" && remote.Hostname() != "127.0.0.1") {
+			errJSON(c, http.StatusBadRequest, "remote_url must use the local E2E server")
+			return
+		}
+		args := []string{"-C", repository.LocalPath, "remote", "add", "origin", remote.String()}
+		if getErr := exec.CommandContext(c.Request.Context(), "git", "-C", repository.LocalPath,
+			"remote", "get-url", "origin").Run(); getErr == nil {
+			args = []string{"-C", repository.LocalPath, "remote", "set-url", "origin", remote.String()}
+		}
+		if output, runErr := exec.CommandContext(c.Request.Context(), "git", args...).CombinedOutput(); runErr != nil {
+			log.Error("test harness: configure git remote failed", zap.Error(runErr))
+			errJSON(c, http.StatusInternalServerError, strings.TrimSpace(string(output)))
+			return
+		}
+		if marker := os.Getenv("KANDEV_E2E_GITLAB_PUSH_FILE"); marker != "" {
+			if writeErr := os.WriteFile(marker, []byte(remote.String()), 0o600); writeErr != nil {
+				log.Error("test harness: write GitLab push marker failed", zap.Error(writeErr))
+				errJSON(c, http.StatusInternalServerError, "write GitLab push marker")
+				return
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func gitPushRecordHandler(repo *sqliterepo.Repository) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, err := repo.GetRepository(c.Request.Context(), c.Param("id")); err != nil {
+			errJSON(c, http.StatusNotFound, "repository not found")
+			return
+		}
+		recordPath := os.Getenv("KANDEV_E2E_GITLAB_PUSH_RECORD_FILE")
+		if recordPath == "" {
+			errJSON(c, http.StatusNotFound, "git push was not recorded")
+			return
+		}
+		contents, err := os.ReadFile(recordPath)
+		if err != nil {
+			errJSON(c, http.StatusNotFound, "git push was not recorded")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"args": strings.TrimSpace(string(contents))})
 	}
 }
 

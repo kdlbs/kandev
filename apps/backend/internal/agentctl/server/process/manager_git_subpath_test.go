@@ -15,6 +15,28 @@ func newTestManager(t *testing.T, workDir string) *Manager {
 	return NewManager(&config.InstanceConfig{WorkDir: workDir}, log)
 }
 
+func TestManagerGitOperatorUsesInstanceGitLabEnvironment(t *testing.T) {
+	t.Setenv(gitLabHostEnv, "")
+	t.Setenv(gitLabTokenEnv, "")
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir: t.TempDir(),
+		AgentEnv: []string{
+			gitLabHostEnv + "=http://gitlab.internal:8080",
+			gitLabTokenEnv + "=instance-token",
+		},
+	}, log)
+	op := mgr.GitOperator()
+
+	if got := op.detectPRProvider("git@gitlab.internal:acme/widgets.git"); got != prProviderGitLab {
+		t.Fatalf("instance-scoped provider = %q, want gitlab", got)
+	}
+	if got := op.environmentValue(gitLabTokenEnv); got != "instance-token" {
+		t.Fatalf("instance-scoped token = %q, want instance-token", got)
+	}
+}
+
 func TestManager_GitOperatorFor_EmptySubpathReturnsRoot(t *testing.T) {
 	tmp := t.TempDir()
 	mgr := newTestManager(t, tmp)

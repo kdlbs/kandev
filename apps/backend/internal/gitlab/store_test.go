@@ -2,7 +2,9 @@ package gitlab
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,7 +22,11 @@ func newTestStore(t *testing.T) *Store {
 		t.Fatalf("open db: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (
+	if _, err := sqlxDB.Exec(`CREATE TABLE workspaces (
+		id TEXT PRIMARY KEY,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE tasks (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
 		archived_at DATETIME
@@ -32,6 +38,13 @@ func newTestStore(t *testing.T) *Store {
 		t.Fatalf("new store: %v", err)
 	}
 	return store
+}
+
+func seedWorkspace(t *testing.T, store *Store, workspaceID string) {
+	t.Helper()
+	if _, err := store.db.Exec(`INSERT INTO workspaces (id) VALUES (?)`, workspaceID); err != nil {
+		t.Fatalf("seed workspace %s: %v", workspaceID, err)
+	}
 }
 
 func seedTask(t *testing.T, store *Store, taskID, workspaceID string) {
@@ -100,6 +113,55 @@ func TestStore_UpsertTaskMR_InsertsThenUpdates(t *testing.T) {
 	}
 	if got[0].MRTitle != "updated title" || got[0].State != "merged" {
 		t.Errorf("title/state not updated: %+v", got[0])
+	}
+}
+
+func TestStore_UpsertTaskMR_ConcurrentCallsPreserveOriginalIdentity(t *testing.T) {
+	store := newTestStore(t)
+	const writers = 16
+	start := make(chan struct{})
+	results := make(chan *TaskMR, writers)
+	errs := make(chan error, writers)
+	var wg sync.WaitGroup
+
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			row := newTestMR("task-concurrent", "repo-1", "group/subgroup/project", 7)
+			row.ID = fmt.Sprintf("candidate-%02d", index)
+			row.CreatedAt = time.Date(2026, 1, 1, 0, 0, index, 0, time.UTC)
+			row.MRTitle = fmt.Sprintf("writer-%02d", index)
+			errs <- store.UpsertTaskMR(context.Background(), row)
+			results <- row
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	close(results)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent upsert: %v", err)
+		}
+	}
+	rows, err := store.ListTaskMRsByTask(context.Background(), "task-concurrent")
+	if err != nil {
+		t.Fatalf("list task MRs: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("stored rows = %d, want exactly one", len(rows))
+	}
+	stored := rows[0]
+	for result := range results {
+		if result.ID != stored.ID {
+			t.Fatalf("caller ID = %q, stored ID = %q", result.ID, stored.ID)
+		}
+		if !result.CreatedAt.Equal(stored.CreatedAt) {
+			t.Fatalf("caller created_at = %v, stored created_at = %v", result.CreatedAt, stored.CreatedAt)
+		}
 	}
 }
 

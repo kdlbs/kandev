@@ -6,21 +6,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/subproc"
 )
 
+var credentialURLPattern = regexp.MustCompile(`(?i)(https?://)[^\s/@]+@`)
+
 type prProvider string
 
 const (
 	prProviderGitHub               prProvider = "github"
+	prProviderGitLab               prProvider = "gitlab"
 	prProviderAzureRepos           prProvider = "azure_repos"
 	prCreateSubcommand                        = "create"
 	repositoryFlagTitle                       = "--title"
@@ -31,7 +38,11 @@ const (
 	azureDevOpsExtensionName                  = "azure-devops"
 	errAzureCLIMissing                        = "azure CLI (az) is not on PATH; install it and run: az extension add --name azure-devops"
 	errAzureDevOpsExtensionMissing            = "azure DevOps CLI extension is not installed; run: az extension add --name azure-devops"
+	gitLabHostEnv                             = "KANDEV_GITLAB_HOST"
+	gitLabTokenEnv                            = "GITLAB_TOKEN"
 )
+
+const gitLabAPITimeout = 30 * time.Second
 
 type azureRepoInfo struct {
 	OrganizationURL string
@@ -47,6 +58,10 @@ type azurePRCreateResponse struct {
 }
 
 func detectPRProvider(remoteURL string) prProvider {
+	return detectPRProviderWithGitLabHost(remoteURL, os.Getenv(gitLabHostEnv))
+}
+
+func detectPRProviderWithGitLabHost(remoteURL, configuredGitLabHost string) prProvider {
 	host := remoteHostFromURL(remoteURL)
 	if isAzureReposHost(host) {
 		return prProviderAzureRepos
@@ -54,7 +69,22 @@ func detectPRProvider(remoteURL string) prProvider {
 	if isGitHubHost(host) {
 		return prProviderGitHub
 	}
+	if isGitLabHost(host, configuredGitLabHost) {
+		return prProviderGitLab
+	}
 	return ""
+}
+
+func isGitLabHost(host, configuredGitLabHost string) bool {
+	if host == "gitlab.com" {
+		return true
+	}
+	configured, err := url.Parse(strings.TrimSpace(configuredGitLabHost))
+	return err == nil && configured.Hostname() != "" && strings.EqualFold(host, configured.Hostname())
+}
+
+func (g *GitOperator) detectPRProvider(remoteURL string) prProvider {
+	return detectPRProviderWithGitLabHost(remoteURL, g.environmentValue(gitLabHostEnv))
 }
 
 func isGitHubHost(host string) bool {
@@ -314,6 +344,30 @@ func combineCommandOutput(stdout, stderr string) string {
 	return strings.Join(parts, "\n")
 }
 
+func sanitizePRFailure(message string, sensitiveValues ...string) string {
+	sanitized := credentialURLPattern.ReplaceAllString(message, `${1}`+redactedLogValue+"@")
+	values := append([]string{os.Getenv(gitLabTokenEnv)}, sensitiveValues...)
+	for _, value := range values {
+		if value != "" {
+			sanitized = strings.ReplaceAll(sanitized, value, redactedLogValue)
+		}
+	}
+	return sanitized
+}
+
+func sanitizeGitPushOutput(output string) string {
+	return sanitizePRFailure(output)
+}
+
+func (g *GitOperator) sanitizePRFailure(message string, sensitiveValues ...string) string {
+	values := append([]string{g.environmentValue(gitLabTokenEnv)}, sensitiveValues...)
+	return sanitizePRFailure(message, values...)
+}
+
+func (g *GitOperator) sanitizeGitPushOutput(output string) string {
+	return g.sanitizePRFailure(output)
+}
+
 func redactRemoteURL(remoteURL string) string {
 	trimmed := strings.TrimSpace(remoteURL)
 	if trimmed == "" {
@@ -346,7 +400,7 @@ func (g *GitOperator) getOriginRemoteURL(ctx context.Context) (string, error) {
 func (g *GitOperator) runRepositoryCommand(ctx context.Context, name string, args ...string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = g.workDir
-	cmd.Env = filterGitEnv(os.Environ())
+	cmd.Env = filterGitEnv(g.environmentValues())
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -407,6 +461,325 @@ func (g *GitOperator) createGitHubPR(
 	result.Success = true
 	g.logger.Info("PR created", zap.String("url", result.PRURL))
 	return result, nil
+}
+
+func (g *GitOperator) createGitLabPR(
+	ctx context.Context,
+	result *PRCreateResult,
+	info *gitLabRepoInfo,
+	branch, title, body, baseBranch string,
+	draft bool,
+) (*PRCreateResult, error) {
+	targetBranch, err := g.resolveGitLabTargetBranch(ctx, info, baseBranch)
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+
+	if _, lookupErr := exec.LookPath("glab"); lookupErr != nil {
+		return g.createGitLabPRWithREST(ctx, result, info, branch, title, body, targetBranch, draft)
+	}
+	if existingURL := g.findExistingGitLabMRWithGLab(ctx, info, branch, targetBranch); existingURL != "" {
+		result.PRURL = existingURL
+		result.Output = existingURL
+		result.Success = true
+		return result, nil
+	}
+
+	args := []string{"mr", "create", repositoryFlagTitle, title, repositoryFlagDescription, body, "--source-branch", branch}
+	args = append(args, "--target-branch", targetBranch)
+	if draft {
+		args = append(args, "--draft")
+	}
+	args = append(args, "--yes")
+
+	stdoutOutput, stderrOutput, err := g.runRepositoryCommand(ctx, "glab", args...)
+	result.Output = g.sanitizePRFailure(combineCommandOutput(stdoutOutput, stderrOutput), title, body)
+	if err != nil {
+		if g.environmentValue(gitLabTokenEnv) != "" {
+			return g.createGitLabPRWithREST(ctx, result, info, branch, title, body, targetBranch, draft)
+		}
+		result.Error = "GitLab merge request creation failed; authenticate glab for the configured host"
+		return result, nil
+	}
+	result.PRURL = extractGitLabMRURL(stdoutOutput, info)
+	result.Success = result.PRURL != ""
+	if !result.Success {
+		result.Error = "GitLab did not return a merge request URL"
+	}
+	return result, nil
+}
+
+type gitLabRepoInfo struct {
+	Origin      string
+	APIHost     string
+	ProjectPath string
+}
+
+type gitLabRemoteInfo struct {
+	Hostname    string
+	HTTPOrigin  string
+	ProjectPath string
+	SSH         bool
+}
+
+func parseGitLabRepoInfo(remoteURL, configuredOrigin string) (*gitLabRepoInfo, error) {
+	remote, err := parseGitLabRemote(remoteURL)
+	if err != nil {
+		return nil, err
+	}
+	origin := strings.TrimSpace(configuredOrigin)
+	if origin == "" {
+		if !strings.EqualFold(remote.Hostname, "gitlab.com") {
+			return nil, errors.New("GitLab host is not configured for this remote")
+		}
+		origin = "https://gitlab.com"
+	}
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil || (parsedOrigin.Scheme != "http" && parsedOrigin.Scheme != "https") || parsedOrigin.Host == "" || parsedOrigin.User != nil || (parsedOrigin.Path != "" && parsedOrigin.Path != "/") {
+		return nil, errors.New("configured GitLab host must be an HTTP(S) origin")
+	}
+	normalizedOrigin := parsedOrigin.Scheme + "://" + parsedOrigin.Host
+	if remote.SSH {
+		if !strings.EqualFold(parsedOrigin.Hostname(), remote.Hostname) {
+			return nil, errors.New("GitLab remote host does not match the configured workspace host")
+		}
+	} else if !strings.EqualFold(normalizedOrigin, remote.HTTPOrigin) {
+		return nil, errors.New("GitLab remote host does not match the configured workspace host")
+	}
+	return &gitLabRepoInfo{
+		Origin:      normalizedOrigin,
+		APIHost:     parsedOrigin.Host,
+		ProjectPath: remote.ProjectPath,
+	}, nil
+}
+
+func parseGitLabRemote(remoteURL string) (*gitLabRemoteInfo, error) {
+	trimmed := strings.TrimSpace(remoteURL)
+	if strings.Contains(trimmed, "://") {
+		parsed, err := url.Parse(trimmed)
+		if err != nil || parsed.Hostname() == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, errors.New("invalid GitLab remote URL")
+		}
+		host, projectPath, err := validateGitLabRemoteParts(parsed.Hostname(), parsed.Path)
+		if err != nil {
+			return nil, err
+		}
+		switch parsed.Scheme {
+		case "http", "https":
+			if parsed.User != nil {
+				return nil, errors.New("GitLab HTTP remote URL must not contain credentials")
+			}
+			return &gitLabRemoteInfo{Hostname: host, HTTPOrigin: parsed.Scheme + "://" + parsed.Host, ProjectPath: projectPath}, nil
+		case "ssh":
+			return &gitLabRemoteInfo{Hostname: host, ProjectPath: projectPath, SSH: true}, nil
+		default:
+			return nil, errors.New("unsupported GitLab remote URL scheme")
+		}
+	}
+	withoutUser := trimmed
+	if _, after, ok := strings.Cut(withoutUser, "@"); ok {
+		withoutUser = after
+	}
+	host, path, ok := strings.Cut(withoutUser, ":")
+	if !ok {
+		return nil, errors.New("invalid GitLab SSH remote URL")
+	}
+	host, projectPath, err := validateGitLabRemoteParts(host, path)
+	if err != nil {
+		return nil, err
+	}
+	return &gitLabRemoteInfo{Hostname: host, ProjectPath: projectPath, SSH: true}, nil
+}
+
+func validateGitLabRemoteParts(host, path string) (string, string, error) {
+	projectPath := strings.TrimSuffix(strings.Trim(strings.TrimSpace(path), "/"), ".git")
+	if host == "" || projectPath == "" || strings.Contains(projectPath, "..") || strings.Contains(projectPath, "/-/") {
+		return "", "", errors.New("invalid GitLab repository path")
+	}
+	return strings.ToLower(host), projectPath, nil
+}
+
+type gitLabMRResponse struct {
+	WebURL       string `json:"web_url"`
+	TargetBranch string `json:"target_branch"`
+}
+
+func (g *GitOperator) findExistingGitLabMRWithGLab(ctx context.Context, info *gitLabRepoInfo, branch, targetBranch string) string {
+	args := []string{"mr", "list", "--source-branch", branch, "--target-branch", targetBranch, "--state", "opened", "--output", "json"}
+	stdoutOutput, _, err := g.runRepositoryCommand(ctx, "glab", args...)
+	if err != nil {
+		return ""
+	}
+	var rows []gitLabMRResponse
+	if json.Unmarshal([]byte(stdoutOutput), &rows) != nil {
+		return ""
+	}
+	for _, row := range rows {
+		if row.TargetBranch == targetBranch {
+			validated, validationErr := validateGitLabMRWebURL(row.WebURL, info)
+			if validationErr == nil {
+				return validated
+			}
+		}
+	}
+	return ""
+}
+
+func extractGitLabMRURL(output string, info *gitLabRepoInfo) string {
+	for _, field := range strings.Fields(output) {
+		candidate := strings.Trim(field, "()[]{}<>,.;\"'")
+		if validated, err := validateGitLabMRWebURL(candidate, info); err == nil {
+			return validated
+		}
+	}
+	return ""
+}
+
+func validateGitLabMRWebURL(raw string, info *gitLabRepoInfo) (string, error) {
+	candidate := strings.TrimSpace(raw)
+	parsed, err := url.Parse(candidate)
+	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("invalid GitLab merge request URL")
+	}
+	if !strings.EqualFold(parsed.Scheme+"://"+parsed.Host, info.Origin) {
+		return "", errors.New("GitLab merge request URL does not match the configured workspace origin")
+	}
+	prefix := "/" + strings.Trim(info.ProjectPath, "/") + "/-/merge_requests/"
+	iid := strings.TrimPrefix(parsed.Path, prefix)
+	if !strings.HasPrefix(parsed.Path, prefix) || iid == "" || strings.Contains(iid, "/") {
+		return "", errors.New("GitLab merge request URL does not match the repository")
+	}
+	if _, err := strconv.Atoi(iid); err != nil {
+		return "", errors.New("GitLab merge request URL has an invalid IID")
+	}
+	return candidate, nil
+}
+
+func (g *GitOperator) resolveGitLabTargetBranch(ctx context.Context, info *gitLabRepoInfo, baseBranch string) (string, error) {
+	if target := cleanBaseBranch(baseBranch); target != "" {
+		return target, nil
+	}
+	projectPath := "projects/" + url.PathEscape(info.ProjectPath)
+	if _, err := exec.LookPath("glab"); err == nil {
+		stdout, _, runErr := g.runRepositoryCommand(ctx, "glab", "api", projectPath, "--hostname", info.APIHost)
+		if runErr == nil {
+			var project struct {
+				DefaultBranch string `json:"default_branch"`
+			}
+			if json.Unmarshal([]byte(stdout), &project) == nil && strings.TrimSpace(project.DefaultBranch) != "" {
+				return strings.TrimSpace(project.DefaultBranch), nil
+			}
+		}
+	}
+	token := strings.TrimSpace(g.environmentValue(gitLabTokenEnv))
+	if token == "" {
+		return "", errors.New("GitLab project default branch is unavailable; authenticate glab for the configured host")
+	}
+	var project struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	endpoint := info.Origin + "/api/v4/" + projectPath
+	if err := gitLabAPIJSON(ctx, &http.Client{Timeout: gitLabAPITimeout}, token, http.MethodGet, endpoint, nil, &project); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(project.DefaultBranch) == "" {
+		return "", errors.New("GitLab project did not return a default branch")
+	}
+	return strings.TrimSpace(project.DefaultBranch), nil
+}
+
+func (g *GitOperator) createGitLabPRWithREST(
+	ctx context.Context,
+	result *PRCreateResult,
+	info *gitLabRepoInfo,
+	branch, title, body, targetBranch string,
+	draft bool,
+) (*PRCreateResult, error) {
+	token := strings.TrimSpace(g.environmentValue(gitLabTokenEnv))
+	if token == "" {
+		result.Error = "GitLab authentication is unavailable; install and authenticate glab or configure a workspace token"
+		return result, nil
+	}
+	client := &http.Client{Timeout: gitLabAPITimeout}
+	projectEndpoint := info.Origin + "/api/v4/projects/" + url.PathEscape(info.ProjectPath)
+	existingEndpoint := projectEndpoint + "/merge_requests?state=opened&source_branch=" + url.QueryEscape(branch) + "&target_branch=" + url.QueryEscape(targetBranch)
+	var existing []gitLabMRResponse
+	if err := gitLabAPIJSON(ctx, client, token, http.MethodGet, existingEndpoint, nil, &existing); err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	if len(existing) > 0 && existing[0].WebURL != "" {
+		validated, validationErr := validateGitLabMRWebURL(existing[0].WebURL, info)
+		if validationErr != nil {
+			result.Error = validationErr.Error()
+			return result, nil
+		}
+		result.PRURL = validated
+		result.Output = validated
+		result.Success = true
+		return result, nil
+	}
+
+	if draft && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(title)), "draft:") {
+		title = "Draft: " + title
+	}
+	payload := struct {
+		SourceBranch string `json:"source_branch"`
+		TargetBranch string `json:"target_branch"`
+		Title        string `json:"title"`
+		Description  string `json:"description"`
+	}{SourceBranch: branch, TargetBranch: targetBranch, Title: title, Description: body}
+	var created gitLabMRResponse
+	if err := gitLabAPIJSON(ctx, client, token, http.MethodPost, projectEndpoint+"/merge_requests", payload, &created); err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	if created.WebURL == "" {
+		result.Error = "GitLab did not return a merge request URL"
+		return result, nil
+	}
+	validated, validationErr := validateGitLabMRWebURL(created.WebURL, info)
+	if validationErr != nil {
+		result.Error = validationErr.Error()
+		return result, nil
+	}
+	result.PRURL = validated
+	result.Output = validated
+	result.Success = true
+	return result, nil
+}
+
+func gitLabAPIJSON(ctx context.Context, client *http.Client, token, method, endpoint string, requestBody, responseBody any) error {
+	var body io.Reader
+	if requestBody != nil {
+		encoded, err := json.Marshal(requestBody)
+		if err != nil {
+			return errors.New("encode GitLab API request")
+		}
+		body = bytes.NewReader(encoded)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	if err != nil {
+		return errors.New("build GitLab API request")
+	}
+	req.Header.Set("PRIVATE-TOKEN", token)
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("GitLab API request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("GitLab API request failed with status %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(responseBody); err != nil {
+		return errors.New("decode GitLab API response")
+	}
+	return nil
 }
 
 func ensureAzureDevOpsCLI(ctx context.Context) error {

@@ -235,6 +235,8 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const shimDir = path.join(tmpDir, "bin");
       const shimPath = path.join(shimDir, "git");
       const shimDelayFile = path.join(tmpDir, "git-delay-ms");
+      const shimGitLabPushFile = path.join(tmpDir, "gitlab-push-remote");
+      const shimGitLabPushRecordFile = path.join(tmpDir, "gitlab-push-record");
       const originalPath = process.env.PATH ?? "";
       fs.mkdirSync(shimDir, { recursive: true });
       fs.writeFileSync(
@@ -252,6 +254,14 @@ if [ -f "$KANDEV_E2E_GIT_DELAY_FILE" ] && { [ "$1" = "fetch" ] || [ "$1" = "pull
       fi
       ;;
   esac
+fi
+if [ "$1" = "push" ] && [ -f "$KANDEV_E2E_GITLAB_PUSH_FILE" ]; then
+  expected_remote=$(cat "$KANDEV_E2E_GITLAB_PUSH_FILE" 2>/dev/null)
+  actual_remote=$(PATH="$KANDEV_E2E_ORIGINAL_PATH" git config --get remote.origin.url 2>/dev/null)
+  if [ -n "$expected_remote" ] && [ "$actual_remote" = "$expected_remote" ]; then
+    printf '%s\n' "$*" > "$KANDEV_E2E_GITLAB_PUSH_RECORD_FILE"
+    exit 0
+  fi
 fi
 export PATH="$KANDEV_E2E_ORIGINAL_PATH"
 exec git "$@"
@@ -275,6 +285,8 @@ exec git "$@"
         PATH: `${shimDir}:${path.join(BACKEND_DIR, "bin")}:${originalPath}`,
         KANDEV_E2E_ORIGINAL_PATH: originalPath,
         KANDEV_E2E_GIT_DELAY_FILE: shimDelayFile,
+        KANDEV_E2E_GITLAB_PUSH_FILE: shimGitLabPushFile,
+        KANDEV_E2E_GITLAB_PUSH_RECORD_FILE: shimGitLabPushRecordFile,
         HOME: tmpDir,
         KANDEV_HOME_DIR: homeDir,
         KANDEV_SERVER_PORT: String(backendPort),

@@ -718,6 +718,50 @@ func TestResolvePrepareScript(t *testing.T) {
 			t.Fatal("expected non-empty default script")
 		}
 	})
+
+	t.Run("GitLab clone URL remains credential free", func(t *testing.T) {
+		req := &ExecutorCreateRequest{
+			Metadata: map[string]interface{}{
+				"repository_clone_url": "http://gitlab.internal:8080/group/repo.git",
+				"base_branch":          "main",
+				"worktree_branch":      "feature/gitlab",
+			},
+			Env: map[string]string{
+				"GITLAB_TOKEN":       "glpat-super-secret",
+				"KANDEV_GITLAB_HOST": "http://gitlab.internal:8080",
+			},
+		}
+		script := exec.resolvePrepareScript(req)
+		if !strings.Contains(script, "'http://gitlab.internal:8080/group/repo.git'") {
+			t.Fatalf("resolved script does not retain raw clone URL:\n%s", script)
+		}
+		if strings.Contains(script, "glpat-super-secret") || strings.Contains(script, "oauth2@") {
+			t.Fatalf("resolved script contains GitLab credentials:\n%s", script)
+		}
+	})
+}
+
+func TestContainerBuildEnvVarsMergesEphemeralGitLabCredentialHelper(t *testing.T) {
+	credentials := map[string]string{
+		"GITLAB_TOKEN":       "glpat-super-secret",
+		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_KEY_0":   "credential.http://gitlab.internal:8080.helper",
+		"GIT_CONFIG_VALUE_0": `!f() { echo "username=oauth2"; echo "password=$GITLAB_TOKEN"; }; f`,
+	}
+	env := (&ContainerManager{}).buildEnvVars(ContainerConfig{
+		AgentConfig: agents.NewMockAgent(),
+		Credentials: credentials,
+	})
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "GIT_CONFIG_COUNT=4") || !strings.Contains(joined, "GIT_CONFIG_KEY_3=credential.http://gitlab.internal:8080.helper") {
+		t.Fatalf("GitLab credential helper was not merged:\n%s", joined)
+	}
+	if strings.Count(joined, "GIT_CONFIG_COUNT=") != 1 {
+		t.Fatalf("duplicate GIT_CONFIG_COUNT:\n%s", joined)
+	}
+	if strings.Contains(joined, "password=glpat-super-secret") {
+		t.Fatalf("token embedded in credential helper:\n%s", joined)
+	}
 }
 
 func TestLocalPathFromCloneURL(t *testing.T) {

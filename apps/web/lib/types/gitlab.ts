@@ -5,7 +5,7 @@
 export type GitLabStatus = {
   authenticated: boolean;
   username: string;
-  auth_method: "glab_cli" | "pat" | "none" | "mock";
+  auth_method: "glab_cli" | "pat" | "environment" | "none" | "mock";
   host: string;
   token_configured: boolean;
   token_secret_id?: string;
@@ -22,6 +22,31 @@ export type GitLabStatus = {
    * actually-valid token.
    */
   connection_error?: string;
+};
+
+export type GitLabConfig = {
+  workspace_id: string;
+  host: string;
+  auth_method: "glab_cli" | "pat" | "environment";
+  username: string;
+  has_secret: boolean;
+  last_ok: boolean;
+  last_error?: string;
+  last_checked_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SetGitLabConfigRequest = {
+  host: string;
+  auth_method: GitLabConfig["auth_method"];
+  token?: string;
+};
+
+export type TestGitLabConnectionResult = {
+  ok: boolean;
+  username?: string;
+  error?: string;
 };
 
 export type GitLabAuthDiagnostics = {
@@ -89,13 +114,31 @@ export type MR = {
   has_conflicts: boolean;
   additions: number;
   deletions: number;
-  reviewers: { username: string; name: string; type: string }[];
-  assignees: { username: string; name: string; type: string }[];
+  reviewers: GitLabMRUser[];
+  assignees: GitLabMRUser[];
+  labels?: string[];
   created_at: string;
   updated_at: string;
   merged_at?: string;
   closed_at?: string;
 };
+
+export type GitLabMRUser = {
+  id: number;
+  username: string;
+  name: string;
+  type: string;
+  avatar_url?: string;
+};
+
+export type GitLabProjectMember = {
+  id: number;
+  username: string;
+  name: string;
+  avatar_url: string;
+};
+
+export type GitLabSubscriptionState = { subscribed: boolean };
 
 /** Issue returned by /api/v1/gitlab/user/issues. */
 export type Issue = {
@@ -172,11 +215,16 @@ export type ReviewWatch = {
   agent_profile_id: string;
   executor_profile_id: string;
   prompt: string;
+  repository_id?: string;
+  base_branch?: string;
   review_scope: "user" | "user_and_teams" | string;
   custom_query: string;
   enabled: boolean;
   poll_interval_seconds: number;
   cleanup_policy: "auto" | "always" | "never" | string;
+  max_inflight_tasks?: number;
+  last_error?: string;
+  last_error_at?: string;
   last_polled_at?: string;
   created_at: string;
   updated_at: string;
@@ -192,11 +240,16 @@ export type IssueWatch = {
   agent_profile_id: string;
   executor_profile_id: string;
   prompt: string;
+  repository_id?: string;
+  base_branch?: string;
   labels: string[];
   custom_query: string;
   enabled: boolean;
   poll_interval_seconds: number;
   cleanup_policy: "auto" | "always" | "never" | string;
+  max_inflight_tasks?: number;
+  last_error?: string;
+  last_error_at?: string;
   last_polled_at?: string;
   created_at: string;
   updated_at: string;

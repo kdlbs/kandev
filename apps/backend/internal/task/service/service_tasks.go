@@ -497,6 +497,7 @@ func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspace
 		SourceType:     sourceTypeProvider,
 		Provider:       repo.Provider,
 		ProviderRepoID: repo.ProviderRepoID,
+		ProviderHost:   repo.ProviderHost,
 		ProviderOwner:  repo.ProviderOwner,
 		ProviderName:   repo.ProviderName,
 		DefaultBranch:  repo.DefaultBranch,
@@ -698,10 +699,17 @@ func (s *Service) resolveRepoInputRemote(
 	if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil && provider == providerGitHub {
 		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, provider, owner, name)
 	}
+	providerHost := ""
+	if provider == providerGitHub {
+		providerHost = "https://github.com"
+	} else if provider == "gitlab" {
+		providerHost = "https://gitlab.com"
+	}
 	repo, repoCreated, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
 		WorkspaceID:    workspaceID,
 		Provider:       provider,
 		ProviderRepoID: repoInput.ProviderRepoID,
+		ProviderHost:   providerHost,
 		ProviderOwner:  owner,
 		ProviderName:   name,
 		RemoteURL:      canonicalURL,
@@ -850,7 +858,7 @@ func parseAzureSSHRemote(parts []string) (string, string, string, string, error)
 func (s *Service) probeProviderDefaultBranchIfMissing(
 	ctx context.Context, workspaceID, provider, owner, name string,
 ) string {
-	existing, lookupErr := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, owner, name)
+	existing, lookupErr := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, "https://github.com", owner, name)
 	if lookupErr != nil {
 		s.logger.Warn("resolveRepoInput: failed to look up existing repo before probe",
 			zap.String("provider", provider),

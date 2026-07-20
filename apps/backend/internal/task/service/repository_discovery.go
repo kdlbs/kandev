@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,8 @@ type RepositoryDiscoveryConfig struct {
 	MaxDepth          int
 	TaskWorktreeRoots []string
 }
+
+const githubProviderName = "github"
 
 // LocalRepoStatus reports the current branch and dirty file paths for a
 // local repository on disk. Used by the task-create dialog to preflight the
@@ -900,55 +903,72 @@ func parseGitConfigOriginURL(config string) string {
 	return ""
 }
 
-// ParseGitRemoteURL extracts provider, owner, and repo name from a git remote URL.
-// Supports HTTPS (https://github.com/owner/repo.git), SSH (git@github.com:owner/repo.git),
-// and ssh:// (ssh://git@github.com/owner/repo.git) formats.
-// Returns empty strings for unrecognized URLs or non-GitHub providers.
-func ParseGitRemoteURL(remoteURL string) (provider, owner, name string) {
+// ParseGitRemoteIdentity returns a normalized provider origin and full project
+// path. HTTP(S) origins preserve their scheme; SSH remotes use ssh://host.
+func ParseGitRemoteIdentity(remoteURL string) (origin, projectPath string) {
 	remoteURL = strings.TrimSpace(remoteURL)
 	if remoteURL == "" {
-		return "", "", ""
+		return "", ""
 	}
-
-	host, path := splitRemoteURL(remoteURL)
-	if host == "" || path == "" {
-		return "", "", ""
+	if strings.Contains(remoteURL, "@") && !strings.Contains(remoteURL, "://") {
+		_, remoteURL, _ = strings.Cut(remoteURL, "@")
+		host, path, ok := strings.Cut(remoteURL, ":")
+		if !ok {
+			return "", ""
+		}
+		return normalizeRemoteIdentity("ssh", host, path)
 	}
-
-	if !strings.Contains(strings.ToLower(host), "github.com") {
-		return "", "", ""
+	parsed, err := url.Parse(remoteURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", ""
 	}
-
-	path = strings.TrimSuffix(path, ".git")
-	path = strings.Trim(path, "/")
-	parts := strings.SplitN(path, "/", 3)
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", ""
-	}
-	return "github", parts[0], parts[1]
+	return normalizeRemoteIdentity(parsed.Scheme, parsed.Host, parsed.Path)
 }
 
-// splitRemoteURL splits a git remote URL into host and path components.
-func splitRemoteURL(remoteURL string) (host, path string) {
-	switch {
-	case strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://"):
-		trimmed := strings.TrimPrefix(remoteURL, "https://")
-		trimmed = strings.TrimPrefix(trimmed, "http://")
-		host, path, _ = strings.Cut(trimmed, "/")
-
-	case strings.HasPrefix(remoteURL, "ssh://"):
-		trimmed := strings.TrimPrefix(remoteURL, "ssh://")
-		if _, after, ok := strings.Cut(trimmed, "@"); ok {
-			trimmed = after
-		}
-		host, path, _ = strings.Cut(trimmed, "/")
-
-	case strings.Contains(remoteURL, "@") && strings.Contains(remoteURL, ":"):
-		// git@github.com:owner/repo.git
-		_, afterAt, _ := strings.Cut(remoteURL, "@")
-		host, path, _ = strings.Cut(afterAt, ":")
+func normalizeRemoteIdentity(scheme, host, path string) (string, string) {
+	scheme = strings.ToLower(strings.TrimSpace(scheme))
+	host = strings.ToLower(strings.TrimSpace(host))
+	if scheme != "http" && scheme != "https" && scheme != "ssh" {
+		return "", ""
 	}
-	return host, path
+	path = strings.TrimSuffix(strings.Trim(strings.TrimSpace(path), "/"), ".git")
+	if host == "" || path == "" || !strings.Contains(path, "/") {
+		return "", ""
+	}
+	return scheme + "://" + host, path
+}
+
+// ParseGitRemoteURL retains the legacy GitHub-only provider API.
+func ParseGitRemoteURL(remoteURL string) (provider, owner, name string) {
+	origin, projectPath := ParseGitRemoteIdentity(remoteURL)
+	parsed, err := url.Parse(origin)
+	if err != nil || !strings.EqualFold(parsed.Hostname(), "github.com") {
+		return "", "", ""
+	}
+	owner, name = splitProjectPath(projectPath)
+	if owner == "" {
+		return "", "", ""
+	}
+	return githubProviderName, owner, name
+}
+
+func splitProjectPath(projectPath string) (owner, name string) {
+	lastSlash := strings.LastIndex(projectPath, "/")
+	if lastSlash <= 0 || lastSlash == len(projectPath)-1 {
+		return "", ""
+	}
+	return projectPath[:lastSlash], projectPath[lastSlash+1:]
+}
+
+// ResolveGitRemoteIdentity reads and parses a local checkout's origin.
+func ResolveGitRemoteIdentity(repoPath string) (origin, owner, name string) {
+	remoteURL, err := readGitRemoteOriginURL(repoPath)
+	if err != nil {
+		return "", "", ""
+	}
+	origin, projectPath := ParseGitRemoteIdentity(remoteURL)
+	owner, name = splitProjectPath(projectPath)
+	return origin, owner, name
 }
 
 // ResolveGitRemoteProvider detects the provider, owner, and repo name from a
@@ -959,6 +979,24 @@ func ResolveGitRemoteProvider(repoPath string) (provider, owner, name string) {
 		return "", "", ""
 	}
 	return ParseGitRemoteURL(url)
+}
+
+// ResolveGitRemoteProviderIdentity includes the durable normalized origin.
+func ResolveGitRemoteProviderIdentity(repoPath string) (provider, origin, owner, name string) {
+	origin, owner, name = ResolveGitRemoteIdentity(repoPath)
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return "", "", "", ""
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "github.com":
+		provider = githubProviderName
+		origin = "https://github.com"
+	case "gitlab.com":
+		provider = "gitlab"
+		origin = "https://gitlab.com"
+	}
+	return provider, origin, owner, name
 }
 
 func parsePackedRefs(refsRoot string, branchMap map[string]Branch) {

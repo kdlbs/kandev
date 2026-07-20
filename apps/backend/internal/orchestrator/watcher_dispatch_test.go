@@ -32,6 +32,7 @@ type fakeWatcherSource struct {
 	buildReq         *IssueTaskRequest
 	buildErr         error
 	attachErr        error
+	terminalAttach   bool
 	autoStart        AutoStartParams
 	watchID          string
 	metadataKey      string
@@ -63,6 +64,8 @@ func (f *fakeWatcherSource) AttachTaskID(_ context.Context, _ any, _ string) err
 	f.recordedAttach++
 	return f.attachErr
 }
+
+func (f *fakeWatcherSource) IsTerminalAttachError(error) bool { return f.terminalAttach }
 
 func (f *fakeWatcherSource) AutoStartParams(_ any) AutoStartParams {
 	p := f.autoStart
@@ -286,6 +289,28 @@ func TestCoordinator_Dispatch_AttachError_LogsButContinues(t *testing.T) {
 	// MUST NOT Release the dedup row — that would orphan the task.
 	if src.recordedRelease != 0 {
 		t.Fatalf("expected no Release after attach error, got %d", src.recordedRelease)
+	}
+}
+
+func TestCoordinator_Dispatch_TerminalAttachErrorSkipsAutoStart(t *testing.T) {
+	src := &fakeWatcherSource{
+		name:           "gitlab_review",
+		reserveOK:      true,
+		buildReq:       &IssueTaskRequest{WorkspaceID: "ws-1", WorkflowStepID: "step-1"},
+		attachErr:      errors.New("watch ownership lost"),
+		terminalAttach: true,
+	}
+	taskCreator := &fakeTaskCreator{}
+	starter := &fakeTaskStarter{}
+	coordinator := newTestCoordinator(t, taskCreator, true, starter)
+
+	coordinator.Dispatch(context.Background(), src, "evt")
+
+	if starter.called != 0 {
+		t.Fatalf("auto-start called %d times after terminal attach error", starter.called)
+	}
+	if src.recordedRelease != 0 {
+		t.Fatalf("terminal ownership loss released replacement reservation %d times", src.recordedRelease)
 	}
 }
 

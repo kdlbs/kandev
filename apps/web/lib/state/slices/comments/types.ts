@@ -52,6 +52,9 @@ export type FileEditorComment = CommentBase & {
 export type PRFeedbackComment = CommentBase & {
   source: "pr-feedback";
   prNumber: number;
+  provider?: "github" | "gitlab";
+  projectPath?: string;
+  mrIid?: number;
   feedbackType: "check" | "review" | "comment" | "conflict";
   /** Pre-formatted markdown text for display and sending */
   content: string;

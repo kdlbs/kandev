@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +102,75 @@ func TestHealthRouteReturnsOK(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestConfigureGitRemoteRoute(t *testing.T) {
+	repo, sqlxDB := newTestRepo(t)
+	now := time.Now().UTC()
+	if _, err := sqlxDB.Exec(`INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('ws-1', 'Test workspace', ?, ?)`, now, now); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if output, err := exec.Command("git", "init", "-b", "main", repoDir).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	model := &models.Repository{WorkspaceID: "ws-1", Name: "repo", SourceType: "local", LocalPath: repoDir}
+	if err := repo.CreateRepository(t.Context(), model); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	marker := filepath.Join(t.TempDir(), "gitlab-push")
+	record := filepath.Join(t.TempDir(), "gitlab-push-record")
+	t.Setenv("KANDEV_E2E_GITLAB_PUSH_FILE", marker)
+	t.Setenv("KANDEV_E2E_GITLAB_PUSH_RECORD_FILE", record)
+	router := newRouter(t, repo, nil)
+	remoteURL := "http://localhost:18080/group/project.git"
+	body := mustJSON(t, map[string]string{"remote_url": remoteURL})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/v1/_test/repositories/"+model.ID+"/git-remote", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+	output, err := exec.Command("git", "-C", repoDir, "remote", "get-url", "origin").Output()
+	if err != nil || strings.TrimSpace(string(output)) != remoteURL {
+		t.Fatalf("remote=%q err=%v", output, err)
+	}
+	markerValue, err := os.ReadFile(marker)
+	if err != nil || string(markerValue) != remoteURL {
+		t.Fatalf("marker=%q err=%v", markerValue, err)
+	}
+	if err := os.WriteFile(record, []byte("push --set-upstream origin HEAD\n"), 0o600); err != nil {
+		t.Fatalf("write push record: %v", err)
+	}
+	pushReq := httptest.NewRequest(http.MethodGet,
+		"/api/v1/_test/repositories/"+model.ID+"/git-push-record", nil)
+	pushRes := httptest.NewRecorder()
+	router.ServeHTTP(pushRes, pushReq)
+	if pushRes.Code != http.StatusOK || !strings.Contains(pushRes.Body.String(), "origin HEAD") {
+		t.Fatalf("push record status=%d body=%s", pushRes.Code, pushRes.Body.String())
+	}
+	remove := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/_test/repositories/"+model.ID+"/git-remote", nil)
+	removed := httptest.NewRecorder()
+	router.ServeHTTP(removed, remove)
+	if removed.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", removed.Code, removed.Body.String())
+	}
+	if err := exec.Command("git", "-C", repoDir, "remote", "get-url", "origin").Run(); err == nil {
+		t.Fatal("origin remote still exists after cleanup")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("push marker still exists after cleanup: %v", err)
+	}
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("push record still exists after cleanup: %v", err)
 	}
 }
 

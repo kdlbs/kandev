@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -26,6 +27,25 @@ const (
 )
 
 var ErrWorkspaceConfirmNameMismatch = errors.New("confirm_name does not match workspace name")
+
+func normalizeProviderHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return ""
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return ""
+	}
+	return scheme + "://" + strings.ToLower(parsed.Host)
+}
 
 type workspaceDeleteTaskCleanup struct {
 	task        *models.Task
@@ -615,6 +635,7 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		LocalPath:              localPath,
 		Provider:               req.Provider,
 		ProviderRepoID:         req.ProviderRepoID,
+		ProviderHost:           normalizeProviderHost(req.ProviderHost),
 		ProviderOwner:          req.ProviderOwner,
 		ProviderName:           req.ProviderName,
 		RemoteURL:              req.RemoteURL,
@@ -628,10 +649,14 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		CopyFiles:              req.CopyFiles,
 	}
 
-	// Auto-detect GitHub provider info from git remote if not provided
-	if repository.Provider == "" && repository.LocalPath != "" {
-		if p, o, n := ResolveGitRemoteProvider(repository.LocalPath); p != "" {
+	// Auto-detect provider identity from the origin when it is available.
+	if repository.LocalPath != "" && (repository.Provider == "" || repository.ProviderHost == "") {
+		p, h, o, n := ResolveGitRemoteProviderIdentity(repository.LocalPath)
+		if repository.Provider == "" {
 			repository.Provider = p
+		}
+		if repository.Provider != "" && (strings.HasPrefix(h, "http://") || strings.HasPrefix(h, "https://")) {
+			repository.ProviderHost = h
 			repository.ProviderOwner = o
 			repository.ProviderName = n
 		}
@@ -653,8 +678,8 @@ func (s *Service) GetRepository(ctx context.Context, id string) (*models.Reposit
 
 // GetRepositoryByProviderInfo looks up a repository by workspace and provider identity.
 // Returns nil (with nil error) when no matching repository exists.
-func (s *Service) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, owner, name string) (*models.Repository, error) {
-	return s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, owner, name)
+func (s *Service) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, host, owner, name string) (*models.Repository, error) {
+	return s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, normalizeProviderHost(host), owner, name)
 }
 
 // FindOrCreateRepository looks up a repository by provider info, creating one if not found.
@@ -667,7 +692,10 @@ func (s *Service) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, 
 // create race between snapshot and lookup, so a snapshot-miss does NOT
 // mean this call created the row.
 func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateRepositoryRequest) (*models.Repository, bool, error) {
-	existing, err := s.repoEntities.GetRepositoryByProviderInfo(ctx, req.WorkspaceID, req.Provider, req.ProviderOwner, req.ProviderName)
+	req.ProviderHost = normalizeProviderHost(req.ProviderHost)
+	existing, err := s.repoEntities.GetRepositoryByProviderInfo(
+		ctx, req.WorkspaceID, req.Provider, req.ProviderHost, req.ProviderOwner, req.ProviderName,
+	)
 	if err != nil {
 		return nil, false, fmt.Errorf("lookup repository: %w", err)
 	}
@@ -684,6 +712,10 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 				return nil, false, pathErr
 			}
 			existing.LocalPath = localPath
+			dirty = true
+		}
+		if existing.ProviderHost == "" && req.ProviderHost != "" {
+			existing.ProviderHost = normalizeProviderHost(req.ProviderHost)
 			dirty = true
 		}
 		// Backfill default_branch when the caller carries one and the existing
@@ -719,6 +751,7 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		LocalPath:      req.LocalPath,
 		Provider:       req.Provider,
 		ProviderRepoID: req.ProviderRepoID,
+		ProviderHost:   req.ProviderHost,
 		ProviderOwner:  req.ProviderOwner,
 		ProviderName:   req.ProviderName,
 		RemoteURL:      req.RemoteURL,
@@ -786,6 +819,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 	}
 	if req.ProviderRepoID != nil {
 		repository.ProviderRepoID = *req.ProviderRepoID
+	}
+	if req.ProviderHost != nil {
+		repository.ProviderHost = normalizeProviderHost(*req.ProviderHost)
 	}
 	if req.ProviderOwner != nil {
 		repository.ProviderOwner = *req.ProviderOwner

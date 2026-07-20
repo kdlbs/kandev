@@ -26,10 +26,10 @@ func NewController(svc *Service, log *logger.Logger) *Controller {
 // RegisterHTTPRoutes registers the v1 HTTP surface.
 func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api := router.Group("/api/v1/gitlab")
+	c.registerConfigRoutes(api)
+	c.RegisterTaskMRHTTPRoutes(api)
+	c.registerMemberSubscriptionRoutes(api)
 	api.GET("/status", c.httpGetStatus)
-	api.POST("/token", c.httpConfigureToken)
-	api.DELETE("/token", c.httpClearToken)
-	api.POST("/host", c.httpConfigureHost)
 
 	api.GET("/mrs/feedback", c.httpGetMRFeedback)
 	api.POST("/mrs/discussions/notes", c.httpCreateDiscussionNote)
@@ -37,7 +37,6 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 	api.GET("/workspaces/:workspaceID/task-mrs", c.httpListWorkspaceTaskMRs)
 	api.GET("/tasks/:taskID/mrs", c.httpListTaskMRs)
-	api.POST("/tasks/:taskID/mrs/sync", c.httpSyncTaskMR)
 
 	api.GET("/user/mrs", c.httpSearchUserMRs)
 	api.GET("/user/issues", c.httpSearchUserIssues)
@@ -51,9 +50,13 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 }
 
 func (c *Controller) httpGetStatus(ctx *gin.Context) {
-	status, err := c.service.GetStatus(ctx.Request.Context())
+	if c.workspaceID(ctx) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "workspace_id query parameter required"})
+		return
+	}
+	status, err := c.service.GetStatusForWorkspace(ctx.Request.Context(), c.workspaceID(ctx))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: "GitLab status unavailable"})
 		return
 	}
 	ctx.JSON(http.StatusOK, status)
@@ -105,9 +108,14 @@ func (c *Controller) httpGetMRFeedback(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: err.Error()})
 		return
 	}
-	feedback, err := c.service.GetMRFeedback(ctx.Request.Context(), projectPath, iid)
+	var feedback *MRFeedback
+	err = c.runWorkspaceClientAction(ctx, func(client Client) error {
+		var actionErr error
+		feedback, actionErr = client.GetMRFeedback(ctx.Request.Context(), projectPath, iid)
+		return actionErr
+	})
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+		writeWorkspaceClientActionError(ctx, err, "merge request feedback")
 		return
 	}
 	ctx.JSON(http.StatusOK, feedback)
@@ -124,9 +132,14 @@ func (c *Controller) httpCreateDiscussionNote(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid payload"})
 		return
 	}
-	note, err := c.service.CreateMRDiscussionNote(ctx.Request.Context(), req.Project, req.IID, req.DiscussionID, req.Body)
+	var note *MRNote
+	err := c.runWorkspaceClientAction(ctx, func(client Client) error {
+		var actionErr error
+		note, actionErr = client.CreateMRDiscussionNote(ctx.Request.Context(), req.Project, req.IID, req.DiscussionID, req.Body)
+		return actionErr
+	})
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+		writeWorkspaceClientActionError(ctx, err, "discussion reply")
 		return
 	}
 	ctx.JSON(http.StatusOK, note)
@@ -142,8 +155,11 @@ func (c *Controller) httpResolveDiscussion(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid payload"})
 		return
 	}
-	if err := c.service.ResolveMRDiscussion(ctx.Request.Context(), req.Project, req.IID, req.DiscussionID); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+	err := c.runWorkspaceClientAction(ctx, func(client Client) error {
+		return client.ResolveMRDiscussion(ctx.Request.Context(), req.Project, req.IID, req.DiscussionID)
+	})
+	if err != nil {
+		writeWorkspaceClientActionError(ctx, err, "discussion resolve")
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"resolved": true})
@@ -185,7 +201,7 @@ func (c *Controller) httpListWorkspaceTaskMRs(ctx *gin.Context) {
 	}
 	taskMRs, err := c.service.ListTaskMRsByWorkspace(ctx.Request.Context(), wsID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: "GitLab task merge requests unavailable"})
 		return
 	}
 	ctx.JSON(http.StatusOK, TaskMRsResponse{TaskMRs: taskMRs})
@@ -199,7 +215,7 @@ func (c *Controller) httpListTaskMRs(ctx *gin.Context) {
 	}
 	mrs, err := c.service.ListTaskMRsByTask(ctx.Request.Context(), taskID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: "GitLab task merge requests unavailable"})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"task_mrs": mrs})
@@ -243,11 +259,15 @@ func (c *Controller) httpSearchUserMRs(ctx *gin.Context) {
 			filter = translated
 		}
 	}
-	result, err := c.service.Client().SearchMRsPaged(
+	client, ok := c.workspaceClient(ctx)
+	if !ok {
+		return
+	}
+	result, err := client.SearchMRsPaged(
 		ctx.Request.Context(), filter, customQuery, page, perPage,
 	)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+		writeWorkspaceClientActionError(ctx, err, "merge request search")
 		return
 	}
 	ctx.JSON(http.StatusOK, result)
@@ -272,11 +292,15 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 			filter = translated
 		}
 	}
-	result, err := c.service.Client().ListIssuesPaged(
+	client, ok := c.workspaceClient(ctx)
+	if !ok {
+		return
+	}
+	result, err := client.ListIssuesPaged(
 		ctx.Request.Context(), filter, customQuery, page, perPage,
 	)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+		writeWorkspaceClientActionError(ctx, err, "issue search")
 		return
 	}
 	ctx.JSON(http.StatusOK, result)
@@ -293,9 +317,13 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 func (c *Controller) translateMRFilter(ctx *gin.Context, filter string) (string, error) {
 	var username string
 	if filter == filterTokenReviewRequested {
-		u, err := c.service.Client().GetAuthenticatedUser(ctx.Request.Context())
+		client, ok := c.workspaceClient(ctx)
+		if !ok {
+			return "", ErrWorkspaceRequired
+		}
+		u, err := client.GetAuthenticatedUser(ctx.Request.Context())
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+			writeWorkspaceClientActionError(ctx, err, "authenticated user lookup")
 			return "", err
 		}
 		if u == "" {

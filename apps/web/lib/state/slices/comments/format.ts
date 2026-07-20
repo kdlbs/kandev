@@ -81,7 +81,8 @@ export function formatPlanCommentsAsMarkdown(comments: PlanComment[]): string {
 export function formatPRFeedbackAsMarkdown(comments: PRFeedbackComment[]): string {
   if (!comments || comments.length === 0) return "";
 
-  const lines: string[] = ["### PR Feedback", ""];
+  const onlyGitLab = comments.every((comment) => comment.provider === "gitlab");
+  const lines: string[] = [onlyGitLab ? "### Merge Request Feedback" : "### PR Feedback", ""];
   for (const c of comments) {
     lines.push(c.content);
     lines.push("");
