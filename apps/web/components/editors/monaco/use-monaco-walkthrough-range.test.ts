@@ -168,6 +168,22 @@ describe("useMonacoWalkthroughRange", () => {
     expect(fake.revealLinesInCenter).toHaveBeenLastCalledWith(2, 2);
   });
 
+  it("does not recenter for same-model line count changes outside the active range", () => {
+    const fake = createModelSwitchingEditor(3);
+    renderHook(() =>
+      useMonacoWalkthroughRange({
+        editor: fake.editor,
+        editorAreaRef: { current: null },
+        path: WALKTHROUGH_FILE,
+      }),
+    );
+    fake.revealLinesInCenter.mockClear();
+
+    act(() => fake.changeLineCount(4));
+
+    expect(fake.revealLinesInCenter).not.toHaveBeenCalled();
+  });
+
   it("reapplies the range after switching to a model with the same line count", () => {
     const fake = createModelSwitchingEditor(3);
     renderHook(() =>
@@ -178,10 +194,12 @@ describe("useMonacoWalkthroughRange", () => {
       }),
     );
     fake.setDecorations.mockClear();
+    fake.revealLinesInCenter.mockClear();
 
     act(() => fake.switchModel(3));
 
     expect(fake.decoratedLines()).toEqual([2, 3]);
+    expect(fake.revealLinesInCenter).toHaveBeenLastCalledWith(2, 3);
   });
 
   it("unsubscribes from Monaco model events on unmount", () => {

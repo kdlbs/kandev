@@ -125,13 +125,59 @@ function useMonacoModelSnapshot(editor: monacoEditor.IStandaloneCodeEditor | nul
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+function useMonacoWalkthroughDecorations(
+  editor: monacoEditor.IStandaloneCodeEditor | null,
+  range: WalkthroughEditorRange | null,
+  anchorKey: string,
+  modelSnapshot: string,
+) {
+  const decorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
+  const revealedRef = useRef<{
+    editor: monacoEditor.IStandaloneCodeEditor;
+    model: monacoEditor.ITextModel | null;
+    anchorKey: string;
+    startLine: number;
+    endLine: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!editor) return;
+    decorationsRef.current = editor.createDecorationsCollection([]);
+    return () => {
+      decorationsRef.current?.set([]);
+      decorationsRef.current = null;
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    decorationsRef.current?.set(buildWalkthroughRangeDecorations(range));
+    if (!editor || !range) {
+      revealedRef.current = null;
+      return;
+    }
+
+    const next = { editor, model: editor.getModel(), anchorKey, ...range };
+    const previous = revealedRef.current;
+    if (
+      previous?.editor === next.editor &&
+      previous.model === next.model &&
+      previous.anchorKey === next.anchorKey &&
+      previous.startLine === next.startLine &&
+      previous.endLine === next.endLine
+    ) {
+      return;
+    }
+    revealedRef.current = next;
+    editor.revealLinesInCenter(range.startLine, range.endLine);
+  }, [anchorKey, editor, modelSnapshot, range]);
+}
+
 export function useMonacoWalkthroughRange({
   editor,
   editorAreaRef,
   path,
   repo,
 }: UseMonacoWalkthroughRangeOpts): WalkthroughRangeBox | null {
-  const decorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
   const [box, setBox] = useState<WalkthroughRangeBox | null>(null);
   const { taskId, stepIndex, step } = useActiveWalkthroughStep();
   const modelSnapshot = useMonacoModelSnapshot(editor);
@@ -145,22 +191,7 @@ export function useMonacoWalkthroughRange({
     [editor, modelSnapshot, range],
   );
   const anchorKey = taskId ? `${taskId}:${stepIndex}:${repo ?? ""}:${path}` : "";
-
-  useEffect(() => {
-    if (!editor) return;
-    decorationsRef.current = editor.createDecorationsCollection([]);
-    return () => {
-      decorationsRef.current?.set([]);
-      decorationsRef.current = null;
-    };
-  }, [editor]);
-
-  useEffect(() => {
-    decorationsRef.current?.set(buildWalkthroughRangeDecorations(clampedRange));
-    if (editor && clampedRange) {
-      editor.revealLinesInCenter(clampedRange.startLine, clampedRange.endLine);
-    }
-  }, [clampedRange, editor]);
+  useMonacoWalkthroughDecorations(editor, clampedRange, anchorKey, modelSnapshot);
 
   useEffect(() => {
     const area = editorAreaRef.current;
