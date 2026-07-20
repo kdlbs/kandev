@@ -109,6 +109,16 @@ Embed `pluginsdk.UnimplementedPlugin` and override only the methods you need
 live `Host` into your plugin once the broker connection back to kandev is
 established (retrieve it later via `p.Host()`).
 
+## Webhooks
+
+Declare each webhook key in `manifest.yaml`. Kandev relays `GET` and `POST`
+requests for `/api/plugins/<id>/webhooks/<key>` to `HandleWebhook`; undeclared
+keys return `404`. Request bodies are limited to **4 MiB** and requests that
+exceed the limit return `413` before reaching the plugin. Kandev does not
+authenticate webhook callers or enforce the manifest's informational `method`,
+so validate the HTTP method and the upstream provider's signature before any
+side effect.
+
 ## The Host API
 
 A plugin calls back into kandev through the injected `Host`:
