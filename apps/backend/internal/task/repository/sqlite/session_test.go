@@ -272,8 +272,7 @@ func TestRunMigrationsBackfillsSessionWorkflowStep(t *testing.T) {
 
 	if _, err := sqlxDB.Exec(`
 		CREATE TABLE task_sessions (
-			id TEXT PRIMARY KEY,
-			workflow_step_id TEXT DEFAULT ''
+			id TEXT PRIMARY KEY
 		);
 		CREATE TABLE session_step_history (
 			id TEXT PRIMARY KEY,
@@ -281,7 +280,7 @@ func TestRunMigrationsBackfillsSessionWorkflowStep(t *testing.T) {
 			to_step_id TEXT,
 			created_at TIMESTAMP
 		);
-		INSERT INTO task_sessions (id, workflow_step_id) VALUES ('session-migrated', '');
+		INSERT INTO task_sessions (id) VALUES ('session-migrated');
 		INSERT INTO session_step_history (id, session_id, to_step_id, created_at)
 		VALUES ('history-1', 'session-migrated', 'step-spec', '2025-01-01T00:00:00Z'),
 		       ('history-2', 'session-migrated', 'step-review', '2025-01-02T00:00:00Z');

@@ -872,10 +872,13 @@ func (s *Service) maybySwitchSessionForProfile(
 // Guarded against out-of-order writes: on-enter processing for a step runs in
 // its own goroutine (see handleTaskMovedWithSession/processStepExitAndEnter),
 // so a rapid A -> B -> C sequence of moves can let a delayed B goroutine
-// finish after C's. Without this check that delayed write would persist "B"
-// as the session's step link even though the task has already moved on to
-// "C". Re-reading the task and comparing WorkflowStepID makes the write a
-// no-op unless the task is still actually on `stepID`.
+// finish after C's. Re-reading the task and comparing WorkflowStepID closes
+// the common case: if B's goroutine is delayed past C's entire execution,
+// GetTask here returns "C" and the write is skipped. A finer interleaving (B
+// reads the task while it still shows "B", then C fully commits, then B's
+// write proceeds) can still transiently clobber C's link — this check does
+// not close that narrower window. That's acceptable given the best-effort
+// framing: the next session-state event repairs the link.
 func (s *Service) updateSessionStepLink(ctx context.Context, taskID string, session *models.TaskSession, stepID string) {
 	if session == nil || stepID == "" || session.WorkflowStepID == stepID {
 		return

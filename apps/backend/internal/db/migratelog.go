@@ -24,24 +24,29 @@ func NewMigrateLogger(db *sqlx.DB, log *logger.Logger) *MigrateLogger {
 }
 
 // Apply executes stmt and classifies the result:
-//   - success: logs "migration applied" at INFO
-//   - "already exists" error: silent (idempotent re-run)
-//   - anything else: logs "migration failed" at WARN
+//   - success: logs "migration applied" at INFO, returns true
+//   - "already exists" error: silent (idempotent re-run), returns false
+//   - anything else: logs "migration failed" at WARN, returns false
 //
 // The error is never returned - this matches the contract of the legacy
-// `_, _ = db.Exec(...)` pattern, with observability added.
-func (m *MigrateLogger) Apply(name, stmt string) {
+// `_, _ = db.Exec(...)` pattern, with observability added. The returned bool
+// lets callers gate one-time follow-up work (e.g. a backfill) so it only
+// runs on the boot where the column/table was actually newly created,
+// instead of re-running (and re-scanning the table) on every subsequent
+// boot once the ALTER becomes a no-op.
+func (m *MigrateLogger) Apply(name, stmt string) bool {
 	if _, err := m.db.Exec(stmt); err != nil {
 		if IsAlreadyExistsError(err) {
-			return
+			return false
 		}
 		if m.log != nil {
 			m.log.Warn("migration failed",
 				zap.String("name", name), zap.Error(err))
 		}
-		return
+		return false
 	}
 	if m.log != nil {
 		m.log.Info("migration applied", zap.String("name", name))
 	}
+	return true
 }

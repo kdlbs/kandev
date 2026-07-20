@@ -109,9 +109,14 @@ func (r *Repository) runMigrations() error {
 	// historically dropped by a now-removed removal migration that is gated on
 	// the column's presence; keeping the column out of base_schema guarantees
 	// that removal never re-fires on fresh DBs.
-	r.migrate.Apply("task_sessions.workflow_step_id", `ALTER TABLE task_sessions ADD COLUMN workflow_step_id TEXT DEFAULT ''`)
-	if err := r.backfillSessionWorkflowStep(); err != nil {
-		return err
+	// Gate the backfill on the ADD COLUMN having actually run (first boot after
+	// upgrade) rather than running it unconditionally: once the column exists,
+	// re-running the backfill's correlated EXISTS scan against every row in
+	// task_sessions on each subsequent boot is unnecessary cost.
+	if r.migrate.Apply("task_sessions.workflow_step_id", `ALTER TABLE task_sessions ADD COLUMN workflow_step_id TEXT DEFAULT ''`) {
+		if err := r.backfillSessionWorkflowStep(); err != nil {
+			return err
+		}
 	}
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}'`)
