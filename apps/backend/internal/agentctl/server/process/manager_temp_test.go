@@ -375,6 +375,9 @@ func TestManager_TempNamesDoNotCollideAfterSanitization(t *testing.T) {
 	if data, err := os.ReadFile(secondSentinel); err != nil || string(data) != "owned by second" {
 		t.Fatalf("first cleanup changed second temp dir, data = %q, err = %v", data, err)
 	}
+	if err := second.StopForTeardown(context.Background()); err != nil {
+		t.Fatalf("second Stop() error = %v", err)
+	}
 }
 
 func TestManager_StoppedAgentKeepsTempUntilWorkspaceProcessReaped(t *testing.T) {
