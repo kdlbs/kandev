@@ -4,7 +4,7 @@ export type SessionInfo = {
   diffStats: { additions: number; deletions: number } | undefined;
   updatedAt: string | undefined;
   sessionState: TaskSessionState | undefined;
-  // Fine-grained busy substate (ADR-0046) of the most-active session, so the
+  // Fine-grained busy substate (ADR-0047) of the most-active session, so the
   // sidebar indicator can distinguish background-running from generating. Paired
   // with `sessionState` (both read from the same picked session) and left
   // undefined when no session is present.

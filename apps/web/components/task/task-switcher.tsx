@@ -18,7 +18,7 @@ export type TaskSwitcherItem = {
   title: string;
   state?: TaskState;
   sessionState?: TaskSessionState;
-  /** Task-level most-active-wins busy aggregate (ADR-0046) from the task record. */
+  /** Task-level most-active-wins busy aggregate (ADR-0047) from the task record. */
   foregroundActivity?: ForegroundActivity | null;
   description?: string;
   workflowId?: string;

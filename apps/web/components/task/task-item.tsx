@@ -42,7 +42,7 @@ type TaskItemProps = {
   state?: TaskState;
   sessionState?: TaskSessionState;
   /**
-   * Task-level most-active-wins busy aggregate (ADR-0046) carried on the task
+   * Task-level most-active-wins busy aggregate (ADR-0047) carried on the task
    * record. Drives the sidebar row's generating/background tiers so it agrees
    * with the board card and open-task header instead of re-deriving from a
    * single session's substate (§spec:task-level-truth).

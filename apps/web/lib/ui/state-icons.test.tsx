@@ -150,7 +150,7 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
 });
 
 describe("getSessionStateIcon — fine-grained busy tri-state", () => {
-  // ADR-0046. Three distinguishable conditions:
+  // ADR-0047. Three distinguishable conditions:
   //  (a) RUNNING + generating  → the established static "running" dot (unchanged)
   //  (b) RUNNING + background   → working-in-background spinner, NOT the done check
   //  (c) COMPLETED              → done checkmark
@@ -228,7 +228,7 @@ describe("getSessionStateIcon — waiting-for-input variants (§spec:waiting-for
   });
 
   it("keeps background-running ahead of a waiting flag (still working in background)", () => {
-    // Session-level background is the emerald IconLoader2 spinner (ADR-0046),
+    // Session-level background is the emerald IconLoader2 spinner (ADR-0047),
     // distinct from the task-level violet IconLoader.
     expect(iconType(getSessionStateIcon("RUNNING", undefined, "background", true, false))).toBe(
       IconLoader2,

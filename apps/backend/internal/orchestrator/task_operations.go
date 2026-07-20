@@ -2690,7 +2690,9 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// the pre-injection prompt; PromptTask re-applies config/plan transforms.
 	s.rememberTurnPrompt(sessionID, prompt, model, planMode, attachments)
 
-	claimedSession, err := s.claimSessionRunningForPrompt(ctx, taskID, sessionID, claimEntryID, session)
+	claimedSession, err := s.claimSessionRunningForPrompt(
+		ctx, taskID, sessionID, claimEntryID, session, foregroundClaim,
+	)
 	if err != nil {
 		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
 		return nil, err
@@ -2849,7 +2851,12 @@ func (s *Service) effectivePromptForSession(sessionID, prompt string, planMode b
 // call near its top. Reloading the session and re-running
 // checkSessionPromptable here makes "is it actually still safe to mark this
 // session RUNNING right now" an atomic fact, not a stale read.
-func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sessionID, claimEntryID string, session *models.TaskSession) (*models.TaskSession, error) {
+func (s *Service) claimSessionRunningForPrompt(
+	ctx context.Context,
+	taskID, sessionID, claimEntryID string,
+	session *models.TaskSession,
+	foregroundClaim *foregroundClaim,
+) (*models.TaskSession, error) {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -2865,7 +2872,9 @@ func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sess
 	if freshSession == nil {
 		return nil, errQueuedDispatchSuperseded
 	}
-	if promptErr := s.checkSessionPromptable(taskID, sessionID, freshSession.State); promptErr != nil {
+	if promptErr := s.recheckPromptableWithForegroundClaim(
+		taskID, sessionID, freshSession.State, foregroundClaim,
+	); promptErr != nil {
 		return nil, promptErr
 	}
 	s.setSessionRunning(ctx, taskID, sessionID, freshSession)
@@ -2889,6 +2898,23 @@ func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sess
 		s.clearQueuedDispatchInFlightIfCurrent(sessionID, claimEntryID)
 	}
 	return freshSession, nil
+}
+
+func (s *Service) recheckPromptableWithForegroundClaim(
+	taskID, sessionID string,
+	state models.TaskSessionState,
+	claim *foregroundClaim,
+) error {
+	if claim == nil {
+		return s.checkSessionPromptable(taskID, sessionID, state)
+	}
+	if state != models.TaskSessionStateRunning {
+		return fmt.Errorf("%w: session is in %s state", ErrSessionNotPromptable, state)
+	}
+	if !s.isForegroundClaimCurrent(sessionID, claim) {
+		return fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
+	}
+	return nil
 }
 
 // checkSessionPromptable returns nil when the session's state accepts a new
