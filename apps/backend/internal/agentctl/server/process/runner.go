@@ -353,8 +353,6 @@ func (r *ProcessRunner) startAndActivate(proc *commandProcess, cmd *exec.Cmd, id
 	proc.mu.Lock()
 	proc.pgid = cmd.Process.Pid
 	proc.lifecycle = lifecycle
-	proc.mu.Unlock()
-	proc.mu.Lock()
 	proc.info.Status = types.ProcessStatusRunning
 	proc.info.UpdatedAt = time.Now().UTC()
 	proc.mu.Unlock()
