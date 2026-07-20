@@ -689,6 +689,7 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToProviderRepository
 		SourceType:    sourceTypeLocal,
 		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
 		Provider:      "github",
+		ProviderHost:  githubProviderHost,
 		ProviderOwner: "kdlbs",
 		ProviderName:  "kandev",
 		DefaultBranch: "main",
@@ -749,6 +750,7 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToSafeLocalRepositor
 		SourceType:    sourceTypeLocal,
 		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
 		Provider:      "github",
+		ProviderHost:  githubProviderHost,
 		ProviderOwner: "kdlbs",
 		ProviderName:  "kandev",
 		DefaultBranch: "main",
@@ -922,6 +924,7 @@ func TestService_CreateTask_CreatesProviderRepositoryForTaskWorktreeRepositoryID
 		SourceType:    sourceTypeLocal,
 		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
 		Provider:      "github",
+		ProviderHost:  githubProviderHost,
 		ProviderOwner: "kdlbs",
 		ProviderName:  "kandev",
 		DefaultBranch: "main",
@@ -1026,6 +1029,7 @@ func TestService_CreateTask_GitHubURLIgnoresTaskWorktreeProviderMatch(t *testing
 		SourceType:    sourceTypeLocal,
 		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
 		Provider:      "github",
+		ProviderHost:  githubProviderHost,
 		ProviderOwner: "kdlbs",
 		ProviderName:  "kandev",
 		DefaultBranch: "main",
@@ -1076,6 +1080,7 @@ func TestService_FindOrCreateRepository_ReturnsCreatedForTaskWorktreeReplacement
 		SourceType:    sourceTypeLocal,
 		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
 		Provider:      "github",
+		ProviderHost:  githubProviderHost,
 		ProviderOwner: "kdlbs",
 		ProviderName:  "kandev",
 		DefaultBranch: "main",
@@ -1116,6 +1121,7 @@ func TestService_FindOrCreateRepository_ErrorsWhenTaskWorktreeReplacementDisappe
 		SourceType:    sourceTypeLocal,
 		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
 		Provider:      "github",
+		ProviderHost:  githubProviderHost,
 		ProviderOwner: "kdlbs",
 		ProviderName:  "kandev",
 		DefaultBranch: "main",
@@ -1137,6 +1143,25 @@ func TestService_FindOrCreateRepository_ErrorsWhenTaskWorktreeReplacementDisappe
 	}
 	if !strings.Contains(err.Error(), "no longer exists") {
 		t.Fatalf("expected missing replacement error, got %v", err)
+	}
+}
+
+func TestSameProviderIdentityIncludesNormalizedHost(t *testing.T) {
+	public := &models.Repository{
+		Provider: "gitlab", ProviderHost: "https://gitlab.com", ProviderOwner: "group", ProviderName: "project",
+	}
+	selfManaged := &models.Repository{
+		Provider: "gitlab", ProviderHost: "https://gitlab.internal", ProviderOwner: "group", ProviderName: "project",
+	}
+	if sameProviderIdentity(public, selfManaged) {
+		t.Fatal("repositories on different GitLab hosts matched")
+	}
+	legacyGitHub := &models.Repository{Provider: "github", ProviderOwner: "group", ProviderName: "project"}
+	canonicalGitHub := &models.Repository{
+		Provider: "github", ProviderHost: githubProviderHost, ProviderOwner: "group", ProviderName: "project",
+	}
+	if !sameProviderIdentity(legacyGitHub, canonicalGitHub) {
+		t.Fatal("legacy hostless GitHub repository did not match the canonical GitHub host")
 	}
 }
 

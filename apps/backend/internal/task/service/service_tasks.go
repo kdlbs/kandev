@@ -566,6 +566,8 @@ func (s *Service) findSafeReplacementRepository(ctx context.Context, workspaceID
 
 func sameProviderIdentity(left, right *models.Repository) bool {
 	return left.Provider == right.Provider &&
+		normalizeProviderHost(left.Provider, left.ProviderHost) ==
+			normalizeProviderHost(right.Provider, right.ProviderHost) &&
 		left.ProviderOwner == right.ProviderOwner &&
 		left.ProviderName == right.ProviderName
 }
@@ -701,7 +703,7 @@ func (s *Service) resolveRepoInputRemote(
 	}
 	providerHost := ""
 	if provider == providerGitHub {
-		providerHost = "https://github.com"
+		providerHost = githubProviderHost
 	} else if provider == "gitlab" {
 		providerHost = "https://gitlab.com"
 	}
@@ -858,7 +860,7 @@ func parseAzureSSHRemote(parts []string) (string, string, string, string, error)
 func (s *Service) probeProviderDefaultBranchIfMissing(
 	ctx context.Context, workspaceID, provider, owner, name string,
 ) string {
-	existing, lookupErr := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, "https://github.com", owner, name)
+	existing, lookupErr := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, githubProviderHost, owner, name)
 	if lookupErr != nil {
 		s.logger.Warn("resolveRepoInput: failed to look up existing repo before probe",
 			zap.String("provider", provider),

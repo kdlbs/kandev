@@ -31,7 +31,7 @@ test.describe("compact desktop responsive layout", () => {
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.showSessionContext();
     await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible();
     await expect(testPage.getByTestId("tablet-task-layout")).toHaveCount(0);
     await expect(session.sidebar).toBeVisible();

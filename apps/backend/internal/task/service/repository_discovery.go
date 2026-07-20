@@ -21,7 +21,10 @@ type RepositoryDiscoveryConfig struct {
 	TaskWorktreeRoots []string
 }
 
-const githubProviderName = "github"
+const (
+	githubProviderName = "github"
+	githubProviderHost = "https://github.com"
+)
 
 // LocalRepoStatus reports the current branch and dirty file paths for a
 // local repository on disk. Used by the task-create dialog to preflight the
@@ -991,7 +994,7 @@ func ResolveGitRemoteProviderIdentity(repoPath string) (provider, origin, owner,
 	switch strings.ToLower(parsed.Hostname()) {
 	case "github.com":
 		provider = githubProviderName
-		origin = "https://github.com"
+		origin = githubProviderHost
 	case "gitlab.com":
 		provider = "gitlab"
 		origin = "https://gitlab.com"
