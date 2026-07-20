@@ -1182,6 +1182,15 @@ export class ApiClient {
       repo,
       branches,
     });
+
+    // Branch fixtures predate workspace-scoped GitHub authentication and
+    // expect the shared mock client to be available for provider lookups.
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
   }
 
   async mockGitHubAssociateTaskPR(data: {
