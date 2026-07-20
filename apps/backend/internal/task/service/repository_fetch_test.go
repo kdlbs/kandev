@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // TestBranchFetcher_CooldownSkipsRepeatedFetches verifies that a second call
@@ -137,4 +139,33 @@ func makeRepoWithCommit(t *testing.T, path string) string {
 		}
 	}
 	return path
+}
+
+func TestRefreshRepositoryBranches_SavedRepositoryOutsideDiscoveryRoots(t *testing.T) {
+	isolateGitEnvForTest(t)
+	discoveryRoot := t.TempDir()
+	repoPath := filepath.Join(t.TempDir(), "explicit-repo")
+	initRealGitRepo(t, repoPath)
+
+	svc := newDiscoveryService(t, discoveryRoot)
+	ctx := context.Background()
+	if err := svc.workspaces.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := svc.repoEntities.CreateRepository(ctx, &models.Repository{
+		ID: "outside-repo", WorkspaceID: "ws-1", Name: "outside", SourceType: sourceTypeLocal, LocalPath: repoPath,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	result, err := svc.RefreshRepositoryBranches(ctx, "outside-repo")
+	if err != nil {
+		t.Fatalf("RefreshRepositoryBranches: %v", err)
+	}
+	if result.FetchedAt.IsZero() {
+		t.Fatal("FetchedAt is zero")
+	}
+	if result.Err != nil {
+		t.Fatalf("fetch result error: %v", result.Err)
+	}
 }

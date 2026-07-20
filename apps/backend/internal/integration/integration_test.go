@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -221,6 +222,10 @@ func createTempRepoDir(t *testing.T) string {
 	baseDir := t.TempDir()
 	repoPath := filepath.Join(baseDir, "repo")
 	require.NoError(t, os.MkdirAll(repoPath, 0o755))
+	cmd := exec.Command("git", "init", "-b", "main", ".")
+	cmd.Dir = repoPath
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git init: %s", output)
 
 	return repoPath
 }

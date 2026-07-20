@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestPerformFreshBranch_CleanWorkingTree(t *testing.T) {
@@ -17,10 +19,11 @@ func TestPerformFreshBranch_CleanWorkingTree(t *testing.T) {
 	initRealGitRepo(t, repoPath)
 
 	svc := newDiscoveryService(t, root)
+	repositoryID := persistFreshBranchRepository(t, svc, repoPath)
 	err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
-		RepoPath:   repoPath,
-		BaseBranch: "main",
-		NewBranch:  "feature/x",
+		RepositoryID: repositoryID,
+		BaseBranch:   "main",
+		NewBranch:    "feature/x",
 	})
 	if err != nil {
 		t.Fatalf("PerformFreshBranch error: %v", err)
@@ -38,10 +41,11 @@ func TestPerformFreshBranch_DirtyWithoutConfirm(t *testing.T) {
 	writeDirty(t, repoPath, "untracked.txt", "hi")
 
 	svc := newDiscoveryService(t, root)
+	repositoryID := persistFreshBranchRepository(t, svc, repoPath)
 	err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
-		RepoPath:   repoPath,
-		BaseBranch: "main",
-		NewBranch:  "feature/x",
+		RepositoryID: repositoryID,
+		BaseBranch:   "main",
+		NewBranch:    "feature/x",
 	})
 	var dirty *ErrDirtyWorkingTree
 	if !errors.As(err, &dirty) {
@@ -68,8 +72,9 @@ func TestPerformFreshBranch_DirtyWithConfirm(t *testing.T) {
 	writeDirty(t, repoPath, "untracked.txt", "hi")
 
 	svc := newDiscoveryService(t, root)
+	repositoryID := persistFreshBranchRepository(t, svc, repoPath)
 	err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
-		RepoPath:            repoPath,
+		RepositoryID:        repositoryID,
 		BaseBranch:          "main",
 		NewBranch:           "feature/x",
 		ConfirmDiscard:      true,
@@ -95,8 +100,9 @@ func TestPerformFreshBranch_DirtyWithExtraUnconsented(t *testing.T) {
 	writeDirty(t, repoPath, "extra.txt", "hi")
 
 	svc := newDiscoveryService(t, root)
+	repositoryID := persistFreshBranchRepository(t, svc, repoPath)
 	err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
-		RepoPath:            repoPath,
+		RepositoryID:        repositoryID,
 		BaseBranch:          "main",
 		NewBranch:           "feature/x",
 		ConfirmDiscard:      true,
@@ -139,10 +145,11 @@ func TestPerformFreshBranch_RefusesExistingBranch(t *testing.T) {
 	}
 
 	svc := newDiscoveryService(t, root)
+	repositoryID := persistFreshBranchRepository(t, svc, repoPath)
 	err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
-		RepoPath:   repoPath,
-		BaseBranch: "main",
-		NewBranch:  "feature/existing",
+		RepositoryID: repositoryID,
+		BaseBranch:   "main",
+		NewBranch:    "feature/existing",
 	})
 	if err == nil {
 		t.Fatal("expected PerformFreshBranch to refuse overwriting an existing branch")
@@ -156,13 +163,14 @@ func TestPerformFreshBranch_RejectsFlagLikeRefs(t *testing.T) {
 	initRealGitRepo(t, repoPath)
 
 	svc := newDiscoveryService(t, root)
+	repositoryID := persistFreshBranchRepository(t, svc, repoPath)
 	if err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
-		RepoPath: repoPath, BaseBranch: "main", NewBranch: "--upload-pack=evil",
+		RepositoryID: repositoryID, BaseBranch: "main", NewBranch: "--upload-pack=evil",
 	}); err == nil {
 		t.Fatal("expected rejection for ref starting with --")
 	}
 	if err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
-		RepoPath: repoPath, BaseBranch: "-flag", NewBranch: "feature/x",
+		RepositoryID: repositoryID, BaseBranch: "-flag", NewBranch: "feature/x",
 	}); err == nil {
 		t.Fatal("expected rejection for ref starting with -")
 	}
@@ -175,13 +183,14 @@ func TestPerformFreshBranch_RejectsEmptyFields(t *testing.T) {
 	initRealGitRepo(t, repoPath)
 
 	svc := newDiscoveryService(t, root)
+	repositoryID := persistFreshBranchRepository(t, svc, repoPath)
 	if err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
-		RepoPath: repoPath, NewBranch: "feature/x",
+		RepositoryID: repositoryID, NewBranch: "feature/x",
 	}); err == nil {
 		t.Fatal("expected error for empty BaseBranch")
 	}
 	if err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
-		RepoPath: repoPath, BaseBranch: "main",
+		RepositoryID: repositoryID, BaseBranch: "main",
 	}); err == nil {
 		t.Fatal("expected error for empty NewBranch")
 	}
@@ -203,6 +212,22 @@ func TestLocalRepositoryStatus_CleanRepo(t *testing.T) {
 	}
 	if len(status.DirtyFiles) != 0 {
 		t.Fatalf("expected clean tree, got dirty files: %v", status.DirtyFiles)
+	}
+}
+
+func TestLocalRepositoryStatus_ExplicitPathOutsideDiscoveryRoots(t *testing.T) {
+	isolateGitEnvForTest(t)
+	discoveryRoot := t.TempDir()
+	repoPath := filepath.Join(t.TempDir(), "explicit-repo")
+	initRealGitRepo(t, repoPath)
+
+	svc := newDiscoveryService(t, discoveryRoot)
+	status, err := svc.LocalRepositoryStatus(context.Background(), repoPath)
+	if err != nil {
+		t.Fatalf("LocalRepositoryStatus: %v", err)
+	}
+	if status.CurrentBranch != "main" {
+		t.Fatalf("CurrentBranch = %q, want main", status.CurrentBranch)
 	}
 }
 
@@ -352,4 +377,20 @@ func isolateGitEnvForTest(t *testing.T) {
 			t.Cleanup(func() { _ = os.Setenv(key, val) })
 		}
 	}
+}
+
+func persistFreshBranchRepository(t *testing.T, svc *Service, repoPath string) string {
+	t.Helper()
+	ctx := context.Background()
+	const workspaceID = "fresh-branch-workspace"
+	const repositoryID = "fresh-branch-repository"
+	if err := svc.workspaces.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := svc.repoEntities.CreateRepository(ctx, &models.Repository{
+		ID: repositoryID, WorkspaceID: workspaceID, Name: "Repository", SourceType: sourceTypeLocal, LocalPath: repoPath,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	return repositoryID
 }

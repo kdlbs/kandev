@@ -80,12 +80,12 @@ func DefaultBranchOrEmpty(repoPath string) (string, error) {
 }
 
 // guardRepoPath rejects relative paths and any path containing `..` segments
-// before passing the value into the file-reading helpers below. Callers
-// already validate against an allowlist (see service.resolveAllowedLocalPath),
-// but CodeQL's go/path-injection taint analysis doesn't trace that as a
-// sanitizer, so we re-check here at the I/O boundary. The check is also
-// genuinely useful: any caller — migration code, tests, future callers —
-// must hand us an absolute, traversal-free path or we refuse to read.
+// before passing the value into the file-reading helpers below. Service
+// callers provide canonical explicit repository paths, but CodeQL's
+// go/path-injection taint analysis does not trace that as a sanitizer, so we
+// re-check here at the I/O boundary. The check is also genuinely useful: any
+// caller - migration code, tests, or future callers - must hand us an absolute,
+// traversal-free path or we refuse to read.
 func guardRepoPath(repoPath string) (string, error) {
 	if repoPath == "" {
 		return "", fmt.Errorf("repository path is required")

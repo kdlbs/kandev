@@ -56,6 +56,8 @@ type RepositoryPathValidation struct {
 
 var ErrPathNotAllowed = errors.New("path is not within an allowed root")
 
+var ErrInvalidRepositoryPath = errors.New("invalid repository path")
+
 // gitHEAD is the HEAD git ref.
 const gitHEAD = "HEAD"
 
@@ -108,43 +110,151 @@ func (s *Service) DiscoverLocalRepositories(ctx context.Context, root string) (R
 }
 
 func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) (RepositoryPathValidation, error) {
-	absPath, err := filepath.Abs(path)
+	absPath, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
 		return RepositoryPathValidation{}, fmt.Errorf("invalid path: %w", err)
 	}
-	roots := s.discoveryRoots()
-	allowed := isPathAllowed(absPath, roots)
-	info, statErr := os.Stat(absPath)
-	exists := statErr == nil
-	isDir := exists && info.IsDir()
-	isGit := false
-	defaultBranch := ""
-	message := ""
-
-	switch {
-	case !allowed:
-		message = "Path is outside the allowed roots"
-	case !exists:
-		message = "Path does not exist"
-	case !isDir:
-		message = "Path is not a directory"
-	default:
-		var gitErr error
-		defaultBranch, gitErr = readGitDefaultBranch(absPath)
-		isGit = gitErr == nil
-		if !isGit {
-			message = "Not a git repository"
-		}
+	result := RepositoryPathValidation{Path: absPath, Allowed: true}
+	canonicalPath, defaultBranch, resolveErr := resolveExplicitLocalRepositoryPath(absPath)
+	if resolveErr == nil {
+		result.Path = canonicalPath
+		result.Exists = true
+		result.IsGitRepo = true
+		result.DefaultBranch = defaultBranch
+		return result, nil
 	}
 
-	return RepositoryPathValidation{
-		Path:          absPath,
-		Exists:        exists,
-		IsGitRepo:     isGit,
-		Allowed:       allowed,
-		DefaultBranch: defaultBranch,
-		Message:       message,
-	}, nil
+	info, statErr := os.Stat(absPath)
+	result.Exists = statErr == nil
+	switch {
+	case errors.Is(statErr, os.ErrNotExist):
+		result.Message = "Path does not exist"
+	case statErr != nil:
+		result.Message = "Path cannot be accessed"
+	case !info.IsDir():
+		result.Message = "Path is not a directory"
+	default:
+		result.Message = "Not a git repository"
+	}
+	return result, nil
+}
+
+// resolveExplicitLocalRepositoryPath validates a path the user selected
+// directly. Discovery roots intentionally do not apply to explicit choices.
+func resolveExplicitLocalRepositoryPath(repoPath string) (string, string, error) {
+	if repoPath == "" {
+		return "", "", fmt.Errorf("%w: path is required", ErrInvalidRepositoryPath)
+	}
+	absPath, err := filepath.Abs(filepath.Clean(repoPath))
+	if err != nil {
+		return "", "", fmt.Errorf("%w: %v", ErrInvalidRepositoryPath, err)
+	}
+	canonicalPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: %v", ErrInvalidRepositoryPath, err)
+	}
+	info, err := os.Stat(canonicalPath)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: %v", ErrInvalidRepositoryPath, err)
+	}
+	if !info.IsDir() {
+		return "", "", fmt.Errorf("%w: path is not a directory", ErrInvalidRepositoryPath)
+	}
+	if err := validateExplicitGitMetadata(canonicalPath); err != nil {
+		return "", "", fmt.Errorf("%w: %v", ErrInvalidRepositoryPath, err)
+	}
+	defaultBranch, err := readGitDefaultBranch(canonicalPath)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: not a git repository", ErrInvalidRepositoryPath)
+	}
+	return filepath.Clean(canonicalPath), defaultBranch, nil
+}
+
+// validateExplicitGitMetadata rejects metadata indirection that does not prove
+// it belongs to the selected repository. A real linked worktree has a .git
+// pointer whose target contains both a reciprocal gitdir pointer and a
+// commondir placing that target under <common-dir>/worktrees. Without those
+// checks, a crafted folder could borrow another repository's .git directory
+// and turn an exact-path grant into permission to mutate unrelated Git refs.
+func validateExplicitGitMetadata(repoPath string) error {
+	gitPath := filepath.Join(repoPath, ".git")
+	info, err := os.Lstat(gitPath)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New(".git metadata must not be a symbolic link")
+	}
+	if info.IsDir() {
+		return validateStandaloneGitMetadata(gitPath)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New(".git metadata must be a directory or linked-worktree pointer")
+	}
+	return validateLinkedWorktreeMetadata(repoPath, gitPath)
+}
+
+func validateStandaloneGitMetadata(gitPath string) error {
+	if _, err := os.Lstat(filepath.Join(gitPath, "commondir")); err == nil {
+		return errors.New("standalone .git metadata must not redirect its common directory")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func validateLinkedWorktreeMetadata(repoPath, gitPath string) error {
+	gitDir, err := resolveGitDir(repoPath)
+	if err != nil {
+		return err
+	}
+	canonicalGitDir, err := filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		return err
+	}
+	canonicalGitFile, err := filepath.EvalSymlinks(gitPath)
+	if err != nil {
+		return err
+	}
+
+	backPointer, err := readMetadataPath(filepath.Join(canonicalGitDir, "gitdir"), canonicalGitDir)
+	if err != nil {
+		return errors.New(".git pointer is not a linked worktree")
+	}
+	if !sameCanonicalPath(backPointer, canonicalGitFile) {
+		return errors.New("linked-worktree metadata does not point back to the selected repository")
+	}
+
+	commonDir, err := readMetadataPath(filepath.Join(canonicalGitDir, "commondir"), canonicalGitDir)
+	if err != nil {
+		return errors.New("linked-worktree metadata has no valid common directory")
+	}
+	worktreesDir := filepath.Join(commonDir, "worktrees")
+	rel, err := filepath.Rel(worktreesDir, canonicalGitDir)
+	if err != nil || rel == "." || filepath.Dir(rel) != "." {
+		return errors.New("linked-worktree metadata is outside its common directory")
+	}
+	return nil
+}
+
+func readMetadataPath(path, relativeTo string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	metadataPath := strings.TrimSpace(string(content))
+	if metadataPath == "" {
+		return "", errors.New("metadata path is empty")
+	}
+	if !filepath.IsAbs(metadataPath) {
+		metadataPath = filepath.Join(relativeTo, metadataPath)
+	}
+	return filepath.EvalSymlinks(filepath.Clean(metadataPath))
+}
+
+func sameCanonicalPath(left, right string) bool {
+	rel, err := filepath.Rel(left, right)
+	return err == nil && rel == "."
 }
 
 // BranchListResult bundles a branch list with the currently-checked-out
@@ -198,7 +308,7 @@ func (s *Service) ListBranchesWithCurrent(ctx context.Context, repoID, path stri
 	// HEAD is detached or unreadable.
 	return BranchListResult{
 		Branches:      branches,
-		CurrentBranch: readGitCurrentBranch(resolved, s.discoveryRoots()),
+		CurrentBranch: readExplicitGitCurrentBranch(resolved),
 	}, nil
 }
 
@@ -232,42 +342,68 @@ func (s *Service) listRemoteBranchesIfApplicable(ctx context.Context, repoID str
 	return branches, true, err
 }
 
-// resolveBranchListingPath turns the request inputs into a validated
-// absolute path to list branches in. Both inputs go through the same
-// allowed-roots / dir / symlink validation via resolveAllowedLocalPath.
+// resolveBranchListingPath turns the request inputs into a validated,
+// canonical path to list branches in. A repository ID resolves the durable
+// path grant stored on the repository; a raw path is an explicit read-only
+// pre-registration probe. Discovery roots do not authorize either case.
 func (s *Service) resolveBranchListingPath(ctx context.Context, repoID, path string) (string, error) {
 	switch {
 	case repoID != "":
-		repo, err := s.repoEntities.GetRepository(ctx, repoID)
-		if err != nil {
-			return "", err
-		}
-		if repo.LocalPath == "" {
-			return "", fmt.Errorf("repository local path is empty")
-		}
-		path = repo.LocalPath
+		return s.resolveRepositoryLocalPath(ctx, repoID)
 	case path == "":
 		return "", fmt.Errorf("repository_id or path is required")
 	}
-	return s.resolveAllowedLocalPath(path)
+	resolved, _, err := resolveExplicitLocalRepositoryPath(path)
+	return resolved, err
+}
+
+func (s *Service) resolveRepositoryLocalPath(ctx context.Context, repoID string) (string, error) {
+	if repoID == "" {
+		return "", errors.New("repository ID is required")
+	}
+	repo, err := s.repoEntities.GetRepository(ctx, repoID)
+	if err != nil {
+		return "", err
+	}
+	if repo.LocalPath == "" {
+		return "", errors.New("repository local path is empty")
+	}
+	resolved, _, err := resolveExplicitLocalRepositoryPath(repo.LocalPath)
+	if err != nil {
+		return "", err
+	}
+	if !sameCanonicalPath(filepath.Clean(repo.LocalPath), resolved) {
+		return "", fmt.Errorf("%w: saved repository path resolves to a different location", ErrInvalidRepositoryPath)
+	}
+	return resolved, nil
+}
+
+// RepositoryCurrentBranch returns the current branch for a saved repository,
+// resolving its exact path grant by repository ID.
+func (s *Service) RepositoryCurrentBranch(ctx context.Context, repoID string) (string, error) {
+	resolved, err := s.resolveRepositoryLocalPath(ctx, repoID)
+	if err != nil {
+		return "", err
+	}
+	return readExplicitGitCurrentBranch(resolved), nil
 }
 
 // LocalRepositoryCurrentBranch returns the currently checked-out branch for a
 // local repository on disk. Returns the branch name (e.g. "main") or an empty
 // string if HEAD is detached or unreadable.
 func (s *Service) LocalRepositoryCurrentBranch(ctx context.Context, path string) (string, error) {
-	absPath, err := s.resolveAllowedLocalPath(path)
+	absPath, _, err := resolveExplicitLocalRepositoryPath(path)
 	if err != nil {
 		return "", err
 	}
-	return readGitCurrentBranch(absPath, s.discoveryRoots()), nil
+	return readExplicitGitCurrentBranch(absPath), nil
 }
 
 // LocalRepositoryStatus returns the current branch and dirty file list for a
 // local repository on disk. Used by the task-create dialog to preflight the
 // fresh-branch flow before committing to a destructive checkout.
 func (s *Service) LocalRepositoryStatus(ctx context.Context, path string) (LocalRepoStatus, error) {
-	absPath, err := s.resolveAllowedLocalPath(path)
+	absPath, _, err := resolveExplicitLocalRepositoryPath(path)
 	if err != nil {
 		return LocalRepoStatus{}, err
 	}
@@ -276,75 +412,26 @@ func (s *Service) LocalRepositoryStatus(ctx context.Context, path string) (Local
 		return LocalRepoStatus{}, err
 	}
 	return LocalRepoStatus{
-		CurrentBranch: readGitCurrentBranch(absPath, s.discoveryRoots()),
+		CurrentBranch: readExplicitGitCurrentBranch(absPath),
 		DirtyFiles:    dirty,
 	}, nil
 }
 
-func (s *Service) resolveAllowedLocalPath(repoPath string) (string, error) {
-	if repoPath == "" {
-		return "", fmt.Errorf("repository path is required")
-	}
-	roots := s.discoveryRoots()
-	abs, err := filepath.Abs(filepath.Clean(repoPath))
+// readExplicitGitCurrentBranch preserves linked-worktree support: an explicit
+// repository's .git file may legitimately point at metadata outside the
+// worktree directory. The repository has already passed Git validation before
+// this helper is called, so its resolved metadata directory is trusted for the
+// narrow HEAD read.
+func readExplicitGitCurrentBranch(repoPath string) string {
+	gitDir, err := resolveGitDir(repoPath)
 	if err != nil {
-		return "", fmt.Errorf("invalid repository path: %w", err)
+		return ""
 	}
-	// Resolve symlinks before the allowlist check so that OS-level symlinks
-	// (e.g. /var -> /private/var on macOS) don't produce false negatives.
-	// normalizeRoots already resolves symlinks on the roots themselves, so both
-	// sides of the comparison are canonical after this step.
-	resolved, err := filepath.EvalSymlinks(abs)
+	canonicalGitDir, err := filepath.EvalSymlinks(gitDir)
 	if err != nil {
-		return "", err
+		return ""
 	}
-	safe, err := pathWithinRoots(filepath.Clean(resolved), roots)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(safe)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("repository path is not a directory")
-	}
-	return safe, nil
-}
-
-// pathWithinRoots returns abs only when it sits inside one of the allowed
-// roots after resolving relative segments. The returned string is the
-// trusted, validated path; callers should never use the original input for
-// subsequent file operations.
-//
-// Each root is also passed through filepath.EvalSymlinks before comparison so
-// that OS-level symlinks (e.g. /var -> /private/var on macOS) do not produce
-// false negatives when abs was obtained via EvalSymlinks but the stored root
-// was not.
-func pathWithinRoots(abs string, roots []string) (string, error) {
-	for _, root := range roots {
-		if root == "" {
-			continue
-		}
-		// Resolve symlinks on the root so both sides of the comparison are
-		// canonical. Ignore errors — if the root itself doesn't exist we skip it.
-		canonRoot := root
-		if r, err := filepath.EvalSymlinks(root); err == nil {
-			canonRoot = r
-		}
-		rel, err := filepath.Rel(canonRoot, abs)
-		if err != nil {
-			continue
-		}
-		if rel == "." {
-			return abs, nil
-		}
-		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-			continue
-		}
-		return abs, nil
-	}
-	return "", ErrPathNotAllowed
+	return readGitCurrentBranch(repoPath, []string{canonicalGitDir})
 }
 
 func (s *Service) discoveryRoots() []string {
@@ -528,14 +615,11 @@ func isWithinRoot(path string, root string) bool {
 	}
 	absPath = filepath.Clean(absPath)
 	absRoot = filepath.Clean(absRoot)
-	if absPath == absRoot {
-		return true
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return false
 	}
-	separator := string(os.PathSeparator)
-	if !strings.HasSuffix(absRoot, separator) {
-		absRoot += separator
-	}
-	return strings.HasPrefix(absPath, absRoot)
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
 }
 
 // readGitCurrentBranch returns the currently checked-out branch by reading

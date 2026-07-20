@@ -2,11 +2,9 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -133,33 +131,12 @@ func newNonInteractiveGitFetchCmd(ctx context.Context, repoPath string) *exec.Cm
 
 // RefreshRepositoryBranches resolves the repository's local path and runs
 // `git fetch` for it, subject to a per-repository cooldown and single-flight
-// deduplication. Returns ErrPathNotAllowed when the repository's path is not
-// inside an allowed discovery root.
+// deduplication. The persisted repository path is the durable exact-path grant;
+// discovery roots only constrain automatic scanning.
 func (s *Service) RefreshRepositoryBranches(ctx context.Context, repoID string) (BranchRefreshResult, error) {
-	repo, err := s.repoEntities.GetRepository(ctx, repoID)
+	localPath, err := s.resolveRepositoryLocalPath(ctx, repoID)
 	if err != nil {
 		return BranchRefreshResult{}, err
 	}
-	return s.RefreshBranchesAtPath(ctx, repo.LocalPath)
-}
-
-// RefreshBranchesAtPath validates an already-resolved repository path and runs
-// `git fetch` for it, subject to the same cooldown and single-flight as
-// RefreshRepositoryBranches. Use this when the caller already has the path in
-// hand to avoid a redundant repository lookup.
-func (s *Service) RefreshBranchesAtPath(ctx context.Context, localPath string) (BranchRefreshResult, error) {
-	if localPath == "" {
-		return BranchRefreshResult{}, errors.New("repository local path is empty")
-	}
-	absPath, err := filepath.Abs(localPath)
-	if err != nil {
-		return BranchRefreshResult{}, fmt.Errorf("invalid repository path: %w", err)
-	}
-	if !isPathAllowed(absPath, s.discoveryRoots()) {
-		return BranchRefreshResult{}, ErrPathNotAllowed
-	}
-	if info, statErr := os.Stat(absPath); statErr != nil || !info.IsDir() {
-		return BranchRefreshResult{}, errors.New("repository path is not a directory")
-	}
-	return s.branchFetcher.Fetch(ctx, absPath), nil
+	return s.branchFetcher.Fetch(ctx, localPath), nil
 }

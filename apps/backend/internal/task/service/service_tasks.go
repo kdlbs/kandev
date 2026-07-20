@@ -16,7 +16,6 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -630,14 +629,11 @@ func (s *Service) resolveRepoInputLocal(
 		// a feature branch and break every downstream merge-base lookup.
 		defaultBranch := repoInput.DefaultBranch
 		if defaultBranch == "" {
-			// Probe must operate on a path validated against the discovery
-			// allowlist — repoInput.LocalPath comes straight from the HTTP body
-			// and feeds into os.Stat/ReadFile inside gitref.DefaultBranch, so
-			// without this guard a caller could traverse the filesystem.
-			if safePath, pathErr := s.resolveAllowedLocalPath(repoInput.LocalPath); pathErr == nil {
-				if probed, err := gitref.DefaultBranchOrEmpty(safePath); err == nil && probed != "" {
-					defaultBranch = probed
-				}
+			// A manually supplied path is an explicit read-only probe. Canonical
+			// repository validation protects the filesystem read; discovery roots
+			// only constrain automatic scans.
+			if _, probed, pathErr := resolveExplicitLocalRepositoryPath(repoInput.LocalPath); pathErr == nil && probed != "" {
+				defaultBranch = probed
 			}
 		}
 		createdRepo, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{

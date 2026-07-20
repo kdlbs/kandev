@@ -142,7 +142,7 @@ Debug output may contain repository paths, subprocess output, prompts, file cont
 
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
-| `repositoryDiscovery.roots` | `KANDEV_REPOSITORYDISCOVERY_ROOTS` | `[]` | Local roots exposed to repository discovery. Prefer absolute paths. Array encoding through environment variables is Viper-dependent; YAML is clearer. |
+| `repositoryDiscovery.roots` | `KANDEV_REPOSITORYDISCOVERY_ROOTS` | `[]` | Roots traversed by automatic repository discovery. Explicitly selected repository paths need not be included. Prefer absolute paths. Array encoding through environment variables is Viper-dependent; YAML is clearer. |
 | `repositoryDiscovery.maxDepth` | `KANDEV_REPOSITORYDISCOVERY_MAXDEPTH` | `5` | Positive directory traversal depth. |
 | `worktree.enabled` | `KANDEV_WORKTREE_ENABLED` | `true` | Enables the worktree provider. |
 | `worktree.defaultBranch` | `KANDEV_WORKTREE_DEFAULTBRANCH` | `main` | Accepted compatibility field; current task behavior uses each repository's stored/detected default branch instead. |
@@ -151,7 +151,7 @@ Debug output may contain repository paths, subprocess output, prompts, file cont
 | `worktree.pullTimeoutSeconds` | `KANDEV_WORKTREE_PULLTIMEOUTSECONDS` | `60` | Git pull timeout during worktree preparation. |
 | `repoClone.basePath` | `KANDEV_REPOCLONE_BASEPATH` | `<home>/repos` | Base directory for provider-backed clones. A leading `~/` expands. |
 
-Discovery roots grant Kandev visibility into local filesystem trees and repositories. Scope them narrowly. Worktrees and clones can contain credentials or generated files ignored by Git; review repository copy-file and setup/cleanup settings before remote execution. See [Git operations](./git-operations.md).
+Discovery roots bound automatic filesystem traversal, so scope them narrowly. They do not authorize explicitly selected repository paths: **Add Local Repository** validates and saves the exact accessible Git repository the user chooses without widening automatic scans. Worktrees and clones can contain credentials or generated files ignored by Git; review repository copy-file and setup/cleanup settings before remote execution. See [Git operations](./git-operations.md).
 
 ### Debug configuration
 
@@ -189,6 +189,9 @@ repositoryDiscovery:
   roots:
     - "/srv/repositories"
 ```
+
+This example changes automatic discovery only. An explicitly selected repository may live outside
+`/srv/repositories` if the Kandev process can access and validate it.
 
 A complete shape, including compatibility fields, is:
 
@@ -249,7 +252,7 @@ logging:
   compress: true
 
 repositoryDiscovery:
-  roots: []
+  roots: []                # automatic scan roots; explicit paths need not be included
   maxDepth: 5
 
 worktree:

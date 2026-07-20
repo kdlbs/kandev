@@ -6,6 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -1047,6 +1050,149 @@ func TestResolveFreshBranchName(t *testing.T) {
 			tc.assert(t, resolveFreshBranchName(tc.raw, tc.taskTitle))
 		})
 	}
+}
+
+type freshBranchIdentityRepository struct {
+	mockRepository
+	task         *models.Task
+	taskRepos    []*models.TaskRepository
+	repositories map[string]*models.Repository
+	listTaskErr  error
+	deletedTask  bool
+}
+
+func (r *freshBranchIdentityRepository) GetTask(_ context.Context, _ string) (*models.Task, error) {
+	return r.task, nil
+}
+
+func (r *freshBranchIdentityRepository) DeleteTask(_ context.Context, _ string) error {
+	r.deletedTask = true
+	return nil
+}
+
+func (r *freshBranchIdentityRepository) ListTaskRepositories(_ context.Context, _ string) ([]*models.TaskRepository, error) {
+	return r.taskRepos, r.listTaskErr
+}
+
+func (r *freshBranchIdentityRepository) GetRepository(_ context.Context, id string) (*models.Repository, error) {
+	repo, ok := r.repositories[id]
+	if !ok {
+		return nil, errors.New("repository not found")
+	}
+	return repo, nil
+}
+
+func (r *freshBranchIdentityRepository) DeleteTaskRepositoriesByTask(_ context.Context, _ string) error {
+	r.taskRepos = nil
+	return nil
+}
+
+func (r *freshBranchIdentityRepository) CreateTaskRepository(_ context.Context, taskRepo *models.TaskRepository) error {
+	r.taskRepos = append(r.taskRepos, taskRepo)
+	return nil
+}
+
+func TestCommitFreshBranchUsesPersistedTaskRepositoryIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	realRepoPath := initHandlerGitRepository(t, filepath.Join(t.TempDir(), "real"))
+	decoyRepoPath := initHandlerGitRepository(t, filepath.Join(t.TempDir(), "decoy"))
+	repo := &freshBranchIdentityRepository{
+		task: &models.Task{ID: "task-1", WorkspaceID: "ws-1"},
+		taskRepos: []*models.TaskRepository{{
+			ID: "task-repo-1", TaskID: "task-1", RepositoryID: "real-repo", BaseBranch: "main", Position: 0,
+		}},
+		repositories: map[string]*models.Repository{
+			"real-repo": {ID: "real-repo", WorkspaceID: "ws-1", Name: "real", SourceType: "local", LocalPath: realRepoPath},
+		},
+	}
+	log := newTestLogger(t)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo,
+		Messages: repo, Turns: repo, Sessions: repo, GitSnapshots: repo,
+		RepoEntities: repo, Executors: repo, Environments: repo,
+		TaskEnvironments: repo, Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{Roots: []string{filepath.Dir(decoyRepoPath)}})
+	handler := &TaskHandlers{service: svc, logger: log}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", nil)
+	inputs := []httpTaskRepositoryInput{{
+		RepositoryID: "real-repo", LocalPath: decoyRepoPath, BaseBranch: "main",
+		FreshBranch: true, NewBranchName: "feature/identity",
+	}}
+	repos := []dto.TaskRepositoryInput{{RepositoryID: "real-repo", BaseBranch: "main", LocalPath: decoyRepoPath}}
+
+	if ok := handler.commitFreshBranch(c, "task-1", "Identity", "ws-1", inputs, repos); !ok {
+		t.Fatalf("commitFreshBranch failed: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if branch := handlerGitCurrentBranch(t, realRepoPath); branch != "feature/identity" {
+		t.Fatalf("persisted repository branch = %q, want feature/identity", branch)
+	}
+	if branch := handlerGitCurrentBranch(t, decoyRepoPath); branch != "main" {
+		t.Fatalf("request path branch = %q, want unchanged main", branch)
+	}
+	if len(repo.taskRepos) != 1 || repo.taskRepos[0].BaseBranch != "feature/identity" {
+		t.Fatalf("persisted task repositories = %+v, want rewritten feature/identity branch", repo.taskRepos)
+	}
+}
+
+func TestCommitFreshBranchRollsBackTaskWhenPersistedRepositoriesCannotBeLoaded(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &freshBranchIdentityRepository{
+		task:        &models.Task{ID: "task-1", WorkspaceID: "ws-1"},
+		listTaskErr: errors.New("database unavailable"),
+	}
+	log := newTestLogger(t)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo,
+		Messages: repo, Turns: repo, Sessions: repo, GitSnapshots: repo,
+		RepoEntities: repo, Executors: repo, Environments: repo,
+		TaskEnvironments: repo, Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	handler := &TaskHandlers{service: svc, logger: log}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", nil)
+	inputs := []httpTaskRepositoryInput{{RepositoryID: "repo-1", FreshBranch: true}}
+	repos := []dto.TaskRepositoryInput{{RepositoryID: "repo-1"}}
+
+	if ok := handler.commitFreshBranch(c, "task-1", "Identity", "ws-1", inputs, repos); ok {
+		t.Fatal("commitFreshBranch succeeded despite task repository load error")
+	}
+	if !repo.deletedTask {
+		t.Fatal("created task was not rolled back")
+	}
+}
+
+func initHandlerGitRepository(t *testing.T, path string) string {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for _, args := range [][]string{
+		{"init", "-b", "main"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+		{"commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = path
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	return path
+}
+
+func handlerGitCurrentBranch(t *testing.T, path string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = path
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git current branch: %v", err)
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func TestAssociatePRFromRepoInputs(t *testing.T) {

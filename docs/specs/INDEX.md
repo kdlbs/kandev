@@ -93,6 +93,7 @@ Per-workspace credentials and triage triggers for external services.
 | Spec | Status |
 |---|---|
 | [deletion](workspaces/deletion.md) | shipped |
+| [local-repositories](workspaces/local-repositories.md) | draft |
 
 ## costs/ — cost tracking & budgets
 
