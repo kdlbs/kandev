@@ -159,9 +159,9 @@ a PR that lists it.
    [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json).
 2. Open a pull request. The registry index-build workflow runs on your PR
    (build + tests, no Pages deploy), resolving your entry against the GitHub API
-   — your repo must have a latest release that publishes a `.tar.gz` package and
-   its `checksums.txt`. An entry whose repo has no release or no package asset is
-   skipped.
+   — your repo must have a latest release that publishes a `.tar.gz` package
+   asset (an accompanying `checksums.txt` asset is optional). An entry whose repo
+   has no release or no package asset is skipped.
 3. A maintainer reviews and merges — maintainer approval is what gates the
    official catalog. The index-build workflow then picks up your entry and your
    plugin appears in the in-app catalog on the next build.
