@@ -34,7 +34,11 @@ export function useAppStatusBarDrag({
   const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const onItemPointerDown = useCallback((itemId: string, event: ReactPointerEvent<HTMLElement>) => {
-    if (event.pointerType !== "mouse" || (!event.metaKey && !event.ctrlKey)) return;
+    if (event.pointerType !== "mouse" || event.button !== 0 || (!event.metaKey && !event.ctrlKey)) {
+      return;
+    }
+    event.preventDefault();
+    barRef.current?.setPointerCapture?.(event.pointerId);
     candidate.current = {
       itemId,
       pointerId: event.pointerId,
@@ -49,7 +53,7 @@ export function useAppStatusBarDrag({
     if (!current || current.pointerId !== event.pointerId) return;
     if (!current.dragging && Math.abs(event.clientX - current.startX) <= DRAG_THRESHOLD_PX) return;
     current.dragging = true;
-    barRef.current?.setPointerCapture?.(event.pointerId);
+    document.getSelection()?.removeAllRanges();
     setDraggingId(current.itemId);
     current.target = readDropTarget(barRef.current, current.itemId, event.clientX);
     event.preventDefault();

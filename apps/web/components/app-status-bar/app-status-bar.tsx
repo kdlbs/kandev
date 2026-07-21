@@ -37,7 +37,10 @@ export function AppStatusBar({
     <footer
       ref={drag.barRef}
       {...drag.barHandlers}
-      className="relative flex h-6 shrink-0 items-center gap-2 bg-background px-2 text-xs leading-none before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-border"
+      className={cn(
+        "relative flex h-6 shrink-0 select-none items-center gap-4 overflow-hidden bg-app-status-bar px-3 text-xs font-medium leading-none text-app-status-bar-foreground/80 antialiased [font-family:var(--font-geist-sans)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-app-status-bar-border",
+        drag.draggingId && "cursor-grabbing",
+      )}
       data-testid="app-status-bar"
       aria-label="Application status"
     >
@@ -67,7 +70,7 @@ function StatusItemGroup({
 }) {
   return (
     <div
-      className="flex h-full min-w-0 items-center gap-1 overflow-hidden"
+      className="flex h-full min-w-0 items-center gap-3 overflow-hidden"
       data-testid={testId}
       data-status-side={side}
     >
@@ -90,8 +93,8 @@ function BarStatusItem({
   return (
     <div
       className={cn(
-        "inline-flex h-full min-w-0 shrink-0 items-center leading-none",
-        drag.draggingId === item.id && "opacity-50",
+        "inline-flex h-full min-w-0 shrink-0 items-center leading-none transition-opacity duration-150 empty:hidden",
+        drag.draggingId === item.id && "opacity-45",
       )}
       data-status-item-id={item.id}
       data-status-side={side}

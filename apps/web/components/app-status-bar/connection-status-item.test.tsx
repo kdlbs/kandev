@@ -3,7 +3,7 @@ import { connectionStatusDetails } from "./connection-status-item";
 
 describe("connectionStatusDetails", () => {
   it.each([
-    ["connected", "Connected", "Connection active"],
+    ["connected", "Connected", "Connected to Kandev"],
     ["connecting", "Connecting", "Connecting to Kandev"],
     ["reconnecting", "Reconnecting", "Reconnecting to Kandev"],
     ["disconnected", "Offline", "Connection unavailable"],
@@ -19,7 +19,7 @@ describe("connectionStatusDetails", () => {
 
   it("uses a small green dot for an active connection", () => {
     expect(connectionStatusDetails("connected", null)).toMatchObject({
-      dotClass: "bg-emerald-500",
+      dotClass: "bg-success",
       animate: false,
     });
   });

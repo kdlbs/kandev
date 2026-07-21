@@ -160,7 +160,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
       (response) =>
         response.request().method() === "PATCH" && response.url().endsWith("/api/v1/user/settings"),
     );
-    await testPage.keyboard.down("Control");
+    await testPage.keyboard.down("Meta");
     await testPage.mouse.move(movedBox.x + movedBox.width / 2, movedBox.y + movedBox.height / 2);
     await testPage.mouse.down();
     await testPage.mouse.move(
@@ -169,8 +169,9 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
       { steps: 8 },
     );
     await testPage.mouse.up();
-    await testPage.keyboard.up("Control");
+    await testPage.keyboard.up("Meta");
     expect((await orderSaved).ok()).toBe(true);
+    expect(await testPage.evaluate(() => window.getSelection()?.toString() ?? "")).toBe("");
     await expect(movedContribution).toHaveAttribute("data-status-side", "right");
 
     await backend.restart();

@@ -168,8 +168,8 @@ func TestFeatures_ProductionDefaults(t *testing.T) {
 	if cfg.Features.Plugins {
 		t.Errorf("Features.Plugins = true, want false (production default must be off)")
 	}
-	if !cfg.Features.AppStatusBar {
-		t.Error("Features.AppStatusBar = false, want true (shipped status surface must stay visible by default)")
+	if cfg.Features.AppStatusBar {
+		t.Error("Features.AppStatusBar = true, want false (status surface must remain opt-in by default)")
 	}
 }
 

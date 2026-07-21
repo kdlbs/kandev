@@ -127,9 +127,9 @@ function MetricsDisplayToggle({
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="space-y-1">
-        <Label htmlFor="show-system-metrics">Show in status bar</Label>
+        <Label htmlFor="show-system-metrics">Show host metrics in status bar</Label>
         <p className="text-xs text-muted-foreground">
-          Collection starts only while at least one client displays metrics.
+          Shows Kandev host values only. Collection starts while a client displays them.
         </p>
       </div>
       <Switch
@@ -246,7 +246,8 @@ function ExecutionMetricsToggle({
       <div className="space-y-1">
         <Label htmlFor="collect-execution-metrics">Collect execution environment metrics</Label>
         <p className="text-xs text-muted-foreground">
-          Adds agentctl values for Docker, SSH, Sprites, and remote executors.
+          Makes agentctl values available to plugins and other consumers. The built-in status bar
+          remains host-only.
         </p>
       </div>
       <Switch

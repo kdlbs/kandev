@@ -94,6 +94,16 @@ describe("AppStatusBar rendering", () => {
 
     expect(document.querySelector(`[data-status-item-id="${APP_STATUS_METRICS_ID}"]`)).toBeNull();
   });
+
+  it("collapses a plugin item when its contribution renders nothing", () => {
+    pluginRegistry.forPlugin(RIGHT_PLUGIN_ID).registerComponent("app-status-bar-right", () => null);
+
+    renderBar();
+
+    expect(statusItem(`plugin:${RIGHT_PLUGIN_ID}:app-status-bar-right:0`).className).toContain(
+      "empty:hidden",
+    );
+  });
 });
 
 describe("AppStatusBar drag input", () => {
@@ -117,12 +127,13 @@ describe("AppStatusBar drag input", () => {
     setRect(screen.getByTestId("app-status-bar-spacer"), 40, 80);
     setRect(statusItem(rightId), 80, 100);
 
-    fireEvent.pointerDown(dragged, {
+    const pointerDownAccepted = fireEvent.pointerDown(dragged, {
       pointerId: 1,
       pointerType: "mouse",
       ctrlKey: true,
       clientX: 30,
     });
+    expect(pointerDownAccepted).toBe(false);
     fireEvent.pointerMove(screen.getByTestId(APP_STATUS_BAR_TEST_ID), {
       pointerId: 1,
       pointerType: "mouse",

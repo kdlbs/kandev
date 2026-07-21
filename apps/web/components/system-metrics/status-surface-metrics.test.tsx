@@ -78,6 +78,21 @@ function renderMetrics(drawerOpen = false) {
                     },
                   ],
                 },
+                {
+                  id: "executor-session-1",
+                  label: "Demo executor",
+                  kind: "execution",
+                  session_id: "session-1",
+                  metrics: [
+                    {
+                      id: "memory_percent",
+                      label: "Memory",
+                      unit: "%",
+                      value: 99,
+                      available: true,
+                    },
+                  ],
+                },
               ],
             },
           },
@@ -86,7 +101,6 @@ function renderMetrics(drawerOpen = false) {
     >
       <TooltipProvider>
         <StatusSurfaceMetrics
-          activeSessionId={null}
           presentation={responsiveState.isMobile ? "mobile-drawer" : "bar"}
           density="full"
           drawerOpen={drawerOpen}
@@ -113,6 +127,8 @@ describe("StatusSurfaceMetrics", () => {
     expect(screen.getByLabelText("Memory 51%")).toBeTruthy();
     expect(screen.getByLabelText("Disk 63%")).toBeTruthy();
     expect(screen.getByLabelText("CPU temperature 72°C")).toBeTruthy();
+    expect(screen.queryByLabelText("Executor metrics")).toBeNull();
+    expect(screen.queryByLabelText("Memory 99%")).toBeNull();
   });
 
   it("does not subscribe or render while the phone Status drawer is closed", () => {

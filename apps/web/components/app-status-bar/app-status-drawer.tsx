@@ -56,7 +56,7 @@ export function AppStatusDrawer({
 function DrawerStatusItem({ item, open }: { item: AppStatusItem; open: boolean }) {
   return (
     <div
-      className="flex min-h-11 w-full min-w-0 items-center rounded-md px-3 hover:bg-muted/60"
+      className="flex min-h-11 w-full min-w-0 items-center rounded-md px-3 hover:bg-muted/60 empty:hidden"
       data-status-item-id={item.id}
     >
       {item.render({ presentation: "mobile-drawer", density: "full", drawerOpen: open })}

@@ -18,6 +18,9 @@ test.describe("App status bar", () => {
     expect(Math.abs(barBox.y + barBox.height - viewport.height)).toBeLessThanOrEqual(1);
     expect(Math.abs(barBox.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(barBox.width - viewport.width)).toBeLessThanOrEqual(1);
+    await expect
+      .poll(() => bar.evaluate((element) => getComputedStyle(element).fontFamily))
+      .toMatch(/^"?Geist"?/);
 
     const connectionDot = bar
       .locator('[data-status-item-id="builtin:connection"] [aria-hidden="true"]')

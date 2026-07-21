@@ -14,13 +14,13 @@ Use global system metrics settings for collection policy and per-user settings o
 
 The backend process samples the backend host. Agentctl exposes an execution-environment metrics endpoint for runtimes with a distinct boundary: local Docker, remote Docker, SSH/remote VPS, and cloud/Sprites. Local process and worktree agentctl instances are not sampled separately in v1 because they duplicate the backend host. Containerized agentctl collectors prefer cgroup CPU and memory accounting when available, falling back to procfs only when no meaningful cgroup limit exists.
 
-Metrics updates are delivered over a dedicated WebSocket stream to subscribed connections only, not via global broadcast. Desktop and tablet render them in the app status surface; phone subscribes and renders only while the global Status drawer is open.
+Metrics updates are delivered over a dedicated WebSocket stream to subscribed connections only, not via global broadcast. Desktop and tablet render only the Kandev backend-host source in the app status surface; phone subscribes and renders that same host source only while the global Status drawer is open. Execution-source sampling remains a backend capability, but the global status surface does not couple its built-in presentation to an active task or session. Plugins may use host state for separately owned context-specific presentations.
 
 ## Consequences
 
-The backend avoids background procfs/cgroup/agentctl polling when no visible UI needs metrics. Multi-user behavior stays clear: global settings control what is sampled and how often, while each user controls whether they see it. Docker and remote users get the execution-environment values that matter instead of duplicated backend-host values.
+The backend avoids background procfs/cgroup/agentctl polling when no visible UI needs metrics. Multi-user behavior stays clear: global settings control what is sampled and how often, while each user controls whether they see it. Docker and remote execution values remain available in the metrics stream without making the global status surface task-dependent.
 
-This adds a small connection-interest registry, a reusable install-wide settings table, and a new agentctl API surface. The status surface now makes host metrics available across hosted routes; execution metrics remain scoped to the active session when one is unambiguous. A closed phone Status drawer creates no sampling interest.
+This adds a small connection-interest registry, a reusable install-wide settings table, and a new agentctl API surface. The status surface makes host metrics available consistently across hosted routes and deliberately ignores active-session execution sources. A closed phone Status drawer creates no sampling interest.
 
 ## Alternatives Considered
 

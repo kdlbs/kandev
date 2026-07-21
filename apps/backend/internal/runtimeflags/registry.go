@@ -33,10 +33,10 @@ var definitions = []RuntimeFlagDefinition{
 		EnvVar:      envFeaturesAppStatusBar,
 		Kind:        KindFeature,
 		Label:       "App status bar",
-		Description: "Shows the global connection, optional system metrics, and plugin status surface.",
+		Description: "Adds the global connection, optional host metrics, and plugin status surface.",
 		Stability:   StabilityStable,
 		RiskLevel:   RiskLow,
-		RiskDescription: "Disabling this hides the desktop and tablet status bar and the phone Status drawer entry " +
+		RiskDescription: "Changing this adds or removes the desktop and tablet status bar and the phone Status drawer entry " +
 			"after restart. It does not stop connections, metrics collection requested by other clients, or plugins.",
 		RestartRequired: true,
 		Mutable:         true,

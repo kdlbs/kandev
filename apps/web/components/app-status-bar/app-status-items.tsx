@@ -41,7 +41,7 @@ export function useAppStatusItems(context: AppStatusContext): AppStatusItem[] {
     return [
       connectionItem(),
       ...left.map((registration) => pluginItem(registration, "left", context)),
-      ...(metricsEnabled ? [metricsItem(context.activeSessionId)] : []),
+      ...(metricsEnabled ? [metricsItem()] : []),
       ...right.map((registration) => pluginItem(registration, "right", context)),
     ];
   }, [context, metricsEnabled, registry, registryVersion]);
@@ -51,21 +51,16 @@ function connectionItem(): AppStatusItem {
   return {
     id: APP_STATUS_CONNECTION_ID,
     defaultSide: "left",
-    render: () => <ConnectionStatusItem className="h-full" />,
+    render: ({ presentation }) => <ConnectionStatusItem presentation={presentation} />,
   };
 }
 
-function metricsItem(activeSessionId: string | null): AppStatusItem {
+function metricsItem(): AppStatusItem {
   return {
     id: APP_STATUS_METRICS_ID,
     defaultSide: "right",
     render: ({ presentation, density, drawerOpen }) => (
-      <StatusSurfaceMetrics
-        activeSessionId={activeSessionId}
-        presentation={presentation}
-        density={density}
-        drawerOpen={drawerOpen}
-      />
+      <StatusSurfaceMetrics presentation={presentation} density={density} drawerOpen={drawerOpen} />
     ),
   };
 }

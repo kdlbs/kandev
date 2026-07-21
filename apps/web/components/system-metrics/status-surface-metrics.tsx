@@ -4,7 +4,6 @@ import {
   IconActivity,
   IconCpu,
   IconDatabase,
-  IconDeviceDesktopAnalytics,
   IconDisc,
   IconFlame,
   IconGauge,
@@ -18,14 +17,12 @@ import { useSystemMetricsSubscription } from "@/hooks/use-system-metrics-subscri
 import type { SystemMetricSample, SystemMetricsSource } from "@/lib/types/system";
 
 type StatusSurfaceMetricsProps = {
-  activeSessionId: string | null;
   presentation: "bar" | "mobile-drawer";
   density: "full" | "compact";
   drawerOpen: boolean;
 };
 
 export function StatusSurfaceMetrics({
-  activeSessionId,
   presentation,
   density,
   drawerOpen,
@@ -39,17 +36,15 @@ export function StatusSurfaceMetrics({
 
   if (!enabled || (isMobile && !drawerOpen)) return null;
 
-  const sources = selectSources(snapshot?.sources ?? [], activeSessionId, density);
+  const host = snapshot?.sources.find((source) => source.kind === "backend");
   if (presentation === "mobile-drawer") {
     return (
       <section data-testid="app-status-metrics" className="space-y-1" aria-label="System metrics">
         <h3 className="px-1 text-sm font-medium">System metrics</h3>
-        {sources.length === 0 ? (
+        {!host ? (
           <EmptyMetrics drawer />
         ) : (
-          sources.map((source) => (
-            <DrawerSourceMetrics key={source.id} source={source} updatedAt={snapshot?.timestamp} />
-          ))
+          <DrawerSourceMetrics source={host} updatedAt={snapshot?.timestamp} />
         )}
       </section>
     );
@@ -58,41 +53,21 @@ export function StatusSurfaceMetrics({
   return (
     <div
       data-testid="app-status-metrics"
-      className="flex h-full max-w-[42vw] items-center gap-1 overflow-hidden leading-none"
+      className="flex h-full max-w-[52vw] items-center overflow-hidden leading-none text-current"
       aria-label="System metrics"
     >
-      {sources.length === 0 ? (
+      {!host ? (
         <EmptyMetrics />
       ) : (
-        sources.map((source) => (
-          <BarSourceMetrics
-            key={source.id}
-            source={source}
-            updatedAt={snapshot?.timestamp}
-            showSource={density === "compact" || sources.length > 1}
-            metricLimit={density === "compact" ? 2 : 4}
-          />
-        ))
+        <BarSourceMetrics
+          source={host}
+          updatedAt={snapshot?.timestamp}
+          showSourceLabel={density === "full"}
+          metricLimit={density === "compact" ? 2 : 4}
+        />
       )}
     </div>
   );
-}
-
-function selectSources(
-  sources: SystemMetricsSource[],
-  activeSessionId: string | null,
-  density: "full" | "compact",
-) {
-  if (density === "compact") {
-    return [sources.find((source) => source.session_id === activeSessionId) ?? sources[0]].filter(
-      Boolean,
-    ) as SystemMetricsSource[];
-  }
-  if (!activeSessionId) return sources.slice(0, 2);
-  return [
-    sources.find((source) => source.kind === "backend"),
-    sources.find((source) => source.session_id === activeSessionId),
-  ].filter(Boolean) as SystemMetricsSource[];
 }
 
 function EmptyMetrics({ drawer = false }: { drawer?: boolean }) {
@@ -101,7 +76,7 @@ function EmptyMetrics({ drawer = false }: { drawer?: boolean }) {
       className={
         drawer
           ? "flex min-h-11 items-center gap-2 rounded-md px-3 text-sm text-muted-foreground"
-          : "flex h-full items-center gap-1 px-1 text-xs text-muted-foreground"
+          : "flex h-full items-center gap-2 text-[11px] text-current opacity-70"
       }
     >
       <IconActivity className="h-3.5 w-3.5" />
@@ -113,17 +88,17 @@ function EmptyMetrics({ drawer = false }: { drawer?: boolean }) {
 function BarSourceMetrics({
   source,
   updatedAt,
-  showSource,
+  showSourceLabel,
   metricLimit,
 }: {
   source: SystemMetricsSource;
   updatedAt?: string;
-  showSource: boolean;
+  showSourceLabel: boolean;
   metricLimit: number;
 }) {
   return (
-    <div className="flex h-full max-w-[220px] items-center gap-1 overflow-hidden border-l border-border px-1.5 text-xs first:border-l-0">
-      {showSource ? <SourceBadge source={source} updatedAt={updatedAt} /> : null}
+    <div className="flex h-full max-w-[360px] items-center gap-3 overflow-hidden text-[11px]">
+      <SourceBadge source={source} updatedAt={updatedAt} showLabel={showSourceLabel} />
       <MetricValues source={source} updatedAt={updatedAt} limit={metricLimit} />
     </div>
   );
@@ -138,7 +113,7 @@ function DrawerSourceMetrics({
 }) {
   return (
     <div className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-muted/60">
-      <SourceBadge source={source} updatedAt={updatedAt} />
+      <SourceBadge source={source} updatedAt={updatedAt} showLabel />
       <div className="flex min-w-0 flex-1 items-center justify-end gap-3 overflow-hidden">
         <MetricValues source={source} updatedAt={updatedAt} limit={4} />
       </div>
@@ -146,25 +121,26 @@ function DrawerSourceMetrics({
   );
 }
 
-function SourceBadge({ source, updatedAt }: { source: SystemMetricsSource; updatedAt?: string }) {
-  const isHost = source.kind === "backend";
-  const label = isHost ? "Host" : "Executor";
-  const Icon = isHost ? IconServer : IconDeviceDesktopAnalytics;
-
+function SourceBadge({
+  source,
+  updatedAt,
+  showLabel,
+}: {
+  source: SystemMetricsSource;
+  updatedAt?: string;
+  showLabel: boolean;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
-          className="flex shrink-0 items-center gap-1 text-muted-foreground"
-          aria-label={`${label} metrics`}
-        >
-          <Icon className="h-3.5 w-3.5" />
-          <span className="max-w-20 truncate text-xs">{label}</span>
+        <span className="flex shrink-0 items-center gap-1.5 text-current" aria-label="Host metrics">
+          <IconServer className="size-3.5" stroke={1.6} />
+          {showLabel ? <span className="max-w-20 truncate">Host</span> : null}
         </span>
       </TooltipTrigger>
       <TooltipContent>
         <div className="space-y-1">
-          <div className="font-medium">{label}</div>
+          <div className="font-medium">Host</div>
           <div className="text-xs text-muted-foreground">{source.label}</div>
           <div className="text-xs text-muted-foreground">{lastUpdatedText(updatedAt)}</div>
         </div>
@@ -184,9 +160,13 @@ function MetricValues({
 }) {
   const metrics = source.metrics.slice(0, limit);
   if (metrics.length === 0) return <span className="text-muted-foreground">-</span>;
-  return metrics.map((metric) => (
-    <MetricValue key={metric.id} metric={metric} source={source} updatedAt={updatedAt} />
-  ));
+  return (
+    <span className="flex min-w-0 items-center gap-3 overflow-hidden">
+      {metrics.map((metric) => (
+        <MetricValue key={metric.id} metric={metric} source={source} updatedAt={updatedAt} />
+      ))}
+    </span>
+  );
 }
 
 function MetricValue({
@@ -202,19 +182,20 @@ function MetricValue({
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          className={`inline-flex shrink-0 items-center gap-0.5 tabular-nums ${metricColor(metric)}`}
+          className={`inline-flex shrink-0 items-center gap-1.5 tabular-nums ${metricColor(metric)}`}
           aria-label={`${metricLabel(metric.id)} ${formatMetric(metric)}`}
         >
           {metricIcon(metric.id)}
-          <span>{formatMetric(metric)}</span>
+          <MetricMeter metric={metric} />
+          <span className="font-medium tracking-[-0.015em] [font-family:var(--font-geist-mono)]">
+            {formatMetric(metric)}
+          </span>
         </span>
       </TooltipTrigger>
       <TooltipContent>
         <div className="space-y-1">
           <div className="font-medium">{metricLabel(metric.id)}</div>
-          <div className="text-xs text-muted-foreground">
-            {source.kind === "backend" ? "Host" : "Executor"}: {source.label}
-          </div>
+          <div className="text-xs text-muted-foreground">Host: {source.label}</div>
           <div className="text-xs tabular-nums">{formatMetric(metric)}</div>
           {metric.error ? (
             <div className="text-xs text-muted-foreground">{metric.error}</div>
@@ -247,7 +228,20 @@ function metricIcon(id: string) {
       cpu_temp: IconFlame,
       io_load: IconGauge,
     }[id] ?? IconActivity;
-  return <Icon className="h-3.5 w-3.5" />;
+  return <Icon className="size-3.5 opacity-80" stroke={1.6} />;
+}
+
+function MetricMeter({ metric }: { metric: SystemMetricSample }) {
+  if (metric.unit !== "%" || typeof metric.value !== "number") return null;
+  const width = `${Math.max(0, Math.min(100, metric.value))}%`;
+  return (
+    <span
+      className="h-1 w-7 overflow-hidden rounded-full bg-muted-foreground/20"
+      aria-hidden="true"
+    >
+      <span className="block h-full rounded-full bg-current opacity-65" style={{ width }} />
+    </span>
+  );
 }
 
 function formatMetric(metric: SystemMetricSample) {
@@ -257,12 +251,12 @@ function formatMetric(metric: SystemMetricSample) {
 }
 
 function metricColor(metric: SystemMetricSample) {
-  if (!metric.available) return "text-muted-foreground";
+  if (!metric.available) return "text-current opacity-50";
   const thresholdValue = metric.unit === "%" || metric.id === "cpu_temp" ? metric.value : null;
-  if (typeof thresholdValue !== "number") return "text-muted-foreground";
+  if (typeof thresholdValue !== "number") return "text-current";
   if (thresholdValue > 95) return "text-destructive";
   if (thresholdValue >= 80) return "text-yellow-500 dark:text-yellow-400";
-  return "text-muted-foreground";
+  return "text-current";
 }
 
 function lastUpdatedText(updatedAt?: string) {

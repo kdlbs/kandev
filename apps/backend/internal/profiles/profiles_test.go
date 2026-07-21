@@ -8,8 +8,8 @@ import (
 
 // TestApplyProfile_DefaultsToProd pins the production-safety
 // invariant: with no profile-selector env var set, ApplyProfile picks
-// prod and Office stays off. A regression that flips the default would
-// surface here as a failing test, not as an unintended release.
+// prod and optional product surfaces stay off. A regression that flips the
+// default would surface here as a failing test, not as an unintended release.
 func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	clearProfileSelectors(t)
 	clearProfilesYAMLVars(t)
@@ -21,7 +21,7 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	if env != EnvProd {
 		t.Errorf("env = %q, want %q (no selector env vars set)", env, EnvProd)
 	}
-	// Prod writes the two experimental flags and the default-on status bar.
+	// Prod writes each registered feature flag with its safe shipped default.
 	if count != 3 {
 		t.Errorf("ApplyProfile wrote %d vars in prod; want 3", count)
 	}
@@ -31,15 +31,14 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	if v := os.Getenv("KANDEV_FEATURES_PLUGINS"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_PLUGINS = %q after prod ApplyProfile; want %q", v, "false")
 	}
-	if v := os.Getenv("KANDEV_FEATURES_APP_STATUS_BAR"); v != "true" {
-		t.Errorf("KANDEV_FEATURES_APP_STATUS_BAR = %q after prod ApplyProfile; want %q", v, "true")
+	if v := os.Getenv("KANDEV_FEATURES_APP_STATUS_BAR"); v != "false" {
+		t.Errorf("KANDEV_FEATURES_APP_STATUS_BAR = %q after prod ApplyProfile; want %q", v, "false")
 	}
 }
 
-// TestApplyProfile_DevTurnsOnFeatures verifies that selecting the dev
-// profile flips the in-progress features on. This is what `make dev`
-// relies on once apps/cli/src/dev.ts stops setting these by hand.
-func TestApplyProfile_DevTurnsOnFeatures(t *testing.T) {
+// TestApplyProfile_DevUsesDevelopmentDefaults verifies the mixed dev profile:
+// active development tools turn on while the user-facing status bar stays opt-in.
+func TestApplyProfile_DevUsesDevelopmentDefaults(t *testing.T) {
 	clearProfileSelectors(t)
 	clearProfilesYAMLVars(t)
 	t.Setenv("KANDEV_DEBUG_DEV_MODE", "true")
@@ -57,8 +56,8 @@ func TestApplyProfile_DevTurnsOnFeatures(t *testing.T) {
 	if v := os.Getenv("KANDEV_FEATURES_PLUGINS"); v != "true" {
 		t.Errorf("KANDEV_FEATURES_PLUGINS = %q in dev; want %q", v, "true")
 	}
-	if v := os.Getenv("KANDEV_FEATURES_APP_STATUS_BAR"); v != "true" {
-		t.Errorf("KANDEV_FEATURES_APP_STATUS_BAR = %q in dev; want %q", v, "true")
+	if v := os.Getenv("KANDEV_FEATURES_APP_STATUS_BAR"); v != "false" {
+		t.Errorf("KANDEV_FEATURES_APP_STATUS_BAR = %q in dev; want %q", v, "false")
 	}
 }
 

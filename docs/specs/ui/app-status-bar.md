@@ -14,15 +14,17 @@ Kandev has useful app-wide state, but it is scattered through route headers. A s
 
 - Desktop and tablet render one persistent **24 px**, in-flow bottom status bar across the app shell, including sidebar and route content. Desktop uses `full` density; tablet uses `compact` density.
 - Phone renders no persistent second bottom bar. Native route controls open one global **Status** inset bottom drawer, so it does not collide with task bottom navigation. The drawer mirrors the saved bar order vertically (saved left sequence, then saved right sequence), has a fixed header, one internal scroll body, safe-area clearance, 44 px action rows, and returns focus to its trigger.
-- The default-on `features.appStatusBar` runtime toggle controls both presentations. When disabled and Kandev restarts, neither the desktop/tablet bar nor phone Status entry points render. It changes visibility only; it does not stop connections, metrics collection requested by other clients, or plugin execution.
+- The production-default-off `features.appStatusBar` runtime toggle controls both presentations. When disabled, neither the desktop/tablet bar nor phone Status entry points render. Enabling or disabling it requires a Kandev restart. It changes visibility only; it does not stop connections, metrics collection requested by other clients, or plugin execution.
 - Built-ins are limited to Kandev-owned state:
-  - Canonical connection state and error from `state.connection.status` / `state.connection.error`, with semantic visual state, accessible text, and readable detail.
-  - Existing host and active-executor CPU/memory metrics, preserving current source selection, formatting, thresholds, and tooltips.
+  - Canonical connection state and error from `state.connection.status` / `state.connection.error`, with a restrained semantic dot, the connected detail **Connected to Kandev**, accessible text, and readable failure detail.
+  - Existing Kandev-host CPU/memory metrics, preserving current formatting, thresholds, and tooltips. The built-in surface does not render active-task, active-session, or executor metrics.
 - `userSettings.systemMetricsDisplay.showInTopbar` remains the persisted/wire compatibility key. User-visible copy calls this the Status bar setting; no migration or API break occurs.
 - Existing composer-local `ChatStatusBar` remains separate. Queue, PR, share, and next-step affordances stay with chat.
 - The connection indicator, complete metrics cluster, and each plugin component registration are individual status items. Holding Cmd on macOS or Ctrl on other platforms while dragging with the mouse reorders an item horizontally across the full bar, including across its flexible spacer.
 - A modified pointer press that does not become a horizontal drag preserves the contribution's normal click behavior. Plain mouse/touch interaction never starts reordering.
+- Modified dragging does not start browser text selection. The surface uses a clear grabbing state after the horizontal drag threshold is crossed.
 - Status item contents share one optical vertical center. The 1 px top separator does not reduce or offset the 24 px content alignment box.
+- The bar is a quiet technical strip rather than a collection of chips: low-contrast Kandev surface tokens, deliberate space between opaque status items, Geist Sans for labels, Geist Mono plus tabular numerals for changing metrics, consistent icon weight, and no decorative elevation.
 
 ## Responsive and layout contract
 
@@ -55,7 +57,7 @@ The existing setting is the first gate. If disabled, no status-surface metrics s
 
 ## Data, API, and persistence
 
-The surface reads existing Zustand connection, active-context, user-settings, system-metrics, and feature state. `features.appStatusBar` is a default-on, restart-required runtime flag exposed through the existing Feature Toggles page; `KANDEV_FEATURES_APP_STATUS_BAR` takes precedence and locks the control when set explicitly. The phone drawer's open state is presentation-local and is not persisted. Existing `show_in_topbar` user-setting persistence remains authoritative.
+The surface reads existing Zustand connection, active-context, user-settings, system-metrics, and feature state. `features.appStatusBar` is a default-off, restart-required runtime flag exposed through the existing Feature Toggles page; `KANDEV_FEATURES_APP_STATUS_BAR` takes precedence and locks the control when set explicitly. The E2E profile enables it only for browser coverage. The phone drawer's open state is presentation-local and is not persisted. Existing `show_in_topbar` user-setting persistence remains authoritative.
 
 The existing backend-owned user settings JSON stores the portable layout:
 
@@ -95,13 +97,14 @@ Visual interaction is a clean Kandev adaptation of Orca's public status-bar idea
 
 ## Scenarios
 
-- **GIVEN** a desktop or tablet route, **WHEN** it opens, **THEN** one 24 px app status bar remains at its bottom and route/sidebar content use the remaining height without a new page scrollbar.
-- **GIVEN** metrics preference enabled, **WHEN** a desktop/tablet status bar mounts, **THEN** existing host and active-executor metrics appear there and no route header still renders them.
+- **GIVEN** the feature is enabled on a desktop or tablet route, **WHEN** it opens, **THEN** one 24 px app status bar remains at its bottom and route/sidebar content use the remaining height without a new page scrollbar.
+- **GIVEN** metrics preference enabled, **WHEN** a desktop/tablet status bar mounts, **THEN** existing Kandev-host metrics appear there, task/session/executor metrics do not, and no route header still renders metrics.
 - **GIVEN** metrics preference disabled, or a phone Status drawer closed, **WHEN** the app runs, **THEN** no system-metrics WebSocket subscription is held by this feature.
-- **GIVEN** a phone user, **WHEN** they choose Status from a native entry point, **THEN** the drawer shows the same built-ins and plugin regions; dismissing it restores focus and leaves no persistent status bar.
+- **GIVEN** the feature is enabled for a phone user, **WHEN** they choose Status from a native entry point, **THEN** the drawer shows the same built-ins and plugin regions; dismissing it restores focus and leaves no persistent status bar.
 - **GIVEN** an administrator disables **App status bar** in Feature Toggles and restarts Kandev, **WHEN** a route renders on any breakpoint, **THEN** the bar/drawer and native Status triggers are absent while the rest of the shell remains available.
 - **GIVEN** a plugin registered for either status slot, **WHEN** it enables or disables, **THEN** its contribution appears or disappears without reload in the active presentation. A failed contribution does not suppress a following healthy one after registrations change.
 - **GIVEN** a desktop/tablet bar, **WHEN** the user holds Cmd/Ctrl and mouse-drags a built-in or plugin contribution across another item or the spacer, **THEN** the item moves horizontally, normal click activation is suppressed only after a drag begins, and the new side/order survives reload and backend restart.
+- **GIVEN** a modified mouse press begins on status text, **WHEN** the pointer crosses the drag threshold, **THEN** the item enters its dragging state without selecting text in the bar.
 - **GIVEN** a saved order containing a disabled plugin contribution, **WHEN** that plugin enables again, **THEN** its stable item returns to the saved position without remounting any other item twice.
 - **GIVEN** a saved desktop order, **WHEN** Status opens on phone, **THEN** the drawer renders the saved left sequence followed by the saved right sequence as vertical 44 px rows and offers no drag interaction.
 - **GIVEN** the bar at a 1x device scale, **WHEN** text, dots, and metric icons render beside one another, **THEN** they share the same vertical content center and the top separator does not create a half-pixel offset.

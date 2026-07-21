@@ -90,4 +90,28 @@ describe("AppStatusDrawer", () => {
     expect(screen.getByTestId(LEFT_PLUGIN_ID).textContent).toBe("mobile-drawer");
     expect(screen.getByTestId(RIGHT_PLUGIN_ID).textContent).toBe("mobile-drawer");
   });
+
+  it("collapses a plugin row when its contribution renders nothing", () => {
+    pluginRegistry.forPlugin(RIGHT_PLUGIN_ID).registerComponent("app-status-bar-right", () => null);
+
+    render(
+      <StateProvider>
+        <TooltipProvider>
+          <AppStatusDrawer
+            pathname="/"
+            activeWorkspaceId={null}
+            activeTaskId={null}
+            activeSessionId={null}
+            open
+            onOpenChange={() => {}}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    const row = document.querySelector<HTMLElement>(
+      `[data-status-item-id="plugin:${RIGHT_PLUGIN_ID}:app-status-bar-right:0"]`,
+    );
+    expect(row?.className).toContain("empty:hidden");
+  });
 });

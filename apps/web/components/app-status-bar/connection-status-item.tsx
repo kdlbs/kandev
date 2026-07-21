@@ -20,8 +20,8 @@ export function connectionStatusDetails(
     case "connected":
       return {
         label: "Connected",
-        description: "Connection active",
-        dotClass: "bg-emerald-500",
+        description: "Connected to Kandev",
+        dotClass: "bg-success",
         animate: false,
       };
     case "connecting":
@@ -55,7 +55,7 @@ export function connectionStatusDetails(
   }
 }
 
-export function ConnectionStatusItem({ className }: { className?: string }) {
+export function ConnectionStatusItem({ presentation }: { presentation: "bar" | "mobile-drawer" }) {
   const status = useAppStore((state) => state.connection.status);
   const error = useAppStore((state) => state.connection.error);
   const details = connectionStatusDetails(status, error);
@@ -65,18 +65,20 @@ export function ConnectionStatusItem({ className }: { className?: string }) {
       <TooltipTrigger asChild>
         <span
           className={cn(
-            "inline-flex w-6 items-center justify-center leading-none",
-            className ?? "h-6",
+            "inline-flex h-full items-center leading-none",
+            presentation === "bar" ? "w-5 justify-center" : "min-h-11 gap-3 px-1 text-sm",
           )}
           role="status"
           aria-label={details.description}
           data-testid="app-status-connection"
         >
           <span
-            className={`h-2 w-2 rounded-full ${details.dotClass} ${details.animate ? "animate-pulse" : ""}`}
+            className={`size-1.5 shrink-0 rounded-full ${details.dotClass} ${details.animate ? "animate-pulse" : ""}`}
             aria-hidden="true"
           />
-          <span className="sr-only">{details.label}</span>
+          <span className={presentation === "bar" ? "sr-only" : "text-foreground"}>
+            {presentation === "bar" ? details.label : details.description}
+          </span>
         </span>
       </TooltipTrigger>
       <TooltipContent>{details.description}</TooltipContent>
