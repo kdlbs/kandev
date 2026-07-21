@@ -22,7 +22,7 @@ import {
   pickActiveSessionId,
   resolveAgentLabelFor,
   sortSessions,
-} from "./session-sort";
+} from "@/lib/state/slices/session/session-sort";
 
 const LABEL_SEPARATOR = " \u2022 ";
 

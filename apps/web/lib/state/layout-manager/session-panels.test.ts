@@ -88,7 +88,7 @@ it("materializes reusable chat panels to the active task session", () => {
   });
 });
 
-it("materializes sibling task session tabs beside the active session", () => {
+it("materializes sibling task session tabs in step-flow order, keeping active in place", () => {
   const materialized = materializeReusableChatPanel(
     layoutWithGroup({
       id: CENTER_GROUP_ID,
@@ -99,10 +99,31 @@ it("materializes sibling task session tabs beside the active session", () => {
     [SIBLING_SESSION_ID, NEW_SESSION_ID],
   );
 
+  // The incoming id order (already sorted by step flow) is preserved; the
+  // active session is activated in its slot rather than force-prepended.
   expect(materialized.columns[0]?.groups[0]?.activePanel).toBe(NEW_SESSION_PANEL_ID);
   expect(materialized.columns[0]?.groups[0]?.panels.map((item) => item.id)).toEqual([
-    NEW_SESSION_PANEL_ID,
     SIBLING_SESSION_PANEL_ID,
+    NEW_SESSION_PANEL_ID,
+    "plan",
+  ]);
+});
+
+it("appends a not-yet-listed active session at the end, not the front", () => {
+  const materialized = materializeReusableChatPanel(
+    layoutWithGroup({
+      id: CENTER_GROUP_ID,
+      activePanel: CHAT_ID,
+      panels: [chatPlaceholder(), panel("plan")],
+    }),
+    NEW_SESSION_ID,
+    [SIBLING_SESSION_ID],
+  );
+
+  expect(materialized.columns[0]?.groups[0]?.activePanel).toBe(NEW_SESSION_PANEL_ID);
+  expect(materialized.columns[0]?.groups[0]?.panels.map((item) => item.id)).toEqual([
+    SIBLING_SESSION_PANEL_ID,
+    NEW_SESSION_PANEL_ID,
     "plan",
   ]);
 });

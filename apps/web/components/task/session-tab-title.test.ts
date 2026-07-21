@@ -108,3 +108,39 @@ describe("resolveSessionTabTitle", () => {
     ).toBe(PROFILE_LABEL);
   });
 });
+
+describe("resolveSessionTabTitle workflow-step label", () => {
+  it("uses the workflow-step label over the agent/model title", () => {
+    expect(
+      resolveSessionTabTitle({
+        ...baseArgs,
+        stepLabel: "Spec",
+        rank: 2,
+        activeModelId: SPARK_MODEL_ID,
+        modelOptions: [{ id: SPARK_MODEL_ID, name: SPARK_MODEL_NAME }],
+      }),
+    ).toBe("Spec #2");
+  });
+
+  it("lets a user rename win over the workflow-step label", () => {
+    expect(
+      resolveSessionTabTitle({
+        ...baseArgs,
+        customName: "reviewer",
+        stepLabel: "Spec",
+        rank: 2,
+      }),
+    ).toBe("reviewer");
+  });
+
+  it("disambiguates duplicate step labels by rank", () => {
+    expect(resolveSessionTabTitle({ ...baseArgs, stepLabel: "Spec", rank: 1 })).toBe("Spec #1");
+    expect(resolveSessionTabTitle({ ...baseArgs, stepLabel: "Spec", rank: 2 })).toBe("Spec #2");
+  });
+
+  it("falls back to the agent label plus rank when no step label is present", () => {
+    expect(resolveSessionTabTitle({ ...baseArgs, stepLabel: null, rank: 3 })).toBe(
+      `${PROFILE_LABEL} #3`,
+    );
+  });
+});

@@ -45,6 +45,13 @@ function useChatSessionTitle(panelId: string, sessionId: string | null) {
     return parts[1] || parts[0] || profile.label;
   });
   useEffect(() => {
+    // Session-scoped chat panels (`session:<id>`, tabComponent "sessionTab")
+    // own their tab title exclusively via `SessionTab`'s rank-aware title
+    // sync effect. Setting it here too would race with that effect and can
+    // clobber the `<label> #<rank>` suffix with the plain agent label. Only
+    // the single non-session-scoped "chat" panel (tabComponent
+    // "permanentTab") needs this fallback title.
+    if (panelId.startsWith("session:")) return;
     setPanelTitle(panelId, resolveChatPanelTitle(agentLabel));
   }, [panelId, agentLabel]);
 }

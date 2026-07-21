@@ -406,6 +406,8 @@ export type TaskSession = {
   completed_at?: string | null;
   updated_at: string;
   // Workflow fields
+  /** Workflow step the session currently belongs to; drives session-tab ordering & labels. */
+  workflow_step_id?: string;
   is_primary?: boolean;
   is_passthrough?: boolean;
   review_status?: WorkflowReviewStatus;

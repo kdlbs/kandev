@@ -23,16 +23,34 @@ import {
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import type { HandoffPreset } from "@/components/task/new-session-dialog";
 import { usableConfigOptions } from "@/components/model-config-selector";
+import type { AppState } from "@/lib/state/store";
 import { SessionContextMenuItems, SessionTabDialogs } from "./session-tab-menu";
 import type { TaskSessionState } from "@/lib/types/http";
 import {
   markSessionTabUserActivationIntent,
   shouldMarkSessionTabUserActivationIntent,
 } from "./session-tab-activation-intent";
-import { isSessionActive } from "./session-sort";
-import { resolveSessionTabTitle } from "./session-tab-title";
+import {
+  isSessionActive,
+  resolveWorkflowStepTitle,
+  splitAgentProfileLabel,
+} from "@/lib/state/slices/session/session-sort";
+import { resolveSessionTabTitle, resolveSnapshotModel } from "./session-tab-title";
 import { TabRenameInput } from "./tab-rename-input";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
+
+function sessionRank(state: AppState, sessionId: string): number | null {
+  const activeTaskId = state.tasks.activeTaskId;
+  const sessions = activeTaskId ? state.taskSessionsByTask.itemsByTaskId[activeTaskId] : null;
+  const index = sessions?.findIndex((s: { id: string }) => s.id === sessionId) ?? -1;
+  return index >= 0 ? index + 1 : null;
+}
+
+function agentTabLabel(state: AppState, agentProfileId: string | undefined): string | null {
+  if (!agentProfileId) return null;
+  const profile = state.agentProfiles.items.find((p: { id: string }) => p.id === agentProfileId);
+  return splitAgentProfileLabel(profile);
+}
 
 function useSessionTabState(sessionId: string | undefined) {
   const isPrimary = useAppStore((state) => {
@@ -56,25 +74,16 @@ function useSessionTabState(sessionId: string | undefined) {
     const session = state.taskSessions.items[sessionId];
     const sessionModels = state.sessionModels.bySessionId[sessionId];
     const activeModelId = state.activeModel.bySessionId[sessionId] || null;
-    const agentLabel = (() => {
-      if (!session?.agent_profile_id) return null;
-      const profile = state.agentProfiles.items.find(
-        (p: { id: string }) => p.id === session.agent_profile_id,
-      );
-      if (!profile) return null;
-      const parts = profile.label.split(" \u2022 ");
-      return parts[1] || parts[0] || profile.label;
-    })();
-    const snapshotModel =
-      typeof session?.agent_profile_snapshot?.model === "string"
-        ? session.agent_profile_snapshot.model
-        : null;
+    const stepLabel = resolveWorkflowStepTitle(state, session?.workflow_step_id);
+    const agentLabel = agentTabLabel(state, session?.agent_profile_id);
     return resolveSessionTabTitle({
       customName: session?.name ?? null,
+      stepLabel,
       agentLabel,
+      rank: sessionRank(state, sessionId),
       activeModelId,
       currentModelId: sessionModels?.currentModelId || null,
-      snapshotModel,
+      snapshotModel: resolveSnapshotModel(session?.agent_profile_snapshot),
       modelOptions:
         sessionModels?.models.map((model) => ({
           id: model.modelId,
@@ -96,17 +105,12 @@ function useSessionTabState(sessionId: string | undefined) {
   });
   const sessionNumber = useAppStore((state) => {
     if (!sessionId) return null;
-    const activeTaskId = state.tasks.activeTaskId;
-    const sessions = activeTaskId ? state.taskSessionsByTask.itemsByTaskId[activeTaskId] : null;
-    if (!sessions) return null;
-    // Sort chronologically (oldest first) so indexes are stable regardless of
-    // which session is primary or the backend's default DESC ordering.
-    const sorted = [...sessions].sort(
-      (a: { started_at: string }, b: { started_at: string }) =>
-        new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-    );
-    const idx = sorted.findIndex((s: { id: string }) => s.id === sessionId);
-    return idx >= 0 ? idx + 1 : null;
+    // The stored list is kept in workflow-step-flow order (see
+    // reorderStoredSessions in the session slice), so the badge is simply the
+    // session's 1-based position in that list — guaranteeing the badge number
+    // always matches the visible left-to-right tab order. Shares sessionRank's
+    // lookup so the tab title and the badge can never disagree.
+    return sessionRank(state, sessionId);
   });
   const sessionCount = useAppStore((state) => {
     const activeTaskId = state.tasks.activeTaskId;
@@ -232,7 +236,6 @@ function SessionTabTriggerContent({
   sessionId,
   isPrimary,
   showMultiSessionBadges,
-  sessionNumber,
   agentName,
   sessionState,
   isActive,
@@ -243,7 +246,6 @@ function SessionTabTriggerContent({
   sessionId: string | undefined;
   isPrimary: boolean;
   showMultiSessionBadges: boolean;
-  sessionNumber: number | null;
   agentName: string | null;
   sessionState: TaskSessionState | null;
   isActive: boolean;
@@ -264,11 +266,6 @@ function SessionTabTriggerContent({
     <div ref={tabContentRef} className="flex items-center">
       {isPrimary && showMultiSessionBadges && (
         <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
-      )}
-      {sessionNumber != null && showMultiSessionBadges && (
-        <span className="ml-1.5 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5">
-          {sessionNumber}
-        </span>
       )}
       {agentName &&
         (isSessionActive(sessionState) ? (
@@ -340,7 +337,6 @@ function SessionTabBody({
   sessionId: string | undefined;
   isPrimary: boolean;
   showMultiSessionBadges: boolean;
-  sessionNumber: number | null;
   agentName: string | null;
   sessionState: TaskSessionState | null;
   isActive: boolean;
@@ -364,7 +360,9 @@ function SessionTabBody({
 
 /**
  * Custom dockview tab for session panels.
- * Shows agent logo, index badge, and star for primary; right-click for lifecycle actions.
+ * Shows agent logo and star for primary (rank is already embedded in the tab
+ * title via `#<rank>`, so no separate numeric badge is rendered); right-click
+ * for lifecycle actions.
  */
 export function SessionTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
@@ -390,7 +388,15 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
 
   useEffect(() => {
-    if (tabTitle && api.title !== tabTitle) api.setTitle(tabTitle);
+    // Always call setTitle (not gated on api.title !== tabTitle) when tabTitle
+    // changes: dockview's setTitle already no-ops internally when the value is
+    // unchanged (see DockviewPanelModel.setTitle), so this is cheap, and
+    // reading api.title here to skip the call is unreliable across dockview
+    // panel moves/reconciliation (dockview-react's own useTitle hook has a
+    // similar comment: "the title may already be out of sync, cf. issue
+    // #1003"). Always syncing guarantees the tab strip never gets stuck on a
+    // stale (e.g. rank-less) title after a session is added/reordered.
+    if (tabTitle) api.setTitle(tabTitle);
   }, [tabTitle, api]);
 
   const showMultiSessionBadges = sessionCount > 1;
@@ -427,7 +433,6 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             sessionId={sessionId}
             isPrimary={isPrimary}
             showMultiSessionBadges={showMultiSessionBadges}
-            sessionNumber={sessionNumber}
             agentName={agentName}
             sessionState={sessionState}
             isActive={isActive}

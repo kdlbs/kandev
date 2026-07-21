@@ -202,6 +202,7 @@ type SessionRepository interface {
 	BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
+	UpdateSessionWorkflowStep(ctx context.Context, sessionID, stepID string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 	SetSessionACPSessionID(ctx context.Context, sessionID, acpSessionID string) (bool, error)

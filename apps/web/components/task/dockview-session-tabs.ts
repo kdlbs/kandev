@@ -17,6 +17,7 @@ import type { TaskSession } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
+import { reconcileSessionPanelOrder } from "./dockview-session-tab-order";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -814,6 +815,8 @@ export function runAutoSessionTabEffect(
     siblingAnchor,
     refs.sessionTabCreatedRef.current,
   );
+
+  reconcileSessionPanelOrder(api, currentSessionIds, activePanel);
 
   if (isDebug()) {
     debug("useAutoSessionTab: effect exit", {

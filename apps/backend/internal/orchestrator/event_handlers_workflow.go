@@ -827,6 +827,7 @@ func (s *Service) maybySwitchSessionForProfile(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
 ) (*models.TaskSession, bool) {
 	if s.agentManager.IsPassthroughSession(ctx, session.ID) {
+		s.updateSessionStepLink(ctx, taskID, session, step.ID)
 		return session, true
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
@@ -845,6 +846,7 @@ func (s *Service) maybySwitchSessionForProfile(
 				session.IsPrimary = true
 			}
 		}
+		s.updateSessionStepLink(ctx, taskID, session, step.ID)
 		return session, true
 	}
 	newSession, err := s.switchSessionForStep(ctx, taskID, session, effectiveProfile)
@@ -856,7 +858,58 @@ func (s *Service) maybySwitchSessionForProfile(
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return nil, false
 	}
+	s.updateSessionStepLink(ctx, taskID, newSession, step.ID)
 	return newSession, true
+}
+
+// updateSessionStepLink persists the workflow step a session currently belongs
+// to and mirrors it onto the in-memory struct. Best-effort: a persistence
+// failure is logged but not fatal — the session tab falls back to legacy
+// ordering/labeling. workflow_step_id is deliberately excluded from the
+// full-row session update (like name/metadata) so this dedicated write is the
+// single path that changes a session's step link on a workflow move.
+//
+// Guarded against out-of-order writes: on-enter processing for a step runs in
+// its own goroutine (see handleTaskMovedWithSession/processStepExitAndEnter),
+// so a rapid A -> B -> C sequence of moves can let a delayed B goroutine
+// finish after C's. Re-reading the task and comparing WorkflowStepID closes
+// the common case: if B's goroutine is delayed past C's entire execution,
+// GetTask here returns "C" and the write is skipped. A finer interleaving (B
+// reads the task while it still shows "B", then C fully commits, then B's
+// write proceeds) can still transiently clobber C's link — this check does
+// not close that narrower window. That's acceptable given the best-effort
+// framing: the next session-state event repairs the link.
+func (s *Service) updateSessionStepLink(ctx context.Context, taskID string, session *models.TaskSession, stepID string) {
+	if session == nil || stepID == "" || session.WorkflowStepID == stepID {
+		return
+	}
+	if taskID != "" {
+		task, err := s.repo.GetTask(ctx, taskID)
+		if err != nil {
+			s.logger.Warn("failed to load task before session step link write, skipping",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("step_id", stepID),
+				zap.Error(err))
+			return
+		}
+		if task != nil && task.WorkflowStepID != "" && task.WorkflowStepID != stepID {
+			s.logger.Info("skipping stale session step link write: task has already moved on",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("stale_step_id", stepID),
+				zap.String("current_step_id", task.WorkflowStepID))
+			return
+		}
+	}
+	if err := s.repo.UpdateSessionWorkflowStep(ctx, session.ID, stepID); err != nil {
+		s.logger.Warn("failed to update session workflow step link",
+			zap.String("session_id", session.ID),
+			zap.String("step_id", stepID),
+			zap.Error(err))
+		return
+	}
+	session.WorkflowStepID = stepID
 }
 
 // processOnEnter processes the on_enter events for a step after transitioning to it.

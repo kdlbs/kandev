@@ -233,6 +233,49 @@ func (b *recordingEventBus) Request(context.Context, string, *bus.Event, time.Du
 func (b *recordingEventBus) Close()            {}
 func (b *recordingEventBus) IsConnected() bool { return true }
 
+// TestUpdateTaskSessionStatePublishesWorkflowStepID covers an active-turn
+// transition (WAITING_FOR_INPUT -> RUNNING via allowWakeFromWaiting) so a
+// session already linked to a workflow step keeps that link in the payload
+// mid-turn, not just on session creation/on_enter.
+func TestUpdateTaskSessionStatePublishesWorkflowStepID(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateSessionWorkflowStep(ctx, "s1", "step1"))
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+
+	svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateWaitingForInput, "", false)
+	require.Len(t, eb.events, 1)
+	data, ok := eb.events[0].event.Data.(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "step1", data["workflow_step_id"])
+
+	svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateRunning, "", true)
+	require.Len(t, eb.events, 2)
+	data, ok = eb.events[1].event.Data.(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "step1", data["workflow_step_id"], "workflow_step_id must survive an active-turn state transition")
+}
+
+func TestUpdateTaskSessionStateOmitsWorkflowStepIDWhenUnset(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+
+	svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateWaitingForInput, "", false)
+
+	require.Len(t, eb.events, 1)
+	data, ok := eb.events[0].event.Data.(map[string]interface{})
+	require.True(t, ok)
+	_, present := data["workflow_step_id"]
+	require.False(t, present, "workflow_step_id should be omitted when the session has no step link")
+}
+
 func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

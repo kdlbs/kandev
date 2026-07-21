@@ -83,7 +83,7 @@ describe("MobileSessionsPicker", () => {
     render(<MobileSessionsPicker taskId="task-1" sessionId="session-b" fullWidth />);
 
     expect(
-      screen.getByRole("button", { name: "Active session: Beta. Tap to switch." }),
+      screen.getByRole("button", { name: "Active session: Beta #2. Tap to switch." }),
     ).toBeTruthy();
 
     fireEvent.click(screen.getByTestId("mobile-sessions-pill"));

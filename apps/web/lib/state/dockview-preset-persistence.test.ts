@@ -377,7 +377,10 @@ describe("applyCustomLayout — session panel normalization", () => {
     await flushRaf();
 
     const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
-    const panel = appliedState?.columns[0]?.groups[0]?.panels[0];
+    // sessionIds already arrive in step-flow order; the active session is
+    // activated in its existing slot rather than force-prepended, so the
+    // sibling (first in step-flow order) stays ahead of the active session.
+    const panel = appliedState?.columns[0]?.groups[0]?.panels[1];
     expect(panel).toMatchObject({
       id: NEW_SESSION_PANEL_ID,
       component: "chat",
@@ -385,8 +388,8 @@ describe("applyCustomLayout — session panel normalization", () => {
       params: { sessionId: NEW_SESSION_ID },
     });
     expect(appliedState?.columns[0]?.groups[0]?.panels.map((item) => item.id)).toEqual([
-      NEW_SESSION_PANEL_ID,
       SIBLING_SESSION_PANEL_ID,
+      NEW_SESSION_PANEL_ID,
     ]);
     expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe(NEW_SESSION_PANEL_ID);
   });

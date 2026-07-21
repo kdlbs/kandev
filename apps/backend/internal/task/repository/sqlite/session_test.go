@@ -139,6 +139,173 @@ func TestRenameTaskSession(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionWorkflowStep(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	// Unknown session yields a typed not-found error.
+	if err := repo.UpdateSessionWorkflowStep(ctx, "missing-session", "step-1"); !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("UpdateSessionWorkflowStep error = %v, want ErrTaskSessionNotFound", err)
+	}
+
+	// workflow_step_id round-trips through CreateTaskSession + ToAPI.
+	seedForMsgTest(t, repo, "task-step", "session-seed", "turn-step")
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-step", TaskID: "task-step", WorkflowStepID: "step-spec",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession with step: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-step")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.WorkflowStepID != "step-spec" {
+		t.Fatalf("session.WorkflowStepID = %q, want %q", session.WorkflowStepID, "step-spec")
+	}
+	if got := session.ToAPI()["workflow_step_id"]; got != "step-spec" {
+		t.Fatalf(`ToAPI()["workflow_step_id"] = %v, want "step-spec"`, got)
+	}
+
+	// A step move updates just the step link, and it survives list scans.
+	if err := repo.UpdateSessionWorkflowStep(ctx, "session-step", "step-review"); err != nil {
+		t.Fatalf("UpdateSessionWorkflowStep: %v", err)
+	}
+	sessions, err := repo.ListTaskSessions(ctx, "task-step")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	found := false
+	for _, s := range sessions {
+		if s.ID == "session-step" {
+			found = true
+			if s.WorkflowStepID != "step-review" {
+				t.Fatalf("listed session WorkflowStepID = %q, want %q", s.WorkflowStepID, "step-review")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("session-step not returned by ListTaskSessions")
+	}
+
+	// Empty step id omitted from ToAPI (frontend falls back to legacy ordering).
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-nostep", TaskID: "task-step",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession without step: %v", err)
+	}
+	nostep, err := repo.GetTaskSession(ctx, "session-nostep")
+	if err != nil {
+		t.Fatalf("GetTaskSession nostep: %v", err)
+	}
+	if _, ok := nostep.ToAPI()["workflow_step_id"]; ok {
+		t.Fatalf("ToAPI() should omit workflow_step_id when empty")
+	}
+}
+
+func TestBackfillSessionWorkflowStep(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	// No session_step_history table yet: backfill tolerates the missing table.
+	if err := repo.backfillSessionWorkflowStep(); err != nil {
+		t.Fatalf("backfill with missing history table: %v", err)
+	}
+
+	// Seed a session with an empty step link, plus history rows for it.
+	seedForMsgTest(t, repo, "task-bf", "session-bf", "turn-bf")
+	if _, err := repo.db.Exec(`
+		CREATE TABLE session_step_history (
+			id TEXT PRIMARY KEY, session_id TEXT, to_step_id TEXT, created_at TIMESTAMP
+		)`); err != nil {
+		t.Fatalf("create history table: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, h := range []struct {
+		id, step string
+		at       time.Time
+	}{
+		{"h1", "step-spec", now.Add(-2 * time.Hour)},
+		{"h2", "step-review", now.Add(-1 * time.Hour)}, // most recent → wins
+	} {
+		if _, err := repo.db.Exec(repo.db.Rebind(`
+			INSERT INTO session_step_history (id, session_id, to_step_id, created_at)
+			VALUES (?, 'session-bf', ?, ?)`), h.id, h.step, h.at); err != nil {
+			t.Fatalf("insert history %s: %v", h.id, err)
+		}
+	}
+
+	if err := repo.backfillSessionWorkflowStep(); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-bf")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.WorkflowStepID != "step-review" {
+		t.Fatalf("backfilled WorkflowStepID = %q, want %q (latest history)", session.WorkflowStepID, "step-review")
+	}
+
+	// Idempotent + non-clobbering: a session with an existing link is untouched.
+	if err := repo.UpdateSessionWorkflowStep(ctx, "session-bf", "step-manual"); err != nil {
+		t.Fatalf("set manual step: %v", err)
+	}
+	if err := repo.backfillSessionWorkflowStep(); err != nil {
+		t.Fatalf("backfill re-run: %v", err)
+	}
+	session, err = repo.GetTaskSession(ctx, "session-bf")
+	if err != nil {
+		t.Fatalf("GetTaskSession after re-run: %v", err)
+	}
+	if session.WorkflowStepID != "step-manual" {
+		t.Fatalf("re-run clobbered existing link: %q, want %q", session.WorkflowStepID, "step-manual")
+	}
+}
+
+func TestRunMigrationsBackfillsSessionWorkflowStep(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-backfill.db")
+	dbConn, err := db.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+
+	if _, err := sqlxDB.Exec(`
+		CREATE TABLE task_sessions (
+			id TEXT PRIMARY KEY
+		);
+		CREATE TABLE session_step_history (
+			id TEXT PRIMARY KEY,
+			session_id TEXT,
+			to_step_id TEXT,
+			created_at TIMESTAMP
+		);
+		INSERT INTO task_sessions (id) VALUES ('session-migrated');
+		INSERT INTO session_step_history (id, session_id, to_step_id, created_at)
+		VALUES ('history-1', 'session-migrated', 'step-spec', '2025-01-01T00:00:00Z'),
+		       ('history-2', 'session-migrated', 'step-review', '2025-01-02T00:00:00Z');
+	`); err != nil {
+		t.Fatalf("seed legacy schema: %v", err)
+	}
+
+	repo := &Repository{
+		db:      sqlxDB,
+		ro:      sqlxDB,
+		migrate: db.NewMigrateLogger(sqlxDB, nil),
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("runMigrations: %v", err)
+	}
+
+	var stepID string
+	if err := sqlxDB.Get(&stepID, `SELECT workflow_step_id FROM task_sessions WHERE id = 'session-migrated'`); err != nil {
+		t.Fatalf("select migrated step: %v", err)
+	}
+	if stepID != "step-review" {
+		t.Fatalf("workflow_step_id after runMigrations = %q, want %q", stepID, "step-review")
+	}
+}
+
 func TestTaskSessionNotFoundErrorsAreTyped(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

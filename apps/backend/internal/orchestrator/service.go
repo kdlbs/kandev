@@ -171,6 +171,7 @@ type sessionExecutorStore interface {
 	GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
 	UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
+	UpdateSessionWorkflowStep(ctx context.Context, sessionID, stepID string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 	SetSessionMetadataKeyIfAbsent(ctx context.Context, sessionID, key string, value interface{}) (bool, error)

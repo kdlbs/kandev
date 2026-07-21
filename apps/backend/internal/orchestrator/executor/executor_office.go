@@ -169,6 +169,14 @@ func (e *Executor) createOfficeSession(
 
 	agentProfileSnapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
 
+	// Resolve the task's current workflow step so the session tab can be
+	// ordered/labeled by step. Best-effort: on lookup failure the session is
+	// created without a step link and falls back to legacy ordering.
+	var workflowStepID string
+	if dbTask, terr := e.repo.GetTask(ctx, task.ID); terr == nil && dbTask != nil {
+		workflowStepID = dbTask.WorkflowStepID
+	}
+
 	now := time.Now().UTC()
 	// Office sessions are owned by the stable agent identity while their
 	// concrete execution profile may change between runs.
@@ -189,6 +197,7 @@ func (e *Executor) createOfficeSession(
 		AgentProfileSnapshot: agentProfileSnapshot,
 		IsPassthrough:        isPassthrough,
 		Metadata:             metadata,
+		WorkflowStepID:       workflowStepID,
 	}
 	if executorProfileID != "" {
 		session.ExecutorProfileID = executorProfileID

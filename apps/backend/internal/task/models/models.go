@@ -819,9 +819,10 @@ type TaskSession struct {
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
 
 	// Workflow-related fields
-	IsPrimary     bool         `json:"is_primary"`              // Whether this is the primary session for the task
-	IsPassthrough bool         `json:"is_passthrough"`          // Whether this session uses passthrough (PTY) mode
-	ReviewStatus  ReviewStatus `json:"review_status,omitempty"` // zero value = no review needed
+	WorkflowStepID string       `json:"workflow_step_id,omitempty"` // Workflow step the session currently belongs to; drives session-tab ordering & labels
+	IsPrimary      bool         `json:"is_primary"`                 // Whether this is the primary session for the task
+	IsPassthrough  bool         `json:"is_passthrough"`             // Whether this session uses passthrough (PTY) mode
+	ReviewStatus   ReviewStatus `json:"review_status,omitempty"`    // zero value = no review needed
 }
 
 // ToAPI converts internal TaskSession to API type
@@ -876,6 +877,9 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	result["is_passthrough"] = s.IsPassthrough
 	if s.TaskEnvironmentID != "" {
 		result["task_environment_id"] = s.TaskEnvironmentID
+	}
+	if s.WorkflowStepID != "" {
+		result["workflow_step_id"] = s.WorkflowStepID
 	}
 	// Office sessions carry an agent_profile_id; the frontend uses it
 	// to distinguish per-(task, agent) office sessions from per-launch

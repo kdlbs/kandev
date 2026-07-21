@@ -2,6 +2,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { WorkflowPayload } from "@/lib/types/backend";
+import { reorderAllStoredSessionsPlain } from "@/lib/state/slices/session/session-slice";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function stepFromPayload(step: any) {
@@ -121,7 +122,13 @@ export function registerWorkflowsHandlers(store: StoreApi<AppState>): WsHandlers
         const steps = state.kanban.steps
           .map((s) => (s.id === step.id ? stepFromPayload(step) : s))
           .sort((a, b) => a.position - b.position);
-        return { ...state, kanban: { ...state.kanban, steps } };
+        const nextState = { ...state, kanban: { ...state.kanban, steps } };
+        // A step reorder invalidates the cached step-flow tab order for every
+        // loaded task on this workflow, but no session-level event fires to
+        // trigger the slice's own resort — re-derive it here so tab
+        // order/rank badges don't go stale until an unrelated session event.
+        const taskSessionsByTask = reorderAllStoredSessionsPlain(nextState);
+        return taskSessionsByTask ? { ...nextState, taskSessionsByTask } : nextState;
       });
     },
     "workflow.step.deleted": (message) => {
@@ -129,7 +136,13 @@ export function registerWorkflowsHandlers(store: StoreApi<AppState>): WsHandlers
       store.setState((state) => {
         if (state.kanban.workflowId !== step.workflow_id) return state;
         const steps = state.kanban.steps.filter((s) => s.id !== step.id);
-        return { ...state, kanban: { ...state.kanban, steps } };
+        const nextState = { ...state, kanban: { ...state.kanban, steps } };
+        // Deleting a step shifts every later step's position (and can leave
+        // sessions pointing at a now-missing step), which invalidates the
+        // cached step-flow tab order the same way a reorder does — re-derive
+        // it here too so tab order/rank badges don't go stale.
+        const taskSessionsByTask = reorderAllStoredSessionsPlain(nextState);
+        return taskSessionsByTask ? { ...nextState, taskSessionsByTask } : nextState;
       });
     },
   };

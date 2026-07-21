@@ -227,10 +227,12 @@ test.describe("Workflow agent profile switching", () => {
     const session = new SessionPage(testPage);
     await expect(session.chat).toBeVisible({ timeout: 15_000 });
 
-    // Wait for the first session tab to appear with the correct profile name
+    // Wait for the first session tab to appear with the step's label
+    // (session tabs now show the workflow step name + rank, not the raw
+    // agent profile name — see resolveSessionTabTitle's stepLabel precedence).
     const sessionTabs = testPage.locator('[data-testid^="session-tab-"]');
     await expect(sessionTabs.first()).toBeVisible({ timeout: 30_000 });
-    await expect(sessionTabs.first()).toContainText("Profile A", { timeout: 10_000 });
+    await expect(sessionTabs.first()).toContainText("Step1", { timeout: 10_000 });
 
     // Wait for the agent to be ready (WAITING_FOR_INPUT) before moving
     for (let i = 0; i < 20; i++) {
@@ -443,8 +445,8 @@ test.describe("Workflow agent profile switching", () => {
 
   /**
    * Verifies the StartCreatedSession fix: when a task is created in a step with an
-   * agent profile override, the session tab shows the step's agent profile name
-   * (not the workspace default).
+   * agent profile override, the session tab shows the step's label (session tabs
+   * are named by workflow step, not the raw agent profile name).
    */
   test("initial task creation shows step's agent profile in session tab", async ({
     testPage,
@@ -483,10 +485,11 @@ test.describe("Workflow agent profile switching", () => {
     const session = new SessionPage(testPage);
     await expect(session.chat).toBeVisible({ timeout: 15_000 });
 
-    // The session tab should show "Profile A" (the step's agent profile name)
+    // The session tab should show "Step1" (the step's label; tabs are named
+    // by workflow step, not the raw agent profile name).
     const sessionTab = testPage.locator('[data-testid^="session-tab-"]').first();
     await expect(sessionTab).toBeVisible({ timeout: 30_000 });
-    await expect(sessionTab).toContainText("Profile A", { timeout: 10_000 });
+    await expect(sessionTab).toContainText("Step1", { timeout: 10_000 });
   });
 
   /**
@@ -542,8 +545,9 @@ test.describe("Workflow agent profile switching", () => {
     const session = new SessionPage(testPage);
     await expect(session.chat).toBeVisible({ timeout: 15_000 });
 
-    // Wait for Profile A tab to appear and be active
-    const profileATab = session.sessionTabByText("Profile A");
+    // Wait for Step1 tab to appear and be active (tabs are named by
+    // workflow step, not the raw agent profile name).
+    const profileATab = session.sessionTabByText("Step1");
     await expect(profileATab).toBeVisible({ timeout: 60_000 });
 
     // Wait for agent to be ready (WAITING_FOR_INPUT)
@@ -560,11 +564,11 @@ test.describe("Workflow agent profile switching", () => {
     // Move to Step2 — triggers new session with profileB
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    // The new "Profile B" tab should appear and the primary star should move to it
-    // (the active tab stays on Profile A because the SSR-load pin protects it).
-    const profileBTab = session.sessionTabByText("Profile B");
+    // The new "Step2" tab should appear and the primary star should move to it
+    // (the active tab stays on Step1 because the SSR-load pin protects it).
+    const profileBTab = session.sessionTabByText("Step2");
     await expect(profileBTab).toBeVisible({ timeout: 60_000 });
-    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 60_000 });
+    await expect(session.primaryStarInTab("Step2")).toBeVisible({ timeout: 60_000 });
   });
 
   /**
@@ -620,10 +624,11 @@ test.describe("Workflow agent profile switching", () => {
     // Move to Step1 → auto_start with profileA → on_turn_complete → Step2 (profileB)
     await apiClient.moveTask(task.id, workflow.id, step1.id);
 
-    // After the cascade, the Profile B tab should appear and own the primary star.
-    const profileBTab = session.sessionTabByText("Profile B");
+    // After the cascade, the Step2 tab should appear and own the primary star
+    // (tabs are named by workflow step, not the raw agent profile name).
+    const profileBTab = session.sessionTabByText("Step2");
     await expect(profileBTab).toBeVisible({ timeout: 90_000 });
-    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 90_000 });
+    await expect(session.primaryStarInTab("Step2")).toBeVisible({ timeout: 90_000 });
   });
 
   /**
@@ -687,12 +692,13 @@ test.describe("Workflow agent profile switching", () => {
     // Move to Step2
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    // The Profile B tab should appear and own the primary star (no reload needed).
-    // The non-terminal Profile A tab stays user-pinned, so the star moving is
-    // what proves SetPrimarySession's WS broadcast landed.
-    const profileBTab = session.sessionTabByText("Profile B");
+    // The Step2 tab should appear and own the primary star (no reload needed).
+    // The non-terminal Step1 tab stays user-pinned, so the star moving is
+    // what proves SetPrimarySession's WS broadcast landed. (Tabs are named by
+    // workflow step, not the raw agent profile name.)
+    const profileBTab = session.sessionTabByText("Step2");
     await expect(profileBTab).toBeVisible({ timeout: 60_000 });
-    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 60_000 });
+    await expect(session.primaryStarInTab("Step2")).toBeVisible({ timeout: 60_000 });
   });
 
   /**
@@ -741,9 +747,10 @@ test.describe("Workflow agent profile switching", () => {
     const session = new SessionPage(testPage);
     await expect(session.chat).toBeVisible({ timeout: 15_000 });
 
-    // Wait for Profile B session (Step1 override) to be ready
-    const profileBTab = session.sessionTabByText("Profile B");
-    await expect(profileBTab).toBeVisible({ timeout: 60_000 });
+    // Wait for the Step1 session (profileB override) to be ready. (Tabs are
+    // named by workflow step, not the raw agent profile name.)
+    const step1Tab = session.sessionTabByText("Step1");
+    await expect(step1Tab).toBeVisible({ timeout: 60_000 });
     await expect
       .poll(
         async () => {
@@ -774,8 +781,12 @@ test.describe("Workflow agent profile switching", () => {
         { timeout: 60_000, message: "Waiting for workflow agent to stay primary" },
       )
       .toEqual({ profileBPrimary: true, profileBCompleted: false, profileACount: 0 });
-    await expect(profileBTab).toBeVisible({ timeout: 60_000 });
-    await expect(session.sessionTabByText("Profile A")).toHaveCount(0);
+    // The session is reused across Step1 -> Step2 (same agent, no override), so
+    // its tab label follows the session's current step and now reads "Step2"
+    // instead of "Step1" — and there is still exactly one session tab (no
+    // extra default-profile session was spawned).
+    await expect(session.sessionTabByText("Step2")).toBeVisible({ timeout: 60_000 });
+    await expect(testPage.locator('[data-testid^="session-tab-"]')).toHaveCount(1);
   });
 
   /**

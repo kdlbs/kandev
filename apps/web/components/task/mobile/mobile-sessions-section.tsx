@@ -36,6 +36,13 @@ import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { formatTaskSessionStateLabel } from "@/lib/ui/state-labels";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import {
+  buildStepPositionById,
+  buildStepTitleById,
+  sortSessionsByStepFlow,
+  splitAgentProfileLabel,
+} from "@/lib/state/slices/session/session-sort";
+import { resolveSessionTabTitle, resolveSnapshotModel } from "../session-tab-title";
 
 type SessionRow = {
   id: string;
@@ -47,26 +54,50 @@ type SessionRow = {
   startedAt: string;
 };
 
+function mobileAgentLabel(profile: AgentProfileOption | undefined): string {
+  return splitAgentProfileLabel(profile) ?? "Agent";
+}
+
+function mobileSessionLabel(
+  session: TaskSession,
+  profile: AgentProfileOption | undefined,
+  stepTitle: string | null,
+  rank: number,
+): string {
+  return (
+    resolveSessionTabTitle({
+      customName: session.name ?? null,
+      stepLabel: stepTitle,
+      agentLabel: mobileAgentLabel(profile),
+      rank,
+      activeModelId: null,
+      currentModelId: null,
+      snapshotModel: resolveSnapshotModel(session.agent_profile_snapshot),
+      modelOptions: [],
+      configOptions: [],
+    }) ?? `Agent #${rank}`
+  );
+}
+
 function buildSessionRows(
   sessions: TaskSession[],
   agentProfiles: AgentProfileOption[],
   primarySessionId: string | null | undefined,
+  stepPositionById: Record<string, number>,
+  stepTitleById: Record<string, string>,
 ): SessionRow[] {
-  const sorted = [...sessions].sort(
-    (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-  );
+  const sorted = sortSessionsByStepFlow(sessions, stepPositionById);
   return sorted.map((s, idx) => {
     const profile = agentProfiles.find((p) => p.id === s.agent_profile_id);
-    const labelParts = profile?.label.split(" • ") ?? [];
+    const stepTitle = s.workflow_step_id ? (stepTitleById[s.workflow_step_id] ?? null) : null;
+    const rank = idx + 1;
     return {
       id: s.id,
       agentName: profile?.agent_name ?? null,
-      // User-supplied session name wins over the derived profile label,
-      // matching the desktop session tab title precedence.
-      agentLabel: s.name || labelParts[1] || labelParts[0] || profile?.label || "Agent",
+      agentLabel: mobileSessionLabel(s, profile, stepTitle, rank),
       state: (s.state as TaskSessionState | undefined) ?? null,
       isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
-      index: idx + 1,
+      index: rank,
       startedAt: s.started_at,
     };
   });
@@ -256,11 +287,6 @@ function SessionRowItem({
         {row.isPrimary && showBadges && (
           <IconStar className="h-3.5 w-3.5 fill-foreground/60 stroke-0 shrink-0" />
         )}
-        {showBadges && (
-          <span className="text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5 shrink-0">
-            {row.index}
-          </span>
-        )}
         {row.agentName && <AgentLogo agentName={row.agentName} size={16} className="shrink-0" />}
         <span className="text-sm truncate flex-1">{row.agentLabel}</span>
         <StateBadge state={row.state} />
@@ -304,10 +330,21 @@ function useSessionRows(taskId: string | null) {
     const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
     return task?.primarySessionId ?? null;
   });
+  const kanbanSteps = useAppStore((s) => s.kanban?.steps);
+  const snapshots = useAppStore((s) => s.kanbanMulti?.snapshots);
+  const stepPositionById = useMemo(
+    () => buildStepPositionById({ kanban: { steps: kanbanSteps }, kanbanMulti: { snapshots } }),
+    [kanbanSteps, snapshots],
+  );
+  const stepTitleById = useMemo(
+    () => buildStepTitleById({ kanban: { steps: kanbanSteps }, kanbanMulti: { snapshots } }),
+    [kanbanSteps, snapshots],
+  );
   const { sessions, isLoading } = useTaskSessions(taskId);
   const rows = useMemo(
-    () => buildSessionRows(sessions, agentProfiles, primarySessionId),
-    [sessions, agentProfiles, primarySessionId],
+    () =>
+      buildSessionRows(sessions, agentProfiles, primarySessionId, stepPositionById, stepTitleById),
+    [sessions, agentProfiles, primarySessionId, stepPositionById, stepTitleById],
   );
   return { rows, isLoading, primarySessionId };
 }

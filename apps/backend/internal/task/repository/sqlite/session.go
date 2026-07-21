@@ -197,7 +197,7 @@ const taskSessionSelectCols = `ts.id, ts.task_id,
 	ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name`
+	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.workflow_step_id`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -260,15 +260,15 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
-			is_primary, review_status, is_passthrough, task_environment_id, name
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			is_primary, review_status, is_passthrough, task_environment_id, name, workflow_step_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), session.ID, session.TaskID, agentProfileID,
 		session.ExecutionProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID, session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
-		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
+		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name, session.WorkflowStepID)
 
 	if err != nil && strings.Contains(err.Error(), "uniq_office_task_session") {
 		// Two callers raced past their SELECT-then-INSERT for the same
@@ -306,6 +306,9 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	// via NullString so the empty case maps to "" on the model.
 	var agentProfileID sql.NullString
 	var name sql.NullString
+	// workflow_step_id may be NULL on legacy rows whose column predates the
+	// DEFAULT ''; decode via NullString so those map cleanly to "".
+	var workflowStepID sql.NullString
 
 	err := row.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
@@ -313,7 +316,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name,
+		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &workflowStepID,
 	)
 
 	if err == sql.ErrNoRows {
@@ -334,6 +337,9 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	}
 	if name.Valid {
 		session.Name = name.String
+	}
+	if workflowStepID.Valid {
+		session.WorkflowStepID = workflowStepID.String
 	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
@@ -597,6 +603,25 @@ func (r *Repository) UpdateTaskSessionAgentProfileSnapshot(
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
+	}
+	return nil
+}
+
+// UpdateSessionWorkflowStep updates just the workflow step a session currently
+// belongs to. Like name/metadata, workflow_step_id is deliberately excluded from
+// the full-row updateTaskSession write so a concurrent session update using a
+// stale in-memory copy can't clobber the step link. Callers update it when a
+// session is created for or carried into a workflow step.
+func (r *Repository) UpdateSessionWorkflowStep(ctx context.Context, sessionID, stepID string) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions SET workflow_step_id = ?, updated_at = ? WHERE id = ?
+	`), stepID, time.Now().UTC(), sessionID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, sessionID)
 	}
 	return nil
 }
@@ -1247,6 +1272,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	var reviewStatus sql.NullString
 	var agentProfileID sql.NullString
 	var name sql.NullString
+	var workflowStepID sql.NullString
 
 	err := rows.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
@@ -1254,7 +1280,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name,
+		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &workflowStepID,
 	)
 	if err != nil {
 		return nil, err
@@ -1271,6 +1297,9 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	}
 	if name.Valid {
 		session.Name = name.String
+	}
+	if workflowStepID.Valid {
+		session.WorkflowStepID = workflowStepID.String
 	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time

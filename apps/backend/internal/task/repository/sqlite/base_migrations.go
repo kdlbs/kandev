@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
@@ -70,10 +71,6 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
-	// Remove deprecated workflow_step_id column from task_sessions
-	if err := r.migrateSessionsRemoveWorkflowStepID(); err != nil {
-		return err
-	}
 	// Backfill executors_running from task_sessions and drop the denormalized
 	// agent_execution_id / container_id columns. After this migration,
 	// executors_running is the single source of truth for "active execution per
@@ -102,6 +99,28 @@ func (r *Repository) runMigrations() error {
 	// recreates task_sessions from an explicit column list and would drop a
 	// column added earlier.
 	r.migrate.Apply("task_sessions.name", `ALTER TABLE task_sessions ADD COLUMN name TEXT DEFAULT ''`)
+	// Workflow step the session currently belongs to; drives session-tab
+	// ordering & labels. This column tracks the session's current step and is
+	// kept in sync on step moves. Must run after the
+	// migrateSessionsRemoveAgentExecutionID rebuild, like name/workspace_path,
+	// so that rebuild (which recreates task_sessions from an explicit column
+	// list) can't drop it. NOTE: workflow_step_id is deliberately NOT part of
+	// the base_schema CREATE TABLE — a stale, task-level copy of this column was
+	// historically dropped by a now-removed removal migration that is gated on
+	// the column's presence; keeping the column out of base_schema guarantees
+	// that removal never re-fires on fresh DBs.
+	// Deliberately unconditional (not gated on the ADD COLUMN having just run):
+	// backfillSessionWorkflowStep tolerates a missing session_step_history
+	// table (the workflow repository may not have migrated yet) by returning
+	// nil without backfilling. If this were gated on a one-time "column just
+	// added" signal, that early boot could permanently skip the backfill —
+	// once the column exists, later boots would never retry. The scan cost
+	// is bounded (WHERE workflow_step_id = '' already narrows it to rows that
+	// still need migrating) and becomes a no-op once all sessions are filled.
+	r.migrate.Apply("task_sessions.workflow_step_id", `ALTER TABLE task_sessions ADD COLUMN workflow_step_id TEXT DEFAULT ''`)
+	if err := r.backfillSessionWorkflowStep(); err != nil {
+		return err
+	}
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.remote_url", `ALTER TABLE repositories ADD COLUMN remote_url TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}'`)
@@ -560,53 +579,38 @@ func (r *Repository) recreateTaskRepositoriesForMultiBranch(trigger string) erro
 	)
 }
 
-// migrateSessionsRemoveWorkflowStepID removes the deprecated workflow_step_id column
-// from task_sessions. Workflow step is now tracked on the task, not the session.
-func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
-	return r.recreateTableNamed("task_sessions.recreate_drop_workflow_step_id", "task_sessions", "workflow_step_id", []string{
-		`CREATE TABLE task_sessions_new (
-			id TEXT PRIMARY KEY,
-			task_id TEXT NOT NULL,
-			agent_execution_id TEXT NOT NULL DEFAULT '',
-			container_id TEXT NOT NULL DEFAULT '',
-			agent_profile_id TEXT,
-			execution_profile_id TEXT NOT NULL DEFAULT '',
-			executor_id TEXT DEFAULT '',
-			executor_profile_id TEXT DEFAULT '',
-			environment_id TEXT DEFAULT '',
-			repository_id TEXT DEFAULT '',
-			base_branch TEXT DEFAULT '',
-			agent_profile_snapshot TEXT DEFAULT '{}',
-			executor_snapshot TEXT DEFAULT '{}',
-			environment_snapshot TEXT DEFAULT '{}',
-			repository_snapshot TEXT DEFAULT '{}',
-			state TEXT NOT NULL DEFAULT 'CREATED',
-			error_message TEXT DEFAULT '',
-			metadata TEXT DEFAULT '{}',
-			started_at TIMESTAMP NOT NULL,
-			completed_at TIMESTAMP,
-			updated_at TIMESTAMP NOT NULL,
-			is_primary INTEGER DEFAULT 0,
-			is_passthrough INTEGER DEFAULT 0,
-			review_status TEXT DEFAULT '',
-			base_commit_sha TEXT DEFAULT '',
-			task_environment_id TEXT DEFAULT '',
-			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-		)`,
-		`INSERT INTO task_sessions_new SELECT
-			id, task_id, agent_execution_id, container_id, agent_profile_id, execution_profile_id,
-			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
-			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-			state, error_message, metadata, started_at, completed_at, updated_at,
-			is_primary, is_passthrough, review_status,
-			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, '')
-		FROM task_sessions`,
-		`DROP TABLE task_sessions`,
-		`ALTER TABLE task_sessions_new RENAME TO task_sessions`,
-		`CREATE INDEX IF NOT EXISTS idx_task_sessions_task_id ON task_sessions(task_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_task_sessions_state ON task_sessions(state)`,
-		`CREATE INDEX IF NOT EXISTS idx_task_sessions_task_state ON task_sessions(task_id, state)`,
-	})
+// backfillSessionWorkflowStep populates task_sessions.workflow_step_id for
+// legacy rows (created before the column existed) from the most recent
+// session_step_history entry for each session. It maps each session to the
+// last step it served, matching the "session belongs to its current step"
+// model used going forward.
+//
+// Best-effort and idempotent: only empty rows that have history are filled, so
+// re-running is a no-op. A missing session_step_history table (the workflow
+// repository initialises it separately and may not have run yet) is tolerated
+// so cross-repository init ordering doesn't matter — a later boot backfills.
+func (r *Repository) backfillSessionWorkflowStep() error {
+	const stmt = `
+		UPDATE task_sessions
+		SET workflow_step_id = (
+			SELECT h.to_step_id
+			FROM session_step_history h
+			WHERE h.session_id = task_sessions.id
+			ORDER BY h.created_at DESC, h.id DESC
+			LIMIT 1
+		)
+		WHERE (workflow_step_id IS NULL OR workflow_step_id = '')
+		  AND EXISTS (
+			SELECT 1 FROM session_step_history h2
+			WHERE h2.session_id = task_sessions.id
+		  )`
+	if _, err := r.db.Exec(stmt); err != nil {
+		if db.IsMissingTableError(err) {
+			return nil
+		}
+		return fmt.Errorf("backfill session workflow_step_id: %w", err)
+	}
+	return nil
 }
 
 type backfillRow struct {

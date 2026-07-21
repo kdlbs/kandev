@@ -22,26 +22,41 @@ function sessionPanel(sessionId: string): LayoutPanel {
   };
 }
 
-function targetPanels(activeSessionId: string | null, currentSessionIds: string[]): LayoutPanel[] {
-  if (!activeSessionId) return [knownPanel(CHAT_PANEL_ID)];
+type PanelTargets = { panels: LayoutPanel[]; activeId: string };
 
-  const orderedSessionIds = [activeSessionId, ...currentSessionIds].filter(
+function targetPanels(activeSessionId: string | null, currentSessionIds: string[]): PanelTargets {
+  if (!activeSessionId) {
+    return { panels: [knownPanel(CHAT_PANEL_ID)], activeId: CHAT_PANEL_ID };
+  }
+
+  // currentSessionIds arrives already in step-flow order. Keep that order and
+  // simply ensure the active session is present (a freshly-created active
+  // session may not be in the list yet) by appending it — never force-prepend,
+  // so the active tab stays in its step-flow slot instead of jumping to the
+  // left edge.
+  const withActive = currentSessionIds.includes(activeSessionId)
+    ? currentSessionIds
+    : [...currentSessionIds, activeSessionId];
+  const orderedSessionIds = withActive.filter(
     (sessionId, index, sessionIds) => sessionId && sessionIds.indexOf(sessionId) === index,
   );
-  return orderedSessionIds.map(sessionPanel);
+  return {
+    panels: orderedSessionIds.map(sessionPanel),
+    activeId: `${SESSION_PANEL_PREFIX}${activeSessionId}`,
+  };
 }
 
 function rewrittenActivePanel(
   group: LayoutGroup,
   panels: LayoutPanel[],
-  targets: LayoutPanel[],
+  targets: PanelTargets,
   activeWasRewritten: boolean,
 ): string | undefined {
   if (activeWasRewritten) {
-    const activeTargetId = targets[0]?.id;
-    return activeTargetId && panels.some((panel) => panel.id === activeTargetId)
-      ? activeTargetId
+    const activeTargetId = panels.some((panel) => panel.id === targets.activeId)
+      ? targets.activeId
       : panels[0]?.id;
+    return activeTargetId;
   }
 
   if (group.activePanel && !panels.some((panel) => panel.id === group.activePanel)) {
@@ -53,7 +68,7 @@ function rewrittenActivePanel(
 
 function rewriteGroup(
   group: LayoutGroup,
-  targets: LayoutPanel[],
+  targets: PanelTargets,
   inserted: { value: boolean },
 ): LayoutGroup | null {
   let activeWasRewritten = false;
@@ -70,7 +85,7 @@ function rewriteGroup(
     // Keep only the first reusable chat slot. Later chat/session slots are
     // duplicate stale session tabs and should disappear with their group/column.
     if (!inserted.value) {
-      panels.push(...targets);
+      panels.push(...targets.panels);
       inserted.value = true;
     }
   }
@@ -90,7 +105,7 @@ function collectGroupsFromTree(node: LayoutNode): LayoutGroup[] {
 
 function rewriteTreeNode(
   node: LayoutNode,
-  targets: LayoutPanel[],
+  targets: PanelTargets,
   inserted: { value: boolean },
 ): LayoutNode | null {
   if (node.type === "leaf") {
@@ -107,7 +122,7 @@ function rewriteTreeNode(
 
 function rewriteColumn(
   column: LayoutColumn,
-  targets: LayoutPanel[],
+  targets: PanelTargets,
   inserted: { value: boolean },
 ): LayoutColumn | null {
   if (column.tree) {
@@ -127,7 +142,7 @@ function rewriteColumn(
   return { ...column, groups };
 }
 
-function rewriteReusableChatPanels(state: LayoutState, targets: LayoutPanel[]): LayoutState {
+function rewriteReusableChatPanels(state: LayoutState, targets: PanelTargets): LayoutState {
   const inserted = { value: false };
   const columns = state.columns
     .map((column) => rewriteColumn(column, targets, inserted))
@@ -136,7 +151,10 @@ function rewriteReusableChatPanels(state: LayoutState, targets: LayoutPanel[]): 
 }
 
 export function normalizeReusableSessionPanels(state: LayoutState): LayoutState {
-  return rewriteReusableChatPanels(state, [knownPanel(CHAT_PANEL_ID)]);
+  return rewriteReusableChatPanels(state, {
+    panels: [knownPanel(CHAT_PANEL_ID)],
+    activeId: CHAT_PANEL_ID,
+  });
 }
 
 export function materializeReusableChatPanel(

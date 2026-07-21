@@ -25,7 +25,14 @@ import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { buildAgentLabelsById, resolveAgentLabelFor, sortSessions } from "./session-sort";
+import {
+  buildAgentLabelsById,
+  buildStepPositionById,
+  buildStepTitleById,
+  resolveAgentLabelFor,
+  sortSessionsByStepFlow,
+} from "@/lib/state/slices/session/session-sort";
+import { resolveSessionTabTitle, resolveSnapshotModel } from "./session-tab-title";
 
 type SessionStatus = "running" | "waiting_input" | "complete" | "failed" | "cancelled";
 
@@ -178,12 +185,39 @@ function useSessionsDropdownState(taskId: string | null) {
   const currentTime = useRunningSessionsClock(sessions);
 
   const agentLabelsById = useMemo(() => buildAgentLabelsById(agentProfiles), [agentProfiles]);
-  const sortedSessions = useMemo(() => sortSessions(taskId ? sessions : []), [sessions, taskId]);
-  const resolveAgentLabel = useCallback(
-    (s: TaskSession) => resolveAgentLabelFor(s, agentLabelsById),
-    [agentLabelsById],
+  // Order the dropdown by the same workflow-step flow as the tab strip so the
+  // dropdown numbering matches each tab's badge. Select stable store refs and
+  // memoize the derived map to avoid per-render churn.
+  const kanbanSteps = useAppStore((state) => state.kanban?.steps);
+  const snapshots = useAppStore((state) => state.kanbanMulti?.snapshots);
+  const stepPositionById = useMemo(
+    () => buildStepPositionById({ kanban: { steps: kanbanSteps }, kanbanMulti: { snapshots } }),
+    [kanbanSteps, snapshots],
   );
-  return { sortedSessions, currentTime, loadSessions, resolveAgentLabel };
+  const stepTitleById = useMemo(
+    () => buildStepTitleById({ kanban: { steps: kanbanSteps }, kanbanMulti: { snapshots } }),
+    [kanbanSteps, snapshots],
+  );
+  const sortedSessions = useMemo(
+    () => sortSessionsByStepFlow(taskId ? sessions : [], stepPositionById),
+    [sessions, taskId, stepPositionById],
+  );
+  const resolveSessionLabel = useCallback(
+    (s: TaskSession, rank: number) =>
+      resolveSessionTabTitle({
+        customName: s.name ?? null,
+        stepLabel: s.workflow_step_id ? (stepTitleById[s.workflow_step_id] ?? null) : null,
+        agentLabel: resolveAgentLabelFor(s, agentLabelsById),
+        rank,
+        activeModelId: null,
+        currentModelId: null,
+        snapshotModel: resolveSnapshotModel(s.agent_profile_snapshot),
+        modelOptions: [],
+        configOptions: [],
+      }) ?? `Agent #${rank}`,
+    [agentLabelsById, stepTitleById],
+  );
+  return { sortedSessions, currentTime, loadSessions, resolveSessionLabel };
 }
 
 export const SessionsDropdown = memo(function SessionsDropdown({
@@ -202,7 +236,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
     return task?.primarySessionId ?? null;
   });
   const primarySessionId = primarySessionIdProp ?? storePrimarySessionId;
-  const { sortedSessions, currentTime, loadSessions, resolveAgentLabel } =
+  const { sortedSessions, currentTime, loadSessions, resolveSessionLabel } =
     useSessionsDropdownState(taskId);
   const { handleSelectSession } = useSessionSelectionHandlers(taskId);
   const { handleResumeSession, handleDeleteSession, handleSetPrimary } = useSessionLifecycleActions(
@@ -239,7 +273,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           activeSessionId={activeSessionId}
           primarySessionId={primarySessionId}
           currentTime={currentTime}
-          resolveAgentLabel={resolveAgentLabel}
+          resolveSessionLabel={resolveSessionLabel}
           onSelectSession={(sessionId) => handleSelectSession(sessionId, () => setOpen(false))}
           onSetPrimary={onSetPrimary ?? handleSetPrimary}
           onNewSession={() => setShowNewSessionDialog(true)}
@@ -273,7 +307,7 @@ function SessionDropdownContent({
   activeSessionId,
   primarySessionId,
   currentTime,
-  resolveAgentLabel,
+  resolveSessionLabel,
   onSelectSession,
   onSetPrimary,
   onNewSession,
@@ -285,7 +319,7 @@ function SessionDropdownContent({
   activeSessionId: string | null;
   primarySessionId: string | null;
   currentTime: number;
-  resolveAgentLabel: (session: TaskSession) => string;
+  resolveSessionLabel: (session: TaskSession, rank: number) => string;
   onSelectSession: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
   onNewSession: () => void;
@@ -309,7 +343,7 @@ function SessionDropdownContent({
         activeSessionId={activeSessionId}
         primarySessionId={primarySessionId}
         currentTime={currentTime}
-        resolveAgentLabel={resolveAgentLabel}
+        resolveSessionLabel={resolveSessionLabel}
         onSelectSession={onSelectSession}
         onSetPrimary={onSetPrimary}
         onResumeSession={onResumeSession}
@@ -325,7 +359,7 @@ function SessionDropdownList({
   activeSessionId,
   primarySessionId,
   currentTime,
-  resolveAgentLabel,
+  resolveSessionLabel,
   onSelectSession,
   onSetPrimary,
   onResumeSession,
@@ -335,7 +369,7 @@ function SessionDropdownList({
   activeSessionId: string | null;
   primarySessionId: string | null;
   currentTime: number;
-  resolveAgentLabel: (session: TaskSession) => string;
+  resolveSessionLabel: (session: TaskSession, rank: number) => string;
   onSelectSession: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
 } & SessionLifecycleCallbacks) {
@@ -353,11 +387,10 @@ function SessionDropdownList({
           <SessionRow
             key={session.id}
             session={session}
-            number={sessions.length - index}
             isActive={activeSessionId === session.id}
             isPrimary={session.id === primarySessionId}
             currentTime={currentTime}
-            agentLabel={resolveAgentLabel(session)}
+            agentLabel={resolveSessionLabel(session, index + 1)}
             onSelect={onSelectSession}
             onSetPrimary={onSetPrimary}
             onResume={onResumeSession}
@@ -384,7 +417,6 @@ function isSessionDeletable(state: TaskSessionState): boolean {
 /** Individual session row in the dropdown */
 function SessionRow({
   session,
-  number,
   isActive,
   isPrimary,
   currentTime,
@@ -395,7 +427,6 @@ function SessionRow({
   onDelete,
 }: {
   session: TaskSession;
-  number: number;
   isActive: boolean;
   isPrimary: boolean;
   currentTime: number;
@@ -414,7 +445,6 @@ function SessionRow({
       onClick={() => onSelect(session.id)}
       className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${isActive ? "bg-muted/50" : ""}`}
     >
-      <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">#{number}</span>
       <span className="text-xs text-foreground flex-1 text-left flex items-center gap-1.5">
         {agentLabel}
         {isPrimary && <IconStar className="h-3.5 w-3.5 text-amber-500 fill-amber-500" />}

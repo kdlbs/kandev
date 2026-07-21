@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -284,6 +287,8 @@ func TestProcessOnTurnStart(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
+		eb := &recordingEventBus{}
+		svc.eventBus = eb
 		task, _ := repo.GetTask(ctx, "t1")
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		got := svc.processOnTurnStart(ctx, task, session)
@@ -295,6 +300,17 @@ func TestProcessOnTurnStart(t *testing.T) {
 		if updatedTask.WorkflowStepID != "step2" {
 			t.Errorf("expected task workflow step to be 'step2', got %q", updatedTask.WorkflowStepID)
 		}
+
+		// The on_turn_start transition drives the session to WAITING_FOR_INPUT
+		// via setSessionWaitingForInput -> updateTaskSessionState. The
+		// published session.state_changed payload must carry the new step id
+		// so the frontend tab label/order updates without a reload.
+		require.NotEmpty(t, eb.events)
+		last := eb.events[len(eb.events)-1]
+		require.Equal(t, events.TaskSessionStateChanged, last.subject)
+		data, ok := last.event.Data.(map[string]interface{})
+		require.True(t, ok)
+		require.Equal(t, "step2", data["workflow_step_id"])
 	})
 }
 
