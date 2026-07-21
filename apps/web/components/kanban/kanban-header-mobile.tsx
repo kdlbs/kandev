@@ -48,7 +48,7 @@ function MobileHeaderActions({
 }: {
   workspaceId?: string;
   workspaceLabel: string;
-  currentPage: string;
+  currentPage: "kanban" | "tasks";
   onSearchChange?: (query: string) => void;
   isSearchOpen: boolean;
   handleOpenQuickChat: () => void;

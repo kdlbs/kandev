@@ -20,8 +20,8 @@ export type MainTopBarSlotProps = {
   workspaceId: string | null;
   /** Human-readable label of that workspace, when known. */
   workspaceLabel?: string;
-  /** Which listing the top bar belongs to ("kanban" | "tasks"). */
-  currentPage: string;
+  /** Which listing the top bar belongs to. */
+  currentPage: "kanban" | "tasks";
 };
 
 /**
@@ -35,7 +35,7 @@ export type MainTopBarSlotProps = {
 export function MainTopBarPluginActions(props: {
   workspaceId?: string;
   workspaceLabel?: string;
-  currentPage: string;
+  currentPage: "kanban" | "tasks";
 }) {
   const { workspaceId, workspaceLabel, currentPage } = props;
 

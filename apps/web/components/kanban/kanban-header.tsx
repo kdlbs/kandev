@@ -153,7 +153,7 @@ function TabletHeader({
   title: string;
   workspaceLabel: string;
   workspaceId?: string;
-  currentPage: string;
+  currentPage: "kanban" | "tasks";
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
@@ -245,7 +245,7 @@ function DesktopHeader({
   title: string;
   workspaceLabel: string;
   workspaceId?: string;
-  currentPage: string;
+  currentPage: "kanban" | "tasks";
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;

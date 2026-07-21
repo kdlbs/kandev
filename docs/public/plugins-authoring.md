@@ -455,7 +455,7 @@ host passes:
 type MainTopBarSlotProps = {
   workspaceId: string | null;  // workspace the top bar is showing, null on global home
   workspaceLabel?: string;     // human-readable workspace name, when known
-  currentPage: string;         // which listing is showing: "kanban" | "tasks"
+  currentPage: "kanban" | "tasks";
 };
 ```
 
