@@ -4,6 +4,10 @@ import type { AgentMessageComment } from "@/lib/state/slices/comments";
 
 const ANCHOR_CONTEXT_LENGTH = 80;
 
+export function agentMessageCommentHighlightName(messageId: string) {
+  return `agent-message-comment-${messageId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
 export type ResolvedMessageTextRange = { start: number; end: number };
 export type MessageSelection = ResolvedMessageTextRange & {
   selectedText: string;
@@ -117,81 +121,60 @@ function messageTextNodes(root: HTMLElement): Text[] {
   return nodes;
 }
 
-function createCommentBadge(commentId: string): HTMLSpanElement {
-  const badge = document.createElement("span");
-  badge.className = "comment-badge agent-message-comment-badge";
-  badge.dataset.agentMessageCommentId = commentId;
-  badge.dataset.commentId = commentId;
-  badge.setAttribute("role", "button");
-  badge.setAttribute("tabindex", "0");
-  badge.setAttribute("aria-label", "Edit comment");
-  badge.innerHTML =
-    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-    '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-  return badge;
-}
-
-function wrapTextRange(
-  root: HTMLElement,
-  start: number,
-  end: number,
-  commentId: string,
-): HTMLElement | null {
+function domRangeForOffsets(root: HTMLElement, start: number, end: number): Range | null {
   let cursor = 0;
-  let lastMark: HTMLElement | null = null;
+  let startBoundary: { node: Text; offset: number } | null = null;
+  let endBoundary: { node: Text; offset: number } | null = null;
   for (const textNode of messageTextNodes(root)) {
     const textLength = textNode.data.length;
     const nodeStart = cursor;
     const nodeEnd = cursor + textLength;
     cursor = nodeEnd;
-    const overlapStart = Math.max(start, nodeStart) - nodeStart;
-    const overlapEnd = Math.min(end, nodeEnd) - nodeStart;
-    if (overlapEnd <= overlapStart) continue;
-
-    let selectedNode = textNode;
-    if (overlapEnd < selectedNode.data.length) selectedNode.splitText(overlapEnd);
-    if (overlapStart > 0) selectedNode = selectedNode.splitText(overlapStart);
-    const mark = document.createElement("mark");
-    mark.dataset.agentMessageCommentId = commentId;
-    mark.dataset.commentId = commentId;
-    mark.className = "comment-highlight agent-message-comment-highlight";
-    selectedNode.parentNode?.replaceChild(mark, selectedNode);
-    mark.appendChild(selectedNode);
-    lastMark = mark;
+    if (!startBoundary && start >= nodeStart && start <= nodeEnd) {
+      startBoundary = { node: textNode, offset: start - nodeStart };
+    }
+    if (end >= nodeStart && end <= nodeEnd) {
+      endBoundary = { node: textNode, offset: end - nodeStart };
+      break;
+    }
   }
-  return lastMark;
+  if (!startBoundary || !endBoundary) return null;
+  const range = document.createRange();
+  range.setStart(startBoundary.node, startBoundary.offset);
+  range.setEnd(endBoundary.node, endBoundary.offset);
+  return range;
 }
 
-export function clearMessageCommentHighlights(root: HTMLElement) {
-  for (const badge of Array.from(root.querySelectorAll(".agent-message-comment-badge"))) {
-    badge.remove();
-  }
-  for (const mark of Array.from(root.querySelectorAll("mark[data-agent-message-comment-id]"))) {
-    const parent = mark.parentNode;
-    if (!parent) continue;
-    while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
-    mark.remove();
-  }
-  root.normalize();
-}
+export type MessageCommentDecoration = {
+  comment: AgentMessageComment;
+  range: Range;
+  left: number;
+  top: number;
+};
 
-/** Restore comment marks after a virtualized row remount or markdown rerender. */
-export function restoreMessageCommentHighlights(
+/** Resolve highlights without changing DOM nodes owned by React. */
+export function getMessageCommentDecorations(
   root: HTMLElement,
   comments: AgentMessageComment[],
-): number {
-  clearMessageCommentHighlights(root);
+): MessageCommentDecoration[] {
   const content = root.textContent ?? "";
-  let restored = 0;
+  const rootRect = root.getBoundingClientRect();
+  const decorations: MessageCommentDecoration[] = [];
   for (const comment of comments) {
-    const range = resolveMessageTextAnchor(comment.anchor, content);
+    const resolved = resolveMessageTextAnchor(comment.anchor, content);
+    if (!resolved) continue;
+    const range = domRangeForOffsets(root, resolved.start, resolved.end);
     if (!range) continue;
-    const lastMark = wrapTextRange(root, range.start, range.end, comment.id);
-    lastMark?.insertAdjacentElement("afterend", createCommentBadge(comment.id));
-    restored++;
+    const rects = Array.from(range.getClientRects());
+    const rect = rects.at(-1) ?? range.getBoundingClientRect();
+    decorations.push({
+      comment,
+      range,
+      left: rect.right - rootRect.left + root.scrollLeft,
+      top: rect.top - rootRect.top + root.scrollTop,
+    });
   }
-  return restored;
+  return decorations;
 }
 
 export function isSelectableAgentMessage(

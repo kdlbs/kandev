@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import {
   createMessageTextAnchor,
+  getMessageCommentDecorations,
   getMessageSelection,
   isSelectableAgentMessage,
-  restoreMessageCommentHighlights,
   resolveMessageTextAnchor,
 } from "./agent-message-comments";
 
@@ -110,9 +110,10 @@ describe("message-local DOM anchors", () => {
     root.remove();
   });
 
-  it("restores plan-style marks and an editable badge after markdown rerenders", () => {
+  it("resolves decoration ranges without rewriting React-owned nodes", () => {
     const root = document.createElement("div");
     root.innerHTML = "<p>A settled </p><p>answer with detail.</p>";
+    const renderedHtml = root.innerHTML;
     const comment = {
       id: "comment-1",
       sessionId: "session-1",
@@ -124,22 +125,15 @@ describe("message-local DOM anchors", () => {
       status: "pending" as const,
       anchor: createMessageTextAnchor("reply-1", "A settled answer with detail.", 10, 16),
     };
-    expect(restoreMessageCommentHighlights(root, [comment])).toBe(1);
-    expect(
-      root.querySelectorAll(
-        'mark.comment-highlight[data-agent-message-comment-id="comment-1"][data-comment-id="comment-1"]',
-      ),
-    ).toHaveLength(1);
-    const badge = root.querySelector<HTMLElement>('.comment-badge[data-comment-id="comment-1"]');
-    expect(badge).not.toBeNull();
-    expect(badge?.getAttribute("role")).toBe("button");
-    expect(badge?.getAttribute("aria-label")).toBe("Edit comment");
+    const decorations = getMessageCommentDecorations(root, [comment]);
+    expect(decorations).toHaveLength(1);
+    expect(decorations[0].range.toString()).toBe("answer");
+    expect(root.innerHTML).toBe(renderedHtml);
     expect(root.textContent).toBe("A settled answer with detail.");
 
-    // A virtualized row remount/re-render replaces, rather than duplicates,
-    // both affordances.
-    expect(restoreMessageCommentHighlights(root, [comment])).toBe(1);
-    expect(root.querySelectorAll('.comment-badge[data-comment-id="comment-1"]')).toHaveLength(1);
+    // Recomputing for a virtualized row remount remains side-effect free.
+    expect(getMessageCommentDecorations(root, [comment])).toHaveLength(1);
+    expect(root.innerHTML).toBe(renderedHtml);
   });
 
   it("keeps highlight restoration bounded to the message body", () => {
@@ -162,8 +156,8 @@ describe("message-local DOM anchors", () => {
       };
     });
 
-    expect(restoreMessageCommentHighlights(root, comments)).toBe(40);
-    expect(root.querySelectorAll("mark[data-agent-message-comment-id]")).toHaveLength(40);
+    expect(getMessageCommentDecorations(root, comments)).toHaveLength(40);
+    expect(root.querySelectorAll("mark[data-agent-message-comment-id]")).toHaveLength(0);
     expect(root.textContent).toBe(words);
   });
 });

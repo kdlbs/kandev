@@ -1,10 +1,52 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import { SessionPage } from "../../pages/session-page";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 
 export const AGENT_REPLY = "The settled answer contains a useful detail.";
+
+export async function expectAgentMessageHighlight(body: Locator, expectedCount: number) {
+  const highlightName = await body.getAttribute("data-agent-message-highlight-name");
+  if (!highlightName) throw new Error("Expected an agent message highlight name");
+  await expect
+    .poll(() =>
+      body.evaluate((_, name) => {
+        const registry = (
+          CSS as typeof CSS & {
+            highlights?: { get: (key: string) => { size: number } | undefined };
+          }
+        ).highlights;
+        return registry?.get(name)?.size ?? 0;
+      }, highlightName),
+    )
+    .toBe(expectedCount);
+}
+
+export async function clickAgentMessageHighlight(body: Locator, selectedText: string) {
+  const position = await body.evaluate((element, text) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      const value = node.nodeValue ?? "";
+      const start = value.indexOf(text);
+      if (start >= 0) {
+        const range = document.createRange();
+        range.setStart(node, start);
+        range.setEnd(node, start + text.length);
+        const rangeRect = range.getBoundingClientRect();
+        const bodyRect = element.getBoundingClientRect();
+        return {
+          x: rangeRect.left - bodyRect.left + rangeRect.width / 2,
+          y: rangeRect.top - bodyRect.top + rangeRect.height / 2,
+        };
+      }
+      node = walker.nextNode();
+    }
+    throw new Error(`Could not locate highlighted text: ${text}`);
+  }, selectedText);
+  await body.click({ position });
+}
 
 export async function openSeededAgentReply(
   page: Page,

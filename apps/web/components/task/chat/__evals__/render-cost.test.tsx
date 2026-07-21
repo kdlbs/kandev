@@ -25,7 +25,7 @@ import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { __markdownParseCount, __resetMarkdownCounters } from "@/lib/markdown/normalize-cache";
 import {
   createMessageTextAnchor,
-  restoreMessageCommentHighlights,
+  getMessageCommentDecorations,
 } from "@/lib/chat/agent-message-comments";
 
 type Row = { id: string; content: string };
@@ -149,8 +149,8 @@ describe("chat render-cost evals", () => {
       };
     });
 
-    expect(restoreMessageCommentHighlights(root, comments)).toBe(20);
-    expect(root.querySelectorAll("mark[data-agent-message-comment-id]")).toHaveLength(20);
+    expect(getMessageCommentDecorations(root, comments)).toHaveLength(20);
+    expect(root.querySelectorAll("mark[data-agent-message-comment-id]")).toHaveLength(0);
     expect(__markdownParseCount() - parsesAfterMount).toBe(0);
   });
 });

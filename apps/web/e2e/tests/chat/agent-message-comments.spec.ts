@@ -1,6 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
   AGENT_REPLY,
+  clickAgentMessageHighlight,
+  expectAgentMessageHighlight,
   openSeededAgentReply,
   openSeededQuickChatReply,
   selectAgentReplyText,
@@ -34,13 +36,8 @@ test.describe("Agent message comments", () => {
     await expect(
       session.activeChat().getByText("1 message comment", { exact: true }),
     ).toBeVisible();
-    const highlight = body.locator("mark.comment-highlight[data-agent-message-comment-id]");
-    await expect(highlight).toHaveCount(1);
-    const highlightColors = await highlight.evaluate((element) => ({
-      foreground: getComputedStyle(element).color,
-      prose: getComputedStyle(element.parentElement!).color,
-    }));
-    expect(highlightColors.foreground).toBe(highlightColors.prose);
+    await expectAgentMessageHighlight(body, 1);
+    await expect(body.locator("mark[data-agent-message-comment-id]")).toHaveCount(0);
     await expect(body.locator(".comment-badge[data-comment-id]")).toHaveCount(1);
 
     await testPage.reload();
@@ -52,16 +49,14 @@ test.describe("Agent message comments", () => {
       .filter({
         hasText: AGENT_REPLY,
       });
-    await expect(
-      restoredBody.locator("mark.comment-highlight[data-agent-message-comment-id]"),
-    ).toHaveCount(1);
+    await expectAgentMessageHighlight(restoredBody, 1);
     await expect(restoredBody.locator(".comment-badge[data-comment-id]")).toHaveCount(1);
     await expect(
       session.activeChat().getByText("1 message comment", { exact: true }),
     ).toBeVisible();
 
-    // Saved comments use the same click-to-edit/delete loop as plan comments.
-    await restoredBody.locator(".comment-badge[data-comment-id] svg").click();
+    // Saved highlights and badges both use the same edit/delete loop as plan comments.
+    await clickAgentMessageHighlight(restoredBody, "settled answer");
     await expect(popover).toBeVisible();
     const input = popover.getByTestId("agent-message-comment-input");
     await expect(input).toHaveValue("Please expand this detail.");
@@ -71,7 +66,7 @@ test.describe("Agent message comments", () => {
     await restoredBody.locator(".comment-badge[data-comment-id] svg").click();
     await expect(input).toHaveValue("Please make this detail concrete.");
     await popover.getByRole("button", { name: "Delete comment" }).click();
-    await expect(restoredBody.locator("mark.comment-highlight[data-comment-id]")).toHaveCount(0);
+    await expectAgentMessageHighlight(restoredBody, 0);
     await expect(restoredBody.locator(".comment-badge[data-comment-id]")).toHaveCount(0);
     await expect(
       session.activeChat().getByText("1 message comment", { exact: true }),
@@ -96,9 +91,7 @@ test.describe("Agent message comments", () => {
       .fill("Keep this context in Quick Chat.");
     await popover.getByTestId("agent-message-comment-add").click();
     await expect(dialog.getByText("1 message comment", { exact: true })).toBeVisible();
-    await expect(body.locator("mark.comment-highlight[data-agent-message-comment-id]")).toHaveCount(
-      1,
-    );
+    await expectAgentMessageHighlight(body, 1);
     await expect(body.locator(".comment-badge[data-comment-id]")).toHaveCount(1);
   });
 });

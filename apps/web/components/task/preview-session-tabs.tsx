@@ -6,7 +6,6 @@ import { GridSpinner } from "@/components/grid-spinner";
 import { PanelLoadingState } from "@/components/panel-loading-state";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
-import { useToast } from "@/components/toast-provider";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
@@ -149,24 +148,18 @@ function SessionAgentLogo({ profile }: { profile: AgentProfileOption | null | un
   return <AgentLogo agentName={profile.agent_name} size={12} className="shrink-0" />;
 }
 
-function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId: string }) {
-  const { toast } = useToast();
+export function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId: string }) {
   const handleSendMessage = useCallback(
     async (content: string) => {
       const client = getWebSocketClient();
-      if (!client) return;
-      try {
-        await client.request(
-          "message.add",
-          { task_id: taskId, session_id: session.id, content },
-          10000,
-        );
-      } catch (error) {
-        console.error("Failed to send message:", error);
-        toast({ title: "Failed to send message", variant: "error" });
-      }
+      if (!client) throw new Error("WebSocket client unavailable");
+      await client.request(
+        "message.add",
+        { task_id: taskId, session_id: session.id, content },
+        10000,
+      );
     },
-    [taskId, session.id, toast],
+    [taskId, session.id],
   );
 
   if (session.is_passthrough) {

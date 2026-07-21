@@ -3,12 +3,10 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
+  useId,
   useRef,
   useState,
   type Dispatch,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
   type SetStateAction,
@@ -31,15 +29,21 @@ import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import {
+  agentMessageCommentHighlightName,
   createMessageTextAnchor,
   getMessageSelection,
   isSelectableAgentMessage,
   resolveMessageTextAnchor,
-  restoreMessageCommentHighlights,
+  type MessageCommentDecoration,
   type MessageSelection,
 } from "@/lib/chat/agent-message-comments";
 import type { Message } from "@/lib/types/http";
 import { cn, generateUUID } from "@/lib/utils";
+import {
+  messageCommentDecorationAtPoint,
+  useMessageCommentDecorations,
+  useMessageCommentShortcut,
+} from "./use-message-comment-dom";
 
 type MessageCommentSurfaceProps = {
   message: Message;
@@ -50,6 +54,7 @@ type MessageCommentSurfaceProps = {
 
 type CommentTarget = {
   selection: MessageSelection;
+  anchor: AgentMessageComment["anchor"];
   position: { x: number; y: number };
   editingCommentId?: string;
   editingText?: string;
@@ -64,18 +69,20 @@ function commentFromTarget(
   target: CommentTarget,
   renderedText: string,
   feedback: string,
-): AgentMessageComment {
-  const { start, end } = target.selection;
+): AgentMessageComment | null {
+  const resolved = resolveMessageTextAnchor(target.anchor, renderedText);
+  if (!resolved) return null;
+  const anchor = createMessageTextAnchor(message.id, renderedText, resolved.start, resolved.end);
   return {
     id: generateUUID(),
     sessionId,
     source: "agent-message",
     messageId: message.id,
-    selectedText: renderedText.slice(start, end),
+    selectedText: anchor.selectedText,
     text: feedback.trim(),
     createdAt: new Date().toISOString(),
     status: "pending",
-    anchor: createMessageTextAnchor(message.id, renderedText, start, end),
+    anchor,
   };
 }
 
@@ -282,7 +289,11 @@ function usePendingCommentsForMessage(sessionId: string | null | undefined, mess
   );
 }
 
-function useCommentTargetState(rootRef: RefObject<HTMLDivElement | null>, isSelectable: boolean) {
+function useCommentTargetState(
+  rootRef: RefObject<HTMLDivElement | null>,
+  isSelectable: boolean,
+  messageId: string,
+) {
   const [target, setTarget] = useState<CommentTarget | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
 
@@ -292,13 +303,18 @@ function useCommentTargetState(rootRef: RefObject<HTMLDivElement | null>, isSele
     window.getSelection()?.removeAllRanges();
   }, []);
 
-  const setNewSelection = useCallback((selection: MessageSelection, openComposer: boolean) => {
-    setTarget({
-      selection,
-      position: { x: selection.rect.right, y: selection.rect.bottom },
-    });
-    setComposerOpen(openComposer);
-  }, []);
+  const setNewSelection = useCallback(
+    (selection: MessageSelection, openComposer: boolean) => {
+      const renderedText = rootRef.current?.textContent ?? "";
+      setTarget({
+        selection,
+        anchor: createMessageTextAnchor(messageId, renderedText, selection.start, selection.end),
+        position: { x: selection.rect.right, y: selection.rect.bottom },
+      });
+      setComposerOpen(openComposer);
+    },
+    [messageId, rootRef],
+  );
 
   const captureSelection = useCallback(() => {
     if (!rootRef.current || !isSelectable) return;
@@ -306,21 +322,11 @@ function useCommentTargetState(rootRef: RefObject<HTMLDivElement | null>, isSele
     if (selection) setNewSelection(selection, false);
   }, [isSelectable, rootRef, setNewSelection]);
 
-  useEffect(() => {
-    if (!isSelectable) return;
-    const handleShortcut = (event: KeyboardEvent) => {
-      if (!((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "c"))
-        return;
-      if (!rootRef.current) return;
-      const selection = getMessageSelection(rootRef.current, window.getSelection());
-      if (!selection) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      setNewSelection(selection, true);
-    };
-    document.addEventListener("keydown", handleShortcut, true);
-    return () => document.removeEventListener("keydown", handleShortcut, true);
-  }, [isSelectable, rootRef, setNewSelection]);
+  const openFromShortcut = useCallback(
+    (selection: MessageSelection) => setNewSelection(selection, true),
+    [setNewSelection],
+  );
+  useMessageCommentShortcut(rootRef, isSelectable, openFromShortcut);
 
   useEffect(() => {
     if (!target || composerOpen) return;
@@ -360,6 +366,7 @@ function useExistingCommentHandlers(
           selectedText: comment.selectedText,
           rect: new DOMRect(position.x, position.y, 0, 0),
         },
+        anchor: comment.anchor,
         position,
         editingCommentId: comment.id,
         editingText: comment.text,
@@ -370,36 +377,7 @@ function useExistingCommentHandlers(
     [pendingComments, rootRef, setComposerOpen, setTarget],
   );
 
-  const handleCommentClick = useCallback(
-    (event: ReactMouseEvent<HTMLDivElement>) => {
-      const element = (event.target as HTMLElement).closest<HTMLElement>(
-        "[data-agent-message-comment-id]",
-      );
-      const commentId = element?.dataset.agentMessageCommentId;
-      if (!commentId) return;
-      event.preventDefault();
-      event.stopPropagation();
-      openExistingComment(commentId, { x: event.clientX, y: event.clientY });
-    },
-    [openExistingComment],
-  );
-
-  const handleCommentKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      const element = (event.target as HTMLElement).closest<HTMLElement>(
-        ".agent-message-comment-badge[data-agent-message-comment-id]",
-      );
-      const commentId = element?.dataset.agentMessageCommentId;
-      if (!commentId) return;
-      event.preventDefault();
-      const rect = element.getBoundingClientRect();
-      openExistingComment(commentId, { x: rect.right, y: rect.bottom });
-    },
-    [openExistingComment],
-  );
-
-  return { handleCommentClick, handleCommentKeyDown };
+  return openExistingComment;
 }
 
 function useMessageCommentActions({
@@ -429,6 +407,7 @@ function useMessageCommentActions({
       }
       const renderedText = rootRef.current?.textContent ?? "";
       const comment = commentFromTarget(message, sessionId, target, renderedText, feedback);
+      if (!comment) return null;
       addComment(comment);
       return comment;
     },
@@ -456,14 +435,42 @@ function useMessageCommentActions({
     [close, runComment, saveComment],
   );
 
-  const handleDelete = target?.editingCommentId
-    ? () => {
-        removeComment(target.editingCommentId!);
-        close();
-      }
-    : undefined;
+  const deleteComment = useCallback(() => {
+    if (!target?.editingCommentId) return;
+    removeComment(target.editingCommentId);
+    close();
+  }, [close, removeComment, target?.editingCommentId]);
+  const handleDelete = target?.editingCommentId ? deleteComment : undefined;
 
   return { handleAdd, handleRun, handleDelete };
+}
+
+function MessageCommentBadges({
+  decorations,
+  onOpen,
+}: {
+  decorations: MessageCommentDecoration[];
+  onOpen: (commentId: string, position: { x: number; y: number }) => void;
+}) {
+  return decorations.map((decoration) => (
+    <button
+      key={decoration.comment.id}
+      type="button"
+      className="comment-badge agent-message-comment-badge border-0 bg-transparent p-0"
+      style={{ position: "absolute", left: decoration.left, top: decoration.top }}
+      data-agent-message-comment-id={decoration.comment.id}
+      data-comment-id={decoration.comment.id}
+      aria-label="Edit comment"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        onOpen(decoration.comment.id, { x: rect.right, y: rect.bottom });
+      }}
+    >
+      <IconMessage aria-hidden="true" />
+    </button>
+  ));
 }
 
 export function MessageCommentSurface({
@@ -473,12 +480,13 @@ export function MessageCommentSurface({
   children,
 }: MessageCommentSurfaceProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const highlightInstanceId = useId();
   const useDrawer = useTouchDrawer();
   const pendingComments = usePendingCommentsForMessage(sessionId, message.id);
   const isSelectable = Boolean(sessionId) && isSelectableAgentMessage(message, isTurnActive, false);
-  const targetState = useCommentTargetState(rootRef, isSelectable);
+  const targetState = useCommentTargetState(rootRef, isSelectable, message.id);
   const { target, composerOpen, setTarget, setComposerOpen, close, captureSelection } = targetState;
-  const commentHandlers = useExistingCommentHandlers(
+  const openExistingComment = useExistingCommentHandlers(
     rootRef,
     pendingComments,
     setTarget,
@@ -486,26 +494,46 @@ export function MessageCommentSurface({
   );
   const actions = useMessageCommentActions({ message, sessionId, target, rootRef, close });
   const portalContainer = rootRef.current?.closest<HTMLElement>('[role="dialog"]');
-
-  useLayoutEffect(() => {
-    if (!rootRef.current) return;
-    restoreMessageCommentHighlights(rootRef.current, pendingComments);
-  }, [pendingComments, children, message.content]);
+  const highlightName = agentMessageCommentHighlightName(`${message.id}-${highlightInstanceId}`);
+  const decorations = useMessageCommentDecorations(
+    rootRef,
+    pendingComments,
+    message.content,
+    highlightName,
+  );
 
   return (
     <>
       <div
         ref={rootRef}
-        className="agent-message-comment-body"
+        className="agent-message-comment-body relative"
         data-agent-message-body="true"
         data-message-id={message.id}
+        data-agent-message-highlight-name={highlightName}
         onMouseUp={captureSelection}
         onTouchEnd={captureSelection}
-        onClick={commentHandlers.handleCommentClick}
-        onKeyDown={commentHandlers.handleCommentKeyDown}
+        onClick={(event) => {
+          const decoration = messageCommentDecorationAtPoint(
+            decorations,
+            event.clientX,
+            event.clientY,
+          );
+          if (!decoration) return;
+          event.preventDefault();
+          openExistingComment(decoration.comment.id, { x: event.clientX, y: event.clientY });
+        }}
       >
         {children}
+        <MessageCommentBadges decorations={decorations} onOpen={openExistingComment} />
       </div>
+      {pendingComments.length > 0 ? (
+        <style>{`::highlight(${highlightName}) {
+          background-color: color-mix(in oklch, var(--accent) 70%, transparent);
+          color: inherit;
+          text-decoration: underline 2px color-mix(in oklch, var(--accent-foreground) 25%, transparent);
+          text-underline-offset: 2px;
+        }`}</style>
+      ) : null}
       {target && !composerOpen ? (
         <SelectionCommentTrigger
           selection={target.selection}
