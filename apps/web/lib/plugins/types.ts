@@ -92,7 +92,10 @@ export interface PluginRouteOptions {
  */
 export type PluginSlotName = string;
 
-/** Context the host passes to every app status bar slot component. */
+/**
+ * Context the host passes to every app status item. `placement` is its
+ * registration/default side; a user's saved order may render it on the other side.
+ */
 export type AppStatusBarSlotProps = {
   placement: "left" | "right";
   presentation: "bar" | "mobile-drawer";

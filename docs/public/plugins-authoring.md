@@ -396,8 +396,8 @@ plugins at once. Available slots:
 | `chat-input-actions` | Chat composer toolbar, beside the model picker, mic, and send button | `{ taskId, taskTitle, activeSessionId, sessionIds }` |
 | `chat-top-bar` | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
 | `main-top-bar` | Default app top bar (Home / Kanban / Tasks), beside the CPU/DB metrics and the view/display controls | `{ workspaceId, workspaceLabel, currentPage }` |
-| `app-status-bar-left` | Left cluster of global status bar; left section in phone Status drawer | `AppStatusBarSlotProps` |
-| `app-status-bar-right` | Right cluster of global status bar; right section in phone Status drawer | `AppStatusBarSlotProps` |
+| `app-status-bar-left` | Default-left item in the global status surface | `AppStatusBarSlotProps` |
+| `app-status-bar-right` | Default-right item in the global status surface | `AppStatusBarSlotProps` |
 | `plugin-settings` | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }` |
 
 `plugin-settings` is the one exception to "every plugin's component renders":
@@ -582,11 +582,17 @@ type AppStatusBarSlotProps = {
 };
 ```
 
-The IDs are hints; use `host.store` for full records. Registration order is
-render order. Enable, disable, and uninstall update the live slot without a
+The IDs are hints; use `host.store` for full records. Each component registration
+is one opaque item: Kandev does not inspect or separately reorder its children.
+The slot chooses the default side. A user can Cmd-drag (macOS) or Ctrl-drag
+(other desktop platforms) with a mouse across the full bar, and Kandev preserves
+that backend-owned order across reloads, restarts, and plugin disable/enable.
+Phone lists the saved left sequence followed by the saved right sequence and does
+not offer drag ordering. There is no keyboard-arrow, touch, or plugin-priority
+ordering API. Enable, disable, and uninstall update the live surface without a
 reload, and each contribution has its own error boundary. A full-bleed route
-(`topbar: false`) owns its own chrome; mount the host Status trigger there if
-that route should expose Status.
+(`topbar: false`) owns its own chrome; mount the host Status trigger there if that
+route should expose Status.
 
 ## Three integration patterns
 

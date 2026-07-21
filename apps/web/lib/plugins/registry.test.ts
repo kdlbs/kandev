@@ -3,6 +3,7 @@ import { pluginRegistry } from "./registry";
 
 const TASK_SIDEBAR_SLOT = "task-sidebar";
 const TASK_CREATED_ACTION = "task.created";
+const APP_STATUS_LEFT_SLOT = "app-status-bar-left";
 
 function cleanup(...pluginIds: string[]) {
   pluginIds.forEach((id) => pluginRegistry.unregisterPlugin(id));
@@ -80,6 +81,7 @@ describe("pluginRegistry", () => {
 
     expect(registration).toEqual({
       registrationId: expect.any(String),
+      orderingId: expect.any(String),
       pluginId: "plugin-a",
       Component: Sidebar,
     });
@@ -89,6 +91,32 @@ describe("pluginRegistry", () => {
     expect(pluginRegistry.getSlotRegistrations(TASK_SIDEBAR_SLOT)[0]?.registrationId).toBe(
       registration?.registrationId,
     );
+  });
+
+  it("restores deterministic ordering identities after plugin re-enable", () => {
+    function First() {
+      return null;
+    }
+    function Second() {
+      return null;
+    }
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    scoped.registerComponent(APP_STATUS_LEFT_SLOT, First);
+    scoped.registerComponent(APP_STATUS_LEFT_SLOT, Second);
+    const before = pluginRegistry
+      .getSlotRegistrations(APP_STATUS_LEFT_SLOT)
+      .map((registration) => registration.orderingId);
+
+    pluginRegistry.unregisterPlugin("plugin-a");
+    const reenabled = pluginRegistry.forPlugin("plugin-a");
+    reenabled.registerComponent(APP_STATUS_LEFT_SLOT, First);
+    reenabled.registerComponent(APP_STATUS_LEFT_SLOT, Second);
+
+    expect(pluginRegistry.getSlotRegistrations(APP_STATUS_LEFT_SLOT)).toMatchObject([
+      { orderingId: before[0], pluginId: "plugin-a", Component: First },
+      { orderingId: before[1], pluginId: "plugin-a", Component: Second },
+    ]);
+    expect(before[0]).not.toBe(before[1]);
   });
 });
 

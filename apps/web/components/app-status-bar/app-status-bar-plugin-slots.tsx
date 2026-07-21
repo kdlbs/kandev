@@ -1,32 +1,21 @@
 "use client";
 
-import { useMemo } from "react";
-import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { PluginSlotRegistrationView } from "@/components/plugins/plugin-slot";
+import type { PluginSlotRegistration } from "@/lib/plugins/registry";
 import type { AppStatusBarSlotProps } from "@/lib/plugins/types";
 
-/** Renders plugins registered for the app status bar with host-owned context. */
-export function AppStatusBarPluginSlots({
-  placement,
-  presentation,
-  density,
-  pathname,
-  activeWorkspaceId,
-  activeTaskId,
-  activeSessionId,
-}: AppStatusBarSlotProps) {
-  const slotProps = useMemo<AppStatusBarSlotProps>(
-    () => ({
-      placement,
-      presentation,
-      density,
-      pathname,
-      activeWorkspaceId,
-      activeTaskId,
-      activeSessionId,
-    }),
-    [placement, presentation, density, pathname, activeWorkspaceId, activeTaskId, activeSessionId],
+/** Renders one opaque plugin-owned status item with host-owned context. */
+export function AppStatusBarPluginContribution({
+  registration,
+  ...slotProps
+}: AppStatusBarSlotProps & { registration: PluginSlotRegistration }) {
+  const name = slotProps.placement === "left" ? "app-status-bar-left" : "app-status-bar-right";
+  return (
+    <PluginSlotRegistrationView
+      key={registration.registrationId}
+      registration={registration}
+      name={name}
+      slotProps={slotProps}
+    />
   );
-
-  const name = placement === "left" ? "app-status-bar-left" : "app-status-bar-right";
-  return <PluginSlot name={name} slotProps={slotProps} />;
 }

@@ -178,8 +178,14 @@ export type UserSettingsState = {
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
   systemMetricsDisplay: { showInTopbar: boolean };
+  appStatusBarOrder: AppStatusBarOrderState;
   voiceMode: VoiceModeState;
   loaded: boolean;
+};
+
+export type AppStatusBarOrderState = {
+  leftItemIds: string[];
+  rightItemIds: string[];
 };
 
 export type TaskCreateLastUsedState = {

@@ -1,6 +1,7 @@
 "use client";
 
 import { usePluginRegistry } from "@/lib/plugins/registry";
+import type { PluginSlotRegistration } from "@/lib/plugins/registry";
 import { PluginErrorBoundary } from "./plugin-error-boundary";
 
 export type PluginSlotProps = {
@@ -33,14 +34,31 @@ export function PluginSlot({ name, slotProps, ownerPluginId }: PluginSlotProps) 
 
   return (
     <>
-      {registrations.map(({ registrationId, pluginId, Component }) => (
-        <PluginErrorBoundary
-          key={registrationId}
-          context={`plugin "${pluginId}" slot "${name}" component`}
-        >
-          <Component slotProps={slotProps} />
-        </PluginErrorBoundary>
+      {registrations.map((registration) => (
+        <PluginSlotRegistrationView
+          key={registration.registrationId}
+          registration={registration}
+          name={name}
+          slotProps={slotProps}
+        />
       ))}
     </>
+  );
+}
+
+export function PluginSlotRegistrationView({
+  registration,
+  name,
+  slotProps,
+}: {
+  registration: PluginSlotRegistration;
+  name: string;
+  slotProps?: unknown;
+}) {
+  const { pluginId, Component } = registration;
+  return (
+    <PluginErrorBoundary context={`plugin "${pluginId}" slot "${name}" component`}>
+      <Component slotProps={slotProps} />
+    </PluginErrorBoundary>
   );
 }

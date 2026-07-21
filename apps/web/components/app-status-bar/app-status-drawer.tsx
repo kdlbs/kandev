@@ -1,9 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
-import { StatusSurfaceMetrics } from "@/components/system-metrics/status-surface-metrics";
-import { ConnectionStatusItem } from "./connection-status-item";
-import { AppStatusBarPluginSlots } from "./app-status-bar-plugin-slots";
+import { useAppStatusItems, type AppStatusItem } from "./app-status-items";
+import { useAppStatusBarOrder } from "./use-app-status-bar-order";
 
 type AppStatusDrawerProps = {
   pathname: string;
@@ -22,6 +22,14 @@ export function AppStatusDrawer({
   open,
   onOpenChange,
 }: AppStatusDrawerProps) {
+  const context = useMemo(
+    () => ({ pathname, activeWorkspaceId, activeTaskId, activeSessionId }),
+    [pathname, activeWorkspaceId, activeTaskId, activeSessionId],
+  );
+  const activeItems = useAppStatusItems(context);
+  const { projected } = useAppStatusBarOrder(activeItems);
+  const orderedItems = [...projected.left, ...projected.right];
+
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="h-[min(32rem,calc(100dvh-16px))] max-h-[calc(100dvh-16px)] overflow-hidden pb-[max(0.5rem,env(safe-area-inset-bottom))]">
@@ -33,34 +41,11 @@ export function AppStatusDrawer({
             <DrawerTitle>Status</DrawerTitle>
           </DrawerHeader>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
-            <section className="space-y-1" aria-label="Connection status">
-              <h3 className="px-1 text-sm font-medium">Connection</h3>
-              <div className="flex min-h-11 items-center rounded-md px-3 hover:bg-muted/60">
-                <ConnectionStatusItem />
-              </div>
+            <section className="space-y-1" aria-label="Application status items">
+              {orderedItems.map((item) => (
+                <DrawerStatusItem key={item.id} item={item} open={open} />
+              ))}
             </section>
-            <div className="mt-5">
-              <StatusSurfaceMetrics
-                activeSessionId={activeSessionId}
-                presentation="mobile-drawer"
-                density="full"
-                drawerOpen={open}
-              />
-            </div>
-            <StatusDrawerPluginSection
-              placement="left"
-              pathname={pathname}
-              activeWorkspaceId={activeWorkspaceId}
-              activeTaskId={activeTaskId}
-              activeSessionId={activeSessionId}
-            />
-            <StatusDrawerPluginSection
-              placement="right"
-              pathname={pathname}
-              activeWorkspaceId={activeWorkspaceId}
-              activeTaskId={activeTaskId}
-              activeSessionId={activeSessionId}
-            />
           </div>
         </div>
       </DrawerContent>
@@ -68,30 +53,13 @@ export function AppStatusDrawer({
   );
 }
 
-function StatusDrawerPluginSection({
-  placement,
-  pathname,
-  activeWorkspaceId,
-  activeTaskId,
-  activeSessionId,
-}: {
-  placement: "left" | "right";
-  pathname: string;
-  activeWorkspaceId: string | null;
-  activeTaskId: string | null;
-  activeSessionId: string | null;
-}) {
+function DrawerStatusItem({ item, open }: { item: AppStatusItem; open: boolean }) {
   return (
-    <section className="mt-5 space-y-1" aria-label={`Status plugins (${placement})`}>
-      <AppStatusBarPluginSlots
-        placement={placement}
-        presentation="mobile-drawer"
-        density="full"
-        pathname={pathname}
-        activeWorkspaceId={activeWorkspaceId}
-        activeTaskId={activeTaskId}
-        activeSessionId={activeSessionId}
-      />
-    </section>
+    <div
+      className="flex min-h-11 w-full min-w-0 items-center rounded-md px-3 hover:bg-muted/60"
+      data-status-item-id={item.id}
+    >
+      {item.render({ presentation: "mobile-drawer", density: "full", drawerOpen: open })}
+    </div>
   );
 }

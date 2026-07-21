@@ -1,5 +1,5 @@
 ---
-status: completed
+status: done
 spec: docs/specs/ui/app-status-bar.md
 ---
 
@@ -7,7 +7,7 @@ spec: docs/specs/ui/app-status-bar.md
 
 ## Outcome
 
-Ship one app-owned status surface: 24 px in-flow bar on desktop/tablet, native Status drawer on phone. It shows only connection plus existing opted-in host/active-executor metrics, and exposes live plugin regions without changing chat-local status UI.
+Ship one app-owned status surface: 24 px in-flow bar on desktop/tablet, native Status drawer on phone. It shows only connection plus existing opted-in host/active-executor metrics, exposes live plugin regions without changing chat-local status UI, and lets users preserve a full-bar item order.
 
 ## Fixed decisions
 
@@ -16,6 +16,9 @@ Ship one app-owned status surface: 24 px in-flow bar on desktop/tablet, native S
 - Metrics subscribe only when legacy `showInTopbar` preference permits: desktop/tablet while bar mounted, phone only while drawer open.
 - Shell uses an in-flow footer. `--app-status-bar-height` offsets audited desktop fixed overlays only.
 - Orca is conceptual reference only. Ship pinned MIT attribution; do not transplant its component or add data providers.
+- `app-status-bar-left` and `app-status-bar-right` choose default sides only. Cmd/Ctrl plus mouse drag may move an opaque host item across the full bar; no keyboard-arrow or touch reorder interaction is added.
+- Portable order lives only in backend-owned user settings as `app_status_bar_order.left_item_ids/right_item_ids`. Phone renders left then right vertically.
+- The top separator is visually inset over a full 24 px alignment box so dots, text, plugin roots, and metric icons do not inherit a half-pixel center from a 23 px bordered content box.
 
 ## Waves
 
@@ -26,6 +29,9 @@ Ship one app-owned status surface: 24 px in-flow bar on desktop/tablet, native S
 | 3 | [04](task-04-mobile-status-entry-points.md), [05](task-05-fixed-overlay-audit.md), [06](task-06-plugin-fixture-desktop-e2e.md), [08](task-08-attribution-public-docs.md) | Phone access, fixed controls, live plugin E2E, records/attribution land. |
 | 4 | [07](task-07-mobile-status-e2e.md) | Pixel 5 flow proves drawer parity and geometry. |
 | 5 | [09](task-09-integration-verification.md) | Focused then full verification clean. |
+| 6 | [10](task-10-portable-item-order.md), [11](task-11-stable-status-item-identities.md) | User-settings round trip and deterministic opaque item identities. |
+| 7 | [12](task-12-reorder-interaction-and-alignment.md) | Full-bar modifier drag, aligned content, and mirrored phone order. |
+| 8 | [13](task-13-reorder-docs-e2e-verification.md) | Public contract, desktop/mobile persistence E2E, review, and full verification. |
 
 ## Dependency graph
 
@@ -35,6 +41,10 @@ Ship one app-owned status surface: 24 px in-flow bar on desktop/tablet, native S
 02 built-ins ────┘                              ├─> 05 fixed-overlay audit   ├─> 07 mobile E2E ─> 09 verify
                                                 ├─> 06 fixture + desktop E2E ─┘
                                                 └─> 08 attribution/docs ──────> 09 verify
+
+10 portable order ─┐
+                   ├─> 12 reorder + alignment ─> 13 docs/E2E/verify
+11 stable items ───┘
 ```
 
 ## File / test map
@@ -45,6 +55,8 @@ Ship one app-owned status surface: 24 px in-flow bar on desktop/tablet, native S
 - **Mobile:** native Status actions in Home, task, Settings, PageTopbar, Office; no second footer.
 - **Proof:** fixture plugin hot enable/disable desktop test; `mobile-status-drawer.spec.ts`; layout/overlay assertions; licenses-page test.
 - **Records:** public plugin/operations/features docs, resource-metrics decision amendment, MIT notice generation.
+- **Portable order extension:** existing user settings model/DTO/service/store, boot and WS mapping, deterministic plugin ordering keys, shared ordered item projection, pointer drag behavior, and drawer projection.
+- **Alignment regression:** 1x-device-scale geometry assertion proving that the separator does not shrink the content alignment box and that representative plugin text/dot/metric items share a center.
 
 ## Verification order
 
@@ -59,6 +71,14 @@ make typecheck test lint
 
 Also run `node --test scripts/validate-public-docs.test.mjs` and `node scripts/validate-public-docs.mjs`. Resolve viewport regressions at narrow desktop, tablet, and configured `mobile-chrome` Pixel 5 before declaring ready.
 
+For the ordering extension, focused verification starts with:
+
+```sh
+cd apps/backend && go test ./internal/user/...
+cd apps && pnpm --filter @kandev/web test -- components/app-status-bar lib/plugins/registry.test.ts lib/ws/handlers/users.test.ts lib/ssr/user-settings.test.ts
+cd apps/web && pnpm e2e:run tests/layout/app-status-bar.spec.ts tests/plugins/mobile-status-drawer.spec.ts
+```
+
 ## Risks
 
 - Nested viewport roots can create scrollbars: convert only shell-owned routes to `h-full min-h-0` and retain `h-dvh` for genuine phone sheets/dialogs.
@@ -66,6 +86,9 @@ Also run `node --test scripts/validate-public-docs.test.mjs` and `node scripts/v
 - Responsive double mounting can duplicate plugins/metrics: provider selects exactly one host presentation.
 - Array-index error-boundary keys leak failure state: stable registration IDs are mandatory.
 - Full-bleed plugin routes intentionally opt out of host chrome; their authors own Status trigger placement.
+- Slot registration IDs created from a process counter do not survive re-enable/restart: derive a separate deterministic ordering identity from plugin/slot/ordinal and keep error-boundary identity behavior covered.
+- Pointer dragging can steal plugin clicks: wait for horizontal movement beyond a threshold before starting reorder, and suppress only the click produced by a completed drag.
+- Disabled plugins and hidden metrics can disappear from active rendering: retain their opaque IDs in the saved arrays and reconcile active items without rewriting missing entries.
 
 ## Tasks
 
@@ -80,3 +103,7 @@ Also run `node --test scripts/validate-public-docs.test.mjs` and `node scripts/v
 | 07 | done | 4 | [Mobile Status E2E](task-07-mobile-status-e2e.md) |
 | 08 | done | 3 | [Attribution and public docs](task-08-attribution-public-docs.md) |
 | 09 | done | 5 | [Integration verification](task-09-integration-verification.md) |
+| 10 | done | 6 | [Portable status item order](task-10-portable-item-order.md) |
+| 11 | done | 6 | [Stable status item identities](task-11-stable-status-item-identities.md) |
+| 12 | done | 7 | [Reorder interaction and alignment](task-12-reorder-interaction-and-alignment.md) |
+| 13 | done | 8 | [Reorder docs, E2E, and verification](task-13-reorder-docs-e2e-verification.md) |

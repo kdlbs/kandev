@@ -29,6 +29,16 @@ test.describe("Mobile Status drawer", () => {
   }) => {
     test.setTimeout(90_000);
     await installFixture(testPage);
+    const leftOrderingId = `plugin:${PLUGIN_ID}:app-status-bar-left:0`;
+    const rightOrderingId = `plugin:${PLUGIN_ID}:app-status-bar-right:0`;
+    const orderResponse = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      system_metrics_display: { show_in_topbar: true },
+      app_status_bar_order: {
+        left_item_ids: [rightOrderingId, "builtin:metrics"],
+        right_item_ids: ["builtin:connection", leftOrderingId],
+      },
+    });
+    expect(orderResponse.ok).toBe(true);
     await testPage.goto("/");
     await testPage.reload();
 
@@ -44,6 +54,42 @@ test.describe("Mobile Status drawer", () => {
     await expect(drawer.getByTestId("app-status-connection")).toBeVisible();
     await expect(testPage.locator("#hello-status-left")).toContainText("mobile-drawer no-task");
     await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
+    const statusRows = drawer.locator("[data-status-item-id]");
+    await expect(statusRows).toHaveCount(4);
+    expect(
+      await statusRows.evaluateAll((rows) => rows.map((row) => row.dataset.statusItemId)),
+    ).toEqual([rightOrderingId, "builtin:metrics", "builtin:connection", leftOrderingId]);
+    for (const row of await statusRows.all()) {
+      expect((await row.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    }
+    let orderPatchCount = 0;
+    testPage.on("request", (request) => {
+      if (request.method() === "PATCH" && request.url().endsWith("/api/v1/user/settings")) {
+        orderPatchCount += 1;
+      }
+    });
+    const [firstRowBox, lastRowBox] = await Promise.all([
+      statusRows.first().boundingBox(),
+      statusRows.last().boundingBox(),
+    ]);
+    if (!firstRowBox || !lastRowBox) throw new Error("mobile status row geometry unavailable");
+    await testPage.keyboard.down("Control");
+    await testPage.mouse.move(
+      firstRowBox.x + firstRowBox.width / 2,
+      firstRowBox.y + firstRowBox.height / 2,
+    );
+    await testPage.mouse.down();
+    await testPage.mouse.move(
+      lastRowBox.x + lastRowBox.width / 2,
+      lastRowBox.y + lastRowBox.height / 2,
+      { steps: 6 },
+    );
+    await testPage.mouse.up();
+    await testPage.keyboard.up("Control");
+    expect(orderPatchCount).toBe(0);
+    expect(
+      await statusRows.evaluateAll((rows) => rows.map((row) => row.dataset.statusItemId)),
+    ).toEqual([rightOrderingId, "builtin:metrics", "builtin:connection", leftOrderingId]);
     expect(await drawer.locator("[class*='overflow-y-auto']").count()).toBe(1);
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
       await testPage.evaluate(() => document.documentElement.clientWidth),

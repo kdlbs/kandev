@@ -493,6 +493,8 @@ Mattermost-webapp model), not iframes. The full contract lives in
   `PLUGIN-API.md`: current path/context plus placement and presentation. The host
   renders one responsive presentation at once — 24 px bar on tablet/desktop or
   phone Status drawer — so a plugin must tolerate remounting and adapt its own UI.
+  A status slot chooses the contribution's default side; portable user order may
+  move either contribution across the desktop spacer and determines drawer order.
   Registrations are namespaced per plugin and bulk-revoked on disable/uninstall.
 - **Isolation (v1):** only active, operator-installed plugins load; a failing
   bundle/`initialize` is caught and never breaks boot; slot components render behind
@@ -655,6 +657,11 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
   `app-status-bar-right`, **WHEN** Kandev switches between desktop/tablet and phone,
   **THEN** the plugin receives the exact slot props for the active bar or Status
   drawer presentation, and only that presentation is mounted.
+
+- **GIVEN** a user has moved a registered status contribution, **WHEN** the plugin
+  disables and later enables or Kandev restarts, **THEN** its deterministic
+  plugin/slot/ordinal identity restores the saved position; the original slot
+  remains its default side rather than overriding user order.
 
 - **GIVEN** a plugin whose manifest declares `api_write: ["tasks"]` in this phase,
   **WHEN** it calls `CreateTask`, **THEN** kandev returns gRPC status `Unimplemented`

@@ -159,8 +159,8 @@ interface PluginRegistry {
 ### App-status-bar slots
 
 `app-status-bar-left` and `app-status-bar-right` are live named component slots.
-The host renders each in its matching cluster in the tablet/desktop app status bar
-and in matching ordered sections in the phone Status drawer. Components receive
+Each registration is one opaque status item; the slot chooses its default side,
+not a permanent side after user customization. Components receive
 `slotProps` with this exact shape:
 
 ```ts
@@ -180,11 +180,17 @@ the host mounts only one presentation at once. `density` is `full` on desktop an
 phone drawer, `compact` on tablet. `pathname` and active IDs are current-context
 hints, not entity payloads; read complete records from `host.store`.
 
-Registration order is render order. There is no cross-plugin priority API. Enable,
-disable, and uninstall update slots without reload. Each component is isolated by an
-owner-aware error boundary, so plugins must tolerate remounting and render a compact
-bar control or touch-usable drawer row for the supplied presentation. Do not depend
-on the host adding nested buttons or on another slot being present.
+Before customization, registration order is render order within each default side.
+Users can Cmd-drag on macOS or Ctrl-drag elsewhere with a mouse to move any item
+across the whole desktop/tablet bar. Kandev stores that order in backend user
+settings; disabled contributions keep their place and return there when enabled.
+Phone renders the saved left sequence followed by the saved right sequence, without
+dragging. There is no cross-plugin priority API, keyboard-arrow ordering, or touch
+ordering. Enable, disable, and uninstall update slots without reload. Each component
+is isolated by an owner-aware error boundary, so plugins must tolerate remounting and
+render a compact bar control or touch-usable drawer row for the supplied presentation.
+The host neither inspects nor separately reorders children inside a registration, and
+does not add a nested interactive wrapper.
 
 A full-bleed plugin route (`topbar: false`) opts out of host chrome. It may mount
 the host-provided Status drawer trigger when its own chrome should expose status;

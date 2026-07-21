@@ -54,6 +54,7 @@ type UserSettingsDTO struct {
 	TerminalFontSize            int                                 `json:"terminal_font_size"`
 	ChangesPanelLayout          string                              `json:"changes_panel_layout"`
 	SystemMetricsDisplay        models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
+	AppStatusBarOrder           models.AppStatusBarOrder            `json:"app_status_bar_order"`
 	VoiceMode                   models.VoiceModeSettings            `json:"voice_mode"`
 	UpdatedAt                   string                              `json:"updated_at"`
 }
@@ -112,6 +113,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontSize            *int                                 `json:"terminal_font_size,omitempty"`
 	ChangesPanelLayout          *string                              `json:"changes_panel_layout,omitempty"`
 	SystemMetricsDisplay        *models.SystemMetricsDisplaySettings `json:"system_metrics_display,omitempty"`
+	AppStatusBarOrder           *models.AppStatusBarOrder            `json:"app_status_bar_order,omitempty"`
 	VoiceMode                   *models.VoiceModeSettings            `json:"voice_mode,omitempty"`
 }
 
@@ -226,6 +228,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		TerminalFontSize:            settings.TerminalFontSize,
 		ChangesPanelLayout:          settings.ChangesPanelLayout,
 		SystemMetricsDisplay:        settings.SystemMetricsDisplay,
+		AppStatusBarOrder:           settings.AppStatusBarOrder,
 		VoiceMode:                   settings.VoiceMode,
 		UpdatedAt:                   settings.UpdatedAt.Format(time.RFC3339),
 	}

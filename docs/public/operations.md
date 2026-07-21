@@ -242,6 +242,11 @@ These metrics are lightweight UI observability. Set alerts, retention, CPU/memor
 
 Each requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
 
+Status-bar layout is a separate per-user preference. Hold Cmd on macOS or Ctrl
+elsewhere while mouse-dragging an item to move it across the desktop/tablet bar.
+The backend preserves the layout across reloads and restarts; the phone Status
+drawer mirrors it as the saved left sequence followed by the saved right sequence.
+
 ## Troubleshooting
 
 | Symptom | Check | Action |

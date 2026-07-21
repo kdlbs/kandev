@@ -62,3 +62,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-20-explicit-local-repository-trust | [Explicit Local Repository Trust](2026-07-20-explicit-local-repository-trust.md) | accepted | backend, frontend | 2026-07-20 |
 | 2026-07-20-provider-neutral-remote-repositories | [Provider-neutral remote repositories](2026-07-20-provider-neutral-remote-repositories.md) | accepted | backend, frontend, protocol | 2026-07-20 |
 | 2026-07-20-repository-provider-origin-identity | [Persist Provider Origin In Repository Identity](2026-07-20-repository-provider-origin-identity.md) | accepted | backend, frontend | 2026-07-20 |
+| 2026-07-21-portable-status-bar-order | [Portable Status Bar Order](2026-07-21-portable-status-bar-order.md) | accepted | backend, frontend, protocol | 2026-07-21 |

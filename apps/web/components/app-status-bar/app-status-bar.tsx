@@ -1,8 +1,10 @@
 "use client";
 
-import { ConnectionStatusItem } from "./connection-status-item";
-import { AppStatusBarPluginSlots } from "./app-status-bar-plugin-slots";
-import { StatusSurfaceMetrics } from "@/components/system-metrics/status-surface-metrics";
+import { useMemo } from "react";
+import { cn } from "@kandev/ui/lib/utils";
+import { useAppStatusItems, type AppStatusItem } from "./app-status-items";
+import { useAppStatusBarDrag } from "./use-app-status-bar-drag";
+import { useAppStatusBarOrder } from "./use-app-status-bar-order";
 
 type AppStatusBarProps = {
   pathname: string;
@@ -23,52 +25,79 @@ export function AppStatusBar({
   activeSessionId,
   density,
 }: AppStatusBarProps) {
+  const context = useMemo(
+    () => ({ pathname, activeWorkspaceId, activeTaskId, activeSessionId }),
+    [pathname, activeWorkspaceId, activeTaskId, activeSessionId],
+  );
+  const activeItems = useAppStatusItems(context);
+  const { projected, moveItem } = useAppStatusBarOrder(activeItems);
+  const drag = useAppStatusBarDrag({ moveItem });
+
   return (
     <footer
-      className="flex h-6 shrink-0 items-center gap-2 border-t border-border bg-background px-2 text-xs leading-none"
+      ref={drag.barRef}
+      {...drag.barHandlers}
+      className="relative flex h-6 shrink-0 items-center gap-2 bg-background px-2 text-xs leading-none before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-border"
       data-testid="app-status-bar"
       aria-label="Application status"
     >
-      <div className="flex h-full min-w-0 items-center overflow-hidden">
-        <ConnectionStatusItem className="h-full" />
-        <div
-          className="flex h-full min-w-0 items-center gap-1 overflow-hidden"
-          data-testid="app-status-bar-left-plugins"
-        >
-          <AppStatusBarPluginSlots
-            placement="left"
-            presentation="bar"
-            density={density}
-            pathname={pathname}
-            activeWorkspaceId={activeWorkspaceId}
-            activeTaskId={activeTaskId}
-            activeSessionId={activeSessionId}
-          />
-        </div>
-      </div>
-      <div className="min-w-0 flex-1" />
-      <div className="flex h-full min-w-0 items-center overflow-hidden">
-        <StatusSurfaceMetrics
-          activeSessionId={activeSessionId}
-          presentation="bar"
-          density={density}
-          drawerOpen={false}
-        />
-        <div
-          className="flex h-full min-w-0 items-center gap-1 overflow-hidden"
-          data-testid="app-status-bar-right-plugins"
-        >
-          <AppStatusBarPluginSlots
-            placement="right"
-            presentation="bar"
-            density={density}
-            pathname={pathname}
-            activeWorkspaceId={activeWorkspaceId}
-            activeTaskId={activeTaskId}
-            activeSessionId={activeSessionId}
-          />
-        </div>
-      </div>
+      <StatusItemGroup side="left" testId="app-status-bar-left-plugins">
+        {projected.left.map((item) => (
+          <BarStatusItem key={item.id} item={item} side="left" density={density} drag={drag} />
+        ))}
+      </StatusItemGroup>
+      <div className="h-full min-w-0 flex-1" data-testid="app-status-bar-spacer" />
+      <StatusItemGroup side="right" testId="app-status-bar-right-plugins">
+        {projected.right.map((item) => (
+          <BarStatusItem key={item.id} item={item} side="right" density={density} drag={drag} />
+        ))}
+      </StatusItemGroup>
     </footer>
+  );
+}
+
+function StatusItemGroup({
+  side,
+  testId,
+  children,
+}: {
+  side: "left" | "right";
+  testId: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="flex h-full min-w-0 items-center gap-1 overflow-hidden"
+      data-testid={testId}
+      data-status-side={side}
+    >
+      {children}
+    </div>
+  );
+}
+
+function BarStatusItem({
+  item,
+  side,
+  density,
+  drag,
+}: {
+  item: AppStatusItem;
+  side: "left" | "right";
+  density: "full" | "compact";
+  drag: ReturnType<typeof useAppStatusBarDrag>;
+}) {
+  return (
+    <div
+      className={cn(
+        "inline-flex h-full min-w-0 shrink-0 items-center leading-none",
+        drag.draggingId === item.id && "opacity-50",
+      )}
+      data-status-item-id={item.id}
+      data-status-side={side}
+      onPointerDown={(event) => drag.onItemPointerDown(item.id, event)}
+    >
+      {item.render({ presentation: "bar", density, drawerOpen: false })}
+    </div>
   );
 }

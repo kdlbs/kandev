@@ -31,6 +31,7 @@ This page expands the short feature list in the README without turning the READM
 - **Worktree isolation:** concurrent agents work in isolated git worktrees so their changes do not collide.
 - **Per-task repository setup:** repositories can copy selected ignored files, such as `.env` files, into newly created worktrees.
 - **Resource monitor:** optionally show CPU, memory, disk, CPU temperature, and load metrics in the global desktop/tablet status bar or phone Status drawer. Kandev can also collect execution-environment metrics for Docker, SSH, Sprites, and other remote runtimes.
+- **Customizable app status:** see connection state, optional resource metrics, and live plugin contributions in a 24 px desktop/tablet bar or phone Status drawer. Cmd/Ctrl plus mouse-drag reorders whole status items, with portable backend persistence.
 
 ## Integrations And MCP
 

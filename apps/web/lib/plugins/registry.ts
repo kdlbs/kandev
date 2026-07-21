@@ -38,6 +38,7 @@ export interface PluginRouteRegistration extends RouteRegistration {
 
 interface SlotRegistration {
   registrationId: string;
+  orderingId: string;
   slot: string;
   Component: SlotComponent;
 }
@@ -45,6 +46,7 @@ interface SlotRegistration {
 /** Slot component plus its stable registry identity and owning plugin. */
 export interface PluginSlotRegistration {
   registrationId: string;
+  orderingId: string;
   pluginId: string;
   Component: SlotComponent;
 }
@@ -100,10 +102,14 @@ class PluginRegistryStore {
   }
 
   registerComponent(pluginId: string, slot: string, Component: SlotComponent): void {
+    const ordinal = this.slotComponents.filter(
+      (entry) => entry.pluginId === pluginId && entry.value.slot === slot,
+    ).length;
     this.slotComponents.push({
       pluginId,
       value: {
         registrationId: `slot-registration-${this.nextSlotRegistrationId++}`,
+        orderingId: pluginSlotOrderingId(pluginId, slot, ordinal),
         slot,
         Component,
       },
@@ -155,6 +161,7 @@ class PluginRegistryStore {
       .filter((entry) => entry.value.slot === slot)
       .map((entry) => ({
         registrationId: entry.value.registrationId,
+        orderingId: entry.value.orderingId,
         pluginId: entry.pluginId,
         Component: entry.value.Component,
       }));
@@ -206,6 +213,10 @@ class PluginRegistryStore {
     this.version += 1;
     this.listeners.forEach((listener) => listener());
   }
+}
+
+function pluginSlotOrderingId(pluginId: string, slot: string, ordinal: number): string {
+  return `plugin:${encodeURIComponent(pluginId)}:${encodeURIComponent(slot)}:${ordinal}`;
 }
 
 export const pluginRegistry = new PluginRegistryStore();

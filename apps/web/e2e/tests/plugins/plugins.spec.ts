@@ -149,6 +149,38 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(testPage.locator("#hello-main-top-bar")).toBeVisible();
     await expect(testPage.locator("#hello-main-top-bar")).toHaveText("Hello kanban");
 
+    const movedOrderingId = `plugin:${PLUGIN_ID}:app-status-bar-left:0`;
+    const movedContribution = testPage.locator(`[data-status-item-id="${movedOrderingId}"]`);
+    const [movedBox, statusBarBox] = await Promise.all([
+      movedContribution.boundingBox(),
+      testPage.getByTestId("app-status-bar").boundingBox(),
+    ]);
+    if (!movedBox || !statusBarBox) throw new Error("plugin status drag geometry unavailable");
+    const orderSaved = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "PATCH" && response.url().endsWith("/api/v1/user/settings"),
+    );
+    await testPage.keyboard.down("Control");
+    await testPage.mouse.move(movedBox.x + movedBox.width / 2, movedBox.y + movedBox.height / 2);
+    await testPage.mouse.down();
+    await testPage.mouse.move(
+      statusBarBox.x + statusBarBox.width - 8,
+      statusBarBox.y + statusBarBox.height / 2,
+      { steps: 8 },
+    );
+    await testPage.mouse.up();
+    await testPage.keyboard.up("Control");
+    expect((await orderSaved).ok()).toBe(true);
+    await expect(movedContribution).toHaveAttribute("data-status-side", "right");
+
+    await backend.restart();
+    await testPage.reload();
+    await expect(testPage.locator(`[data-status-item-id="${movedOrderingId}"]`)).toHaveAttribute(
+      "data-status-side",
+      "right",
+      { timeout: 15_000 },
+    );
+
     await navItem.click();
     await expect(testPage).toHaveURL(new RegExp(`${PLUGIN_ROUTE}$`));
     const pluginPage = testPage.locator("#hello-plugin-page");
@@ -201,6 +233,8 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible();
     await pluginRow.getByRole("button", { name: "Disable" }).click();
     await expect(pluginRow.getByText("Disabled", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.locator("#hello-status-left")).toHaveCount(0);
+    await expect(testPage.locator("#hello-status-right")).toHaveCount(0);
     await testPage.goto("/");
     await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toHaveCount(0);
     await expect(testPage.locator("#hello-status-left")).toHaveCount(0);
@@ -210,6 +244,11 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.goto("/settings/plugins");
     await pluginRow.getByRole("button", { name: "Enable" }).click();
     await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.locator(`[data-status-item-id="${movedOrderingId}"]`)).toHaveAttribute(
+      "data-status-side",
+      "right",
+      { timeout: 15_000 },
+    );
     await testPage.goto("/");
     await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toBeVisible();
     await expect(testPage.locator("#hello-status-left")).toHaveText("Hello status bar no-task");
