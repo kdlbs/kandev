@@ -150,19 +150,6 @@ interface PluginRegistry {
 }
 ```
 
-### Example: the `plugin-settings` slot
-
-The `plugin-settings` slot lets a plugin render live status inline on its own
-settings page (between the host's Settings and Manifest cards). The plugin owns
-the card, so it can show health, degraded/empty states, or any custom UI. The
-mockups below are illustrative (not real product screenshots):
-
-![plugin-settings slot on a plugin's settings page](./assets/plugin-settings-slot.png)
-
-Possible usages — live health, a degraded state, or any plugin's custom UI:
-
-![possible usages of the plugin-settings slot](./assets/plugin-settings-slot-usages.png)
-
 ## Registry internals (host side)
 
 `apps/web/lib/plugins/registry.ts` holds a singleton `PluginRegistry` whose data
