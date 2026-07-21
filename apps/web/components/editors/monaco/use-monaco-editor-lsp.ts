@@ -3,6 +3,7 @@ import type { editor as monacoEditor } from "monaco-editor";
 import { useAppStore } from "@/components/state-provider";
 import { useLsp } from "@/hooks/use-lsp";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
+import { getLspUnavailableSetupHint } from "@/lib/lsp/lsp-json-rpc";
 import { computeLineDiffStats } from "@/lib/diff";
 import { useToast } from "@/components/toast-provider";
 import { diffLines } from "diff";
@@ -224,18 +225,21 @@ export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
   // LSP status toasts
   const lspStateForToast = lspStatus.state;
   const lspReasonForToast = "reason" in lspStatus ? lspStatus.reason : null;
+  const lspSetupHintForToast = getLspUnavailableSetupHint(lspStatus, lspLanguage);
   useEffect(() => {
     if (lspStateForToast === "installing") {
       toast({ title: "Installing language server", description: "This may take a moment..." });
     } else if (lspStateForToast === "unavailable" && lspReasonForToast) {
       toast({
-        title: "Language server not found",
-        description: `${lspReasonForToast}. Enable auto-install in Settings \u2192 Editors.`,
+        title: "Language server unavailable",
+        description: lspSetupHintForToast
+          ? `${lspReasonForToast}. ${lspSetupHintForToast}`
+          : lspReasonForToast,
       });
     } else if (lspStateForToast === "error" && lspReasonForToast) {
       toast({ title: "LSP error", description: lspReasonForToast });
     }
-  }, [lspStateForToast, lspReasonForToast, toast]);
+  }, [lspStateForToast, lspReasonForToast, lspSetupHintForToast, toast]);
 
   return { lspStatus, lspLanguage, toggleLsp, monacoPath };
 }

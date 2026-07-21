@@ -412,7 +412,7 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
 // Language mapping
 // ---------------------------------------------------------------------------
 
-function getMonacoLanguagesForLsp(lspLanguage: string): string[] {
+export function getMonacoLanguagesForLsp(lspLanguage: string): string[] {
   switch (lspLanguage) {
     case "typescript":
       return ["typescript", "javascript", "typescriptreact", "javascriptreact"];
@@ -422,6 +422,8 @@ function getMonacoLanguagesForLsp(lspLanguage: string): string[] {
       return ["rust"];
     case "python":
       return ["python"];
+    case "kotlin":
+      return ["kotlin"];
     default:
       return [];
   }

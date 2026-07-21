@@ -16,15 +16,20 @@ type GoInstallStrategy struct {
 	binary     string // "gopls"
 	importPath string // "golang.org/x/tools/gopls@latest"
 	logger     *logger.Logger
+	runner     CommandRunner
 }
 
 // NewGoInstallStrategy creates a new go install strategy.
-func NewGoInstallStrategy(binary, importPath string, log *logger.Logger) *GoInstallStrategy {
-	return &GoInstallStrategy{
+func NewGoInstallStrategy(binary, importPath string, log *logger.Logger, runners ...CommandRunner) *GoInstallStrategy {
+	strategy := &GoInstallStrategy{
 		binary:     binary,
 		importPath: importPath,
 		logger:     log,
 	}
+	if len(runners) > 0 {
+		strategy.runner = runners[0]
+	}
+	return strategy
 }
 
 func (s *GoInstallStrategy) Name() string {
@@ -39,8 +44,10 @@ func (s *GoInstallStrategy) Install(ctx context.Context) (*InstallResult, error)
 
 	s.logger.Info("installing via go install", zap.String("import_path", s.importPath))
 
-	cmd := exec.CommandContext(ctx, goPath, "install", s.importPath)
-	output, err := cmd.CombinedOutput()
+	output, err := combinedOutput(ctx, s.runner, CommandSpec{
+		Path: goPath,
+		Args: []string{installSubcommand, s.importPath},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("go install failed: %w\nOutput: %s", err, string(output))
 	}

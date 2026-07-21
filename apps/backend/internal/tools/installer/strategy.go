@@ -2,6 +2,23 @@ package installer
 
 import "context"
 
+const installSubcommand = "install"
+
+// CommandSpec describes a command that an install strategy needs to run.
+// The runner decides how the process tree is owned and reaped.
+type CommandSpec struct {
+	Path string
+	Args []string
+	Dir  string
+	Env  map[string]string
+}
+
+// CommandRunner runs installer subprocesses. Agentctl supplies its process
+// manager so npm/go descendants follow task teardown on every platform.
+type CommandRunner interface {
+	CombinedOutput(ctx context.Context, spec CommandSpec) ([]byte, error)
+}
+
 // InstallResult contains information about an installed tool binary.
 type InstallResult struct {
 	BinaryPath string // absolute path to installed binary

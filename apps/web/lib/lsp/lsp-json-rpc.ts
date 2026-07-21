@@ -6,6 +6,12 @@ import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
 // Types
 // ---------------------------------------------------------------------------
 
+export type LspUnavailableCause =
+  | "missing_binary"
+  | "workspace_unavailable"
+  | "unsupported_executor"
+  | "capacity";
+
 export type LspStatus =
   | { state: "disabled" }
   | { state: "connecting" }
@@ -13,7 +19,7 @@ export type LspStatus =
   | { state: "starting" }
   | { state: "ready" }
   | { state: "stopping" }
-  | { state: "unavailable"; reason: string }
+  | { state: "unavailable"; reason: string; cause: LspUnavailableCause }
   | { state: "error"; reason: string };
 
 export type OpenDocument = { version: number; languageId: string };
@@ -187,10 +193,39 @@ export function getWsBaseUrl(): string {
 
 /** Map WebSocket close codes to LSP status for pre-bridge failures. */
 export const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = {
-  4001: (reason) => ({ state: "unavailable", reason: reason || "Language server not found" }),
-  4002: () => ({ state: "unavailable", reason: "No active workspace" }),
+  4001: (reason) => ({
+    state: "unavailable",
+    reason: reason || "Language server not found",
+    cause: "missing_binary",
+  }),
+  4002: () => ({
+    state: "unavailable",
+    reason: "No active workspace",
+    cause: "workspace_unavailable",
+  }),
   4003: (reason) => ({ state: "error", reason: reason || "Install failed" }),
+  4004: (reason) => ({
+    state: "unavailable",
+    reason: reason || "Language servers are not supported by this task executor",
+    cause: "unsupported_executor",
+  }),
+  4005: (reason) => ({
+    state: "unavailable",
+    reason: reason || "Too many language servers are active",
+    cause: "capacity",
+  }),
 };
+
+export function getLspUnavailableSetupHint(
+  status: LspStatus,
+  lspLanguage: string | null,
+): string | null {
+  if (status.state !== "unavailable" || status.cause !== "missing_binary") return null;
+  if (lspLanguage === "kotlin") {
+    return "Install kotlin-lsp on the task host, then restart the task.";
+  }
+  return "Enable auto-install in Settings → Editors.";
+}
 
 /** LSP client capabilities sent during initialization. */
 export const LSP_CLIENT_CAPABILITIES = {
@@ -288,6 +323,7 @@ export function toLspLanguage(monacoLanguage: string): string | null {
     go: "go",
     rust: "rust",
     python: "python",
+    kotlin: "kotlin",
   };
   return map[monacoLanguage] ?? null;
 }

@@ -3,20 +3,32 @@ package websocket
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/lsp/installer"
+	"github.com/kandev/kandev/internal/lsp/protocol"
+	"github.com/kandev/kandev/internal/user/models"
 )
+
+type staticLSPUserService struct {
+	settings *models.UserSettings
+}
+
+func (s staticLSPUserService) GetUserSettings(context.Context) (*models.UserSettings, error) {
+	return s.settings, nil
+}
 
 func TestReadLSPMessage_Valid(t *testing.T) {
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize"}`
 	raw := fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), body)
 	reader := bufio.NewReader(strings.NewReader(raw))
 
-	msg, err := readLSPMessage(reader)
+	msg, err := protocol.ReadMessage(reader)
 	if err != nil {
 		t.Fatalf("readLSPMessage() error = %v", err)
 	}
@@ -30,7 +42,7 @@ func TestReadLSPMessage_WithExtraHeaders(t *testing.T) {
 	raw := fmt.Sprintf("Content-Length: %d\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n%s", len(body), body)
 	reader := bufio.NewReader(strings.NewReader(raw))
 
-	msg, err := readLSPMessage(reader)
+	msg, err := protocol.ReadMessage(reader)
 	if err != nil {
 		t.Fatalf("readLSPMessage() error = %v", err)
 	}
@@ -43,7 +55,7 @@ func TestReadLSPMessage_MissingContentLength(t *testing.T) {
 	raw := "Content-Type: application/json\r\n\r\n{}"
 	reader := bufio.NewReader(strings.NewReader(raw))
 
-	_, err := readLSPMessage(reader)
+	_, err := protocol.ReadMessage(reader)
 	if err == nil {
 		t.Fatal("readLSPMessage() should return error for missing Content-Length")
 	}
@@ -56,7 +68,7 @@ func TestReadLSPMessage_InvalidContentLength(t *testing.T) {
 	raw := "Content-Length: abc\r\n\r\n{}"
 	reader := bufio.NewReader(strings.NewReader(raw))
 
-	_, err := readLSPMessage(reader)
+	_, err := protocol.ReadMessage(reader)
 	if err == nil {
 		t.Fatal("readLSPMessage() should return error for invalid Content-Length")
 	}
@@ -68,7 +80,7 @@ func TestReadLSPMessage_InvalidContentLength(t *testing.T) {
 func TestReadLSPMessage_EOF(t *testing.T) {
 	reader := bufio.NewReader(bytes.NewReader(nil))
 
-	_, err := readLSPMessage(reader)
+	_, err := protocol.ReadMessage(reader)
 	if err == nil {
 		t.Fatal("readLSPMessage() should return error on EOF")
 	}
@@ -84,7 +96,7 @@ func TestReadLSPMessage_MultipleMessages(t *testing.T) {
 		len(body1), body1, len(body2), body2)
 	reader := bufio.NewReader(strings.NewReader(raw))
 
-	msg1, err := readLSPMessage(reader)
+	msg1, err := protocol.ReadMessage(reader)
 	if err != nil {
 		t.Fatalf("first readLSPMessage() error = %v", err)
 	}
@@ -92,7 +104,7 @@ func TestReadLSPMessage_MultipleMessages(t *testing.T) {
 		t.Errorf("first readLSPMessage() = %q, want %q", string(msg1), body1)
 	}
 
-	msg2, err := readLSPMessage(reader)
+	msg2, err := protocol.ReadMessage(reader)
 	if err != nil {
 		t.Fatalf("second readLSPMessage() error = %v", err)
 	}
@@ -111,6 +123,7 @@ func TestLspCommand_ViaRegistry(t *testing.T) {
 		{"go", "gopls", []string{"serve"}},
 		{"rust", "rust-analyzer", nil},
 		{"python", "pyright-langserver", []string{"--stdio"}},
+		{"kotlin", "kotlin-lsp", []string{"--stdio"}},
 		{"unknown", "", nil},
 	}
 	for _, tc := range tests {
@@ -139,6 +152,7 @@ func TestIsValidLSPLanguage_ViaRegistry(t *testing.T) {
 		{"go", true},
 		{"rust", true},
 		{"python", true},
+		{"kotlin", true},
 		{"java", false},
 		{"", false},
 		{"ruby", false},
@@ -159,6 +173,8 @@ func TestCloseCodeConstants(t *testing.T) {
 		{"lspCloseBinaryNotFound", lspCloseBinaryNotFound},
 		{"lspCloseSessionNotFound", lspCloseSessionNotFound},
 		{"lspCloseInstallFailed", lspCloseInstallFailed},
+		{"lspCloseUnsupportedExecutor", lspCloseUnsupportedExecutor},
+		{"lspCloseCapacityExceeded", lspCloseCapacityExceeded},
 	}
 	for _, tc := range codes {
 		if tc.code < 4000 || tc.code > 4999 {
@@ -172,5 +188,36 @@ func TestCloseCodeConstants(t *testing.T) {
 			t.Errorf("%s and %s have the same code %d", prev, tc.name, tc.code)
 		}
 		seen[tc.code] = tc.name
+	}
+}
+
+func TestLSPRuntimeSupported(t *testing.T) {
+	tests := []struct {
+		runtime agentruntime.Runtime
+		want    bool
+	}{
+		{agentruntime.RuntimeStandalone, true},
+		{agentruntime.RuntimeDocker, true},
+		{agentruntime.RuntimeSprites, false},
+		{agentruntime.RuntimeRemoteDocker, false},
+		{agentruntime.RuntimeSSH, false},
+	}
+	for _, tc := range tests {
+		if got := lspRuntimeSupported(tc.runtime); got != tc.want {
+			t.Fatalf("lspRuntimeSupported(%q) = %v, want %v", tc.runtime, got, tc.want)
+		}
+	}
+}
+
+func TestShouldAutoInstallRejectsManualOnlyLanguage(t *testing.T) {
+	handler := &LSPHandler{userService: staticLSPUserService{settings: &models.UserSettings{
+		LspAutoInstallLanguages: []string{"kotlin", "python"},
+	}}}
+
+	if handler.shouldAutoInstall(context.Background(), "kotlin") {
+		t.Fatal("Kotlin must remain manual-install-only even if stale settings contain it")
+	}
+	if !handler.shouldAutoInstall(context.Background(), "python") {
+		t.Fatal("Python should honor its auto-install setting")
 	}
 }

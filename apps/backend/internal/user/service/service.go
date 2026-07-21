@@ -508,7 +508,7 @@ func applyLSPSettings(settings *models.UserSettings, req *UpdateUserSettingsRequ
 		settings.LspAutoStartLanguages = *req.LspAutoStartLanguages
 	}
 	if req.LspAutoInstallLanguages != nil {
-		if err := validateLSPLanguages(*req.LspAutoInstallLanguages); err != nil {
+		if err := validateLSPAutoInstallLanguages(*req.LspAutoInstallLanguages); err != nil {
 			return fmt.Errorf("lsp_auto_install_languages: %w", err)
 		}
 		settings.LspAutoInstallLanguages = *req.LspAutoInstallLanguages
@@ -758,6 +758,18 @@ func validateLSPLanguages(langs []string) error {
 	for _, lang := range langs {
 		if _, ok := supported[lang]; !ok {
 			return fmt.Errorf("unsupported language: %s", lang)
+		}
+	}
+	return nil
+}
+
+func validateLSPAutoInstallLanguages(langs []string) error {
+	if err := validateLSPLanguages(langs); err != nil {
+		return err
+	}
+	for _, lang := range langs {
+		if !installer.CanAutoInstall(lang) {
+			return fmt.Errorf("language %s does not support auto-install", lang)
 		}
 	}
 	return nil

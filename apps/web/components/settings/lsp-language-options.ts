@@ -24,6 +24,7 @@ export type LspLanguageOption = {
   docsUrl: string;
   installHintKey: string;
   installHintValues: Record<string, string>;
+  autoInstallSupported: boolean;
 };
 
 export const LSP_LANGUAGE_OPTIONS: LspLanguageOption[] = [
@@ -40,6 +41,7 @@ export const LSP_LANGUAGE_OPTIONS: LspLanguageOption[] = [
       manager: "npm",
       dir: LSP_SERVERS_DIR,
     },
+    autoInstallSupported: true,
   },
   {
     id: "go",
@@ -48,6 +50,7 @@ export const LSP_LANGUAGE_OPTIONS: LspLanguageOption[] = [
     docsUrl: "https://github.com/golang/tools/blob/master/gopls/doc/settings.md",
     installHintKey: "settings:lspInstallHintGo",
     installHintValues: { command: "go install golang.org/x/tools/gopls@latest" },
+    autoInstallSupported: true,
   },
   {
     id: "rust",
@@ -56,6 +59,7 @@ export const LSP_LANGUAGE_OPTIONS: LspLanguageOption[] = [
     docsUrl: "https://rust-analyzer.github.io/book/configuration.html",
     installHintKey: "settings:lspInstallHintRust",
     installHintValues: { binary: "rust-analyzer", dir: LSP_SERVERS_DIR },
+    autoInstallSupported: true,
   },
   {
     id: "python",
@@ -64,5 +68,15 @@ export const LSP_LANGUAGE_OPTIONS: LspLanguageOption[] = [
     docsUrl: "https://microsoft.github.io/pyright/#/settings",
     installHintKey: "settings:lspInstallHintPython",
     installHintValues: { package: "pyright", manager: "npm", dir: LSP_SERVERS_DIR },
+    autoInstallSupported: true,
+  },
+  {
+    id: "kotlin",
+    label: "Kotlin (experimental)",
+    binary: "kotlin-lsp",
+    docsUrl: "https://kotlinlang.org/docs/kotlin-lsp.html",
+    installHintKey: "settings:lspInstallHintKotlin",
+    installHintValues: { binary: "kotlin-lsp", path: "PATH" },
+    autoInstallSupported: false,
   },
 ];

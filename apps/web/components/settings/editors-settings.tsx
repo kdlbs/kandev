@@ -91,9 +91,11 @@ function LspLanguageCards({
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {LSP_LANGUAGE_OPTIONS.map((lang) => {
+          const autoInstallSupported = lang.autoInstallSupported;
           const autoStartDirty =
             lspAutoStartLanguages.includes(lang.id) !== baselineLspAutoStart.includes(lang.id);
           const autoInstallDirty =
+            autoInstallSupported &&
             lspAutoInstallLanguages.includes(lang.id) !== baselineLspAutoInstall.includes(lang.id);
           return (
             <div
@@ -114,19 +116,27 @@ function LspLanguageCards({
                 />
               </div>
               <div className="flex items-center gap-2">
-                <Checkbox
-                  id={`lsp-install-${lang.id}`}
-                  checked={lspAutoInstallLanguages.includes(lang.id)}
-                  onCheckedChange={(checked) => toggleAutoInstall(lang.id, checked === true)}
-                  className="h-3.5 w-3.5"
-                  data-settings-dirty={autoInstallDirty}
-                />
-                <label
-                  htmlFor={`lsp-install-${lang.id}`}
-                  className="text-xs text-muted-foreground cursor-pointer"
-                >
-                  {t("settings:autoInstallIfNotFound")}
-                </label>
+                {autoInstallSupported && (
+                  <Checkbox
+                    id={`lsp-install-${lang.id}`}
+                    checked={lspAutoInstallLanguages.includes(lang.id)}
+                    onCheckedChange={(checked) => toggleAutoInstall(lang.id, checked === true)}
+                    className="h-3.5 w-3.5"
+                    data-settings-dirty={autoInstallDirty}
+                  />
+                )}
+                {autoInstallSupported ? (
+                  <label
+                    htmlFor={`lsp-install-${lang.id}`}
+                    className="text-xs text-muted-foreground cursor-pointer"
+                  >
+                    {t("settings:autoInstallIfNotFound")}
+                  </label>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    {t("settings:manualInstallRequired")}
+                  </span>
+                )}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />

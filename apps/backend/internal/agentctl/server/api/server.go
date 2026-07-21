@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
+	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/internal/system/metrics"
 	"go.uber.org/zap"
@@ -33,6 +34,7 @@ type Server struct {
 	router           *gin.Engine
 	portProxies      *portProxyCache
 	metricsCollector *metrics.Collector
+	lspInstaller     lspInstallerRegistry
 
 	upgrader websocket.Upgrader
 }
@@ -52,6 +54,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 		router:           gin.New(),
 		portProxies:      newPortProxyCache(),
 		metricsCollector: metrics.NewCollector(),
+		lspInstaller:     lspinstaller.NewRegistry("", log, lspinstaller.WithCommandRunner(procMgr)),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for container-local communication
@@ -101,6 +104,7 @@ func (s *Server) setupRoutes() {
 		// Agent stream: bidirectional WebSocket for agent events, MCP, and agent operations
 		// (initialize, session/new, session/load, prompt, cancel, stderr, permissions/respond)
 		api.GET("/agent/stream", s.handleAgentStreamWS)
+		api.GET("/lsp/stream", s.handleLSPStreamWS)
 
 		// Unified workspace stream (git status, files, shell)
 		api.GET("/workspace/stream", s.handleWorkspaceStreamWS)
