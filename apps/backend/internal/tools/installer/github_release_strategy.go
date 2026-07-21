@@ -84,27 +84,59 @@ func (s *GithubReleaseStrategy) Install(ctx context.Context) (*InstallResult, er
 	}
 
 	outPath := filepath.Join(s.binDir, s.binary)
-
-	// Decompress .gz or write directly
-	if strings.HasSuffix(asset, ".gz") {
-		if err := WriteGzipBody(resp.Body, outPath); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := WriteBody(resp.Body, outPath); err != nil {
-			return nil, err
-		}
-	}
-
-	// Make executable
-	if err := os.Chmod(outPath, 0o755); err != nil {
-		return nil, fmt.Errorf("failed to chmod: %w", err)
+	if err := writeReleaseAsset(ctx, resp.Body, asset, outPath); err != nil {
+		return nil, err
 	}
 
 	s.logger.Info("GitHub release download completed", zap.String("binary", outPath))
 	return &InstallResult{
 		BinaryPath: outPath,
 	}, nil
+}
+
+func writeReleaseAsset(ctx context.Context, body io.Reader, asset, outPath string) error {
+	tempFile, err := os.CreateTemp(filepath.Dir(outPath), "."+filepath.Base(outPath)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary download: %w", err)
+	}
+	tempPath := tempFile.Name()
+	if err := tempFile.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("failed to close temporary download: %w", err)
+	}
+	defer func() { _ = os.Remove(tempPath) }()
+
+	reader := &contextReader{ctx: ctx, reader: body}
+	if strings.HasSuffix(asset, ".gz") {
+		err = WriteGzipBody(reader, tempPath)
+	} else {
+		err = WriteBody(reader, tempPath)
+	}
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tempPath, 0o755); err != nil {
+		return fmt.Errorf("failed to chmod: %w", err)
+	}
+	if err := os.Rename(tempPath, outPath); err != nil {
+		return fmt.Errorf("failed to publish downloaded binary: %w", err)
+	}
+	return nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *contextReader) Read(data []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(data)
 }
 
 // WriteGzipBody decompresses a gzip reader into outPath.

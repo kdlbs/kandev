@@ -21,7 +21,7 @@ func testLogger() *logger.Logger {
 
 func TestSupportedLanguages(t *testing.T) {
 	langs := SupportedLanguages()
-	expected := []string{"typescript", "go", "rust", "python"}
+	expected := []string{"typescript", "go", "rust", "python", "kotlin"}
 	for _, lang := range expected {
 		if _, ok := langs[lang]; !ok {
 			t.Errorf("expected %q in SupportedLanguages()", lang)
@@ -41,6 +41,7 @@ func TestIsSupported(t *testing.T) {
 		{"go", true},
 		{"rust", true},
 		{"python", true},
+		{"kotlin", true},
 		{"java", false},
 		{"", false},
 		{"ruby", false},
@@ -62,6 +63,7 @@ func TestLspCommand(t *testing.T) {
 		{"go", "gopls", []string{"serve"}},
 		{"rust", "rust-analyzer", nil},
 		{"python", "pyright-langserver", []string{"--stdio"}},
+		{"kotlin", "kotlin-lsp", []string{"--stdio"}},
 		{"unknown", "", nil},
 	}
 	for _, tc := range tests {
@@ -77,6 +79,19 @@ func TestLspCommand(t *testing.T) {
 					t.Errorf("LspCommand(%q) args[%d] = %q, want %q", tc.language, i, args[i], tc.wantArgs[i])
 				}
 			}
+		}
+	}
+}
+
+func TestCanAutoInstall(t *testing.T) {
+	for _, language := range []string{"typescript", "go", "rust", "python"} {
+		if !CanAutoInstall(language) {
+			t.Errorf("CanAutoInstall(%q) = false, want true", language)
+		}
+	}
+	for _, language := range []string{"kotlin", "java", ""} {
+		if CanAutoInstall(language) {
+			t.Errorf("CanAutoInstall(%q) = true, want false", language)
 		}
 	}
 }
@@ -221,6 +236,28 @@ func TestBinaryPath_UnsupportedLanguage(t *testing.T) {
 	_, err := r.BinaryPath("java")
 	if err == nil {
 		t.Error("BinaryPath(\"java\") should return error for unsupported language")
+	}
+}
+
+func TestNewRegistryFailsClosedWithoutTrustedHome(t *testing.T) {
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+	t.Setenv("HOME", "")
+	t.Setenv("PATH", "")
+	projectBinary := filepath.Join(workDir, DefaultBinDir, "kotlin-lsp")
+	if err := os.MkdirAll(filepath.Dir(projectBinary), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projectBinary, []byte("project-controlled"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRegistry("", testLogger())
+	if r.binDir != "" {
+		t.Fatalf("binDir = %q, want disabled cache", r.binDir)
+	}
+	if path, err := r.BinaryPath("kotlin"); err == nil {
+		t.Fatalf("BinaryPath(kotlin) = %q from relative project cache, want not found", path)
 	}
 }
 

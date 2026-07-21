@@ -443,6 +443,9 @@ func TestManager_BeginStopWaitsForInFlightTempOwnerAdmission(t *testing.T) {
 	if _, err := mgr.StartProcess(context.Background(), StartProcessRequest{}); !errors.Is(err, ErrManagerStopping) {
 		t.Fatalf("StartProcess() error = %v, want manager-stopping error", err)
 	}
+	if _, err := mgr.StartPipedProcess(PipedStartRequest{}); !errors.Is(err, ErrManagerStopping) {
+		t.Fatalf("StartPipedProcess() error = %v, want manager-stopping error", err)
+	}
 	if err := mgr.StartShell(); !errors.Is(err, ErrManagerStopping) {
 		t.Fatalf("StartShell() error = %v, want manager-stopping error", err)
 	}
@@ -451,6 +454,39 @@ func TestManager_BeginStopWaitsForInFlightTempOwnerAdmission(t *testing.T) {
 	}
 	if _, err := mgr.ShellManager().Start("terminal", shell.DefaultConfig(t.TempDir())); err == nil {
 		t.Fatal("terminal shell Start() succeeded after BeginStop()")
+	}
+}
+
+func TestManager_StopForTeardownCancelsAndDrainsOwnedOperation(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{WorkDir: t.TempDir()}, newTestLogger(t))
+	operationCtx, release, err := mgr.BeginOwnedOperation(context.Background())
+	if err != nil {
+		t.Fatalf("BeginOwnedOperation() error = %v", err)
+	}
+
+	canceled := make(chan struct{})
+	allowRelease := make(chan struct{})
+	go func() {
+		<-operationCtx.Done()
+		close(canceled)
+		<-allowRelease
+		release()
+	}()
+
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- mgr.StopForTeardown(context.Background()) }()
+	<-canceled
+	select {
+	case err := <-stopDone:
+		t.Fatalf("StopForTeardown() returned before the owned operation released: %v", err)
+	default:
+	}
+	close(allowRelease)
+	if err := <-stopDone; err != nil {
+		t.Fatalf("StopForTeardown() error = %v", err)
+	}
+	if _, _, err := mgr.BeginOwnedOperation(context.Background()); !errors.Is(err, ErrManagerStopping) {
+		t.Fatalf("BeginOwnedOperation() after teardown error = %v, want %v", err, ErrManagerStopping)
 	}
 }
 

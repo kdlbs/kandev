@@ -140,6 +140,21 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
+func TestApplyLSPSettingsRejectsManualOnlyAutoInstallLanguage(t *testing.T) {
+	settings := &models.UserSettings{}
+	req := &UpdateUserSettingsRequest{
+		LspAutoInstallLanguages: ptr([]string{"kotlin"}),
+	}
+
+	err := applyLSPSettings(settings, req)
+	if err == nil || !strings.Contains(err.Error(), "does not support auto-install") {
+		t.Fatalf("applyLSPSettings() error = %v, want manual-install-only error", err)
+	}
+	if len(settings.LspAutoInstallLanguages) != 0 {
+		t.Fatalf("LspAutoInstallLanguages = %v, want unchanged", settings.LspAutoInstallLanguages)
+	}
+}
+
 func TestApplyBasicSettingsMCPTaskAgentProfileDefault(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
 		settings := &models.UserSettings{MCPTaskAgentProfileDefault: models.MCPTaskAgentProfileDefaultWorkspaceDefault}

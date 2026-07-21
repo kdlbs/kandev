@@ -9,6 +9,7 @@ agentctl exposes these route groups (see `server/api/`):
 - `/instances/*` - Multi-instance management
 - `/processes/*` - Agent subprocess management (start/stop)
 - `/agent/configure`, `/agent/stream` - Agent configuration and event streaming
+- `/lsp/stream` - Task-host language-server stdio/WebSocket bridge
 - `/git/*` - Git operations (status, commit, push, pull, rebase, stage, create PR, etc.)
 - `/shell/*` - Shell session management
 - `/workspace/*` - File operations, search, tree
@@ -111,6 +112,15 @@ only allows the normal graceful path first (stdin close, adapter close, process
 wait). After the command leader exits, `waitForProcessExit` still checks the
 agent process group and sends SIGTERM/SIGKILL if descendants remain. If `Stop(ctx)`
 times out, it also re-runs the pgid SIGKILL fallback.
+
+Non-agent protocol subprocesses must use the same ownership path. LSP servers
+start through `process.Manager.StartPipedProcess`, which exposes stdin/stdout to
+the bridge while registering the command with `ProcessRunner`; instance teardown
+then closes admission and reaps the full process tree on Unix and Windows.
+LSP auto-install work holds `Manager.BeginOwnedOperation`; npm and Go installer
+commands run through `Manager.CombinedOutput`, so teardown cancels downloads,
+drains cache mutations, and reaps installer descendants before resources are
+released.
 
 To add another agent that needs immediate kill instead of graceful stdin close:
 set `RequiresProcessKill: true` in its `Runtime()` config.

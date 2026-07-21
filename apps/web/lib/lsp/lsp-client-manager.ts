@@ -163,7 +163,8 @@ class LSPClientManager {
 
     ws.onclose = (event) => {
       ws.removeEventListener("message", statusHandler);
-      this.disposeConnection(key);
+      const connection = this.connections.get(key);
+      if (connection) this.cleanupConnection(key, connection);
 
       const current = this.statuses.get(key);
       if (current?.state === "ready" || current?.state === "stopping") {
@@ -517,18 +518,6 @@ class LSPClientManager {
         }
       }, LSP_IDLE_TIMEOUT);
     }
-  }
-
-  private disposeConnection(key: string) {
-    const conn = this.connections.get(key);
-    if (!conn) return;
-    for (const d of conn.providerDisposables) d.dispose();
-    conn.providerDisposables = [];
-    conn.rpc?.dispose();
-    conn.rpc = null;
-    conn.initialized = false;
-    conn.openDocuments.clear();
-    this.connections.delete(key);
   }
 
   private cleanupConnection(key: string, conn: LSPConnection) {
