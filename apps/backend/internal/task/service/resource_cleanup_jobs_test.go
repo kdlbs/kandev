@@ -691,6 +691,40 @@ func TestDeleteInheritedSubtaskPreservesChildMaterializedWorkspaceForParent(t *t
 	}
 }
 
+func TestDeleteInheritedSubtaskBlockedWhenNoSurvivorCanOwnSharedEnvironment(t *testing.T) {
+	_, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	seedParentChildWorkspace(t, repo, "ws-shared-blocked", "wf-shared-blocked", "task-parent", "task-child")
+	for _, env := range []*models.TaskEnvironment{
+		{ID: "env-parent", TaskID: "task-parent", Status: models.TaskEnvironmentStatusReady},
+		{ID: "env-shared", TaskID: "task-child", Status: models.TaskEnvironmentStatusReady},
+	} {
+		if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+			t.Fatalf("create task environment %s: %v", env.ID, err)
+		}
+	}
+
+	groups := newFakeWSGroupRepo()
+	groups.groups["group-shared"] = &orchmodels.WorkspaceGroup{
+		ID: "group-shared", OwnerTaskID: "task-parent", MaterializedEnvironmentID: "env-shared",
+	}
+	groups.members["group-shared"] = map[string]string{
+		"task-parent": orchmodels.WorkspaceMemberRoleOwner,
+		"task-child":  orchmodels.WorkspaceMemberRoleMember,
+	}
+	handoff := NewHandoffService(repo, repo, nil, nil, groups, nil)
+
+	if _, err := handoff.DeleteTaskTree(ctx, "task-child", false); err == nil {
+		t.Fatal("DeleteTaskTree should fail when no surviving member can own the shared environment")
+	}
+	if task, err := repo.GetTask(ctx, "task-child"); err != nil || task == nil {
+		t.Fatalf("blocked deletion removed child task: task=%#v err=%v", task, err)
+	}
+	if env, err := repo.GetTaskEnvironment(ctx, "env-shared"); err != nil || env.TaskID != "task-child" {
+		t.Fatalf("blocked deletion changed shared environment: env=%#v err=%v", env, err)
+	}
+}
+
 func TestPreparedCleanupIsNotRunnableUntilStarted(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()

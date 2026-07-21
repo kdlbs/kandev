@@ -106,7 +106,7 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		m.logger.Info("preserved worktree still referenced by another task session",
 			zap.String("worktree_id", wt.ID),
 			zap.String("session_id", wt.SessionID),
-			zap.Int("active_references", activeReferences))
+			zap.Int("non_deleted_references", activeReferences))
 		return nil
 	}
 
