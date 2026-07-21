@@ -32,9 +32,7 @@ export function PluginSlot({ name, slotProps, ownerPluginId }: PluginSlotProps) 
 
   if (components.length === 0) return null;
 
-  // Scope the boundary key by owner too, so navigating between owner-scoped
-  // pages (e.g. /settings/plugins/A -> B without remounting PluginSlot) resets
-  // the boundary instead of reusing A's errored one and hiding B's card.
+  // Key by owner too, so navigating A -> B resets the boundary instead of reusing A's error (hiding B).
   const keyBase = ownerPluginId ? `${name}-${ownerPluginId}` : name;
 
   return (
