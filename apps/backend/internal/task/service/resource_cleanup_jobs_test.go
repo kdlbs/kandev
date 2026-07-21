@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentruntime"
+	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -627,6 +628,66 @@ func TestCascadeDeletePersistsCleanupBeforeTaskMutation(t *testing.T) {
 	handoff.SetTaskResourceCleaner(taskSvc)
 	if _, err := handoff.DeleteTaskTree(ctx, task.ID, false); err != nil {
 		t.Fatalf("DeleteTaskTree: %v", err)
+	}
+}
+
+func TestDeleteInheritedSubtaskPreservesChildMaterializedWorkspaceForParent(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	seedParentChildWorkspace(t, repo, "ws-shared-delete", "wf-shared-delete", "task-parent", "task-child")
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:           "env-shared",
+		TaskID:       "task-child",
+		Status:       models.TaskEnvironmentStatusReady,
+		WorktreeID:   "worktree-shared",
+		WorktreePath: "/tmp/worktree-shared",
+	}); err != nil {
+		t.Fatalf("create child-materialized environment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "task-child",
+		State:             models.TaskSessionStateCompleted,
+		TaskEnvironmentID: "env-shared",
+	}); err != nil {
+		t.Fatalf("create child session: %v", err)
+	}
+
+	groups := newFakeWSGroupRepo()
+	groups.groups["group-shared"] = &orchmodels.WorkspaceGroup{
+		ID:                        "group-shared",
+		WorkspaceID:               "ws-shared-delete",
+		OwnerTaskID:               "task-parent",
+		MaterializedEnvironmentID: "env-shared",
+		MaterializedKind:          orchmodels.WorkspaceGroupKindSingleRepo,
+		OwnedByKandev:             true,
+		CleanupPolicy:             orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+		CleanupStatus:             orchmodels.WorkspaceCleanupStatusActive,
+	}
+	groups.members["group-shared"] = map[string]string{
+		"task-parent": orchmodels.WorkspaceMemberRoleOwner,
+		"task-child":  orchmodels.WorkspaceMemberRoleMember,
+	}
+	destroyer := &stubDestroyer{}
+	taskSvc.SetEnvironmentDestroyer(destroyer)
+	taskSvc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+	handoff := NewHandoffService(repo, repo, nil, nil, groups, nil)
+	handoff.SetTaskResourceCleaner(taskSvc)
+
+	if _, err := handoff.DeleteTaskTree(ctx, "task-child", false); err != nil {
+		t.Fatalf("DeleteTaskTree: %v", err)
+	}
+	waitForCleanupDone(t, taskSvc)
+
+	env, err := repo.GetTaskEnvironment(ctx, "env-shared")
+	if err != nil {
+		t.Fatalf("shared environment should survive child deletion: %v", err)
+	}
+	if env.TaskID != "task-parent" {
+		t.Fatalf("shared environment owner = %q, want task-parent", env.TaskID)
+	}
+	if len(destroyer.worktreeCalls) != 0 {
+		t.Fatalf("child cleanup destroyed shared worktree: %v", destroyer.worktreeCalls)
 	}
 }
 

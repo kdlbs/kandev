@@ -10,7 +10,6 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
-	"github.com/kandev/kandev/internal/task/models"
 )
 
 // SQLiteStore implements Store interface using SQLite.
@@ -453,8 +452,9 @@ func (s *SQLiteStore) ListActiveWorktreePaths(ctx context.Context) ([]string, er
 	return paths, rows.Err()
 }
 
-// CountActiveWorktreeReferences counts non-deleted worktree associations whose
-// sessions are not terminal, excluding associations owned by the caller.
+// CountActiveWorktreeReferences counts non-deleted worktree associations,
+// excluding associations owned by the caller. A terminal session still protects
+// its task workspace until that task's own cleanup releases the association.
 func (s *SQLiteStore) CountActiveWorktreeReferences(
 	ctx context.Context,
 	worktreeID string,
@@ -467,14 +467,10 @@ func (s *SQLiteStore) CountActiveWorktreeReferences(
 		WHERE tsw.worktree_id = ?
 		  AND tsw.status <> ?
 		  AND tsw.deleted_at IS NULL
-		  AND s.state NOT IN (?, ?, ?)
 	`
 	args := []interface{}{
 		worktreeID,
 		StatusDeleted,
-		models.TaskSessionStateCompleted,
-		models.TaskSessionStateFailed,
-		models.TaskSessionStateCancelled,
 	}
 	if len(excludeSessionIDs) > 0 {
 		query += ` AND tsw.session_id NOT IN (?)`

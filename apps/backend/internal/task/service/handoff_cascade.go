@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,12 @@ import (
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+type workspaceEnvironmentRepository interface {
+	taskEnvironmentOwnerTransferer
+	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
+	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+}
 
 // publishUpdatedTask re-reads the task row and forwards it to the event
 // publisher. Used by ArchiveTaskTree after stamping archived_at so the
@@ -189,6 +196,9 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	} else {
 		all = []string{rootID}
 	}
+	if err := s.transferSharedWorkspaceEnvironmentOwnership(ctx, all); err != nil {
+		return out, err
+	}
 	cleanupOps, err := s.prepareCascadeResourceCleanup(ctx, all, cascadeID, models.TaskResourceCleanupTriggerCascadeArchive)
 	if err != nil {
 		return out, err
@@ -277,6 +287,9 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 	if err != nil {
 		return nil, err
 	}
+	if err := s.transferSharedWorkspaceEnvironmentOwnership(ctx, all); err != nil {
+		return out, err
+	}
 	cleanupOps, err := s.prepareCascadeResourceCleanup(ctx, all, cascadeID, models.TaskResourceCleanupTriggerCascadeDelete)
 	if err != nil {
 		return out, err
@@ -333,6 +346,129 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 		}
 	}
 	return out, nil
+}
+
+// transferSharedWorkspaceEnvironmentOwnership moves a materialized environment
+// off a task about to leave its workspace group when another active member will
+// remain. Task deletion cascades task_environments by task_id, so leaving the
+// environment attached to the departing member would destroy shared workspace
+// state before group cleanup gets a chance to enforce its last-member rule.
+func (s *HandoffService) transferSharedWorkspaceEnvironmentOwnership(ctx context.Context, taskIDs []string) error {
+	if s.wsGroups == nil || len(taskIDs) == 0 {
+		return nil
+	}
+	departing := make(map[string]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		departing[taskID] = struct{}{}
+	}
+	seenGroups := make(map[string]struct{})
+	for _, taskID := range taskIDs {
+		group, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("lookup workspace group for task %s: %w", taskID, err)
+		}
+		if group == nil || group.MaterializedEnvironmentID == "" {
+			continue
+		}
+		if _, seen := seenGroups[group.ID]; seen {
+			continue
+		}
+		seenGroups[group.ID] = struct{}{}
+		if err := s.transferWorkspaceGroupEnvironmentOwnership(ctx, group, departing); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
+	ctx context.Context,
+	group *orchmodels.WorkspaceGroup,
+	departing map[string]struct{},
+) error {
+	members, err := s.wsGroups.ListActiveWorkspaceGroupMembers(ctx, group.ID)
+	if err != nil {
+		return fmt.Errorf("list active workspace group members for %s: %w", group.ID, err)
+	}
+	candidates := survivingWorkspaceMemberIDs(group.OwnerTaskID, members, departing)
+	if len(candidates) == 0 {
+		return nil
+	}
+	environments, ok := s.tasks.(workspaceEnvironmentRepository)
+	if !ok {
+		return fmt.Errorf("preserve workspace group %s: task environment repository unavailable", group.ID)
+	}
+	env, err := environments.GetTaskEnvironment(ctx, group.MaterializedEnvironmentID)
+	if err != nil {
+		return fmt.Errorf("load materialized environment %s for workspace group %s: %w",
+			group.MaterializedEnvironmentID, group.ID, err)
+	}
+	if env == nil {
+		return fmt.Errorf("materialized environment %s for workspace group %s not found",
+			group.MaterializedEnvironmentID, group.ID)
+	}
+	if _, leaving := departing[env.TaskID]; !leaving {
+		return nil
+	}
+	newOwner, err := availableWorkspaceEnvironmentOwner(ctx, environments, env.ID, candidates)
+	if err != nil {
+		return fmt.Errorf("select workspace environment owner for group %s: %w", group.ID, err)
+	}
+	if newOwner == "" {
+		return fmt.Errorf("preserve workspace group %s: no surviving member can own environment %s", group.ID, env.ID)
+	}
+	if err := environments.TransferTaskEnvironmentToTask(ctx, env.ID, newOwner); err != nil {
+		return fmt.Errorf("transfer workspace environment %s to task %s: %w", env.ID, newOwner, err)
+	}
+	s.logf().Info("transferred shared workspace environment before task lifecycle cleanup",
+		zap.String("group_id", group.ID),
+		zap.String("environment_id", env.ID),
+		zap.String("old_owner_task_id", env.TaskID),
+		zap.String("new_owner_task_id", newOwner))
+	return nil
+}
+
+func survivingWorkspaceMemberIDs(
+	ownerTaskID string,
+	members []orchmodels.WorkspaceGroupMember,
+	departing map[string]struct{},
+) []string {
+	ids := make([]string, 0, len(members))
+	for _, member := range members {
+		if member.TaskID == "" {
+			continue
+		}
+		if _, leaving := departing[member.TaskID]; leaving {
+			continue
+		}
+		ids = append(ids, member.TaskID)
+	}
+	sort.Strings(ids)
+	for i, taskID := range ids {
+		if taskID == ownerTaskID {
+			ids[0], ids[i] = ids[i], ids[0]
+			break
+		}
+	}
+	return ids
+}
+
+func availableWorkspaceEnvironmentOwner(
+	ctx context.Context,
+	environments workspaceEnvironmentRepository,
+	environmentID string,
+	candidates []string,
+) (string, error) {
+	for _, taskID := range candidates {
+		owned, err := environments.GetTaskEnvironmentByTaskID(ctx, taskID)
+		if err != nil {
+			return "", err
+		}
+		if owned == nil || owned.ID == environmentID {
+			return taskID, nil
+		}
+	}
+	return "", nil
 }
 
 func (s *HandoffService) prepareCascadeResourceCleanup(
