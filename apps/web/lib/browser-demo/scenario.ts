@@ -24,7 +24,7 @@ import {
 } from "@/lib/types/ids";
 
 export const DEMO_STORAGE_KEY = "kandev-browser-demo:v1";
-export const DEMO_SCENARIO_VERSION = 3;
+export const DEMO_SCENARIO_VERSION = 4;
 
 export const DEMO_IDS = {
   workspace: "demo-workspace",
@@ -299,7 +299,8 @@ export function createDemoState(): DemoState {
     makeTask("demo-task-audit", "Add audit logging", DEMO_IDS.steps.review, "REVIEW", 0, {
       description: "Record privileged account changes and expose them to workspace admins.",
       primarySessionId: "demo-session-audit",
-      primarySessionState: "IDLE",
+      primarySessionState: "WAITING_FOR_INPUT",
+      primarySessionPendingAction: "permission",
       reviewStatus: "pending",
     }),
     makeTask(
@@ -333,7 +334,7 @@ export function createDemoState(): DemoState {
   ];
   const sessions = [
     makeSession("demo-session-checkout", "demo-task-checkout", "RUNNING"),
-    makeSession("demo-session-audit", "demo-task-audit", "IDLE"),
+    makeSession("demo-session-audit", "demo-task-audit", "WAITING_FOR_INPUT"),
     makeSession("demo-session-react", "demo-task-react", "IDLE"),
     makeSession("demo-session-empty", "demo-task-empty", "IDLE"),
     makeSession("demo-session-auth", "demo-task-auth", "IDLE"),
@@ -797,6 +798,56 @@ export function createDemoState(): DemoState {
           "agent",
           "Addressed Mira's review: raw IP addresses never cross the audit boundary now. The recorder stores only `internal`, `global`, or `global-ipv6`, and the new regression test asserts the source address is absent. PR #142 is updated and checks are green.",
           { turnId: "audit-review-fix" },
+        ),
+        makeMessage(
+          "audit-migration-check",
+          "demo-session-audit",
+          "demo-task-audit",
+          "agent",
+          "Run the privacy-safe audit migration check against staging",
+          {
+            type: "tool_call",
+            turnId: "audit-review-fix",
+            metadata: {
+              tool_call_id: "audit-migration-check",
+              tool_name: "Bash",
+              title: "Verify the audit migration on staging",
+              status: "pending",
+              args: {
+                command: "pnpm audit:migrate:check --env staging",
+                cwd: "/demo/worktrees/demo-task-audit",
+              },
+            },
+          },
+        ),
+        makeMessage(
+          "audit-migration-permission",
+          "demo-session-audit",
+          "demo-task-audit",
+          "agent",
+          "Approve staging migration verification",
+          {
+            type: "permission_request",
+            turnId: "audit-review-fix",
+            requestsInput: true,
+            metadata: {
+              pending_id: "audit-migration-permission",
+              tool_call_id: "audit-migration-check",
+              action_type: "command",
+              action_details: {
+                command: "pnpm audit:migrate:check --env staging",
+                cwd: "/demo/worktrees/demo-task-audit",
+                description:
+                  "Runs a read-only schema compatibility check against the shared staging database.",
+                raw_input: { command: "pnpm audit:migrate:check --env staging" },
+              },
+              options: [
+                { option_id: "audit-allow-once", name: "Allow once", kind: "allow_once" },
+                { option_id: "audit-reject-once", name: "Reject", kind: "reject_once" },
+              ],
+              status: "pending",
+            },
+          },
         ),
       ],
       "demo-session-react": [
@@ -1384,6 +1435,7 @@ export function createWorkflowSnapshot(tasks: Task[], workflow: Workflow, steps:
         repositories: task.repositories,
         primarySessionId: task.primary_session_id,
         primarySessionState: task.primary_session_state,
+        primarySessionPendingAction: task.primary_session_pending_action,
         sessionCount: task.session_count,
         reviewStatus: task.review_status,
         updatedAt: task.updated_at,
@@ -1454,6 +1506,7 @@ function makeTask(
     description?: string;
     primarySessionId?: string;
     primarySessionState?: Task["primary_session_state"];
+    primarySessionPendingAction?: Task["primary_session_pending_action"];
     reviewStatus?: Task["review_status"];
     workflowId?: string;
     repositories?: Task["repositories"];
@@ -1474,6 +1527,7 @@ function makeTask(
       ? toSessionId(options.primarySessionId)
       : undefined,
     primary_session_state: options.primarySessionState,
+    primary_session_pending_action: options.primarySessionPendingAction,
     session_count: options.primarySessionId ? 1 : 0,
     review_status: options.reviewStatus,
     created_at: NOW,

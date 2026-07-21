@@ -54,6 +54,7 @@ const DEMO_TERMINAL_ID = "demo-terminal-1";
 const DEMO_TIMESTAMP = "2026-07-18T12:00:00.000Z";
 const TASK_NOT_FOUND = "Task not found";
 const PLAN_NOT_FOUND = "Task plan not found";
+const TASK_UPDATED_EVENT = "task.updated";
 const DEMO_REPOSITORY_SCRIPTS = [
   {
     id: "demo-script-test",
@@ -319,7 +320,7 @@ function moveTask(id: string, input: Record<string, unknown>): DemoHttpResponse 
   task.position = Number(input.position ?? task.position);
   task.updated_at = new Date().toISOString();
   persist();
-  notify("task.updated", taskEvent(task));
+  notify(TASK_UPDATED_EVENT, taskEvent(task));
   const workflowStep = demoSteps.find((step) => step.id === task.workflow_step_id);
   return json({ task, workflow_step: workflowStep });
 }
@@ -386,7 +387,7 @@ function updateTask(task: Task, input: Record<string, unknown>): DemoHttpRespons
   if (typeof input.state === "string") task.state = input.state as Task["state"];
   task.updated_at = new Date().toISOString();
   persist();
-  notify("task.updated", taskEvent(task));
+  notify(TASK_UPDATED_EVENT, taskEvent(task));
   return json(task);
 }
 
@@ -426,12 +427,67 @@ type SocketRouter = (context: SocketRouteContext) => boolean;
 
 const SOCKET_ROUTERS: SocketRouter[] = [
   routeSessionSocket,
+  routePermissionSocket,
   routePlanReviewSocket,
   routeWorkspaceReadSocket,
   routeWorkspaceMutationSocket,
   routeShellSocket,
   routeMessageSocket,
 ];
+
+function routePermissionSocket(context: SocketRouteContext): boolean {
+  const { socketId, id, action, payload } = context;
+  if (action !== "permission.respond") return false;
+
+  const pendingId = String(payload.pending_id || "");
+  const sessionId = String(payload.session_id || "");
+  const permission = (state.messagesBySession[sessionId] ?? []).find(
+    (message) =>
+      message.type === "permission_request" &&
+      (message.metadata as { pending_id?: string } | undefined)?.pending_id === pendingId,
+  );
+  if (!permission) {
+    respond(socketId, id, { message: "Permission request not found" }, true);
+    return true;
+  }
+
+  const status = permissionResponseStatus(payload);
+  const now = new Date().toISOString();
+  permission.metadata = { ...permission.metadata, status };
+  permission.requests_input = false;
+  permission.updated_at = now;
+
+  const session = state.sessions.find((candidate) => candidate.id === sessionId);
+  const task = session ? findTask(session.task_id) : undefined;
+  if (session) {
+    const oldState = session.state;
+    session.state = "IDLE";
+    session.updated_at = now;
+    notify("session.state_changed", {
+      task_id: session.task_id,
+      session_id: session.id,
+      old_state: oldState,
+      new_state: session.state,
+      updated_at: now,
+    });
+  }
+  if (task) {
+    task.primary_session_state = "IDLE";
+    task.primary_session_pending_action = null;
+    task.updated_at = now;
+    notify(TASK_UPDATED_EVENT, taskEvent(task));
+  }
+
+  persist();
+  respond(socketId, id, { success: true, status });
+  notify("session.message.updated", messageEvent(permission));
+  return true;
+}
+
+function permissionResponseStatus(payload: Record<string, unknown>) {
+  if (payload.cancelled) return "expired";
+  return payload.rejected ? "rejected" : "approved";
+}
 
 function routeSessionSocket(context: SocketRouteContext): boolean {
   const { socketId, id, action, payload } = context;
@@ -988,7 +1044,7 @@ function startAgent(task: Task, prompt: string) {
   task.workflow_step_id = DEMO_IDS.steps.progress;
   const user = makeMessage(`${sessionId}-user`, sessionId, task.id, "user", prompt);
   state.messagesBySession[sessionId] = [user];
-  notify("task.updated", taskEvent(task));
+  notify(TASK_UPDATED_EVENT, taskEvent(task));
   notify("session.message.added", messageEvent(user));
   setTimeout(() => {
     const agent = makeMessage(
@@ -1176,6 +1232,7 @@ function taskEvent(task: Task) {
     repositories: task.repositories,
     primary_session_id: task.primary_session_id,
     primary_session_state: task.primary_session_state,
+    primary_session_pending_action: task.primary_session_pending_action,
     session_count: task.session_count,
     review_status: task.review_status,
     archived_at: task.archived_at,
@@ -1192,7 +1249,11 @@ function messageEvent(message: Message) {
     author_type: message.author_type,
     author_id: message.author_id,
     content: message.content,
+    raw_content: message.raw_content,
     type: message.type,
+    metadata: message.metadata,
+    requests_input: message.requests_input,
+    turn_id: message.turn_id,
     created_at: message.created_at,
     updated_at: message.updated_at,
   };
