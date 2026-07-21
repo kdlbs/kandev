@@ -193,8 +193,9 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		agentProfiles:    d.profiles,
 		sessionCodeStats: d.codeStats,
 		messageData:      d.messages,
-		utilitySettings:  d.utilCfg,
-		utilityRunner:    d.utilRun,
+		utilityDeps: func() (utilitySettingsSource, utilityRunner) {
+			return d.utilCfg, d.utilRun
+		},
 	}
 	return d
 }
@@ -870,6 +871,22 @@ func TestPluginHost_Messages_PaginatesWithHasMore(t *testing.T) {
 	}
 	if info == nil || !info.HasMore || info.NextCursor != "2" {
 		t.Fatalf("PageInfo = %+v, want HasMore=true NextCursor=2", info)
+	}
+}
+
+func TestPluginHost_Messages_TooManyFilterValuesIsInvalidArgument(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"messages"}})
+	sessionIDs := make([]string, maxMessageFilterValues+1)
+	for i := range sessionIDs {
+		sessionIDs[i] = fmt.Sprintf("s%d", i)
+	}
+	_, _, err := d.host.Messages().List(context.Background(), pluginsdk.MessageFilter{SessionIDs: sessionIDs}, pluginsdk.Page{})
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.InvalidArgument {
+		t.Fatalf("err = %v, want InvalidArgument", err)
+	}
+	if d.messages.calls != 0 {
+		t.Fatalf("data source called %d times, want 0 (rejected before query)", d.messages.calls)
 	}
 }
 

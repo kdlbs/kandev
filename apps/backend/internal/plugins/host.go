@@ -63,10 +63,15 @@ type pluginHost struct {
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
 
-	// Utility agent invocation (ADR 0048), wired by Service.SetUtilityAgent.
+	// utilityDeps returns the live utility-agent dependencies (ADR 0048) at
+	// call time rather than a spawn-time snapshot. hostUtilityMgr is
+	// constructed late in boot — after StartActivePlugins has already spawned
+	// boot-active plugins — so snapshotting here would strand those hosts with
+	// nil deps and make InvokeUtilityAgent return Unimplemented for their whole
+	// lifetime. Reading live (under Service.mu) lets the later SetUtilityAgent
+	// wiring take effect without a plugin restart. nil on a bare test host.
 	// See host_utility.go.
-	utilitySettings utilitySettingsSource
-	utilityRunner   utilityRunner
+	utilityDeps func() (utilitySettingsSource, utilityRunner)
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)

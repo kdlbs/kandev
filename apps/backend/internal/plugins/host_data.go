@@ -62,6 +62,12 @@ const (
 	maxPageLimit     = 200
 )
 
+// maxMessageFilterValues bounds the combined number of session/task/type
+// values a ListMessages filter may carry, keeping the resulting IN(...) bind
+// parameters comfortably under SQLite's SQLITE_MAX_VARIABLE_NUMBER (999 on
+// older builds) with headroom for the since/until/limit/offset params.
+const maxMessageFilterValues = 400
+
 // normalizePageLimit clamps limit to [1, maxPageLimit], defaulting to
 // defaultPageLimit when unset or invalid.
 func normalizePageLimit(limit int32) int {
@@ -494,6 +500,13 @@ type messageReader struct{ host *pluginHost }
 // messageModelToDTO (kandev-system blocks stripped) before it reaches the
 // plugin.
 func (r messageReader) List(ctx context.Context, filter pluginsdk.MessageFilter, page pluginsdk.Page) ([]pluginsdk.Message, *pluginsdk.PageInfo, error) {
+	// Each session/task/type value becomes its own SQL bind parameter; cap
+	// their combined count well under SQLite's host-parameter limit
+	// (~500-999) so a large filter fails fast with a clear InvalidArgument
+	// instead of a cryptic "too many SQL variables" at query execution.
+	if n := len(filter.SessionIDs) + len(filter.TaskIDs) + len(filter.Types); n > maxMessageFilterValues {
+		return nil, nil, invalidArgument(fmt.Sprintf("message filter has %d session/task/type values, max %d", n, maxMessageFilterValues))
+	}
 	since, err := parseFilterTime(filter.Since, "since")
 	if err != nil {
 		return nil, nil, err

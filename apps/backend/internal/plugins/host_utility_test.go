@@ -110,6 +110,46 @@ func TestPluginHost_InvokeUtilityAgent_ProfileMissing(t *testing.T) {
 	}
 }
 
+// TestPluginHost_InvokeUtilityAgent_LateWiringReachesSpawnedHost proves the
+// boot-ordering fix: a host built before SetUtilityAgent runs (as happens for
+// boot-active plugins, spawned before hostUtilityMgr exists) still resolves the
+// utility deps once they are wired, because utilityDeps reads them live from the
+// Service rather than snapshotting at spawn time.
+func TestPluginHost_InvokeUtilityAgent_LateWiringReachesSpawnedHost(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	profiles := &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{
+		Agents: []agentsettingsdto.AgentDTO{{
+			ID:       "agent-1",
+			Profiles: []agentsettingsdto.AgentProfileDTO{{ID: "p1", AgentID: "claude-acp", Model: "m"}},
+		}},
+	}}
+	// A host as hostForPlugin would build it: utilityDeps bound to the service,
+	// which has NOT been wired with a utility agent yet.
+	host := &pluginHost{
+		capabilities:  manifest.Capabilities{AgentInvoke: true},
+		agentProfiles: profiles,
+		utilityDeps:   svc.utilityAgentDeps,
+	}
+
+	// Before wiring: Unimplemented (deps still nil on the service).
+	if _, err := host.InvokeUtilityAgent(context.Background(), "hi"); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("pre-wiring code = %v, want Unimplemented", status.Code(err))
+	}
+
+	// Wire late, exactly as backendapp does after plugins have already spawned.
+	runner := &fakeUtilityRunner{text: "done"}
+	svc.SetUtilityAgent(&fakeUtilitySettingsSource{profileID: "p1"}, runner)
+
+	// The already-built host now resolves the freshly-wired deps.
+	got, err := host.InvokeUtilityAgent(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("post-wiring error: %v", err)
+	}
+	if got != "done" || runner.gotAgentType != "claude-acp" {
+		t.Fatalf("got %q via %q, want done via claude-acp", got, runner.gotAgentType)
+	}
+}
+
 func TestPluginHost_InvokeUtilityAgent_SettingError(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
 	d.utilCfg.err = errors.New("db down")

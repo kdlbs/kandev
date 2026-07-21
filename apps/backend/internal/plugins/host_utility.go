@@ -41,13 +41,18 @@ func (h *pluginHost) InvokeUtilityAgent(ctx context.Context, prompt string) (str
 	if !h.capabilities.AgentInvoke {
 		return "", permissionDenied(capabilityAgentInvoke)
 	}
-	if h.utilitySettings == nil || h.utilityRunner == nil || h.agentProfiles == nil {
-		// Not wired (e.g. a bare test pluginHost) — fall back to the embedded
-		// Unimplemented default rather than nil-dereferencing.
+	var settings utilitySettingsSource
+	var runner utilityRunner
+	if h.utilityDeps != nil {
+		settings, runner = h.utilityDeps()
+	}
+	if settings == nil || runner == nil || h.agentProfiles == nil {
+		// Not wired yet (e.g. a bare test pluginHost) — fall back to the
+		// embedded Unimplemented default rather than nil-dereferencing.
 		return h.UnimplementedHostData.InvokeUtilityAgent(ctx, prompt)
 	}
 
-	profileID, err := h.utilitySettings.UtilityAgentProfileID(ctx)
+	profileID, err := settings.UtilityAgentProfileID(ctx)
 	if err != nil {
 		return "", fmt.Errorf("plugins: read utility agent setting: %w", err)
 	}
@@ -59,7 +64,7 @@ func (h *pluginHost) InvokeUtilityAgent(ctx context.Context, prompt string) (str
 	if err != nil {
 		return "", err
 	}
-	return h.utilityRunner.ExecutePrompt(ctx, agentType, model, "", prompt)
+	return runner.ExecutePrompt(ctx, agentType, model, "", prompt)
 }
 
 // resolveUtilityAgentProfile finds the configured profile id among the
