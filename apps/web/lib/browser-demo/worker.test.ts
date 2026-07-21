@@ -207,6 +207,37 @@ describe("browser demo worker WebSocket runtime", () => {
     expect(diff.payload).toEqual({ cumulative_diff: null, ready: true });
   });
 
+  it("resolves the seeded audit permission and clears the pending session action", async () => {
+    const before = requestSocket("message.list", { session_id: AUDIT_SESSION_ID });
+    const pending = before.payload.messages.find(
+      (message: { id: string }) => message.id === "audit-migration-permission",
+    );
+
+    expect(pending).toMatchObject({
+      requests_input: true,
+      metadata: { status: "pending", tool_call_id: "audit-migration-check" },
+    });
+    expect(
+      requestSocket("permission.respond", {
+        session_id: AUDIT_SESSION_ID,
+        pending_id: "audit-migration-permission",
+        option_id: "audit-allow-once",
+      }).payload,
+    ).toEqual({ success: true, status: "approved" });
+
+    const after = requestSocket("message.list", { session_id: AUDIT_SESSION_ID });
+    const resolved = after.payload.messages.find(
+      (message: { id: string }) => message.id === "audit-migration-permission",
+    );
+    expect(resolved).toMatchObject({ requests_input: false, metadata: { status: "approved" } });
+    expect(await get("/api/v1/tasks/demo-task-audit")).toMatchObject({
+      body: {
+        primary_session_state: "IDLE",
+        primary_session_pending_action: null,
+      },
+    });
+  });
+
   it("serves a browsable workspace tree and file contents", () => {
     const tree = requestSocket("workspace.tree.get", {
       session_id: AUDIT_SESSION_ID,

@@ -131,6 +131,36 @@ describe("browser demo scenario", () => {
     });
   });
 
+  it("backs the audit approval badge with a pending chat permission", () => {
+    const state = createDemoState();
+    const task = state.tasks.find((candidate) => candidate.id === "demo-task-audit");
+    const session = state.sessions.find((candidate) => candidate.id === "demo-session-audit");
+    const messages = state.messagesBySession["demo-session-audit"];
+    const permission = messages.find((message) => message.type === "permission_request");
+    const toolCall = messages.find(
+      (message) =>
+        (message.metadata as { tool_call_id?: string } | undefined)?.tool_call_id ===
+        "audit-migration-check",
+    );
+
+    expect(task).toMatchObject({
+      primary_session_state: "WAITING_FOR_INPUT",
+      primary_session_pending_action: "permission",
+      review_status: "pending",
+    });
+    expect(session?.state).toBe("WAITING_FOR_INPUT");
+    expect(toolCall).toMatchObject({ type: "tool_call", metadata: { status: "pending" } });
+    expect(permission).toMatchObject({
+      requests_input: true,
+      metadata: {
+        pending_id: "audit-migration-permission",
+        tool_call_id: "audit-migration-check",
+        action_type: "command",
+        status: "pending",
+      },
+    });
+  });
+
   it("provides a rich, navigable repository fixture", () => {
     const files = createDemoFiles();
 
