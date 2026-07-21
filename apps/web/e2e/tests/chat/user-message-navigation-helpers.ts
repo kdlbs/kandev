@@ -107,5 +107,6 @@ export async function expectMessageAtNavigationPosition(scrollOwner: Locator, me
 
 export async function expectNavigationOutline(message: Locator) {
   await expect(message).toHaveCSS("outline-style", "solid");
+  await expect(message).toHaveCSS("outline-width", "1px");
   await expect(message).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 }

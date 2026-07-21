@@ -17,9 +17,9 @@ Long agent turns can put hundreds of tool calls between a user's prompts. Users 
 - Up selects the immediately previous user prompt in chronological order. When no previous prompt is loaded but older history may exist, one action loads successive existing 20-row pages until it finds a user prompt, reaches the confirmed start of history, or cannot make progress.
 - Down selects the immediately next user prompt from loaded newer history and never requests an older page.
 - A destination is centered when the scroll range allows it; at the oldest or newest boundary it settles at the nearest reachable edge. It receives a brief, low-contrast outline that fades without changing its background or layout. Reduced-motion preferences avoid smooth scrolling and show the outline without animation.
-- A control is disabled only at a known boundary. Up remains available while the server reports older history; down is disabled only when there is no newer user prompt.
+- While navigation is idle, a control is disabled only at a known boundary. Up remains available while the server reports older history; down is disabled only when there is no newer user prompt.
 - The existing **Load older messages** button remains available as a manual fallback.
-- While a navigation request is pending, duplicate navigation is blocked and user-message navigation actions expose their busy state accessibly.
+- While a navigation request is pending, both controls are temporarily disabled, duplicate navigation is blocked, and the actions expose their busy state accessibly.
 
 ## Mobile Contract
 
