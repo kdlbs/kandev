@@ -172,18 +172,19 @@ type RelatedTasks struct {
 // than reaching into the repos directly so document writes still go
 // through DocumentService and emit the same revision/event side effects.
 type HandoffService struct {
-	tasks           repository.TaskRepository
-	docs            *DocumentService
-	docsRepo        repository.DocumentRepository
-	blockers        BlockerRepository
-	wsGroups        WorkspaceGroupRepo
-	sessions        SessionWorktreeReader
-	cleaner         WorkspaceCleaner
-	runCanceller    RunCanceller
-	eventPublisher  TaskEventPublisher
-	resourceCleaner TaskResourceCleaner
-	logger          *logger.Logger
-	parentLock      parentMutex
+	tasks              repository.TaskRepository
+	docs               *DocumentService
+	docsRepo           repository.DocumentRepository
+	blockers           BlockerRepository
+	wsGroups           WorkspaceGroupRepo
+	sessions           SessionWorktreeReader
+	cleaner            WorkspaceCleaner
+	runCanceller       RunCanceller
+	eventPublisher     TaskEventPublisher
+	resourceCleaner    TaskResourceCleaner
+	logger             *logger.Logger
+	parentLock         parentMutex
+	workspaceGroupLock parentMutex
 }
 
 // TaskEventPublisher abstracts the side-effect of broadcasting task
@@ -280,6 +281,7 @@ func NewHandoffService(
 		parentLock: parentMutex{
 			locks: make(map[string]*sync.Mutex),
 		},
+		workspaceGroupLock: parentMutex{locks: make(map[string]*sync.Mutex)},
 	}
 }
 

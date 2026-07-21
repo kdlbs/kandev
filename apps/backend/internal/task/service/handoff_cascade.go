@@ -383,14 +383,9 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 	group *orchmodels.WorkspaceGroup,
 	departing map[string]struct{},
 ) error {
-	members, err := s.wsGroups.ListActiveWorkspaceGroupMembers(ctx, group.ID)
-	if err != nil {
-		return fmt.Errorf("list active workspace group members for %s: %w", group.ID, err)
-	}
-	candidates := survivingWorkspaceMemberIDs(group.OwnerTaskID, members, departing)
-	if len(candidates) == 0 {
-		return nil
-	}
+	mu := s.workspaceGroupLock.lockFor(group.ID)
+	mu.Lock()
+	defer mu.Unlock()
 	environments, ok := s.tasks.(workspaceEnvironmentRepository)
 	if !ok {
 		return fmt.Errorf("preserve workspace group %s: task environment repository unavailable", group.ID)
@@ -405,6 +400,14 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 			group.MaterializedEnvironmentID, group.ID)
 	}
 	if _, leaving := departing[env.TaskID]; !leaving {
+		return nil
+	}
+	members, err := s.wsGroups.ListActiveWorkspaceGroupMembers(ctx, group.ID)
+	if err != nil {
+		return fmt.Errorf("list active workspace group members for %s: %w", group.ID, err)
+	}
+	candidates := survivingWorkspaceMemberIDs(group.OwnerTaskID, members, departing)
+	if len(candidates) == 0 {
 		return nil
 	}
 	newOwner, err := availableWorkspaceEnvironmentOwner(ctx, environments, env.ID, candidates)
