@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { IconGitFork } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -76,15 +76,16 @@ export function RepoChipsRow({
   userSettingsLoaded,
   localRepositoryCreation,
 }: RepoChipsRowProps) {
+  const chipRowRef = useRef<HTMLDivElement>(null);
   const [creatingForRowKey, setCreatingForRowKey] = useState<string | null>(null);
   const handleCreationOpenChange = (open: boolean) => {
     if (open || creatingForRowKey === null) return;
     const rowKey = creatingForRowKey;
     setCreatingForRowKey(null);
     requestAnimationFrame(() => {
-      const row = Array.from(document.querySelectorAll<HTMLElement>("[data-repo-row-key]")).find(
-        (candidate) => candidate.dataset.repoRowKey === rowKey,
-      );
+      const row = Array.from(
+        chipRowRef.current?.querySelectorAll<HTMLElement>("[data-repo-row-key]") ?? [],
+      ).find((candidate) => candidate.dataset.repoRowKey === rowKey);
       row?.querySelector<HTMLElement>("[data-testid='repo-chip-trigger']")?.focus();
     });
   };
@@ -117,7 +118,11 @@ export function RepoChipsRow({
     // modal doesn't jump when the user toggles between Repo / URL / None
     // (None renders a single pill, Repo can render chips + branch + add and
     // sometimes wraps when the segmented control crowds the row).
-    <div className="flex min-h-9 flex-wrap items-center gap-2" data-testid="repo-chips-row">
+    <div
+      ref={chipRowRef}
+      className="flex min-h-9 flex-wrap items-center gap-2"
+      data-testid="repo-chips-row"
+    >
       <ModeBody
         fs={fs}
         repositories={repositories}

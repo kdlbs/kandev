@@ -117,6 +117,7 @@ func (s *Service) initializeLocalRepository(
 }
 
 func createLocalRepositoryStaging(parentPath string) (*localRepositoryStaging, error) {
+	// codeql[go/path-injection] parentPath is canonicalized and its ownership chain is trusted.
 	stagingPath, err := os.MkdirTemp(parentPath, ".kandev-repository-init-")
 	if err != nil {
 		return nil, fmt.Errorf("%w: parent directory is not writable", ErrInvalidLocalRepositoryInitialization)
@@ -134,7 +135,8 @@ func createLocalRepositoryStaging(parentPath string) (*localRepositoryStaging, e
 	stagingIdentity, err := stagingDirectory.Stat()
 	if err != nil || !os.SameFile(stagingPathInfo, stagingIdentity) ||
 		!localRepositoryTargetMatches(stagingPath, stagingIdentity) ||
-		!localRepositoryDirectoryOwnedByProcess(stagingIdentity) || stagingIdentity.Mode().Perm() != 0o700 {
+		!localRepositoryDirectoryOwnedByProcess(stagingIdentity) ||
+		!localRepositoryStagingPermissionsPrivate(stagingIdentity) {
 		_ = stagingDirectory.Close()
 		_ = os.Remove(stagingPath)
 		return nil, errLocalRepositoryTargetChanged
@@ -180,11 +182,13 @@ func (s *Service) cleanupInitializedLocalRepository(
 	targetIdentity fs.FileInfo,
 ) {
 	if anchoredPath := inheritedDirectoryPath(int(targetDirectory.Fd())); anchoredPath != "" {
+		// codeql[go/path-injection] anchoredPath resolves through the verified staging directory descriptor.
 		if err := os.RemoveAll(filepath.Join(anchoredPath, ".git")); err != nil {
 			s.logger.Warn("failed to clean up initialized Git metadata",
 				zap.String("path", targetPath), zap.Error(err))
 		}
 	} else if localRepositoryTargetMatches(targetPath, targetIdentity) {
+		// codeql[go/path-injection] targetPath still matches this request's verified directory identity.
 		if err := os.RemoveAll(filepath.Join(targetPath, ".git")); err != nil {
 			s.logger.Warn("failed to clean up initialized Git metadata",
 				zap.String("path", targetPath), zap.Error(err))
@@ -213,6 +217,7 @@ func inheritedDirectoryPath(fd int) string {
 }
 
 func localRepositoryTargetMatches(targetPath string, createdTarget fs.FileInfo) bool {
+	// codeql[go/path-injection] targetPath is compared only to the request-owned directory identity.
 	currentTarget, err := os.Lstat(targetPath)
 	return err == nil && currentTarget.IsDir() && os.SameFile(createdTarget, currentTarget)
 }
@@ -237,7 +242,7 @@ func canonicalLocalRepositoryParent(parentPath string) (string, error) {
 	if err != nil || !info.IsDir() {
 		return "", fmt.Errorf("%w: parent_path must be an accessible directory", ErrInvalidLocalRepositoryInitialization)
 	}
-	if info.Mode().Perm()&0o222 == 0 {
+	if !localRepositoryParentWritable(info) {
 		return "", fmt.Errorf("%w: parent directory is not writable", ErrInvalidLocalRepositoryInitialization)
 	}
 	if err := validateLocalRepositoryParentChain(canonicalPath); err != nil {
@@ -248,12 +253,13 @@ func canonicalLocalRepositoryParent(parentPath string) (string, error) {
 
 func validateLocalRepositoryParentChain(parentPath string) error {
 	for path := parentPath; ; path = filepath.Dir(path) {
+		// codeql[go/path-injection] path is a component of the canonical selected parent chain.
 		info, err := os.Lstat(path)
 		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 ||
 			!localRepositoryDirectoryOwnerTrusted(info) {
 			return fmt.Errorf("%w: parent directory ownership is not trusted", ErrInvalidLocalRepositoryInitialization)
 		}
-		if info.Mode().Perm()&0o022 != 0 && info.Mode()&os.ModeSticky == 0 {
+		if localRepositoryParentSharedWritable(info) {
 			return fmt.Errorf("%w: parent directory must not be shared writable", ErrInvalidLocalRepositoryInitialization)
 		}
 		if filepath.Dir(path) == path {

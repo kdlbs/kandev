@@ -21,6 +21,18 @@ func localRepositoryDirectoryOwnerTrusted(info fs.FileInfo) bool {
 	return ok && (stat.Uid == 0 || stat.Uid == uint32(os.Geteuid()))
 }
 
+func localRepositoryParentWritable(info fs.FileInfo) bool {
+	return info.Mode().Perm()&0o222 != 0
+}
+
+func localRepositoryParentSharedWritable(info fs.FileInfo) bool {
+	return info.Mode().Perm()&0o022 != 0 && info.Mode()&os.ModeSticky == 0
+}
+
+func localRepositoryStagingPermissionsPrivate(info fs.FileInfo) bool {
+	return info.Mode().Perm() == 0o700
+}
+
 func openLocalRepositoryDirectory(path string) (*os.File, error) {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {

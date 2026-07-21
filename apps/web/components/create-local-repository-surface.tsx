@@ -28,7 +28,7 @@ export function validateLocalRepositoryName(name: string): string | null {
   const trimmed = name.trim();
   if (!trimmed) return "Enter a repository name.";
   if (trimmed === "." || trimmed === "..") return "Choose a different repository name.";
-  if (trimmed.includes("/") || trimmed.includes("\\")) {
+  if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("\0")) {
     return "The repository name must be one folder name.";
   }
   return null;

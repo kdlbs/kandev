@@ -3,9 +3,12 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+
+	"golang.org/x/sys/windows"
 )
 
 func localRepositoryDirectoryOwnedByProcess(fs.FileInfo) bool {
@@ -13,6 +16,18 @@ func localRepositoryDirectoryOwnedByProcess(fs.FileInfo) bool {
 }
 
 func localRepositoryDirectoryOwnerTrusted(fs.FileInfo) bool {
+	return true
+}
+
+func localRepositoryParentWritable(info fs.FileInfo) bool {
+	return info.Mode().Perm()&0o222 != 0
+}
+
+func localRepositoryParentSharedWritable(fs.FileInfo) bool {
+	return false
+}
+
+func localRepositoryStagingPermissionsPrivate(fs.FileInfo) bool {
 	return true
 }
 
@@ -34,5 +49,25 @@ func openLocalRepositoryDirectory(path string) (*os.File, error) {
 }
 
 func publishLocalRepository(stagingPath, targetPath string) error {
-	return os.Rename(stagingPath, targetPath)
+	from, err := windows.UTF16PtrFromString(stagingPath)
+	if err != nil {
+		return err
+	}
+	to, err := windows.UTF16PtrFromString(targetPath)
+	if err != nil {
+		return err
+	}
+	if err := windows.MoveFileEx(from, to, 0); err != nil {
+		if errors.Is(err, windows.ERROR_ALREADY_EXISTS) ||
+			errors.Is(err, windows.ERROR_FILE_EXISTS) || localRepositoryTargetExists(targetPath) {
+			return fs.ErrExist
+		}
+		return err
+	}
+	return nil
+}
+
+func localRepositoryTargetExists(targetPath string) bool {
+	_, err := os.Lstat(targetPath)
+	return err == nil
 }

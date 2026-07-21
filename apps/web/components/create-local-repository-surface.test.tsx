@@ -73,7 +73,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("local repository form helpers", () => {
-  it.each(["", ".", "..", "nested/name", "nested\\name"])(
+  it.each(["", ".", "..", "nested/name", "nested\\name", "name\0with-null"])(
     "rejects invalid repository name %j",
     (name) => {
       expect(validateLocalRepositoryName(name)).not.toBeNull();

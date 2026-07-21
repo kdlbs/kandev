@@ -388,7 +388,7 @@ export function useDialogHandlers(
       });
       clearFreshBranch(fs);
     },
-    [context, directLocalExecutorSelection, fs, repositories],
+    [context, directLocalExecutorSelection, fs],
   );
   return {
     ...repo,
