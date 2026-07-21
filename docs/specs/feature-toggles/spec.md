@@ -19,8 +19,9 @@ restart required for startup-gated features such as Office mode and Debug mode.
 - Kandev adds a **Feature Toggles** settings page at
   `/settings/system/feature-toggles`.
 - The page shows user-facing runtime toggles, not every profile/env knob.
-- V1 exposes two user-facing toggles:
+- V1 exposes three user-facing toggles:
   - **Office mode** — enables the autonomous-agent Office surface.
+  - **App status bar** — shows the global desktop/tablet status bar and the phone Status drawer entry. It is stable and on by default; disabling it changes visibility only.
   - **Debug mode** — enables local diagnostic/debug behavior, including agent
     message debug logs.
 - Office mode is marked **Experimental** and includes a concise description of
@@ -259,6 +260,9 @@ especially Debug mode, to admins.
 - **GIVEN** Debug mode is off, **WHEN** the user enables it, **THEN** the page
   explains that local diagnostic endpoints and agent message debug logs will be
   enabled after restart.
+- **GIVEN** App status bar is using its default, **WHEN** the user opens Feature
+  Toggles, **THEN** it appears on and explains that disabling it removes both
+  the desktop/tablet bar and phone Status entry after restart.
 - **GIVEN** a toggle override exists, **WHEN** the user clicks `Reset to default`,
   **THEN** the override is removed and the page shows restart-required state if
   the effective runtime value differs from the restored default.
@@ -276,6 +280,8 @@ especially Debug mode, to admins.
 
 - A user can enable or disable Office mode from Feature Toggles and understand
   that restart is required.
+- A user can hide or restore the App status bar from Feature Toggles and
+  understand that it applies after restart on every breakpoint.
 - Office mode clearly communicates experimental status and risk.
 - A user can enable or disable Debug mode without seeing duplicate agent-message
   debug toggles.

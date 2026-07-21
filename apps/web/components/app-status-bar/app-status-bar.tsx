@@ -25,13 +25,16 @@ export function AppStatusBar({
 }: AppStatusBarProps) {
   return (
     <footer
-      className="flex h-6 shrink-0 items-center gap-2 border-t border-border bg-background px-2 text-xs"
+      className="flex h-6 shrink-0 items-center gap-2 border-t border-border bg-background px-2 text-xs leading-none"
       data-testid="app-status-bar"
       aria-label="Application status"
     >
-      <div className="flex min-w-0 items-center overflow-hidden">
-        <ConnectionStatusItem compact={density === "compact"} />
-        <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+      <div className="flex h-full min-w-0 items-center overflow-hidden">
+        <ConnectionStatusItem className="h-full" />
+        <div
+          className="flex h-full min-w-0 items-center gap-1 overflow-hidden"
+          data-testid="app-status-bar-left-plugins"
+        >
           <AppStatusBarPluginSlots
             placement="left"
             presentation="bar"
@@ -44,14 +47,17 @@ export function AppStatusBar({
         </div>
       </div>
       <div className="min-w-0 flex-1" />
-      <div className="flex min-w-0 items-center overflow-hidden">
+      <div className="flex h-full min-w-0 items-center overflow-hidden">
         <StatusSurfaceMetrics
           activeSessionId={activeSessionId}
           presentation="bar"
           density={density}
           drawerOpen={false}
         />
-        <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+        <div
+          className="flex h-full min-w-0 items-center gap-1 overflow-hidden"
+          data-testid="app-status-bar-right-plugins"
+        >
           <AppStatusBarPluginSlots
             placement="right"
             presentation="bar"

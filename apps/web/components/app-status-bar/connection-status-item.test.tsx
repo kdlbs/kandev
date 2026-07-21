@@ -16,4 +16,11 @@ describe("connectionStatusDetails", () => {
       description,
     });
   });
+
+  it("uses a small green dot for an active connection", () => {
+    expect(connectionStatusDetails("connected", null)).toMatchObject({
+      dotClass: "bg-emerald-500",
+      animate: false,
+    });
+  });
 });

@@ -2,8 +2,8 @@ package runtimeflags
 
 var definitions = []RuntimeFlagDefinition{
 	{
-		Key:         "features.office",
-		EnvVar:      "KANDEV_FEATURES_OFFICE",
+		Key:         featureOfficeKey,
+		EnvVar:      envFeaturesOffice,
 		Kind:        KindFeature,
 		Label:       "Office mode",
 		Description: "Enables autonomous agent office workflows and related settings.",
@@ -15,8 +15,8 @@ var definitions = []RuntimeFlagDefinition{
 		Mutable:         true,
 	},
 	{
-		Key:         "features.plugins",
-		EnvVar:      "KANDEV_FEATURES_PLUGINS",
+		Key:         featurePluginsKey,
+		EnvVar:      envFeaturesPlugins,
 		Kind:        KindFeature,
 		Label:       "Plugins",
 		Description: "Enables the extensible plugin system and related settings.",
@@ -29,8 +29,21 @@ var definitions = []RuntimeFlagDefinition{
 		Mutable:         true,
 	},
 	{
-		Key:         "debug.devMode",
-		EnvVar:      "KANDEV_DEBUG_DEV_MODE",
+		Key:         featureAppStatusBarKey,
+		EnvVar:      envFeaturesAppStatusBar,
+		Kind:        KindFeature,
+		Label:       "App status bar",
+		Description: "Shows the global connection, optional system metrics, and plugin status surface.",
+		Stability:   StabilityStable,
+		RiskLevel:   RiskLow,
+		RiskDescription: "Disabling this hides the desktop and tablet status bar and the phone Status drawer entry " +
+			"after restart. It does not stop connections, metrics collection requested by other clients, or plugins.",
+		RestartRequired: true,
+		Mutable:         true,
+	},
+	{
+		Key:         debugDevModeKey,
+		EnvVar:      envDebugDevMode,
 		Kind:        KindDebug,
 		Label:       "Debug mode",
 		Description: "Enables local diagnostic endpoints and agent message debug logs for troubleshooting backend, agent, and tool-call behavior.",
@@ -41,8 +54,8 @@ var definitions = []RuntimeFlagDefinition{
 		RestartRequired: true,
 		Mutable:         true,
 		ImpliedEnvVars: []string{
-			"KANDEV_DEBUG_PPROF_ENABLED",
-			"KANDEV_DEBUG_AGENT_MESSAGES",
+			envDebugPprofEnabled,
+			envDebugAgentMessages,
 		},
 	},
 }

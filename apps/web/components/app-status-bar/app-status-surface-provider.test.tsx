@@ -4,6 +4,8 @@ import { StateProvider } from "@/components/state-provider";
 import { AppStatusDrawerTrigger, AppStatusSurfaceProvider } from "./app-status-surface-provider";
 
 const responsiveState = vi.hoisted(() => ({ isMobile: false }));
+const featureState = vi.hoisted(() => ({ appStatusBar: true }));
+const STATUS_DRAWER_TEST_ID = "app-status-drawer";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
@@ -18,13 +20,17 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   }),
 }));
 
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: (name: string) => (name === "appStatusBar" ? featureState.appStatusBar : true),
+}));
+
 vi.mock("./app-status-bar", () => ({
   AppStatusBar: () => <div data-testid="app-status-bar" />,
 }));
 
 vi.mock("./app-status-drawer", () => ({
   AppStatusDrawer: ({ open }: { open: boolean }) => (
-    <div data-testid="app-status-drawer">{String(open)}</div>
+    <div data-testid={STATUS_DRAWER_TEST_ID}>{String(open)}</div>
   ),
 }));
 
@@ -41,6 +47,7 @@ function renderSurface() {
 describe("AppStatusSurfaceProvider", () => {
   beforeEach(() => {
     responsiveState.isMobile = false;
+    featureState.appStatusBar = true;
   });
 
   afterEach(cleanup);
@@ -49,7 +56,7 @@ describe("AppStatusSurfaceProvider", () => {
     renderSurface();
 
     expect(screen.getByTestId("app-status-bar")).toBeTruthy();
-    expect(screen.queryByTestId("app-status-drawer")).toBeNull();
+    expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
   });
 
   it("mounts only phone drawer and opens it from native trigger", () => {
@@ -57,9 +64,19 @@ describe("AppStatusSurfaceProvider", () => {
     renderSurface();
 
     expect(screen.queryByTestId("app-status-bar")).toBeNull();
-    expect(screen.getByTestId("app-status-drawer").textContent).toBe("false");
+    expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("false");
 
     fireEvent.click(screen.getByRole("button", { name: "Open status" }));
-    expect(screen.getByTestId("app-status-drawer").textContent).toBe("true");
+    expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("true");
+  });
+
+  it("hides both presentations when the app-status-bar feature is disabled", () => {
+    responsiveState.isMobile = true;
+    featureState.appStatusBar = false;
+    renderSurface();
+
+    expect(screen.queryByTestId("app-status-bar")).toBeNull();
+    expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("app-status-drawer-trigger")).toBeNull();
   });
 });

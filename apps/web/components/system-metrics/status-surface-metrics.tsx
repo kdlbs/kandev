@@ -58,7 +58,7 @@ export function StatusSurfaceMetrics({
   return (
     <div
       data-testid="app-status-metrics"
-      className="flex h-6 max-w-[42vw] items-center gap-1 overflow-hidden"
+      className="flex h-full max-w-[42vw] items-center gap-1 overflow-hidden leading-none"
       aria-label="System metrics"
     >
       {sources.length === 0 ? (
@@ -101,7 +101,7 @@ function EmptyMetrics({ drawer = false }: { drawer?: boolean }) {
       className={
         drawer
           ? "flex min-h-11 items-center gap-2 rounded-md px-3 text-sm text-muted-foreground"
-          : "flex h-6 items-center gap-1 px-1 text-xs text-muted-foreground"
+          : "flex h-full items-center gap-1 px-1 text-xs text-muted-foreground"
       }
     >
       <IconActivity className="h-3.5 w-3.5" />
@@ -122,7 +122,7 @@ function BarSourceMetrics({
   metricLimit: number;
 }) {
   return (
-    <div className="flex h-6 max-w-[220px] items-center gap-1 overflow-hidden border-l border-border px-1.5 text-xs first:border-l-0">
+    <div className="flex h-full max-w-[220px] items-center gap-1 overflow-hidden border-l border-border px-1.5 text-xs first:border-l-0">
       {showSource ? <SourceBadge source={source} updatedAt={updatedAt} /> : null}
       <MetricValues source={source} updatedAt={updatedAt} limit={metricLimit} />
     </div>

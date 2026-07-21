@@ -237,9 +237,10 @@ These metrics are lightweight UI observability. Set alerts, retention, CPU/memor
 **Settings > System > Feature Toggles** currently exposes:
 
 - **Office mode** — experimental, medium risk, and off in the production profile by default.
+- **App status bar** — stable, low risk, and on by default. Disabling it hides the desktop/tablet bar and phone Status entry after restart; it does not stop connections, metrics collection requested by other clients, or plugins.
 - **Debug mode** — high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
 
-Both require restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
+Each requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
 
 ## Troubleshooting
 

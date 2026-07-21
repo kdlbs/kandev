@@ -1,22 +1,15 @@
 "use client";
 
-import {
-  IconAlertCircle,
-  IconCircleCheck,
-  IconLoader2,
-  IconPlugConnectedX,
-  IconRefresh,
-} from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { cn } from "@kandev/ui/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { ConnectionStatus } from "@/lib/types/connection";
 
 export type ConnectionStatusDetails = {
   label: string;
   description: string;
-  className: string;
-  Icon: typeof IconCircleCheck;
-  animate?: boolean;
+  dotClass: string;
+  animate: boolean;
 };
 
 export function connectionStatusDetails(
@@ -28,43 +21,41 @@ export function connectionStatusDetails(
       return {
         label: "Connected",
         description: "Connection active",
-        className: "text-emerald-600 dark:text-emerald-400",
-        Icon: IconCircleCheck,
+        dotClass: "bg-emerald-500",
+        animate: false,
       };
     case "connecting":
       return {
         label: "Connecting",
         description: "Connecting to Kandev",
-        className: "text-muted-foreground",
-        Icon: IconLoader2,
+        dotClass: "bg-muted-foreground",
         animate: true,
       };
     case "reconnecting":
       return {
         label: "Reconnecting",
         description: "Reconnecting to Kandev",
-        className: "text-amber-600 dark:text-amber-400",
-        Icon: IconRefresh,
+        dotClass: "bg-amber-500",
         animate: true,
       };
     case "error":
       return {
         label: "Connection error",
         description: error ? `Connection error: ${error}` : "Connection error",
-        className: "text-destructive",
-        Icon: IconAlertCircle,
+        dotClass: "bg-destructive",
+        animate: false,
       };
     case "disconnected":
       return {
         label: "Offline",
         description: "Connection unavailable",
-        className: "text-muted-foreground",
-        Icon: IconPlugConnectedX,
+        dotClass: "bg-muted-foreground/50",
+        animate: false,
       };
   }
 }
 
-export function ConnectionStatusItem({ compact = false }: { compact?: boolean }) {
+export function ConnectionStatusItem({ className }: { className?: string }) {
   const status = useAppStore((state) => state.connection.status);
   const error = useAppStore((state) => state.connection.error);
   const details = connectionStatusDetails(status, error);
@@ -73,13 +64,19 @@ export function ConnectionStatusItem({ compact = false }: { compact?: boolean })
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          className={`inline-flex h-6 items-center gap-1.5 px-2 text-xs ${details.className}`}
+          className={cn(
+            "inline-flex w-6 items-center justify-center leading-none",
+            className ?? "h-6",
+          )}
           role="status"
           aria-label={details.description}
           data-testid="app-status-connection"
         >
-          <details.Icon className={`h-3.5 w-3.5 ${details.animate ? "animate-spin" : ""}`} />
-          <span className={compact ? "sr-only" : "truncate"}>{details.label}</span>
+          <span
+            className={`h-2 w-2 rounded-full ${details.dotClass} ${details.animate ? "animate-pulse" : ""}`}
+            aria-hidden="true"
+          />
+          <span className="sr-only">{details.label}</span>
         </span>
       </TooltipTrigger>
       <TooltipContent>{details.description}</TooltipContent>

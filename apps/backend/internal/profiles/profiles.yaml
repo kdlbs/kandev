@@ -50,6 +50,13 @@ features:
     dev:  "true"
     e2e:  "true"
 
+  # App status bar. On by default for every profile; users can hide it with a
+  # persisted Feature Toggles override when they restart Kandev.
+  KANDEV_FEATURES_APP_STATUS_BAR:
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent
