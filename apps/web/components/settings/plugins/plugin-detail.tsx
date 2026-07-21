@@ -55,12 +55,7 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
       <Separator />
 
       <PluginSettingsCard plugin={plugin} form={form} busy={actions.busyId === plugin.id} />
-      {/*
-       * Inline injection point for the plugin's own settings UI (e.g. a live
-       * integration/health card). `ownerPluginId` scopes the slot to this
-       * plugin's own registered component, so a plugin only ever renders on
-       * its own settings page (see PLUGIN-API.md).
-       */}
+      {/* Owner-scoped inline slot for the plugin's own settings UI (see PLUGIN-API.md). */}
       <PluginSlot
         name="plugin-settings"
         ownerPluginId={plugin.id}
