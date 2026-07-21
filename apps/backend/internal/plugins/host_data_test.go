@@ -137,6 +137,24 @@ func (f *fakeSessionCodeStatsSource) ListSessionCodeStats(
 	return f.stats, nil
 }
 
+type fakeMessageDataSource struct {
+	calls      int
+	lastFilter taskmodels.PluginMessageFilter
+	messages   []*taskmodels.Message
+	err        error
+}
+
+func (f *fakeMessageDataSource) ListMessagesForPlugin(
+	_ context.Context, filter taskmodels.PluginMessageFilter,
+) ([]*taskmodels.Message, error) {
+	f.calls++
+	f.lastFilter = filter
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.messages, nil
+}
+
 // testDataHost bundles a pluginHost with every fake it was wired from, so
 // tests can both drive Host calls and assert against the fakes' recorded
 // state.
@@ -147,6 +165,7 @@ type testDataHost struct {
 	steps     *fakeWorkflowStepLister
 	profiles  *fakeAgentProfileDataSource
 	codeStats *fakeSessionCodeStatsSource
+	messages  *fakeMessageDataSource
 }
 
 // newTestDataHost builds a fully-wired pluginHost (every Host data API
@@ -159,6 +178,7 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		steps:     &fakeWorkflowStepLister{},
 		profiles:  &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
 		codeStats: &fakeSessionCodeStatsSource{},
+		messages:  &fakeMessageDataSource{},
 	}
 	d.host = &pluginHost{
 		pluginID:         "p1",
@@ -168,6 +188,7 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		workflowSteps:    d.steps,
 		agentProfiles:    d.profiles,
 		sessionCodeStats: d.codeStats,
+		messageData:      d.messages,
 	}
 	return d
 }
@@ -217,6 +238,12 @@ func TestPluginHost_Repositories_DeniedWithoutCapability(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{})
 	_, _, err := d.host.Repositories().List(context.Background(), "ws-1", pluginsdk.Page{})
 	assertPermissionDenied(t, err, "api_read:repositories")
+}
+
+func TestPluginHost_Messages_DeniedWithoutCapability(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{})
+	_, _, err := d.host.Messages().List(context.Background(), pluginsdk.MessageFilter{}, pluginsdk.Page{})
+	assertPermissionDenied(t, err, "api_read:messages")
 }
 
 // ── capability gating: succeeds with api_read:<resource> ───────────────
@@ -724,5 +751,131 @@ func TestPluginHost_ArchivedTaskFetchFlags(t *testing.T) {
 	if len(d.tasks.gotIncludeArchived) != 2 ||
 		d.tasks.gotIncludeArchived[0] != want[0] || d.tasks.gotIncludeArchived[1] != want[1] {
 		t.Fatalf("includeArchived per call = %v, want %v", d.tasks.gotIncludeArchived, want)
+	}
+}
+
+// ── Messages reader ─────────────────────────────────────────────────────
+
+func TestPluginHost_Messages_SucceedsAndStripsSystemContent(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"messages"}})
+	created := time.Date(2026, 7, 20, 9, 30, 0, 0, time.UTC)
+	d.messages.messages = []*taskmodels.Message{
+		{
+			ID:            "m1",
+			TaskSessionID: "s1",
+			TaskID:        "t1",
+			TurnID:        "turn1",
+			AuthorType:    taskmodels.MessageAuthorUser,
+			Content:       "<kandev-system>secret prompt</kandev-system>Please summarize yesterday.",
+			Type:          taskmodels.MessageTypeMessage,
+			CreatedAt:     created,
+		},
+		{
+			ID:            "m2",
+			TaskSessionID: "s1",
+			TaskID:        "t1",
+			TurnID:        "turn1",
+			AuthorType:    taskmodels.MessageAuthorAgent,
+			Content:       "Here is the summary.",
+			Type:          "", // empty type must default to "message"
+			CreatedAt:     created.Add(time.Minute),
+		},
+	}
+
+	msgs, info, err := d.host.Messages().List(context.Background(), pluginsdk.MessageFilter{
+		SessionIDs: []string{"s1"},
+	}, pluginsdk.Page{Limit: 50})
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("List() len = %d, want 2", len(msgs))
+	}
+	if msgs[0].Content != "Please summarize yesterday." {
+		t.Fatalf("content[0] = %q, want system block stripped", msgs[0].Content)
+	}
+	if msgs[0].AuthorType != "user" || msgs[1].AuthorType != "agent" {
+		t.Fatalf("author types = %q/%q, want user/agent", msgs[0].AuthorType, msgs[1].AuthorType)
+	}
+	if msgs[1].Type != "message" {
+		t.Fatalf("type[1] = %q, want defaulted to message", msgs[1].Type)
+	}
+	if msgs[0].SessionID != "s1" || msgs[0].TaskID != "t1" || msgs[0].TurnID != "turn1" {
+		t.Fatalf("ids = %+v, want session/task/turn set", msgs[0])
+	}
+	if msgs[0].CreatedAt != "2026-07-20T09:30:00Z" {
+		t.Fatalf("created_at = %q, want RFC3339", msgs[0].CreatedAt)
+	}
+	if info == nil || info.HasMore {
+		t.Fatalf("PageInfo = %+v, want HasMore=false", info)
+	}
+}
+
+func TestPluginHost_Messages_PassesFilterAndTimeRange(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"messages"}})
+	since := "2026-07-20T00:00:00Z"
+	until := "2026-07-21T00:00:00Z"
+
+	_, _, err := d.host.Messages().List(context.Background(), pluginsdk.MessageFilter{
+		SessionIDs: []string{"s1", "s2"},
+		TaskIDs:    []string{"t1"},
+		Types:      []string{"message", "content"},
+		Since:      &since,
+		Until:      &until,
+	}, pluginsdk.Page{Limit: 10})
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	got := d.messages.lastFilter
+	if len(got.SessionIDs) != 2 || len(got.TaskIDs) != 1 || len(got.Types) != 2 {
+		t.Fatalf("filter passthrough = %+v", got)
+	}
+	if got.Since == nil || !got.Since.Equal(time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("since = %v, want parsed 2026-07-20", got.Since)
+	}
+	if got.Until == nil || !got.Until.Equal(time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("until = %v, want parsed 2026-07-21", got.Until)
+	}
+	// Reader requests one extra row past the page limit to derive HasMore.
+	if got.Limit != 11 {
+		t.Fatalf("data-source Limit = %d, want page-limit+1 (11)", got.Limit)
+	}
+}
+
+func TestPluginHost_Messages_PaginatesWithHasMore(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"messages"}})
+	base := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	// Data source returns limit+1 rows (3) for a page limit of 2 → HasMore.
+	for i := 0; i < 3; i++ {
+		d.messages.messages = append(d.messages.messages, &taskmodels.Message{
+			ID:         fmt.Sprintf("m%d", i),
+			AuthorType: taskmodels.MessageAuthorUser,
+			Content:    "hi",
+			CreatedAt:  base.Add(time.Duration(i) * time.Minute),
+		})
+	}
+
+	msgs, info, err := d.host.Messages().List(context.Background(), pluginsdk.MessageFilter{}, pluginsdk.Page{Limit: 2})
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("page len = %d, want 2 (trimmed from 3)", len(msgs))
+	}
+	if info == nil || !info.HasMore || info.NextCursor != "2" {
+		t.Fatalf("PageInfo = %+v, want HasMore=true NextCursor=2", info)
+	}
+}
+
+func TestPluginHost_Messages_InvalidTimeIsInvalidArgument(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"messages"}})
+	bad := "not-a-timestamp"
+	_, _, err := d.host.Messages().List(context.Background(), pluginsdk.MessageFilter{Since: &bad}, pluginsdk.Page{})
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.InvalidArgument {
+		t.Fatalf("err = %v, want InvalidArgument", err)
+	}
+	if d.messages.calls != 0 {
+		t.Fatalf("data source called %d times, want 0 (rejected before query)", d.messages.calls)
 	}
 }

@@ -154,6 +154,7 @@ type MessageRepository interface {
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error)
+	ListMessagesForPlugin(ctx context.Context, filter models.PluginMessageFilter) ([]*models.Message, error)
 	SearchMessages(ctx context.Context, sessionID string, opts models.SearchMessagesOptions) ([]*models.Message, error)
 	DeleteMessage(ctx context.Context, id string) error
 }

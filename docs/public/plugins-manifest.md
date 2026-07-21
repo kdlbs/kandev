@@ -78,7 +78,7 @@ ui:                                           # optional native frontend plugin
 | `runtime.executables` | required when `runtime.type: binary` | map\<string,string\> | Key is `<goos>-<goarch>` (e.g. `linux-amd64`, `darwin-arm64`, `windows-amd64`); value is a clean, package-relative path under `server/` (no leading `/`, no `..` segments). At least one entry required; the running host's key must be present at install time. Windows values end in `.exe`. |
 | `min_kandev_version` | no | string | Optional advisory; not currently enforced by the installer. |
 | `capabilities.events` | no | string[] | Bus subjects (or wildcard patterns) this plugin subscribes to. See "Event subscription vocabulary" below. |
-| `capabilities.api_read` | no | string[] | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `sessions`, `workspaces`, `workflows`, `agent_profiles`, `repositories`. Calling the matching `Host` accessor (e.g. `Tasks()`) without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below. |
+| `capabilities.api_read` | no | string[] | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`, `agent_profiles`, `repositories`. Calling the matching `Host` accessor (e.g. `Tasks()`) without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below. |
 | `capabilities.api_write` | no | string[] | **Reserved for future Host RPCs.** Declared but not enforced by anything today — no Host RPC currently writes kandev's own data. |
 | `capabilities.state` | no | bool | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `capabilities.secrets` | no | bool | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
@@ -119,15 +119,24 @@ recognizes its shape.
 
 ## Host data API resource vocabulary
 
-`capabilities.api_read` gates the read-only Host data accessors (ADR 0043):
-each entry must be one of `tasks`, `sessions`, `workspaces`, `workflows`,
-`agent_profiles`, `repositories`. Declaring a resource grants the matching
-`Host` accessor (`Tasks()`, `Sessions()`, `Workspaces()`, `Workflows()`,
-`AgentProfiles()`, `Repositories()` — see [Authoring a
-plugin](plugins-authoring.md)); calling an accessor for an undeclared
-resource returns gRPC `PermissionDenied`. `capabilities.api_write` reserves
-the same resource names for a future write path — no write RPC exists yet,
-so declaring it currently has no effect.
+`capabilities.api_read` gates the read-only Host data accessors (ADR 0043,
+ADR 0047): each entry must be one of `tasks`, `sessions`, `messages`,
+`workspaces`, `workflows`, `agent_profiles`, `repositories`. Declaring a
+resource grants the matching `Host` accessor (`Tasks()`, `Sessions()`,
+`Messages()`, `Workspaces()`, `Workflows()`, `AgentProfiles()`,
+`Repositories()` — see [Authoring a plugin](plugins-authoring.md)); calling an
+accessor for an undeclared resource returns gRPC `PermissionDenied`.
+`capabilities.api_write` reserves the same resource names for a future write
+path — no write RPC exists yet, so declaring it currently has no effect.
+
+`messages` reads historical **conversation content** (`Messages().List`):
+one user/agent message per row (`id`, `session_id`, `task_id`, `turn_id`,
+`author_type`, `content`, `type`, `created_at`), filterable by session ids,
+task ids, a `created_at` time range (`since` inclusive / `until` exclusive,
+RFC3339), and message `types`. Content is sanitized — kandev-injected
+`<kandev-system>` blocks are stripped, exactly like the `message.added` bus
+event, so raw system prompts are never exposed. `author_type` is `user` or
+`agent` (there is no `system` author).
 
 ## Config schema validation and secret fields
 

@@ -118,7 +118,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, workflowSvc, taskSvc, log)
 	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if pluginsSvc != nil {
-		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics))
+		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc)
 	}
 	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
 

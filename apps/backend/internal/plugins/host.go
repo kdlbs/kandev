@@ -61,6 +61,7 @@ type pluginHost struct {
 	workflowSteps    workflowStepLister
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
+	messageData      messageDataSource
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)
@@ -79,6 +80,12 @@ func permissionDenied(capability string) error {
 // (nil, nil) success for a missing task.
 func taskNotFound(id string) error {
 	return status.Errorf(codes.NotFound, "task %q not found", id)
+}
+
+// invalidArgument builds the gRPC error a Host data reader returns when a
+// plugin passes a malformed filter value (e.g. a non-RFC3339 time bound).
+func invalidArgument(msg string) error {
+	return status.Error(codes.InvalidArgument, msg)
 }
 
 func (h *pluginHost) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {

@@ -675,3 +675,102 @@ func sessionCodeStatsSliceToProto(items []SessionCodeStats) []*pluginv1.SessionC
 	}
 	return out
 }
+
+// Message is the Go-native mirror of kandev.plugin.v1.Message — one
+// user/agent message in a session transcript. Content has kandev's injected
+// <kandev-system> blocks stripped; raw system content is never exposed.
+type Message struct {
+	ID         string
+	SessionID  string
+	TaskID     string
+	TurnID     string
+	AuthorType string // "user" | "agent"
+	Content    string
+	Type       string // "message" default; see the MessageType vocabulary
+	CreatedAt  string // RFC3339
+}
+
+func (m Message) toProto() *pluginv1.Message {
+	return &pluginv1.Message{
+		Id:         m.ID,
+		SessionId:  m.SessionID,
+		TaskId:     m.TaskID,
+		TurnId:     m.TurnID,
+		AuthorType: m.AuthorType,
+		Content:    m.Content,
+		Type:       m.Type,
+		CreatedAt:  m.CreatedAt,
+	}
+}
+
+func messageFromProto(p *pluginv1.Message) Message {
+	if p == nil {
+		return Message{}
+	}
+	return Message{
+		ID:         p.GetId(),
+		SessionID:  p.GetSessionId(),
+		TaskID:     p.GetTaskId(),
+		TurnID:     p.GetTurnId(),
+		AuthorType: p.GetAuthorType(),
+		Content:    p.GetContent(),
+		Type:       p.GetType(),
+		CreatedAt:  p.GetCreatedAt(),
+	}
+}
+
+func messagesFromProto(items []*pluginv1.Message) []Message {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]Message, len(items))
+	for i, item := range items {
+		out[i] = messageFromProto(item)
+	}
+	return out
+}
+
+func messagesToProto(items []Message) []*pluginv1.Message {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.Message, len(items))
+	for i := range items {
+		out[i] = items[i].toProto()
+	}
+	return out
+}
+
+// MessageFilter is the Go-native mirror of kandev.plugin.v1.MessageFilter.
+// Since/Until are RFC3339 strings bounding created_at (Since inclusive, Until
+// exclusive); nil means unbounded on that end.
+type MessageFilter struct {
+	SessionIDs []string
+	TaskIDs    []string
+	Since      *string
+	Until      *string
+	Types      []string
+}
+
+func (f MessageFilter) toProto() *pluginv1.MessageFilter {
+	return &pluginv1.MessageFilter{
+		SessionIds: f.SessionIDs,
+		TaskIds:    f.TaskIDs,
+		Since:      f.Since,
+		Until:      f.Until,
+		Types:      f.Types,
+	}
+}
+
+func messageFilterFromProto(p *pluginv1.MessageFilter) MessageFilter {
+	if p == nil {
+		return MessageFilter{}
+	}
+	return MessageFilter{
+		SessionIDs: p.GetSessionIds(),
+		TaskIDs:    p.GetTaskIds(),
+		Since:      p.Since,
+		Until:      p.Until,
+		Types:      p.GetTypes(),
+	}
+}

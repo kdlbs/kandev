@@ -161,6 +161,11 @@ type Host interface {
 	Workflows() WorkflowReader
 	AgentProfiles() AgentProfileReader
 	Repositories() RepositoryReader
+
+	// Messages reads historical user/agent conversation content
+	// (capability api_read:messages). kandev-injected system blocks are
+	// stripped; raw system prompts are never returned.
+	Messages() MessageReader
 }
 ```
 
@@ -191,7 +196,16 @@ The data-reader accessors return typed, paginated readers — e.g.
 `([]Task, *PageInfo, error)` with an opaque `PageInfo.NextCursor` for the
 next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
 `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`, `Repository`,
-`Session`, and filter/page types.
+`Session`, `Message`, and filter/page types.
+
+`host.Messages().List(ctx, MessageFilter{...}, Page{...})` reads historical
+conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
+`TaskIDs`, a `Since`/`Until` `created_at` window (RFC3339; `Since` inclusive,
+`Until` exclusive — the natural way to fetch "yesterday"), and message
+`Types`. Each `Message` carries `id`, `session_id`, `task_id`, `turn_id`,
+`author_type` (`user` or `agent`), `content`, `type`, and `created_at`.
+`content` has kandev's injected `<kandev-system>` blocks stripped — a plugin
+never sees raw system prompts.
 
 **Capability gating.** Every Host RPC except `GetConfig` and `EmitEvent` is
 checked against your manifest's `capabilities` before the handler runs:
@@ -199,7 +213,8 @@ checked against your manifest's `capabilities` before the handler runs:
 `capabilities.state: true`; `GetSecret`/`SetSecret`/`DeleteSecret`/
 `RevealSecret` require `capabilities.secrets: true`; each data-reader
 accessor requires its resource in `capabilities.api_read` (e.g. `tasks`,
-`sessions`, `workspaces`, `workflows`, `agent_profiles`, `repositories`).
+`sessions`, `messages`, `workspaces`, `workflows`, `agent_profiles`,
+`repositories`).
 Calling one without the declared capability returns gRPC `PermissionDenied`
 with a message naming the missing capability — declare what you use.
 

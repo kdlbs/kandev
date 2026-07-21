@@ -137,9 +137,10 @@ restart_count: 0
 
 `capabilities.api_read` / `capabilities.api_write` gate the **Host data API** Host
 RPCs (read RPCs live now; write RPCs are deferred) — the vocabulary is a list of
-resource names: `tasks`, `sessions`, `workspaces`, `workflows`, `agent_profiles`,
-`repositories` for `api_read`, plus `comments` for `api_write` only (there is no
-`ListComments` read RPC). They are unrelated to office. See "Host data API".
+resource names: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`,
+`agent_profiles`, `repositories` for `api_read`, plus `comments` for `api_write`
+only (there is no `ListComments` read RPC). They are unrelated to office. See
+"Host data API".
 
 **Declaring data access.** Listing a resource under `api_read` grants the
 corresponding Host data reads for that resource only — e.g. `api_read:
@@ -350,6 +351,7 @@ domain structs. See [ADR 0043](../../decisions/0043-plugin-host-data-api.md) and
 | `ListRepositories` | `api_read:repositories` | Repositories for a workspace (id, name, default branch) |
 | `ListSessions` | `api_read:sessions` | Session identity + agent context (id, task, agent profile, resolved display name + model, `acp_session_id`, state, timestamps) |
 | `ListSessionCodeStats` | `api_read:sessions` | **Computed** per-session code metrics: committed lines added/deleted, peak pending-diff lines added/deleted |
+| `ListMessages` | `api_read:messages` | Historical conversation content (id, session, task, turn, `author_type` (user/agent), `content`, `type`, `created_at`), filterable by session ids, task ids, a `created_at` range (`since`/`until`), and types. See "Conversation content" below. |
 
 `acp_session_id` on a session is the external usage-attribution join key (e.g.
 `tokscale`): kandev exposes the session identity and code stats but stays out of
@@ -357,6 +359,20 @@ the token business. `SessionCodeStats` is a deliberately computed shape — the
 aggregate the agent-stats plugin previously re-derived by hand from
 `task_session_commits` and `task_session_git_snapshots` — so plugins never touch
 those raw rows.
+
+**Conversation content (`api_read:messages`, ADR 0047).** `ListMessages` reads
+historical user/agent message content — the data a "summarize yesterday"
+plugin needs, which the `message.added` bus event alone (live-only,
+post-install-only) cannot provide. `MessageFilter` narrows by `session_ids`,
+`task_ids`, a `created_at` window (`since` inclusive / `until` exclusive,
+RFC3339), and message `types`; results are ordered oldest-first with opaque
+cursor pagination. `content` is sanitized the same way the event path is —
+kandev-injected `<kandev-system>` blocks are stripped via
+`sysprompt.StripSystemContent`, and raw system content is never exposed.
+`author_type` is only `user` or `agent`: kandev has no `system` author, since
+system context is inline markup removed at read time. Reads route through the
+task service's `ListMessagesForPlugin` (a single filtered
+session/task/time/type query), never a repository or the DB file directly.
 
 **Write phase (deferred).** `CreateTask`, `UpdateTask`, and `CreateComment` are
 specified in the proto but not implemented in this phase. When added, each is

@@ -139,6 +139,75 @@ func (r *Repository) ListMessagesPaginated(ctx context.Context, sessionID string
 	return scanMessageRows(rows, limit)
 }
 
+// ListMessagesForPlugin returns messages matching the plugin Host data API
+// filter (ADR 0047): session/task ids, a created_at time range, and message
+// types, ordered oldest-first by (created_at, id) with SQL Limit/Offset. It
+// backs internal/plugins' capability-gated Messages().List reader — always via
+// the service layer, never called directly by a plugin.
+func (r *Repository) ListMessagesForPlugin(ctx context.Context, filter models.PluginMessageFilter) ([]*models.Message, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListMessagesForPlugin")
+	defer span.End()
+
+	query, args := buildPluginMessageQuery(filter)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	msgs, _, err := scanMessageRows(rows, 0)
+	return msgs, err
+}
+
+// buildPluginMessageQuery assembles the WHERE/ORDER/LIMIT/OFFSET clauses for
+// ListMessagesForPlugin. session_ids and task_ids each become an IN (...)
+// clause (ANDed together when both are set); Since is an inclusive and Until
+// an exclusive created_at bound; types filters by message type. A zero/negative
+// Limit yields no LIMIT clause (returns all matching rows from the offset).
+func buildPluginMessageQuery(filter models.PluginMessageFilter) (string, []interface{}) {
+	query := `
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
+		FROM task_session_messages`
+	var conditions []string
+	var args []interface{}
+
+	if ph, inArgs := buildInPlaceholders(filter.SessionIDs); ph != "" {
+		conditions = append(conditions, "task_session_id IN ("+ph+")")
+		args = append(args, inArgs...)
+	}
+	if ph, inArgs := buildInPlaceholders(filter.TaskIDs); ph != "" {
+		conditions = append(conditions, "task_id IN ("+ph+")")
+		args = append(args, inArgs...)
+	}
+	if ph, inArgs := buildInPlaceholders(filter.Types); ph != "" {
+		conditions = append(conditions, "type IN ("+ph+")")
+		args = append(args, inArgs...)
+	}
+	if filter.Since != nil {
+		conditions = append(conditions, "created_at >= ?")
+		args = append(args, *filter.Since)
+	}
+	if filter.Until != nil {
+		conditions = append(conditions, "created_at < ?")
+		args = append(args, *filter.Until)
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY created_at ASC, id ASC"
+	// OFFSET is only emitted alongside a LIMIT: standalone OFFSET is a syntax
+	// error in SQLite, and the only caller (the plugin message reader) always
+	// requests a positive Limit (page-limit+1), so Offset never travels alone.
+	if filter.Limit > 0 {
+		query += sqlLimitClause
+		args = append(args, filter.Limit)
+		if filter.Offset > 0 {
+			query += " OFFSET ?"
+			args = append(args, filter.Offset)
+		}
+	}
+	return query, args
+}
+
 func (r *Repository) resolveMessageCursor(ctx context.Context, sessionID string, opts models.ListMessagesOptions) (*models.Message, error) {
 	if opts.Before != "" {
 		cursor, err := r.GetMessage(ctx, opts.Before)

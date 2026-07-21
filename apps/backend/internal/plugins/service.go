@@ -93,6 +93,7 @@ type Service struct {
 	workflowSteps    workflowStepLister
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
+	messageData      messageDataSource
 
 	// kandevVersion is the currently running kandev build version, used to
 	// enforce a package's manifest.min_kandev_version at Install (see
@@ -204,12 +205,14 @@ func (s *Service) SetDataSources(
 	workflowSteps workflowStepLister,
 	agentProfiles agentProfileDataSource,
 	sessionCodeStats sessionCodeStatsSource,
+	messages messageDataSource,
 ) {
 	s.taskData = tasks
 	s.workflows = workflows
 	s.workflowSteps = workflowSteps
 	s.agentProfiles = agentProfiles
 	s.sessionCodeStats = sessionCodeStats
+	s.messageData = messages
 }
 
 // SetKandevVersion wires the currently running kandev build version,
@@ -309,6 +312,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		workflowSteps:    s.workflowSteps,
 		agentProfiles:    s.agentProfiles,
 		sessionCodeStats: s.sessionCodeStats,
+		messageData:      s.messageData,
 	}
 }
 

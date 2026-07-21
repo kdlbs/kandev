@@ -29,9 +29,12 @@ type dataRecordingHost struct {
 	workflowSteps []WorkflowStep
 	agentProfiles []AgentProfile
 	repositories  []Repository
+	messages      []Message
+	messagePage   *PageInfo
 
 	lastTaskFilter    TaskFilter
 	lastSessionFilter SessionFilter
+	lastMessageFilter MessageFilter
 	lastWorkspaceID   string
 	lastWorkflowID    string
 }
@@ -67,6 +70,7 @@ func (h *dataRecordingHost) AgentProfiles() AgentProfileReader {
 func (h *dataRecordingHost) Repositories() RepositoryReader {
 	return dataRecordingRepositoryReader{h}
 }
+func (h *dataRecordingHost) Messages() MessageReader { return dataRecordingMessageReader{h} }
 
 type dataRecordingTaskReader struct{ h *dataRecordingHost }
 
@@ -126,6 +130,13 @@ func (r dataRecordingRepositoryReader) List(_ context.Context, workspaceID strin
 	return r.h.repositories, nil, nil
 }
 
+type dataRecordingMessageReader struct{ h *dataRecordingHost }
+
+func (r dataRecordingMessageReader) List(_ context.Context, filter MessageFilter, _ Page) ([]Message, *PageInfo, error) {
+	r.h.lastMessageFilter = filter
+	return r.h.messages, r.h.messagePage, nil
+}
+
 func TestHostData_TasksListAndGet(t *testing.T) {
 	impl := &dataRecordingHost{
 		tasks: map[string]Task{
@@ -175,6 +186,28 @@ func TestHostData_Workspaces(t *testing.T) {
 	workspaces, _, err := host.Workspaces().List(context.Background(), Page{})
 	require.NoError(t, err)
 	require.Equal(t, impl.workspaces, workspaces)
+}
+
+func TestHostData_Messages(t *testing.T) {
+	impl := &dataRecordingHost{
+		messages: []Message{{
+			ID: "m1", SessionID: "s1", TaskID: "t1", TurnID: "turn1",
+			AuthorType: "user", Content: "hello", Type: "message", CreatedAt: "2026-07-20T09:00:00Z",
+		}},
+		messagePage: &PageInfo{NextCursor: "2", HasMore: true},
+	}
+	host := dialHostOverBufconn(t, impl)
+
+	since := "2026-07-20T00:00:00Z"
+	filter := MessageFilter{SessionIDs: []string{"s1"}, TaskIDs: []string{"t1"}, Since: &since, Types: []string{"message"}}
+	messages, pageInfo, err := host.Messages().List(context.Background(), filter, Page{Limit: 10})
+	require.NoError(t, err)
+	require.Equal(t, impl.messages, messages)
+	require.Equal(t, &PageInfo{NextCursor: "2", HasMore: true}, pageInfo)
+	// Filter (including the optional Since pointer) round-trips through proto.
+	require.Equal(t, filter, impl.lastMessageFilter)
+	require.NotNil(t, impl.lastMessageFilter.Since)
+	require.Equal(t, since, *impl.lastMessageFilter.Since)
 }
 
 func TestHostData_WorkflowsAndSteps(t *testing.T) {

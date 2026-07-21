@@ -64,6 +64,24 @@ type SearchMessagesOptions struct {
 	Limit int
 }
 
+// PluginMessageFilter defines the filters for the plugin Host data API's
+// message reader (ADR 0047). SessionIDs and TaskIDs narrow by session/task
+// (ORed within each, ANDed across the two — a message must match any
+// requested session AND any requested task when both are set); empty means
+// unconstrained on that axis. Since/Until bound created_at (Since inclusive,
+// Until exclusive); nil means unbounded. Types narrows by message type; empty
+// means all types. Results are ordered oldest-first by (created_at, id) with
+// SQL Limit/Offset pagination.
+type PluginMessageFilter struct {
+	SessionIDs []string
+	TaskIDs    []string
+	Types      []string
+	Since      *time.Time
+	Until      *time.Time
+	Limit      int
+	Offset     int
+}
+
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
 	MetaKeyAgentProfileID    = "agent_profile_id"

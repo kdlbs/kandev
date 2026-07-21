@@ -104,6 +104,11 @@ type Host interface {
 	// Repositories returns the reader for the Host data API's repository
 	// RPCs (capability api_read:repositories).
 	Repositories() RepositoryReader
+
+	// Messages returns the reader for the Host data API's message RPC
+	// (capability api_read:messages). It reads historical user/agent
+	// conversation content; kandev-injected system blocks are stripped.
+	Messages() MessageReader
 }
 
 // TaskReader is the read-only accessor behind Host.Tasks(), mirroring the
@@ -157,6 +162,14 @@ type AgentProfileReader interface {
 type RepositoryReader interface {
 	// List returns repositories for workspaceID.
 	List(ctx context.Context, workspaceID string, page Page) ([]Repository, *PageInfo, error)
+}
+
+// MessageReader is the read-only accessor behind Host.Messages(), mirroring
+// the Host data API's ListMessages RPC. It reads historical conversation
+// content filtered by session, task, and/or time range.
+type MessageReader interface {
+	// List returns messages matching filter, oldest first within a page.
+	List(ctx context.Context, filter MessageFilter, page Page) ([]Message, *PageInfo, error)
 }
 
 // newHostClient wraps a *grpc.ClientConn (dialed over the go-plugin broker)
@@ -275,6 +288,8 @@ func (h *grpcHostClient) Repositories() RepositoryReader {
 	return grpcRepositoryReader{client: h.client}
 }
 
+func (h *grpcHostClient) Messages() MessageReader { return grpcMessageReader{client: h.client} }
+
 var _ Host = (*grpcHostClient)(nil)
 
 // grpcTaskReader implements TaskReader on the plugin side, calling the
@@ -386,6 +401,19 @@ func (r grpcRepositoryReader) List(ctx context.Context, workspaceID string, page
 		return nil, nil, err
 	}
 	return repositoriesFromProto(resp.GetRepositories()), pageInfoFromProto(resp.GetPageInfo()), nil
+}
+
+// grpcMessageReader implements MessageReader on the plugin side.
+type grpcMessageReader struct {
+	client pluginv1.HostClient
+}
+
+func (r grpcMessageReader) List(ctx context.Context, filter MessageFilter, page Page) ([]Message, *PageInfo, error) {
+	resp, err := r.client.ListMessages(ctx, &pluginv1.ListMessagesRequest{Filter: filter.toProto(), Page: page.toProto()})
+	if err != nil {
+		return nil, nil, err
+	}
+	return messagesFromProto(resp.GetMessages()), pageInfoFromProto(resp.GetPageInfo()), nil
 }
 
 // registerHostServer registers a grpc server that dispatches
@@ -613,6 +641,16 @@ func (s *grpcHostServer) ListSessionCodeStats(ctx context.Context, req *pluginv1
 	return &pluginv1.ListSessionCodeStatsResponse{Stats: sessionCodeStatsSliceToProto(stats), PageInfo: pageInfo.toProto()}, nil
 }
 
+func (s *grpcHostServer) ListMessages(ctx context.Context, req *pluginv1.ListMessagesRequest) (*pluginv1.ListMessagesResponse, error) {
+	filter := messageFilterFromProto(req.GetFilter())
+	page := pageFromProto(req.GetPage())
+	messages, pageInfo, err := s.impl.Messages().List(ctx, filter, page)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.ListMessagesResponse{Messages: messagesToProto(messages), PageInfo: pageInfo.toProto()}, nil
+}
+
 var _ pluginv1.HostServer = (*grpcHostServer)(nil)
 
 // UnimplementedHostData is an embeddable default for the Host data API
@@ -636,6 +674,7 @@ func (UnimplementedHostData) AgentProfiles() AgentProfileReader {
 func (UnimplementedHostData) Repositories() RepositoryReader {
 	return unimplementedRepositoryReader{}
 }
+func (UnimplementedHostData) Messages() MessageReader { return unimplementedMessageReader{} }
 
 func errUnimplementedHostData(resource string) error {
 	return status.Errorf(codes.Unimplemented, "pluginsdk: Host data API %q not implemented", resource)
@@ -687,4 +726,10 @@ type unimplementedRepositoryReader struct{}
 
 func (unimplementedRepositoryReader) List(context.Context, string, Page) ([]Repository, *PageInfo, error) {
 	return nil, nil, errUnimplementedHostData("repositories")
+}
+
+type unimplementedMessageReader struct{}
+
+func (unimplementedMessageReader) List(context.Context, MessageFilter, Page) ([]Message, *PageInfo, error) {
+	return nil, nil, errUnimplementedHostData("messages")
 }
