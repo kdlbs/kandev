@@ -136,8 +136,8 @@ interface PluginRegistry {
   // tokscale cost data on a session) is the plugin's job, done server-side in
   // the plugin backend via the Host data API; the host only propagates ids.
   // "plugin-settings" renders inline on a plugin's own settings page
-  // (Settings > Plugins > <plugin>, between the schema-driven settings form and
-  // the manifest card) and forwards `{ pluginId: string, status: PluginStatus }`
+  // (Settings > Plugins > <plugin>, at the top above the schema-driven settings
+  // form) and forwards `{ pluginId: string, status: PluginStatus }`
   // as `slotProps`. It is owner-scoped: the host renders only the component
   // registered by the plugin currently being viewed, so your card appears on
   // your own settings page and never on another plugin's — no per-id gating
