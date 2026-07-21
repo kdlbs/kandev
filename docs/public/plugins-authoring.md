@@ -252,7 +252,8 @@ interface PluginRegistry {
   // Route under /settings/plugins/{id}/..., rendered inside the settings shell.
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
   // Named slot injection. Initial slots: "task-sidebar", "settings-nav",
-  // "main-nav-footer", "chat-input-actions" (see "Chat toolbar actions" below).
+  // "main-nav-footer", "chat-input-actions", "chat-top-bar", "main-top-bar",
+  // "plugin-settings" (see "Named slots" below).
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
   // WS action handler, bridged into the existing lib/ws dispatch.
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
@@ -343,6 +344,12 @@ plugins at once. Available slots:
 | `main-nav-footer` | Footer of the main sidebar | — |
 | `chat-input-actions` | Chat composer toolbar, beside the model picker, mic, and send button | `{ taskId, taskTitle, activeSessionId, sessionIds }` |
 | `chat-top-bar` | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
+| `main-top-bar` | Default app top bar (Home / Kanban / Tasks), beside the CPU/DB metrics and the view/display controls | `{ workspaceId, workspaceLabel, currentPage }` |
+| `plugin-settings` | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }` |
+
+`plugin-settings` is the one exception to "every plugin's component renders":
+it is **owner-scoped**, so the host renders only the component registered by the
+plugin whose settings page is being viewed. See "Plugin settings page" below.
 
 ### Chat toolbar actions
 
@@ -433,6 +440,59 @@ metric chips.
 ```js
 // inside initialize(registry, host):
 registry.registerComponent("chat-top-bar", makeTopBarStatus(host));
+```
+
+### Default app top bar
+
+Register a `main-top-bar` component to add status or a small action to the
+**default app top bar** — the strip across the Home, Kanban, and Tasks views,
+beside the CPU/DB metrics and the view/display controls. This is the app-wide,
+task-agnostic counterpart to `chat-top-bar`: use it for something that isn't
+tied to one session (a workspace-level indicator, a global quick action). The
+host passes:
+
+```ts
+type MainTopBarSlotProps = {
+  workspaceId: string | null;  // workspace the top bar is showing, null on global home
+  workspaceLabel?: string;     // human-readable workspace name, when known
+  currentPage: "kanban" | "tasks";
+};
+```
+
+Because the bar is not scoped to a task, no task/session ids are provided. Like
+`chat-top-bar` it is a compact horizontal strip, so keep contributions to small
+badges or `h-7` buttons that match the native metric chips.
+
+```js
+// inside initialize(registry, host):
+registry.registerComponent("main-top-bar", makeAppBarStatus(host));
+```
+
+### Plugin settings page
+
+Register a `plugin-settings` component to render your own UI inline on your
+plugin's settings page (**Settings > Plugins > `<plugin>`**), at the top above
+the schema-driven settings form. Use it for live integration health — e.g. "CLI
+installed ✅ v0.45.2" or "API token ✅ authenticated" — or any custom controls
+alongside the config form. The host passes:
+
+```ts
+type PluginSettingsSlotProps = {
+  pluginId: string; // the plugin whose settings page is being viewed (always yours)
+  status: "registered" | "active" | "error" | "disabled" | "uninstalled";
+};
+```
+
+Unlike the other slots, `plugin-settings` is **owner-scoped**: the host renders
+only the component registered by the plugin currently being viewed, so your card
+appears on your own settings page and never on another plugin's — you do **not**
+need to gate on `slotProps.pluginId` yourself. The host provides no wrapper card,
+so your component owns its own card and can render `null` when it has nothing to
+show.
+
+```js
+// inside initialize(registry, host):
+registry.registerComponent("plugin-settings", makeSettingsStatus(host));
 ```
 
 ## Three integration patterns

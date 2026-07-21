@@ -21,6 +21,7 @@ type TurnGroupMessageProps = {
   isLastGroup?: boolean;
   /** Whether the turn is still active (agent is running) */
   isTurnActive?: boolean;
+  streamingMessageId?: string | null;
   onScrollToMessage?: (messageId: string) => void;
 };
 
@@ -151,6 +152,8 @@ type TurnGroupContentProps = {
   taskId?: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
+  isTurnActive?: boolean;
+  streamingMessageId?: string | null;
   onScrollToMessage?: (messageId: string) => void;
 };
 
@@ -276,6 +279,7 @@ function renderMessageEntry(message: Message, props: MessageRenderProps) {
       childrenByParentToolCallId={props.childrenByParentToolCallId}
       worktreePath={props.worktreePath}
       sessionId={props.sessionId ?? undefined}
+      isTurnActive={props.isTurnActive && message.id === props.streamingMessageId}
       onOpenFile={props.onOpenFile}
       onScrollToMessage={props.onScrollToMessage}
     />
@@ -328,6 +332,8 @@ function TurnGroupContent({
   taskId,
   worktreePath,
   onOpenFile,
+  isTurnActive,
+  streamingMessageId,
   onScrollToMessage,
 }: TurnGroupContentProps) {
   const renderProps: MessageRenderProps = {
@@ -337,6 +343,8 @@ function TurnGroupContent({
     taskId,
     worktreePath,
     onOpenFile,
+    isTurnActive,
+    streamingMessageId,
     onScrollToMessage,
   };
   const compacted = useMemo(() => compactTurnGroupMessages(group.messages), [group.messages]);
@@ -363,6 +371,7 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
   onOpenFile,
   isLastGroup = false,
   isTurnActive = false,
+  streamingMessageId,
   onScrollToMessage,
 }: TurnGroupMessageProps) {
   const isGroupRunning = hasRunningTool(group.messages);
@@ -400,6 +409,8 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
           taskId={taskId}
           worktreePath={worktreePath}
           onOpenFile={onOpenFile}
+          isTurnActive={isTurnActive}
+          streamingMessageId={streamingMessageId}
           onScrollToMessage={onScrollToMessage}
         />
       )}

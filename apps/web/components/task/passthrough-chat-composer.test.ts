@@ -40,6 +40,27 @@ function comment(id = "comment-1"): DiffComment {
   };
 }
 
+function messageComment() {
+  return {
+    id: "message-comment-1",
+    sessionId: SESSION_ID,
+    source: "agent-message",
+    messageId: "reply-1",
+    selectedText: "settled answer",
+    anchor: {
+      messageId: "reply-1",
+      start: 0,
+      end: 14,
+      selectedText: "settled answer",
+      prefix: "",
+      suffix: "",
+    },
+    text: "Please expand this.",
+    createdAt: "2026-07-20T00:00:00.000Z",
+    status: "pending",
+  } as never;
+}
+
 function panelState(overrides: Record<string, unknown> = {}) {
   return {
     resolvedSessionId: SESSION_ID,
@@ -49,10 +70,12 @@ function panelState(overrides: Record<string, unknown> = {}) {
     pendingPRFeedback: [],
     planComments: [],
     walkthroughComments: [],
+    messageComments: [],
     planModeEnabled: false,
     handleClearPRFeedback: vi.fn(),
     clearSessionPlanComments: vi.fn(),
     handleClearWalkthroughComments: vi.fn(),
+    handleClearMessageComments: vi.fn(),
     clearEphemeral: vi.fn(),
     addContextFile: vi.fn(),
     ...overrides,
@@ -83,6 +106,18 @@ describe("passthrough chat composer metadata helpers", () => {
     expect(result.formatted).toContain("### Review Comments");
     expect(result.formatted).toContain("Please fix this");
     expect(result.formatted).toContain("Ship it");
+  });
+
+  it("includes pending agent message comments in passthrough context once", () => {
+    const result = formatPassthroughBaseMessage(
+      "Ship it",
+      undefined,
+      [],
+      panelState({ messageComments: [messageComment()] }),
+    );
+
+    expect(result.formatted.match(/### Agent Message Comments/g)).toHaveLength(1);
+    expect(result.commentsToSend.map((item) => item.id)).toEqual(["message-comment-1"]);
   });
 
   it("merges selected context files with inline file, prompt, and task mentions", async () => {
@@ -211,10 +246,12 @@ describe("passthrough chat composer cleanup", () => {
       pendingPRFeedback: [{ id: "feedback-1" }],
       planComments: [{ id: "plan-comment-1" }],
       walkthroughComments: [{ id: "walkthrough-comment-1" }],
+      messageComments: [messageComment()],
     }) as unknown as {
       handleClearPRFeedback: ReturnType<typeof vi.fn>;
       clearSessionPlanComments: ReturnType<typeof vi.fn>;
       handleClearWalkthroughComments: ReturnType<typeof vi.fn>;
+      handleClearMessageComments: ReturnType<typeof vi.fn>;
       clearEphemeral: ReturnType<typeof vi.fn>;
       addContextFile: ReturnType<typeof vi.fn>;
     };
@@ -224,6 +261,7 @@ describe("passthrough chat composer cleanup", () => {
     expect(state.handleClearPRFeedback).toHaveBeenCalledTimes(1);
     expect(state.clearSessionPlanComments).toHaveBeenCalledTimes(1);
     expect(state.handleClearWalkthroughComments).toHaveBeenCalledTimes(1);
+    expect(state.handleClearMessageComments).toHaveBeenCalledTimes(1);
     expect(state.clearEphemeral).toHaveBeenCalledWith(SESSION_ID);
     expect(state.addContextFile).toHaveBeenCalledWith(SESSION_ID, {
       path: PLAN_CONTEXT_PATH,

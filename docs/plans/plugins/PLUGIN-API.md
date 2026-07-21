@@ -123,7 +123,8 @@ interface PluginRegistry {
 
   // Named slot injection. Host renders all components registered for a slot via
   // <PluginSlot name="..." props={...}/>. Initial slots: "task-sidebar",
-  // "settings-nav", "main-nav-footer", "chat-input-actions", "chat-top-bar".
+  // "settings-nav", "main-nav-footer", "chat-input-actions", "chat-top-bar",
+  // "main-top-bar", "plugin-settings".
   // "chat-input-actions" renders icon buttons in the chat composer toolbar
   // (beside the model picker, mic, and send) and forwards
   // `{ taskId, taskTitle, activeSessionId, sessionIds }` as `slotProps`.
@@ -131,9 +132,21 @@ interface PluginRegistry {
   // metrics and the document/editor/debug controls) and forwards
   // `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }`. Both
   // carry the active session plus every kandev session id on the task.
+  // "main-top-bar" renders status/actions in the default app top bar on the
+  // Home / Kanban / Tasks views (beside the CPU/DB metrics and the view/display
+  // controls) and forwards `{ workspaceId, workspaceLabel, currentPage }`. It is
+  // the app-wide, task-agnostic counterpart to "chat-top-bar", so it carries no
+  // task/session ids.
   // Resolving a session id to an agent/ACP transcript id (e.g. to key
   // tokscale cost data on a session) is the plugin's job, done server-side in
   // the plugin backend via the Host data API; the host only propagates ids.
+  // "plugin-settings" renders inline on a plugin's own settings page
+  // (Settings > Plugins > <plugin>, at the top above the schema-driven settings
+  // form) and forwards `{ pluginId: string, status: PluginStatus }`
+  // as `slotProps`. It is owner-scoped: the host renders only the component
+  // registered by the plugin currently being viewed, so your card appears on
+  // your own settings page and never on another plugin's — no per-id gating
+  // needed in your component.
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
 
   // WS action handler. Bridged into the existing lib/ws dispatch; called with the

@@ -143,6 +143,13 @@ references rather than cleartext for secret fields.
 
 ![A plugin's settings page: a schema-driven form with a masked API-token field, a toggle, and a text field, above a Manifest card showing the plugin's id, version, signing status, and capabilities.](../screenshots/plugin-settings-page.png)
 
+A plugin can also render its own UI inline on this page — at the top, above the
+settings form — via the `plugin-settings` slot, for example a live
+integration-health card ("CLI installed ✅ v0.45.2", "API token ✅
+authenticated"). This is owner-scoped, so a plugin's card only ever appears on
+its own settings page. See [Named
+slots](plugins-authoring.md#named-slots) in the authoring guide.
+
 ## Signed vs. unsigned packages
 
 Every package's `checksums.txt` is verified at install time — this integrity

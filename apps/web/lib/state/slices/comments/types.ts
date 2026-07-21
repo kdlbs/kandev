@@ -72,12 +72,31 @@ export type WalkthroughComment = CommentBase & {
   stepText: string;
 };
 
+export type MessageTextAnchor = {
+  messageId: string;
+  start: number;
+  end: number;
+  selectedText: string;
+  /** Text immediately before the selection, used when message content shifts. */
+  prefix: string;
+  /** Text immediately after the selection, used when message content shifts. */
+  suffix: string;
+};
+
+export type AgentMessageComment = CommentBase & {
+  source: "agent-message";
+  messageId: string;
+  selectedText: string;
+  anchor: MessageTextAnchor;
+};
+
 export type Comment =
   | DiffComment
   | PlanComment
   | FileEditorComment
   | PRFeedbackComment
-  | WalkthroughComment;
+  | WalkthroughComment
+  | AgentMessageComment;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -101,6 +120,10 @@ export function isPRFeedbackComment(c: Comment): c is PRFeedbackComment {
 
 export function isWalkthroughComment(c: Comment): c is WalkthroughComment {
   return c.source === "walkthrough";
+}
+
+export function isAgentMessageComment(c: Comment): c is AgentMessageComment {
+  return c.source === "agent-message";
 }
 
 // ---------------------------------------------------------------------------

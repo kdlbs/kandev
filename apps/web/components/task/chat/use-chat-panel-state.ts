@@ -13,23 +13,20 @@ import { useProcessedMessages } from "@/hooks/use-processed-messages";
 import { useSessionModel } from "@/hooks/domains/session/use-session-model";
 import { useQueue } from "@/hooks/domains/session/use-queue";
 import { useContextFilesStore, type ContextFile } from "@/lib/state/context-files-store";
-import {
-  useCommentsStore,
-  isPlanComment,
-  isPRFeedbackComment,
-  isWalkthroughComment,
-} from "@/lib/state/slices/comments";
+import { useCommentsStore, isPlanComment, type Comment } from "@/lib/state/slices/comments";
 import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
 import {
   usePendingPlanComments,
   usePendingPRFeedback,
   usePendingWalkthroughComments,
+  usePendingAgentMessageComments,
 } from "@/hooks/domains/comments/use-pending-comments";
 import { buildContextItems } from "../chat-context-items";
 import { useAutoDisablePlanMode, usePlanLayoutHandlers } from "./use-plan-mode-helpers";
 import type { ContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
 import type {
+  AgentMessageComment,
   PlanComment,
   PRFeedbackComment,
   WalkthroughComment,
@@ -53,6 +50,7 @@ export type CommentsState = {
   pendingCommentsByFile: Record<string, DiffComment[]>;
   pendingPRFeedback: PRFeedbackComment[];
   walkthroughComments: WalkthroughComment[];
+  messageComments: AgentMessageComment[];
   markCommentsSent: (ids: string[]) => void;
   handleRemoveCommentFile: (filePath: string) => void;
   handleRemoveComment: (commentId: string) => void;
@@ -60,8 +58,18 @@ export type CommentsState = {
   handleClearPRFeedback: () => void;
   handleRemoveWalkthroughComment: (commentId: string) => void;
   handleClearWalkthroughComments: () => void;
+  handleClearMessageComments: () => void;
   clearSessionPlanComments: () => void;
 };
+
+function removePendingCommentsForSession(sessionId: string | null, source: Comment["source"]) {
+  if (!sessionId) return;
+  const state = useCommentsStore.getState();
+  for (const id of [...state.pendingForChat]) {
+    const comment = state.byId[id];
+    if (comment?.sessionId === sessionId && comment.source === source) state.removeComment(id);
+  }
+}
 
 /** Re-focus chat input after dockview layout rebuild. */
 function useRefocusChatAfterLayout() {
@@ -257,11 +265,11 @@ export function useCommentsState(resolvedSessionId: string | null): CommentsStat
   useEffect(() => {
     if (resolvedSessionId) hydrateComments(resolvedSessionId);
   }, [resolvedSessionId, hydrateComments]);
-  // Filter pending comments by sessionId to prevent cross-session leakage
   const planComments = usePendingPlanComments(resolvedSessionId);
   const pendingCommentsByFile = usePendingDiffCommentsByFile(resolvedSessionId);
   const pendingPRFeedback = usePendingPRFeedback(resolvedSessionId);
   const walkthroughComments = usePendingWalkthroughComments(resolvedSessionId);
+  const messageComments = usePendingAgentMessageComments(resolvedSessionId);
   const markCommentsSent = useCommentsStore((state) => state.markCommentsSent);
   const removeComment = useCommentsStore((state) => state.removeComment);
   const clearSessionPlanComments = useCallback(() => {
@@ -289,37 +297,24 @@ export function useCommentsState(resolvedSessionId: string | null): CommentsStat
     [removeComment],
   );
   const handleClearPRFeedback = useCallback(() => {
-    if (!resolvedSessionId) return;
-    const state = useCommentsStore.getState();
-    const allPending = [...state.pendingForChat];
-    for (const id of allPending) {
-      const c = state.byId[id];
-      // Only clear PR feedback for the current session
-      if (c && isPRFeedbackComment(c) && c.sessionId === resolvedSessionId) {
-        state.removeComment(id);
-      }
-    }
+    removePendingCommentsForSession(resolvedSessionId, "pr-feedback");
   }, [resolvedSessionId]);
   const handleRemoveWalkthroughComment = useCallback(
     (commentId: string) => removeComment(commentId),
     [removeComment],
   );
   const handleClearWalkthroughComments = useCallback(() => {
-    if (!resolvedSessionId) return;
-    const state = useCommentsStore.getState();
-    const allPending = [...state.pendingForChat];
-    for (const id of allPending) {
-      const c = state.byId[id];
-      if (c && isWalkthroughComment(c) && c.sessionId === resolvedSessionId) {
-        state.removeComment(id);
-      }
-    }
+    removePendingCommentsForSession(resolvedSessionId, "walkthrough");
+  }, [resolvedSessionId]);
+  const handleClearMessageComments = useCallback(() => {
+    removePendingCommentsForSession(resolvedSessionId, "agent-message");
   }, [resolvedSessionId]);
   return {
     planComments,
     pendingCommentsByFile,
     pendingPRFeedback,
     walkthroughComments,
+    messageComments,
     markCommentsSent,
     handleRemoveCommentFile,
     handleRemoveComment,
@@ -327,6 +322,7 @@ export function useCommentsState(resolvedSessionId: string | null): CommentsStat
     handleClearPRFeedback,
     handleRemoveWalkthroughComment,
     handleClearWalkthroughComments,
+    handleClearMessageComments,
     clearSessionPlanComments,
   };
 }
@@ -387,6 +383,8 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
         walkthroughComments: comments.walkthroughComments,
         handleRemoveWalkthroughComment: comments.handleRemoveWalkthroughComment,
         handleClearWalkthroughComments: comments.handleClearWalkthroughComments,
+        messageComments: comments.messageComments,
+        handleClearMessageComments: comments.handleClearMessageComments,
         taskId,
       }),
     [
@@ -410,6 +408,8 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
       comments.walkthroughComments,
       comments.handleRemoveWalkthroughComment,
       comments.handleClearWalkthroughComments,
+      comments.messageComments,
+      comments.handleClearMessageComments,
       taskId,
     ],
   );

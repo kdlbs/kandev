@@ -539,6 +539,17 @@ export class ApiClient {
     });
   }
 
+  async startQuickChat(
+    workspaceId: string,
+    agentProfileId: string,
+    title: string,
+  ): Promise<{ task_id: string; session_id: string }> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/quick-chat`, {
+      title,
+      agent_profile_id: agentProfileId,
+    });
+  }
+
   /** Start a config chat session via the dedicated config-chat endpoint. */
   async startConfigChat(
     workspaceId: string,

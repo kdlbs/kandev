@@ -4,8 +4,15 @@ import type {
   PlanComment,
   PRFeedbackComment,
   WalkthroughComment,
+  AgentMessageComment,
 } from "./types";
-import { isDiffComment, isPlanComment, isPRFeedbackComment, isWalkthroughComment } from "./types";
+import {
+  isAgentMessageComment,
+  isDiffComment,
+  isPlanComment,
+  isPRFeedbackComment,
+  isWalkthroughComment,
+} from "./types";
 
 /**
  * Format diff review comments as human-readable markdown for sending to agent.
@@ -119,6 +126,23 @@ export function formatWalkthroughCommentsAsMarkdown(comments: WalkthroughComment
   return lines.join("\n");
 }
 
+/** Format feedback anchored to ordinary agent replies. */
+export function formatAgentMessageCommentsAsMarkdown(comments: AgentMessageComment[]): string {
+  if (!comments || comments.length === 0) return "";
+
+  const lines: string[] = ["### Agent Message Comments", ""];
+  for (const comment of comments) {
+    lines.push("Selected agent response:");
+    lines.push(toBlockquote(comment.selectedText));
+    lines.push("");
+    lines.push("User feedback:");
+    lines.push(toBlockquote(comment.text));
+    lines.push("");
+  }
+  lines.push("---", "");
+  return lines.join("\n");
+}
+
 /**
  * Format all pending comments for inclusion in a chat message.
  */
@@ -127,18 +151,27 @@ export function formatCommentsForMessage(comments: Comment[]): {
   planComments: PlanComment[];
   prFeedbackComments: PRFeedbackComment[];
   walkthroughComments: WalkthroughComment[];
+  agentMessageComments: AgentMessageComment[];
 } {
   const diffComments: DiffComment[] = [];
   const planComments: PlanComment[] = [];
   const prFeedbackComments: PRFeedbackComment[] = [];
   const walkthroughComments: WalkthroughComment[] = [];
+  const agentMessageComments: AgentMessageComment[] = [];
 
   for (const c of comments) {
     if (isDiffComment(c)) diffComments.push(c);
     else if (isPlanComment(c)) planComments.push(c);
     else if (isPRFeedbackComment(c)) prFeedbackComments.push(c);
     else if (isWalkthroughComment(c)) walkthroughComments.push(c);
+    else if (isAgentMessageComment(c)) agentMessageComments.push(c);
   }
 
-  return { diffComments, planComments, prFeedbackComments, walkthroughComments };
+  return {
+    diffComments,
+    planComments,
+    prFeedbackComments,
+    walkthroughComments,
+    agentMessageComments,
+  };
 }

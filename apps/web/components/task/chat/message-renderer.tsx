@@ -39,6 +39,7 @@ type AdapterContext = {
   sessionId?: string;
   onOpenFile?: (path: string) => void;
   onScrollToMessage?: (messageId: string) => void;
+  isTurnActive?: boolean;
 };
 
 function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; sessionId: string }) {
@@ -98,6 +99,7 @@ function TaskDescriptionMessage({
   worktreePath,
   onOpenFile,
   onScrollToMessage,
+  isTurnActive = false,
 }: {
   comment: Message;
   taskId?: string;
@@ -105,6 +107,7 @@ function TaskDescriptionMessage({
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
   onScrollToMessage?: (messageId: string) => void;
+  isTurnActive?: boolean;
 }) {
   const sessionState = useSessionStateValue(sessionId);
   const task = useTask(taskId ?? null);
@@ -117,6 +120,7 @@ function TaskDescriptionMessage({
         className="bg-muted/40 text-foreground border-border/60"
         showRichBlocks={comment.type === "message" || comment.type === "content" || !comment.type}
         sessionId={sessionId}
+        isTurnActive={isTurnActive}
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}
         onScrollToMessage={onScrollToMessage}
@@ -132,6 +136,7 @@ function TaskDescriptionMessage({
         label="You"
         className="bg-primary/10 text-foreground border-primary/30"
         sessionId={sessionId}
+        isTurnActive={isTurnActive}
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}
         onScrollToMessage={onScrollToMessage}
@@ -322,6 +327,7 @@ const adapters: MessageAdapter[] = [
             worktreePath={ctx.worktreePath}
             onOpenFile={ctx.onOpenFile}
             onScrollToMessage={ctx.onScrollToMessage}
+            isTurnActive={ctx.isTurnActive}
           />
         );
       }
@@ -335,6 +341,7 @@ const adapters: MessageAdapter[] = [
             worktreePath={ctx.worktreePath}
             onOpenFile={ctx.onOpenFile}
             onScrollToMessage={ctx.onScrollToMessage}
+            isTurnActive={ctx.isTurnActive}
           />
         );
       }
@@ -348,6 +355,7 @@ const adapters: MessageAdapter[] = [
           worktreePath={ctx.worktreePath}
           onOpenFile={ctx.onOpenFile}
           onScrollToMessage={ctx.onScrollToMessage}
+          isTurnActive={ctx.isTurnActive}
         />
       );
     },
@@ -364,6 +372,7 @@ type MessageRendererProps = {
   sessionId?: string;
   onOpenFile?: (path: string) => void;
   onScrollToMessage?: (messageId: string) => void;
+  isTurnActive?: boolean;
 };
 
 export const MessageRenderer = memo(function MessageRenderer({
@@ -376,6 +385,7 @@ export const MessageRenderer = memo(function MessageRenderer({
   sessionId,
   onOpenFile,
   onScrollToMessage,
+  isTurnActive = false,
 }: MessageRendererProps) {
   const ctx = {
     isTaskDescription,
@@ -386,6 +396,7 @@ export const MessageRenderer = memo(function MessageRenderer({
     sessionId,
     onOpenFile,
     onScrollToMessage,
+    isTurnActive,
   };
   const adapter =
     adapters.find((entry) => entry.matches(comment, ctx)) ?? adapters[adapters.length - 1];

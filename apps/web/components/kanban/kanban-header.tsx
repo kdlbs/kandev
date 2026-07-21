@@ -18,6 +18,7 @@ import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
+import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -138,6 +139,7 @@ function TabletHeader({
   title,
   workspaceLabel,
   workspaceId,
+  currentPage,
   searchQuery,
   onSearchChange,
   isSearchLoading,
@@ -151,6 +153,7 @@ function TabletHeader({
   title: string;
   workspaceLabel: string;
   workspaceId?: string;
+  currentPage: "kanban" | "tasks";
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
@@ -183,6 +186,11 @@ function TabletHeader({
               className="hidden md:flex w-48 lg:w-56 [&_input]:h-8"
             />
           )}
+          <MainTopBarPluginActions
+            workspaceId={workspaceId}
+            workspaceLabel={workspaceLabel}
+            currentPage={currentPage}
+          />
           <TopbarMetrics size="lg" />
           {workspaceId && (
             <Button
@@ -223,6 +231,8 @@ function TabletHeader({
 function DesktopHeader({
   title,
   workspaceLabel,
+  workspaceId,
+  currentPage,
   searchQuery,
   onSearchChange,
   isSearchLoading,
@@ -234,6 +244,8 @@ function DesktopHeader({
 }: {
   title: string;
   workspaceLabel: string;
+  workspaceId?: string;
+  currentPage: "kanban" | "tasks";
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
@@ -271,6 +283,11 @@ function DesktopHeader({
       actions={
         <>
           {actionsSearch}
+          <MainTopBarPluginActions
+            workspaceId={workspaceId}
+            workspaceLabel={workspaceLabel}
+            currentPage={currentPage}
+          />
           <TopbarMetrics size="lg" />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
@@ -353,6 +370,7 @@ export function KanbanHeader({
             title={title}
             workspaceLabel={workspaceLabel}
             workspaceId={workspaceId}
+            currentPage={currentPage}
             hideTitle={hideTitle}
             {...sharedSearch}
             toggleValue={toggleValue}
@@ -375,6 +393,8 @@ export function KanbanHeader({
       <DesktopHeader
         title={title}
         workspaceLabel={workspaceLabel}
+        workspaceId={workspaceId}
+        currentPage={currentPage}
         hideTitle={hideTitle}
         {...sharedSearch}
         toggleValue={toggleValue}

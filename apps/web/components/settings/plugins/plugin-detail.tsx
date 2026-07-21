@@ -5,6 +5,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
+import { PluginSlot } from "@/components/plugins/plugin-slot";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
@@ -53,6 +54,12 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
       <PluginDetailHeader plugin={plugin} />
       <Separator />
 
+      {/* Owner-scoped inline slot for the plugin's own settings UI, at the top (see PLUGIN-API.md). */}
+      <PluginSlot
+        name="plugin-settings"
+        ownerPluginId={plugin.id}
+        slotProps={{ pluginId: plugin.id, status: plugin.status }}
+      />
       <PluginSettingsCard plugin={plugin} form={form} busy={actions.busyId === plugin.id} />
       <PluginManifestCard plugin={plugin} />
 

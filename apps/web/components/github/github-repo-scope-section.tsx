@@ -1,13 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { IconInfoCircle } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import {
   fetchGitHubWorkspaceSettings,
   updateGitHubWorkspaceSettings,
@@ -37,6 +49,50 @@ function parseRepoFilters(value: string): RepoFilter[] {
 
 function repoFiltersToInput(repos: RepoFilter[]): string {
   return repos.map((repo) => `${repo.owner}/${repo.name}`).join(", ");
+}
+
+const repositoryScopeHelp =
+  "Limits the GitHub pull requests and issues Kandev discovers for this workspace, including My GitHub results and review and issue watches. It does not change GitHub permissions or repository access.";
+
+function RepositoryScopeHelp() {
+  const usesTouchDrawer = useTouchDrawer();
+  const [open, setOpen] = useState(false);
+  const button = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="h-11 w-11 cursor-pointer text-muted-foreground sm:h-7 sm:w-7"
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      aria-label="Explain repository scope"
+    >
+      <IconInfoCircle className="h-4 w-4" />
+    </Button>
+  );
+  const drawerTrigger = <DrawerTrigger asChild>{button}</DrawerTrigger>;
+  const trigger = usesTouchDrawer ? (
+    drawerTrigger
+  ) : (
+    <Tooltip>
+      <TooltipTrigger asChild>{drawerTrigger}</TooltipTrigger>
+      <TooltipContent side="top" align="start" className="max-w-[320px] text-xs leading-relaxed">
+        {repositoryScopeHelp}
+      </TooltipContent>
+    </Tooltip>
+  );
+
+  return (
+    <Drawer open={open} onOpenChange={setOpen}>
+      {trigger}
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>Repository Scope</DrawerTitle>
+          <DrawerDescription>{repositoryScopeHelp}</DrawerDescription>
+        </DrawerHeader>
+      </DrawerContent>
+    </Drawer>
+  );
 }
 
 type ScopeFieldsProps = {
@@ -240,7 +296,8 @@ export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string })
   return (
     <SettingsSection
       title="Repository Scope"
-      description="Choose which GitHub repositories belong to this workspace."
+      titleAccessory={<RepositoryScopeHelp />}
+      description="Limits GitHub pull requests and issues shown or imported in this workspace."
     >
       <RepositoryScopeFields
         mode={draft.mode}
