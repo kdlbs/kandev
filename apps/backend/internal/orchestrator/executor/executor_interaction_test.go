@@ -523,6 +523,9 @@ func TestSwitchModelFallback_PreservesRestrictedMCPMode(t *testing.T) {
 				},
 			}
 			exec := newTestExecutor(t, manager, repo)
+			exec.SetGitLabCredentialResolver(&fakeGitLabCredentialResolver{byWorkspace: map[string]struct{ host, token string }{
+				"workspace-1": {host: "https://gitlab.example", token: "switch-token"},
+			}})
 
 			if _, err := exec.SwitchModel(
 				context.Background(), "task-office", "session-office", "new-model", "continue",
@@ -534,6 +537,9 @@ func TestSwitchModelFallback_PreservesRestrictedMCPMode(t *testing.T) {
 			}
 			if capturedReq.McpMode != tt.wantMode {
 				t.Fatalf("McpMode = %q, want %q", capturedReq.McpMode, tt.wantMode)
+			}
+			if capturedReq.WorkspaceID != "workspace-1" || capturedReq.Env[envGitLabToken] != "switch-token" {
+				t.Fatalf("model-switch credentials not workspace scoped: workspace=%q env=%#v", capturedReq.WorkspaceID, capturedReq.Env)
 			}
 		})
 	}

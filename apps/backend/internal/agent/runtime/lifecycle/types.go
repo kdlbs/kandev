@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -58,6 +59,10 @@ type AgentExecution struct {
 
 	// agentctl client for this execution
 	agentctl *agentctl.Client
+	// agentctlReady records the successful health check independently of the
+	// agent process and workspace stream lifecycles. Prepared sessions have a
+	// healthy agentctl before either of those is started or attached.
+	agentctlReady atomic.Bool
 
 	// Unified workspace stream for shell I/O, git status, and file changes
 	workspaceStream   *agentctl.WorkspaceStream
@@ -177,6 +182,16 @@ type PromptCompletionSignal struct {
 // GetAgentCtlClient returns the agentctl client for this execution
 func (ae *AgentExecution) GetAgentCtlClient() *agentctl.Client {
 	return ae.agentctl
+}
+
+// MarkAgentctlReady records that agentctl passed its startup health check.
+func (ae *AgentExecution) MarkAgentctlReady() {
+	ae.agentctlReady.Store(true)
+}
+
+// IsAgentctlReady reports whether agentctl passed its startup health check.
+func (ae *AgentExecution) IsAgentctlReady() bool {
+	return ae.agentctlReady.Load()
 }
 
 // AgentctlURL returns the base URL of the agentctl HTTP server for this

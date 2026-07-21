@@ -29,6 +29,7 @@ type rawMR struct {
 	Author       rawUser    `json:"author"`
 	Reviewers    []rawUser  `json:"reviewers"`
 	Assignees    []rawUser  `json:"assignees"`
+	Labels       []string   `json:"labels"`
 	ChangesCount string     `json:"changes_count"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
@@ -37,6 +38,7 @@ type rawMR struct {
 }
 
 type rawUser struct {
+	ID        int64  `json:"id"`
 	Username  string `json:"username"`
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatar_url"`
@@ -134,6 +136,7 @@ func convertRawMR(raw *rawMR) *MR {
 		HasConflicts:     raw.HasConflicts,
 		Reviewers:        convertReviewers(raw.Reviewers),
 		Assignees:        convertReviewers(raw.Assignees),
+		Labels:           append([]string(nil), raw.Labels...),
 		CreatedAt:        raw.CreatedAt,
 		UpdatedAt:        raw.UpdatedAt,
 		MergedAt:         raw.MergedAt,
@@ -157,6 +160,7 @@ func convertReviewers(raw []rawUser) []MRReviewer {
 			continue
 		}
 		out = append(out, MRReviewer{
+			ID:       r.ID,
 			Username: r.Username,
 			Name:     r.Name,
 			Type:     "user",

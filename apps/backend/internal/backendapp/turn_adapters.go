@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
 // turnServiceAdapter adapts the task service to the orchestrator.TurnService interface.
@@ -152,6 +154,37 @@ func (a *automationTaskDeleterAdapter) DeleteTask(ctx context.Context, taskID st
 // maps to ok=false and watcher create/update rejects the binding.
 type repositoryLookupAdapter struct {
 	svc *taskservice.Service
+}
+
+type gitLabWatchDependencyValidator struct {
+	tasks     *taskservice.Service
+	workflows *workflowservice.Service
+	agents    settingsstore.Repository
+}
+
+func (v *gitLabWatchDependencyValidator) WorkflowStepBelongs(ctx context.Context, workspaceID, workflowID, stepID string) (bool, error) {
+	workflow, err := v.tasks.GetWorkflow(ctx, workflowID)
+	if err != nil || workflow == nil || workflow.WorkspaceID != workspaceID {
+		return false, nil
+	}
+	step, err := v.workflows.GetStep(ctx, stepID)
+	if err != nil || step == nil {
+		return false, nil
+	}
+	return step.WorkflowID == workflowID, nil
+}
+
+func (v *gitLabWatchDependencyValidator) AgentProfileBelongs(ctx context.Context, workspaceID string, profileID string) (bool, error) {
+	profile, err := v.agents.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil {
+		return false, nil
+	}
+	return profile.WorkspaceID == "" || profile.WorkspaceID == workspaceID, nil
+}
+
+func (v *gitLabWatchDependencyValidator) ExecutorProfileBelongs(ctx context.Context, _ string, profileID string) (bool, error) {
+	profile, err := v.tasks.GetExecutorProfile(ctx, profileID)
+	return err == nil && profile != nil, nil
 }
 
 func (a *repositoryLookupAdapter) GetRepository(ctx context.Context, id string) (string, string, bool) {

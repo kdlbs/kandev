@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback } from "react";
 import {
   listIssueWatches,
   createIssueWatch,
@@ -8,17 +8,23 @@ import {
   deleteIssueWatch,
   triggerIssueWatch,
   triggerAllIssueWatches,
+  previewResetIssueWatch,
+  resetIssueWatch,
   type CreateIssueWatchRequest,
   type UpdateIssueWatchRequest,
 } from "@/lib/api/domains/gitlab-api";
 import { useAppStore } from "@/components/state-provider";
 
-/**
- * useGitLabIssueWatches mirrors useGitLabReviewWatches — the per-instance
- * lastFetchedRef triggers a refetch on workspace switch, working around the
- * fact that the slice-level `loaded` flag is shared across all consumers.
- */
-export function useGitLabIssueWatches(workspaceId?: string | null) {
+const WORKSPACE_REQUIRED = "workspaceId required";
+
+function filterByWorkspace<T extends { workspace_id: string }>(
+  items: T[],
+  workspaceId?: string | null,
+) {
+  return workspaceId ? items.filter((watch) => watch.workspace_id === workspaceId) : [];
+}
+
+export function useGitLabIssueWatches(workspaceId: string | null) {
   const items = useAppStore((state) => state.gitlabIssueWatches.items);
   const loaded = useAppStore((state) => state.gitlabIssueWatches.loaded);
   const loading = useAppStore((state) => state.gitlabIssueWatches.loading);
@@ -27,18 +33,25 @@ export function useGitLabIssueWatches(workspaceId?: string | null) {
   const add = useAppStore((state) => state.addGitLabIssueWatch);
   const upd = useAppStore((state) => state.updateGitLabIssueWatchInStore);
   const rm = useAppStore((state) => state.removeGitLabIssueWatch);
-  const lastFetchedRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
-    if (workspaceId === null || loading) return;
-    if (loaded && lastFetchedRef.current === workspaceId) return;
-    lastFetchedRef.current = workspaceId;
+    if (!workspaceId) return;
+    let cancelled = false;
     setLoading(true);
-    listIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
-      .then((response) => set(response?.watches ?? []))
-      .catch(() => set([]))
-      .finally(() => setLoading(false));
-  }, [workspaceId, loaded, loading, set, setLoading]);
+    listIssueWatches(workspaceId, { cache: "no-store" })
+      .then((response) => {
+        if (!cancelled) set(response?.watches ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) set([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, set, setLoading]);
 
   const create = useCallback(
     async (req: CreateIssueWatchRequest) => {
@@ -50,24 +63,65 @@ export function useGitLabIssueWatches(workspaceId?: string | null) {
   );
 
   const update = useCallback(
-    async (id: string, req: UpdateIssueWatchRequest) => {
-      const watch = await updateIssueWatch(id, req);
+    async (id: string, req: UpdateIssueWatchRequest, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      const watch = await updateIssueWatch(id, ws, req);
       upd(watch);
       return watch;
     },
-    [upd],
+    [upd, workspaceId],
   );
 
   const remove = useCallback(
-    async (id: string) => {
-      await deleteIssueWatch(id);
+    async (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      await deleteIssueWatch(id, ws);
       rm(id);
     },
-    [rm],
+    [rm, workspaceId],
   );
 
-  const trigger = useCallback((id: string) => triggerIssueWatch(id), []);
-  const triggerAll = useCallback(() => triggerAllIssueWatches(), []);
+  const trigger = useCallback(
+    (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      return triggerIssueWatch(id, ws);
+    },
+    [workspaceId],
+  );
+  const triggerAll = useCallback(() => {
+    if (!workspaceId) throw new Error(WORKSPACE_REQUIRED);
+    return triggerAllIssueWatches(workspaceId);
+  }, [workspaceId]);
+  const previewReset = useCallback(
+    (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      return previewResetIssueWatch(id, ws);
+    },
+    [workspaceId],
+  );
+  const reset = useCallback(
+    (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      return resetIssueWatch(id, ws);
+    },
+    [workspaceId],
+  );
 
-  return { items, loaded, loading, create, update, remove, trigger, triggerAll };
+  return {
+    items: filterByWorkspace(items, workspaceId),
+    loaded,
+    loading,
+    create,
+    update,
+    remove,
+    trigger,
+    triggerAll,
+    previewReset,
+    reset,
+  };
 }

@@ -184,7 +184,7 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 //     kdlbs/kandev; backfill provider info on the match.
 //  3. Fall back to cloning into the managed location and registering it.
 func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID string) (*taskmodels.Repository, error) {
-	if existing, err := h.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, repoProvider, repoOwner, repoName); err != nil {
+	if existing, err := h.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, repoProvider, "https://github.com", repoOwner, repoName); err != nil {
 		return nil, err
 	} else if existing != nil {
 		return existing, nil
@@ -207,6 +207,7 @@ func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID string) (*
 	repo, _, err := h.taskSvc.FindOrCreateRepository(ctx, &taskservice.FindOrCreateRepositoryRequest{
 		WorkspaceID:   workspaceID,
 		Provider:      repoProvider,
+		ProviderHost:  "https://github.com",
 		ProviderOwner: repoOwner,
 		ProviderName:  repoName,
 		DefaultBranch: defaultBranch,
@@ -241,16 +242,18 @@ func findKandevRepoByLocalRemote(repos []*taskmodels.Repository, resolve remoteR
 // repo so subsequent lookups by provider info hit the fast path. Failures are
 // logged but non-fatal — we still return the matched repo to the caller.
 func (h *Handler) backfillKandevProviderInfo(ctx context.Context, repo *taskmodels.Repository) {
-	if repo.Provider == repoProvider && repo.ProviderOwner == repoOwner && repo.ProviderName == repoName {
+	if repo.Provider == repoProvider && repo.ProviderHost == "https://github.com" &&
+		repo.ProviderOwner == repoOwner && repo.ProviderName == repoName {
 		return
 	}
-	provider, owner, name := repoProvider, repoOwner, repoName
+	provider, providerHost, owner, name := repoProvider, "https://github.com", repoOwner, repoName
 	branch := repo.DefaultBranch
 	if branch == "" {
 		branch = defaultBranch
 	}
 	if _, err := h.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
 		Provider:      &provider,
+		ProviderHost:  &providerHost,
 		ProviderOwner: &owner,
 		ProviderName:  &name,
 		DefaultBranch: &branch,
@@ -260,6 +263,7 @@ func (h *Handler) backfillKandevProviderInfo(ctx context.Context, repo *taskmode
 		return
 	}
 	repo.Provider = provider
+	repo.ProviderHost = providerHost
 	repo.ProviderOwner = owner
 	repo.ProviderName = name
 	repo.DefaultBranch = branch

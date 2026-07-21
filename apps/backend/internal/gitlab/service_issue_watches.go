@@ -18,6 +18,13 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if !IsValidCleanupPolicy(req.CleanupPolicy) {
 		return nil, fmt.Errorf("invalid cleanup_policy: %q", req.CleanupPolicy)
 	}
+	if err := s.validateWatchDependencies(ctx, req.WorkspaceID, req.WorkflowID, req.WorkflowStepID, req.AgentProfileID, req.ExecutorProfileID); err != nil {
+		return nil, err
+	}
+	repositoryID, baseBranch, err := s.resolveWatchRepository(ctx, req.WorkspaceID, req.RepositoryID, req.BaseBranch)
+	if err != nil {
+		return nil, err
+	}
 	iw := &IssueWatch{
 		WorkspaceID:         req.WorkspaceID,
 		WorkflowID:          req.WorkflowID,
@@ -26,11 +33,17 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		AgentProfileID:      req.AgentProfileID,
 		ExecutorProfileID:   req.ExecutorProfileID,
 		Prompt:              req.Prompt,
+		RepositoryID:        repositoryID,
+		BaseBranch:          baseBranch,
 		Labels:              req.Labels,
 		CustomQuery:         req.CustomQuery,
 		Enabled:             true,
 		PollIntervalSeconds: clampPollInterval(req.PollIntervalSeconds),
 		CleanupPolicy:       NormalizeCleanupPolicy(req.CleanupPolicy),
+		MaxInflightTasks:    req.MaxInflightTasks,
+	}
+	if err := validateWatchMaxInflight(iw.MaxInflightTasks); err != nil {
+		return nil, err
 	}
 	store := s.requireStore()
 	if store == nil {
@@ -62,6 +75,14 @@ func (s *Service) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, er
 		return nil, errStoreUnavailable
 	}
 	return store.GetIssueWatch(ctx, id)
+}
+
+func (s *Service) GetIssueWatchIncludingDeleting(ctx context.Context, id string) (*IssueWatch, error) {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.GetIssueWatchIncludingDeleting(ctx, id)
 }
 
 // ListIssueWatches lists issue watches in a workspace.
@@ -99,8 +120,21 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		return fmt.Errorf("%w: issue watch %s", ErrWatchNotFound, id)
 	}
 	applyIssueWatchPatch(iw, req)
+	if err := s.validateWatchDependencies(ctx, iw.WorkspaceID, iw.WorkflowID, iw.WorkflowStepID, iw.AgentProfileID, iw.ExecutorProfileID); err != nil {
+		return err
+	}
+	if req.RepositoryID != nil || req.BaseBranch != nil {
+		repositoryID, baseBranch, err := s.resolveWatchRepository(ctx, iw.WorkspaceID, iw.RepositoryID, iw.BaseBranch)
+		if err != nil {
+			return err
+		}
+		iw.RepositoryID, iw.BaseBranch = repositoryID, baseBranch
+	}
 	if req.CleanupPolicy != nil && !IsValidCleanupPolicy(*req.CleanupPolicy) {
 		return fmt.Errorf("invalid cleanup_policy: %q", *req.CleanupPolicy)
+	}
+	if err := validateWatchMaxInflight(iw.MaxInflightTasks); err != nil {
+		return err
 	}
 	return store.UpdateIssueWatch(ctx, iw)
 }
@@ -125,6 +159,15 @@ func applyIssueWatchPatch(iw *IssueWatch, req *UpdateIssueWatchRequest) {
 	if req.Prompt != nil {
 		iw.Prompt = *req.Prompt
 	}
+	if req.RepositoryID != nil {
+		iw.RepositoryID = *req.RepositoryID
+		if iw.RepositoryID == "" {
+			iw.BaseBranch = ""
+		}
+	}
+	if req.BaseBranch != nil && iw.RepositoryID != "" {
+		iw.BaseBranch = *req.BaseBranch
+	}
 	if req.Labels != nil {
 		iw.Labels = *req.Labels
 	}
@@ -133,12 +176,23 @@ func applyIssueWatchPatch(iw *IssueWatch, req *UpdateIssueWatchRequest) {
 	}
 	if req.Enabled != nil {
 		iw.Enabled = *req.Enabled
+		if iw.Enabled {
+			iw.LastError = ""
+			iw.LastErrorAt = nil
+		}
 	}
 	if req.PollIntervalSeconds != nil {
 		iw.PollIntervalSeconds = clampPollInterval(*req.PollIntervalSeconds)
 	}
 	if req.CleanupPolicy != nil {
 		iw.CleanupPolicy = NormalizeCleanupPolicy(*req.CleanupPolicy)
+	}
+	if req.MaxInflightTasks != nil {
+		if *req.MaxInflightTasks == 0 {
+			iw.MaxInflightTasks = nil
+		} else {
+			iw.MaxInflightTasks = req.MaxInflightTasks
+		}
 	}
 }
 
@@ -148,33 +202,24 @@ func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 	if store == nil {
 		return errStoreUnavailable
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), watchDeleteTimeout)
+	defer cancel()
 	s.mu.RLock()
 	deleter := s.taskDeleter
+	cascadeDeleter := s.cascadeTaskDeleter
 	s.mu.RUnlock()
-	if deleter != nil {
-		tasks, err := store.ListIssueWatchTasksByWatch(ctx, id)
-		if err != nil {
-			s.logger.Warn("failed to list issue tasks for pre-delete sweep",
-				zap.String("watch_id", id), zap.Error(err))
-		} else {
-			s.sweepIssueWatchTasksOnDelete(ctx, id, tasks, deleter)
-		}
+	invalidation, err := store.BeginIssueWatchDelete(deleteCtx, id)
+	if err != nil {
+		return err
 	}
-	return store.DeleteIssueWatch(ctx, id)
-}
-
-func (s *Service) sweepIssueWatchTasksOnDelete(ctx context.Context, watchID string, tasks []*IssueWatchTask, deleter TaskDeleter) {
-	for _, t := range tasks {
-		if t.TaskID == "" {
-			continue
-		}
-		if err := deleter.DeleteTask(ctx, t.TaskID); err != nil {
-			s.logger.Warn("failed to delete issue task during watch cleanup",
-				zap.String("watch_id", watchID),
-				zap.String("task_id", t.TaskID),
-				zap.Error(err))
-		}
+	if invalidation.Missing {
+		return nil
 	}
+	s.cleanupInvalidatedWatchTasks(deleteCtx, id, invalidation.TaskIDs, cascadeDeleter, deleter)
+	return store.DeleteIssueWatch(deleteCtx, id)
 }
 
 // CheckIssueWatch polls a single watch and returns new issues.
@@ -186,10 +231,6 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 	}
 	if !watch.Enabled {
 		return nil, nil
-	}
-	client := s.Client()
-	if client == nil {
-		return nil, ErrNoClient
 	}
 	store := s.requireStore()
 	if store == nil {
@@ -218,10 +259,16 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 }
 
 func (s *Service) fetchIssues(ctx context.Context, watch *IssueWatch) ([]*Issue, error) {
-	client := s.Client()
+	client, err := s.ClientForWorkspace(ctx, watch.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
 	username, err := client.GetAuthenticatedUser(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("resolve gitlab username: %w", err)
+	}
+	if username == "" {
+		return nil, fmt.Errorf("no authenticated gitlab username")
 	}
 	// When a custom_query is set, labels need to be folded into it (the
 	// client's buildIssueSearchQuery returns customQuery verbatim and
@@ -298,6 +345,31 @@ func (s *Service) TriggerIssueWatchAll(ctx context.Context) (int, error) {
 		}
 		for _, issue := range found {
 			s.publishNewIssueEvent(ctx, iw, issue)
+		}
+		total += len(found)
+	}
+	return total, nil
+}
+
+// TriggerIssueWatchAllForWorkspace runs only watches owned by workspaceID.
+func (s *Service) TriggerIssueWatchAllForWorkspace(ctx context.Context, workspaceID string) (int, error) {
+	store := s.requireStore()
+	if store == nil {
+		return 0, errStoreUnavailable
+	}
+	watches, err := store.ListEnabledIssueWatchesForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, watch := range watches {
+		found, checkErr := s.CheckIssueWatch(ctx, watch)
+		if checkErr != nil {
+			s.logger.Warn("trigger workspace issue watches", zap.String("watch_id", watch.ID), zap.Error(checkErr))
+			continue
+		}
+		for _, issue := range found {
+			s.publishNewIssueEvent(ctx, watch, issue)
 		}
 		total += len(found)
 	}

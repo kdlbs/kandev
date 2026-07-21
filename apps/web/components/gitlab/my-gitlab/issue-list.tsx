@@ -6,11 +6,18 @@ import { Badge } from "@kandev/ui/badge";
 import { Spinner } from "@kandev/ui/spinner";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { Issue } from "@/lib/types/gitlab";
+import type { GitLabLaunchPayload, GitLabTaskPreset } from "./quick-task-launcher";
+import { StartTaskMenu } from "./start-task-menu";
+import { SubscriptionToggle } from "../subscription-toggle";
 
 type IssueListProps = {
   items: Issue[];
   loading: boolean;
   error: string | null;
+  presets?: GitLabTaskPreset[];
+  onStartTask?: (payload: GitLabLaunchPayload) => void;
+  workspaceId?: string;
+  host?: string;
 };
 
 function IssueLabels({ labels }: { labels: string[] }) {
@@ -29,7 +36,19 @@ function IssueLabels({ labels }: { labels: string[] }) {
   );
 }
 
-function IssueRow({ issue }: { issue: Issue }) {
+function IssueRow({
+  issue,
+  presets,
+  onStartTask,
+  workspaceId,
+  host,
+}: {
+  issue: Issue;
+  presets: GitLabTaskPreset[];
+  onStartTask?: IssueListProps["onStartTask"];
+  workspaceId?: string;
+  host?: string;
+}) {
   const isOpen = issue.state !== "closed";
   const StateIcon = isOpen ? IconCircle : IconCircleCheck;
   const stateClass = isOpen
@@ -63,11 +82,38 @@ function IssueRow({ issue }: { issue: Issue }) {
           <IssueLabels labels={issue.labels} />
         </div>
       </div>
+      <div className="shrink-0">
+        <div className="flex items-center gap-2">
+          {workspaceId && host ? (
+            <SubscriptionToggle
+              kind="issue"
+              workspaceId={workspaceId}
+              host={host}
+              project={issue.project_path}
+              iid={issue.iid}
+            />
+          ) : null}
+          {onStartTask ? (
+            <StartTaskMenu
+              presets={presets}
+              onSelect={(preset) => onStartTask({ kind: "issue", issue, preset })}
+            />
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
 
-function IssueListBody({ loading, error, items }: IssueListProps) {
+function IssueListBody({
+  loading,
+  error,
+  items,
+  presets = [],
+  onStartTask,
+  workspaceId,
+  host,
+}: IssueListProps) {
   if (loading) {
     return (
       <div className="flex justify-center py-10">
@@ -88,7 +134,14 @@ function IssueListBody({ loading, error, items }: IssueListProps) {
   return (
     <div className="divide-y">
       {items.map((issue) => (
-        <IssueRow key={`${issue.project_path}-${issue.iid}`} issue={issue} />
+        <IssueRow
+          key={`${issue.project_path}-${issue.iid}`}
+          issue={issue}
+          presets={presets}
+          onStartTask={onStartTask}
+          workspaceId={workspaceId}
+          host={host}
+        />
       ))}
     </div>
   );

@@ -9,6 +9,7 @@ const repositoryFields: Array<keyof RepositoryWithScripts> = [
   "local_path",
   "provider",
   "provider_repo_id",
+  "provider_host",
   "provider_owner",
   "provider_name",
   "default_branch",

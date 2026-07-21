@@ -138,7 +138,7 @@ az login
 export AZURE_DEVOPS_EXT_PAT='...'
 ```
 
-The Azure tooling is optional and only needed for Azure Repos operations. See [Git operations](git-operations.md#create-a-pull-request).
+The Azure tooling is optional and only needed for Azure Repos operations. See [Git operations](git-operations.md#create-a-pull-request-or-merge-request).
 
 ## Development state and persistence
 

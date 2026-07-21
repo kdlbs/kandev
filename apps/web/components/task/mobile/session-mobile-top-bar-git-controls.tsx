@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { ChangeRequestPartialStatus } from "@/components/vcs/vcs-dialog-fields";
+import { getChangeRequestFailureFeedback } from "@/components/vcs/change-request-feedback";
 import {
   IconGitCommit,
   IconGitPullRequest,
@@ -36,12 +38,17 @@ import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
-import { useGitOperations } from "@/hooks/use-git-operations";
+import {
+  resolveChangeRequestTerminology,
+  useChangeRequestTerminology,
+  useGitOperations,
+} from "@/hooks/use-git-operations";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import type { FileInfo } from "@/lib/state/slices";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { openExternalLink } from "@/lib/desktop/external-links";
+import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import {
   CommitSummary,
   MobilePRBranchSummary,
@@ -230,6 +237,18 @@ export function CommitDialog({
   );
 }
 
+type PRDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  displayBranch: string | undefined;
+  baseBranch: string | undefined;
+  isGitLoading: boolean;
+  taskTitle: string | undefined;
+  firstCommitMessage?: string;
+  onCreatePR: (title: string, body: string, draft: boolean) => void;
+  branchPushed: boolean;
+};
+
 export function PRDialog({
   open,
   onOpenChange,
@@ -239,19 +258,12 @@ export function PRDialog({
   taskTitle,
   firstCommitMessage,
   onCreatePR,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  displayBranch: string | undefined;
-  baseBranch: string | undefined;
-  isGitLoading: boolean;
-  taskTitle: string | undefined;
-  firstCommitMessage?: string;
-  onCreatePR: (title: string, body: string, draft: boolean) => void;
-}) {
+  branchPushed,
+}: PRDialogProps) {
   const [prTitle, setPrTitle] = useState("");
   const [prBody, setPrBody] = useState("");
   const [prDraft, setPrDraft] = useState(true);
+  const terminology = useChangeRequestTerminology(useEnvironmentSessionId());
 
   const handleOpen = (isOpen: boolean) => {
     if (isOpen) {
@@ -267,11 +279,16 @@ export function PRDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconGitPullRequest className="h-5 w-5 text-cyan-500" />
-            Create Pull Request
+            Create {terminology.longName}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <MobilePRBranchSummary displayBranch={displayBranch} baseBranch={baseBranch} />
+          {branchPushed && <ChangeRequestPartialStatus terminology={terminology} />}
+          <MobilePRBranchSummary
+            displayBranch={displayBranch}
+            baseBranch={baseBranch}
+            terminology={terminology}
+          />
           <div className="space-y-2">
             <Label htmlFor="pr-title-mobile" className="text-sm">
               Title
@@ -279,7 +296,8 @@ export function PRDialog({
             <input
               id="pr-title-mobile"
               type="text"
-              placeholder="Pull request title..."
+              aria-label={`${terminology.longName} title`}
+              placeholder={`${terminology.longName} title...`}
               value={prTitle}
               onChange={(e) => setPrTitle(e.target.value)}
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -322,6 +340,8 @@ export function PRDialog({
             prDraft={prDraft}
             isGitLoading={isGitLoading}
             onCreatePR={onCreatePR}
+            terminology={terminology}
+            branchPushed={branchPushed}
           />
         </DialogFooter>
       </DialogContent>
@@ -355,10 +375,17 @@ export function GitActionsDropdown({
   onMerge,
 }: GitActionsDropdownProps) {
   const disabled = isGitLoading || !sessionId;
+  const terminology = useChangeRequestTerminology(sessionId);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="icon-sm" variant="ghost" className="cursor-pointer">
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="h-11 w-11 cursor-pointer"
+          aria-label="Git actions"
+          data-testid="mobile-git-actions"
+        >
           {isGitLoading ? (
             <IconLoader2 className="h-4 w-4 animate-spin" />
           ) : (
@@ -382,7 +409,7 @@ export function GitActionsDropdown({
         </DropdownMenuItem>
         <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPRClick} disabled={disabled}>
           <IconGitPullRequest className="h-4 w-4 text-cyan-500" />
-          <span className="flex-1">Create PR</span>
+          <span className="flex-1">Create {terminology.shortName}</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPull} disabled={disabled}>
@@ -434,21 +461,17 @@ export function useMobileGitActions(
   baseBranch: string | undefined,
   setCommitDialogOpen: (v: boolean) => void,
   setPrDialogOpen: (v: boolean) => void,
+  setPrBranchPushed: (v: boolean) => void,
 ) {
   const { toast } = useToast();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
+  const defaultTerminology = useChangeRequestTerminology(sessionId);
   // SessionGit's commit fans out per-repo for multi-repo workspaces; the raw
   // useGitOperations.commit hits the workspace root and fails on multi-repo
   // tasks. Pull from useGitOperations only what SessionGit doesn't override.
-  const {
-    pull,
-    push,
-    rebase,
-    merge,
-    createPR,
-    isLoading: isGitLoading,
-  } = useGitOperations(sessionId ?? null);
+  const gitOperations = useGitOperations(sessionId ?? null);
+  const { pull, push, rebase, merge, createPR, isLoading: isGitLoading } = gitOperations;
   const { commit } = useSessionGit(sessionId ?? null);
   const handleGitOperation = useGitToast();
 
@@ -483,9 +506,10 @@ export function useMobileGitActions(
       try {
         const result = await createPR(title, body, baseBranch, draft);
         if (result.success) {
+          const terms = resolveChangeRequestTerminology(result.provider, defaultTerminology);
           toast({
-            title: draft ? "Draft Pull Request created" : "Pull Request created",
-            description: result.pr_url || "PR created successfully",
+            title: draft ? `Draft ${terms.longName} created` : `${terms.longName} created`,
+            description: result.pr_url || `${terms.longName} created successfully`,
             variant: "success",
           });
           if (result.pr_url) {
@@ -495,21 +519,33 @@ export function useMobileGitActions(
             void openExternalLink(result.pr_url).catch(() => undefined);
           }
         } else {
-          toast({
-            title: "Create PR failed",
-            description: result.error || "An error occurred",
-            variant: "error",
-          });
+          const feedback = getChangeRequestFailureFeedback(result, defaultTerminology);
+          toast(feedback);
+          if (result.branch_pushed) {
+            setPrBranchPushed(true);
+            setPrDialogOpen(true);
+            return;
+          }
         }
+        setPrBranchPushed(false);
       } catch (e) {
         toast({
-          title: "Create PR failed",
+          title: `Create ${defaultTerminology.shortName} failed`,
           description: e instanceof Error ? e.message : "An error occurred",
           variant: "error",
         });
       }
     },
-    [createPR, baseBranch, toast, setPrDialogOpen, activeTaskId, setPendingPrUrlForTask],
+    [
+      createPR,
+      baseBranch,
+      toast,
+      setPrDialogOpen,
+      setPrBranchPushed,
+      defaultTerminology,
+      activeTaskId,
+      setPendingPrUrlForTask,
+    ],
   );
 
   return {

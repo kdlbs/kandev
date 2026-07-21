@@ -899,6 +899,7 @@ type Repository struct {
 	// Provider fields describe the upstream source (e.g. github/gitlab) for future syncing.
 	Provider               string     `json:"provider"`
 	ProviderRepoID         string     `json:"provider_repo_id"`
+	ProviderHost           string     `json:"provider_host"`
 	ProviderOwner          string     `json:"provider_owner"`
 	ProviderName           string     `json:"provider_name"`
 	RemoteURL              string     `json:"remote_url"`

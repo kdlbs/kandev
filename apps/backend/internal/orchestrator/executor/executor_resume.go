@@ -151,7 +151,9 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 		return "", nil
 	}
 
-	cloneURL, urlErr := e.repoCloner.BuildCloneURL(repo.Provider, repo.ProviderOwner, repo.ProviderName)
+	cloneURL, urlErr := e.repoCloner.BuildCloneURLWithHost(
+		repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+	)
 	if urlErr != nil || cloneURL == "" {
 		// Fall back to HTTPS URL if BuildCloneURL fails
 		cloneURL = repositoryCloneURL(repo)
@@ -528,6 +530,7 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	}
 	req := &LaunchAgentRequest{
 		TaskID:               task.ID,
+		WorkspaceID:          task.WorkspaceID,
 		SessionID:            session.ID,
 		TaskTitle:            task.Title,
 		AgentProfileID:       executionProfileID,
@@ -576,6 +579,7 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	}
 
 	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
+	e.injectGitLabWorkspaceCredentials(ctx, req)
 
 	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
 }

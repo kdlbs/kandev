@@ -35,6 +35,8 @@ import { useToast } from "@/components/toast-provider";
 import { useFileTabRestoration, useFileSaveDelete } from "./task-center-panel-restoration";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { PRDetailContent } from "@/components/github/pr-detail-panel";
+import { MRDetailPanelComponent, mrTaskKey } from "@/components/gitlab/mr-detail-panel";
+import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 
 import type { SelectedDiff } from "./task-layout";
 
@@ -226,13 +228,13 @@ function useCenterPanelTabs(
   openFileTabs: OpenFileTab[],
   handleCloseFileTab: (path: string) => void,
   hasChanges: boolean | undefined,
-  hasPR: boolean,
+  reviewLabel: "Pull Request" | "Merge Request" | null,
 ) {
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
       ...(hasChanges ? [{ id: "changes", label: "All changes" }] : []),
       { id: "chat", label: "Chat" },
-      ...(hasPR ? [{ id: "pr", label: "Pull Request" }] : []),
+      ...(reviewLabel ? [{ id: "pr", label: reviewLabel }] : []),
     ];
     const fileTabs: SessionTab[] = openFileTabs.map((tab) => ({
       id: `file:${tab.path}`,
@@ -246,13 +248,22 @@ function useCenterPanelTabs(
       className: "cursor-pointer group gap-1.5 data-[state=active]:bg-muted",
     }));
     return [...staticTabs, ...fileTabs];
-  }, [openFileTabs, handleCloseFileTab, hasChanges, hasPR]);
+  }, [openFileTabs, handleCloseFileTab, hasChanges, reviewLabel]);
   const separatorAfterIndex = useMemo(() => {
     if (openFileTabs.length === 0) return undefined;
-    const staticCount = (hasChanges ? 1 : 0) + 1 + (hasPR ? 1 : 0); // changes + chat + pr
+    const staticCount = (hasChanges ? 1 : 0) + 1 + (reviewLabel ? 1 : 0);
     return staticCount - 1;
-  }, [openFileTabs.length, hasChanges, hasPR]);
+  }, [openFileTabs.length, hasChanges, reviewLabel]);
   return { tabs, separatorAfterIndex };
+}
+
+function useTaskReview(taskId: string | null) {
+  const taskPR = useActiveTaskPR();
+  const taskMR = useTaskMRs(taskId)[0] ?? null;
+  let reviewLabel: "Pull Request" | "Merge Request" | null = null;
+  if (taskPR) reviewLabel = "Pull Request";
+  else if (taskMR) reviewLabel = "Merge Request";
+  return { taskPR, taskMR, reviewLabel };
 }
 
 function useCenterPanelState(props: TaskCenterPanelProps) {
@@ -275,8 +286,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     activeSessionId,
     activeTaskId,
   );
-  const taskPR = useActiveTaskPR();
-  const hasPR = !!taskPR;
+  const { taskPR, taskMR, reviewLabel } = useTaskReview(activeTaskId);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
@@ -309,7 +319,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     openFileTabs,
     fileTabOps.handleCloseFileTab,
     hasChanges,
-    hasPR,
+    reviewLabel,
   );
 
   useEffect(() => {
@@ -344,6 +354,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     showApproveButton,
     handleApprove,
     taskPR,
+    taskMR,
     openFileTabs,
     savingFiles,
     selectedDiff,
@@ -370,6 +381,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
     showApproveButton,
     handleApprove,
     taskPR,
+    taskMR,
     openFileTabs,
     savingFiles,
     selectedDiff,
@@ -418,6 +430,14 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
         {taskPR && activeSessionId && (
           <TabsContent value="pr" className="flex-1 min-h-0" data-testid="pr-detail-panel">
             <PRDetailContent taskPR={taskPR} sessionId={activeSessionId} />
+          </TabsContent>
+        )}
+        {!taskPR && taskMR && activeSessionId && (
+          <TabsContent value="pr" className="flex-1 min-h-0" data-testid="mr-detail-panel">
+            <MRDetailPanelComponent
+              panelId="task-center-mr"
+              params={{ mrKey: mrTaskKey(taskMR) }}
+            />
           </TabsContent>
         )}
         {openFileTabs.map((tab) => (

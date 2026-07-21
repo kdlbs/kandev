@@ -24,6 +24,7 @@ type mockAgentManager struct {
 	stopAgentWithReasonFunc          func(ctx context.Context, agentExecutionID string, reason string, force bool) error
 	resolveAgentProfileFunc          func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
+	setExecutionEnvFunc              func(ctx context.Context, agentExecutionID string, env map[string]string) error
 	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
 	isAgentCommandConfiguredFunc     func(agentExecutionID string) bool
 	isAgentRunningForSessionFunc     func(ctx context.Context, sessionID string) bool
@@ -65,8 +66,10 @@ func (m *mockAgentManager) SetExecutionDescription(ctx context.Context, agentExe
 	}
 	return nil
 }
-
-func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[string]string) error {
+func (m *mockAgentManager) SetExecutionEnv(ctx context.Context, executionID string, env map[string]string) error {
+	if m.setExecutionEnvFunc != nil {
+		return m.setExecutionEnvFunc(ctx, executionID, env)
+	}
 	return nil
 }
 
@@ -952,7 +955,7 @@ func (m *mockRepository) ListRepositoryScripts(ctx context.Context, repositoryID
 func (m *mockRepository) ListScriptsByRepositoryIDs(_ context.Context, _ []string) (map[string][]*models.RepositoryScript, error) {
 	return make(map[string][]*models.RepositoryScript), nil
 }
-func (m *mockRepository) GetRepositoryByProviderInfo(_ context.Context, _, _, _, _ string) (*models.Repository, error) {
+func (m *mockRepository) GetRepositoryByProviderInfo(_ context.Context, _, _, _, _, _ string) (*models.Repository, error) {
 	return nil, nil
 }
 

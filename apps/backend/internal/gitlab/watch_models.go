@@ -83,11 +83,18 @@ type ReviewWatch struct {
 	AgentProfileID      string          `json:"agent_profile_id" db:"agent_profile_id"`
 	ExecutorProfileID   string          `json:"executor_profile_id" db:"executor_profile_id"`
 	Prompt              string          `json:"prompt" db:"prompt"`
+	RepositoryID        string          `json:"repository_id,omitempty" db:"repository_id"`
+	BaseBranch          string          `json:"base_branch,omitempty" db:"base_branch"`
 	ReviewScope         string          `json:"review_scope" db:"review_scope"`
 	CustomQuery         string          `json:"custom_query" db:"custom_query"`
 	Enabled             bool            `json:"enabled" db:"enabled"`
 	PollIntervalSeconds int             `json:"poll_interval_seconds" db:"poll_interval_seconds"`
 	CleanupPolicy       string          `json:"cleanup_policy" db:"cleanup_policy"`
+	MaxInflightTasks    *int            `json:"max_inflight_tasks,omitempty" db:"max_inflight_tasks"`
+	Generation          int64           `json:"-" db:"generation"`
+	Deleting            bool            `json:"-" db:"deleting"`
+	LastError           string          `json:"last_error,omitempty" db:"last_error"`
+	LastErrorAt         *time.Time      `json:"last_error_at,omitempty" db:"last_error_at"`
 	LastPolledAt        *time.Time      `json:"last_polled_at,omitempty" db:"last_polled_at"`
 	CreatedAt           time.Time       `json:"created_at" db:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at" db:"updated_at"`
@@ -101,6 +108,7 @@ type ReviewMRTask struct {
 	MRIID         int       `json:"mr_iid" db:"mr_iid"`
 	MRURL         string    `json:"mr_url" db:"mr_url"`
 	TaskID        string    `json:"task_id" db:"task_id"`
+	Generation    int64     `json:"-" db:"generation"`
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
 }
 
@@ -115,12 +123,19 @@ type IssueWatch struct {
 	AgentProfileID      string          `json:"agent_profile_id" db:"agent_profile_id"`
 	ExecutorProfileID   string          `json:"executor_profile_id" db:"executor_profile_id"`
 	Prompt              string          `json:"prompt" db:"prompt"`
+	RepositoryID        string          `json:"repository_id,omitempty" db:"repository_id"`
+	BaseBranch          string          `json:"base_branch,omitempty" db:"base_branch"`
 	Labels              []string        `json:"labels" db:"-"`
 	LabelsJSON          string          `json:"-" db:"labels"`
 	CustomQuery         string          `json:"custom_query" db:"custom_query"`
 	Enabled             bool            `json:"enabled" db:"enabled"`
 	PollIntervalSeconds int             `json:"poll_interval_seconds" db:"poll_interval_seconds"`
 	CleanupPolicy       string          `json:"cleanup_policy" db:"cleanup_policy"`
+	MaxInflightTasks    *int            `json:"max_inflight_tasks,omitempty" db:"max_inflight_tasks"`
+	Generation          int64           `json:"-" db:"generation"`
+	Deleting            bool            `json:"-" db:"deleting"`
+	LastError           string          `json:"last_error,omitempty" db:"last_error"`
+	LastErrorAt         *time.Time      `json:"last_error_at,omitempty" db:"last_error_at"`
 	LastPolledAt        *time.Time      `json:"last_polled_at,omitempty" db:"last_polled_at"`
 	CreatedAt           time.Time       `json:"created_at" db:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at" db:"updated_at"`
@@ -134,6 +149,7 @@ type IssueWatchTask struct {
 	IssueIID     int       `json:"issue_iid" db:"issue_iid"`
 	IssueURL     string    `json:"issue_url" db:"issue_url"`
 	TaskID       string    `json:"task_id" db:"task_id"`
+	Generation   int64     `json:"-" db:"generation"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 }
 
@@ -146,10 +162,13 @@ type CreateReviewWatchRequest struct {
 	AgentProfileID      string          `json:"agent_profile_id"`
 	ExecutorProfileID   string          `json:"executor_profile_id"`
 	Prompt              string          `json:"prompt"`
+	RepositoryID        string          `json:"repository_id"`
+	BaseBranch          string          `json:"base_branch"`
 	ReviewScope         string          `json:"review_scope"`
 	CustomQuery         string          `json:"custom_query"`
 	PollIntervalSeconds int             `json:"poll_interval_seconds"`
 	CleanupPolicy       string          `json:"cleanup_policy"`
+	MaxInflightTasks    *int            `json:"max_inflight_tasks,omitempty"`
 }
 
 // UpdateReviewWatchRequest is the request body for updating a review watch.
@@ -160,11 +179,16 @@ type UpdateReviewWatchRequest struct {
 	AgentProfileID      *string          `json:"agent_profile_id,omitempty"`
 	ExecutorProfileID   *string          `json:"executor_profile_id,omitempty"`
 	Prompt              *string          `json:"prompt,omitempty"`
+	RepositoryID        *string          `json:"repository_id,omitempty"`
+	BaseBranch          *string          `json:"base_branch,omitempty"`
 	ReviewScope         *string          `json:"review_scope,omitempty"`
 	CustomQuery         *string          `json:"custom_query,omitempty"`
 	Enabled             *bool            `json:"enabled,omitempty"`
 	PollIntervalSeconds *int             `json:"poll_interval_seconds,omitempty"`
 	CleanupPolicy       *string          `json:"cleanup_policy,omitempty"`
+	// MaxInflightTasks updates the cap; zero explicitly clears it, while an
+	// omitted field leaves the existing cap unchanged.
+	MaxInflightTasks *int `json:"max_inflight_tasks,omitempty"`
 }
 
 // CreateIssueWatchRequest is the request body for creating an issue watch.
@@ -176,10 +200,13 @@ type CreateIssueWatchRequest struct {
 	AgentProfileID      string          `json:"agent_profile_id"`
 	ExecutorProfileID   string          `json:"executor_profile_id"`
 	Prompt              string          `json:"prompt"`
+	RepositoryID        string          `json:"repository_id"`
+	BaseBranch          string          `json:"base_branch"`
 	Labels              []string        `json:"labels"`
 	CustomQuery         string          `json:"custom_query"`
 	PollIntervalSeconds int             `json:"poll_interval_seconds"`
 	CleanupPolicy       string          `json:"cleanup_policy"`
+	MaxInflightTasks    *int            `json:"max_inflight_tasks,omitempty"`
 }
 
 // UpdateIssueWatchRequest is the request body for updating an issue watch.
@@ -190,11 +217,16 @@ type UpdateIssueWatchRequest struct {
 	AgentProfileID      *string          `json:"agent_profile_id,omitempty"`
 	ExecutorProfileID   *string          `json:"executor_profile_id,omitempty"`
 	Prompt              *string          `json:"prompt,omitempty"`
+	RepositoryID        *string          `json:"repository_id,omitempty"`
+	BaseBranch          *string          `json:"base_branch,omitempty"`
 	Labels              *[]string        `json:"labels,omitempty"`
 	CustomQuery         *string          `json:"custom_query,omitempty"`
 	Enabled             *bool            `json:"enabled,omitempty"`
 	PollIntervalSeconds *int             `json:"poll_interval_seconds,omitempty"`
 	CleanupPolicy       *string          `json:"cleanup_policy,omitempty"`
+	// MaxInflightTasks updates the cap; zero explicitly clears it, while an
+	// omitted field leaves the existing cap unchanged.
+	MaxInflightTasks *int `json:"max_inflight_tasks,omitempty"`
 }
 
 // MRFeedbackEvent is published when an MR has new feedback (new discussion,
@@ -213,24 +245,32 @@ type MRFeedbackEvent struct {
 // review watch and a task has been auto-created.
 type NewReviewMREvent struct {
 	ReviewWatchID     string `json:"review_watch_id"`
+	WatchGeneration   int64  `json:"watch_generation"`
 	WorkspaceID       string `json:"workspace_id"`
 	WorkflowID        string `json:"workflow_id"`
 	WorkflowStepID    string `json:"workflow_step_id"`
 	AgentProfileID    string `json:"agent_profile_id"`
 	ExecutorProfileID string `json:"executor_profile_id"`
 	Prompt            string `json:"prompt"`
+	RepositoryID      string `json:"repository_id,omitempty"`
+	BaseBranch        string `json:"base_branch,omitempty"`
+	MaxInflightTasks  *int   `json:"max_inflight_tasks,omitempty"`
 	MR                *MR    `json:"mr"`
 }
 
 // NewIssueEvent is published when a new issue matching a watch is found.
 type NewIssueEvent struct {
 	IssueWatchID      string `json:"issue_watch_id"`
+	WatchGeneration   int64  `json:"watch_generation"`
 	WorkspaceID       string `json:"workspace_id"`
 	WorkflowID        string `json:"workflow_id"`
 	WorkflowStepID    string `json:"workflow_step_id"`
 	AgentProfileID    string `json:"agent_profile_id"`
 	ExecutorProfileID string `json:"executor_profile_id"`
 	Prompt            string `json:"prompt"`
+	RepositoryID      string `json:"repository_id,omitempty"`
+	BaseBranch        string `json:"base_branch,omitempty"`
+	MaxInflightTasks  *int   `json:"max_inflight_tasks,omitempty"`
 	Issue             *Issue `json:"issue"`
 }
 

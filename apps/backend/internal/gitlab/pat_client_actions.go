@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 )
@@ -178,4 +179,91 @@ func (c *PATClient) SetMRAssignees(ctx context.Context, projectPath string, iid 
 		return fmt.Errorf("set MR assignees: %w", err)
 	}
 	return nil
+}
+
+func (c *PATClient) ListProjectMembers(ctx context.Context, projectPath, query string) ([]ProjectMember, error) {
+	endpoint := fmt.Sprintf("/projects/%s/members/all?per_page=100", projectRef(projectPath))
+	if strings.TrimSpace(query) != "" {
+		endpoint += "&query=" + url.QueryEscape(query)
+	}
+	var raw []struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username"`
+		Name      string `json:"name"`
+		AvatarURL string `json:"avatar_url"`
+		State     string `json:"state"`
+	}
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("list project members: %w", err)
+	}
+	members := make([]ProjectMember, 0, len(raw))
+	for _, member := range raw {
+		if member.State != "" && member.State != "active" {
+			continue
+		}
+		members = append(members, ProjectMember{
+			ID:        member.ID,
+			Username:  member.Username,
+			Name:      member.Name,
+			AvatarURL: member.AvatarURL,
+		})
+	}
+	return members, nil
+}
+
+func (c *PATClient) SetMRReviewers(ctx context.Context, projectPath string, iid int, reviewerIDs []int64) error {
+	if reviewerIDs == nil {
+		reviewerIDs = []int64{}
+	}
+	body, err := json.Marshal(map[string][]int64{"reviewer_ids": reviewerIDs})
+	if err != nil {
+		return fmt.Errorf("encode set-reviewers payload: %w", err)
+	}
+	endpoint := fmt.Sprintf("/projects/%s/merge_requests/%d", projectRef(projectPath), iid)
+	if err := c.doWrite(ctx, http.MethodPut, endpoint, body, nil); err != nil {
+		return fmt.Errorf("set MR reviewers: %w", err)
+	}
+	return nil
+}
+
+func (c *PATClient) GetMRSubscription(ctx context.Context, projectPath string, iid int) (*SubscriptionState, error) {
+	return c.getSubscription(ctx, projectPath, "merge_requests", iid)
+}
+
+func (c *PATClient) SetMRSubscription(ctx context.Context, projectPath string, iid int, subscribed bool) (*SubscriptionState, error) {
+	return c.setSubscription(ctx, projectPath, "merge_requests", iid, subscribed)
+}
+
+func (c *PATClient) GetIssueSubscription(ctx context.Context, projectPath string, iid int) (*SubscriptionState, error) {
+	return c.getSubscription(ctx, projectPath, "issues", iid)
+}
+
+func (c *PATClient) SetIssueSubscription(ctx context.Context, projectPath string, iid int, subscribed bool) (*SubscriptionState, error) {
+	return c.setSubscription(ctx, projectPath, "issues", iid, subscribed)
+}
+
+func (c *PATClient) getSubscription(ctx context.Context, projectPath, resource string, iid int) (*SubscriptionState, error) {
+	endpoint := fmt.Sprintf("/projects/%s/%s/%d", projectRef(projectPath), resource, iid)
+	var state SubscriptionState
+	if err := c.get(ctx, endpoint, &state); err != nil {
+		return nil, fmt.Errorf("get %s subscription: %w", resource, err)
+	}
+	return &state, nil
+}
+
+func (c *PATClient) setSubscription(ctx context.Context, projectPath, resource string, iid int, subscribed bool) (*SubscriptionState, error) {
+	action := "unsubscribe"
+	if subscribed {
+		action = "subscribe"
+	}
+	endpoint := fmt.Sprintf("/projects/%s/%s/%d/%s", projectRef(projectPath), resource, iid, action)
+	var state SubscriptionState
+	status, err := c.doWriteWithStatus(ctx, http.MethodPost, endpoint, nil, &state)
+	if status == http.StatusNotModified {
+		return &SubscriptionState{Subscribed: subscribed}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s to %s notifications: %w", action, resource, err)
+	}
+	return &state, nil
 }

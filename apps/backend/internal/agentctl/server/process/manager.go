@@ -681,6 +681,7 @@ func (m *Manager) GitOperator() *GitOperator {
 
 	if m.gitOperator == nil {
 		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.workspaceTracker)
+		m.gitOperator.setEnvironmentProvider(m.gitEnvironment)
 	}
 	return m.gitOperator
 }
@@ -710,8 +711,15 @@ func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
 		return op, nil
 	}
 	op := NewGitOperatorForRepo(full, cleaned, m.logger, m.workspaceTracker)
+	op.setEnvironmentProvider(m.gitEnvironment)
 	m.gitOperatorsBySubpath[cleaned] = op
 	return op, nil
+}
+
+func (m *Manager) gitEnvironment() []string {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+	return append([]string(nil), m.cfg.AgentEnv...)
 }
 
 // resolveSubpath normalises and validates a repo subpath relative to

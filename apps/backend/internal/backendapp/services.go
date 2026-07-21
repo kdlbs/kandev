@@ -378,9 +378,15 @@ func initGitLabService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 	}
 	if svc != nil {
 		svc.SetSecretManager(adapter)
+		svc.SetWorkspaceSecretStore(secretadapter.New(secretsStore))
 		svc.SetEventBus(eventBus)
 		if store, storeErr := gitlab.NewStore(dbPool.Writer(), dbPool.Reader()); storeErr == nil {
 			svc.SetStore(store)
+			if migrationErr := gitlab.MigrateLegacyConnection(
+				context.Background(), store, secretadapter.New(secretsStore), adapter, adapter, hostStore, log,
+			); migrationErr != nil {
+				log.Warn("GitLab legacy connection migration failed (non-fatal)", zap.Error(migrationErr))
+			}
 		} else {
 			log.Warn("GitLab task-mr store unavailable (non-fatal)", zap.Error(storeErr))
 		}

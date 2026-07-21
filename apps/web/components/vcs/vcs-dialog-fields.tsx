@@ -6,6 +6,9 @@ import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import type { getChangeRequestTerminology } from "@/hooks/use-git-operations";
+
+type ChangeRequestTerminology = ReturnType<typeof getChangeRequestTerminology>;
 
 type GenerateButtonProps = {
   onClick: () => void;
@@ -103,19 +106,21 @@ export function PRTitleField({
   onGenerateTitle,
   isGeneratingTitle,
   isUtilityConfigured,
+  terminology,
 }: {
   prTitle: string;
   onPrTitleChange: (v: string) => void;
   onGenerateTitle: () => void;
   isGeneratingTitle: boolean;
   isUtilityConfigured: boolean;
+  terminology: ChangeRequestTerminology;
 }) {
   return (
     <div className="relative min-w-0">
       <Input
         id="vcs-pr-title"
-        aria-label="Pull request title"
-        placeholder="Pull request title..."
+        aria-label={`${terminology.longName} title`}
+        placeholder={`${terminology.longName} title...`}
         value={prTitle}
         onChange={(e) => onPrTitleChange(e.target.value)}
         className="pr-10"
@@ -125,7 +130,7 @@ export function PRTitleField({
         <GenerateButton
           onClick={onGenerateTitle}
           isGenerating={isGeneratingTitle}
-          tooltip="Generate PR title with AI"
+          tooltip={`Generate ${terminology.shortName} title with AI`}
           isConfigured={isUtilityConfigured}
         />
       </div>
@@ -139,12 +144,14 @@ export function PRDescriptionField({
   onGenerateDescription,
   isGeneratingDescription,
   isUtilityConfigured,
+  terminology,
 }: {
   prBody: string;
   onPrBodyChange: (v: string) => void;
   onGenerateDescription: () => void;
   isGeneratingDescription: boolean;
   isUtilityConfigured: boolean;
+  terminology: ChangeRequestTerminology;
 }) {
   return (
     <div className="space-y-2">
@@ -164,7 +171,7 @@ export function PRDescriptionField({
           <GenerateButton
             onClick={onGenerateDescription}
             isGenerating={isGeneratingDescription}
-            tooltip="Generate PR description with AI"
+            tooltip={`Generate ${terminology.shortName} description with AI`}
             isConfigured={isUtilityConfigured}
           />
         </div>
@@ -176,24 +183,40 @@ export function PRDescriptionField({
 export function PRBranchSummary({
   displayBranch,
   baseBranch,
+  terminology,
 }: {
   displayBranch?: string | null;
   baseBranch?: string;
+  terminology: ChangeRequestTerminology;
 }) {
   if (!displayBranch) return null;
   return (
     <div className="text-sm text-muted-foreground">
       {baseBranch ? (
         <span>
-          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>
+          Creating {terminology.shortName} from{" "}
+          <span className="font-medium text-foreground">{displayBranch}</span>
           {" → "}
           <span className="font-medium text-foreground">{baseBranch}</span>
         </span>
       ) : (
         <span>
-          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>
+          Creating {terminology.shortName} from{" "}
+          <span className="font-medium text-foreground">{displayBranch}</span>
         </span>
       )}
+    </div>
+  );
+}
+
+export function ChangeRequestPartialStatus({
+  terminology,
+}: {
+  terminology: ChangeRequestTerminology;
+}) {
+  return (
+    <div role="status" className="border-l-2 border-amber-500 bg-amber-500/10 px-3 py-2 text-sm">
+      Branch was pushed; retry {terminology.longName.toLowerCase()} creation.
     </div>
   );
 }
