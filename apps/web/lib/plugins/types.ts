@@ -74,9 +74,15 @@ export interface PluginRouteOptions {
  * "task-sidebar", "settings-nav", "main-nav-footer", "chat-input-actions"
  * (icon buttons in the chat composer toolbar, beside the model picker / mic /
  * send — receives `{ taskId, taskTitle, activeSessionId, sessionIds }` as
- * `slotProps`), and "chat-top-bar" (status in the session top bar, beside the
+ * `slotProps`), "chat-top-bar" (status in the session top bar, beside the
  * CPU/DB metrics — receives `{ taskId, taskTitle, workspaceId, activeSessionId,
- * sessionIds }`). Not a closed union — hosts may register additional slot names.
+ * sessionIds }`), and "plugin-settings" (inline UI on a plugin's own settings
+ * page, Settings > Plugins > <plugin>, between the settings form and the
+ * manifest card — receives `{ pluginId: string; status: PluginStatus }` as
+ * `slotProps`). Because "plugin-settings" renders on *every* plugin's detail
+ * page, a registered component must early-return `null` unless
+ * `slotProps.pluginId` matches its own plugin id. Not a closed union — hosts
+ * may register additional slot names.
  */
 export type PluginSlotName = string;
 

@@ -5,6 +5,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
+import { PluginSlot } from "@/components/plugins/plugin-slot";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
@@ -54,6 +55,17 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
       <Separator />
 
       <PluginSettingsCard plugin={plugin} form={form} busy={actions.busyId === plugin.id} />
+      {/*
+       * Inline injection point for the plugin's own settings UI (e.g. a live
+       * integration/health card). Renders every component registered for the
+       * "plugin-settings" slot on *every* plugin's detail page, so we forward
+       * the current plugin's id/status — a registered component must gate on
+       * `slotProps.pluginId === "<its own id>"` (see PLUGIN-API.md).
+       */}
+      <PluginSlot
+        name="plugin-settings"
+        slotProps={{ pluginId: plugin.id, status: plugin.status }}
+      />
       <PluginManifestCard plugin={plugin} />
 
       <PluginDangerZone plugin={plugin} actions={actions} />

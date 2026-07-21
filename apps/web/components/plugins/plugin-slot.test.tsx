@@ -56,6 +56,37 @@ describe("PluginSlot", () => {
     expect(screen.getByTestId("slot-a").textContent).toBe("hello");
   });
 
+  it("renders the plugin-settings slot and forwards slotProps.pluginId to gate per plugin", () => {
+    // The "plugin-settings" slot renders on every plugin's detail page, so a
+    // registered component early-returns unless slotProps.pluginId is its own id.
+    const ProviderUsageCard = ({ slotProps }: { slotProps?: unknown }) => {
+      const { pluginId } = (slotProps as { pluginId: string }) ?? { pluginId: "" };
+      if (pluginId !== "provider-usage") return null;
+      return <div data-testid="provider-usage-card">status card for {pluginId}</div>;
+    };
+    pluginRegistry.forPlugin("plugin-a").registerComponent("plugin-settings", ProviderUsageCard);
+
+    // Viewing a different plugin's page: the card gates itself out.
+    const { rerender } = render(
+      <PluginSlot
+        name="plugin-settings"
+        slotProps={{ pluginId: "other-plugin", status: "active" }}
+      />,
+    );
+    expect(screen.queryByTestId("provider-usage-card")).toBeNull();
+
+    // Viewing its own plugin's page: the card renders with the forwarded id.
+    rerender(
+      <PluginSlot
+        name="plugin-settings"
+        slotProps={{ pluginId: "provider-usage", status: "active" }}
+      />,
+    );
+    expect(screen.getByTestId("provider-usage-card").textContent).toBe(
+      "status card for provider-usage",
+    );
+  });
+
   it("isolates a throwing slot component so a sibling still renders", () => {
     // eslint-disable-next-line no-console -- expected error boundary log, assert + silence it
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});

@@ -123,7 +123,8 @@ interface PluginRegistry {
 
   // Named slot injection. Host renders all components registered for a slot via
   // <PluginSlot name="..." props={...}/>. Initial slots: "task-sidebar",
-  // "settings-nav", "main-nav-footer", "chat-input-actions", "chat-top-bar".
+  // "settings-nav", "main-nav-footer", "chat-input-actions", "chat-top-bar",
+  // "plugin-settings".
   // "chat-input-actions" renders icon buttons in the chat composer toolbar
   // (beside the model picker, mic, and send) and forwards
   // `{ taskId, taskTitle, activeSessionId, sessionIds }` as `slotProps`.
@@ -134,6 +135,13 @@ interface PluginRegistry {
   // Resolving a session id to an agent/ACP transcript id (e.g. to key
   // tokscale cost data on a session) is the plugin's job, done server-side in
   // the plugin backend via the Host data API; the host only propagates ids.
+  // "plugin-settings" renders inline on a plugin's own settings page
+  // (Settings > Plugins > <plugin>, between the schema-driven settings form and
+  // the manifest card) and forwards `{ pluginId: string, status: PluginStatus }`
+  // as `slotProps`. This slot renders on *every* plugin's detail page, so a
+  // registered component MUST early-return null unless
+  // `slotProps.pluginId === "<its own plugin id>"` — otherwise plugin A's card
+  // would show on plugin B's settings page.
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
 
   // WS action handler. Bridged into the existing lib/ws dispatch; called with the
