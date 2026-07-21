@@ -59,4 +59,62 @@ test.describe("Create task Remote repo picker on mobile", () => {
       { timeout: 10_000 },
     );
   });
+
+  test("selects an Azure DevOps repository from the unified picker", async ({
+    apiClient,
+    seedData,
+    testPage,
+  }) => {
+    await apiClient.mockAzureDevOpsSeed({
+      authenticated: true,
+      projects: [{ id: "project-1", name: "Platform", url: "https://dev.azure.com/acme/Platform" }],
+      repositories: [
+        {
+          id: "azure-repo-1",
+          name: "api",
+          projectId: "project-1",
+          projectName: "Platform",
+          defaultBranch: "refs/heads/main",
+          webUrl: "https://dev.azure.com/acme/Platform/_git/api",
+        },
+      ],
+    });
+    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
+      organizationUrl: "https://dev.azure.com/acme",
+      pat: "azure-test-pat",
+    });
+
+    await openRemotePicker(testPage);
+    const providerTabs = testPage.getByTestId("remote-repo-provider-tabs");
+    await expect(providerTabs).toBeVisible();
+    await expect(providerTabs.getByRole("tab", { name: "GitHub" })).toBeVisible();
+    const azureTab = providerTabs.getByRole("tab", { name: "Azure DevOps" });
+    await expect(azureTab).toBeVisible();
+    await testPage.getByTestId("remote-repo-popover-content").evaluate(async (element) => {
+      await Promise.all(
+        element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
+    const azureTabBox = await azureTab.boundingBox();
+    expect(azureTabBox).not.toBeNull();
+    expect(azureTabBox!.height).toBeGreaterThanOrEqual(44);
+    const tabOverflow = await providerTabs.evaluate((element) => ({
+      overflowY: getComputedStyle(element).overflowY,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
+    expect(tabOverflow.overflowY).toBe("hidden");
+    expect(tabOverflow.scrollHeight).toBeLessThanOrEqual(tabOverflow.clientHeight);
+    await azureTab.click();
+    const option = testPage.getByTestId("remote-repo-option").filter({ hasText: "Platform/api" });
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click();
+    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
+      "Platform/api",
+    );
+    const hasHorizontalOverflow = await testPage.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(hasHorizontalOverflow).toBe(false);
+  });
 });

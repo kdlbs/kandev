@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  invalidateIntegrationAvailability,
+  subscribeIntegrationAvailability,
+} from "@/lib/integrations/integration-availability-events";
+
+export { invalidateIntegrationAvailability };
 
 // The backend poller probes credentials roughly every 90s. Refreshing at the
 // same cadence keeps the UI no more than ~one cycle stale.
@@ -53,9 +59,11 @@ export function useIntegrationAuthed(
     }
     void refresh();
     const id = setInterval(() => void refresh(), refreshMs);
+    const unsubscribe = subscribeIntegrationAvailability(() => void refresh());
     return () => {
       cancelled = true;
       clearInterval(id);
+      unsubscribe();
     };
   }, [active, fetchConfig, refreshMs]);
   return authed;

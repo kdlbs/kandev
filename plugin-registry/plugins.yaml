@@ -26,6 +26,9 @@ plugins:
   - id: kandev-session-cost
     repo: kdlbs/kandev-plugin-session-cost
     categories: [analytics]
+  - id: kandev-provider-usage
+    repo: kdlbs/kandev-plugin-provider-usage
+    categories: [analytics]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:

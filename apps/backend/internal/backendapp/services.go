@@ -16,6 +16,7 @@ import (
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/automation"
+	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -110,6 +111,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		}
 	}
 	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
+	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
+	if azureDevOpsSvc != nil {
+		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
+	}
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
@@ -148,6 +153,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Workflow:     workflowSvc,
 		GitHub:       githubSvc,
 		GitLab:       gitlabSvc,
+		AzureDevOps:  azureDevOpsSvc,
 		Jira:         jiraSvc,
 		Linear:       linearSvc,
 		Sentry:       sentrySvc,
@@ -491,6 +497,24 @@ func initJiraService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secret
 	svc, _, err := jira.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
 	if err != nil {
 		log.Warn("JIRA service initialization failed (non-fatal)", zap.Error(err))
+	}
+	return svc
+}
+
+// initAzureDevOpsService wires the workspace-scoped Azure integration.
+// Failures are non-fatal so unrelated providers and the backend keep working.
+func initAzureDevOpsService(
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) *azuredevops.Service {
+	svc, _, err := azuredevops.Provide(
+		dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log,
+	)
+	if err != nil {
+		log.Warn("Azure DevOps service initialization failed (non-fatal)", zap.Error(err))
+		return nil
 	}
 	return svc
 }

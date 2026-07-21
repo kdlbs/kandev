@@ -75,6 +75,21 @@ func TestWorkspaceRepoPathRejectsTraversal(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRepoPathSupportsNestedProviderOwner(t *testing.T) {
+	t.Parallel()
+
+	basePath := t.TempDir()
+	cloner := NewCloner(Config{BasePath: basePath}, ProtocolHTTPS, "", logger.Default())
+	path, err := cloner.WorkspaceRepoPath("workspace-a", "gitlab", "group/subgroup", "repository")
+	if err != nil {
+		t.Fatalf("WorkspaceRepoPath() unexpected error: %v", err)
+	}
+	want := filepath.Join(basePath, "workspaces", "workspace-a", "gitlab", "group", "subgroup", "repository")
+	if path != want {
+		t.Fatalf("WorkspaceRepoPath() = %q, want %q", path, want)
+	}
+}
+
 func TestEnsureWorkspaceClonedUsesSelectedCredentialWithoutAmbientFallback(t *testing.T) {
 	root := t.TempDir()
 	binDir := filepath.Join(root, "bin")
@@ -166,6 +181,22 @@ func TestEnsureWorkspaceClonedRequiresExplicitGitHubCredential(t *testing.T) {
 	)
 	if !errors.Is(err, ErrWorkspaceCredentialUnavailable) {
 		t.Fatalf("EnsureWorkspaceCloned() error = %v, want credential unavailable", err)
+	}
+}
+
+func TestWorkspaceCloneAuthPreservesNonGitHubURL(t *testing.T) {
+	t.Parallel()
+
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolSSH, "", logger.Default())
+	want := "git@ssh.dev.azure.com:v3/acme/Platform/api"
+	got, auth, err := cloner.workspaceCloneAuth(
+		context.Background(), "workspace-a", "azure_devops", want, "Platform", "api",
+	)
+	if err != nil {
+		t.Fatalf("workspaceCloneAuth() unexpected error: %v", err)
+	}
+	if got != want || auth != nil {
+		t.Fatalf("workspaceCloneAuth() = (%q, %#v), want (%q, nil)", got, auth, want)
 	}
 }
 

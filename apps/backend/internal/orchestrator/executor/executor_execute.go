@@ -490,6 +490,9 @@ const providerGitHub = "github"
 // repos with a real remote (or a file:// remote, used by Docker E2E tests)
 // participate in remote executors that clone inside the container/sandbox.
 func repositoryCloneURL(repo *models.Repository) string {
+	if strings.TrimSpace(repo.RemoteURL) != "" {
+		return strings.TrimSpace(repo.RemoteURL)
+	}
 	if repo.ProviderOwner != "" && repo.ProviderName != "" {
 		var host string
 		switch strings.ToLower(repo.Provider) {

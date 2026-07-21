@@ -291,6 +291,7 @@ func (r *Repository) initTaskSchema() error {
 		provider_repo_id TEXT DEFAULT '',
 		provider_owner TEXT DEFAULT '',
 		provider_name TEXT DEFAULT '',
+		remote_url TEXT DEFAULT '',
 		default_branch TEXT DEFAULT '',
 		worktree_branch_prefix TEXT DEFAULT 'feature/',
 		worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}',

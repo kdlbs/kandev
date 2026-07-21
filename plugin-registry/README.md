@@ -30,8 +30,10 @@ Each plugin lives in its **own** public GitHub repository, named
 `owner/name`). Every plugin repo publishes its package as a GitHub **Release**
 asset in the standard Kandev package format:
 
-- `<id>-<version>.tar.gz` — the plugin package, and
-- `checksums.txt` — the integrity manifest the install pipeline verifies.
+- `<id>-<version>.tar.gz` — the required plugin package. The archive contains
+  its own generated `checksums.txt`, which the install pipeline verifies.
+- `checksums.txt` — an optional release asset containing the tarball digest.
+  The catalog does not currently populate or enforce it.
 
 The `kdlbs/kandev-plugin-template` starter repo is the recommended way to
 bootstrap a new plugin with the right layout and a release workflow.
@@ -43,8 +45,10 @@ usage telemetry** — there is no "most installed" metric, by design.
 ## Submitting a plugin to the official catalog
 
 1. **Publish your plugin.** Push it to a public GitHub repository and cut a
-   GitHub **Release** whose assets include `<id>-<version>.tar.gz` and
-   `checksums.txt`. The release must pass the standard package integrity gate.
+   GitHub **Release** whose assets include `<id>-<version>.tar.gz`. A separate
+   release-level `checksums.txt` is optional; the package's internal generated
+   checksum manifest is mandatory. The release must pass the standard package
+   integrity gate.
 2. **Fork this repo** (`kdlbs/kandev`).
 3. **Add one entry** to `plugin-registry/plugins.yaml` pointing at your public
    repo:
@@ -60,11 +64,11 @@ usage telemetry** — there is no "most installed" metric, by design.
    should be left out of submissions.
 4. **Open a pull request.** The index-build workflow runs on your PR (build +
    tests, no Pages deploy) and resolves your entry against the GitHub API — your
-   repo must have a latest release that publishes a `.tar.gz` package and its
-   `checksums.txt`; an entry whose repo has no release or no package is skipped.
-   Name the package `<id>-<version>.tar.gz` and keep your entry `id` equal to
-   your manifest `id` so the index resolves the right asset. `plugins.yaml` must
-   also follow the `schema.json` pointer-list contract.
+   repo must have a latest release that publishes a `.tar.gz` package; an entry
+   whose repo has no release or no package is skipped. Name the package
+   `<id>-<version>.tar.gz` and keep your entry `id` equal to your manifest `id`
+   so the index resolves the right asset. `plugins.yaml` must also follow the
+   `schema.json` pointer-list contract.
 5. **A maintainer reviews and merges** — maintainer approval is what gates the
    official catalog. Once merged, the index-build workflow picks up your entry
    and your plugin appears in the in-app catalog on the next build.

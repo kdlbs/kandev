@@ -3,7 +3,7 @@
 import Link from "@/components/routing/app-link";
 import { IconChevronRight } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { SIDEBAR_ITEM_ACTIVE, SIDEBAR_ITEM_INACTIVE } from "../../app-sidebar-constants";
@@ -14,9 +14,10 @@ const INACTIVE_CLASS = SIDEBAR_ITEM_INACTIVE;
 type SettingsLeafProps = {
   href: string;
   label: string;
-  icon?: TablerIcon;
+  icon?: ComponentType<{ className?: string }>;
   /** Pre-rendered leading visual (e.g. AgentLogo). Takes precedence over `icon`. */
   leadingIcon?: ReactNode;
+  labelSuffix?: ReactNode;
   isActive: boolean;
   /** Nesting level — used to add left padding. */
   depth?: number;
@@ -38,6 +39,7 @@ export function SettingsLeaf({
   label,
   icon: Icon,
   leadingIcon,
+  labelSuffix,
   isActive,
   depth = 0,
 }: SettingsLeafProps) {
@@ -53,6 +55,7 @@ export function SettingsLeaf({
     >
       {leadingIcon ?? (Icon && <Icon className="h-3.5 w-3.5 shrink-0" />)}
       <span className="flex-1 truncate">{label}</span>
+      {labelSuffix}
     </Link>
   );
 }

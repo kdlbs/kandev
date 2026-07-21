@@ -11,27 +11,34 @@ import type {
   MRSearchPage,
   IssueSearchPage,
 } from "@/lib/types/gitlab";
+import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
 export async function fetchGitLabStatus(options?: ApiRequestOptions) {
   return fetchJson<GitLabStatus>("/api/v1/gitlab/status", options);
 }
 
 export async function configureGitLabToken(token: string) {
-  return fetchJson<GitLabConfigureTokenResponse>("/api/v1/gitlab/token", {
-    init: { method: "POST", body: JSON.stringify({ token }) },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<GitLabConfigureTokenResponse>("/api/v1/gitlab/token", {
+      init: { method: "POST", body: JSON.stringify({ token }) },
+    }),
+  );
 }
 
 export async function clearGitLabToken() {
-  return fetchJson<GitLabClearTokenResponse>("/api/v1/gitlab/token", {
-    init: { method: "DELETE" },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<GitLabClearTokenResponse>("/api/v1/gitlab/token", {
+      init: { method: "DELETE" },
+    }),
+  );
 }
 
 export async function configureGitLabHost(host: string) {
-  return fetchJson<GitLabConfigureHostResponse>("/api/v1/gitlab/host", {
-    init: { method: "POST", body: JSON.stringify({ host }) },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<GitLabConfigureHostResponse>("/api/v1/gitlab/host", {
+      init: { method: "POST", body: JSON.stringify({ host }) },
+    }),
+  );
 }
 
 /** List every MR association for tasks in a workspace, grouped by task ID. */
@@ -268,11 +275,12 @@ export async function searchProjects(query: string) {
   );
 }
 
-export async function listProjectBranches(project: string) {
+export async function listProjectBranches(project: string, options?: ApiRequestOptions) {
   const qs = new URLSearchParams();
   qs.set("project", project);
   return fetchJson<{ branches: GitLabRepoBranch[] }>(
     `/api/v1/gitlab/projects/branches?${qs.toString()}`,
+    options,
   );
 }
 

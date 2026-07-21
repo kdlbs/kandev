@@ -50,7 +50,7 @@ func (m *Manager) Refresh(ctx context.Context, agentType string) (AgentCapabilit
 		})
 		return AgentCapabilities{}, err
 	}
-	caps := m.probe(ctx, inst, ia)
+	caps := m.probe(ctx, inst, ia, true)
 	m.cache.set(caps)
 	return caps, nil
 }

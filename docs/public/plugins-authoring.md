@@ -109,6 +109,16 @@ Embed `pluginsdk.UnimplementedPlugin` and override only the methods you need
 live `Host` into your plugin once the broker connection back to kandev is
 established (retrieve it later via `p.Host()`).
 
+## Webhooks
+
+Declare each webhook key in `manifest.yaml`. Kandev relays `GET` and `POST`
+requests for `/api/plugins/<id>/webhooks/<key>` to `HandleWebhook`; undeclared
+keys return `404`. Request bodies are limited to **4 MiB** and requests that
+exceed the limit return `413` before reaching the plugin. Kandev does not
+authenticate webhook callers or enforce the manifest's informational `method`,
+so validate the HTTP method and the upstream provider's signature before any
+side effect.
+
 ## The Host API
 
 A plugin calls back into kandev through the injected `Host`:
@@ -523,9 +533,10 @@ field](plugins-manifest.md#field-reference) at its package-relative path.
 ## Publishing to the marketplace
 
 To make your plugin discoverable and one-click installable from inside kandev,
-publish the `<id>-<version>.tar.gz` + `checksums.txt` as a GitHub **Release**
-asset and either open a PR listing your repo in the official catalog or host
-your own source. See [Plugin marketplace →
+publish the `<id>-<version>.tar.gz` as a GitHub **Release** asset and either
+open a PR listing your repo in the official catalog or host your own source. A
+separate release-level `checksums.txt` is optional; the checksum manifest inside
+the package is mandatory. See [Plugin marketplace →
 Publishing](plugins-marketplace.md#publishing-a-plugin).
 
 ## Iterate loop

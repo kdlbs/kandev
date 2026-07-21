@@ -30,6 +30,7 @@ import type {
   TaskCIAutomationOptions,
   TaskCIAutomationPatch,
 } from "@/lib/types/github";
+import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
 export * from "./github-auth-api";
 export * from "./github-pr-api";
@@ -37,19 +38,23 @@ export * from "./github-pr-api";
 // Token configuration
 export async function configureGitHubToken(workspaceId: string, token: string) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
-  return fetchJson<{ configured: boolean }>(`/api/v1/github/token?${query}`, {
-    init: {
-      method: "POST",
-      body: JSON.stringify({ token }),
-    },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<{ configured: boolean }>(`/api/v1/github/token?${query}`, {
+      init: {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      },
+    }),
+  );
 }
 
 export async function clearGitHubToken(workspaceId: string) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
-  return fetchJson<{ cleared: boolean }>(`/api/v1/github/token?${query}`, {
-    init: { method: "DELETE" },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<{ cleared: boolean }>(`/api/v1/github/token?${query}`, {
+      init: { method: "DELETE" },
+    }),
+  );
 }
 
 // Task PR associations

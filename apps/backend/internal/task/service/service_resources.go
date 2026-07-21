@@ -617,6 +617,7 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		ProviderRepoID:         req.ProviderRepoID,
 		ProviderOwner:          req.ProviderOwner,
 		ProviderName:           req.ProviderName,
+		RemoteURL:              req.RemoteURL,
 		DefaultBranch:          req.DefaultBranch,
 		WorktreeBranchPrefix:   prefix,
 		WorktreeBranchTemplate: template,
@@ -693,6 +694,14 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 			existing.DefaultBranch = req.DefaultBranch
 			dirty = true
 		}
+		if existing.RemoteURL == "" && req.RemoteURL != "" {
+			existing.RemoteURL = req.RemoteURL
+			dirty = true
+		}
+		if existing.ProviderRepoID == "" && req.ProviderRepoID != "" {
+			existing.ProviderRepoID = req.ProviderRepoID
+			dirty = true
+		}
 		if dirty {
 			if updateErr := s.repoEntities.UpdateRepository(ctx, existing); updateErr != nil {
 				s.logger.Warn("failed to backfill repository fields",
@@ -704,14 +713,16 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 
 	name := fmt.Sprintf("%s/%s", req.ProviderOwner, req.ProviderName)
 	created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
-		WorkspaceID:   req.WorkspaceID,
-		Name:          name,
-		SourceType:    sourceTypeProvider,
-		LocalPath:     req.LocalPath,
-		Provider:      req.Provider,
-		ProviderOwner: req.ProviderOwner,
-		ProviderName:  req.ProviderName,
-		DefaultBranch: req.DefaultBranch,
+		WorkspaceID:    req.WorkspaceID,
+		Name:           name,
+		SourceType:     sourceTypeProvider,
+		LocalPath:      req.LocalPath,
+		Provider:       req.Provider,
+		ProviderRepoID: req.ProviderRepoID,
+		ProviderOwner:  req.ProviderOwner,
+		ProviderName:   req.ProviderName,
+		RemoteURL:      req.RemoteURL,
+		DefaultBranch:  req.DefaultBranch,
 	})
 	if createErr != nil {
 		return nil, false, createErr

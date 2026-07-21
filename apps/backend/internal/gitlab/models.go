@@ -149,6 +149,8 @@ type Project struct {
 	Path              string `json:"path"`
 	Name              string `json:"name"`
 	Visibility        string `json:"visibility"` // private, internal, public
+	WebURL            string `json:"web_url"`
+	DefaultBranch     string `json:"default_branch"`
 }
 
 // Group represents a GitLab group the authenticated user belongs to.

@@ -60,6 +60,10 @@ type ProbeRequest struct {
 	// AgentID is the agent to probe (e.g., "claude-acp", "codex-acp").
 	AgentID string `json:"agent_id" binding:"required"`
 
+	// Refresh asks agent-specific discovery fallbacks to invalidate their own
+	// model caches. ACP session discovery itself always starts a fresh process.
+	Refresh bool `json:"refresh,omitempty"`
+
 	// InferenceConfig is the agent's inference configuration.
 	// Command and WorkDir are required; Model is intentionally omitted for probes.
 	InferenceConfig *InferenceConfigDTO `json:"inference_config,omitempty"`

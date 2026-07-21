@@ -19,6 +19,10 @@ vi.mock("@/components/github/pr-status-chip", () => ({
   PRStatusChip: () => null,
 }));
 
+vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => ({
+  AzureDevOpsTaskPullRequestChip: () => null,
+}));
+
 vi.mock("@/components/task/share/share-button", () => ({
   ShareButton: () => null,
   shareableSessionStateClient: () => false,

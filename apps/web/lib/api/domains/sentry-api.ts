@@ -14,6 +14,7 @@ import type {
   UpdateSentryConfigRequest,
   UpdateSentryIssueWatchRequest,
 } from "@/lib/types/sentry";
+import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
 const BASE = "/api/v1/sentry";
 
@@ -94,10 +95,12 @@ export async function createSentryInstance(
   payload: CreateSentryConfigRequest,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<SentryConfig>(withParams(`${BASE}/instances`, { workspace_id: workspaceId }), {
-    ...options,
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<SentryConfig>(withParams(`${BASE}/instances`, { workspace_id: workspaceId }), {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+    }),
+  );
 }
 
 // updateSentryInstance replaces an instance's name/url/auth (and, when a
@@ -108,12 +111,14 @@ export async function updateSentryInstance(
   payload: UpdateSentryConfigRequest,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<SentryConfig>(
-    withParams(`${BASE}/instances/${encodeURIComponent(id)}`, { workspace_id: workspaceId }),
-    {
-      ...options,
-      init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
-    },
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<SentryConfig>(
+      withParams(`${BASE}/instances/${encodeURIComponent(id)}`, { workspace_id: workspaceId }),
+      {
+        ...options,
+        init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
+      },
+    ),
   );
 }
 
@@ -124,12 +129,14 @@ export async function deleteSentryInstance(
   id: string,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<{ deleted: boolean }>(
-    withParams(`${BASE}/instances/${encodeURIComponent(id)}`, { workspace_id: workspaceId }),
-    {
-      ...options,
-      init: { ...(options?.init ?? {}), method: "DELETE" },
-    },
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<{ deleted: boolean }>(
+      withParams(`${BASE}/instances/${encodeURIComponent(id)}`, { workspace_id: workspaceId }),
+      {
+        ...options,
+        init: { ...(options?.init ?? {}), method: "DELETE" },
+      },
+    ),
   );
 }
 

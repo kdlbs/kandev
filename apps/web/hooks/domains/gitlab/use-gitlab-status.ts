@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { fetchGitLabStatus } from "@/lib/api/domains/gitlab-api";
 import { useAppStore } from "@/components/state-provider";
+import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 
 /**
  * useGitLabStatus subscribes the slice to the latest GitLab connection status.
@@ -30,7 +31,7 @@ export function useGitLabStatus() {
       .finally(() => setStatusLoading(false));
   }, [loading, loadedAt, setStatus, setStatusLoading]);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setStatusLoading(true);
     try {
       const res = await fetchGitLabStatus({ cache: "no-store" });
@@ -40,7 +41,9 @@ export function useGitLabStatus() {
     } finally {
       setStatusLoading(false);
     }
-  };
+  }, [setStatus, setStatusLoading]);
+
+  useEffect(() => subscribeIntegrationAvailability(() => void refresh()), [refresh]);
 
   return { status, loading, refresh };
 }

@@ -4,6 +4,7 @@ import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/automation"
+	"github.com/kandev/kandev/internal/azuredevops"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	"github.com/kandev/kandev/internal/github"
@@ -63,6 +64,7 @@ type Services struct {
 	Workflow     *workflowservice.Service
 	GitHub       *github.Service
 	GitLab       *gitlab.Service
+	AzureDevOps  *azuredevops.Service
 	Jira         *jira.Service
 	Linear       *linear.Service
 	Sentry       *sentry.Service

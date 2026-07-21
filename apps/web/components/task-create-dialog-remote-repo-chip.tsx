@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "@/components/routing/app-link";
-import { IconBrandGithub, IconGitBranch, IconLink, IconX } from "@tabler/icons-react";
+import {
+  IconBrandGithub,
+  IconBrandGitlab,
+  IconGitBranch,
+  IconLink,
+  IconX,
+} from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Branch } from "@/lib/types/http";
 import { Badge } from "@kandev/ui/badge";
@@ -16,11 +22,19 @@ import {
   sortBranches,
 } from "@/components/task-create-dialog-pill";
 import { scoreBranch } from "@/lib/utils/branch-filter";
-import type { UseAccessibleReposResult } from "@/hooks/domains/github/use-accessible-repos";
-import type { AccessibleRepo } from "@/lib/api/domains/github-api";
+import type {
+  RemoteRepository,
+  RemoteRepositoryProvider,
+  UseRemoteRepositoriesResult,
+} from "@/hooks/domains/integrations/use-remote-repositories";
+import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import { parseGitHubAnyUrl, type PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
+import {
+  RemoteRepositoryProviderIcon,
+  RemoteRepoProviderTabs,
+} from "@/components/task-create-dialog-remote-repo-provider-tabs";
 
 const TRUNCATE_THRESHOLD = 30;
 
@@ -60,14 +74,17 @@ export type RemoteRepoChipProps = {
    * that's acceptable because in practice only one popover is open at a
    * time.
    */
-  accessibleRepos: UseAccessibleReposResult;
+  accessibleRepos: UseRemoteRepositoriesResult;
   onURLChange: (
     url: string,
     source: "picker" | "paste",
     metadata?: {
-      provider: "github" | "gitlab";
+      provider: "github" | "gitlab" | "azure_devops";
       fullName: string;
       defaultBranch: string;
+      providerRepoId?: string;
+      providerOwner?: string;
+      providerName?: string;
     },
   ) => void;
   onBranchChange: (branch: string) => void;
@@ -195,7 +212,7 @@ function RemoteRepoPill({
   onURLChange,
 }: {
   row: TaskRemoteRepoRow;
-  accessibleRepos: UseAccessibleReposResult;
+  accessibleRepos: UseRemoteRepositoriesResult;
   onURLChange: RemoteRepoChipProps["onURLChange"];
 }) {
   const [open, setOpen] = useState(false);
@@ -227,10 +244,13 @@ function RemoteRepoPill({
         <RemoteRepoPopoverContent
           accessible={accessibleRepos}
           onPick={(repo) => {
-            onURLChange(`https://github.com/${repo.owner}/${repo.name}`, "picker", {
-              provider: "github",
-              fullName: repo.full_name,
-              defaultBranch: repo.default_branch,
+            onURLChange(repo.url, "picker", {
+              provider: repo.provider,
+              fullName: repo.fullName,
+              defaultBranch: repo.defaultBranch,
+              providerRepoId: repo.id,
+              providerOwner: repo.owner,
+              providerName: repo.name,
             });
             setOpen(false);
           }}
@@ -247,6 +267,12 @@ function RemoteRepoPill({
 function RepoTriggerIcon({ row }: { row: TaskRemoteRepoRow }) {
   if (row.source === "picker" && row.provider === "github") {
     return <IconBrandGithub className="h-3 w-3 shrink-0 text-muted-foreground" />;
+  }
+  if (row.source === "picker" && row.provider === "gitlab") {
+    return <IconBrandGitlab className="h-3 w-3 shrink-0 text-muted-foreground" />;
+  }
+  if (row.source === "picker" && row.provider === "azure_devops") {
+    return <AzureDevOpsIcon className="h-3 w-3 shrink-0 text-muted-foreground" />;
   }
   return <IconLink className="h-3 w-3 shrink-0 text-muted-foreground" />;
 }
@@ -274,12 +300,13 @@ function RemoteRepoPopoverContent({
   onPick,
   onPaste,
 }: {
-  accessible: UseAccessibleReposResult;
-  onPick: (repo: AccessibleRepo) => void;
+  accessible: UseRemoteRepositoriesResult;
+  onPick: (repo: RemoteRepository) => void;
   onPaste: (value: string) => void;
 }) {
   const [value, setValue] = useState("");
   const [urlError, setUrlError] = useState<string | null>(null);
+  const [activeProvider, setActiveProvider] = useState<RemoteRepositoryProvider | null>(null);
   const { search: triggerSearch } = accessible;
   useEffect(() => {
     triggerSearch(value);
@@ -287,9 +314,9 @@ function RemoteRepoPopoverContent({
 
   const commitURL = (candidate: string) => {
     const trimmed = candidate.trim();
-    if (!parseGitHubAnyUrl(trimmed)) {
+    if (!parseGitHubAnyUrl(trimmed) && !looksLikeSupportedRemoteURL(trimmed)) {
       if (looksLikeURL(trimmed)) {
-        setUrlError("Enter a GitHub repository URL, such as github.com/owner/repo.");
+        setUrlError("Enter a GitHub, GitLab, or Azure DevOps repository URL.");
       }
       return false;
     }
@@ -298,6 +325,14 @@ function RemoteRepoPopoverContent({
     return true;
   };
   const visibleUrlError = accessible.unavailable ? null : urlError;
+  const showProviderTabs = accessible.availableProviders.length > 1;
+  const selectedProvider =
+    activeProvider && accessible.availableProviders.includes(activeProvider)
+      ? activeProvider
+      : accessible.availableProviders[0];
+  const visibleRepos = showProviderTabs
+    ? accessible.repos.filter((repo) => repo.provider === selectedProvider)
+    : accessible.repos;
 
   return (
     <div className="flex flex-col">
@@ -336,8 +371,8 @@ function RemoteRepoPopoverContent({
           const isURL = looksLikeURL(value.trim());
           if (commitURL(value) || isURL) event.preventDefault();
         }}
-        placeholder="Search repositories or paste a GitHub URL"
-        aria-label="Search repositories or paste a GitHub URL"
+        placeholder="Search repositories or paste a remote URL"
+        aria-label="Search repositories or paste a remote URL"
         aria-invalid={visibleUrlError ? true : undefined}
         data-testid="remote-repo-input"
         data-legacy-testid="remote-paste-url-input"
@@ -347,7 +382,18 @@ function RemoteRepoPopoverContent({
           visibleUrlError && "border-destructive focus:border-destructive",
         )}
       />
-      <PickerList accessible={accessible} onPick={onPick} urlError={visibleUrlError} />
+      <PickerList
+        accessible={{ ...accessible, repos: visibleRepos }}
+        onPick={onPick}
+        urlError={visibleUrlError}
+      />
+      {showProviderTabs && selectedProvider ? (
+        <RemoteRepoProviderTabs
+          providers={accessible.availableProviders}
+          value={selectedProvider}
+          onChange={setActiveProvider}
+        />
+      ) : null}
     </div>
   );
 }
@@ -363,13 +409,25 @@ function looksLikeURL(value: string): boolean {
   }
 }
 
+function looksLikeSupportedRemoteURL(value: string): boolean {
+  if (/^git@(github\.com|gitlab\.com|ssh\.dev\.azure\.com):\S+$/i.test(value)) return true;
+  if (!looksLikeURL(value)) return false;
+  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
+  try {
+    const host = new URL(candidate).hostname.toLowerCase();
+    return host === "github.com" || host === "gitlab.com" || host === "dev.azure.com";
+  } catch {
+    return false;
+  }
+}
+
 function PickerList({
   accessible,
   onPick,
   urlError,
 }: {
-  accessible: UseAccessibleReposResult;
-  onPick: (repo: AccessibleRepo) => void;
+  accessible: UseRemoteRepositoriesResult;
+  onPick: (repo: RemoteRepository) => void;
   urlError: string | null;
 }) {
   const { repos, loading, error } = accessible;
@@ -380,7 +438,7 @@ function PickerList({
           {urlError}
         </div>
       ) : null}
-      {accessible.unavailable ? <ConnectGitHubBanner /> : null}
+      {accessible.unavailable ? <ConnectProvidersBanner /> : null}
       {!accessible.unavailable && loading && repos.length === 0 ? (
         <div
           className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
@@ -399,7 +457,7 @@ function PickerList({
         </div>
       ) : null}
       {repos.map((repo) => (
-        <RepoOption key={repo.full_name} repo={repo} onPick={onPick} />
+        <RepoOption key={`${repo.provider}:${repo.id}`} repo={repo} onPick={onPick} />
       ))}
     </div>
   );
@@ -409,8 +467,8 @@ function RepoOption({
   repo,
   onPick,
 }: {
-  repo: AccessibleRepo;
-  onPick: (repo: AccessibleRepo) => void;
+  repo: RemoteRepository;
+  onPick: (repo: RemoteRepository) => void;
 }) {
   return (
     <button
@@ -422,7 +480,10 @@ function RepoOption({
         "hover:bg-muted cursor-pointer text-left",
       )}
     >
-      <span className="truncate min-w-0">{repo.full_name}</span>
+      <span className="flex min-w-0 items-center gap-2">
+        <RemoteRepositoryProviderIcon provider={repo.provider} />
+        <span className="truncate">{repo.fullName}</span>
+      </span>
       {repo.private ? (
         <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
           private
@@ -432,12 +493,12 @@ function RepoOption({
   );
 }
 
-function ConnectGitHubBanner() {
+function ConnectProvidersBanner() {
   return (
     <div className="px-3 py-3 text-xs text-muted-foreground">
-      Connect a GitHub account in{" "}
+      Connect a source control provider in{" "}
       <Link
-        href="/settings/integrations/github"
+        href="/settings/integrations"
         className="text-foreground underline underline-offset-2 cursor-pointer"
       >
         Settings
@@ -502,7 +563,7 @@ function computeRemoteBranchDisabledReason(
   branchesLoading: boolean,
   optionCount: number,
 ): string | undefined {
-  if (!hasUrl) return "Enter a GitHub URL first.";
+  if (!hasUrl) return "Select or enter a remote repository first.";
   // If a branch is already set the pill is enabled; no disabled reason needed.
   if (hasBranch) return undefined;
   if (branchesLoading) return "Loading branches…";

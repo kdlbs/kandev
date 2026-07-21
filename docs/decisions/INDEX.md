@@ -60,3 +60,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0047 | [Separate GitHub deployment, workspace automation, and personal identities](0047-github-authentication-ownership.md)                | accepted   | backend, frontend, security | 2026-07-19 |
 | 2026-07-20-managed-github-app-registration | [Manage Self-Hosted GitHub App Registration at Runtime](2026-07-20-managed-github-app-registration.md) | accepted | backend, frontend, security | 2026-07-20 |
 | 2026-07-20-explicit-local-repository-trust | [Explicit Local Repository Trust](2026-07-20-explicit-local-repository-trust.md) | accepted | backend, frontend | 2026-07-20 |
+| 2026-07-20-provider-neutral-remote-repositories | [Provider-neutral remote repositories](2026-07-20-provider-neutral-remote-repositories.md) | accepted | backend, frontend, protocol | 2026-07-20 |

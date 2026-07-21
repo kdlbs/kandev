@@ -2278,6 +2278,14 @@ func TestRepositoryCloneURL(t *testing.T) {
 		want string
 	}{
 		{
+			name: "stored remote URL takes precedence",
+			repo: &models.Repository{
+				Provider: "azure_devops", ProviderOwner: "Platform", ProviderName: "api",
+				RemoteURL: "https://dev.azure.com/acme/Platform/_git/api",
+			},
+			want: "https://dev.azure.com/acme/Platform/_git/api",
+		},
+		{
 			name: "github repo",
 			repo: &models.Repository{Provider: "github", ProviderOwner: "acme", ProviderName: "app"},
 			want: "https://github.com/acme/app.git",
@@ -2324,6 +2332,80 @@ func TestRepositoryCloneURL(t *testing.T) {
 				t.Errorf("repositoryCloneURL() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+type recordingAuthenticatedCloner struct {
+	normalCalls int
+	authCalls   int
+	workspaceID string
+	provider    string
+	password    string
+}
+
+func (c *recordingAuthenticatedCloner) EnsureWorkspaceCloned(
+	_ context.Context, workspaceID, provider, _, _, _ string,
+) (string, error) {
+	c.normalCalls++
+	c.workspaceID = workspaceID
+	c.provider = provider
+	return "/repos/normal", nil
+}
+
+func (c *recordingAuthenticatedCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
+
+func (c *recordingAuthenticatedCloner) BuildCloneURL(_, _, _ string) (string, error) {
+	return "", nil
+}
+
+func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedWithBasicAuth(
+	_ context.Context, workspaceID, provider, _, _, _, _, password string,
+) (string, error) {
+	c.authCalls++
+	c.workspaceID = workspaceID
+	c.provider = provider
+	c.password = password
+	return "/repos/azure", nil
+}
+
+func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
+	t.Parallel()
+	cloner := &recordingAuthenticatedCloner{}
+	exec := &Executor{
+		repoCloner: cloner,
+		secretStore: &mockSecretStore{secrets: map[string]string{
+			"azure_devops:workspace-1:pat": "workspace-pat",
+		}},
+	}
+	azure := &models.Repository{
+		WorkspaceID: "workspace-1", Provider: "azure_devops", ProviderOwner: "Platform", ProviderName: "api",
+	}
+	path, err := exec.ensureClonedWithWorkspaceAuth(
+		context.Background(), azure, "https://dev.azure.com/acme/Platform/_git/api",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/repos/azure" || cloner.authCalls != 1 || cloner.workspaceID != "workspace-1" ||
+		cloner.provider != "azure_devops" || cloner.password != "workspace-pat" {
+		t.Fatalf("authenticated clone was not used with workspace credential: %+v", cloner)
+	}
+
+	github := &models.Repository{
+		WorkspaceID: "workspace-2", Provider: "github", ProviderOwner: "acme", ProviderName: "api",
+	}
+	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), github, "https://github.com/acme/api.git"); err != nil {
+		t.Fatal(err)
+	}
+	azureSSH := "git@ssh.dev.azure.com:v3/acme/Platform/api"
+	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), azure, azureSSH); err != nil {
+		t.Fatal(err)
+	}
+	if cloner.normalCalls != 2 || cloner.authCalls != 1 {
+		t.Fatalf("non-Azure-HTTPS providers must use ordinary cloning: %+v", cloner)
+	}
+	if cloner.workspaceID != "workspace-1" || cloner.provider != "azure_devops" {
+		t.Fatalf("ordinary clone did not preserve workspace/provider isolation: %+v", cloner)
 	}
 }
 

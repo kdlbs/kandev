@@ -3,6 +3,7 @@ package repoclone
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -106,19 +107,34 @@ func (c *Cloner) WorkspaceRepoPath(workspaceID, provider, owner, name string) (s
 	if provider == "" {
 		provider = githubProvider
 	}
-	segments := []string{workspaceID, provider, owner, name}
+	segments := []string{workspaceID, provider, name}
 	for _, segment := range segments {
 		if err := validatePathSegment(segment); err != nil {
 			return "", err
 		}
 	}
-	return filepath.Join(basePath, managedWorkspacesDir, workspaceID, provider, owner, name), nil
+	if err := validateOwnerPath(owner); err != nil {
+		return "", err
+	}
+	return filepath.Join(basePath, managedWorkspacesDir, workspaceID, provider, filepath.FromSlash(owner), name), nil
 }
 
 func validatePathSegment(segment string) error {
 	if segment == "" || segment == "." || segment == ".." || filepath.Clean(segment) != segment ||
 		strings.ContainsAny(segment, `/\\`) {
 		return fmt.Errorf("invalid managed clone path segment %q", segment)
+	}
+	return nil
+}
+
+func validateOwnerPath(owner string) error {
+	if strings.Contains(owner, `\`) {
+		return fmt.Errorf("invalid managed clone owner path %q", owner)
+	}
+	for _, segment := range strings.Split(owner, "/") {
+		if err := validatePathSegment(segment); err != nil {
+			return fmt.Errorf("invalid managed clone owner path %q: %w", owner, err)
+		}
 	}
 	return nil
 }
@@ -158,9 +174,9 @@ func pathWithin(root, path string) (bool, error) {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)), nil
 }
 
-// EnsureWorkspaceCloned clones or fetches a repository using only the
-// workspace's configured automation identity. Managed GitHub clones never use
-// the host's gh session, global git credential helpers, or SSH agent.
+// EnsureWorkspaceCloned clones or fetches a repository into its workspace-
+// isolated path. Managed GitHub clones use only the workspace's configured
+// automation identity, never the host's gh session or ambient Git credentials.
 func (c *Cloner) EnsureWorkspaceCloned(
 	ctx context.Context,
 	workspaceID, provider, cloneURL, owner, name string,
@@ -201,12 +217,12 @@ func (c *Cloner) workspaceCloneAuth(
 	if provider == "" {
 		provider = githubProvider
 	}
+	if provider != githubProvider {
+		return cloneURL, nil, nil
+	}
 	httpsURL, err := CloneURL(provider, owner, name, ProtocolHTTPS)
 	if err != nil {
 		return "", nil, err
-	}
-	if provider != githubProvider {
-		return httpsURL, nil, nil
 	}
 	if c.credentials == nil {
 		return "", nil, ErrWorkspaceCredentialUnavailable
@@ -266,6 +282,80 @@ func (c *Cloner) gitCmd(ctx context.Context, auth *cloneAuth, args ...string) *e
 	}
 	cmd.Env = env
 	return cmd
+}
+
+// EnsureWorkspaceClonedWithBasicAuth clones or fetches a repository into its
+// workspace-isolated path using an ephemeral HTTP Authorization header.
+func (c *Cloner) EnsureWorkspaceClonedWithBasicAuth(
+	ctx context.Context,
+	workspaceID, provider, cloneURL, owner, name, username, password string,
+) (string, error) {
+	targetPath, err := c.WorkspaceRepoPath(workspaceID, provider, owner, name)
+	if err != nil {
+		return "", err
+	}
+
+	mu := c.repoMu(targetPath)
+	mu.Lock()
+	defer mu.Unlock()
+
+	header := "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+	gitDir := filepath.Join(targetPath, ".git")
+	if info, statErr := os.Stat(gitDir); statErr == nil && info.IsDir() {
+		c.fetchWithHTTPHeader(ctx, targetPath, cloneURL, header)
+		return targetPath, nil
+	}
+	return targetPath, c.cloneWithHTTPHeader(ctx, cloneURL, targetPath, header)
+}
+
+func (c *Cloner) gitCmdWithHTTPHeader(
+	ctx context.Context, authURL, header string, args ...string,
+) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	env := withoutEnv(os.Environ(),
+		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", gitHubCredentialEnv, gitHubCredentialUserEnv,
+		"GIT_ASKPASS", "SSH_ASKPASS", "GIT_SSH", "GIT_SSH_COMMAND",
+		"GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",
+	)
+	env = append(env,
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=credential.helper",
+		"GIT_CONFIG_VALUE_0=",
+		"GIT_CONFIG_KEY_1=http."+authURL+".extraHeader",
+		"GIT_CONFIG_VALUE_1="+header,
+	)
+	cmd.Env = env
+	return cmd
+}
+
+func (c *Cloner) fetchWithHTTPHeader(ctx context.Context, repoPath, authURL, header string) {
+	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
+	cmd := c.gitCmdWithHTTPHeader(
+		ctx, authURL, header, "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags,
+	)
+	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
+		c.logger.Warn("authenticated git fetch failed (non-fatal)",
+			zap.String("path", repoPath),
+			zap.String("output", string(out)),
+			zap.Error(err))
+	}
+}
+
+func (c *Cloner) cloneWithHTTPHeader(ctx context.Context, cloneURL, targetPath, header string) error {
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return fmt.Errorf("create parent directory: %w", err)
+	}
+	c.logger.Info("cloning authenticated repository", zap.String("url", cloneURL), zap.String("target", targetPath))
+	cmd := c.gitCmdWithHTTPHeader(
+		ctx, cloneURL, header, "clone", "--filter=blob:none", gitNoTags, cloneURL, targetPath,
+	)
+	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
+		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
+	}
+	return nil
 }
 
 func withoutEnv(env []string, keys ...string) []string {

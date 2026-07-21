@@ -4,6 +4,7 @@ import { useCallback, useEffect } from "react";
 import { fetchGitHubStatus } from "@/lib/api/domains/github-api";
 import { useAppStore } from "@/components/state-provider";
 import type { GitHubStatus, GitHubStatusResponse } from "@/lib/types/github";
+import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 
 export function normalizeGitHubStatus(response: GitHubStatusResponse): GitHubStatus {
   const automation = response.automation ?? null;
@@ -60,6 +61,8 @@ export function useGitHubStatus(requestedWorkspaceId?: string | null) {
     statusState.workspaceId,
     workspaceId,
   ]);
+
+  useEffect(() => subscribeIntegrationAvailability(doFetch), [doFetch]);
 
   const refresh = useCallback(() => {
     invalidateSystemHealth();

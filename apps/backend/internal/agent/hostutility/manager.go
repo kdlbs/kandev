@@ -297,7 +297,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	m.instances[agentType] = inst
 	m.mu.Unlock()
 
-	caps := m.probe(ctx, inst, ia)
+	caps := m.probe(ctx, inst, ia, false)
 	m.cache.set(caps)
 	log.Info("host utility bootstrap completed",
 		zap.String("status", string(caps.Status)),
@@ -522,42 +522,22 @@ const probeTimeout = 60 * time.Second
 
 // probe runs an ACP probe against the given instance and translates the result
 // into an AgentCapabilities record suitable for the cache.
-func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.InferenceAgent) AgentCapabilities {
+func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.InferenceAgent, refresh bool) AgentCapabilities {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	cfg := ia.InferenceConfig()
-	req := &agentctlutil.ProbeRequest{
-		AgentID: inst.agentType,
-		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command:   cfg.Command.Args(),
-			ModelFlag: cfg.ModelFlag.Args(),
-			WorkDir:   inst.workDir,
-			StripEnv:  agents.StripEnvFor(ia),
-		},
-	}
+	req := buildProbeRequest(inst, ia, refresh)
 	resp, err := inst.client.Probe(probeCtx, req)
 	now := time.Now()
 	if err != nil {
-		return AgentCapabilities{
-			AgentType:     inst.agentType,
-			Status:        StatusFailed,
-			Error:         err.Error(),
-			LastCheckedAt: now,
-		}
+		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, now)
 	}
 	if !resp.Success {
 		status := StatusFailed
 		if isAuthError(resp.Error) {
 			status = StatusAuthRequired
 		}
-		return AgentCapabilities{
-			AgentType:     inst.agentType,
-			Status:        status,
-			Error:         resp.Error,
-			DurationMs:    resp.DurationMs,
-			LastCheckedAt: now,
-		}
+		return probeFailureCapabilities(inst.agentType, status, resp.Error, resp.DurationMs, now)
 	}
 	caps := AgentCapabilities{
 		AgentType:       inst.agentType,
@@ -614,6 +594,40 @@ func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.Inference
 		caps.Commands = append(caps.Commands, Command{Name: c.Name, Description: c.Description})
 	}
 	return caps
+}
+
+func buildProbeRequest(
+	inst *instance,
+	ia agents.InferenceAgent,
+	refresh bool,
+) *agentctlutil.ProbeRequest {
+	cfg := ia.InferenceConfig()
+	return &agentctlutil.ProbeRequest{
+		AgentID: inst.agentType,
+		Refresh: refresh,
+		InferenceConfig: &agentctlutil.InferenceConfigDTO{
+			Command:   cfg.Command.Args(),
+			ModelFlag: cfg.ModelFlag.Args(),
+			WorkDir:   inst.workDir,
+			StripEnv:  agents.StripEnvFor(ia),
+		},
+	}
+}
+
+func probeFailureCapabilities(
+	agentType string,
+	status Status,
+	errorMessage string,
+	durationMs int,
+	checkedAt time.Time,
+) AgentCapabilities {
+	return AgentCapabilities{
+		AgentType:     agentType,
+		Status:        status,
+		Error:         errorMessage,
+		DurationMs:    durationMs,
+		LastCheckedAt: checkedAt,
+	}
 }
 
 // isAuthError is a coarse heuristic — ACP auth failures bubble up as string

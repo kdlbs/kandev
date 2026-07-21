@@ -49,6 +49,8 @@ type rawProject struct {
 	Name              string `json:"name"`
 	PathWithNamespace string `json:"path_with_namespace"`
 	Visibility        string `json:"visibility"`
+	WebURL            string `json:"web_url"`
+	DefaultBranch     string `json:"default_branch"`
 	Namespace         struct {
 		FullPath string `json:"full_path"`
 	} `json:"namespace"`
@@ -208,6 +210,8 @@ func convertRawProject(raw *rawProject) Project {
 		Path:              raw.Path,
 		Name:              raw.Name,
 		Visibility:        raw.Visibility,
+		WebURL:            raw.WebURL,
+		DefaultBranch:     raw.DefaultBranch,
 	}
 }
 

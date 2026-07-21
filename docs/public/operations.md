@@ -73,6 +73,19 @@ Database snapshots do not contain Git worktrees, clones, the master key, service
 
 The supported SQLite layout for the System database and restore pages is the derived `<home>/data/kandev.db`. `database.path` can point the persistence layer elsewhere, but the current System page still derives its displayed path, WAL path, and restore destination from `<home>/data/kandev.db`. Treat a custom SQLite path as operator-managed: back it up and restore it with SQLite-aware tooling while Kandev is stopped.
 
+## Storage maintenance
+
+Open **Settings > System > Storage** to inspect Kandev-managed disk usage and configure cleanup.
+**Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
+while task resources are active or another maintenance run owns the cleanup gate.
+
+Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
+period. Orphaned task workspaces move into Kandev's quarantine before permanent deletion; review
+the quarantine list to restore an entry or request deletion as a background job. Host-wide Docker
+build-cache and unused-image cleanup remain disabled until you confirm that Kandev owns a dedicated
+Docker daemon.
+Do not enable those rules on a daemon shared with unrelated workloads.
+
 ## Database operation
 
 ### SQLite

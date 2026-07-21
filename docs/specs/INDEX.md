@@ -83,6 +83,7 @@ Per-workspace credentials and triage triggers for external services.
 
 | Spec | Status |
 |---|---|
+| [azure-devops-integration](azure-devops-integration/spec.md) | shipped |
 | [slack](integrations/slack.md) | shipped |
 | [external-mcp](integrations/external-mcp.md) | draft |
 | [github-authentication](integrations/github-authentication.md) | draft |

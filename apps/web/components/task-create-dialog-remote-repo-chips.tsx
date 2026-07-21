@@ -9,7 +9,7 @@ import {
   RemoteRepoChip,
   type RemoteRepoChipProps,
 } from "@/components/task-create-dialog-remote-repo-chip";
-import { useAccessibleRepos } from "@/hooks/domains/github/use-accessible-repos";
+import { useRemoteRepositories } from "@/hooks/domains/integrations/use-remote-repositories";
 
 /**
  * Chip row for the Remote tab. Renders one `RemoteRepoChip` per row in
@@ -41,8 +41,8 @@ export function RemoteRepoChipsRow({
   // out of the parent cache objects so the effect deps array doesn't churn
   // every render: `fs.branchesByUrl` / `fs.prInfoByUrl` themselves are new
   // object refs each render (they wrap hook results), but the underlying
-  // `ensure` callbacks are stable (`useCallback(..., [])`). Both calls are
-  // internally idempotent so re-firing on unrelated re-renders is cheap.
+  // `ensure` callbacks are stable until their workspace context changes. Both calls are
+  // internally idempotent so re-firing after a workspace change is cheap.
   // PR-info is a no-op for plain repo URLs.
   const { ensure: ensureBranches } = fs.branchesByUrl;
   const { ensure: ensurePRInfo } = fs.prInfoByUrl;
@@ -61,7 +61,7 @@ export function RemoteRepoChipsRow({
   // popover doesn't reset another), at the cost of the shared cache: if
   // two popovers are open with different searches, both see the latest
   // search's results. In practice only one popover is open at a time.
-  const accessibleRepos = useAccessibleRepos(workspaceId);
+  const accessibleRepos = useRemoteRepositories(workspaceId ?? "");
 
   const rows = fs.remoteRepos;
   return (
@@ -103,6 +103,9 @@ function makeURLChange(
         source,
         provider: metadata.provider,
         fullName: metadata.fullName,
+        providerRepoId: metadata.providerRepoId,
+        providerOwner: metadata.providerOwner,
+        providerName: metadata.providerName,
         branch: metadata.defaultBranch ?? "",
       });
       return;
@@ -112,6 +115,9 @@ function makeURLChange(
       source,
       provider: undefined,
       fullName: undefined,
+      providerRepoId: undefined,
+      providerOwner: undefined,
+      providerName: undefined,
       branch: "",
     });
   };
