@@ -108,7 +108,7 @@ export function SettingsTree({ pathname }: { pathname: string }) {
         icon={IconPlugConnected}
         isActive={pathname === EXT_MCP_HREF}
       />
-      <SystemGroup pathname={pathname} {...groupProps("system")} />
+      <PluginSlot name="settings-nav" />
       {pluginsEnabled && (
         <SettingsLeaf
           href={PLUGINS_HREF}
@@ -117,7 +117,7 @@ export function SettingsTree({ pathname }: { pathname: string }) {
           isActive={pathname === PLUGINS_HREF}
         />
       )}
-      <PluginSlot name="settings-nav" />
+      <SystemGroup pathname={pathname} {...groupProps("system")} />
     </>
   );
 }
