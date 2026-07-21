@@ -232,7 +232,9 @@ describe("getStreamingAgentMessageId", () => {
         message("status", "agent", "status"),
       ]),
     ).toBe("reply");
-    expect(getStreamingAgentMessageId([message("old-reply", "agent")])).toBeNull();
+    expect(getStreamingAgentMessageId([message("auto-started-reply", "agent")])).toBe(
+      "auto-started-reply",
+    );
   });
 });
 

@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { floatingBounds, placeFloatingRect } from "@/components/task/floating-selection-position";
 
 type SelectionPosition = {
   x: number;
@@ -16,8 +17,8 @@ type SelectionPosition = {
 type PlanSelectionPopoverProps = {
   selectedText: string;
   position: SelectionPosition;
-  onAdd: (comment: string, selectedText: string) => void;
-  onAddAndRun?: (comment: string, selectedText: string) => void;
+  onAdd: (comment: string, selectedText: string) => boolean | void;
+  onAddAndRun?: (comment: string, selectedText: string) => boolean | void;
   onClose: () => void;
   editingComment?: string;
   onDelete?: () => void;
@@ -26,31 +27,12 @@ type PlanSelectionPopoverProps = {
   addButtonTestId?: string;
   runButtonTestId?: string;
   portalContainer?: HTMLElement | null;
+  errorMessage?: string | null;
 };
 
 const POPOVER_WIDTH = 340;
 const POPOVER_HEIGHT = 180;
 const MARGIN = 8;
-
-function computePopoverPosition(position: SelectionPosition): { left: number; top: number } {
-  // Place directly below cursor, aligned to left of click
-  let left = position.x;
-  let top = position.y + 4;
-
-  // Clamp horizontal — keep popover on screen
-  if (left + POPOVER_WIDTH > window.innerWidth - MARGIN) {
-    left = window.innerWidth - POPOVER_WIDTH - MARGIN;
-  }
-  if (left < MARGIN) left = MARGIN;
-
-  // If overflows bottom, flip above cursor
-  if (top + POPOVER_HEIGHT > window.innerHeight - MARGIN) {
-    top = position.y - POPOVER_HEIGHT - 4;
-  }
-  if (top < MARGIN) top = MARGIN;
-
-  return { left, top };
-}
 
 /** Drag support for the popover. */
 function useDrag() {
@@ -116,20 +98,18 @@ function usePopoverDismiss(
 function usePopoverComposer(
   comment: string,
   selectedText: string,
-  onAdd: (comment: string, selectedText: string) => void,
+  onAdd: (comment: string, selectedText: string) => boolean | void,
   onClose: () => void,
-  onAddAndRun?: (comment: string, selectedText: string) => void,
+  onAddAndRun?: (comment: string, selectedText: string) => boolean | void,
 ) {
   const handleSubmit = useCallback(() => {
     if (!comment.trim()) return;
-    onAdd(comment.trim(), selectedText);
-    onClose();
+    if (onAdd(comment.trim(), selectedText) !== false) onClose();
   }, [comment, onAdd, selectedText, onClose]);
 
   const handleSubmitAndRun = useCallback(() => {
     if (!comment.trim() || !onAddAndRun) return;
-    onAddAndRun(comment.trim(), selectedText);
-    onClose();
+    if (onAddAndRun(comment.trim(), selectedText) !== false) onClose();
   }, [comment, onAddAndRun, selectedText, onClose]);
 
   const handleKeyDown = useCallback(
@@ -250,6 +230,7 @@ export function PlanSelectionPopover({
   addButtonTestId,
   runButtonTestId,
   portalContainer,
+  errorMessage,
 }: PlanSelectionPopoverProps) {
   const [comment, setComment] = useState(editingComment || "");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -263,8 +244,15 @@ export function PlanSelectionPopover({
   const effectiveOnAddAndRun = editingComment ? undefined : onAddAndRun;
   const { handleSubmit, handleSubmitAndRun, handleKeyDown, isDisabled, previewText } =
     usePopoverComposer(comment, selectedText, onAdd, onClose, effectiveOnAddAndRun);
-  const { left, top } = computePopoverPosition(position);
   const portalRect = portalContainer?.getBoundingClientRect();
+  const { left, top } = placeFloatingRect({
+    left: position.x,
+    topCandidates: [position.y + 4, position.y - POPOVER_HEIGHT - 4],
+    width: POPOVER_WIDTH,
+    height: POPOVER_HEIGHT,
+    bounds: floatingBounds(portalRect),
+    margin: MARGIN,
+  });
 
   const handleDelete = onDelete
     ? () => {
@@ -307,6 +295,11 @@ export function PlanSelectionPopover({
           className="min-h-[60px] resize-none text-sm border-border/50 focus:border-primary/50"
           data-testid={inputTestId}
         />
+        {errorMessage ? (
+          <p role="alert" className="mt-2 text-xs text-destructive">
+            {errorMessage}
+          </p>
+        ) : null}
         <PopoverActions
           isEditing={!!editingComment}
           isDisabled={isDisabled}

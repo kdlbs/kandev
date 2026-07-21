@@ -13,13 +13,23 @@ vi.mock("@/components/task/plan-selection-popover", () => ({
   PlanSelectionPopover: ({
     selectedText,
     onAdd,
+    onClose,
+    errorMessage,
   }: {
     selectedText: string;
-    onAdd: (feedback: string) => void;
+    onAdd: (feedback: string) => boolean | void;
+    onClose: () => void;
+    errorMessage?: string | null;
   }) => (
     <div data-testid="comment-popover">
       <span>{selectedText}</span>
-      <button type="button" onClick={() => onAdd("Make this concrete.")}>
+      {errorMessage ? <p role="alert">{errorMessage}</p> : null}
+      <button
+        type="button"
+        onClick={() => {
+          if (onAdd("Make this concrete.") !== false) onClose();
+        }}
+      >
         Save comment
       </button>
     </div>
@@ -27,6 +37,8 @@ vi.mock("@/components/task/plan-selection-popover", () => ({
 }));
 
 const SESSION_ID = "session-1";
+const MESSAGE_TEXT_TEST_ID = "message-text";
+const SELECTED_QUOTE = "settled answer";
 
 function message(content: string): Message {
   return {
@@ -65,24 +77,24 @@ describe("MessageCommentSurface", () => {
         sessionId={SESSION_ID}
         isTurnActive={false}
       >
-        <span data-testid="message-text">{original}</span>
+        <span data-testid={MESSAGE_TEXT_TEST_ID}>{original}</span>
       </MessageCommentSurface>,
     );
 
-    const text = screen.getByTestId("message-text").firstChild!;
+    const text = screen.getByTestId(MESSAGE_TEXT_TEST_ID).firstChild!;
     const range = document.createRange();
-    const start = original.indexOf("settled answer");
+    const start = original.indexOf(SELECTED_QUOTE);
     range.setStart(text, start);
-    range.setEnd(text, start + "settled answer".length);
+    range.setEnd(text, start + SELECTED_QUOTE.length);
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
-    fireEvent.mouseUp(screen.getByTestId("message-text").parentElement!);
+    fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
     fireEvent.click(screen.getByTestId("agent-message-comment-trigger"));
 
     rerender(
       <MessageCommentSurface message={message(updated)} sessionId={SESSION_ID} isTurnActive={false}>
-        <span data-testid="message-text">{updated}</span>
+        <span data-testid={MESSAGE_TEXT_TEST_ID}>{updated}</span>
       </MessageCommentSurface>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
@@ -90,8 +102,8 @@ describe("MessageCommentSurface", () => {
     const saved = Object.values(useCommentsStore.getState().byId)[0];
     expect(saved?.source).toBe("agent-message");
     if (saved?.source !== "agent-message") throw new Error("Expected an agent message comment");
-    expect(saved.selectedText).toBe("settled answer");
-    expect(saved.anchor.start).toBe(updated.indexOf("settled answer"));
+    expect(saved.selectedText).toBe(SELECTED_QUOTE);
+    expect(saved.anchor.start).toBe(updated.indexOf(SELECTED_QUOTE));
   });
 
   it("keeps React-owned text nodes under their rendered parent", () => {
@@ -120,5 +132,43 @@ describe("MessageCommentSurface", () => {
       Array.from(reactOwnedText.childNodes).every((node) => node.nodeType === Node.TEXT_NODE),
     ).toBe(true);
     expect(document.querySelector('.comment-badge[data-comment-id="comment-1"]')).not.toBeNull();
+  });
+
+  it("keeps feedback open and reports when the selected quote was rewritten", () => {
+    const original = "The settled answer contains detail.";
+    const updated = "The response was completely rewritten.";
+    const { rerender } = render(
+      <MessageCommentSurface
+        message={message(original)}
+        sessionId={SESSION_ID}
+        isTurnActive={false}
+      >
+        <span data-testid={MESSAGE_TEXT_TEST_ID}>{original}</span>
+      </MessageCommentSurface>,
+    );
+
+    const text = screen.getByTestId(MESSAGE_TEXT_TEST_ID).firstChild!;
+    const range = document.createRange();
+    const start = original.indexOf(SELECTED_QUOTE);
+    range.setStart(text, start);
+    range.setEnd(text, start + SELECTED_QUOTE.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
+    fireEvent.click(screen.getByTestId("agent-message-comment-trigger"));
+
+    rerender(
+      <MessageCommentSurface message={message(updated)} sessionId={SESSION_ID} isTurnActive={false}>
+        <span data-testid={MESSAGE_TEXT_TEST_ID}>{updated}</span>
+      </MessageCommentSurface>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+
+    expect(screen.getByTestId("comment-popover")).not.toBeNull();
+    expect(Object.values(useCommentsStore.getState().byId)).toHaveLength(0);
+    expect(screen.getByRole("alert").textContent).toBe(
+      "The agent response changed. Select the text again.",
+    );
   });
 });

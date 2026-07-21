@@ -25,6 +25,7 @@ import {
 } from "@kandev/ui/drawer";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { PlanSelectionPopover } from "@/components/task/plan-selection-popover";
+import { floatingBounds, placeFloatingRect } from "@/components/task/floating-selection-position";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
@@ -61,7 +62,6 @@ type CommentTarget = {
 };
 
 const EMPTY_COMMENT_IDS: string[] = [];
-const FLOATING_MARGIN = 8;
 
 function commentFromTarget(
   message: Message,
@@ -86,16 +86,6 @@ function commentFromTarget(
   };
 }
 
-function getTriggerPosition(rect: DOMRect, size: number) {
-  const left = Math.min(
-    Math.max(rect.right - size, FLOATING_MARGIN),
-    window.innerWidth - size - FLOATING_MARGIN,
-  );
-  const above = rect.top - size - FLOATING_MARGIN;
-  const top = above >= FLOATING_MARGIN ? above : rect.bottom + FLOATING_MARGIN;
-  return { left, top };
-}
-
 function SelectionCommentTrigger({
   selection,
   isTouch,
@@ -108,8 +98,15 @@ function SelectionCommentTrigger({
   portalContainer?: HTMLElement | null;
 }) {
   const size = isTouch ? 44 : 28;
-  const position = getTriggerPosition(selection.rect, size + 8);
   const portalRect = portalContainer?.getBoundingClientRect();
+  const outerSize = size + 8;
+  const position = placeFloatingRect({
+    left: selection.rect.right - outerSize,
+    topCandidates: [selection.rect.top - outerSize - 8, selection.rect.bottom + 8],
+    width: outerSize,
+    height: outerSize,
+    bounds: floatingBounds(portalRect),
+  });
   return createPortal(
     <div
       className={cn(
@@ -205,6 +202,7 @@ function MessageCommentDrawer({
   onAdd,
   onRun,
   onDelete,
+  errorMessage,
 }: {
   target: CommentTarget | null;
   open: boolean;
@@ -212,6 +210,7 @@ function MessageCommentDrawer({
   onAdd: (feedback: string) => void;
   onRun: (feedback: string) => void;
   onDelete: (() => void) | undefined;
+  errorMessage?: string | null;
 }) {
   const [feedback, setFeedback] = useState(target?.editingText ?? "");
   const targetKey = `${target?.editingCommentId ?? "new"}:${target?.selection.start ?? 0}:${target?.selection.end ?? 0}`;
@@ -257,6 +256,11 @@ function MessageCommentDrawer({
             autoFocus
             data-testid="agent-message-comment-input"
           />
+          {errorMessage ? (
+            <p role="alert" className="mb-3 text-xs text-destructive">
+              {errorMessage}
+            </p>
+          ) : null}
           <DrawerCommentActions
             isEditing={isEditing}
             disabled={!feedback.trim()}
@@ -396,18 +400,26 @@ function useMessageCommentActions({
   const addComment = useCommentsStore((state) => state.addComment);
   const updateComment = useCommentsStore((state) => state.updateComment);
   const removeComment = useCommentsStore((state) => state.removeComment);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const { runComment } = useRunComment({ sessionId: sessionId ?? null, taskId: message.task_id });
 
+  useEffect(() => setSaveError(null), [target]);
+
   const saveComment = useCallback(
-    (feedback: string): AgentMessageComment | null => {
+    (feedback: string): AgentMessageComment | true | null => {
       if (!target || !sessionId || !feedback.trim()) return null;
       if (target.editingCommentId) {
+        setSaveError(null);
         updateComment(target.editingCommentId, { text: feedback.trim() });
-        return null;
+        return true;
       }
       const renderedText = rootRef.current?.textContent ?? "";
       const comment = commentFromTarget(message, sessionId, target, renderedText, feedback);
-      if (!comment) return null;
+      if (!comment) {
+        setSaveError("The agent response changed. Select the text again.");
+        return null;
+      }
+      setSaveError(null);
       addComment(comment);
       return comment;
     },
@@ -416,8 +428,9 @@ function useMessageCommentActions({
 
   const handleAdd = useCallback(
     (feedback: string) => {
-      saveComment(feedback);
+      if (!saveComment(feedback)) return false;
       close();
+      return true;
     },
     [close, saveComment],
   );
@@ -425,12 +438,14 @@ function useMessageCommentActions({
   const handleRun = useCallback(
     (feedback: string) => {
       const comment = saveComment(feedback);
+      if (!comment) return false;
       close();
-      if (comment) {
+      if (comment !== true) {
         void runComment(comment).catch((error) =>
           console.error("Failed to run agent message comment:", error),
         );
       }
+      return true;
     },
     [close, runComment, saveComment],
   );
@@ -442,7 +457,7 @@ function useMessageCommentActions({
   }, [close, removeComment, target?.editingCommentId]);
   const handleDelete = target?.editingCommentId ? deleteComment : undefined;
 
-  return { handleAdd, handleRun, handleDelete };
+  return { handleAdd, handleRun, handleDelete, saveError };
 }
 
 function MessageCommentBadges({
@@ -547,10 +562,8 @@ export function MessageCommentSurface({
           key={target.editingCommentId ?? `${target.selection.start}:${target.selection.end}`}
           selectedText={target.selection.selectedText}
           position={target.position}
-          onAdd={(feedback) => actions.handleAdd(feedback)}
-          onAddAndRun={
-            target.editingCommentId ? undefined : (feedback) => actions.handleRun(feedback)
-          }
+          onAdd={actions.handleAdd}
+          onAddAndRun={target.editingCommentId ? undefined : actions.handleRun}
           onClose={close}
           editingComment={target.editingText}
           onDelete={actions.handleDelete}
@@ -559,6 +572,7 @@ export function MessageCommentSurface({
           addButtonTestId="agent-message-comment-add"
           runButtonTestId="agent-message-comment-run"
           portalContainer={portalContainer}
+          errorMessage={actions.saveError}
         />
       ) : null}
       {useDrawer ? (
@@ -569,6 +583,7 @@ export function MessageCommentSurface({
           onAdd={actions.handleAdd}
           onRun={actions.handleRun}
           onDelete={actions.handleDelete}
+          errorMessage={actions.saveError}
         />
       ) : null}
     </>

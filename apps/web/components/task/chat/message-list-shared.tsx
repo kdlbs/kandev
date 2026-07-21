@@ -47,7 +47,7 @@ export function getSessionRunningState(sessionState: string | null | undefined) 
   return sessionState === "CREATED" || sessionState === "STARTING" || sessionState === "RUNNING";
 }
 
-/** Only a final ordinary agent row can be the currently streaming reply. */
+/** Only the latest ordinary agent row in the active turn can be the streaming reply. */
 export function getStreamingAgentMessageId(messages: Message[]): string | null {
   let latestUserIndex = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -56,7 +56,6 @@ export function getStreamingAgentMessageId(messages: Message[]): string | null {
       break;
     }
   }
-  if (latestUserIndex === -1) return null;
   for (let i = messages.length - 1; i > latestUserIndex; i--) {
     const message = messages[i];
     if (
