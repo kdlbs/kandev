@@ -25,7 +25,7 @@ import {
 } from "@/lib/types/ids";
 
 export const DEMO_STORAGE_KEY = "kandev-browser-demo:v1";
-export const DEMO_SCENARIO_VERSION = 4;
+export const DEMO_SCENARIO_VERSION = 5;
 
 export const DEMO_IDS = {
   workspace: "demo-workspace",
@@ -371,7 +371,7 @@ export function createDemoState(): DemoState {
   const sessions = [
     makeSession("demo-session-checkout", "demo-task-checkout", "RUNNING"),
     makeSession("demo-session-audit", "demo-task-audit", "WAITING_FOR_INPUT"),
-    makeSession("demo-session-react", "demo-task-react", "IDLE"),
+    makeSession("demo-session-react", "demo-task-react", "IDLE", tasks[2].repositories),
     makeSession("demo-session-empty", "demo-task-empty", "IDLE"),
     makeSession("demo-session-auth", "demo-task-auth", "IDLE"),
   ];
@@ -1598,21 +1598,55 @@ function makeTaskRepository(
   };
 }
 
-export function makeSession(id: string, taskId: string, state: TaskSession["state"]): TaskSession {
+export function makeSession(
+  id: string,
+  taskId: string,
+  state: TaskSession["state"],
+  repositories?: Task["repositories"],
+): TaskSession {
+  const sessionId = toSessionId(id);
+  const taskRoot = `/demo/worktrees/${taskId}`;
+  const orderedRepositories = [...(repositories ?? [])].sort(
+    (left, right) => left.position - right.position,
+  );
+  const primaryRepositoryId = orderedRepositories[0]?.repository_id ?? REPOSITORY_ID;
+  const sessionWorktrees =
+    orderedRepositories.length > 1
+      ? orderedRepositories.map((repository, position) => {
+          const directory = demoRepositoryDirectory(repository.repository_id);
+          return {
+            id: `${id}-worktree-${position + 1}`,
+            session_id: sessionId,
+            worktree_id: `demo-worktree-${taskId}-${directory}`,
+            repository_id: repository.repository_id,
+            branch_slug: `kandev/${taskId}`,
+            position,
+            worktree_path: `${taskRoot}/${directory}`,
+            worktree_branch: `kandev/${taskId}`,
+            created_at: NOW,
+          };
+        })
+      : undefined;
   return {
-    id: toSessionId(id),
+    id: sessionId,
     task_id: toTaskId(taskId),
     name: "Mock agent",
     agent_profile_id: toAgentProfileId(DEMO_IDS.profile),
-    repository_id: REPOSITORY_ID,
-    worktree_path: `/demo/worktrees/${taskId}`,
+    repository_id: primaryRepositoryId,
+    worktree_id: sessionWorktrees?.[0]?.worktree_id,
+    worktree_path: taskRoot,
     worktree_branch: `kandev/${taskId}`,
+    worktrees: sessionWorktrees,
     task_environment_id: `demo-environment-${taskId}`,
     state,
     is_primary: true,
     started_at: NOW,
     updated_at: NOW,
   };
+}
+
+function demoRepositoryDirectory(repositoryId: string) {
+  return repositoryId === DEMO_IDS.apiRepository ? demoApiRepository.name : demoRepository.name;
 }
 
 function makeAgentProfile(id: string, name: string, model: string): Agent["profiles"][number] {

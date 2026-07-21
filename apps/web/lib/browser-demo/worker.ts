@@ -41,12 +41,14 @@ import {
 } from "./scenario";
 import { createDemoStats } from "./stats";
 import { createDemoFiles } from "./demo-files";
+import { createDemoMultiRepoFiles } from "./demo-multi-repo-files";
 import { createDemoSystemRuntime } from "./system-runtime";
 import { createDemoWorkflowRuntime } from "./workflow-runtime";
 
 const scope: DedicatedWorkerGlobalScope = self as never;
 let state = createDemoState();
 let files = createDemoFiles();
+let multiRepoFiles = createDemoMultiRepoFiles();
 let plansByTask = createDemoPlans();
 let systemRuntime = createDemoSystemRuntime();
 let workflowRuntime = makeWorkflowRuntime();
@@ -167,6 +169,7 @@ scope.onmessage = (event: MessageEvent<DemoWorkerRequest>) => {
   if (message.kind === "init") {
     state = restoreState(message.persistedState);
     files = createDemoFiles();
+    multiRepoFiles = createDemoMultiRepoFiles();
     plansByTask = createDemoPlans();
     systemRuntime = createDemoSystemRuntime();
     workflowRuntime = makeWorkflowRuntime();
@@ -680,17 +683,21 @@ function updateFileReview(sessionId: string, payload: Record<string, unknown>) {
 function routeWorkspaceReadSocket(context: SocketRouteContext): boolean {
   const { socketId, id, action, payload } = context;
   if (action === "workspace.tree.get") {
-    respond(socketId, id, { root: buildFileTree(String(payload.path || "")) });
+    const sessionId = String(payload.session_id || "");
+    respond(socketId, id, {
+      root: buildFileTree(String(payload.path || ""), workspaceFilesForSession(sessionId)),
+    });
     return true;
   }
   if (action === "workspace.file.get" || action === "workspace.file.get_at_ref") {
-    readWorkspaceFile(socketId, id, payload.path);
+    readWorkspaceFile(socketId, id, payload);
     return true;
   }
   if (action === "workspace.files.search") {
     const query = String(payload.query || "").toLowerCase();
     const limit = Number(payload.limit ?? 20);
-    const matches = Object.keys(files)
+    const workspaceFiles = workspaceFilesForSession(String(payload.session_id || ""));
+    const matches = Object.keys(workspaceFiles)
       .filter((path) => path.toLowerCase().includes(query))
       .slice(0, limit);
     respond(socketId, id, { files: matches });
@@ -699,9 +706,9 @@ function routeWorkspaceReadSocket(context: SocketRouteContext): boolean {
   return false;
 }
 
-function readWorkspaceFile(socketId: string, id: string, value: unknown) {
-  const path = normalizeFilePath(value);
-  const content = files[path];
+function readWorkspaceFile(socketId: string, id: string, payload: Record<string, unknown>) {
+  const path = workspaceFilePath(payload);
+  const content = workspaceFilesForSession(String(payload.session_id || ""))[path];
   if (content === undefined) {
     respond(socketId, id, { message: `File not found: ${path}` }, true);
     return;
@@ -719,13 +726,14 @@ function routeWorkspaceMutationSocket(context: SocketRouteContext): boolean {
 }
 
 function updateWorkspaceFile(socketId: string, id: string, payload: Record<string, unknown>): true {
-  const path = normalizeFilePath(payload.path);
+  const path = workspaceFilePath(payload);
+  const workspaceFiles = workspaceFilesForSession(String(payload.session_id || ""));
   const content = payload.desired_content;
   if (typeof content !== "string") {
     respond(socketId, id, { message: "The demo editor requires desired_content" }, true);
     return true;
   }
-  files[path] = content;
+  workspaceFiles[path] = content;
   respond(socketId, id, {
     path,
     success: true,
@@ -737,17 +745,18 @@ function updateWorkspaceFile(socketId: string, id: string, payload: Record<strin
 }
 
 function createWorkspaceFile(socketId: string, id: string, payload: Record<string, unknown>): true {
-  const path = normalizeFilePath(payload.path);
-  files[path] = "";
+  const path = workspaceFilePath(payload);
+  workspaceFilesForSession(String(payload.session_id || ""))[path] = "";
   respond(socketId, id, { path, success: true });
   notifyFileChange(String(payload.session_id || ""), path, "create");
   return true;
 }
 
 function deleteWorkspaceFile(socketId: string, id: string, payload: Record<string, unknown>): true {
-  const path = normalizeFilePath(payload.path);
-  for (const filePath of Object.keys(files)) {
-    if (filePath === path || filePath.startsWith(`${path}/`)) delete files[filePath];
+  const path = workspaceFilePath(payload);
+  const workspaceFiles = workspaceFilesForSession(String(payload.session_id || ""));
+  for (const filePath of Object.keys(workspaceFiles)) {
+    if (filePath === path || filePath.startsWith(`${path}/`)) delete workspaceFiles[filePath];
   }
   respond(socketId, id, { path, success: true });
   notifyFileChange(String(payload.session_id || ""), path, "remove");
@@ -755,12 +764,14 @@ function deleteWorkspaceFile(socketId: string, id: string, payload: Record<strin
 }
 
 function renameWorkspaceFile(socketId: string, id: string, payload: Record<string, unknown>): true {
-  const oldPath = normalizeFilePath(payload.old_path);
-  const newPath = normalizeFilePath(payload.new_path);
-  for (const filePath of Object.keys(files)) {
+  const repositoryPrefix = normalizeFilePath(payload.repo);
+  const oldPath = withRepositoryPrefix(normalizeFilePath(payload.old_path), repositoryPrefix);
+  const newPath = withRepositoryPrefix(normalizeFilePath(payload.new_path), repositoryPrefix);
+  const workspaceFiles = workspaceFilesForSession(String(payload.session_id || ""));
+  for (const filePath of Object.keys(workspaceFiles)) {
     if (filePath !== oldPath && !filePath.startsWith(`${oldPath}/`)) continue;
-    files[`${newPath}${filePath.slice(oldPath.length)}`] = files[filePath];
-    delete files[filePath];
+    workspaceFiles[`${newPath}${filePath.slice(oldPath.length)}`] = workspaceFiles[filePath];
+    delete workspaceFiles[filePath];
   }
   respond(socketId, id, { old_path: oldPath, new_path: newPath, success: true });
   notifyFileChange(String(payload.session_id || ""), newPath, "rename");
@@ -1155,7 +1166,7 @@ function serializeFileReviews(sessionId: string) {
 
 function startAgent(task: Task, prompt: string) {
   const sessionId = `demo-session-${task.id}`;
-  const session = makeSession(sessionId, task.id, "RUNNING");
+  const session = makeSession(sessionId, task.id, "RUNNING", task.repositories);
   state.sessions.push(session);
   task.primary_session_id = session.id;
   task.primary_session_state = "RUNNING";
@@ -1360,23 +1371,25 @@ function demoTerminal() {
   };
 }
 
-function buildFileTree(path: string) {
+function buildFileTree(path: string, workspaceFiles: Record<string, string>) {
   const normalizedPath = normalizeFilePath(path);
   const prefix = normalizedPath ? `${normalizedPath}/` : "";
   const childNames = new Set<string>();
-  for (const filePath of Object.keys(files)) {
+  for (const filePath of Object.keys(workspaceFiles)) {
     if (!filePath.startsWith(prefix)) continue;
     const relative = filePath.slice(prefix.length);
     if (relative) childNames.add(relative.split("/")[0]);
   }
   const children = Array.from(childNames, (name) => {
     const childPath = prefix + name;
-    const isDirectory = Object.keys(files).some((filePath) => filePath.startsWith(`${childPath}/`));
+    const isDirectory = Object.keys(workspaceFiles).some((filePath) =>
+      filePath.startsWith(`${childPath}/`),
+    );
     return {
       name,
       path: childPath,
       is_dir: isDirectory,
-      size: isDirectory ? undefined : (files[childPath]?.length ?? 0),
+      size: isDirectory ? undefined : (workspaceFiles[childPath]?.length ?? 0),
     };
   });
   return {
@@ -1385,6 +1398,23 @@ function buildFileTree(path: string) {
     is_dir: true,
     children,
   };
+}
+
+function workspaceFilesForSession(sessionId: string) {
+  const session = state.sessions.find((candidate) => candidate.id === sessionId);
+  const task = session ? findTask(session.task_id) : undefined;
+  return (task?.repositories?.length ?? 0) > 1 ? multiRepoFiles : files;
+}
+
+function workspaceFilePath(payload: Record<string, unknown>) {
+  return withRepositoryPrefix(normalizeFilePath(payload.path), normalizeFilePath(payload.repo));
+}
+
+function withRepositoryPrefix(path: string, repositoryPrefix: string) {
+  if (!repositoryPrefix || path === repositoryPrefix || path.startsWith(`${repositoryPrefix}/`)) {
+    return path;
+  }
+  return `${repositoryPrefix}/${path}`;
 }
 
 function normalizeFilePath(value: unknown) {

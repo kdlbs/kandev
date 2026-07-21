@@ -74,10 +74,23 @@ describe("browser demo scenario", () => {
     const state = createDemoState();
     const payload = createBootPayload(state);
     const task = state.tasks.find((entry) => entry.id === "demo-task-react");
+    const session = state.sessions.find((entry) => entry.id === "demo-session-react");
 
     expect(task?.repositories).toMatchObject([
       { repository_id: DEMO_IDS.repository, base_branch: "main" },
       { repository_id: DEMO_IDS.apiRepository, base_branch: "develop" },
+    ]);
+    expect(session?.worktrees).toMatchObject([
+      {
+        repository_id: DEMO_IDS.repository,
+        position: 0,
+        worktree_path: "/demo/worktrees/demo-task-react/acme-web",
+      },
+      {
+        repository_id: DEMO_IDS.apiRepository,
+        position: 1,
+        worktree_path: "/demo/worktrees/demo-task-react/acme-api",
+      },
     ]);
     expect(
       state.messagesBySession["demo-session-react"].map((message) => message.type),

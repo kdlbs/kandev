@@ -19,7 +19,10 @@ function requestHttp(method: string, path: string, body?: Record<string, unknown
 let socketRequestSequence = 0;
 const CHECKOUT_SESSION_ID = "demo-session-checkout";
 const AUDIT_SESSION_ID = "demo-session-audit";
+const REACT_SESSION_ID = "demo-session-react";
 const REACT_TASK_ID = "demo-task-react";
+const WORKSPACE_TREE_ACTION = "workspace.tree.get";
+const WORKSPACE_FILE_GET_ACTION = "workspace.file.get";
 
 function requestSocket(action: string, payload: Record<string, unknown> = {}) {
   const postMessage = vi.spyOn(self, "postMessage").mockImplementation(() => undefined);
@@ -485,12 +488,12 @@ describe("browser demo worker session lifecycle", () => {
 
 describe("browser demo worker workspace WebSocket runtime", () => {
   it("serves a browsable workspace tree and file contents", () => {
-    const tree = requestSocket("workspace.tree.get", {
+    const tree = requestSocket(WORKSPACE_TREE_ACTION, {
       session_id: AUDIT_SESSION_ID,
       path: "",
       depth: 1,
     });
-    const file = requestSocket("workspace.file.get", {
+    const file = requestSocket(WORKSPACE_FILE_GET_ACTION, {
       session_id: AUDIT_SESSION_ID,
       path: "README.md",
     });
@@ -513,7 +516,7 @@ describe("browser demo worker workspace WebSocket runtime", () => {
       requestSocket("workspace.file.update", { path, desired_content: "export const demo = true;" })
         .payload,
     ).toMatchObject({ path, success: true, resolution: "applied" });
-    expect(requestSocket("workspace.file.get", { path }).payload.content).toBe(
+    expect(requestSocket(WORKSPACE_FILE_GET_ACTION, { path }).payload.content).toBe(
       "export const demo = true;",
     );
 
@@ -525,12 +528,76 @@ describe("browser demo worker workspace WebSocket runtime", () => {
       path: renamedPath,
       success: true,
     });
-    expect(requestSocket("workspace.file.get", { path: renamedPath })).toMatchObject({
+    expect(requestSocket(WORKSPACE_FILE_GET_ACTION, { path: renamedPath })).toMatchObject({
       type: "error",
       payload: { message: expect.stringContaining("File not found") },
     });
   });
+});
 
+describe("browser demo worker multi-repository workspace", () => {
+  it("serves both worktrees, repository roots, and their own files", async () => {
+    const sessions = await get(`/api/v1/tasks/${REACT_TASK_ID}/sessions`);
+    const root = requestSocket(WORKSPACE_TREE_ACTION, {
+      session_id: REACT_SESSION_ID,
+      path: "",
+      depth: 1,
+    });
+    const apiTree = requestSocket(WORKSPACE_TREE_ACTION, {
+      session_id: REACT_SESSION_ID,
+      path: "acme-api",
+      depth: 1,
+    });
+    const apiContract = requestSocket(WORKSPACE_FILE_GET_ACTION, {
+      session_id: REACT_SESSION_ID,
+      path: "internal/contracts/dashboard_fixture_test.go",
+      repo: "acme-api",
+    });
+    const webManifest = requestSocket(WORKSPACE_FILE_GET_ACTION, {
+      session_id: REACT_SESSION_ID,
+      path: "acme-web/package.json",
+    });
+
+    expect(sessions).toMatchObject({
+      status: 200,
+      body: {
+        sessions: [
+          {
+            worktrees: [
+              {
+                repository_id: DEMO_IDS.repository,
+                worktree_path: expect.stringContaining("acme-web"),
+              },
+              {
+                repository_id: DEMO_IDS.apiRepository,
+                worktree_path: expect.stringContaining("acme-api"),
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(root.payload.root.children).toEqual([
+      expect.objectContaining({ name: "acme-web", is_dir: true }),
+      expect.objectContaining({ name: "acme-api", is_dir: true }),
+    ]);
+    expect(apiTree.payload.root.children).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "cmd", is_dir: true }),
+        expect.objectContaining({ name: "internal", is_dir: true }),
+        expect.objectContaining({ name: "go.mod", is_dir: false }),
+      ]),
+    );
+    expect(apiContract.payload).toMatchObject({
+      path: "acme-api/internal/contracts/dashboard_fixture_test.go",
+      is_binary: false,
+    });
+    expect(apiContract.payload.content).toContain("TestDashboardFixtureMatchesWebClient");
+    expect(webManifest.payload.content).toContain('"name": "@acme/web"');
+  });
+});
+
+describe("browser demo worker shell runtime", () => {
   it("lists the demo shell with the terminal union shape", () => {
     const response = requestSocket("user_shell.list", {
       task_id: "demo-task-audit",
