@@ -9,6 +9,10 @@ function get(path: string) {
   return handleHttp({ method: "GET", path, headers: {} });
 }
 
+function requestHttp(method: string, path: string, body: Record<string, unknown> = {}) {
+  return handleHttp({ method, path, headers: {}, body: JSON.stringify(body) });
+}
+
 let socketRequestSequence = 0;
 const CHECKOUT_SESSION_ID = "demo-session-checkout";
 const AUDIT_SESSION_ID = "demo-session-audit";
@@ -115,6 +119,35 @@ describe("browser demo worker HTTP runtime", () => {
 
     expect(responses.every((response) => response.status === 200)).toBe(true);
     expect(responses[0].body).toMatchObject({ total_tasks: expect.any(Number) });
+  });
+
+  it("serves remote repositories, integration settings, and system settings", async () => {
+    const repositories = await get("/api/v1/github/repos?limit=100");
+    const branches = await get("/api/v1/github/repos/kandev-demo/acme-api/branches");
+    const jira = await get(`/api/v1/jira/config?workspace_id=${DEMO_IDS.workspace}`);
+    const linear = await get(`/api/v1/linear/config?workspace_id=${DEMO_IDS.workspace}`);
+    const sentry = await get(`/api/v1/sentry/instances?workspace_id=${DEMO_IDS.workspace}`);
+    const slack = await get(`/api/v1/slack/config?workspace_id=${DEMO_IDS.workspace}`);
+    const preview = await requestHttp("POST", "/api/v1/agent-command-preview/mock", {
+      model: "demo-fast",
+    });
+    const disk = await get("/api/v1/system/disk-usage");
+    const database = await get("/api/v1/system/database");
+    const storage = await get("/api/v1/system/storage");
+
+    expect(repositories).toMatchObject({ status: 200, body: { repos: expect.any(Array) } });
+    expect(branches).toMatchObject({
+      status: 200,
+      body: { branches: expect.arrayContaining([{ name: "main" }, { name: "develop" }]) },
+    });
+    expect(jira).toMatchObject({ status: 200, body: { defaultProjectKey: "PLAT", lastOk: true } });
+    expect(linear).toMatchObject({ status: 200, body: { defaultTeamKey: "ENG", lastOk: true } });
+    expect(sentry).toMatchObject({ status: 200, body: { instances: expect.any(Array) } });
+    expect(slack).toMatchObject({ status: 200, body: { utilityAgentId: "demo-utility-triage" } });
+    expect(preview).toMatchObject({ status: 200, body: { supported: true } });
+    expect(disk).toMatchObject({ status: 200, body: { computing: false } });
+    expect(database).toMatchObject({ status: 200, body: { driver: "sqlite" } });
+    expect(storage).toMatchObject({ status: 200, body: { settings: { enabled: true } } });
   });
 });
 
