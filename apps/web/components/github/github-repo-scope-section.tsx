@@ -1,9 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { IconInfoCircle } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -240,7 +243,31 @@ export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string })
   return (
     <SettingsSection
       title="Repository Scope"
-      description="Choose which GitHub repositories belong to this workspace."
+      titleAccessory={
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 cursor-help text-muted-foreground sm:h-7 sm:w-7"
+              aria-label="Explain repository scope"
+            >
+              <IconInfoCircle className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent
+            side="top"
+            align="start"
+            className="max-w-[320px] text-xs leading-relaxed"
+          >
+            Limits the GitHub pull requests and issues Kandev discovers for this workspace,
+            including My GitHub results and review and issue watches. It does not change GitHub
+            permissions or repository access.
+          </TooltipContent>
+        </Tooltip>
+      }
+      description="Limits GitHub pull requests and issues shown or imported in this workspace."
     >
       <RepositoryScopeFields
         mode={draft.mode}
