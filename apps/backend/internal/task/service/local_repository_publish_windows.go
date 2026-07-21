@@ -20,6 +20,8 @@ func localRepositoryDirectoryOwnerTrusted(fs.FileInfo) bool {
 }
 
 func localRepositoryParentWritable(info fs.FileInfo) bool {
+	// Windows reports directory permissions as 0777; MkdirTemp performs the
+	// authoritative write check when the staging directory is created.
 	return info.Mode().Perm()&0o222 != 0
 }
 

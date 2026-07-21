@@ -25,6 +25,8 @@ var (
 
 type initializeGitRepositoryFunc func(context.Context, string, *os.File) error
 
+const windowsGOOS = "windows"
+
 type localRepositoryStaging struct {
 	path      string
 	directory *os.File
@@ -93,9 +95,11 @@ func (s *Service) initializeLocalRepository(
 		return nil, fmt.Errorf("publish initialized local repository: %w", publishErr)
 	}
 	published = true
-	if chmodErr := staging.directory.Chmod(0o755); chmodErr != nil {
-		cleanup()
-		return nil, fmt.Errorf("set initialized local repository permissions: %w", chmodErr)
+	if runtime.GOOS != windowsGOOS {
+		if chmodErr := staging.directory.Chmod(0o755); chmodErr != nil {
+			cleanup()
+			return nil, fmt.Errorf("set initialized local repository permissions: %w", chmodErr)
+		}
 	}
 	if !localRepositoryTargetMatches(targetPath, staging.identity) {
 		cleanup()
