@@ -1,10 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
 import type { PluginConfigField } from "@/lib/plugins/config-schema";
+import { listUtilityAgents, type UtilityAgent } from "@/lib/api/domains/utility-api";
 
 /** Sentinel for the "Not set" select item — an actual enum option can never
  * collide with it, and Radix rejects value="" items. */
@@ -136,6 +138,18 @@ function ConfigFieldControl({
     );
   }
 
+  if (field.type === "utility_agent") {
+    return (
+      <UtilityAgentSelect
+        field={field}
+        inputId={inputId}
+        value={value}
+        disabled={disabled}
+        onChange={onChange}
+      />
+    );
+  }
+
   return (
     <Input
       id={inputId}
@@ -150,6 +164,44 @@ function ConfigFieldControl({
       className="max-w-md"
       onChange={(event) => onChange(field.name, event.target.value)}
     />
+  );
+}
+
+function UtilityAgentSelect({
+  field,
+  inputId,
+  value,
+  disabled,
+  onChange,
+}: ConfigFieldControlProps) {
+  const [agents, setAgents] = useState<UtilityAgent[]>([]);
+  useEffect(() => {
+    listUtilityAgents({ cache: "no-store" })
+      .then((response) => setAgents(response.agents))
+      .catch(() => setAgents([]));
+  }, []);
+  return (
+    <Select
+      value={typeof value === "string" ? value : ""}
+      disabled={disabled}
+      onValueChange={(next) => onChange(field.name, next)}
+    >
+      <SelectTrigger id={inputId} className="max-w-md cursor-pointer">
+        <SelectValue placeholder="Select a utility agent..." />
+      </SelectTrigger>
+      <SelectContent>
+        {agents.map((agent) => (
+          <SelectItem
+            key={agent.id}
+            value={agent.name}
+            className="cursor-pointer"
+            disabled={!agent.enabled}
+          >
+            {agent.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

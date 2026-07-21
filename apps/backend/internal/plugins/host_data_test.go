@@ -159,15 +159,15 @@ func (f *fakeMessageDataSource) ListMessagesForPlugin(
 // tests can both drive Host calls and assert against the fakes' recorded
 // state.
 type testDataHost struct {
-	host      *pluginHost
-	tasks     *fakeTaskDataSource
-	workflows *fakeWorkflowLister
-	steps     *fakeWorkflowStepLister
-	profiles  *fakeAgentProfileDataSource
-	codeStats *fakeSessionCodeStatsSource
-	messages  *fakeMessageDataSource
-	utilCfg   *fakeUtilitySettingsSource
-	utilRun   *fakeUtilityRunner
+	host       *pluginHost
+	tasks      *fakeTaskDataSource
+	workflows  *fakeWorkflowLister
+	steps      *fakeWorkflowStepLister
+	profiles   *fakeAgentProfileDataSource
+	codeStats  *fakeSessionCodeStatsSource
+	messages   *fakeMessageDataSource
+	utilAgents *fakeUtilityAgentSource
+	utilRun    *fakeUtilityRunner
 }
 
 // newTestDataHost builds a fully-wired pluginHost (every Host data API
@@ -175,14 +175,14 @@ type testDataHost struct {
 // resource) so each test only needs to vary caps.
 func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 	d := &testDataHost{
-		tasks:     &fakeTaskDataSource{},
-		workflows: &fakeWorkflowLister{},
-		steps:     &fakeWorkflowStepLister{},
-		profiles:  &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
-		codeStats: &fakeSessionCodeStatsSource{},
-		messages:  &fakeMessageDataSource{},
-		utilCfg:   &fakeUtilitySettingsSource{},
-		utilRun:   &fakeUtilityRunner{text: "ok"},
+		tasks:      &fakeTaskDataSource{},
+		workflows:  &fakeWorkflowLister{},
+		steps:      &fakeWorkflowStepLister{},
+		profiles:   &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
+		codeStats:  &fakeSessionCodeStatsSource{},
+		messages:   &fakeMessageDataSource{},
+		utilAgents: &fakeUtilityAgentSource{},
+		utilRun:    &fakeUtilityRunner{text: "ok"},
 	}
 	d.host = &pluginHost{
 		pluginID:         "p1",
@@ -193,8 +193,9 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		agentProfiles:    d.profiles,
 		sessionCodeStats: d.codeStats,
 		messageData:      d.messages,
-		utilityDeps: func() (utilitySettingsSource, utilityRunner) {
-			return d.utilCfg, d.utilRun
+		configs:          &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "plugin-agent"}},
+		utilityDeps: func() (utilityAgentSource, utilityRunner) {
+			return d.utilAgents, d.utilRun
 		},
 	}
 	return d

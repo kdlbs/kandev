@@ -96,8 +96,8 @@ type Service struct {
 	messageData      messageDataSource
 
 	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
-	utilitySettings utilitySettingsSource
-	utilityRunner   utilityRunner
+	utilityAgents utilityAgentSource
+	utilityRunner utilityRunner
 
 	// kandevVersion is the currently running kandev build version, used to
 	// enforce a package's manifest.min_kandev_version at Install (see
@@ -220,18 +220,18 @@ func (s *Service) SetDataSources(
 }
 
 // SetUtilityAgent wires the dependencies behind Host.InvokeUtilityAgent
-// (ADR 0048): the settings source that reads the operator-configured utility
-// agent profile id, and the sessionless runner that executes a one-shot
+// (ADR 0048): the service that resolves the utility agent selected in plugin
+// configuration, and the sessionless runner that executes a one-shot
 // completion. Wired by backendapp (not Provide) for the same import-cycle
 // reason as SetDataSources. Unlike the data sources, this is wired LATE in boot
 // (hostUtilityMgr is only available after agentctl control is healthy, by which
 // point StartActivePlugins has already spawned boot-active plugins), so hosts
 // read these live via utilityAgentDeps rather than snapshotting them — the
 // write here is mutex-guarded against those concurrent reads.
-func (s *Service) SetUtilityAgent(settings utilitySettingsSource, runner utilityRunner) {
+func (s *Service) SetUtilityAgent(agents utilityAgentSource, runner utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.utilitySettings = settings
+	s.utilityAgents = agents
 	s.utilityRunner = runner
 }
 
@@ -239,10 +239,10 @@ func (s *Service) SetUtilityAgent(settings utilitySettingsSource, runner utility
 // live (not snapshotted at hostForPlugin time) so a plugin spawned before
 // SetUtilityAgent still resolves them once it is called. Guarded by s.mu against
 // the SetUtilityAgent write.
-func (s *Service) utilityAgentDeps() (utilitySettingsSource, utilityRunner) {
+func (s *Service) utilityAgentDeps() (utilityAgentSource, utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.utilitySettings, s.utilityRunner
+	return s.utilityAgents, s.utilityRunner
 }
 
 // SetKandevVersion wires the currently running kandev build version,

@@ -1,4 +1,4 @@
-# 0048 — Plugins invoke a settings-selectable utility agent
+# 0048 — Plugins invoke a plugin-selected utility agent
 
 - Status: accepted
 - Date: 2026-07-21
@@ -25,21 +25,14 @@ streaming, stateful, and requires an executor + workspace + worktree.
 
 ## Decision
 
-Add a capability-gated `Host.InvokeUtilityAgent`, backed by a new operator
-setting and the existing host-utility tier.
+Add a capability-gated `Host.InvokeUtilityAgent`, backed by each plugin's
+configuration and the existing host-utility tier.
 
-1. **New setting: `utility_agent_profile_id`.** A string user setting (kandev is
-   single-user, so per-user *is* system-wide) selecting one of the existing
-   agent profiles, cloned end-to-end from the existing `default_utility_agent_id`
-   path (`internal/user` model → store → service → dto → controller → boot
-   state). It is chosen in **Settings > System > Utility Agent**, a profile
-   dropdown mirroring the `mcp_task_agent_profile_default` selector (populated
-   from healthy agent profiles, persisted through the shared settings save
-   coordinator). It is deliberately **separate** from `default_utility_agent_id`
-   (an internal agent-*type*+model default for kandev's own utility features):
-   the plugin-facing selection is an explicit, operator-visible agent *profile*,
-   so an operator can grant plugins a specific (and cheap) model without
-   changing kandev's internal utility defaults.
+1. **Plugin config: `utility_agent`.** Plugins declaring `agent_invoke` declare
+   a `config_schema` field named `utility_agent`, with `type: string` and
+   `format: utility-agent`. Settings > Plugins renders it as a picker of the
+   existing built-in and custom utility agents. The selected name is scoped to
+   the plugin; no global user setting or agent profile is involved.
 
 2. **New capability `agent_invoke`.** A boolean `Capabilities.AgentInvoke`,
    enforced exactly like `state`/`secrets`: `Host.InvokeUtilityAgent` returns
@@ -54,9 +47,9 @@ setting and the existing host-utility tier.
    or `max_tokens` is an added proto field, no SDK signature change).
 
 4. **Reuse the host-utility tier (ADR 0002).** The kandev-side handler:
-   gate `agent_invoke` → read `utility_agent_profile_id` → resolve the profile
-   to its agent type + model (scanning the already-wired agent-profiles data
-   source) → call a narrow `utilityRunner.ExecutePrompt(ctx, agentType, model,
+   gate `agent_invoke` → read the calling plugin's `utility_agent` config →
+   resolve its name through the established utility-agent configuration → call a
+   narrow `utilityRunner.ExecutePrompt(ctx, agentType, model,
    "", prompt)` and return the text. `utilityRunner` is a thin
    `pluginsHostUtilityAdapter` over `hostutility.Manager` wired in `backendapp`,
    so `internal/plugins` never imports the agent runtime (the same
@@ -64,10 +57,10 @@ setting and the existing host-utility tier.
    sources). No task, session, workspace, or worktree is involved.
 
 5. **Typed "not configured" failure.** If no utility agent is selected — or the
-   selected profile has since been deleted — the handler returns gRPC
+   selected utility agent has since been deleted or disabled — the handler returns gRPC
    `FailedPrecondition` (`no utility agent configured` /
-   `configured utility agent profile "<id>" not found`), never a silent empty
-   completion. A stale profile id is treated as "unconfigured", not an internal
+   `configured utility agent "<name>" not found`), never a silent empty
+   completion. A stale selection is treated as "unconfigured", not an internal
    error.
 
 ## Consequences
@@ -75,10 +68,10 @@ setting and the existing host-utility tier.
 - A plugin declares `capabilities.agent_invoke: true` and calls
   `host.InvokeUtilityAgent(ctx, prompt)` — no API key, no provider wiring. This
   is what unblocks the "My Daily Standup" plugin's summarization step.
-- The operator stays in control: nothing runs until they pick a utility agent,
-  and they pick which (cheap) profile plugins may spend on.
+- The operator stays in control: nothing runs until each plugin selects a
+  configured utility agent, including its cost and availability characteristics.
 - We reused the sessionless inference path instead of building an agent loop;
-  the only net-new machinery is one setting and one gated RPC handler.
+  the only net-new machinery is a plugin config picker and one gated RPC handler.
 - The `InvokeUtilityAgentRequest`/`Response` proto is a public contract, extended
   additively.
 
@@ -91,8 +84,5 @@ setting and the existing host-utility tier.
   both are streaming, stateful, and require an executor + workspace; neither
   offers a synchronous prompt→text call. ADR 0002's host-utility tier already
   does exactly this, sessionlessly.
-- **Reuse `default_utility_agent_id` instead of a new setting.** Rejected: that
-  is an agent-*type*+model default for kandev's internal utility calls, not an
-  operator-visible agent-*profile* selection scoped to "what plugins may
-  invoke". Keeping them separate lets an operator expose a specific cheap
-  profile to plugins without disturbing internal defaults.
+- **Reuse `default_utility_agent_id`.** Rejected: that default serves Kandev's
+  internal utility calls and cannot express a plugin-specific selection.

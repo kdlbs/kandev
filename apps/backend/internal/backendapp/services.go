@@ -570,6 +570,18 @@ func (a pluginsHostUtilityAdapter) ExecutePrompt(ctx context.Context, agentType,
 	return res.Response, nil
 }
 
+type pluginsUtilityAgentAdapter struct {
+	svc *utilityservice.Service
+}
+
+func (a pluginsUtilityAgentAdapter) GetAgentByName(ctx context.Context, name string) (*plugins.UtilityAgent, error) {
+	agent, err := a.svc.GetAgentByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, Enabled: agent.Enabled}, nil
+}
+
 // workflowProviderAdapter adapts task service to workflow service's WorkflowProvider interface.
 type workflowProviderAdapter struct {
 	svc *taskservice.Service

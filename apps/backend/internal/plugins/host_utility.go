@@ -1,9 +1,6 @@
 // host_utility.go implements pluginHost.InvokeUtilityAgent — the agent_invoke
-// Host capability (ADR 0048). A plugin delegates a one-shot, non-interactive
-// LLM step to the operator-configured "utility agent" (Settings > System), so
-// it needs no API key of its own. The heavy lifting reuses the sessionless
-// host-utility inference tier (ADR 0002) via a narrow utilityRunner interface,
-// wired by backendapp so this package never imports the agent runtime.
+// Host capability (ADR 0048). Plugins delegate one-shot, non-interactive LLM
+// steps to the utility agent selected in their own configuration.
 package plugins
 
 import (
@@ -14,80 +11,65 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const capabilityAgentInvoke = "agent_invoke"
+const (
+	capabilityAgentInvoke = "agent_invoke"
+	// utilityAgentConfigKey is the manifest config_schema field plugins with
+	// agent_invoke declare. Its value is the selected utility agent's name.
+	utilityAgentConfigKey = "utility_agent"
+)
 
-// utilitySettingsSource reads the operator-configured utility agent profile id
-// (internal/user's UtilityAgentProfileID). Empty means "no utility agent
-// configured".
-type utilitySettingsSource interface {
-	UtilityAgentProfileID(ctx context.Context) (string, error)
+// UtilityAgent is the execution-relevant portion of a configured utility
+// agent. backendapp adapts internal/utility/service.Service to this shape.
+type UtilityAgent struct {
+	Name    string
+	AgentID string
+	Model   string
+	Enabled bool
+}
+
+type utilityAgentSource interface {
+	GetAgentByName(ctx context.Context, name string) (*UtilityAgent, error)
 }
 
 // utilityRunner runs a one-shot completion for an agent type + model and
-// returns the response text. Satisfied by a thin adapter over
-// internal/agent/hostutility.Manager (ADR 0002), wired in backendapp so
-// internal/plugins does not import the agent runtime.
+// returns the response text.
 type utilityRunner interface {
 	ExecutePrompt(ctx context.Context, agentType, model, mode, prompt string) (string, error)
 }
 
-// InvokeUtilityAgent runs a one-shot, non-interactive completion using the
-// operator-configured utility agent, gated by the agent_invoke capability. It
-// resolves the configured profile to its agent type + model and delegates to
-// the sessionless host-utility runner. A missing capability is
-// PermissionDenied; an unconfigured (or since-deleted) utility agent is
-// FailedPrecondition — never a silent empty completion.
+// InvokeUtilityAgent runs the named utility agent selected in this plugin's
+// configuration. Missing, stale, and disabled selections are FailedPrecondition
+// so plugins cannot silently fall back to an unrelated model.
 func (h *pluginHost) InvokeUtilityAgent(ctx context.Context, prompt string) (string, error) {
 	if !h.capabilities.AgentInvoke {
 		return "", permissionDenied(capabilityAgentInvoke)
 	}
-	var settings utilitySettingsSource
+	var agents utilityAgentSource
 	var runner utilityRunner
 	if h.utilityDeps != nil {
-		settings, runner = h.utilityDeps()
+		agents, runner = h.utilityDeps()
 	}
-	if settings == nil || runner == nil || h.agentProfiles == nil {
-		// Not wired yet (e.g. a bare test pluginHost) — fall back to the
-		// embedded Unimplemented default rather than nil-dereferencing.
+	if agents == nil || runner == nil || h.configs == nil {
 		return h.UnimplementedHostData.InvokeUtilityAgent(ctx, prompt)
 	}
-
-	profileID, err := settings.UtilityAgentProfileID(ctx)
+	config, err := h.configs.GetConfig(h.pluginID)
 	if err != nil {
-		return "", fmt.Errorf("plugins: read utility agent setting: %w", err)
+		return "", fmt.Errorf("plugins: read plugin config: %w", err)
 	}
-	if profileID == "" {
+	name, _ := config[utilityAgentConfigKey].(string)
+	if name == "" {
 		return "", errNoUtilityAgent()
 	}
-
-	agentType, model, err := h.resolveUtilityAgentProfile(ctx, profileID)
+	agent, err := agents.GetAgentByName(ctx, name)
 	if err != nil {
-		return "", err
+		return "", status.Errorf(codes.FailedPrecondition, "configured utility agent %q not found", name)
 	}
-	return runner.ExecutePrompt(ctx, agentType, model, "", prompt)
+	if !agent.Enabled {
+		return "", status.Errorf(codes.FailedPrecondition, "configured utility agent %q is disabled", name)
+	}
+	return runner.ExecutePrompt(ctx, agent.AgentID, agent.Model, "", prompt)
 }
 
-// resolveUtilityAgentProfile finds the configured profile id among the
-// instance's agent profiles and returns its agent type + model. A profile id
-// that no longer resolves is FailedPrecondition (treated like "unconfigured"),
-// not an internal error — the operator's selection has simply gone stale.
-func (h *pluginHost) resolveUtilityAgentProfile(ctx context.Context, profileID string) (agentType, model string, err error) {
-	resp, err := h.agentProfiles.ListAgents(ctx)
-	if err != nil {
-		return "", "", fmt.Errorf("plugins: list agent profiles: %w", err)
-	}
-	for _, agent := range resp.Agents {
-		for _, profile := range agent.Profiles {
-			if profile.ID == profileID {
-				return profile.AgentID, profile.Model, nil
-			}
-		}
-	}
-	return "", "", status.Errorf(codes.FailedPrecondition, "configured utility agent profile %q not found", profileID)
-}
-
-// errNoUtilityAgent is the typed error a plugin gets when the operator has not
-// selected a utility agent in Settings > System.
 func errNoUtilityAgent() error {
-	return status.Error(codes.FailedPrecondition, "no utility agent configured")
+	return status.Error(codes.FailedPrecondition, "no utility agent configured for this plugin")
 }

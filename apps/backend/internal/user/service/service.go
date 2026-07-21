@@ -67,7 +67,6 @@ type UpdateUserSettingsRequest struct {
 	GitLabSavedPresets          **json.RawMessage
 	DefaultUtilityAgentID       *string
 	DefaultUtilityModel         *string
-	UtilityAgentProfileID       *string
 	KeyboardShortcuts           *map[string]interface{}
 	TerminalLinkBehavior        *string
 	TerminalFontFamily          *string
@@ -117,17 +116,6 @@ func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model
 		return "", "", err
 	}
 	return settings.DefaultUtilityAgentID, settings.DefaultUtilityModel, nil
-}
-
-// UtilityAgentProfileID returns the agent profile id plugins delegate one-shot
-// LLM calls to (Host.InvokeUtilityAgent, ADR 0048). Empty means no utility
-// agent has been configured in Settings > System.
-func (s *Service) UtilityAgentProfileID(ctx context.Context) (string, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
-	if err != nil {
-		return "", err
-	}
-	return settings.UtilityAgentProfileID, nil
 }
 
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
@@ -244,9 +232,6 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	}
 	if req.DefaultUtilityModel != nil {
 		settings.DefaultUtilityModel = strings.TrimSpace(*req.DefaultUtilityModel)
-	}
-	if req.UtilityAgentProfileID != nil {
-		settings.UtilityAgentProfileID = strings.TrimSpace(*req.UtilityAgentProfileID)
 	}
 	if req.KeyboardShortcuts != nil {
 		if err := validateKeyboardShortcuts(*req.KeyboardShortcuts); err != nil {
@@ -616,7 +601,6 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"gitlab_saved_presets":            settings.GitLabSavedPresets,
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
-		"utility_agent_profile_id":        settings.UtilityAgentProfileID,
 		"keyboard_shortcuts":              settings.KeyboardShortcuts,
 		"terminal_link_behavior":          settings.TerminalLinkBehavior,
 		"terminal_font_family":            settings.TerminalFontFamily,
