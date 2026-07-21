@@ -199,4 +199,34 @@ describe("useSessionPromptController", () => {
     expect(result.current.promptValue).toBe("improved prompt");
     expect(result.current.pendingResult).toBeNull();
   });
+
+  it("preserves exact source text and retains the result after a whitespace-only edit", async () => {
+    let deliverResult: ((result: UtilityGenerationResult) => Promise<boolean>) | undefined;
+    mockEnhancePrompt.mockImplementation(
+      async (_source: string, deliver: (result: UtilityGenerationResult) => Promise<boolean>) => {
+        deliverResult = deliver;
+      },
+    );
+
+    const initialPrompt = "  original prompt  ";
+    const editedPrompt = "  original prompt   ";
+    const { result } = renderHook(() => useSessionPromptHarness(initialPrompt));
+
+    await act(async () => {
+      await result.current.handleEnhancePrompt();
+    });
+
+    expect(mockEnhancePrompt).toHaveBeenCalledWith(initialPrompt, expect.any(Function));
+
+    act(() => {
+      result.current.setPromptValue(editedPrompt);
+    });
+
+    await act(async () => {
+      await deliverResult?.(GENERATED_RESULT);
+    });
+
+    expect(result.current.promptValue).toBe(editedPrompt);
+    expect(result.current.pendingResult).toEqual(GENERATED_RESULT);
+  });
 });

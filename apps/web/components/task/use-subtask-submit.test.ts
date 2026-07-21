@@ -134,6 +134,40 @@ describe("useSubtaskPromptZone", () => {
     expect(result.current.pendingResult).toEqual(GENERATED_RESULT);
   });
 
+  it("preserves exact source text and retains the result after a whitespace-only edit", async () => {
+    let deliverResult: ((result: UtilityGenerationResult) => Promise<boolean>) | undefined;
+    mockEnhancePrompt.mockImplementation(
+      async (_source: string, deliver: (result: UtilityGenerationResult) => Promise<boolean>) => {
+        deliverResult = deliver;
+      },
+    );
+
+    const initialPrompt = "  original prompt  ";
+    const editedPrompt = "  original prompt   ";
+    const { result } = renderHook(() => useSubtaskPromptHarness(initialPrompt));
+
+    act(() => {
+      result.current.promptRef.current = { value: initialPrompt } as HTMLTextAreaElement;
+    });
+
+    await act(async () => {
+      await result.current.handleEnhancePrompt();
+    });
+
+    expect(mockEnhancePrompt).toHaveBeenCalledWith(initialPrompt, expect.any(Function));
+
+    act(() => {
+      result.current.setPromptValue(editedPrompt);
+    });
+
+    await act(async () => {
+      await deliverResult?.(GENERATED_RESULT);
+    });
+
+    expect(result.current.promptValue).toBe(editedPrompt);
+    expect(result.current.pendingResult).toEqual(GENERATED_RESULT);
+  });
+
   it("resolves submission prompts from the same controlled prompt state", () => {
     const { result } = renderHook(() => useSubtaskPromptHarness());
 

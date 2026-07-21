@@ -178,7 +178,7 @@ export function useSessionPromptController(
   const latestPromptValueRef = useRef(promptValue);
   latestPromptValueRef.current = promptValue;
   const promptResultDelivery = usePromptResultDelivery({
-    getCurrent: () => (promptRef.current ? latestPromptValueRef.current.trim() : null),
+    getCurrent: () => latestPromptValueRef.current,
     apply: (value) => {
       if (!promptRef.current) {
         return false;
@@ -191,8 +191,8 @@ export function useSessionPromptController(
   });
 
   const handleEnhancePrompt = useCallback(async () => {
-    const current = latestPromptValueRef.current.trim();
-    if (!current) return;
+    const current = latestPromptValueRef.current;
+    if (!current.trim()) return;
 
     await enhancePrompt(current, (enhanced) => {
       const delivered = promptResultDelivery.deliver(current, enhanced);
@@ -365,20 +365,26 @@ function NewSessionForm({
   const [isCreating, setIsCreating] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [promptValue, setPromptValue] = useState("");
+  const latestPromptValueRef = useRef(promptValue);
+  latestPromptValueRef.current = promptValue;
   const controlledPromptRef = useMemo<RefObject<HTMLTextAreaElement | null>>(
     () => ({
-      current: promptRef.current
-        ? ({
-            get value() {
-              return promptValue;
-            },
-            set value(value: string) {
-              setPromptValue(value);
-            },
-          } as HTMLTextAreaElement)
-        : null,
+      get current() {
+        if (!promptRef.current) {
+          return null;
+        }
+
+        return {
+          get value() {
+            return latestPromptValueRef.current;
+          },
+          set value(value: string) {
+            setPromptValue(value);
+          },
+        } as HTMLTextAreaElement;
+      },
     }),
-    [promptValue],
+    [],
   );
   const busySignal = Number(isCreating) + Number(isSummarizing);
   const isBusyState = busySignal > 0;

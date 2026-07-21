@@ -319,6 +319,34 @@ function buildStoppedBannerProps(p: ChatInputContainerProps) {
   };
 }
 
+function applyEnhancedPromptToEditor(
+  inputRef: ContainerState["inputRef"],
+  result: { content: string },
+): boolean {
+  const input = inputRef.current;
+  if (!input) {
+    return false;
+  }
+
+  input.setValue(result.content);
+  return true;
+}
+
+function insertVoiceTranscript(inputRef: ContainerState["inputRef"], text: string): void {
+  const editor = inputRef.current;
+  if (!editor) return;
+
+  const trimmed = text.trim();
+  if (!trimmed) return;
+
+  const cursor = editor.getSelectionStart();
+  const current = editor.getValue();
+  const charBefore = cursor > 0 ? current.charAt(cursor - 1) : "";
+  const needsLeadingSpace = charBefore !== "" && !/\s/.test(charBefore);
+  const insert = needsLeadingSpace ? ` ${trimmed}` : trimmed;
+  editor.insertText(insert, cursor, cursor);
+}
+
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
   function ChatInputContainer(props, ref) {
     const { sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isStarting, isSending } =
@@ -361,31 +389,12 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const handleEnhancePrompt = useCallback(() => {
       const currentValue = s.value?.trim();
       if (!currentValue) return;
-      void enhancePrompt(currentValue, (result) => {
-        // Use setValue to directly update TipTap editor (handleChange only updates React state)
-        const input = s.inputRef.current;
-        if (!input) {
-          return false;
-        }
-        input.setValue(result.content);
-        return true;
-      });
-    }, [s, enhancePrompt]);
+      void enhancePrompt(currentValue, (result) => applyEnhancedPromptToEditor(s.inputRef, result));
+    }, [s.inputRef, s.value, enhancePrompt]);
 
     const handleVoiceTranscript = useCallback(
       (text: string) => {
-        const editor = s.inputRef.current;
-        if (!editor) return;
-        const trimmed = text.trim();
-        if (!trimmed) return;
-        const cursor = editor.getSelectionStart();
-        const current = editor.getValue();
-        // Prepend a space when inserting after existing non-whitespace content
-        // so transcripts flow naturally without running into the previous word.
-        const charBefore = cursor > 0 ? current.charAt(cursor - 1) : "";
-        const needsLeadingSpace = charBefore !== "" && !/\s/.test(charBefore);
-        const insert = needsLeadingSpace ? ` ${trimmed}` : trimmed;
-        editor.insertText(insert, cursor, cursor);
+        insertVoiceTranscript(s.inputRef, text);
       },
       [s.inputRef],
     );

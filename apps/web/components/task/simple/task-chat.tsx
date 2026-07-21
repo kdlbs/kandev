@@ -281,6 +281,89 @@ type ChatInputProps = {
   onSubmitted?: () => void;
 };
 
+type CommentComposerFooterProps = {
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  handleFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  handleEnhance: () => void;
+  isEnhancingPrompt: boolean;
+  isUtilityConfigured: boolean;
+  submitting: boolean;
+  input: string;
+  handleSubmit: () => Promise<void>;
+  pendingResult: ReturnType<typeof usePromptResultDelivery>["pendingResult"];
+  applyPending: () => void;
+  copyPending: () => Promise<void>;
+};
+
+function CommentComposerFooter({
+  fileInputRef,
+  handleFileSelect,
+  handleEnhance,
+  isEnhancingPrompt,
+  isUtilityConfigured,
+  submitting,
+  input,
+  handleSubmit,
+  pendingResult,
+  applyPending,
+  copyPending,
+}: CommentComposerFooterProps) {
+  return (
+    <>
+      <div className="flex items-center gap-1 px-2 pb-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleFileSelect}
+        />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7 cursor-pointer"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <IconPaperclip className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Attach files</TooltipContent>
+        </Tooltip>
+        <EnhancePromptButton
+          onClick={handleEnhance}
+          isLoading={isEnhancingPrompt}
+          isConfigured={isUtilityConfigured}
+        />
+        <span className="flex-1" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon"
+              className="h-7 w-7 cursor-pointer"
+              disabled={submitting || !input.trim()}
+              onClick={() => void handleSubmit()}
+            >
+              <IconSend className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Send comment</TooltipContent>
+        </Tooltip>
+      </div>
+      <div className="px-2 pb-2">
+        <PromptResultRecovery
+          pendingResult={pendingResult}
+          onApply={applyPending}
+          onCopy={copyPending}
+        />
+      </div>
+    </>
+  );
+}
+
 function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInputProps) {
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -351,56 +434,19 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
           rows={2}
           className="w-full bg-transparent px-3 py-2 text-sm outline-none resize-none"
         />
-        <div className="flex items-center gap-1 px-2 pb-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7 cursor-pointer"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <IconPaperclip className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Attach files</TooltipContent>
-          </Tooltip>
-          <EnhancePromptButton
-            onClick={handleEnhance}
-            isLoading={isEnhancingPrompt}
-            isConfigured={isUtilityConfigured}
-          />
-          <span className="flex-1" />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                size="icon"
-                className="h-7 w-7 cursor-pointer"
-                disabled={submitting || !input.trim()}
-                onClick={() => void handleSubmit()}
-              >
-                <IconSend className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Send comment</TooltipContent>
-          </Tooltip>
-        </div>
-        <div className="px-2 pb-2">
-          <PromptResultRecovery
-            pendingResult={promptDelivery.pendingResult}
-            onApply={promptDelivery.applyPending}
-            onCopy={promptDelivery.copyPending}
-          />
-        </div>
+        <CommentComposerFooter
+          fileInputRef={fileInputRef}
+          handleFileSelect={handleFileSelect}
+          handleEnhance={handleEnhance}
+          isEnhancingPrompt={isEnhancingPrompt}
+          isUtilityConfigured={isUtilityConfigured}
+          submitting={submitting}
+          input={input}
+          handleSubmit={handleSubmit}
+          pendingResult={promptDelivery.pendingResult}
+          applyPending={promptDelivery.applyPending}
+          copyPending={promptDelivery.copyPending}
+        />
       </div>
     </div>
   );

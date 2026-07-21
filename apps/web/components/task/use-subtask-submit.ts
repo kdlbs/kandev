@@ -177,7 +177,7 @@ export function useSubtaskPromptZone(opts: {
     taskTitle,
   });
   const promptResultDelivery = usePromptResultDelivery({
-    getCurrent: () => (promptRef.current ? latestPromptValueRef.current.trim() : null),
+    getCurrent: () => latestPromptValueRef.current,
     apply: (value) => {
       if (!promptRef.current) {
         return false;
@@ -189,8 +189,8 @@ export function useSubtaskPromptZone(opts: {
     },
   });
   const handleEnhancePrompt = useCallback(async () => {
-    const current = latestPromptValueRef.current.trim();
-    if (!current) return;
+    const current = latestPromptValueRef.current;
+    if (!current.trim()) return;
 
     await enhancePrompt(current, (enhanced) => {
       const delivered = promptResultDelivery.deliver(current, enhanced);
