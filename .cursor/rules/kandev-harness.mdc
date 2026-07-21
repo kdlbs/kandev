@@ -17,7 +17,4 @@ Use the shared Kandev harness as the source of truth:
 
 For harness edits, load `.agents/skills/harness-improvement/SKILL.md` and the relevant bundled references under `.agents/skills/harness-improvement/references/`. Use `references/platforms/` before external docs.
 
-The always-on `.cursor/rules/planner-orchestration.mdc` defines primary and
-worker behavior for normal tasks.
-
 When updating a subagent role, update all requested project-local mirrors across `.agents/agents`, `.claude/agents`, `.codex/agents`, `.cursor/agents`, and `.opencode/agents` unless the user scopes the request to one platform.

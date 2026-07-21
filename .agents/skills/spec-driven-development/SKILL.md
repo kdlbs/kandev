@@ -9,7 +9,7 @@ Use this as the default development workflow for non-trivial features and behavi
 
 ## Planner And Workers
 
-Load `/planner-orchestration`. The user-started primary session owns planning,
+The user-started primary session owns planning,
 delegation, progress, approvals, and user communication. It does not implement,
 test, integrate, verify, or ship code. Workers do not spawn other workers.
 
@@ -113,9 +113,11 @@ Task file naming:
   `docs/plans/<slug>/task-01-backend-contracts.md`.
 - Start each file with frontmatter: `id`, `title`, `status`, `wave`,
   `depends_on`, and `plan`.
-- Initial `status` is `pending`; the implementing agent updates it to
-  `in_progress` when starting and `done` when finished.
-- `plan.md` must reference every task file and show its current status.
+- Initial `status` is `pending`; the implementing worker updates only its
+  owned task file to `in_progress` when starting and `done` when finished.
+- `plan.md` must reference every task file and show its current status. The
+  planner updates those statuses after accepting worker results, or delegates
+  a serialized update to a worker with explicit shared-plan ownership.
 
 Each task needs:
 - **Title:** one behavior or layer, no "and" unless inseparable.
@@ -150,6 +152,9 @@ Parallelize only when safe:
 - Backend packages can often run in parallel if they do not edit the same files or migrations.
 - Frontend tasks are usually sequential because Vite/React SPA build, type, and state surfaces overlap.
 - Database migrations, generated API types, shared DTOs, and package-wide config are sequential.
+- Parallel workers update only their owned task files. Never let them update
+  `plan.md` concurrently; serialize plan-status updates even when shared-plan
+  ownership is explicitly assigned.
 - E2E runs happen after backend/frontend integration is coherent.
 
 ### Worktrees
@@ -174,14 +179,16 @@ Rules:
 ## Phase 6: Implementation
 
 For each task:
-- Update the task file frontmatter to `status: in_progress` before coding.
+- Update only the owned task file frontmatter to `status: in_progress` before
+  coding.
 - Use `/tdd` for code changes.
 - Use `/e2e` for browser/user-flow coverage.
 - Use `/mobile-parity` for frontend UI changes.
 - Use `/debug` when diagnosis or instrumentation is needed; remove temporary logs before PR.
 - Update the task file frontmatter to `status: done` after the task's
-  acceptance criteria and targeted verification pass, and update the linked
-  status in `plan.md`.
+  acceptance criteria and targeted verification pass. Do not update
+  `plan.md` unless the work packet explicitly owns that shared file and the
+  update is serialized outside parallel execution.
 
 Assign every independent task to an `implementer` worker. Launch implementers in parallel only for tasks in the same wave that do not share mutable files. Use this prompt shape:
 
@@ -198,6 +205,8 @@ Files/patterns:
 Constraints:
 - Follow scoped AGENTS.md.
 - Use TDD. Do not broaden scope.
+- Update only the assigned task file; do not edit `plan.md` without explicit,
+  serialized shared-plan ownership.
 Output:
 - Summary, files changed, tests run, blockers, risks, and task file status update.
 ```

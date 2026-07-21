@@ -9,12 +9,16 @@ Use this as the routing map for Kandev's local skills. Prefer the repo's existin
 
 ## Session Role
 
-Load `/planner-orchestration` before routing development work. The user-started
-primary session plans and delegates through the active harness's native
-subagent tool; registered custom agents execute bounded worker assignments.
-Execution skills below describe what the assigned worker does, not work the
-planner performs directly. Never use Kandev MCP task/session APIs as worker
-delegation or as a fallback for unavailable native subagents.
+The root `AGENTS.md` (also supplied to Claude through `CLAUDE.md`) is the
+authoritative always-on planner/worker role boundary. The user-started primary
+session plans and delegates through the active harness's native subagent tool;
+registered custom agents execute bounded worker assignments. Execution skills
+below describe what the assigned worker does, not work the planner performs
+directly. Never use Kandev MCP task/session APIs as worker delegation or as a
+fallback for unavailable native subagents.
+
+Load `/planner-orchestration` only when its detailed work-packet, model-tier,
+or completion rules are needed. Execution skills do not each need to load it.
 
 ## Skill Map
 

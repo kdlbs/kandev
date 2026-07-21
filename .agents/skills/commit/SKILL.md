@@ -7,7 +7,7 @@ description: Stage and commit changes using Conventional Commits. Use when there
 
 ## Planner Entry
 
-Load `/planner-orchestration`. The user-started primary session delegates full
+The user-started primary session delegates full
 verification to `verify`, then delegates staging and committing the verified
 checkout to an `implementer` worker. It does not run Git commands directly. The
 commit worker must receive the successful verification result and must not spawn

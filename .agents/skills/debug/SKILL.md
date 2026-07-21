@@ -10,7 +10,7 @@ Diagnose efficiently and safely. Debugging produces evidence and a root-cause hy
 
 ## Planner Entry
 
-Load `/planner-orchestration`. In the user-started primary session, delegate the
+In the user-started primary session, delegate the
 triage, evidence gathering, and diagnosis below to one `implementer` worker with
 production edits forbidden. Review its evidence and decide whether to create a
 separate `/fix` assignment. Do not run the diagnostic procedure directly.

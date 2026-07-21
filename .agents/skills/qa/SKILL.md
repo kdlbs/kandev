@@ -7,7 +7,7 @@ description: Verify a feature works after implementation. Actively try to break 
 
 ## Planner Entry
 
-Load `/planner-orchestration`. The user-started primary session delegates this
+The user-started primary session delegates this
 entire procedure to the registered `qa` worker, reviews its report, and creates
 new implementer assignments for any fixes. It does not run QA or fix findings
 directly. An explicitly assigned `qa` worker continues below and does not spawn

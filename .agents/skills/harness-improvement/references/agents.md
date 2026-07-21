@@ -102,11 +102,28 @@ If a platform mirror does not exist, create it only when repo convention or the 
 
 ## Validation
 
-Run:
+Validate only mirrors and search roots that already exist:
 
 ```bash
-git diff --check -- .agents/agents/<name>.md .codex/agents/<name>.toml .claude/agents/<name>.md .cursor/agents/<name>.md .opencode/agents/<name>.md
-rg -n "<agent-name>" .agents/agents .codex/agents .claude/agents .cursor/agents .opencode/agents .agents/skills AGENTS.md CLAUDE.md
+mirror_paths=(
+  ".agents/agents/<name>.md"
+  ".codex/agents/<name>.toml"
+  ".claude/agents/<name>.md"
+  ".cursor/agents/<name>.md"
+  ".opencode/agents/<name>.md"
+)
+existing_mirrors=()
+for path in "${mirror_paths[@]}"; do
+  [[ -e "$path" ]] && existing_mirrors+=("$path")
+done
+((${#existing_mirrors[@]})) && git diff --check -- "${existing_mirrors[@]}"
+
+search_roots=(.agents/agents .codex/agents .claude/agents .cursor/agents .opencode/agents .agents/skills AGENTS.md CLAUDE.md)
+existing_roots=()
+for path in "${search_roots[@]}"; do
+  [[ -e "$path" ]] && existing_roots+=("$path")
+done
+((${#existing_roots[@]})) && rg -n "<agent-name>" "${existing_roots[@]}"
 ```
 
 Check that orchestration skills reference new agents only where they should be used.

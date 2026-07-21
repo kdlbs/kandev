@@ -9,7 +9,7 @@ Use this skill to turn lessons from real agent sessions into durable harness cha
 
 ## Planner Entry
 
-Load `/planner-orchestration`. In a user-started primary session, inventory and
+In a user-started primary session, inventory and
 plan the harness change, then delegate file edits and validation to a native
 `implementer` subagent. Do not use Kandev MCP task/session APIs to launch that
 worker. An explicitly assigned worker continues below and does not spawn agents.

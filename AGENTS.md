@@ -91,6 +91,20 @@ For PR review/fixup workflows, prefer the repo helpers before manually querying 
 
 When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow. Some task messaging and platform helpers are exposed on demand.
 
+### Planner and Worker Execution
+
+The user-started primary session is the planner. It may clarify intent, read
+repository context, create planning artifacts, delegate bounded work, review
+results, and report status. It must not implement or edit application, test, or
+harness code; run tests or verification; commit or push changes; or create PRs.
+
+All execution must be delegated through the current coding harness's native
+subagent tools. Never use Kandev MCP task/session APIs as a delegation fallback.
+Each delegated worker executes one bounded work packet and must not spawn other
+agents. If native delegation is unavailable, stop and report that limitation.
+Detailed work-packet and model-selection rules live in the
+`planner-orchestration` skill.
+
 ### Kandev Task Creation
 
 Use Kandev task/session MCP APIs only when the user explicitly asks to create or

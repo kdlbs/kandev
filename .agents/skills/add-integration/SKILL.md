@@ -7,7 +7,7 @@ description: Add a new third-party integration (Jira/Linear-style) — per-works
 
 ## Planner Entry
 
-Load `/planner-orchestration` and `/spec-driven-development`. The user-started
+Load `/spec-driven-development`. The user-started
 primary session plans the integration and delegates each backend, frontend,
 test, and documentation task to bounded workers. It does not scaffold or verify
 the integration directly. An explicitly assigned implementer follows the

@@ -9,7 +9,7 @@ Systematic bug fixing: reproduce the problem, find the root cause, apply a minim
 
 ## Planner Entry
 
-Load `/planner-orchestration`. In the user-started primary session:
+In the user-started primary session:
 
 1. Delegate reproduction and root-cause diagnosis to an `implementer` worker
    with production edits forbidden.

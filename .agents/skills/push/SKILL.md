@@ -7,7 +7,7 @@ description: Push an already verified and committed branch. With --fixup, return
 
 ## Planner Entry
 
-Load `/planner-orchestration`. The user-started primary session delegates any
+The user-started primary session delegates any
 required verification and commit first, then assigns the push to an
 `implementer` worker. With `--fixup`, the planner coordinates `/pr-fixup`
 workers after the push. It does not run Git or GitHub commands directly.

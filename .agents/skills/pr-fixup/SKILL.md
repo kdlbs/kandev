@@ -9,7 +9,7 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 
 ## Planner Entry
 
-Load `/planner-orchestration`. The user-started primary session coordinates this
+The user-started primary session coordinates this
 workflow by delegating polling to `pr-poller`, code/comment remediation to an
 `implementer`, full checks to `verify`, and commit/push actions to a final
 bounded implementer assignment. It does not run GitHub, test, edit, commit, or
@@ -73,18 +73,32 @@ The planner invokes the registered `pr-poller` with the PR number. The worker:
 Always check for merge conflicts during task 1 before acting on any clean-poller shortcut. A PR can be blocked by conflicts before any check fails.
 
 The planner asks `pr-poller` to include GitHub mergeability and local unmerged
-index state. If either reports conflicts, assign a bounded implementer to load
-`references/merge-conflicts.md`, resolve them, and return targeted verification
-before continuing. The planner does not inspect or resolve conflicts directly.
+index state. Treat the gate as clean only when `mergeable: MERGEABLE`,
+`merge_state_status` is known and not `DIRTY`, and
+`local_unmerged_entries: 0`. If any field reports a conflict, assign a bounded
+implementer to load `references/merge-conflicts.md`, resolve it, and return
+targeted verification before continuing. If any gate field is `unknown`,
+re-poll instead of taking a clean-state shortcut. The planner does not inspect
+or resolve conflicts directly.
 
 **Parse the report.** The fields you care about:
 
-- `ci_failed` — list of `{name, run_id, conclusion, url}`. Empty list ⇒ CI is green.
-- `ci_pending` — anything still running when the 20-min cap hit. Decide whether to re-invoke `pr-poller` after a short delay, or proceed with what you have and re-check at step 6.
-- `bots.<name>` — `done` / `rate_limited` / `pending` / `timeout`. Anything in `done` or `rate_limited` has had its chance; treat the rest as missing data, not a blocker.
-- `unresolved_review_threads` and `issue_comments_from_bots` — drive steps 3-4. If both are 0, `ci_failed` is empty, and the merge-conflict gate is clean, skip to step 5 (still run verify + push if you have fixes from earlier).
+- `ci_failed` — non-empty list of `{name, run_id, conclusion, url}`.
+  `ci_failed: unknown` means CI collection failed, blocks clean state, and
+  requires re-polling. Omission is known empty only when the complete report
+  parsed successfully and its recommendation reports no fetch failure.
+- `ci_pending` — anything still running when the 20-min cap hit. Only `none` is
+  a known non-pending state.
+- `bots.<name>` — `done` / `rate_limited` / `pending` / `timeout` / `unknown`.
+  Only `done` and `rate_limited` are clean; surface `timeout`, and treat
+  `pending` or `unknown` as incomplete state.
+- `unresolved_review_threads` and `issue_comments_from_bots` — drive steps 3-4.
+  Skip to step 5 only when both are known `0`, `ci_failed` is explicitly known
+  empty, `ci_pending` is `none`, the merge-conflict gate is known clean, and
+  every bot is `done` or `rate_limited` (still run verify + push if you have
+  fixes from earlier).
 
-**E2E CI outlasts the poller.** The pr-poller caps at ~20 minutes. Standard E2E shards plus container shards often run longer. GitHub can expand E2E matrix jobs late, and the shard matrix may appear only after the build job finishes; if pending checks briefly drop near zero and then jump when E2E shards appear, keep treating that as normal pending CI unless a shard reports failure. If the report shows `ci_pending` with only E2E/lint jobs and `ci_failed` is empty, re-invoke pr-poller once those jobs finish — do not spin a manual `gh pr checks` loop in the parent. If the cap hits with E2E still pending, report "CI in progress" to the user instead of blocking, and include the exact pending shard names from `ci_pending`.
+**E2E CI outlasts the poller.** The pr-poller caps at ~20 minutes. Standard E2E shards plus container shards often run longer. GitHub can expand E2E matrix jobs late, and the shard matrix may appear only after the build job finishes; if pending checks briefly drop near zero and then jump when E2E shards appear, keep treating that as normal pending CI unless a shard reports failure. If the report shows `ci_pending` with only E2E/lint jobs and `ci_failed` is known empty, re-invoke pr-poller once those jobs finish — do not spin a manual `gh pr checks` loop in the parent. If the cap hits with E2E still pending, report "CI in progress" to the user instead of blocking, and include the exact pending shard names from `ci_pending`.
 
 **Do not fetch poll output yourself** — that is what burns context. The report is the only thing that enters your context.
 
@@ -435,22 +449,20 @@ launched, stop and report the blocked phase. Parse the returned report:
 
 - Require the new poller report to include newly opened review threads before
   waiting on CI. Review bots may add threads after earlier ones were resolved.
-- Treat the PR as clean only when `ci_failed:` is absent, `ci_pending: none`,
-  `unresolved_review_threads: 0`, `issue_comments_from_bots: 0`, and every bot
-  row is terminal (`done`, `rate_limited`, or `timeout`).
-- Treat a clean intermediate state as provisional while `ci_pending` is not
-  `none` or any bot row is `pending`/`unknown`. Reviewer services may add new
-  threads after CI is mostly green.
-- Do not report the PR as review-clean while harness lint or bot review checks
-  are queued or in progress unless the bounded poll cap is reached. Report the
-  pending checks exactly from the poller result.
+- Treat the PR as clean only when `mergeable: MERGEABLE`,
+  `merge_state_status` is known and not `DIRTY`,
+  `local_unmerged_entries: 0`, the complete report establishes `ci_failed` as
+  explicitly known empty, `ci_pending: none`, `unresolved_review_threads: 0`,
+  `issue_comments_from_bots: 0`, and every bot row is `done` or
+  `rate_limited`.
+- Treat a clean intermediate state as provisional while any mergeability or
+  local-conflict field is `unknown`, `ci_failed: unknown` or any other result
+  is not explicitly known empty, `ci_pending` is not `none`, or any bot row is
+  `pending`, `timeout`, or `unknown`.
 - If only long-running checks remain in `ci_pending` after full local
-  verification is green, `ci_failed:` is absent, and
+  verification is green, `ci_failed` is explicitly known empty, and
   `unresolved_review_threads: 0`, stop at the bounded cap and report the exact
   pending checks. Continue immediately if a check fails or a new thread appears.
-- If a pushed fix restarts CI while previous checks were in progress, launch a
-  fresh poller packet. If checks remain pending at the cap, report their exact
-  names from `ci_pending`.
 - If new CI failures appeared from the latest commit → loop back to task 2 and reset task 2-5 to `in_progress` as needed.
 - If new review comments appeared after the push → loop back to task 3.
 - If the poller hit its cap (`recommendation:` mentions "timed out") → surface the remaining pending items to the user and stop.

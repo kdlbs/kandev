@@ -7,7 +7,7 @@ description: Write and run web E2E tests (Playwright) using TDD — locations, p
 
 ## Execution Context
 
-Load `/planner-orchestration`. The user-started primary session delegates this
+The user-started primary session delegates this
 procedure to an `implementer` or `test-engineer` worker and does not write or run
 E2E tests directly. An explicitly assigned worker continues below and does not
 spawn other workers.

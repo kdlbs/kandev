@@ -7,7 +7,7 @@ description: Review changed code for quality, security, and architecture complia
 
 ## Planner Entry
 
-Load `/planner-orchestration`. The user-started primary session delegates this
+The user-started primary session delegates this
 procedure to the registered `code-review` worker and reviews its findings. It
 assigns any fixes to an implementer and delegates security-sensitive follow-up
 to `security-auditor`; it does not review or edit the change directly. An

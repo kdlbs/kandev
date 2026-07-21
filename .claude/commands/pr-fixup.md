@@ -6,7 +6,7 @@ model: opus
 effort: high
 ---
 
-Use `.agents/skills/planner-orchestration/SKILL.md`, then coordinate
+Rely on the root `AGENTS.md`/`CLAUDE.md` planner/worker contract and coordinate
 `.agents/skills/pr-fixup/SKILL.md` as the primary planner.
 
 Delegate PR state collection to `pr-poller`, remediation to `implementer`, full

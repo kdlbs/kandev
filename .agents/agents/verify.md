@@ -12,6 +12,9 @@ permissionMode: acceptEdits
 Run the full verification pipeline for the monorepo and report any failures.
 Do not change production or test logic, resolve conflicts, rebase, or commit.
 
+`permissionMode: acceptEdits` is intentional so the Bash-driven `make fmt`
+step can retain formatter changes. It does not authorize source or test fixes.
+
 ## Steps
 
 1. **Prepare and inspect the current PR base:**

@@ -57,7 +57,6 @@ Markdown example:
 ---
 description: Reviews code for quality and best practices.
 mode: subagent
-model: provider/current-worker-model
 temperature: 0.1
 permission:
   edit: deny
@@ -81,7 +80,6 @@ JSON example:
     "code-reviewer": {
       "description": "Reviews code for best practices and potential issues",
       "mode": "subagent",
-      "model": "provider/current-worker-model",
       "prompt": "You are a code reviewer. Focus on security, performance, and maintainability.",
       "permission": {
         "edit": "deny"
@@ -95,7 +93,8 @@ Important fields:
 
 - `description` is required.
 - `mode`: `primary`, `subagent`, or `all`; default is `all`.
-- `model`: provider/model-id format.
+- `model`: provider/model-id format when explicitly pinned. Kandev's OpenCode
+  mirrors omit it so the configured provider and primary model are inherited.
 - `temperature`: lower for planning/review; higher for brainstorming.
 - `steps`: max agentic iterations; legacy `maxSteps` is deprecated.
 - `permission`: use this instead of deprecated `tools`.

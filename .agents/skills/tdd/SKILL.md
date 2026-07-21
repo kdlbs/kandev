@@ -7,7 +7,7 @@ description: Implement changes using Test-Driven Development (Red-Green-Refactor
 
 ## Execution Context
 
-Load `/planner-orchestration`. The user-started primary session delegates TDD
+The user-started primary session delegates TDD
 work to an `implementer` or `test-engineer` worker and does not continue below.
 An explicitly assigned worker follows this procedure and does not spawn other
 workers.

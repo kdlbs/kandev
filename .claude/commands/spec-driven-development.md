@@ -6,7 +6,9 @@ model: inherit
 effort: high
 ---
 
-Load `/planner-orchestration` and use Kandev's planner-driven flow:
+Rely on the root `AGENTS.md`/`CLAUDE.md` planner/worker contract and use
+`.agents/skills/spec-driven-development/SKILL.md` for Kandev's planner-driven
+flow:
 
 1. Clarify intent with `/interview-me` style questions when needed.
 2. Create or update the product spec with `/spec`.

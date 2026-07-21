@@ -20,7 +20,7 @@ The planner will tell you the PR number (or rely on `gh pr view` against the cur
 
 ## Output contract — print exactly this shape and nothing else
 
-```
+```text
 === pr-poller report ===
 pr=<number>  branch=<name>
 head_sha: <40-char SHA or "unknown">
@@ -29,7 +29,7 @@ merge_state_status: <observed GitHub value or "unknown">
 local_unmerged_entries: <N or "unknown">
 ci_failed:
   - name=<check_name>  run_id=<id or "unknown">  conclusion=<failure|cancelled|timed_out>  url=<details_url>
-  - …  (omit the entire ci_failed: line if none)
+  - …  (one entry per observed failure)
 ci_passed: <count or "unknown">
 ci_pending: <comma-separated names, "none", or "unknown">
 bots:
@@ -44,6 +44,10 @@ claude_summary: blockers=<N or "unknown"> suggestions=<N or "unknown"> verdict=<
 recommendation: <one sentence — what the planner should assign next>
 === end ===
 ```
+
+`ci_failed` has exactly three representations: a non-empty list as shown;
+`ci_failed: unknown` when CI collection fails; or complete omission only when
+successful collection observed zero failures.
 
 Free-form notes are forbidden outside the markers. The planner parses this verbatim. If something unexpected happens, surface it through `recommendation:` (one sentence).
 
@@ -176,14 +180,22 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
 
    If `body` was empty (no Claude summary yet), emit `claude_summary: blockers=0 suggestions=0 verdict=none`. Default missing counts to `0`.
 
-7. **Emit the report.** Fill in the shape above exactly. The `recommendation:` line is one short sentence chosen from this menu, picking the first that applies:
+7. **Emit the report.** Fill in the shape above exactly. Use green wording only
+   when the report is complete and every required value is known: `ci_failed`
+   is known empty, `ci_pending` is `none`, every bot is `done` or
+   `rate_limited`, mergeability and local conflict state are known clean, and
+   all required counts are known. The `recommendation:` line is one short
+   sentence chosen from this menu, picking the first that applies:
    - `"PR has merge conflicts — planner should assign bounded conflict resolution."` if `mergeable` is `CONFLICTING`, `merge_state_status` is `DIRTY`, or `local_unmerged_entries` is greater than zero
    - `"CI failed — planner should assign log triage and remediation."` if `ci_failed` is non-empty
    - `"Claude summary flags <N> blocker(s); planner should assign comment triage and remediation."` if `claude_summary.blockers > 0`
+   - `"Polling timed out with pending items; planner should decide whether to launch another poll."` if any axis hit the cap
+   - `"PR state fetch failed; planner should retry polling."` if a required fetch failed or any required value is `unknown`
+   - `"Polling is incomplete; planner should continue polling."` if CI or any bot is still pending
    - `"All checks green; planner should assign triage for <N> unresolved review threads."` if `unresolved_review_threads > 0`
    - `"All threads resolved; Claude has <N> pending suggestion(s) — planner should assign triage."` if `claude_summary.suggestions > 0`
-   - `"All checks green and no unresolved comments — planner may close out."` otherwise
-   - `"Polling timed out with pending items; planner should decide whether to launch another poll."` if any axis hit the cap
+   - `"All checks green and no unresolved comments — planner may close out."` only when the complete known-state conditions above hold
+   - `"Polling state is incomplete; planner should retry polling."` otherwise
 
 ## What you do NOT do
 

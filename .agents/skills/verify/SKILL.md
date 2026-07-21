@@ -5,7 +5,7 @@ description: Run format, typecheck, test, and lint across the monorepo. Use afte
 
 # Verify
 
-Load `/planner-orchestration`. In the user-started primary session, delegate the
+In the user-started primary session, delegate the
 full verification pipeline to the registered `verify` worker. Do not substitute
 a generic agent: it may lack the required GitHub network access or
 shared-worktree write permissions. If the worker cannot be launched or access

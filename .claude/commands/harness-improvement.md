@@ -6,9 +6,9 @@ model: inherit
 effort: medium
 ---
 
-Use `.agents/skills/planner-orchestration/SKILL.md`, then
-`.agents/skills/harness-improvement/SKILL.md`. Delegate edits and validation to
-the native `Agent` tool; do not edit harness files in the primary command.
+Rely on the root `AGENTS.md`/`CLAUDE.md` planner/worker contract and use
+`.agents/skills/harness-improvement/SKILL.md`. Delegate edits and validation
+to the native `Agent` tool; do not edit harness files in the primary command.
 
 First read the relevant bundled reference files under `.agents/skills/harness-improvement/references/`. For platform-specific formats, use `references/platforms/` as the first source of truth and do not browse unless a bundled reference is missing, contradictory, or the user explicitly asks for latest upstream behavior.
 

@@ -51,9 +51,11 @@ fallback. If native harness delegation is unavailable, stop and report it.
 ## Worker Contract
 
 A worker executes exactly one bounded assignment. It follows the assigned
-execution skill, edits only its owned files, runs the named verification, and
-reports results to the planner. Workers do not spawn other workers or broaden
-their assignment.
+execution skill, edits only its owned files (including, when applicable, only
+its assigned task file), runs the named verification, and reports results to
+the planner. Shared plan files require explicit ownership and their updates
+must be serialized, never performed by parallel workers. Workers do not spawn
+other workers or broaden their assignment.
 
 ## Work Packet
 
@@ -82,7 +84,9 @@ Constraints:
 Workers share a mutable checkout unless the runtime explicitly provides an
 isolated worktree. Run them sequentially by default. Parallelize only when
 their owned files do not overlap and neither worker changes shared schemas,
-generated contracts, migrations, lockfiles, or package-wide configuration.
+generated contracts, migrations, lockfiles, package-wide configuration, or
+shared plan status. Serialize `plan.md` updates even when a work packet
+explicitly assigns shared-plan ownership.
 
 ## Model Tiers
 

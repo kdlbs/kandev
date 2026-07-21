@@ -7,7 +7,7 @@ description: Create a PR from an already verified, committed, and pushed branch.
 
 ## Planner Entry
 
-Load `/planner-orchestration`. The user-started primary session delegates
+The user-started primary session delegates
 verification, commit, push, and PR creation as separate bounded implementer
 assignments, then coordinates `/pr-fixup` unless draft mode was requested. It
 does not run repository-host commands directly.
@@ -75,11 +75,12 @@ explicitly requests task tracking.
 
    Do not fall back to hand-composed `--body` prose. If creation fails, surface the exact stderr, fix the template/body-file problem, and retry with `--body-file`.
 
-5. **If ready (not draft):** Return the PR URL and number to the planner, which
-   launches `pr-poller` and coordinates `/pr-fixup`. Do not poll or remediate
-   from this PR-creation assignment.
+5. **If ready (not draft):** For GitHub, do not return the PR to the planner for
+   `pr-poller` or `/pr-fixup` until any required screenshot capture and
+   embedding in step 6 are complete. Do not poll or remediate from this
+   PR-creation assignment.
 
-6. **Screenshots — required for any UI-visible change.** If the diff touches user-visible UI (typically under `apps/web/`, excluding e2e-only or backend-only edits), you must capture and embed screenshots that show the change actually working before treating the PR as complete — do not wait to be asked. Capture both desktop and mobile viewports whenever the change is responsive.
+6. **Screenshots — required for any UI-visible change.** If the diff touches user-visible UI (typically under `apps/web/`, excluding e2e-only or backend-only edits), you must capture screenshots that show the change actually working and publish them through the host-specific flow before treating the PR as complete — do not wait to be asked. Capture both desktop and mobile viewports whenever the change is responsive.
 
    **Capture:**
    - The planner assigns screenshot capture to a QA or implementer worker before
@@ -87,6 +88,9 @@ explicitly requests task tracking.
      `apps/web/.pr-assets/manifest.json`.
    - If fresh required assets are missing, stop and report the missing capture
      packet; do not run Playwright from this PR worker.
+   - Screenshots must use synthetic or redacted data. Reject any asset that
+     exposes secrets, authentication tokens, or personally identifiable
+     information, and stop with a recapture request.
    - Compress PNGs before embedding: `pngquant --quality 65-90 --ext .png --force apps/web/.pr-assets/*.png`.
 
    **Embed (GitHub only — image binaries must never merge into `main`):** GitHub has no public API to upload images into a PR body (drag-and-drop is web-UI only), so publish the images on an orphan commit that can never be merged and reference them with SHA-pinned raw URLs:
@@ -117,13 +121,20 @@ explicitly requests task tracking.
    environment, return that blocker to the planner. The planner owns user
    communication and decides whether publication may proceed without them.
 
-7. **Return the PR URL** when done.
+7. **Return the PR URL** after all applicable steps are complete. For a ready
+   GitHub PR, return its URL and number to the planner, which launches
+   `pr-poller` and coordinates `/pr-fixup`.
 
 ## Azure Repos flow
 
 When `git remote get-url origin` points at Azure Repos, use the same preflight
 (steps 1-3). For step 4, create an Azure Repos pull request instead of a GitHub
-PR. Skip steps 5 and 6; fixup and PR image preparation are GitHub-specific.
+PR. Skip the GitHub fixup handoff and the GitHub-only embedding portion of step
+6, but do not skip screenshot capture. For a UI-visible change, capture and
+validate the required assets as described in step 6. Attach them to the Azure
+PR when supported; otherwise return the fresh asset paths to the planner as an
+explicit attachment handoff. If capture is impossible or no viable attachment
+handoff exists, return that blocker instead of treating the PR as complete.
 
 Prefer the Azure CLI when it is on `PATH`:
 
@@ -151,11 +162,19 @@ EOF
 Notes:
 - Azure DevOps CLI auto-detects organization / project / repository from the current repo in most cases, so you usually do **not** need to pass `--organization`, `--project`, or `--repository` explicitly.
 - If auto-detect fails (common with unusual remotes or older CLI setups), derive them from the remote and retry with explicit flags.
-- Return the PR URL and stop.
+- Complete the screenshot capture and attachment/handoff requirements above,
+  then return the PR URL and stop.
 
 ## GitLab flow (Merge Requests)
 
-When `git remote get-url origin` points at a GitLab host, the steps are the same up through **Push** (1–3). For step 4, create a Merge Request instead of a PR. **Skip steps 5 and 6** — `/pr-fixup` is wired to GitHub CI / CodeRabbit and `gh pr edit` only works against GitHub. The GitLab equivalent is to manage the MR directly via `glab` or the REST API (see "review comments" note at the bottom). After creating the MR, return the MR URL and stop.
+When `git remote get-url origin` points at a GitLab host, use the same preflight
+(steps 1-3) and create a Merge Request for step 4. Skip the GitHub fixup
+handoff and the GitHub-only orphan-ref embedding portion of step 6, but do not
+skip screenshot capture. For a UI-visible change, capture and validate the
+required assets, including the synthetic/redaction gate, then attach them to
+the MR when supported or return fresh asset paths as an explicit attachment
+handoff. If capture is impossible or no viable attachment handoff exists,
+return that blocker instead of treating the MR as complete.
 
 **MR title** still follows Conventional Commits — the squash-merge commit message is built from it the same way.
 

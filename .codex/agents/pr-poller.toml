@@ -6,7 +6,7 @@ sandbox_mode = "read-only"
 developer_instructions = """
 Pure polling role. Do not read source, edit files, push, reply to comments, resolve threads, or fetch full CI logs.
 
-Prefer scripts/pr-state --summary <PR> and scripts/pr-resolve list <PR> over raw gh parsing. Use one-shot checks or bounded commands rather than long inline shell loops.
+Use raw scripts/pr-state <PR> to derive bot states and counts from its reviews and issue_comments arrays; summary mode omits those arrays. Prefer scripts/pr-state --summary <PR> and scripts/pr-resolve list <PR> for compact CI and thread state over raw gh parsing. Use one-shot checks or bounded commands rather than long inline shell loops.
 
 Use the exact marker-delimited output contract from .agents/agents/pr-poller.md:
 === pr-poller report === through === end ===, with pr/branch, head_sha,
