@@ -12,6 +12,7 @@ const ORIGINAL_PROMPT = "Original prompt";
 const IMPROVED_PROMPT = "Improved prompt";
 const USER_EDIT = "User edit";
 const PROMPT_RESULT_RECOVERY_TEST_ID = "prompt-result-recovery";
+const ENHANCE_PROMPT_BUTTON_TEST_ID = "enhance-prompt-button";
 
 let allowProgrammaticSet = true;
 let mockFs: DialogFormState;
@@ -338,7 +339,7 @@ describe("TaskCreateDialog prompt enhancement", () => {
     renderDialog();
 
     const textarea = screen.getByTestId("task-description-input") as HTMLTextAreaElement;
-    fireEvent.click(screen.getByTestId("enhance-prompt-button"));
+    fireEvent.click(screen.getByTestId(ENHANCE_PROMPT_BUTTON_TEST_ID));
 
     expect(enhancePromptMock).toHaveBeenCalledWith(ORIGINAL_PROMPT, expect.any(Function));
 
@@ -362,7 +363,7 @@ describe("TaskCreateDialog prompt enhancement", () => {
     renderDialog();
 
     const textarea = screen.getByTestId("task-description-input") as HTMLTextAreaElement;
-    fireEvent.click(screen.getByTestId("enhance-prompt-button"));
+    fireEvent.click(screen.getByTestId(ENHANCE_PROMPT_BUTTON_TEST_ID));
     fireEvent.change(textarea, { target: { value: USER_EDIT } });
 
     await act(async () => {
@@ -388,13 +389,34 @@ describe("TaskCreateDialog prompt enhancement", () => {
 
     renderDialog();
 
-    fireEvent.click(screen.getByTestId("enhance-prompt-button"));
+    fireEvent.click(screen.getByTestId(ENHANCE_PROMPT_BUTTON_TEST_ID));
     mockFs.descriptionInputRef.current = null;
 
     await act(async () => {
       await deliver?.({ content: IMPROVED_PROMPT });
     });
 
+    expect(screen.getByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeTruthy();
+  });
+
+  it("keeps the generated result behind recovery when the editor rejects a write", async () => {
+    let deliver: ((result: { content: string }) => boolean | Promise<boolean>) | undefined;
+    enhancePromptMock.mockImplementation(
+      (_source: string, onSuccess: (result: { content: string }) => boolean | Promise<boolean>) => {
+        deliver = onSuccess;
+      },
+    );
+
+    renderDialog();
+
+    fireEvent.click(screen.getByTestId(ENHANCE_PROMPT_BUTTON_TEST_ID));
+    allowProgrammaticSet = false;
+
+    await act(async () => {
+      await deliver?.({ content: IMPROVED_PROMPT });
+    });
+
+    expect(setHasDescriptionMock).not.toHaveBeenCalled();
     expect(screen.getByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeTruthy();
   });
 });

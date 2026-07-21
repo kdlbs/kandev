@@ -19,6 +19,8 @@ import {
 import type { ContextItem } from "@/lib/types/context";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
+import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
+import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -319,17 +321,50 @@ function buildStoppedBannerProps(p: ChatInputContainerProps) {
   };
 }
 
-function applyEnhancedPromptToEditor(
-  inputRef: ContainerState["inputRef"],
-  result: { content: string },
-): boolean {
+function applyEnhancedPromptToEditor(inputRef: ContainerState["inputRef"], value: string): boolean {
   const input = inputRef.current;
   if (!input) {
     return false;
   }
 
-  input.setValue(result.content);
-  return true;
+  input.setValue(value);
+  return input.getValue() === value;
+}
+
+function useChatPromptEnhancement({
+  inputRef,
+  sessionId,
+  taskTitle,
+  taskDescription,
+}: {
+  inputRef: ContainerState["inputRef"];
+  sessionId: string | null;
+  taskTitle?: string;
+  taskDescription: string;
+}) {
+  const isUtilityConfigured = useIsUtilityConfigured();
+  const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
+    sessionId,
+    taskTitle,
+    taskDescription,
+  });
+  const getCurrentEditorValue = useCallback(() => inputRef.current?.getValue() ?? null, [inputRef]);
+  const applyEnhancedPrompt = useCallback(
+    (nextValue: string) => applyEnhancedPromptToEditor(inputRef, nextValue),
+    [inputRef],
+  );
+  const promptDelivery = usePromptResultDelivery({
+    getCurrent: getCurrentEditorValue,
+    apply: applyEnhancedPrompt,
+  });
+  const handleEnhancePrompt = useCallback(() => {
+    const currentValue = getCurrentEditorValue();
+    if (currentValue === null) return;
+    if (!currentValue.trim()) return;
+    void enhancePrompt(currentValue, (result) => promptDelivery.deliver(currentValue, result));
+  }, [getCurrentEditorValue, enhancePrompt, promptDelivery]);
+
+  return { handleEnhancePrompt, isEnhancingPrompt, isUtilityConfigured, promptDelivery };
 }
 
 function insertVoiceTranscript(inputRef: ContainerState["inputRef"], text: string): void {
@@ -379,18 +414,12 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onSubmit: props.onSubmit,
     });
 
-    const isUtilityConfigured = useIsUtilityConfigured();
-    const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
+    const promptEnhancement = useChatPromptEnhancement({
+      inputRef: s.inputRef,
       sessionId,
       taskTitle,
       taskDescription,
     });
-
-    const handleEnhancePrompt = useCallback(() => {
-      const currentValue = s.value?.trim();
-      if (!currentValue) return;
-      void enhancePrompt(currentValue, (result) => applyEnhancedPromptToEditor(s.inputRef, result));
-    }, [s.inputRef, s.value, enhancePrompt]);
 
     const handleVoiceTranscript = useCallback(
       (text: string) => {
@@ -436,10 +465,17 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
         addFiles={s.addFiles}
         contextAreaProps={buildContextAreaProps(s, p)}
+        promptResultRecovery={
+          <PromptResultRecovery
+            pendingResult={promptEnhancement.promptDelivery.pendingResult}
+            onApply={promptEnhancement.promptDelivery.applyPending}
+            onCopy={promptEnhancement.promptDelivery.copyPending}
+          />
+        }
         editorAreaProps={buildEditorAreaProps(s, p, {
-          onEnhancePrompt: handleEnhancePrompt,
-          isEnhancingPrompt,
-          isUtilityConfigured,
+          onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
+          isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
+          isUtilityConfigured: promptEnhancement.isUtilityConfigured,
           onVoiceTranscript: handleVoiceTranscript,
           onVoiceAutoSend: handleVoiceAutoSend,
         })}

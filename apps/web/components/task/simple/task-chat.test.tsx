@@ -110,6 +110,7 @@ vi.mock("@kandev/ui/button", () => ({
 }));
 
 import { TaskChat } from "./task-chat";
+import { synchronizeInputValue } from "./synchronize-input-value";
 import { ActiveSessionRefProvider } from "./components/active-session-ref-context";
 
 afterEach(() => cleanup());
@@ -128,6 +129,7 @@ const ORIGINAL_PROMPT = "Original prompt";
 const IMPROVED_PROMPT = "Improved prompt";
 const USER_EDIT = "User edit";
 const COMMENT_PLACEHOLDER = "Add a comment...";
+const PROMPT_RESULT_RECOVERY_TEST_ID = "prompt-result-recovery";
 
 function makeComment(id: string, createdAt: string, content = `c-${id}`): TaskComment {
   return {
@@ -339,6 +341,18 @@ describe("TaskChat decisions in timeline", () => {
 });
 
 describe("TaskChat prompt enhancement", () => {
+  it("synchronizes an edit before scheduling the state update", () => {
+    const inputValueRef = { current: ORIGINAL_PROMPT };
+    const setInput = vi.fn(() => {
+      expect(inputValueRef.current).toBe(USER_EDIT);
+    });
+
+    synchronizeInputValue(inputValueRef, setInput, USER_EDIT);
+
+    expect(setInput).toHaveBeenCalledWith(USER_EDIT);
+    expect(inputValueRef.current).toBe(USER_EDIT);
+  });
+
   it("applies the enhanced prompt immediately when the input is unchanged", async () => {
     let deliver: ((result: { content: string }) => boolean | Promise<boolean>) | undefined;
     enhancePromptMock.mockImplementation(
@@ -360,7 +374,7 @@ describe("TaskChat prompt enhancement", () => {
     });
 
     await waitFor(() => expect(textarea.value).toBe(IMPROVED_PROMPT));
-    expect(screen.queryByTestId("prompt-result-recovery")).toBeNull();
+    expect(screen.queryByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeNull();
     expect(toastSuccessMock).toHaveBeenCalledWith("Enhanced prompt inserted.");
   });
 
@@ -384,12 +398,35 @@ describe("TaskChat prompt enhancement", () => {
     });
 
     await waitFor(() => expect(textarea.value).toBe(USER_EDIT));
-    expect(screen.getByTestId("prompt-result-recovery")).toBeTruthy();
+    expect(screen.getByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     await waitFor(() => expect(textarea.value).toBe(IMPROVED_PROMPT));
-    expect(screen.queryByTestId("prompt-result-recovery")).toBeNull();
+    expect(screen.queryByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeNull();
+  });
+
+  it("retains an edit made in the same turn as result delivery", async () => {
+    let deliver: ((result: { content: string }) => boolean | Promise<boolean>) | undefined;
+    enhancePromptMock.mockImplementation(
+      (_source: string, onSuccess: (result: { content: string }) => boolean | Promise<boolean>) => {
+        deliver = onSuccess;
+      },
+    );
+
+    render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={[]} />));
+
+    const textarea = screen.getByPlaceholderText(COMMENT_PLACEHOLDER) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ORIGINAL_PROMPT } });
+    fireEvent.click(screen.getByTestId("enhance-prompt-button"));
+
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: USER_EDIT } });
+      await deliver?.({ content: IMPROVED_PROMPT });
+    });
+
+    expect(textarea.value).toBe(USER_EDIT);
+    expect(screen.getByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeTruthy();
   });
 });
 

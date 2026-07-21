@@ -363,6 +363,55 @@ test.describe("Quick Chat", () => {
     );
   });
 
+  test("keeps an edited active-session prompt and offers recovery", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const initialPrompt = "Fix the original bug";
+    const editedPrompt = "Fix the original bug with an added constraint";
+    const generatedPrompt = "Enhanced: fix the original bug with an added constraint and tests";
+    let requestStarted: (() => void) | undefined;
+    let releaseResponse: (() => void) | undefined;
+    const requestGate = new Promise<void>((resolve) => {
+      requestStarted = resolve;
+    });
+    const responseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+
+    await apiClient.saveUserSettings({
+      default_utility_agent_id: "mock",
+      default_utility_model: "mock-fast",
+    });
+    await testPage.route("**/api/v1/utility/execute", async (route) => {
+      requestStarted?.();
+      await responseGate;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, response: generatedPrompt }),
+      });
+    });
+
+    const dialog = await openQuickChatWithAgent(testPage);
+    const editor = dialog.locator(".tiptap.ProseMirror");
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+    await editor.fill(initialPrompt);
+    await dialog.getByLabel("Enhance prompt with AI").click();
+    await requestGate;
+    await editor.focus();
+    await editor.pressSequentially(" with an added constraint");
+    await expect(editor).toHaveText(editedPrompt);
+    releaseResponse?.();
+
+    const recovery = dialog.getByTestId("prompt-result-recovery");
+    await expect(recovery).toBeVisible();
+    await expect(editor).toHaveText(editedPrompt);
+
+    await recovery.getByRole("button", { name: "Apply" }).click();
+    await expect(editor).toHaveText(generatedPrompt);
+  });
+
   test("slash command menu populates before first message (eager agent init)", async ({
     testPage,
   }) => {

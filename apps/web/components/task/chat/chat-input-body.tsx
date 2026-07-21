@@ -237,7 +237,13 @@ export type ChatInputBodyProps = {
   addFiles: (files: File[]) => Promise<void>;
   contextAreaProps: ChatInputContextAreaProps;
   editorAreaProps: ChatInputEditorAreaProps;
+  promptResultRecovery?: React.ReactNode;
 };
+
+function PromptResultRecoveryArea({ children }: { children?: React.ReactNode }) {
+  if (!children) return null;
+  return <div className="mt-2">{children}</div>;
+}
 
 /** Glow class for the outer wrapper. The pulsing glow lives on the wrapper
  * (not the inner box) because the inner box has `overflow-hidden`, which would
@@ -263,6 +269,7 @@ export function ChatInputBody({
   addFiles,
   contextAreaProps,
   editorAreaProps,
+  promptResultRecovery,
 }: ChatInputBodyProps) {
   const [isDragging, setIsDragging] = useState(false);
 
@@ -349,6 +356,7 @@ export function ChatInputBody({
           />
         </div>
       </div>
+      <PromptResultRecoveryArea>{promptResultRecovery}</PromptResultRecoveryArea>
     </div>
   );
 }

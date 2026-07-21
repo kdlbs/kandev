@@ -22,6 +22,7 @@ import { RunErrorEntry } from "./components/run-error-entry";
 import { UserCommentRunBadge } from "./components/user-comment-run-badge";
 import { buildCommentTurnContext, type CommentTurnContext } from "./turn-context";
 import { groupSessionsForTimeline, groupSortKey, type SessionGroup } from "./session-groups";
+import { synchronizeInputValue } from "./synchronize-input-value";
 import type {
   TaskComment,
   TaskDecision,
@@ -308,6 +309,8 @@ function CommentComposerFooter({
   applyPending,
   copyPending,
 }: CommentComposerFooterProps) {
+  const isSendDisabled = submitting || !input.trim();
+
   return (
     <>
       <div className="flex items-center gap-1 px-2 pb-2">
@@ -340,15 +343,17 @@ function CommentComposerFooter({
         <span className="flex-1" />
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              type="button"
-              size="icon"
-              className="h-7 w-7 cursor-pointer"
-              disabled={submitting || !input.trim()}
-              onClick={() => void handleSubmit()}
-            >
-              <IconSend className="h-3.5 w-3.5" />
-            </Button>
+            <span tabIndex={isSendDisabled ? 0 : -1} className="inline-flex">
+              <Button
+                type="button"
+                size="icon"
+                className="h-7 w-7 cursor-pointer"
+                disabled={isSendDisabled}
+                onClick={() => void handleSubmit()}
+              >
+                <IconSend className="h-3.5 w-3.5" />
+              </Button>
+            </span>
           </TooltipTrigger>
           <TooltipContent>Send comment</TooltipContent>
         </Tooltip>
@@ -370,6 +375,9 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputValueRef = useRef(input);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const setInputAndSync = useCallback((next: React.SetStateAction<string>) => {
+    synchronizeInputValue(inputValueRef, setInput, next);
+  }, []);
   const isUtilityConfigured = useIsUtilityConfigured();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId: null,
@@ -379,33 +387,29 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
   const promptDelivery = usePromptResultDelivery({
     getCurrent: () => inputValueRef.current,
     apply: (value) => {
-      inputValueRef.current = value;
-      setInput(value);
+      setInputAndSync(value);
       return true;
     },
   });
-  const { handleFileSelect, handlePaste } = useChatInputHandlers(setInput);
-
-  useEffect(() => {
-    inputValueRef.current = input;
-  }, [input]);
+  const { handleFileSelect, handlePaste } = useChatInputHandlers(setInputAndSync);
 
   const handleSubmit = useCallback(async () => {
-    if (!input.trim() || submitting) return;
+    const current = inputValueRef.current;
+    if (!current.trim() || submitting) return;
     setSubmitting(true);
     try {
-      await createComment(taskId, { body: input.trim(), author_type: "user" });
-      setInput("");
+      await createComment(taskId, { body: current.trim(), author_type: "user" });
+      setInputAndSync("");
       onSubmitted?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to send comment");
     } finally {
       setSubmitting(false);
     }
-  }, [input, submitting, taskId, onSubmitted]);
+  }, [submitting, taskId, onSubmitted, setInputAndSync]);
 
   const handleEnhance = useCallback(() => {
-    const current = input;
+    const current = inputValueRef.current;
     if (!current.trim()) return;
     void enhancePrompt(current, (result) => {
       const inserted = promptDelivery.deliver(current, result);
@@ -414,7 +418,7 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
       }
       return inserted;
     });
-  }, [input, enhancePrompt, promptDelivery]);
+  }, [enhancePrompt, promptDelivery]);
 
   return (
     <div className="mt-4 pt-4 border-t border-border">
@@ -422,7 +426,7 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
         <textarea
           ref={textareaRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => setInputAndSync(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();

@@ -385,11 +385,16 @@ small shared recovery control gives the user explicit Apply and Copy choices.
 
 - [ ] **Step 3: Run full affected-package validation**
 
-  Run in order:
+   Run in order:
 
-  ```zsh
-  cd apps
-  pnpm --filter @kandev/web test -- --run hooks/use-utility-agent-generator.test.tsx hooks/use-prompt-result-delivery.test.ts components/prompt-result-recovery.test.tsx components/task/simple/task-chat.test.tsx
+   ```zsh
+   make fmt
+   make typecheck
+   make test
+   make lint
+
+   cd apps
+   pnpm --filter @kandev/web test -- --run hooks/use-utility-agent-generator.test.tsx hooks/use-prompt-result-delivery.test.ts components/prompt-result-recovery.test.tsx components/task/simple/task-chat.test.tsx
   pnpm --filter @kandev/web typecheck
   pnpm --filter @kandev/web lint
   cd web && pnpm e2e -- e2e/tests/task/enhance-prompt.spec.ts
