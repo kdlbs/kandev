@@ -131,6 +131,10 @@ when the follow-up is intentionally queued until merge.
 
 Jira and Linear are the model (per-workspace credentials, 90s auth-health poller via `internal/integrations/healthpoll`, settings page with status banner). New integrations should **reuse the shared shapes** rather than copying either. Full layout, file conventions, and Jira-vs-Linear divergence notes in `apps/backend/internal/integrations/AGENTS.md` and the `/add-integration` skill — load either when scaffolding a new integration.
 
+### Kandev plugins
+
+Production Kandev plugins live in dedicated repositories, not in this monorepo. Official plugins use public `kdlbs/kandev-plugin-<slug>` repositories and start from [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template). Use `/create-kandev-plugin` for plugin creation, modification, bug fixes, packaging, release, and marketplace work. When a Kandev Worktree task needs the plugin repository, attach it with `add_branch_to_task_kandev` instead of cloning inside this worktree. Keep host API, SDK, loader, registry, and the in-tree test fixture in this repository.
+
 ### Runtime profiles (prod / dev / e2e)
 
 **`profiles.yaml` at the repo root** is the single source of truth for env-driven runtime defaults — feature flags, mock providers (agent / GitHub / Jira / Linear), debug switches, and e2e tuning knobs. The backend embeds it (`//go:embed` via `apps/backend/internal/profiles/`) and at startup calls `profiles.ApplyProfile()` to write the matching profile's env vars onto its own process, *only when each var is not already set* — so launchers, shells, and per-spec overrides still win.
@@ -157,4 +161,4 @@ For developing in ephemeral cloud VMs (Cursor Cloud, Codex, GitHub Codespaces, e
 
 ---
 
-**Last Updated**: 2026-06-23
+**Last Updated**: 2026-07-21
