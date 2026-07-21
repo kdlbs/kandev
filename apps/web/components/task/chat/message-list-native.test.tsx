@@ -103,14 +103,20 @@ describe("NativeMessageList user navigation", () => {
   });
 
   it("centers the destination DOM prompt and replays its highlight", async () => {
+    vi.useFakeTimers();
     const { container } = render(<NativeMessageList {...props()} />);
     const destination = container.querySelector('[data-user-message-id="user-1"]') as HTMLElement;
     const scrollIntoView = vi.fn();
     destination.scrollIntoView = scrollIntoView;
 
-    await act(async () => navigation.options?.navigateTo("user-1"));
+    await act(async () => {
+      const pending = navigation.options?.navigateTo("user-1");
+      await vi.advanceTimersByTimeAsync(300);
+      await pending;
+    });
 
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "center", behavior: "smooth" });
     expect(destination.classList.contains("search-flash")).toBe(true);
+    vi.useRealTimers();
   });
 });

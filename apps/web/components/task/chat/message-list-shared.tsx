@@ -129,7 +129,7 @@ export async function waitForUserMessageElement(
   shouldContinue: () => boolean,
 ): Promise<HTMLElement | null> {
   const maxFrames = 30;
-  const requiredStableFrames = 3;
+  const requiredStableFrames = 8;
   let candidate: HTMLElement | null = null;
   let stableFrames = 0;
   for (let frame = 0; frame < maxFrames && shouldContinue(); frame++) {

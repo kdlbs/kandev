@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import type { Message } from "@/lib/types/http";
 import { USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS } from "./user-message-navigation-rail";
+import { waitForUserMessageElement } from "./message-list-shared";
 
 const SCROLL_OWNER_TEST_ID = "virtuoso-scroll-owner";
 const USER_ONE_ID = "user-1";
@@ -139,6 +140,21 @@ describe("VirtuosoMessageList structure", () => {
   });
 });
 
+describe("waitForUserMessageElement", () => {
+  it("stops waiting when the navigation is cancelled", async () => {
+    vi.useFakeTimers();
+    const scrollOwner = document.createElement("div");
+    const shouldContinue = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+
+    const pending = waitForUserMessageElement(scrollOwner, USER_ONE_ID, shouldContinue);
+    await vi.runAllTimersAsync();
+
+    await expect(pending).resolves.toBeNull();
+    expect(shouldContinue).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+});
+
 describe("VirtuosoMessageList destination navigation", () => {
   it("centers the current item index and highlights only its mounted prompt", async () => {
     const { container } = render(<VirtuosoMessageList {...props()} />);
@@ -169,7 +185,7 @@ describe("VirtuosoMessageList destination navigation", () => {
     let didNavigate: boolean | undefined;
     await act(async () => {
       const pending = navigation.options?.navigateTo(USER_ONE_ID);
-      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(300);
       didNavigate = await pending;
     });
 

@@ -36,7 +36,8 @@ test.describe("@chat user message navigation", () => {
 
       await expect(previous).toBeEnabled();
       await expect(next).toBeDisabled();
-      await expect(session.loadOlderMessagesButton()).toBeAttached();
+      await expect(session.loadOlderMessagesButton()).toBeVisible();
+      await expect(session.loadOlderMessagesButton()).toBeEnabled();
       await expectLegacyRowArrowsAbsent(currentPrompt);
 
       let olderPageRequests = 0;

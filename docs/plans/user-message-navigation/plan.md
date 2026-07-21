@@ -73,9 +73,10 @@ Wave 3:
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run hooks/use-message-navigation.test.ts components/task/chat/user-message-navigation-rail.test.tsx components/task/chat/messages/chat-message.test.tsx components/task/chat/messages/message-actions.test.tsx components/task/chat/message-list-shared.test.tsx components/task/chat/message-list-native.test.tsx components/task/chat/message-list-virtuoso.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
+make fmt
+make typecheck
+make test
+make lint
 make build-web
 cd apps/web && pnpm e2e:run tests/chat/user-message-navigation.spec.ts tests/chat/mobile-user-message-navigation.spec.ts
 ```

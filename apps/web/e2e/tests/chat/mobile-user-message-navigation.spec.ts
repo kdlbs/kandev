@@ -25,7 +25,8 @@ test.describe("User message navigation on mobile", () => {
     const next = session.nextUserMessageButton();
     const currentPrompt = session.userMessageContaining(CURRENT_USER_PROMPT);
     await expect(rail).toHaveCSS("opacity", "1");
-    await expect(session.loadOlderMessagesButton()).toBeAttached();
+    await expect(session.loadOlderMessagesButton()).toBeVisible();
+    await expect(session.loadOlderMessagesButton()).toBeEnabled();
     await expectLegacyRowArrowsAbsent(currentPrompt);
 
     const viewport = testPage.viewportSize();

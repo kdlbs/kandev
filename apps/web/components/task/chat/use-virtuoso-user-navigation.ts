@@ -103,6 +103,7 @@ function useViewportOrigin(
     const programmatic = programmaticRef.current;
     if (programmatic && Date.now() < programmatic.expiresAt) {
       if (nearestId !== programmatic.messageId) return;
+    } else if (programmatic) {
       programmaticRef.current = null;
     }
     setViewportOrigin(nearestId);
@@ -202,6 +203,7 @@ export function useVirtuosoUserNavigation(args: {
         return false;
       }
       if (isDebug()) debugNavigation("scroll.complete", { messageId });
+      programmaticRef.current = { messageId, expiresAt: Date.now() + 500 };
       replayMessageHighlight(element);
       return true;
     },

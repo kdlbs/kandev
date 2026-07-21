@@ -22,6 +22,7 @@ import {
   findUserMessageElement,
   getNavigationScrollBehavior,
   replayMessageHighlight,
+  waitForUserMessageElement,
 } from "./message-list-shared";
 import {
   USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
@@ -177,6 +178,7 @@ function useAutoScroll(
 }
 
 type ProgrammaticNavigation = { messageId: string; expiresAt: number } | null;
+const NAVIGATION_SETTLE_ATTEMPTS = 4;
 
 function useViewportOrigin(
   scrollRef: React.RefObject<HTMLDivElement | null>,
@@ -194,6 +196,7 @@ function useViewportOrigin(
       const programmatic = programmaticRef.current;
       if (programmatic && Date.now() < programmatic.expiresAt) {
         if (nearestId !== programmatic.messageId) return;
+      } else if (programmatic) {
         programmaticRef.current = null;
       }
       setViewportOrigin(nearestId);
@@ -220,18 +223,47 @@ function useNativeUserNavigation(args: {
   loadMore: () => Promise<number>;
 }) {
   const programmaticNavigationRef = useRef<ProgrammaticNavigation>(null);
+  const mountedRef = useRef(true);
+  const sessionIdRef = useRef(args.sessionId);
+  sessionIdRef.current = args.sessionId;
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const navigateTo = useCallback(
-    (messageId: string) => {
+    async (messageId: string) => {
       const scrollElement = args.scrollRef.current;
-      if (!scrollElement) return false;
-      const element = findUserMessageElement(scrollElement, messageId);
-      if (!element) return false;
-      programmaticNavigationRef.current = { messageId, expiresAt: Date.now() + 1000 };
-      element.scrollIntoView({ block: "center", behavior: getNavigationScrollBehavior() });
-      replayMessageHighlight(element);
-      return true;
+      if (!scrollElement || !args.sessionId) return false;
+      const actionSessionId = args.sessionId;
+      const previousScrollTop = scrollElement.scrollTop;
+      programmaticNavigationRef.current = { messageId, expiresAt: Date.now() + 3000 };
+      for (let attempt = 0; attempt < NAVIGATION_SETTLE_ATTEMPTS; attempt++) {
+        const element = findUserMessageElement(scrollElement, messageId);
+        if (!element) break;
+        element.scrollIntoView({
+          block: "center",
+          behavior: attempt === 0 ? getNavigationScrollBehavior() : "auto",
+        });
+        const settled = await waitForUserMessageElement(
+          scrollElement,
+          messageId,
+          () => mountedRef.current && sessionIdRef.current === actionSessionId,
+        );
+        if (settled) {
+          programmaticNavigationRef.current = { messageId, expiresAt: Date.now() + 500 };
+          replayMessageHighlight(settled);
+          return true;
+        }
+      }
+      programmaticNavigationRef.current = null;
+      if (mountedRef.current && sessionIdRef.current === actionSessionId) {
+        scrollElement.scrollTop = previousScrollTop;
+      }
+      return false;
     },
-    [args.scrollRef],
+    [args.scrollRef, args.sessionId],
   );
   const navigation = useUserMessageNavigation({
     sessionId: args.sessionId,
