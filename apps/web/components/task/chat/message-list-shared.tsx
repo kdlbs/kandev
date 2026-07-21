@@ -52,6 +52,8 @@ export type UserMessageRenderStop = {
   itemIndex: number;
 };
 
+export type ProgrammaticNavigation = { messageId: string; expiresAt: number } | null;
+
 export function getUserMessageRenderStops(items: RenderItem[]): UserMessageRenderStop[] {
   const stops: UserMessageRenderStop[] = [];
   items.forEach((item, itemIndex) => {

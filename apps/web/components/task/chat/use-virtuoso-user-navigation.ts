@@ -6,6 +6,7 @@ import type { RenderItem } from "@/hooks/use-processed-messages";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
+  type ProgrammaticNavigation,
   findNearestUserMessageId,
   getItemKey,
   getNavigationScrollBehavior,
@@ -57,7 +58,6 @@ function useStableFirstItemIndex(items: RenderItem[]) {
   return nextIndex;
 }
 
-type ProgrammaticNavigation = { messageId: string; expiresAt: number } | null;
 const NAVIGATION_MOUNT_ATTEMPTS = 4;
 
 export function resolveVirtuosoViewportOrigin(

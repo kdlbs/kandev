@@ -11,6 +11,7 @@ import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { cn } from "@/lib/utils";
 import {
   type MessageListProps,
+  type ProgrammaticNavigation,
   MessageListStatus,
   MessageItem,
   getItemKey,
@@ -177,7 +178,6 @@ function useAutoScroll(
   }, [messages, scrollRef]);
 }
 
-type ProgrammaticNavigation = { messageId: string; expiresAt: number } | null;
 const NAVIGATION_SETTLE_ATTEMPTS = 4;
 
 function useViewportOrigin(
