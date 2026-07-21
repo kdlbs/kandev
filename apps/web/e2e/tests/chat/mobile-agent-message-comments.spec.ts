@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import {
   openSeededAgentReply,
   openSeededQuickChatReply,
+  SELECTED_REPLY_TEXT,
   selectAgentReplyText,
 } from "./agent-message-comments-helpers";
 
@@ -45,7 +46,7 @@ test.describe("Agent message comments on mobile", () => {
       "Mobile Agent Message Comments",
     );
 
-    await selectAgentReplyText(body);
+    await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
     const commentTrigger = testPage.getByTestId("agent-message-comment-trigger");
     await expect(commentTrigger).toBeVisible();
     await expectTouchTarget(commentTrigger);
@@ -72,7 +73,7 @@ test.describe("Agent message comments on mobile", () => {
             (message) =>
               message.author_type === "user" &&
               message.content.includes("### Agent Message Comments") &&
-              message.content.includes("settled answer") &&
+              message.content.includes(SELECTED_REPLY_TEXT) &&
               message.content.includes("Run with this correction."),
           );
         },
@@ -94,7 +95,7 @@ test.describe("Agent message comments on mobile", () => {
       "Mobile Quick Chat Message Comments",
     );
 
-    await selectAgentReplyText(body);
+    await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
     await testPage.getByTestId("agent-message-comment-trigger").click();
     const drawer = testPage.getByTestId("agent-message-comment-drawer");
     await expect(drawer).toBeVisible();

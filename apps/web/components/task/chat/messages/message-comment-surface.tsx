@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type MouseEvent,
   type ReactNode,
   type RefObject,
   type SetStateAction,
@@ -66,6 +67,28 @@ type CommentTarget = {
 };
 
 const EMPTY_COMMENT_IDS: string[] = [];
+const INTERACTIVE_MESSAGE_TARGETS =
+  'a, button, input, textarea, select, summary, [role="button"], [role="link"], [contenteditable="true"]';
+
+function isInteractiveMessageTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest(INTERACTIVE_MESSAGE_TARGETS));
+}
+
+function useDecorationClickHandler(
+  decorations: ReturnType<typeof useMessageCommentDecorations>,
+  openExistingComment: (commentId: string, position: { x: number; y: number }) => void,
+) {
+  return useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (isInteractiveMessageTarget(event.target)) return;
+      const decoration = messageCommentDecorationAtPoint(decorations, event.clientX, event.clientY);
+      if (!decoration) return;
+      event.preventDefault();
+      openExistingComment(decoration.comment.id, { x: event.clientX, y: event.clientY });
+    },
+    [decorations, openExistingComment],
+  );
+}
 
 function commentFromTarget(
   message: Message,
@@ -493,6 +516,7 @@ export function MessageCommentSurface({
     message.content,
     highlightName,
   );
+  const handleDecorationClick = useDecorationClickHandler(decorations, openExistingComment);
 
   return (
     <>
@@ -504,16 +528,7 @@ export function MessageCommentSurface({
         data-agent-message-highlight-name={highlightName}
         onMouseUp={captureSelection}
         onTouchEnd={captureSelection}
-        onClick={(event) => {
-          const decoration = messageCommentDecorationAtPoint(
-            decorations,
-            event.clientX,
-            event.clientY,
-          );
-          if (!decoration) return;
-          event.preventDefault();
-          openExistingComment(decoration.comment.id, { x: event.clientX, y: event.clientY });
-        }}
+        onClick={handleDecorationClick}
       >
         {children}
         <MessageCommentDecorationOverlay

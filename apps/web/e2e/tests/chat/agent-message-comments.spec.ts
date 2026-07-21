@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
   AGENT_REPLY,
+  SELECTED_REPLY_TEXT,
   clickAgentMessageHighlight,
   expectAgentMessageHighlight,
   openSeededAgentReply,
@@ -22,7 +23,7 @@ test.describe("Agent message comments", () => {
       "Agent Message Comments",
     );
 
-    await selectAgentReplyText(body);
+    await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
     const commentTrigger = testPage.getByTestId("agent-message-comment-trigger");
     await expect(commentTrigger).toBeVisible();
     const popover = testPage.getByTestId("agent-message-comment-popover");
@@ -56,7 +57,7 @@ test.describe("Agent message comments", () => {
     ).toBeVisible();
 
     // Saved highlights and badges both use the same edit/delete loop as plan comments.
-    await clickAgentMessageHighlight(restoredBody, "settled answer");
+    await clickAgentMessageHighlight(restoredBody, SELECTED_REPLY_TEXT);
     await expect(popover).toBeVisible();
     const input = popover.getByTestId("agent-message-comment-input");
     await expect(input).toHaveValue("Please expand this detail.");
@@ -82,7 +83,7 @@ test.describe("Agent message comments", () => {
       "Quick Chat Message Comments",
     );
 
-    await selectAgentReplyText(body);
+    await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
     await testPage.getByTestId("agent-message-comment-trigger").click();
     const popover = testPage.getByTestId("agent-message-comment-popover");
     await expect(popover).toBeVisible();

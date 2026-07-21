@@ -82,6 +82,7 @@ function addPendingComment(content: string, selectedText: string) {
 afterEach(() => {
   cleanup();
   resetComments();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -196,5 +197,24 @@ describe("MessageCommentSurface fallback highlights", () => {
     expect(
       document.querySelector('[data-agent-message-comment-fallback][data-comment-id="comment-1"]'),
     ).not.toBeNull();
+  });
+});
+
+describe("MessageCommentSurface highlighted interactions", () => {
+  it("preserves native link clicks inside a highlighted range", () => {
+    vi.spyOn(Range.prototype, "getClientRects").mockReturnValue([
+      new DOMRect(0, 0, 100, 20),
+    ] as unknown as DOMRectList);
+    const content = "Read the docs.";
+    addPendingComment(content, "docs");
+
+    render(
+      <MessageCommentSurface message={message(content)} sessionId={SESSION_ID} isTurnActive={false}>
+        <a href="#docs">{content}</a>
+      </MessageCommentSurface>,
+    );
+
+    expect(fireEvent.click(screen.getByRole("link"), { clientX: 10, clientY: 10 })).toBe(true);
+    expect(screen.queryByTestId("comment-popover")).toBeNull();
   });
 });

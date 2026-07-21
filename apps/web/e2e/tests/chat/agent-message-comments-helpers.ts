@@ -5,6 +5,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 
 export const AGENT_REPLY = "The settled answer contains a useful detail.";
+export const SELECTED_REPLY_TEXT = "settled answer";
 
 export async function expectAgentMessageHighlight(body: Locator, expectedCount: number) {
   const highlightName = await body.getAttribute("data-agent-message-highlight-name");
@@ -83,7 +84,10 @@ export async function openSeededAgentReply(
   return { task, session, body };
 }
 
-export async function selectAgentReplyText(body: ReturnType<SessionPage["activeChat"]>) {
+export async function selectAgentReplyText(
+  body: ReturnType<SessionPage["activeChat"]>,
+  selectedText: string,
+) {
   await body.evaluate((element, selectedText) => {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
@@ -103,7 +107,7 @@ export async function selectAgentReplyText(body: ReturnType<SessionPage["activeC
       node = walker.nextNode();
     }
     throw new Error(`Could not find selected text: ${selectedText}`);
-  }, "settled answer");
+  }, selectedText);
 }
 
 export async function openSeededQuickChatReply(

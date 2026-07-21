@@ -127,9 +127,6 @@ describe("chat render-cost evals", () => {
   });
 
   it("scenario 5: restoring many inline highlights does not reparse markdown rows", () => {
-    const rows = makeRows(20);
-    render(<MessageList rows={rows} panel={false} />);
-    const parsesAfterMount = __markdownParseCount();
     const content = Array.from({ length: 20 }, (_, index) => `reply-${index}`).join(" ");
     const root = document.createElement("div");
     root.textContent = content;
@@ -149,8 +146,9 @@ describe("chat render-cost evals", () => {
       };
     });
 
+    const parsesBefore = __markdownParseCount();
     expect(getMessageCommentDecorations(root, comments)).toHaveLength(20);
     expect(root.querySelectorAll("mark[data-agent-message-comment-id]")).toHaveLength(0);
-    expect(__markdownParseCount() - parsesAfterMount).toBe(0);
+    expect(__markdownParseCount() - parsesBefore).toBe(0);
   });
 });
