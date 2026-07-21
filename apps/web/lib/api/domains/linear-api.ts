@@ -14,6 +14,7 @@ import type {
   TestLinearConnectionResult,
   UpdateLinearIssueWatchInput,
 } from "@/lib/types/linear";
+import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
 type WorkspaceApiOptions = ApiRequestOptions & { workspaceId?: string };
 
@@ -42,17 +43,21 @@ export async function setLinearConfig(
   payload: SetLinearConfigRequest,
   options?: WorkspaceApiOptions,
 ) {
-  return fetchJson<LinearConfig>(withWorkspace(`/api/v1/linear/config`, options), {
-    ...requestOptions(options),
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<LinearConfig>(withWorkspace(`/api/v1/linear/config`, options), {
+      ...requestOptions(options),
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+    }),
+  );
 }
 
 export async function deleteLinearConfig(options?: WorkspaceApiOptions) {
-  return fetchJson<{ deleted: boolean }>(withWorkspace(`/api/v1/linear/config`, options), {
-    ...requestOptions(options),
-    init: { ...(options?.init ?? {}), method: "DELETE" },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<{ deleted: boolean }>(withWorkspace(`/api/v1/linear/config`, options), {
+      ...requestOptions(options),
+      init: { ...(options?.init ?? {}), method: "DELETE" },
+    }),
+  );
 }
 
 export async function testLinearConnection(
@@ -71,10 +76,16 @@ export async function testLinearConnection(
 // copyLinearConfig copies the Linear config + credential from the workspace in
 // options (source) to targetWorkspaceId.
 export async function copyLinearConfig(targetWorkspaceId: string, options?: WorkspaceApiOptions) {
-  return fetchJson<LinearConfig>(withWorkspace(`/api/v1/linear/config/copy`, options), {
-    ...requestOptions(options),
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ targetWorkspaceId }) },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<LinearConfig>(withWorkspace(`/api/v1/linear/config/copy`, options), {
+      ...requestOptions(options),
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        body: JSON.stringify({ targetWorkspaceId }),
+      },
+    }),
+  );
 }
 
 export async function listLinearTeams(options?: WorkspaceApiOptions) {

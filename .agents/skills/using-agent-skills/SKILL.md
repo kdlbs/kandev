@@ -26,6 +26,7 @@ or completion rules are needed. Execution skills do not each need to load it.
 Task arrives
 |
 |-- Need to clarify intent first? ----------> /interview-me
+|-- Create/change/fix/publish Kandev plugin? -> /create-kandev-plugin plus /fix or /tdd as needed
 |-- New feature or behavior-changing fix? --> /spec-driven-development
 |-- Small self-contained bug regression? ---> /fix -> /tdd
 |-- Running/debugging Kandev locally? ------> /debug

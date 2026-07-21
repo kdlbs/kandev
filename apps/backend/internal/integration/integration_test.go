@@ -119,7 +119,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, taskSvc, log)
 	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, taskSvc, log)
 	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, taskSvc, log)
-	workflowhandlers.RegisterRoutes(router, gateway.Dispatcher, workflowCtrl, log)
+	workflowhandlers.RegisterRoutes(router, gateway.Dispatcher, workflowCtrl, eventBus, log)
 
 	// Create test server
 	server := httptest.NewServer(router)

@@ -139,6 +139,17 @@ describe("IntegrationsSection", () => {
     expect(screen.getByRole("link", { name: "Sentry" })).toBeTruthy();
   });
 
+  it("uses the Azure DevOps product mark for Azure links", () => {
+    storeState.appSidebar.sectionExpanded.integrations = true;
+    linksMock.mockReturnValue([
+      { id: "azure-devops", label: "Azure DevOps", href: "/azure-devops" },
+    ]);
+
+    renderSection();
+
+    expect(screen.getAllByTestId("azure-devops-icon")).toHaveLength(2);
+  });
+
   const costPerModelItem = {
     id: "cost-per-model",
     label: "Cost per Model",

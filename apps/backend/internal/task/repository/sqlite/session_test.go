@@ -862,6 +862,54 @@ func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *
 	}
 }
 
+func TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeys(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-remove-metadata", "sess-remove-metadata", "turn-remove-metadata")
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, "sess-remove-metadata", map[string]interface{}{
+		"provider_state": "stale",
+		"keep":           "newer",
+	}))
+	session, err := repo.GetTaskSession(ctx, "sess-remove-metadata")
+	require.NoError(t, err)
+	changed, err := repo.UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
+		ctx,
+		session,
+		models.TaskSessionStateCreated,
+		[]string{"provider_state"},
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	stored, err := repo.GetTaskSession(ctx, "sess-remove-metadata")
+	require.NoError(t, err)
+	require.NotContains(t, stored.Metadata, "provider_state")
+	require.Equal(t, "newer", stored.Metadata["keep"])
+}
+
+func TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeysStateMismatch(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-remove-metadata-mismatch", "sess-remove-metadata-mismatch", "turn-remove-metadata-mismatch")
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, "sess-remove-metadata-mismatch", map[string]interface{}{
+		"provider_state": "stale",
+		"keep":           "untouched",
+	}))
+	session, err := repo.GetTaskSession(ctx, "sess-remove-metadata-mismatch")
+	require.NoError(t, err)
+	changed, err := repo.UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
+		ctx,
+		session,
+		models.TaskSessionStateRunning,
+		[]string{"provider_state"},
+	)
+	require.NoError(t, err)
+	require.False(t, changed)
+	stored, err := repo.GetTaskSession(ctx, "sess-remove-metadata-mismatch")
+	require.NoError(t, err)
+	require.Equal(t, "stale", stored.Metadata["provider_state"])
+	require.Equal(t, "untouched", stored.Metadata["keep"])
+}
+
 func TestDismissLastAgentErrorDoesNotOverwriteNewerError(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

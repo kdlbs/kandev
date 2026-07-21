@@ -96,6 +96,22 @@ async function waitForQuickChatWidth(dialog: Locator) {
 }
 
 test.describe("Quick Chat", () => {
+  test("clarification shortcuts work after clicking the message surface", async ({ testPage }) => {
+    const dialog = await openQuickChatWithAgent(testPage);
+    await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");
+
+    const clarification = dialog.getByTestId("clarification-overlay");
+    await expect(clarification).toBeVisible({ timeout: 30_000 });
+
+    await dialog.getByTestId("quick-chat-messages").click({ position: { x: 8, y: 8 } });
+    await expect(dialog.getByTestId("quick-chat-content")).toBeFocused();
+
+    await testPage.keyboard.press("1");
+    await expect(
+      clarification.locator('[data-testid="clarification-step"][data-step-index="1"]'),
+    ).toHaveAttribute("data-active", "true");
+  });
+
   test("offers configuration chat in setup and hides it once one exists", async ({
     testPage,
     apiClient,

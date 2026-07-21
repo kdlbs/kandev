@@ -6,9 +6,10 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 // The chips-row now owns the single `useAccessibleRepos()` call. Stub it so
 // these tests don't hit the network layer; the chip stub below ignores the
 // prop entirely so its exact shape doesn't matter for these assertions.
-vi.mock("@/hooks/domains/github/use-accessible-repos", () => ({
-  useAccessibleRepos: () => ({
+vi.mock("@/hooks/domains/integrations/use-remote-repositories", () => ({
+  useRemoteRepositories: () => ({
     repos: [],
+    availableProviders: [],
     loading: false,
     unavailable: false,
     error: null,
@@ -177,8 +178,8 @@ describe("RemoteRepoChipsRow", () => {
     renderInProvider(
       <RemoteRepoChipsRow fs={fs} onUpdateRow={vi.fn()} onAddRow={vi.fn()} onRemoveRow={vi.fn()} />,
     );
-    expect(ensure).toHaveBeenCalledWith(URL_AB);
-    expect(ensure).toHaveBeenCalledWith(URL_CD);
+    expect(ensure).toHaveBeenCalledWith(URL_AB, "");
+    expect(ensure).toHaveBeenCalledWith(URL_CD, "");
     expect(ensure).not.toHaveBeenCalledWith("");
   });
 });

@@ -5,6 +5,7 @@ import { listSentryInstances } from "@/lib/api/domains/sentry-api";
 import type { SentryConfig } from "@/lib/types/sentry";
 import { INTEGRATION_STATUS_REFRESH_MS } from "../integrations/use-integration-availability";
 import { useSentryEnabled } from "./use-sentry-enabled";
+import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 
 // isHealthySentryInstance is the single definition of a usable instance:
 // credentials are stored AND the most recent backend probe succeeded.
@@ -66,9 +67,11 @@ export function useSentryInstances(workspaceId?: string | null): SentryAvailabil
     };
     void refresh();
     const id = setInterval(() => void refresh(), INTEGRATION_STATUS_REFRESH_MS);
+    const unsubscribe = subscribeIntegrationAvailability(() => void refresh());
     return () => {
       cancelled = true;
       clearInterval(id);
+      unsubscribe();
     };
   }, [active, workspaceId]);
 

@@ -103,6 +103,7 @@ func (r *Repository) runMigrations() error {
 	// column added earlier.
 	r.migrate.Apply("task_sessions.name", `ALTER TABLE task_sessions ADD COLUMN name TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
+	r.migrate.Apply("repositories.remote_url", `ALTER TABLE repositories ADD COLUMN remote_url TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}'`)
 	r.migrate.Apply("repositories.worktree_branch_template.backfill", `UPDATE repositories SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'`)
 	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)
@@ -980,3 +981,13 @@ func (r *Repository) backfillTaskEnvironmentRepos() error {
 	}
 	return tx.Commit()
 }
+
+// Startup healing of orphaned workflow_step_id values was removed: a raw SQL
+// UPDATE reassigning tasks to a workflow's start step bypasses every
+// domain-level invariant the task service enforces on a move (WIP limits,
+// task-state sync, position bookkeeping, session/on_exit/on_enter handling,
+// transition history, and event publication). The Kanban/Pipeline "Needs
+// Reassignment" fallback column now keeps orphaned tasks visible without any
+// automatic mutation, and any real repair should go through
+// task.Service.MoveTask (or a dedicated, explicit reassignment operation)
+// rather than a migration-time SQL statement.

@@ -52,7 +52,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    | Source | Use it for | Important behavior |
    |---|---|---|
    | **Repo** | A configured or discovered local repository | Select a base branch for each repository row. Add more rows for a multi-repository task. |
-   | **Remote** | A remote repository | Paste a GitHub repository, pull-request, or issue URL, or use the picker; then select the branch. Clone and fetch require valid credentials. |
+   | **Remote** | A remote repository | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL; then select the branch. Clone and fetch require valid credentials. |
    | **None** | Planning, research, or work outside Git | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable. |
 
 4. Select a compatible executor profile and agent profile. A workflow default agent profile locks the task-level agent selector. Executor and agent compatibility is validated before launch.

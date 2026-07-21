@@ -116,6 +116,10 @@ vi.mock("@/components/github/pr-status-chip", () => ({
   PRStatusChip: () => null,
 }));
 
+vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => ({
+  AzureDevOpsTaskPullRequestChip: () => null,
+}));
+
 vi.mock("./chat/pr-archive-banners", () => ({
   PRMergedBanner: () => null,
 }));
@@ -156,6 +160,8 @@ vi.mock("./chat/use-chat-panel-state", () => ({
     planComments: [],
     pendingPRFeedback: [],
     walkthroughComments: [],
+    messageComments: [],
+    handleClearMessageComments: vi.fn(),
     pendingCommentsByFile: mockPendingByFile,
   }),
 }));

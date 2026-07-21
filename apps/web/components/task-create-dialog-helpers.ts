@@ -398,7 +398,7 @@ function buildRemoteRepoPRPayload(
     base_branch: baseBranch,
     checkout_branch: isPrAutoSelection ? metadata.headBranch || undefined : undefined,
     pr_number: isPrAutoSelection ? metadata.number || undefined : undefined,
-    github_url: url,
+    ...remoteRepositoryLocator(row, url),
   };
 }
 
@@ -410,7 +410,26 @@ function buildPlainRemoteRepoPayload(
     repository_id: "",
     base_branch: row.branch || undefined,
     checkout_branch: undefined,
-    github_url: url,
+    ...remoteRepositoryLocator(row, url),
+  };
+}
+
+function remoteRepositoryLocator(
+  row: TaskRemoteRepoRow,
+  url: string,
+): Pick<
+  CreateTaskRepositoryPayload,
+  "github_url" | "remote_url" | "provider" | "provider_repo_id" | "provider_owner" | "provider_name"
+> {
+  if (!row.provider || row.provider === "github") {
+    return { github_url: url };
+  }
+  return {
+    remote_url: url,
+    provider: row.provider,
+    provider_repo_id: row.providerRepoId,
+    provider_owner: row.providerOwner,
+    provider_name: row.providerName,
   };
 }
 

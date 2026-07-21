@@ -267,9 +267,9 @@ export function GitHubConnectionSection() {
 function PerWorkspaceSection({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-8">
-      <GitHubRepoScopeSection workspaceId={workspaceId} />
       <ReviewWatchSection workspaceId={workspaceId} />
       <IssueWatchSection workspaceId={workspaceId} />
+      <GitHubRepoScopeSection workspaceId={workspaceId} />
       <ActionPresetsSection workspaceId={workspaceId} />
       <SettingsSection title="PR Analytics" description="Pull request activity for this workspace.">
         <PRStatsPanel workspaceId={workspaceId} />

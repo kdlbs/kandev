@@ -11,7 +11,23 @@ import (
 
 // noopPublisher satisfies the taskUpdatedPublisher contract without touching
 // an event bus. Workflow-store unit tests don't exercise the event path.
-func noopPublisher(_ context.Context, _ *models.Task) {}
+func noopPublisher(_ context.Context, _ *models.Task, _ ...string) {}
+
+// capturingPublisher records each publishTaskUpdated call's task and
+// old-workflow-ID argument so tests can assert on what ApplyTransition
+// passed through.
+type capturingPublisher struct {
+	calls []capturedTaskUpdate
+}
+
+type capturedTaskUpdate struct {
+	task           *models.Task
+	oldWorkflowIDs []string
+}
+
+func (c *capturingPublisher) publish(_ context.Context, task *models.Task, oldWorkflowIDs ...string) {
+	c.calls = append(c.calls, capturedTaskUpdate{task: task, oldWorkflowIDs: oldWorkflowIDs})
+}
 
 func TestWorkflowStore_LoadState(t *testing.T) {
 	ctx := context.Background()
@@ -140,6 +156,86 @@ func TestWorkflowStore_ApplyTransition(t *testing.T) {
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		t.Errorf("expected review status to be cleared, got %q", session.ReviewStatus)
+	}
+}
+
+func TestWorkflowStore_ApplyTransitionSyncsWorkflowIDAcrossWorkflows(t *testing.T) {
+	// Regression test: applyPendingMove (deferred cross-workflow move_task_kandev
+	// hand-off for tasks with an active/starting session) calls ApplyTransition
+	// directly, bypassing task.Service.MoveTask. Without syncing WorkflowID here,
+	// a cross-workflow move would leave the task pointing at a step ID that
+	// belongs to a different workflow than task.WorkflowID records.
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1") // seedSession puts the task in wf1
+
+	// Create a second workflow the task is moving into.
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf2", WorkspaceID: "ws1", Name: "Other Workflow",
+	}); err != nil {
+		t.Fatalf("CreateWorkflow wf2: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-wf2"] = &wfmodels.WorkflowStep{
+		ID: "step-wf2", WorkflowID: "wf2", Name: "Target", Position: 0,
+	}
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+
+	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step-wf2", "manual_move"); err != nil {
+		t.Fatalf("ApplyTransition: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if task.WorkflowStepID != "step-wf2" {
+		t.Errorf("expected task WorkflowStepID %q, got %q", "step-wf2", task.WorkflowStepID)
+	}
+	if task.WorkflowID != "wf2" {
+		t.Errorf("expected task WorkflowID to sync to the target step's workflow %q, got %q",
+			"wf2", task.WorkflowID)
+	}
+}
+
+func TestWorkflowStore_ApplyTransitionPublishesOldWorkflowIDOnCrossWorkflowMove(t *testing.T) {
+	// Regression test for PR review feedback: ApplyTransition syncs
+	// task.WorkflowID to the target step's workflow, but the task.updated
+	// event must also carry the pre-move workflow ID (old_workflow_id) —
+	// same as the normal task.Service.MoveTask path — so the frontend can
+	// remove the task from its previous workflow's snapshot instead of
+	// leaving a stale duplicate until reload.
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1") // seedSession puts the task in wf1
+
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf2", WorkspaceID: "ws1", Name: "Other Workflow",
+	}); err != nil {
+		t.Fatalf("CreateWorkflow wf2: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-wf2"] = &wfmodels.WorkflowStep{
+		ID: "step-wf2", WorkflowID: "wf2", Name: "Target", Position: 0,
+	}
+	pub := &capturingPublisher{}
+	store := newWorkflowStore(repo, stepGetter, nil, pub.publish, testLogger())
+
+	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step-wf2", "manual_move"); err != nil {
+		t.Fatalf("ApplyTransition: %v", err)
+	}
+
+	if len(pub.calls) != 1 {
+		t.Fatalf("expected exactly 1 publishTaskUpdated call, got %d", len(pub.calls))
+	}
+	call := pub.calls[0]
+	if call.task.WorkflowID != "wf2" {
+		t.Errorf("expected published task WorkflowID %q, got %q", "wf2", call.task.WorkflowID)
+	}
+	if len(call.oldWorkflowIDs) != 1 || call.oldWorkflowIDs[0] != "wf1" {
+		t.Errorf("expected old_workflow_id %q, got %v", "wf1", call.oldWorkflowIDs)
 	}
 }
 

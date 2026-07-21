@@ -17,6 +17,7 @@ import {
   getConversationLoadingState,
   getSessionRunningState,
   getLastTurnGroupId,
+  getStreamingAgentMessageId,
 } from "./message-list-shared";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
@@ -97,11 +98,19 @@ function useStableFirstItemIndex(items: RenderItem[]) {
 }
 
 function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
-  const { items, sessionId, permissionsByToolCallId, childrenByParentToolCallId, taskId } = props;
+  const {
+    items,
+    messages,
+    sessionId,
+    permissionsByToolCallId,
+    childrenByParentToolCallId,
+    taskId,
+  } = props;
   const { worktreePath, onOpenFile, lastTurnGroupId, isRunning } = props;
   const { hasMore, isLoadingMore, loadMore } = props;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const itemCount = items.length;
+  const streamingMessageId = getStreamingAgentMessageId(messages);
   const firstItemIndex = useStableFirstItemIndex(items);
 
   const loadCooldownRef = useRef(false);
@@ -155,6 +164,7 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
             onOpenFile={onOpenFile}
             isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
             isTurnActive={isRunning}
+            streamingMessageId={streamingMessageId}
             onScrollToMessage={handleScrollToMessage}
           />
         </div>
@@ -171,6 +181,7 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
       onOpenFile,
       lastTurnGroupId,
       isRunning,
+      streamingMessageId,
       handleScrollToMessage,
     ],
   );

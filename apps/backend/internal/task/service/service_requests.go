@@ -18,6 +18,11 @@ type TaskRepositoryInput struct {
 	Name           string `json:"name,omitempty"`
 	DefaultBranch  string `json:"default_branch,omitempty"`
 	GitHubURL      string `json:"github_url,omitempty"`
+	RemoteURL      string `json:"remote_url,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	ProviderRepoID string `json:"provider_repo_id,omitempty"`
+	ProviderOwner  string `json:"provider_owner,omitempty"`
+	ProviderName   string `json:"provider_name,omitempty"`
 
 	// ResolveProviderDefaults opts the GitHub-URL resolution path into a
 	// synchronous default-branch probe (git ls-remote --symref) when neither
@@ -106,12 +111,14 @@ type UpdateWorkspaceRequest struct {
 
 // FindOrCreateRepositoryRequest contains the data for finding or creating a repository by provider info.
 type FindOrCreateRepositoryRequest struct {
-	WorkspaceID   string `json:"workspace_id"`
-	Provider      string `json:"provider"`
-	ProviderOwner string `json:"provider_owner"`
-	ProviderName  string `json:"provider_name"`
-	DefaultBranch string `json:"default_branch"`
-	LocalPath     string `json:"local_path"`
+	WorkspaceID    string `json:"workspace_id"`
+	Provider       string `json:"provider"`
+	ProviderOwner  string `json:"provider_owner"`
+	ProviderName   string `json:"provider_name"`
+	ProviderRepoID string `json:"provider_repo_id"`
+	RemoteURL      string `json:"remote_url"`
+	DefaultBranch  string `json:"default_branch"`
+	LocalPath      string `json:"local_path"`
 }
 
 // CreateRepositoryRequest contains the data for creating a new repository
@@ -124,6 +131,7 @@ type CreateRepositoryRequest struct {
 	ProviderRepoID         string `json:"provider_repo_id"`
 	ProviderOwner          string `json:"provider_owner"`
 	ProviderName           string `json:"provider_name"`
+	RemoteURL              string `json:"remote_url"`
 	DefaultBranch          string `json:"default_branch"`
 	WorktreeBranchPrefix   string `json:"worktree_branch_prefix"`
 	WorktreeBranchTemplate string `json:"worktree_branch_template"`

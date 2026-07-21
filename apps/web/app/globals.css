@@ -1228,8 +1228,10 @@
 }
 
 /* Comment highlights, inline mark spans like Highlight extension */
-.tiptap-plan-wrapper .comment-highlight {
+.tiptap-plan-wrapper .comment-highlight,
+.agent-message-comment-body .comment-highlight {
   background-color: color-mix(in oklch, var(--accent) 70%, transparent);
+  color: inherit;
   border-radius: 3px;
   border-bottom: 2px solid color-mix(in oklch, var(--accent-foreground) 25%, transparent);
   cursor: pointer;
@@ -1239,12 +1241,22 @@
   -webkit-box-decoration-break: clone;
 }
 
-.tiptap-plan-wrapper .comment-highlight:hover {
+.tiptap-plan-wrapper .comment-highlight:hover,
+.agent-message-comment-body .comment-highlight:hover {
   background-color: color-mix(in oklch, var(--accent) 90%, transparent);
 }
 
+.agent-message-comment-fallback {
+  position: absolute;
+  pointer-events: none;
+  background-color: color-mix(in oklch, var(--accent) 70%, transparent);
+  border-radius: 3px;
+  border-bottom: 2px solid color-mix(in oklch, var(--accent-foreground) 25%, transparent);
+}
+
 /* Comment badge, single widget decoration at end of mark range */
-.tiptap-plan-wrapper .comment-badge {
+.tiptap-plan-wrapper .comment-badge,
+.agent-message-comment-body .comment-badge {
   position: relative;
   display: inline-block;
   width: 0;
@@ -1253,7 +1265,8 @@
   vertical-align: top;
 }
 
-.tiptap-plan-wrapper .comment-badge svg {
+.tiptap-plan-wrapper .comment-badge svg,
+.agent-message-comment-body .comment-badge svg {
   position: absolute;
   top: -6px;
   left: 2px;
@@ -1265,8 +1278,16 @@
   pointer-events: auto;
 }
 
-.tiptap-plan-wrapper .comment-badge:hover svg {
+.tiptap-plan-wrapper .comment-badge:hover svg,
+.agent-message-comment-body .comment-badge:hover svg,
+.agent-message-comment-body .comment-badge:focus-visible svg {
   color: var(--primary);
+}
+
+.agent-message-comment-body .comment-badge:focus-visible svg {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 .markdown-preview-source-block {
@@ -1736,6 +1757,7 @@
 .sidebar-section-content[data-state="closed"] {
   animation: sidebar-section-collapse 160ms cubic-bezier(0.32, 0.72, 0, 1);
 }
+
 @media (prefers-reduced-motion: reduce) {
   .sidebar-fade-in,
   .sidebar-section-content[data-state="open"],

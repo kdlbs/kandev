@@ -19,6 +19,7 @@ import { SettingsSaveProvider } from "@/components/settings/settings-save-provid
 // app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
 // listed here falls back to dash-aware title-casing of the path segment.
 const SEGMENT_LABEL_OVERRIDES: Record<string, string> = {
+  "azure-devops": "Azure DevOps",
   github: "GitHub",
   jira: "Jira",
   linear: "Linear",

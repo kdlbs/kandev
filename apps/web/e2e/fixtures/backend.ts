@@ -282,7 +282,7 @@ exec git "$@"
         KANDEV_DATABASE_PATH: dbPath,
         // Profile selector. KANDEV_E2E_MOCK=true tells the backend to
         // apply the `e2e:` profile from profiles.yaml at startup —
-        // which sets KANDEV_MOCK_AGENT, KANDEV_MOCK_GITHUB/JIRA/LINEAR,
+        // which sets the mock agent and third-party provider flags,
         // KANDEV_FEATURES_OFFICE, AGENTCTL_AUTO_APPROVE_PERMISSIONS,
         // KANDEV_PLAN_COALESCE_WINDOW_MS, etc. We don't re-set those
         // here. KANDEV_MOCK_PROVIDERS stays opt-in per-spec because it

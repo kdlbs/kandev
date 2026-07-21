@@ -101,7 +101,7 @@ func TestProbePreservesConfigOptionDescriptions(t *testing.T) {
 		agentType: "codex-acp",
 		workDir:   t.TempDir(),
 		client:    agentctlclient.NewClient(host, port, log),
-	}, &installedInferenceAgent{id: "codex-acp"})
+	}, &installedInferenceAgent{id: "codex-acp"}, false)
 
 	raw, err := json.Marshal(caps.ConfigOptions)
 	require.NoError(t, err)
@@ -245,6 +245,7 @@ func TestRefreshRecreatesStaleCachedInstance(t *testing.T) {
 	require.NoError(t, reg.Register(&installedInferenceAgent{id: agentType}))
 
 	var probeCalls atomic.Int32
+	var refreshRequested atomic.Bool
 	instanceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/health":
@@ -259,6 +260,11 @@ func TestRefreshRecreatesStaleCachedInstance(t *testing.T) {
 				return
 			}
 			probeCalls.Add(1)
+			var request agentctlutil.ProbeRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode probe request: %v", err)
+			}
+			refreshRequested.Store(request.Refresh)
 			w.Header().Set("Content-Type", "application/json")
 			err := json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
 				Success:        true,
@@ -321,6 +327,7 @@ func TestRefreshRecreatesStaleCachedInstance(t *testing.T) {
 	require.Equal(t, int32(1), createCalls.Load())
 	require.Equal(t, int32(1), deleteCalls.Load())
 	require.Equal(t, int32(1), probeCalls.Load())
+	require.True(t, refreshRequested.Load())
 
 	mgr.mu.RLock()
 	fresh := mgr.instances[agentType]

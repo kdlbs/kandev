@@ -19,6 +19,10 @@ vi.mock("@/components/github/pr-status-chip", () => ({
   PRStatusChip: () => null,
 }));
 
+vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => ({
+  AzureDevOpsTaskPullRequestChip: () => null,
+}));
+
 vi.mock("@/components/task/share/share-button", () => ({
   ShareButton: () => null,
   shareableSessionStateClient: () => false,
@@ -69,6 +73,7 @@ vi.mock("@/lib/ws/connection", () => ({
 import { useSubmitHandler } from "./chat-input-area";
 
 beforeEach(() => {
+  handleSendMessageMock.mockReset();
   handleSendMessageMock.mockResolvedValue(undefined);
 });
 
@@ -118,5 +123,72 @@ describe("useSubmitHandler", () => {
         "The connection dropped or timed out. Refresh the task to confirm whether it went through.",
       variant: "error",
     });
+  });
+
+  it("reports deterministic preflight failures as not sent", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const error = Object.assign(new Error("Connection unavailable. Reconnect and try again."), {
+      name: "MessageSendError",
+      code: "connection-unavailable",
+    });
+    handleSendMessageMock.mockRejectedValueOnce(error);
+    const { result } = renderHook(() => useSubmitHandler(panelState()));
+
+    await act(async () => {
+      await result.current.handleSubmit("hello");
+    });
+
+    expect(toastMock).toHaveBeenCalledWith({
+      title: "Message not sent",
+      description: "Connection unavailable. Reconnect and try again.",
+      variant: "error",
+    });
+  });
+
+  it("keeps agent message comments pending when sending fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const markCommentsSent = vi.fn();
+    handleSendMessageMock.mockRejectedValueOnce(new Error("send failed"));
+    const { result } = renderHook(() =>
+      useSubmitHandler(
+        panelState({
+          messageComments: [{ id: "comment-1" }],
+          markCommentsSent,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit("hello");
+    });
+
+    expect(markCommentsSent).not.toHaveBeenCalled();
+  });
+
+  it("includes each agent message comment once and marks it sent after success", async () => {
+    const markCommentsSent = vi.fn();
+    const comment = {
+      id: "comment-1",
+      selectedText: "settled answer",
+      text: "Please expand this.",
+    };
+    const { result } = renderHook(() =>
+      useSubmitHandler(
+        panelState({
+          messageComments: [comment],
+          markCommentsSent,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit("hello");
+    });
+
+    const [sentMessage] = handleSendMessageMock.mock.calls[0] as [string];
+    expect(sentMessage.match(/### Agent Message Comments/g)).toHaveLength(1);
+    expect(sentMessage).toContain("> settled answer");
+    expect(sentMessage).toContain("> Please expand this.");
+    expect(markCommentsSent).toHaveBeenCalledWith(["comment-1"]);
   });
 });

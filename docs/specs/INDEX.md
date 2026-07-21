@@ -83,6 +83,7 @@ Per-workspace credentials and triage triggers for external services.
 
 | Spec | Status |
 |---|---|
+| [azure-devops-integration](azure-devops-integration/spec.md) | shipped |
 | [slack](integrations/slack.md) | shipped |
 | [external-mcp](integrations/external-mcp.md) | draft |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
@@ -119,6 +120,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
+| [agent-message-comments](ui/agent-message-comments.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

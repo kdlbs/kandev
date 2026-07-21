@@ -493,6 +493,17 @@ export class ApiClient {
     });
   }
 
+  async startQuickChat(
+    workspaceId: string,
+    agentProfileId: string,
+    title: string,
+  ): Promise<{ task_id: string; session_id: string }> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/quick-chat`, {
+      title,
+      agent_profile_id: agentProfileId,
+    });
+  }
+
   /** Start a config chat session via the dedicated config-chat endpoint. */
   async startConfigChat(
     workspaceId: string,
@@ -1561,6 +1572,27 @@ export class ApiClient {
     if (!res.ok || res.status !== 200) return false;
     const cfg = (await res.json()) as { hasSecret?: boolean; lastOk?: boolean };
     return Boolean(cfg.hasSecret) && Boolean(cfg.lastOk);
+  }
+
+  // --- Azure DevOps Mock Control ---
+
+  async mockAzureDevOpsSeed(state: unknown): Promise<void> {
+    await this.request("POST", "/api/v1/azure-devops/mock/state", state);
+  }
+
+  async mockAzureDevOpsReset(): Promise<void> {
+    await this.request("DELETE", "/api/v1/azure-devops/mock/state");
+  }
+
+  async setAzureDevOpsConfig(
+    workspaceId: string,
+    payload: { organizationUrl: string; pat: string },
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/v1/azure-devops/config?workspace_id=${encodeURIComponent(workspaceId)}`,
+      { ...payload, authMethod: "pat" },
+    );
   }
 
   // --- Jira Mock Control ---

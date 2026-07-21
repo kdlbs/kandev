@@ -257,6 +257,11 @@ type TaskRepositoryInput struct {
 	Name           string
 	DefaultBranch  string
 	GitHubURL      string
+	RemoteURL      string
+	Provider       string
+	ProviderRepoID string
+	ProviderOwner  string
+	ProviderName   string
 }
 
 type CreateTaskRequest struct {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
 import {
@@ -20,20 +20,21 @@ import {
 } from "@tabler/icons-react";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
+import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-devops-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
 import { useAppStore } from "@/components/state-provider";
-import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { GitHubStatus } from "@/lib/types/github";
+import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 
 type MobileIntegrationsSectionProps = {
   onNavigate: () => void;
 };
 
-type IntegrationId = "github" | "gitlab" | "jira" | "linear";
+type IntegrationId = "azure-devops" | "github" | "gitlab" | "jira" | "linear";
 
 type IntegrationLink = {
   id: IntegrationId;
@@ -42,6 +43,7 @@ type IntegrationLink = {
 };
 
 type IntegrationAvailability = {
+  azureDevOpsAvailable?: boolean;
   githubReady: boolean;
   gitlabReady: boolean;
   jiraAvailable: boolean;
@@ -49,6 +51,7 @@ type IntegrationAvailability = {
 };
 
 const INTEGRATION_LINKS: IntegrationLink[] = [
+  { id: "azure-devops", label: "Azure DevOps", href: "/azure-devops" },
   { id: "github", label: "GitHub", href: "/github" },
   { id: "gitlab", label: "GitLab", href: "/gitlab" },
   { id: "jira", label: "Jira", href: "/jira" },
@@ -56,21 +59,24 @@ const INTEGRATION_LINKS: IntegrationLink[] = [
 ];
 
 const INTEGRATION_ICONS = {
+  "azure-devops": AzureDevOpsIcon,
   github: IconBrandGithub,
   gitlab: IconBrandGitlab,
   jira: IconTicket,
   linear: IconHexagon,
-} satisfies Record<IntegrationId, typeof IconBrandGithub>;
+} satisfies Record<IntegrationId, ComponentType<{ className?: string }>>;
 
 const HOVER_CLOSE_DELAY_MS = 180;
 
 export function getAvailableIntegrationLinks({
+  azureDevOpsAvailable,
   githubReady,
   gitlabReady,
   jiraAvailable,
   linearAvailable,
 }: IntegrationAvailability): IntegrationLink[] {
   return INTEGRATION_LINKS.filter((link) => {
+    if (link.id === "azure-devops") return !!azureDevOpsAvailable;
     if (link.id === "github") return githubReady;
     if (link.id === "gitlab") return gitlabReady;
     if (link.id === "jira") return jiraAvailable;
@@ -108,9 +114,11 @@ export function useConfiguredIntegrationLinks(): IntegrationLink[] {
   const gitlabAvailable = useGitLabAvailable();
   const jiraAvailable = useJiraAvailable(scopedWorkspaceId);
   const linearAvailable = useLinearAvailable(scopedWorkspaceId);
+  const azureDevOpsAvailable = useAzureDevOpsAvailable(scopedWorkspaceId);
   const githubStatus = getGitHubIntegrationStatus(status, loading);
 
   return getAvailableIntegrationLinks({
+    azureDevOpsAvailable,
     githubReady: githubStatus.ready,
     gitlabReady: gitlabAvailable,
     jiraAvailable,
@@ -223,7 +231,7 @@ function MobileIntegrationRow({
 }: {
   href: string;
   label: string;
-  icon: TablerIcon;
+  icon: ComponentType<{ className?: string }>;
   testId?: string;
   onNavigate: () => void;
 }) {

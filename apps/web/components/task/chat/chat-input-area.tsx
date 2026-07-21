@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TodoIndicator } from "./todo-indicator";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
+import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { ShareButton, shareableSessionStateClient } from "@/components/task/share/share-button";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -27,23 +28,34 @@ import {
   formatPRFeedbackAsMarkdown,
   formatPlanCommentsAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
+  formatAgentMessageCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
 import { useToast } from "@/components/toast-provider";
+import { isMessageSendError } from "@/lib/chat/message-send-error";
 import type { DiffComment } from "@/lib/diff/types";
+import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { useChatPanelState } from "./use-chat-panel-state";
 import { cn } from "@/lib/utils";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
-export function buildSubmitMessage(
-  message: string,
-  reviewComments: DiffComment[] | undefined,
-  pendingPRFeedback: import("@/lib/state/slices/comments").PRFeedbackComment[],
-  planComments: import("@/lib/state/slices/comments").PlanComment[],
-  walkthroughComments: import("@/lib/state/slices/comments").WalkthroughComment[] = [],
-): string {
+export function buildSubmitMessage({
+  message,
+  reviewComments,
+  pendingPRFeedback,
+  planComments,
+  walkthroughComments = [],
+  messageComments = [],
+}: {
+  message: string;
+  reviewComments?: DiffComment[];
+  pendingPRFeedback: import("@/lib/state/slices/comments").PRFeedbackComment[];
+  planComments: import("@/lib/state/slices/comments").PlanComment[];
+  walkthroughComments?: import("@/lib/state/slices/comments").WalkthroughComment[];
+  messageComments?: AgentMessageComment[];
+}): string {
   let finalMessage = message;
   if (reviewComments && reviewComments.length > 0) {
     finalMessage = formatReviewCommentsAsMarkdown(reviewComments) + (message || "");
@@ -57,6 +69,12 @@ export function buildSubmitMessage(
   if (planComments.length > 0) {
     const planMarkdown = formatPlanCommentsAsMarkdown(planComments);
     finalMessage = finalMessage ? `${planMarkdown}${finalMessage}` : planMarkdown;
+  }
+  if (messageComments.length > 0) {
+    const messageCommentsMarkdown = formatAgentMessageCommentsAsMarkdown(messageComments);
+    finalMessage = finalMessage
+      ? `${messageCommentsMarkdown}${finalMessage}`
+      : messageCommentsMarkdown;
   }
   return finalMessage;
 }
@@ -100,8 +118,16 @@ function pickInputPlaceholder(a: PlaceholderArgs): string {
   );
 }
 
-function showUnknownMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>["toast"]) {
+function showMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>["toast"]) {
   console.error("Failed to send message:", error);
+  if (isMessageSendError(error)) {
+    toast({
+      title: "Message not sent",
+      description: error.message,
+      variant: "error",
+    });
+    return;
+  }
   toast({
     title: "Message send status unknown",
     description:
@@ -147,6 +173,7 @@ export function useSubmitHandler(
     planComments,
     pendingPRFeedback,
     walkthroughComments,
+    messageComments,
     markCommentsSent,
     clearSessionPlanComments,
     handleClearPRFeedback,
@@ -168,13 +195,14 @@ export function useSubmitHandler(
       if (isSending) return;
       setIsSending(true);
       try {
-        const finalMessage = buildSubmitMessage(
+        const finalMessage = buildSubmitMessage({
           message,
           reviewComments,
           pendingPRFeedback,
           planComments,
           walkthroughComments,
-        );
+          messageComments,
+        });
         const hasReviewComments = !!(reviewComments && reviewComments.length > 0);
         if (onSend) {
           // Expand task mentions because onSend bypasses useMessageHandler.buildFinalMessage.
@@ -193,6 +221,7 @@ export function useSubmitHandler(
         }
         if (reviewComments && reviewComments.length > 0)
           markCommentsSent(reviewComments.map((c) => c.id));
+        if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
         if (pendingPRFeedback.length > 0) handleClearPRFeedback();
         if (walkthroughComments.length > 0) handleClearWalkthroughComments();
         if (planComments.length > 0) clearSessionPlanComments();
@@ -204,7 +233,7 @@ export function useSubmitHandler(
           }
         }
       } catch (error) {
-        showUnknownMessageSendToast(error, toast);
+        showMessageSendToast(error, toast);
         return false;
       } finally {
         setIsSending(false);
@@ -219,6 +248,7 @@ export function useSubmitHandler(
       planComments,
       clearSessionPlanComments,
       walkthroughComments,
+      messageComments,
       handleClearWalkthroughComments,
       pendingPRFeedback,
       handleClearPRFeedback,
@@ -311,6 +341,7 @@ function ChatStatusBar({
     >
       {showTodos && <TodoIndicator todos={todoItems} />}
       <PRStatusChip taskId={taskId} />
+      <AzureDevOpsTaskPullRequestChip taskId={taskId} />
       {queueChip}
       {/* Distinct per-banner keys: the key remounts the banner on task switch
           so its dismissed state re-initialises, and keeping the two suffixes
@@ -480,7 +511,8 @@ export function ChatInputArea({
           hasContextComments={
             panelState.planComments.length > 0 ||
             panelState.pendingPRFeedback.length > 0 ||
-            panelState.walkthroughComments.length > 0
+            panelState.walkthroughComments.length > 0 ||
+            panelState.messageComments.length > 0
           }
           submitKey={panelState.chatSubmitKey}
           hasAgentCommands={!!(panelState.agentCommands && panelState.agentCommands.length > 0)}

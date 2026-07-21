@@ -3,14 +3,14 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Branch } from "@/lib/types/http";
 import type { TaskRemoteRepoRow } from "./task-create-dialog-types";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import type { UseAccessibleReposResult } from "@/hooks/domains/github/use-accessible-repos";
+import type { UseRemoteRepositoriesResult } from "@/hooks/domains/integrations/use-remote-repositories";
 
 // Each test passes a stubbed `accessibleRepos` prop to the chip. The hook
 // itself now lives at the chips-row level (see chips-row test); the chip is
 // pure presentational glue over the result. Defaults to an empty/idle state
 // and individual tests override the slice they care about.
 type AccessibleRepo = {
-  provider: "github" | "gitlab";
+  provider: "github" | "gitlab" | "azure_devops";
   owner: string;
   name: string;
   full_name: string;
@@ -18,17 +18,39 @@ type AccessibleRepo = {
   description?: string;
   private: boolean;
 };
-function makeAccessible(
-  overrides: Partial<UseAccessibleReposResult> = {},
-): UseAccessibleReposResult {
+type AccessibleOverrides = Omit<Partial<UseRemoteRepositoriesResult>, "repos"> & {
+  repos?: AccessibleRepo[];
+};
+function makeAccessible(overrides: AccessibleOverrides = {}): UseRemoteRepositoriesResult {
+  const repos = (overrides.repos ?? []).map((repo) => ({
+    provider: repo.provider,
+    id: repo.full_name,
+    owner: repo.owner,
+    name: repo.name,
+    fullName: repo.full_name,
+    url: remoteTestURL(repo),
+    defaultBranch: repo.default_branch,
+    private: repo.private,
+  }));
+  const availableProviders = overrides.availableProviders ?? [
+    ...new Set(repos.map((repo) => repo.provider)),
+  ];
   return {
-    repos: [] as AccessibleRepo[],
     loading: false,
     unavailable: false,
     error: null,
     search: () => undefined,
     ...overrides,
+    repos,
+    availableProviders,
   };
+}
+
+function remoteTestURL(repo: AccessibleRepo): string {
+  if (repo.provider === "azure_devops") {
+    return `https://dev.azure.com/acme/${repo.owner}/_git/${repo.name}`;
+  }
+  return `https://${repo.provider}.com/${repo.owner}/${repo.name}`;
 }
 
 import { RemoteRepoChip } from "./task-create-dialog-remote-repo-chip";
@@ -37,7 +59,6 @@ const TRIGGER_TID = "remote-repo-chip-trigger";
 const INPUT_TID = "remote-repo-input";
 const FULL_NAME = "acme/site";
 const URL_ACME_SITE = "https://github.com/acme/site";
-const URL_FOO_BAR_PR = "https://github.com/foo/bar/pull/42";
 
 afterEach(() => {
   cleanup();
@@ -82,11 +103,49 @@ describe("RemoteRepoChip — write paths", () => {
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
     fireEvent.click(screen.getByText(FULL_NAME));
-    expect(onURLChange).toHaveBeenCalledWith(URL_ACME_SITE, "picker", {
-      provider: "github",
-      fullName: FULL_NAME,
-      defaultBranch: "trunk",
+    expect(onURLChange).toHaveBeenCalledWith(
+      URL_ACME_SITE,
+      "picker",
+      expect.objectContaining({
+        provider: "github",
+        fullName: FULL_NAME,
+        defaultBranch: "trunk",
+      }),
+    );
+  });
+
+  it("selects an Azure DevOps repository with provider metadata", () => {
+    const accessibleRepos = makeAccessible({
+      repos: [
+        {
+          provider: "azure_devops",
+          owner: "Platform",
+          name: "api",
+          full_name: "Platform/api",
+          default_branch: "main",
+          private: true,
+        },
+      ],
     });
+    const onURLChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={accessibleRepos}
+        onURLChange={onURLChange}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    fireEvent.click(screen.getByRole("button", { name: /Platform\/api/i }));
+    expect(onURLChange).toHaveBeenCalledWith(
+      "https://dev.azure.com/acme/Platform/_git/api",
+      "picker",
+      expect.objectContaining({ provider: "azure_devops", fullName: "Platform/api" }),
+    );
   });
 
   it("calls onRemove when the X button is clicked", () => {
@@ -104,112 +163,6 @@ describe("RemoteRepoChip — write paths", () => {
     );
     fireEvent.click(screen.getByTestId("remote-chip-remove"));
     expect(onRemove).toHaveBeenCalledOnce();
-  });
-});
-
-describe("RemoteRepoChip — URL entry", () => {
-  it("writes a GitHub URL with source=paste on Enter", () => {
-    const onURLChange = vi.fn();
-    renderInProvider(
-      <RemoteRepoChip
-        row={row()}
-        branches={[]}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={onURLChange}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
-    fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "https://github.com/acme/api" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(onURLChange).toHaveBeenCalledWith("https://github.com/acme/api", "paste");
-  });
-
-  it("commits a pasted GitHub URL immediately", () => {
-    const onURLChange = vi.fn();
-    renderInProvider(
-      <RemoteRepoChip
-        row={row()}
-        branches={[]}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={onURLChange}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
-    fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
-    fireEvent.paste(input, {
-      clipboardData: { getData: () => URL_FOO_BAR_PR },
-    });
-    expect(onURLChange).toHaveBeenCalledWith(URL_FOO_BAR_PR, "paste");
-  });
-
-  it("commits a typed GitHub URL on blur", () => {
-    const onURLChange = vi.fn();
-    renderInProvider(
-      <RemoteRepoChip
-        row={row()}
-        branches={[]}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={onURLChange}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
-    fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "https://github.com/foo/bar/issues/42" } });
-    fireEvent.blur(input);
-    expect(onURLChange).toHaveBeenCalledWith("https://github.com/foo/bar/issues/42", "paste");
-  });
-
-  it("commits a typed GitHub PR URL when Tab cannot move focus out of the popover", () => {
-    const onURLChange = vi.fn();
-    renderInProvider(
-      <RemoteRepoChip
-        row={row()}
-        branches={[]}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={onURLChange}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
-    fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
-    fireEvent.change(input, { target: { value: URL_FOO_BAR_PR } });
-    fireEvent.keyDown(input, { key: "Tab" });
-    expect(onURLChange).toHaveBeenCalledWith(URL_FOO_BAR_PR, "paste");
-  });
-
-  it("surfaces an inline error when a URL-shaped non-GitHub value is submitted", () => {
-    const onURLChange = vi.fn();
-    renderInProvider(
-      <RemoteRepoChip
-        row={row()}
-        branches={[]}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={onURLChange}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
-    fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "https://gitlab.com/acme/api" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-
-    expect(input.getAttribute("aria-invalid")).toBe("true");
-    expect(screen.getByRole("alert").textContent).toContain("Enter a GitHub repository URL");
-    expect(onURLChange).not.toHaveBeenCalled();
   });
 });
 
@@ -270,11 +223,15 @@ describe("RemoteRepoChip — unified search", () => {
     fireEvent.blur(input, { relatedTarget: option });
     fireEvent.click(option);
     expect(onURLChange).toHaveBeenCalledTimes(1);
-    expect(onURLChange).toHaveBeenCalledWith(URL_ACME_SITE, "picker", {
-      provider: "github",
-      fullName: FULL_NAME,
-      defaultBranch: "main",
-    });
+    expect(onURLChange).toHaveBeenCalledWith(
+      URL_ACME_SITE,
+      "picker",
+      expect.objectContaining({
+        provider: "github",
+        fullName: FULL_NAME,
+        defaultBranch: "main",
+      }),
+    );
   });
 });
 
@@ -312,11 +269,15 @@ describe("RemoteRepoChip — picker focus", () => {
     fireEvent.click(option);
 
     expect(onURLChange).toHaveBeenCalledTimes(1);
-    expect(onURLChange).toHaveBeenCalledWith(URL_ACME_SITE, "picker", {
-      provider: "github",
-      fullName: FULL_NAME,
-      defaultBranch: "main",
-    });
+    expect(onURLChange).toHaveBeenCalledWith(
+      URL_ACME_SITE,
+      "picker",
+      expect.objectContaining({
+        provider: "github",
+        fullName: FULL_NAME,
+        defaultBranch: "main",
+      }),
+    );
   });
 });
 
@@ -478,7 +439,7 @@ describe("RemoteRepoChip — picker loading state", () => {
       />,
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    expect(screen.getByText(/Connect a GitHub account/i)).toBeTruthy();
+    expect(screen.getByText(/Connect a source control provider/i)).toBeTruthy();
     expect(screen.queryByTestId("remote-repo-picker-loading")).toBeNull();
   });
 
@@ -496,10 +457,10 @@ describe("RemoteRepoChip — picker loading state", () => {
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
     const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "https://gitlab.com/acme/api" } });
+    fireEvent.change(input, { target: { value: "https://bitbucket.org/acme/api" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(screen.getByText(/Connect a GitHub account/i)).toBeTruthy();
+    expect(screen.getByText(/Connect a source control provider/i)).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(input.getAttribute("aria-invalid")).toBeNull();
   });
@@ -520,7 +481,7 @@ describe("RemoteRepoChip — popover content", () => {
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
     const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
-    expect(input.placeholder).toBe("Search repositories or paste a GitHub URL");
+    expect(input.placeholder).toBe("Search repositories or paste a remote URL");
     expect(screen.queryByTestId("remote-repo-search")).toBeNull();
     expect(screen.queryByTestId("remote-paste-url-input")).toBeNull();
   });
@@ -547,7 +508,7 @@ describe("RemoteRepoChip — popover content", () => {
     expect(content.className).toContain("overflow-hidden");
   });
 
-  it("renders the 'Connect GitHub' banner when accessibleRepos.unavailable=true", () => {
+  it("renders the provider settings banner when no integration is available", () => {
     renderInProvider(
       <RemoteRepoChip
         row={row()}
@@ -560,9 +521,9 @@ describe("RemoteRepoChip — popover content", () => {
       />,
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    expect(screen.getByText(/Connect a GitHub account/i)).toBeTruthy();
+    expect(screen.getByText(/Connect a source control provider/i)).toBeTruthy();
     const link = screen.getByRole("link", { name: /settings/i }) as HTMLAnchorElement;
-    expect(link.getAttribute("href")).toBe("/settings/integrations/github");
+    expect(link.getAttribute("href")).toBe("/settings/integrations");
   });
 
   it("renders 'private' badge next to private repo options", () => {

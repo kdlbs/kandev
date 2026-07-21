@@ -30,7 +30,7 @@ async function seedMobileTaskWithPlan(testPage: Page, apiClient: ApiClient, seed
 
 async function openMobilePlanPanel(testPage: Page, session: SessionPage) {
   await session.togglePlanMode();
-  await testPage.getByRole("button", { name: "Plan" }).tap();
+  await testPage.getByRole("button", { name: "Plan", exact: true }).tap();
   await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
 }
 

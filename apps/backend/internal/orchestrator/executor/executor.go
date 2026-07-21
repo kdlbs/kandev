@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -690,6 +692,28 @@ type RepoCloner interface {
 	EnsureCloned(ctx context.Context, cloneURL, owner, name string) (string, error)
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
 	BuildCloneURL(provider, owner, name string) (string, error)
+}
+
+type authenticatedRepoCloner interface {
+	EnsureClonedWithBasicAuth(ctx context.Context, cloneURL, owner, name, username, password string) (string, error)
+}
+
+func (e *Executor) ensureClonedWithWorkspaceAuth(
+	ctx context.Context, repo *models.Repository, cloneURL string,
+) (string, error) {
+	if repo.Provider != "azure_devops" || !strings.HasPrefix(cloneURL, "https://") {
+		return e.repoCloner.EnsureCloned(ctx, cloneURL, repo.ProviderOwner, repo.ProviderName)
+	}
+	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
+	if !ok || e.secretStore == nil {
+		return "", fmt.Errorf("azure DevOps repository clone authentication is unavailable")
+	}
+	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
+	if err != nil {
+		return "", fmt.Errorf("read Azure DevOps clone credential: %w", err)
+	}
+	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
+	return authCloner.EnsureClonedWithBasicAuth(ctx, cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat)
 }
 
 // RepoUpdater updates repository records in the database.

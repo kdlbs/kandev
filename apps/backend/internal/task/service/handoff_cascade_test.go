@@ -618,7 +618,7 @@ type fakeEventPublisher struct {
 	archived []bool // archivedAt nil/non-nil per updated entry
 }
 
-func (f *fakeEventPublisher) PublishTaskUpdated(_ context.Context, task *models.Task) {
+func (f *fakeEventPublisher) PublishTaskUpdated(_ context.Context, task *models.Task, _ ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updated = append(f.updated, task.ID)

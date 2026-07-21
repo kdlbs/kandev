@@ -311,6 +311,11 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	}
 
 	startTime := time.Now()
+	isOpenCode := isOpenCodeACPCommand(cfg.Command)
+	var refreshedOpenCodeModels []ProbeModel
+	if isOpenCode && req.Refresh {
+		refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, true)
+	}
 
 	// Probes intentionally omit the model flag so session/new returns the agent's
 	// default model and the complete availableModels list.
@@ -354,8 +359,11 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 			DurationMs: int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
-	if len(resp.Models) == 0 && isOpenCodeACPCommand(cfg.Command) {
-		e.applyOpenCodeModelsFallback(ctx, resp, resolvedCmd, workDir)
+	if len(resp.Models) == 0 && isOpenCode {
+		if len(refreshedOpenCodeModels) == 0 {
+			refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, false)
+		}
+		resp.Models = refreshedOpenCodeModels
 	}
 
 	resp.Success = true
@@ -371,29 +379,41 @@ func isOpenCodeACPCommand(command []string) bool {
 		command[1] == openCodeACPSubcommand
 }
 
-// applyOpenCodeModelsFallback fills an otherwise empty probe model list from
-// OpenCode's CLI model listing.
-func (e *ACPInferenceExecutor) applyOpenCodeModelsFallback(ctx context.Context, resp *ProbeResponse, resolvedCmd, workDir string) {
-	models, err := probeOpenCodeModels(ctx, resolvedCmd, workDir)
+// loadOpenCodeModels runs OpenCode's CLI model listing and logs failures
+// without failing the broader ACP capability probe.
+func (e *ACPInferenceExecutor) loadOpenCodeModels(
+	ctx context.Context,
+	resolvedCmd string,
+	workDir string,
+	refresh bool,
+) []ProbeModel {
+	models, err := probeOpenCodeModels(ctx, resolvedCmd, workDir, refresh)
 	if err != nil {
 		e.logger.Warn("ACP probe: failed to list opencode models",
 			zap.String("command", resolvedCmd),
 			zap.Error(err))
-		return
+		return nil
 	}
 	if len(models) == 0 {
 		e.logger.Warn("ACP probe: opencode models returned no valid model entries",
 			zap.String("command", resolvedCmd))
-		return
 	}
-	resp.Models = models
+	return models
 }
 
-// probeOpenCodeModels runs the OpenCode model-listing command and converts its
-// output into probe model entries.
-func probeOpenCodeModels(ctx context.Context, resolvedCmd, workDir string) ([]ProbeModel, error) {
+// probeOpenCodeModels lists OpenCode's models, optionally refreshing its cache.
+func probeOpenCodeModels(
+	ctx context.Context,
+	resolvedCmd string,
+	workDir string,
+	refresh bool,
+) ([]ProbeModel, error) {
+	args := []string{"models"}
+	if refresh {
+		args = append(args, "--refresh")
+	}
 	//nolint:gosec // resolvedCmd is from the same hard-coded allow-list used to launch the ACP probe.
-	cmd := exec.CommandContext(ctx, resolvedCmd, "models")
+	cmd := exec.CommandContext(ctx, resolvedCmd, args...)
 	cmd.Dir = workDir
 	cmd.Env = environWithNoColor(os.Environ())
 	out, err := cmd.Output()

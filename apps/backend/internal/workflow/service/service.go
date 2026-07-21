@@ -311,6 +311,13 @@ func (s *Service) UpdateStepWithStartStepUpdates(ctx context.Context, step *mode
 }
 
 // DeleteStep deletes a workflow step and clears any references to it from other steps.
+// Tasks currently on the step are NOT auto-reassigned: doing so through the normal
+// move path would run on_exit/on_enter (auto-start agents, session hand-offs) as a
+// side effect of an administrative delete, and any failed move would be silently
+// ignored while the step is deleted anyway (a partial, non-atomic cascade). Instead,
+// affected tasks keep their now-dangling workflow_step_id and are surfaced via the
+// Kanban/Pipeline "Needs Reassignment" fallback column for explicit manual
+// reassignment by a user (which goes through the normal, fully-validated move path).
 func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
 	// First, get the step to find its workflow ID
 	step, err := s.repo.GetStep(ctx, stepID)

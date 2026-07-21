@@ -164,7 +164,7 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 		zap.String("repository_id", repo.ID),
 		zap.String("repo", repo.ProviderOwner+"/"+repo.ProviderName))
 
-	localPath, err := e.repoCloner.EnsureCloned(ctx, cloneURL, repo.ProviderOwner, repo.ProviderName)
+	localPath, err := e.ensureClonedWithWorkspaceAuth(ctx, repo, cloneURL)
 	if err != nil {
 		e.logger.Error("failed to clone repository",
 			zap.String("repository_id", repo.ID),

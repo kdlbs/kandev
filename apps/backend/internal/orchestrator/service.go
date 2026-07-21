@@ -109,7 +109,7 @@ type TurnService interface {
 // metadata, parent_id). The orchestrator does not construct task.updated
 // payloads itself.
 type TaskEventPublisher interface {
-	PublishTaskUpdated(ctx context.Context, task *models.Task)
+	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState)
 }
 
@@ -690,12 +690,14 @@ func (s *Service) SetTaskEventPublisher(publisher TaskEventPublisher) {
 
 // publishTaskUpdated forwards to the configured TaskEventPublisher.
 // No-op when the publisher isn't wired (tests, or before SetTaskEventPublisher
-// has been called during startup).
-func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task) {
+// has been called during startup). Pass the pre-move workflow ID when the
+// task's workflow changed (e.g. a cross-workflow transition) so the event
+// carries old_workflow_id.
+func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string) {
 	if s.taskEvents == nil || task == nil {
 		return
 	}
-	s.taskEvents.PublishTaskUpdated(ctx, task)
+	s.taskEvents.PublishTaskUpdated(ctx, task, oldWorkflowIDs...)
 }
 
 func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState) {

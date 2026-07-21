@@ -214,12 +214,16 @@ export const test = backendFixture.extend<
         .rawRequest("DELETE", `/api/v1/linear/config?${scoped}`)
         .catch(() => undefined);
       await apiClient.deleteAllSentryInstances(seedData.workspaceId).catch(() => undefined);
+      await apiClient
+        .rawRequest("DELETE", `/api/v1/azure-devops/config?${scoped}`)
+        .catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config`).catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/linear/config`).catch(() => undefined);
       await Promise.all([
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),
         apiClient.mockSentryReset().catch(() => undefined),
+        apiClient.mockAzureDevOpsReset().catch(() => undefined),
       ]);
       await use();
     },

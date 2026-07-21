@@ -30,6 +30,7 @@ import (
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/automation"
+	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -879,7 +880,7 @@ func registerSecondaryRoutes(
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
-	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.log)
+	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.eventBus, p.log)
 	p.log.Info("Registered Workflow handlers (HTTP + WebSocket)")
 
 	agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log)
@@ -956,6 +957,12 @@ func registerSecondaryRoutes(
 		gitlab.RegisterRoutesWithDispatcher(p.router, p.gateway.Dispatcher, p.services.GitLab, p.log)
 		gitlab.RegisterMockRoutes(p.router, p.services.GitLab, p.log)
 		p.log.Debug("Registered GitLab handlers (HTTP + WebSocket)")
+	}
+
+	if p.services.AzureDevOps != nil {
+		azuredevops.RegisterRoutes(p.router, p.services.AzureDevOps, p.log)
+		azuredevops.RegisterMockRoutes(p.router, p.services.AzureDevOps, p.log)
+		p.log.Debug("Registered Azure DevOps handlers (HTTP)")
 	}
 
 	if p.services.Jira != nil {

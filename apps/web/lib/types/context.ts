@@ -3,6 +3,7 @@ import type {
   PlanComment,
   PRFeedbackComment,
   WalkthroughComment,
+  AgentMessageComment,
 } from "@/lib/state/slices/comments";
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
 
@@ -69,6 +70,11 @@ export type WalkthroughCommentContextItem = ContextItemBase & {
   onRemoveComment: (id: string) => void;
 };
 
+export type AgentMessageCommentContextItem = ContextItemBase & {
+  kind: "agent-message-comment";
+  comments: AgentMessageComment[];
+};
+
 export type ContextItem =
   | PlanContextItem
   | FileContextItem
@@ -78,6 +84,7 @@ export type ContextItem =
   | ImageContextItem
   | FileAttachmentContextItem
   | PRFeedbackContextItem
-  | WalkthroughCommentContextItem;
+  | WalkthroughCommentContextItem
+  | AgentMessageCommentContextItem;
 
 export type ContextItemKind = ContextItem["kind"];

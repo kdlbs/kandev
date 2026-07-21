@@ -211,6 +211,36 @@ describe("buildRepositoriesPayload — single-row and URL mode (core)", () => {
     ]);
   });
 
+  it("uses the provider-neutral locator for an Azure picker selection", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: true,
+      remoteRepos: [
+        {
+          key: "remote-0",
+          url: "https://dev.azure.com/acme/Platform/_git/api",
+          branch: "main",
+          source: "picker",
+          provider: "azure_devops",
+          providerRepoId: "repo-1",
+          providerOwner: "project-1",
+          providerName: "api",
+        },
+      ],
+      repositories: [],
+      discoveredRepositories: [],
+    });
+    expect(payload).toEqual([
+      expect.objectContaining({
+        remote_url: "https://dev.azure.com/acme/Platform/_git/api",
+        provider: "azure_devops",
+        provider_repo_id: "repo-1",
+        provider_owner: "project-1",
+        provider_name: "api",
+      }),
+    ]);
+    expect(payload[0]).not.toHaveProperty("github_url");
+  });
+
   it("single-row workspace repo: payload mirrors the row", () => {
     const payload = buildRepositoriesPayload({
       useRemote: false,
