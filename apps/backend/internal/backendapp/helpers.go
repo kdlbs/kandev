@@ -890,7 +890,7 @@ func registerSecondaryRoutes(
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
-	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.log)
+	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.eventBus, p.log)
 	p.log.Info("Registered Workflow handlers (HTTP + WebSocket)")
 
 	agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log)

@@ -103,10 +103,10 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		if err := m.ReleaseWorktreeReference(ctx, wt); err != nil {
 			return fmt.Errorf("release shared worktree reference %s: %w", wt.ID, err)
 		}
-		m.logger.Info("preserved worktree still referenced by another active session",
+		m.logger.Info("preserved worktree still referenced by another task session",
 			zap.String("worktree_id", wt.ID),
 			zap.String("session_id", wt.SessionID),
-			zap.Int("active_references", activeReferences))
+			zap.Int("non_deleted_references", activeReferences))
 		return nil
 	}
 

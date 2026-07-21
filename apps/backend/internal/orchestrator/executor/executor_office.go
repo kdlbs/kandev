@@ -14,6 +14,15 @@ import (
 	"go.uber.org/zap"
 )
 
+type officeSessionMetadataUpdater interface {
+	UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
+		ctx context.Context,
+		session *models.TaskSession,
+		expected models.TaskSessionState,
+		keys []string,
+	) (bool, error)
+}
+
 // EnsureSessionForAgent returns a persistent task session for the (task,
 // agent) pair, creating one when no row exists. This is the office run
 // entry point — every run for a participant agent ends up here. Distinct
@@ -77,6 +86,10 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 		return nil
 	}
 	snapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, executionProfileID)
+	updater, ok := e.repo.(officeSessionMetadataUpdater)
+	if !ok {
+		return errors.New("office session rebind requires guarded metadata updates")
+	}
 	for {
 		if isStopTerminalSessionState(session.State) {
 			return nil
@@ -87,7 +100,30 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 		updated.ExecutionProfileID = executionProfileID
 		updated.AgentProfileSnapshot = snapshot
 		updated.IsPassthrough = isPassthrough
-		changed, err := e.repo.UpdateTaskSessionIfCurrentState(ctx, &updated, expectedState)
+		// Provider-native state must not override the newly selected profile.
+		updated.Metadata = cloneMetadata(session.Metadata)
+		for _, key := range []string{
+			"acp_session_id",
+			models.SessionMetaKeySessionMode,
+			models.SessionMetaKeyRuntimeConfig,
+			models.SessionMetaKeyRuntimeConfigOverrides,
+			models.SessionMetaKeyACPConfigBaseline,
+			models.SessionMetaKeyACPModelState,
+			"context_window",
+			models.SessionMetaKeyLastAgentError,
+		} {
+			delete(updated.Metadata, key)
+		}
+		changed, err := updater.UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(ctx, &updated, expectedState, []string{
+			"acp_session_id",
+			models.SessionMetaKeySessionMode,
+			models.SessionMetaKeyRuntimeConfig,
+			models.SessionMetaKeyRuntimeConfigOverrides,
+			models.SessionMetaKeyACPConfigBaseline,
+			models.SessionMetaKeyACPModelState,
+			"context_window",
+			models.SessionMetaKeyLastAgentError,
+		})
 		if err != nil {
 			return fmt.Errorf("update office execution profile: %w", err)
 		}

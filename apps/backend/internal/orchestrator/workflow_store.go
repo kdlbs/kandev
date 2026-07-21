@@ -19,7 +19,7 @@ import (
 // taskUpdatedPublisher is the minimal hook the workflow store needs to emit
 // task.updated events. The orchestrator Service binds this to its shared
 // publishTaskUpdated helper so the publisher wiring stays in one place.
-type taskUpdatedPublisher func(ctx context.Context, task *models.Task)
+type taskUpdatedPublisher func(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 
 type taskMovedPublisher func(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID string)
 
@@ -131,13 +131,26 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 		return err
 	}
 
+	// Keep WorkflowID in sync with the target step's owning workflow. Most
+	// callers transition within the same workflow (targetStep.WorkflowID ==
+	// task.WorkflowID already), but applyPendingMove uses this path for
+	// cross-workflow move_task_kandev hand-offs too — without this, the task
+	// would end up with a step ID from a workflow its WorkflowID doesn't match.
+	oldWorkflowID := task.WorkflowID
+	if targetStep != nil {
+		task.WorkflowID = targetStep.WorkflowID
+	}
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
 	if err := s.updateTransitionTask(ctx, task, targetStep); err != nil {
 		return fmt.Errorf("update task workflow step: %w", err)
 	}
 
-	s.publishTaskUpdated(ctx, task)
+	// Pass the pre-move workflow ID through so cross-workflow transitions
+	// carry old_workflow_id on the task.updated payload — the frontend uses
+	// that field to remove the task from its previous workflow's snapshot
+	// instead of leaving a stale duplicate until reload.
+	s.publishTaskUpdated(ctx, task, oldWorkflowID)
 
 	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 		s.logger.Warn("failed to clear session review status",

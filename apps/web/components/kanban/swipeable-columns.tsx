@@ -9,6 +9,9 @@ import type { KanbanExternalLinkAvailability } from "../kanban-external-link-ava
 
 type SwipeableColumnsProps = {
   steps: WorkflowStep[];
+  // Real workflow steps only (excludes the "Needs Reassignment" sentinel) —
+  // passed to KanbanColumn purely for move-menu targets.
+  moveTargetSteps: WorkflowStep[];
   tasks: Task[];
   activeIndex: number;
   onIndexChange: (index: number) => void;
@@ -66,6 +69,7 @@ function useEmblaIndexSync(
 
 export function SwipeableColumns({
   steps,
+  moveTargetSteps,
   tasks,
   activeIndex,
   onIndexChange,
@@ -126,7 +130,7 @@ export function SwipeableColumns({
               onDeleteTask={onDeleteTask}
               onArchiveTask={onArchiveTask}
               onMoveTask={onMoveTask}
-              steps={steps}
+              steps={moveTargetSteps}
               showMaximizeButton={showMaximizeButton}
               deletingTaskId={deletingTaskId}
               archivingTaskId={archivingTaskId}

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState, type RefObject } from "react";
 import { IconChevronDown, IconChevronUp, IconMessageQuestion } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
@@ -16,6 +16,7 @@ import { ClarificationInputOverlay } from "@/components/task/chat/clarification-
 import { ResizeHandle } from "@/components/task/chat/resize-handle";
 import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 import type { Message } from "@/lib/types/http";
+import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
 
 type QuickChatContentProps = {
   sessionId: string;
@@ -29,12 +30,14 @@ type QuickChatClarificationSectionProps = {
   pending: boolean;
   messages: readonly Message[] | null | undefined;
   onResolved: () => void;
+  shortcutScopeRef: RefObject<HTMLElement | null>;
 };
 
 function QuickChatClarificationSection({
   pending,
   messages,
   onResolved,
+  shortcutScopeRef,
 }: QuickChatClarificationSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
   const contentId = useId();
@@ -99,6 +102,7 @@ function QuickChatClarificationSection({
           <ClarificationInputOverlay
             messages={messages}
             onResolved={onResolved}
+            shortcutScopeRef={shortcutScopeRef}
             keyboardShortcutsEnabled={!collapsed}
           />
         </div>
@@ -137,6 +141,7 @@ export const QuickChatContent = memo(function QuickChatContent({
 }: QuickChatContentProps) {
   const [clarificationKey, setClarificationKey] = useState(0);
   const initialPromptSentFor = useRef<string | null>(null);
+  const shortcutScopeRef = useRef<HTMLDivElement>(null);
   const state = useQuickChatState(sessionId);
   const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
   const { taskId, pendingClarification, pendingClarificationGroup } = panelState;
@@ -154,9 +159,19 @@ export const QuickChatContent = memo(function QuickChatContent({
   }, [initialPrompt, taskId, handleSubmit, onInitialPromptSent, sessionId]);
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
+  const handleShortcutScopeMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(event, shortcutScopeRef),
+    [],
+  );
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div
+      ref={shortcutScopeRef}
+      data-testid="quick-chat-content"
+      tabIndex={-1}
+      onMouseDown={handleShortcutScopeMouseDown}
+      className="flex flex-col flex-1 min-h-0 outline-none"
+    >
       <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
         <MessageList
           items={panelState.groupedItems}
@@ -177,6 +192,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         pending={Boolean(pendingClarification)}
         messages={pendingClarificationGroup}
         onResolved={handleClarificationResolved}
+        shortcutScopeRef={shortcutScopeRef}
       />
       <ChatInputArea
         chatInputRef={chatInputRef}

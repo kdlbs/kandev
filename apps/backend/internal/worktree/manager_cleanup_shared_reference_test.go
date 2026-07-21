@@ -45,6 +45,43 @@ func TestCleanupWorktrees_PreservesSharedActiveReference(t *testing.T) {
 	assertWorktreeReferenceStatus(t, store, wt.ID, "session-borrower", StatusActive)
 }
 
+func TestCleanupWorktrees_PreservesParentWorkspaceWhenInheritedSubtaskDeleted(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-parent", "session-parent", models.TaskSessionStateCompleted)
+	seedReferenceCleanupSession(t, store, "task-child", "session-child", models.TaskSessionStateCancelled)
+	if _, err := store.db.ExecContext(ctx, `UPDATE tasks SET parent_id = ? WHERE id = ?`, "task-parent", "task-child"); err != nil {
+		t.Fatalf("link inherited subtask: %v", err)
+	}
+
+	parent := createReferenceCleanupWorktree(t, mgr, "task-parent", "session-parent")
+	child := *parent
+	child.TaskID = "task-child"
+	child.SessionID = "session-child"
+	if err := store.CreateWorktree(ctx, &child); err != nil {
+		t.Fatalf("create inherited subtask worktree reference: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, "task-child"); err != nil {
+		t.Fatalf("delete inherited subtask: %v", err)
+	}
+
+	if err := mgr.CleanupWorktrees(ctx, []*Worktree{&child}); err != nil {
+		t.Fatalf("cleanup inherited subtask worktree: %v", err)
+	}
+
+	if _, err := os.Stat(parent.Path); err != nil {
+		t.Fatalf("parent workspace should survive inherited subtask deletion: %v", err)
+	}
+	assertWorktreeReferenceStatus(t, store, parent.ID, "session-parent", StatusActive)
+	var parentTasks int
+	if err := store.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE id = ?`, "task-parent").Scan(&parentTasks); err != nil {
+		t.Fatalf("count surviving parent task: %v", err)
+	}
+	if parentTasks != 1 {
+		t.Fatalf("surviving parent tasks = %d, want 1", parentTasks)
+	}
+}
+
 func TestCleanupWorktrees_RemovesLastActiveReference(t *testing.T) {
 	mgr, store := newReferenceCleanupTestManager(t)
 	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", models.TaskSessionStateCompleted)

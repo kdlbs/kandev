@@ -31,6 +31,28 @@ import {
   useKanbanExternalLinkAvailability,
 } from "@/components/kanban-external-link-availability";
 
+/**
+ * Sentinel step ID used to collect tasks whose workflow_step_id no longer
+ * matches any rendered column.  Tasks remapped here are visible as a
+ * "Needs Reassignment" fallback column so they are never silently hidden.
+ */
+export const ORPHAN_STEP_ID = "__kandev_orphan__";
+
+export const ORPHAN_STEP: WorkflowStep = {
+  id: ORPHAN_STEP_ID,
+  title: "Needs Reassignment",
+  color: "#f59e0b",
+};
+
+/**
+ * The "Needs Reassignment" column is a display-only fallback, not a real
+ * workflow step — it must never be offered as a manual move destination
+ * (drag-and-drop, "Move to" menus, or Pipeline navigation).
+ */
+export function isOrphanMoveTarget(targetStepId: string): boolean {
+  return targetStepId === ORPHAN_STEP_ID;
+}
+
 export type SwimlaneKanbanContentProps = {
   workflowId: string;
   steps: WorkflowStep[];
@@ -82,7 +104,7 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
       const taskId = active.id as string;
       const targetStepId = over.id as string;
       const task = tasks.find((t) => t.id === taskId);
-      if (!task || task.workflowStepId === targetStepId) return;
+      if (!task || task.workflowStepId === targetStepId || isOrphanMoveTarget(targetStepId)) return;
 
       const state = store.getState();
       const snapshot = state.kanbanMulti.snapshots[workflowId];
@@ -176,6 +198,46 @@ function useMobileColumnIndex(workflowId: string, steps: WorkflowStep[], tasks: 
   return { activeIndex, setActiveIndex };
 }
 
+/**
+ * remapOrphanTasks re-keys any task whose workflowStepId matches no step in
+ * `stepIds` to `orphanStepId`.  Returns the remapped task list and whether
+ * any orphans were found.  Pure function — safe to call outside React.
+ */
+export function remapOrphanTasks(
+  tasks: Task[],
+  stepIds: Set<string>,
+  orphanStepId: string,
+): { tasks: Task[]; hasOrphans: boolean } {
+  let hasOrphans = false;
+  const remapped = tasks.map((t) => {
+    if (!t.workflowStepId || stepIds.has(t.workflowStepId)) return t;
+    hasOrphans = true;
+    return { ...t, workflowStepId: orphanStepId };
+  });
+  return { tasks: remapped, hasOrphans };
+}
+
+/**
+ * useOrphanDisplay remaps tasks with an unknown workflowStepId to the sentinel
+ * ORPHAN_STEP so they appear in a visible fallback column instead of being
+ * silently dropped from the board.
+ *
+ * Returns:
+ *   displayTasks – all tasks, with orphaned ones keyed to ORPHAN_STEP_ID
+ *   displaySteps – original steps plus ORPHAN_STEP when orphans are present
+ */
+function useOrphanDisplay(
+  tasks: Task[],
+  steps: WorkflowStep[],
+): { displayTasks: Task[]; displaySteps: WorkflowStep[] } {
+  return useMemo(() => {
+    const stepIds = new Set(steps.map((s) => s.id));
+    const { tasks: displayTasks, hasOrphans } = remapOrphanTasks(tasks, stepIds, ORPHAN_STEP_ID);
+    const displaySteps = hasOrphans ? [...steps, ORPHAN_STEP] : steps;
+    return { displayTasks, displaySteps };
+  }, [tasks, steps]);
+}
+
 function useTasksByStep(tasks: Task[]) {
   return useCallback(
     (stepId: string) =>
@@ -186,6 +248,7 @@ function useTasksByStep(tasks: Task[]) {
 
 function MobileKanbanLayout({
   steps,
+  moveTargetSteps,
   tasks,
   activeIndex,
   onIndexChange,
@@ -205,26 +268,10 @@ function MobileKanbanLayout({
   isMultiSelectMode,
   externalLinkAvailability,
   mobileWorkflowNavigation,
-}: {
-  steps: WorkflowStep[];
-  tasks: Task[];
+}: SharedKanbanLayoutProps & {
   activeIndex: number;
   onIndexChange: (index: number) => void;
-  onPreviewTask: (task: Task) => void;
-  onOpenTask: (task: Task) => void;
-  onEditTask: (task: Task) => void;
-  onDeleteTask: (task: Task) => void;
-  onArchiveTask?: (task: Task) => void;
-  moveTaskToStep: (task: Task, targetStepId: string) => Promise<void>;
   activeTask: Task | null;
-  showMaximizeButton?: boolean;
-  deletingTaskId?: string | null;
-  archivingTaskId?: string | null;
-  selectedIds?: Set<string>;
-  onToggleSelect?: (taskId: string) => void;
-  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
-  isMultiSelectMode?: boolean;
-  externalLinkAvailability: KanbanExternalLinkAvailability;
   mobileWorkflowNavigation?: MobileWorkflowNavigation;
 }) {
   const taskCounts = useMemo(() => {
@@ -261,6 +308,7 @@ function MobileKanbanLayout({
       ) : (
         <SwipeableColumns
           steps={steps}
+          moveTargetSteps={moveTargetSteps}
           tasks={tasks}
           activeIndex={activeIndex}
           onIndexChange={onIndexChange}
@@ -280,30 +328,21 @@ function MobileKanbanLayout({
           externalLinkAvailability={externalLinkAvailability}
         />
       )}
-      <MobileDropTargets steps={steps} currentStepId={currentStepId} isDragging={!!activeTask} />
+      <MobileDropTargets
+        steps={moveTargetSteps}
+        currentStepId={currentStepId}
+        isDragging={!!activeTask}
+      />
     </div>
   );
 }
 
-function TabletKanbanLayout({
-  steps,
-  tasks,
-  onPreviewTask,
-  onOpenTask,
-  onEditTask,
-  onDeleteTask,
-  onArchiveTask,
-  moveTaskToStep,
-  showMaximizeButton,
-  deletingTaskId,
-  archivingTaskId,
-  selectedIds,
-  onToggleSelect,
-  onSelectRange,
-  isMultiSelectMode,
-  externalLinkAvailability,
-}: {
+type SharedKanbanLayoutProps = {
   steps: WorkflowStep[];
+  // Real workflow steps only (excludes the synthetic "Needs Reassignment"
+  // sentinel) — used wherever a step is offered as a move destination
+  // (move menus, drop targets), since that sentinel is display-only.
+  moveTargetSteps: WorkflowStep[];
   tasks: Task[];
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
@@ -319,7 +358,27 @@ function TabletKanbanLayout({
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
-}) {
+};
+
+function TabletKanbanLayout({
+  steps,
+  moveTargetSteps,
+  tasks,
+  onPreviewTask,
+  onOpenTask,
+  onEditTask,
+  onDeleteTask,
+  onArchiveTask,
+  moveTaskToStep,
+  showMaximizeButton,
+  deletingTaskId,
+  archivingTaskId,
+  selectedIds,
+  onToggleSelect,
+  onSelectRange,
+  isMultiSelectMode,
+  externalLinkAvailability,
+}: SharedKanbanLayoutProps) {
   const getTasksForStep = useTasksByStep(tasks);
 
   return (
@@ -338,7 +397,7 @@ function TabletKanbanLayout({
             onDeleteTask={onDeleteTask}
             onArchiveTask={onArchiveTask}
             onMoveTask={moveTaskToStep}
-            steps={steps}
+            steps={moveTargetSteps}
             showMaximizeButton={showMaximizeButton}
             deletingTaskId={deletingTaskId}
             archivingTaskId={archivingTaskId}
@@ -356,6 +415,7 @@ function TabletKanbanLayout({
 
 function DesktopKanbanLayout({
   steps,
+  moveTargetSteps,
   tasks,
   onPreviewTask,
   onOpenTask,
@@ -372,24 +432,8 @@ function DesktopKanbanLayout({
   isMultiSelectMode,
   isCompactDesktop,
   externalLinkAvailability,
-}: {
-  steps: WorkflowStep[];
-  tasks: Task[];
-  onPreviewTask: (task: Task) => void;
-  onOpenTask: (task: Task) => void;
-  onEditTask: (task: Task) => void;
-  onDeleteTask: (task: Task) => void;
-  onArchiveTask?: (task: Task) => void;
-  moveTaskToStep: (task: Task, targetStepId: string) => Promise<void>;
-  showMaximizeButton?: boolean;
-  deletingTaskId?: string | null;
-  archivingTaskId?: string | null;
-  selectedIds?: Set<string>;
-  onToggleSelect?: (taskId: string) => void;
-  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
-  isMultiSelectMode?: boolean;
+}: SharedKanbanLayoutProps & {
   isCompactDesktop: boolean;
-  externalLinkAvailability: KanbanExternalLinkAvailability;
 }) {
   const getTasksForStep = useTasksByStep(tasks);
 
@@ -412,7 +456,7 @@ function DesktopKanbanLayout({
           onDeleteTask={onDeleteTask}
           onArchiveTask={onArchiveTask}
           onMoveTask={moveTaskToStep}
-          steps={steps}
+          steps={moveTargetSteps}
           deletingTaskId={deletingTaskId}
           archivingTaskId={archivingTaskId}
           showMaximizeButton={showMaximizeButton}
@@ -423,6 +467,50 @@ function DesktopKanbanLayout({
           externalLinkAvailability={externalLinkAvailability}
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * Picks the responsive layout to render for the swimlane. Extracted so
+ * `SwimlaneKanbanContent` stays under the max-lines-per-function limit.
+ */
+function renderKanbanLayout({
+  isMobile,
+  isTablet,
+  isCompactDesktop,
+  sharedProps,
+  activeIndex,
+  setActiveIndex,
+  activeTask,
+  mobileWorkflowNavigation,
+}: {
+  isMobile: boolean;
+  isTablet: boolean;
+  isCompactDesktop: boolean;
+  sharedProps: SharedKanbanLayoutProps;
+  activeIndex: number;
+  setActiveIndex: (index: number) => void;
+  activeTask: Task | null;
+  mobileWorkflowNavigation?: MobileWorkflowNavigation;
+}): React.ReactNode {
+  if (isMobile) {
+    return (
+      <MobileKanbanLayout
+        {...sharedProps}
+        activeIndex={activeIndex}
+        onIndexChange={setActiveIndex}
+        activeTask={activeTask}
+        mobileWorkflowNavigation={mobileWorkflowNavigation}
+      />
+    );
+  }
+  if (isTablet) {
+    return <TabletKanbanLayout {...sharedProps} />;
+  }
+  return (
+    <div className="h-full overflow-x-auto">
+      <DesktopKanbanLayout {...sharedProps} isCompactDesktop={isCompactDesktop} />
     </div>
   );
 }
@@ -449,17 +537,27 @@ export function SwimlaneKanbanContent({
   const { isMobile, isTablet, isCompactDesktop } = useResponsiveBreakpoint();
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const externalLinkAvailability = useKanbanExternalLinkAvailability(activeWorkspaceId);
-  const { activeIndex, setActiveIndex } = useMobileColumnIndex(workflowId, steps, tasks);
+
+  // Remap tasks with a dead workflowStepId to the orphan sentinel so they
+  // always appear in a visible column rather than being silently dropped.
+  const { displayTasks, displaySteps } = useOrphanDisplay(tasks, steps);
+
+  const { activeIndex, setActiveIndex } = useMobileColumnIndex(
+    workflowId,
+    displaySteps,
+    displayTasks,
+  );
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
-    useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError });
+    useSwimlaneKanbanDnd({ tasks: displayTasks, workflowId, onMoveError });
 
   // Memoized so the layout components don't re-render from a fresh props object
   // on every parent render. Declared before the early return to keep hook order
   // stable.
   const sharedProps = useMemo(
     () => ({
-      steps,
-      tasks,
+      steps: displaySteps,
+      moveTargetSteps: steps,
+      tasks: displayTasks,
       onPreviewTask,
       onOpenTask,
       onEditTask,
@@ -476,8 +574,9 @@ export function SwimlaneKanbanContent({
       externalLinkAvailability,
     }),
     [
+      displaySteps,
       steps,
-      tasks,
+      displayTasks,
       onPreviewTask,
       onOpenTask,
       onEditTask,
@@ -495,28 +594,18 @@ export function SwimlaneKanbanContent({
     ],
   );
 
-  if (steps.length === 0 && !isMobile) return null;
+  if (displaySteps.length === 0 && !isMobile) return null;
 
-  let layoutContent: React.ReactNode;
-  if (isMobile) {
-    layoutContent = (
-      <MobileKanbanLayout
-        {...sharedProps}
-        activeIndex={activeIndex}
-        onIndexChange={setActiveIndex}
-        activeTask={activeTask}
-        mobileWorkflowNavigation={mobileWorkflowNavigation}
-      />
-    );
-  } else if (isTablet) {
-    layoutContent = <TabletKanbanLayout {...sharedProps} />;
-  } else {
-    layoutContent = (
-      <div className="h-full overflow-x-auto">
-        <DesktopKanbanLayout {...sharedProps} isCompactDesktop={isCompactDesktop} />
-      </div>
-    );
-  }
+  const layoutContent = renderKanbanLayout({
+    isMobile,
+    isTablet,
+    isCompactDesktop,
+    sharedProps,
+    activeIndex,
+    setActiveIndex,
+    activeTask,
+    mobileWorkflowNavigation,
+  });
 
   return (
     <DndContext

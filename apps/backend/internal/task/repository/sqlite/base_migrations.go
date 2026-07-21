@@ -981,3 +981,13 @@ func (r *Repository) backfillTaskEnvironmentRepos() error {
 	}
 	return tx.Commit()
 }
+
+// Startup healing of orphaned workflow_step_id values was removed: a raw SQL
+// UPDATE reassigning tasks to a workflow's start step bypasses every
+// domain-level invariant the task service enforces on a move (WIP limits,
+// task-state sync, position bookkeeping, session/on_exit/on_enter handling,
+// transition history, and event publication). The Kanban/Pipeline "Needs
+// Reassignment" fallback column now keeps orphaned tasks visible without any
+// automatic mutation, and any real repair should go through
+// task.Service.MoveTask (or a dedicated, explicit reassignment operation)
+// rather than a migration-time SQL statement.
