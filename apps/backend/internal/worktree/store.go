@@ -463,7 +463,6 @@ func (s *SQLiteStore) CountActiveWorktreeReferences(
 	query := `
 		SELECT COUNT(*)
 		FROM task_session_worktrees tsw
-		INNER JOIN task_sessions s ON s.id = tsw.session_id
 		WHERE tsw.worktree_id = ?
 		  AND tsw.status <> ?
 		  AND tsw.deleted_at IS NULL

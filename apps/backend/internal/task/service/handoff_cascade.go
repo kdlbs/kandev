@@ -196,9 +196,6 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	} else {
 		all = []string{rootID}
 	}
-	if err := s.transferSharedWorkspaceEnvironmentOwnership(ctx, all); err != nil {
-		return out, err
-	}
 	cleanupOps, err := s.prepareCascadeResourceCleanup(ctx, all, cascadeID, models.TaskResourceCleanupTriggerCascadeArchive)
 	if err != nil {
 		return out, err
