@@ -927,6 +927,56 @@ func TestSyncTaskPR_PublishesEventOnMergeableStateChange(t *testing.T) {
 	}
 }
 
+func TestSyncTaskPR_DraftOverridesCleanMergeableState(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:         "t1",
+		Owner:          "owner",
+		Repo:           "repo",
+		PRNumber:       1,
+		PRURL:          "https://github.com/owner/repo/pull/1",
+		PRTitle:        "Draft change",
+		HeadBranch:     "feat",
+		BaseBranch:     "main",
+		State:          "open",
+		ChecksState:    "success",
+		MergeableState: "clean",
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	status := &PRStatus{
+		PR: &PR{
+			Number:         1,
+			Title:          "Draft change",
+			State:          "open",
+			Draft:          true,
+			RepoOwner:      "owner",
+			RepoName:       "repo",
+			MergeableState: "clean",
+		},
+		ChecksState:    "success",
+		MergeableState: "clean",
+	}
+
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if got := eb.publishedCount(); got != 1 {
+		t.Fatalf("expected draft normalization to publish an update, got %d events", got)
+	}
+
+	stored, err := store.GetTaskPR(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task PR: %v", err)
+	}
+	if stored.MergeableState != "draft" {
+		t.Fatalf("stored mergeable_state = %q, want draft", stored.MergeableState)
+	}
+}
+
 // TestSyncTaskPR_ChecksPopulated_PreservesOnLightweightSync verifies the
 // "preserve when batch sync didn't populate" path: a PRStatus with
 // ChecksPopulated=false must NOT clobber the persisted ChecksTotal /

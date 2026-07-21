@@ -18,7 +18,7 @@ Users can already see pull request CI/review status above the task chat input, b
 - The automation section includes an info icon or equivalent help affordance that explains what each control watches, how often Kandev checks watched PRs, how feedback snapshots prevent duplicate prompts, and how auto-merge decides readiness.
 - The same controls are available anywhere the task PR CI popover is rendered, including the normal chat input status bar and passthrough toolbar surfaces.
 - `Auto-fix CI & address comments` causes Kandev to send or queue an agent prompt when a linked PR gets actionable CI or review feedback.
-- `Auto-merge when ready` causes Kandev to merge a linked PR only when the PR is open, checks are passing, review requirements are satisfied, unresolved review threads are cleared, and the PR is cleanly mergeable.
+- `Auto-merge when ready` causes Kandev to merge a linked PR only when the PR is open and not a draft, checks are passing, review requirements are satisfied, unresolved review threads are cleared, and the PR is cleanly mergeable.
 - The auto-fix prompt is customizable per task from the PR CI popover.
 - The per-task prompt editor is opened from an edit button in the automation section.
 - The per-task prompt editor links to Settings > Prompts so the user can edit the default `ci-auto-fix` prompt.
@@ -226,8 +226,9 @@ Auto-merge cycle for one task/PR:
 - **GIVEN** auto-fix has already used 10 rounds for a PR and the 10th round is still queued, **WHEN** new actionable feedback appears, **THEN** Kandev replaces that pending queued prompt without incrementing the round count.
 - **GIVEN** auto-fix sends a prompt for feedback that the backend considered prompt-worthy but the agent determines is already addressed or otherwise non-actionable, **WHEN** the agent reviews that prompt, **THEN** the agent does not modify files, commit, or push and only reports that there is nothing actionable to address.
 - **GIVEN** auto-fix is enabled and the task session is running, **WHEN** new actionable PR feedback appears, **THEN** the prompt is queued and delivered after the current turn rather than interrupting the running session, and the chat history shows the `@ci-auto-fix` user message with visible PR snapshot details before the agent output for the queued turn.
+- **GIVEN** a linked draft PR has passing checks and GitHub reports clean mergeability, **WHEN** Kandev refreshes its status, **THEN** PR status surfaces identify it as a draft and do not present it as ready to merge.
 - **GIVEN** auto-merge is enabled and the PR has passing checks, required reviews, no unresolved threads, and clean mergeability, **WHEN** the PR watch poll observes the ready state, **THEN** Kandev merges the PR with the existing backend merge-method selection.
-- **GIVEN** auto-merge is enabled but the PR has requested changes, pending required review, failing checks, unresolved threads, or dirty mergeability, **WHEN** the PR watch poll observes the state, **THEN** Kandev does not merge.
+- **GIVEN** auto-merge is enabled but the PR is a draft or has requested changes, pending required review, failing checks, unresolved threads, or dirty mergeability, **WHEN** the PR watch poll observes the state, **THEN** Kandev does not merge.
 - **GIVEN** auto-merge attempted a ready-state merge and GitHub rejected it, **WHEN** the same ready state is observed again, **THEN** Kandev does not retry until the readiness signature changes.
 - **GIVEN** a task has two open linked PRs, **WHEN** the user enables either automation control, **THEN** both PRs are eligible for automation and each PR records its own last-fix and last-merge state.
 - **GIVEN** the user is on mobile, **WHEN** they open the PR CI drawer, **THEN** the automation controls and prompt editor are usable without text overflow or overlapping controls.

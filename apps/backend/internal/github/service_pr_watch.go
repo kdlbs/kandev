@@ -591,6 +591,13 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	} else if fetched := s.fetchRequiredReviews(ctx, tp.Owner, tp.Repo, nextBaseBranch); fetched != nil {
 		nextRequiredReviews = fetched
 	}
+	// GitHub reports draft status separately from mergeStateStatus and can
+	// return CLEAN for a draft PR. Persist the effective blocker so every
+	// TaskPR consumer agrees that drafts are not ready to merge.
+	nextMergeableState := status.MergeableState
+	if status.PR.Draft {
+		nextMergeableState = "draft"
+	}
 
 	changed := tp.State != status.PR.State ||
 		tp.PRTitle != status.PR.Title ||
@@ -598,7 +605,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		tp.Deletions != status.PR.Deletions ||
 		tp.ReviewState != status.ReviewState ||
 		tp.ChecksState != status.ChecksState ||
-		tp.MergeableState != status.MergeableState ||
+		tp.MergeableState != nextMergeableState ||
 		tp.ReviewCount != nextReviewCount ||
 		tp.PendingReviewCount != nextPendingReviewCount ||
 		!intPtrEqual(tp.RequiredReviews, nextRequiredReviews) ||
@@ -617,7 +624,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.ClosedAt = status.PR.ClosedAt
 	tp.ReviewState = status.ReviewState
 	tp.ChecksState = status.ChecksState
-	tp.MergeableState = status.MergeableState
+	tp.MergeableState = nextMergeableState
 	tp.ReviewCount = nextReviewCount
 	tp.PendingReviewCount = nextPendingReviewCount
 	tp.RequiredReviews = nextRequiredReviews
