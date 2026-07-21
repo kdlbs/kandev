@@ -64,7 +64,7 @@ export function KeyboardShortcutTooltip({
  * @example
  * ```tsx
  * <KeyboardShortcutText shortcut={SHORTCUTS.SUBMIT} />
- * // Renders: Cmd+Enter (on Mac) or Ctrl+Enter (on Windows/Linux)
+ * // Renders: ⌘+Enter (on Mac) or Ctrl+Enter (on Windows/Linux)
  * ```
  */
 export function KeyboardShortcutText({ shortcut }: { shortcut: KeyboardShortcut }) {

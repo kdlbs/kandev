@@ -236,6 +236,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         height={clarificationHeight}
         messages={pendingClarificationGroup}
         onResolved={handleClarificationResolved}
+        shortcutScopeRef={panelRef}
       />
       <ChatFooter
         isArchived={isArchived}
@@ -262,6 +263,7 @@ type ClarificationSectionProps = {
   height: number | null;
   messages: readonly Message[] | null | undefined;
   onResolved: () => void;
+  shortcutScopeRef: RefObject<HTMLElement | null>;
 };
 
 function ClarificationSection({
@@ -272,6 +274,7 @@ function ClarificationSection({
   height,
   messages,
   onResolved,
+  shortcutScopeRef,
 }: ClarificationSectionProps) {
   if (!pendingClarification || isArchived) return null;
   return (
@@ -283,7 +286,11 @@ function ClarificationSection({
         className="px-1 overflow-y-scroll overscroll-contain max-h-[50vh]"
         style={height === null ? undefined : { height }}
       >
-        <ClarificationInputOverlay messages={messages} onResolved={onResolved} />
+        <ClarificationInputOverlay
+          messages={messages}
+          onResolved={onResolved}
+          shortcutScopeRef={shortcutScopeRef}
+        />
       </div>
     </div>
   );

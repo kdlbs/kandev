@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { IconX, IconMessageQuestion, IconInfoCircle, IconCheck } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
@@ -12,6 +12,8 @@ import type {
   ClarificationQuestion,
 } from "@/lib/types/http";
 import { useClarificationGroup } from "@/hooks/domains/session/use-clarification-group";
+import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
 import {
   ClarificationCarouselNav,
   ClarificationCustomInput,
@@ -22,6 +24,7 @@ import {
 type ClarificationInputOverlayProps = {
   messages: readonly Message[] | null | undefined;
   onResolved: () => void;
+  shortcutScopeRef: RefObject<HTMLElement | null>;
   keyboardShortcutsEnabled?: boolean;
 };
 
@@ -169,6 +172,7 @@ function useResolveCallback(
 
 type CarouselShortcutArgs = {
   enabled: boolean;
+  scopeRef: RefObject<HTMLElement | null>;
   meta: SingleQuestionMeta;
   activeIndex: number;
   total: number;
@@ -211,13 +215,14 @@ function tryHandleMetaEnter(e: KeyboardEvent, canSubmit: boolean, onSubmit: () =
 }
 
 function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
-  const { enabled } = args;
+  const { enabled, scopeRef } = args;
   const optionsCount = args.meta.question.options.length;
   const isLast = args.activeIndex === args.total - 1;
   const { canSubmit, onPick, onPrev, onNext, onSkip, onSubmit } = args;
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
+      if (!(e.target instanceof Node) || !scopeRef.current?.contains(e.target)) return;
       if (tryHandleMetaEnter(e, canSubmit, onSubmit)) return;
       if (shouldIgnoreShortcut(e)) return;
       if (e.key === "Escape") {
@@ -244,7 +249,18 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [enabled, optionsCount, isLast, canSubmit, onPick, onPrev, onNext, onSkip, onSubmit]);
+  }, [
+    enabled,
+    scopeRef,
+    optionsCount,
+    isLast,
+    canSubmit,
+    onPick,
+    onPrev,
+    onNext,
+    onSkip,
+    onSubmit,
+  ]);
   return null;
 }
 
@@ -257,6 +273,7 @@ type CarouselBodyProps = {
   setCustomDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   allAnswered: boolean;
   isSubmitting: boolean;
+  shortcutScopeRef: RefObject<HTMLElement | null>;
   keyboardShortcutsEnabled: boolean;
   onSubmit: () => void;
 };
@@ -362,6 +379,7 @@ function ClarificationCarouselBody({
   setCustomDrafts,
   allAnswered,
   isSubmitting,
+  shortcutScopeRef,
   keyboardShortcutsEnabled,
   onSubmit,
 }: CarouselBodyProps) {
@@ -419,6 +437,7 @@ function ClarificationCarouselBody({
       )}
       <CarouselKeyboardShortcuts
         enabled={keyboardShortcutsEnabled}
+        scopeRef={shortcutScopeRef}
         meta={meta}
         activeIndex={activeIndex}
         total={total}
@@ -433,9 +452,72 @@ function ClarificationCarouselBody({
   );
 }
 
+function ClarificationHeaderActions({
+  total,
+  allAnswered,
+  isSubmitting,
+  onSubmit,
+  onSkip,
+}: {
+  total: number;
+  allAnswered: boolean;
+  isSubmitting: boolean;
+  onSubmit: () => void;
+  onSkip: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      {total > 1 && (
+        <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT} description="Submit answers">
+          <span
+            className="inline-flex"
+            data-testid="clarification-submit-shortcut"
+            tabIndex={!allAnswered || isSubmitting ? 0 : undefined}
+          >
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={!allAnswered || isSubmitting}
+              data-testid="clarification-submit"
+              className={cn(
+                "inline-flex items-center gap-1 text-xs px-3 py-1 rounded font-medium transition-colors",
+                allAnswered && !isSubmitting
+                  ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
+                  : "bg-muted text-muted-foreground cursor-not-allowed",
+              )}
+            >
+              {isSubmitting ? "Submitting…" : "Submit"}
+              <IconCheck className="h-3 w-3" />
+            </button>
+          </span>
+        </KeyboardShortcutTooltip>
+      )}
+      <KeyboardShortcutTooltip shortcut={SHORTCUTS.CANCEL} description="Skip all questions">
+        <span
+          className="inline-flex"
+          data-testid="clarification-skip-shortcut"
+          tabIndex={isSubmitting ? 0 : undefined}
+        >
+          <button
+            type="button"
+            onClick={onSkip}
+            disabled={isSubmitting}
+            className="text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
+            data-testid="clarification-skip"
+            aria-label="Skip all questions"
+          >
+            <IconX className="h-4 w-4" />
+          </button>
+        </span>
+      </KeyboardShortcutTooltip>
+    </div>
+  );
+}
+
 export function ClarificationInputOverlay({
   messages,
   onResolved,
+  shortcutScopeRef,
   keyboardShortcutsEnabled = true,
 }: ClarificationInputOverlayProps) {
   const sortedMessages = useMemo(
@@ -492,35 +574,13 @@ export function ClarificationInputOverlay({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          {total > 1 && (
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={!allAnswered || isSubmitting}
-              data-testid="clarification-submit"
-              className={cn(
-                "inline-flex items-center gap-1 text-xs px-3 py-1 rounded font-medium transition-colors",
-                allAnswered && !isSubmitting
-                  ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
-                  : "bg-muted text-muted-foreground cursor-not-allowed",
-              )}
-            >
-              {isSubmitting ? "Submitting…" : "Submit"}
-              <IconCheck className="h-3 w-3" />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void group.skipAll("User skipped")}
-            disabled={isSubmitting}
-            className="text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
-            data-testid="clarification-skip"
-            aria-label="Skip all questions"
-          >
-            <IconX className="h-4 w-4" />
-          </button>
-        </div>
+        <ClarificationHeaderActions
+          total={total}
+          allAnswered={allAnswered}
+          isSubmitting={isSubmitting}
+          onSubmit={handleSubmit}
+          onSkip={() => void group.skipAll("User skipped")}
+        />
       </div>
       <ClarificationCarouselBody
         sortedMessages={sortedMessages}
@@ -531,6 +591,7 @@ export function ClarificationInputOverlay({
         setCustomDrafts={setCustomDrafts}
         allAnswered={allAnswered}
         isSubmitting={isSubmitting}
+        shortcutScopeRef={shortcutScopeRef}
         keyboardShortcutsEnabled={keyboardShortcutsEnabled}
         onSubmit={handleSubmit}
       />
