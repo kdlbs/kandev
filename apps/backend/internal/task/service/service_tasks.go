@@ -461,6 +461,12 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if req.Metadata != nil {
 		task.Metadata = req.Metadata
 	}
+	if req.ParentID != nil {
+		if err := s.resolveParentID(ctx, task, *req.ParentID); err != nil {
+			return nil, err
+		}
+		task.ParentID = *req.ParentID
+	}
 	task.UpdatedAt = time.Now().UTC()
 
 	if err := s.tasks.UpdateTask(ctx, task); err != nil {
@@ -490,6 +496,50 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	s.logger.Info("task updated", zap.String("task_id", task.ID))
 
 	return task, nil
+}
+
+// parentChainWalkLimit bounds the ancestor walk in resolveParentID so a
+// corrupted parent chain can never spin forever. Real subtask trees are
+// nowhere near this depth.
+const parentChainWalkLimit = 1000
+
+// resolveParentID validates a proposed parent assignment for task. An empty
+// parentID (un-nest) is always allowed. A non-empty parentID must reference a
+// different, existing task in the same workspace, and must not introduce a
+// cycle (nesting a task under one of its own descendants).
+func (s *Service) resolveParentID(ctx context.Context, task *models.Task, parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	if parentID == task.ID {
+		return fmt.Errorf("a task cannot be its own parent")
+	}
+	parent, err := s.tasks.GetTask(ctx, parentID)
+	if err != nil {
+		return fmt.Errorf("parent task not found: %s", parentID)
+	}
+	if parent.WorkspaceID != task.WorkspaceID {
+		return fmt.Errorf("parent task must belong to the same workspace")
+	}
+	// Walk up the parent's ancestor chain. Reaching task.ID means the new
+	// edge would close a cycle (task -> ... -> parent -> task).
+	current := parent
+	for i := 0; i < parentChainWalkLimit; i++ {
+		if current.ID == task.ID {
+			return fmt.Errorf("nesting would create a cycle")
+		}
+		if current.ParentID == "" {
+			return nil
+		}
+		ancestor, err := s.tasks.GetTask(ctx, current.ParentID)
+		if err != nil {
+			// Broken chain — treat the missing ancestor as a root so we don't
+			// block a legitimate re-parent on inconsistent data.
+			return nil
+		}
+		current = ancestor
+	}
+	return fmt.Errorf("parent chain too deep")
 }
 
 // ArchiveTask archives a task by setting its archived_at timestamp.

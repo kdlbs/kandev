@@ -849,6 +849,8 @@ type httpUpdateTaskRequest struct {
 	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
 	Position     *int                      `json:"position,omitempty"`
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
+	// ParentID nests the task under another task. "" clears the parent.
+	ParentID *string `json:"parent_id,omitempty"`
 }
 
 func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
@@ -892,6 +894,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		Repositories: convertToServiceRepos(repos),
 		Position:     body.Position,
 		Metadata:     body.Metadata,
+		ParentID:     body.ParentID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not updated")

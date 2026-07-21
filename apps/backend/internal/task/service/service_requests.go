@@ -53,6 +53,10 @@ type UpdateTaskRequest struct {
 	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Position     *int                   `json:"position,omitempty"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	// ParentID nests the task under another task ("subtask"). A nil pointer
+	// leaves the relationship untouched; a pointer to "" clears it (un-nests
+	// back to a root task); a non-empty value nests it under that parent.
+	ParentID *string `json:"parent_id,omitempty"`
 }
 
 // CreateWorkflowRequest contains the data for creating a new workflow

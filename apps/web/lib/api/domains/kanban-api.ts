@@ -101,6 +101,8 @@ export async function updateTask(
       repository_id: string;
       base_branch?: string;
     }>;
+    /** Nest under another task. Empty string clears the parent (un-nest). */
+    parent_id?: string;
   },
   options?: ApiRequestOptions,
 ) {

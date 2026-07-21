@@ -26,6 +26,7 @@ import {
   TaskMoveContextMenuItems,
   type TaskMoveWorkflow,
 } from "@/components/task/task-move-context-menu";
+import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useSetTaskColor, useTaskColor } from "@/hooks/use-task-color";
 import {
@@ -115,6 +116,7 @@ export function TaskItemWithContextMenu({
           </ContextMenuItem>
         )}
         <TaskColorMenu taskId={task.id} disabled={isDeleting} />
+        <TaskNestContextMenuItems task={task} disabled={isDeleting} />
         {task.workflowId && (
           <TaskMoveContextMenuItems
             currentWorkflowId={task.workflowId}
