@@ -198,7 +198,7 @@ type HandoffService struct {
 // Optional — when nil the cascade still completes, it just won't emit
 // WS events (matches the pre-handoff fallback in the HTTP handler).
 type TaskEventPublisher interface {
-	PublishTaskUpdated(ctx context.Context, task *models.Task)
+	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskDeleted(ctx context.Context, task *models.Task)
 }
 
