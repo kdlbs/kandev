@@ -185,6 +185,40 @@ func TestAppendAgentctlStatusMessage_IncludesWorkspacePathForReload(t *testing.T
 	}
 }
 
+func TestAppendAgentctlStatusMessage_ReplaysReadyForPreparedWorkspace(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{
+		Level:      "error",
+		Format:     "console",
+		OutputPath: "stdout",
+	})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), log)
+	execution := &lifecycle.AgentExecution{
+		ID:                "exec-prepared",
+		TaskID:            "task-1",
+		SessionID:         "sess-prepared",
+		TaskEnvironmentID: "env-1",
+		WorkspacePath:     filepath.Join(t.TempDir(), "scratch"),
+	}
+	execution.MarkAgentctlReady()
+	if err := mgr.ExecutionStoreForTesting().Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	msgs := appendAgentctlStatusMessage(context.Background(), mgr, execution.SessionID, nil, log)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if msgs[0].Action != ws.ActionSessionAgentctlReady {
+		t.Fatalf("expected action %q, got %q", ws.ActionSessionAgentctlReady, msgs[0].Action)
+	}
+	if execution.GetWorkspaceStream() != nil {
+		t.Fatal("prepared workspace should reproduce without an attached workspace stream")
+	}
+}
+
 func TestResolveRepositoryIDForSubpathMatchesSanitizedRepositoryName(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "backendapp-session.db")

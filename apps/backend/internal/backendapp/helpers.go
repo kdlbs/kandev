@@ -128,11 +128,11 @@ const sessionUpdatedAtPayloadKey = "updated_at"
 //
 // Non-blocking by design — sendSessionData runs in the WS read loop, so a
 // network probe here would delay every subscribe/focus ACK by its timeout.
-// Instead, treat the workspace stream's presence as the cached readiness
-// signal: streamManager only attaches it AFTER waitForAgentctlReady's Health
-// check succeeds. If the stream is wired we emit `agentctl_ready`; otherwise
-// `agentctl_starting`. The subsequent waitForAgentctlReady event (or its
-// error) will correct the status if the snapshot picked the wrong one.
+// Instead, replay the readiness cached by waitForAgentctlReady's successful
+// health check. Agent process and workspace stream state are deliberately not
+// used here: prepared sessions have a healthy agentctl before either exists.
+// The subsequent waitForAgentctlReady event (or its error) corrects the status
+// if the snapshot runs while startup is still in progress.
 //
 // Emits no message when the session has no live execution — the lazy
 // create-on-terminal-connect path publishes events normally in that case.
@@ -162,7 +162,7 @@ func appendAgentctlStatusMessage(
 		payload["worktree_path"] = execution.WorkspacePath
 	}
 	action := ws.ActionSessionAgentctlStarting
-	if execution.GetWorkspaceStream() != nil {
+	if execution.IsAgentctlReady() {
 		action = ws.ActionSessionAgentctlReady
 	}
 
