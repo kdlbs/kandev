@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import {
   IconAlertTriangle,
+  IconActivity,
   IconLayoutKanban,
   IconList,
   IconSettings,
@@ -25,6 +26,7 @@ import { cn } from "@/lib/utils";
 import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
 
 type MobileMenuSheetProps = {
   open: boolean;
@@ -254,15 +256,30 @@ function MobileUtilityActions({
   onOpenHealthDialog: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { openStatusDrawer } = useAppStatusDrawer();
   const closeSheet = () => onOpenChange(false);
   const openHealth = () => {
     closeSheet();
     onOpenHealthDialog();
   };
+  const openStatus = () => {
+    closeSheet();
+    requestAnimationFrame(openStatusDrawer);
+  };
 
   return (
     <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-border">
       <div className={mobileSectionTitleClass}>Utilities</div>
+      <Button
+        type="button"
+        variant="outline"
+        className="h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm"
+        onClick={openStatus}
+        data-testid="mobile-home-status-button"
+      >
+        <IconActivity className={mobileControlIconClass} />
+        Status
+      </Button>
       <Button
         asChild
         variant="outline"

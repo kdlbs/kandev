@@ -236,7 +236,7 @@ export function WalkthroughFloatingWindow({
         data-testid="walkthrough-floating"
         data-mobile-variant="bottom-sheet"
         className={cn(
-          "fixed inset-x-2 bottom-2 z-[43] max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-xl",
+          "fixed inset-x-2 bottom-[calc(0.5rem+var(--app-status-bar-height))] z-[43] max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-xl",
           "sm:inset-x-auto sm:bottom-auto sm:w-[400px] sm:max-w-[calc(100vw-2rem)]",
         )}
         style={isDesktop && position ? { left: position.x, top: position.y } : undefined}

@@ -68,6 +68,35 @@ describe("pluginRegistry", () => {
     expect(pluginRegistry.getSlotComponents("settings-nav")).toEqual([]);
   });
 
+  it("returns slot registrations with stable owner and registration identity", () => {
+    const scopedA = pluginRegistry.forPlugin("plugin-a");
+    function Sidebar() {
+      return null;
+    }
+
+    scopedA.registerComponent(TASK_SIDEBAR_SLOT, Sidebar);
+
+    const [registration] = pluginRegistry.getSlotRegistrations(TASK_SIDEBAR_SLOT);
+
+    expect(registration).toEqual({
+      registrationId: expect.any(String),
+      pluginId: "plugin-a",
+      Component: Sidebar,
+    });
+
+    scopedA.registerComponent(TASK_SIDEBAR_SLOT, () => null);
+
+    expect(pluginRegistry.getSlotRegistrations(TASK_SIDEBAR_SLOT)[0]?.registrationId).toBe(
+      registration?.registrationId,
+    );
+  });
+});
+
+describe("pluginRegistry — lifecycle", () => {
+  afterEach(() => {
+    cleanup("plugin-a", "plugin-b");
+  });
+
   it("registers a WS handler and only returns it for the matching action", () => {
     const scoped = pluginRegistry.forPlugin("plugin-a");
     const handler = () => {};

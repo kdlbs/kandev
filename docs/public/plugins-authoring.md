@@ -303,7 +303,8 @@ interface PluginRegistry {
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
   // Named slot injection. Initial slots: "task-sidebar", "settings-nav",
   // "main-nav-footer", "chat-input-actions", "chat-top-bar", "main-top-bar",
-  // "plugin-settings" (see "Named slots" below).
+  // "app-status-bar-left", "app-status-bar-right", and "plugin-settings"
+  // (see "Named slots" below).
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
   // WS action handler, bridged into the existing lib/ws dispatch.
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
@@ -395,6 +396,8 @@ plugins at once. Available slots:
 | `chat-input-actions` | Chat composer toolbar, beside the model picker, mic, and send button | `{ taskId, taskTitle, activeSessionId, sessionIds }` |
 | `chat-top-bar` | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
 | `main-top-bar` | Default app top bar (Home / Kanban / Tasks), beside the CPU/DB metrics and the view/display controls | `{ workspaceId, workspaceLabel, currentPage }` |
+| `app-status-bar-left` | Left cluster of global status bar; left section in phone Status drawer | `AppStatusBarSlotProps` |
+| `app-status-bar-right` | Right cluster of global status bar; right section in phone Status drawer | `AppStatusBarSlotProps` |
 | `plugin-settings` | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }` |
 
 `plugin-settings` is the one exception to "every plugin's component renders":
@@ -467,8 +470,7 @@ example.
 ### Session top bar
 
 Register a `chat-top-bar` component to surface at-a-glance status in the
-session top bar, beside the first-party CPU/DB metrics and the
-document/editor/debug controls. The host passes the current context as
+session top bar, beside first-party document/editor/debug controls. The host passes the current context as
 `slotProps`:
 
 ```ts
@@ -544,6 +546,47 @@ show.
 // inside initialize(registry, host):
 registry.registerComponent("plugin-settings", makeSettingsStatus(host));
 ```
+
+### Global Status bar
+
+Register `app-status-bar-left` or `app-status-bar-right` for app-wide, compact
+status UI. Kandev mounts exactly one presentation: a 24 px bar on tablet and
+desktop, or an in-flow Status drawer section on phone. Keep bar content small;
+render a touch-usable row when `presentation` is `"mobile-drawer"`.
+
+```js
+function StatusContribution({ slotProps }) {
+  const { placement, presentation, activeTaskId } = slotProps ?? {};
+  return host.jsx(
+    "span",
+    { className: presentation === "bar" ? "truncate text-xs" : "block min-h-11 px-3 py-2" },
+    `${placement}: ${activeTaskId ?? "no active task"}`,
+  );
+}
+
+registry.registerComponent("app-status-bar-left", StatusContribution);
+registry.registerComponent("app-status-bar-right", StatusContribution);
+```
+
+Each contribution receives this exact context:
+
+```ts
+type AppStatusBarSlotProps = {
+  placement: "left" | "right";
+  presentation: "bar" | "mobile-drawer";
+  density: "full" | "compact";
+  pathname: string;
+  activeWorkspaceId: string | null;
+  activeTaskId: string | null;
+  activeSessionId: string | null;
+};
+```
+
+The IDs are hints; use `host.store` for full records. Registration order is
+render order. Enable, disable, and uninstall update the live slot without a
+reload, and each contribution has its own error boundary. A full-bleed route
+(`topbar: false`) owns its own chrome; mount the host Status trigger there if
+that route should expose Status.
 
 ## Three integration patterns
 

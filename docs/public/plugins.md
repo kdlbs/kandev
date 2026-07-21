@@ -40,6 +40,30 @@ host-defined slots, including **icon buttons in the chat composer toolbar**
 (beside the model picker, mic, and send button), so an active plugin can add
 its own action right where you message an agent.
 
+### Global Status contributions
+
+Native UI bundles can also add compact, live status UI on every hosted route:
+
+```js
+function StatusContribution({ slotProps }) {
+  return host.jsx(
+    "span",
+    null,
+    `${slotProps.presentation}: ${slotProps.activeTaskId ?? "no task"}`,
+  );
+}
+
+registry.registerComponent("app-status-bar-left", StatusContribution);
+registry.registerComponent("app-status-bar-right", StatusContribution);
+```
+
+Kandev renders these two named regions in its 24 px desktop/tablet status bar,
+or as matching sections in the phone Status drawer. `slotProps` includes
+`placement`, `presentation`, `density`, `pathname`, `activeWorkspaceId`,
+`activeTaskId`, and `activeSessionId`. Only one presentation mounts at once;
+adapt each contribution for both compact bar and touch-friendly drawer use.
+Full-bleed routes that opt out of host topbar chrome own their Status trigger.
+
 ## Installing a plugin
 
 The easiest way to install is from the in-app catalog — **Settings > Plugins >

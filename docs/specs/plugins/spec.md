@@ -487,8 +487,12 @@ Mattermost-webapp model), not iframes. The full contract lives in
   `api.fetch`, a curated `@kandev/ui` subset, and the theme — so a plugin can build
   a page indistinguishable from first-party UI (e.g. a native `/jira` page).
 - **Registry surface:** `registerRoute(path, C)`, `registerNavItem(item)`,
-  `registerSettingsRoute(path, C)`, `registerComponent(slot, C)` (slots:
-  `task-sidebar`, `settings-nav`, ...), `registerWsHandler(action, fn)`.
+  `registerSettingsRoute(path, C)`, `registerComponent(slot, C)` (including
+  `app-status-bar-left` and `app-status-bar-right`), `registerWsHandler(action, fn)`.
+  Status-slot components receive the exact `AppStatusBarSlotProps` contract in
+  `PLUGIN-API.md`: current path/context plus placement and presentation. The host
+  renders one responsive presentation at once — 24 px bar on tablet/desktop or
+  phone Status drawer — so a plugin must tolerate remounting and adapt its own UI.
   Registrations are namespaced per plugin and bulk-revoked on disable/uninstall.
 - **Isolation (v1):** only active, operator-installed plugins load; a failing
   bundle/`initialize` is caught and never breaks boot; slot components render behind
@@ -646,6 +650,11 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
 - **GIVEN** a plugin with `api_read: ["tasks"]`, **WHEN** it calls `ListTasks`
   without `include_ephemeral`, **THEN** quick-chat ephemeral tasks are excluded from
   the results.
+
+- **GIVEN** an active plugin registers `app-status-bar-left` or
+  `app-status-bar-right`, **WHEN** Kandev switches between desktop/tablet and phone,
+  **THEN** the plugin receives the exact slot props for the active bar or Status
+  drawer presentation, and only that presentation is mounted.
 
 - **GIVEN** a plugin whose manifest declares `api_write: ["tasks"]` in this phase,
   **WHEN** it calls `CreateTask`, **THEN** kandev returns gRPC status `Unimplemented`

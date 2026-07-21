@@ -79,7 +79,7 @@ export function TaskDetailRoute({
   }, [initialData, taskId]);
 
   if (routeState.status === "loading") {
-    return <div className="h-screen w-full bg-background" />;
+    return <div className="h-full min-h-0 w-full bg-background" />;
   }
 
   const data = routeState.data;

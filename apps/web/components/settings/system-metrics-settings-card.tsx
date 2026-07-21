@@ -89,7 +89,7 @@ export function SystemMetricsSettingsCard({
       <CardContent className="space-y-5">
         <p className="max-w-3xl text-sm text-muted-foreground">
           Useful when Kandev is self-hosted on a remote server and you want a lightweight view of
-          the machine resources from the kanban or task topbar.
+          the machine resources from the global status bar or phone Status drawer.
         </p>
         <MetricsDisplayToggle
           checked={showInTopbar}
@@ -127,7 +127,7 @@ function MetricsDisplayToggle({
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="space-y-1">
-        <Label htmlFor="show-system-metrics">Show in topbars</Label>
+        <Label htmlFor="show-system-metrics">Show in status bar</Label>
         <p className="text-xs text-muted-foreground">
           Collection starts only while at least one client displays metrics.
         </p>

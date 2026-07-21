@@ -11,6 +11,7 @@ import {
   BreadcrumbSeparator,
 } from "@kandev/ui/breadcrumb";
 import { cn } from "@kandev/ui/lib/utils";
+import { AppStatusDrawerTrigger } from "@/components/app-status-bar/app-status-surface-provider";
 
 type PageTopbarProps = {
   /** Page title shown as the rightmost (current) breadcrumb */
@@ -41,6 +42,8 @@ type PageTopbarProps = {
   className?: string;
   centerClassName?: string;
   actionsClassName?: string;
+  /** Phone-only Status entry point. Turn off where native route chrome owns it. */
+  showStatusTrigger?: boolean;
 };
 
 function BackLink({ href, label }: { href: string; label: string }) {
@@ -182,13 +185,17 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
     className,
     centerClassName,
     actionsClassName,
+    showStatusTrigger = true,
   },
   ref,
 ) {
   return (
     <header
       ref={ref}
-      className={cn("relative flex h-10 shrink-0 items-center gap-3 border-b px-3 py-1", className)}
+      className={cn(
+        "relative flex h-10 min-h-11 shrink-0 items-center gap-3 border-b px-3 py-1 md:min-h-10",
+        className,
+      )}
     >
       {leading}
       <TopbarLeading
@@ -222,6 +229,9 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
           {actions}
         </div>
       )}
+      {showStatusTrigger ? (
+        <AppStatusDrawerTrigger className={cn(actions ? "ml-1" : "ml-auto", "shrink-0")} />
+      ) : null}
     </header>
   );
 });

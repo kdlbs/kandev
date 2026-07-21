@@ -30,7 +30,7 @@ This page expands the short feature list in the README without turning the READM
 - **Executor profiles:** save per-runtime configuration, including prepare scripts, environment variables, credentials, and profile-specific settings.
 - **Worktree isolation:** concurrent agents work in isolated git worktrees so their changes do not collide.
 - **Per-task repository setup:** repositories can copy selected ignored files, such as `.env` files, into newly created worktrees.
-- **Resource monitor:** optionally show CPU, memory, disk, CPU temperature, and load metrics in desktop task and kanban topbars. Kandev can also collect execution-environment metrics for Docker, SSH, Sprites, and other remote runtimes.
+- **Resource monitor:** optionally show CPU, memory, disk, CPU temperature, and load metrics in the global desktop/tablet status bar or phone Status drawer. Kandev can also collect execution-environment metrics for Docker, SSH, Sprites, and other remote runtimes.
 
 ## Integrations And MCP
 

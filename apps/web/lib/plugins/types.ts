@@ -79,7 +79,9 @@ export interface PluginRouteOptions {
  * sessionIds }`), "main-top-bar" (status/actions in the default app top bar on
  * the Home / Kanban / Tasks views, beside the CPU/DB metrics and the
  * view/display controls — the app-wide, task-agnostic counterpart to
- * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage }`), and
+ * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage }`),
+ * "app-status-bar-left" / "app-status-bar-right" (receives
+ * `AppStatusBarSlotProps` as `slotProps`), and
  * "plugin-settings" (inline UI on a plugin's own settings
  * page, Settings > Plugins > <plugin>, at the top above the settings form —
  * receives `{ pluginId: string; status: PluginStatus }` as
@@ -89,6 +91,17 @@ export interface PluginRouteOptions {
  * Not a closed union — hosts may register additional slot names.
  */
 export type PluginSlotName = string;
+
+/** Context the host passes to every app status bar slot component. */
+export type AppStatusBarSlotProps = {
+  placement: "left" | "right";
+  presentation: "bar" | "mobile-drawer";
+  density: "full" | "compact";
+  pathname: string;
+  activeWorkspaceId: string | null;
+  activeTaskId: string | null;
+  activeSessionId: string | null;
+};
 
 /** Component registered for a named slot; receives host-provided `slotProps`. */
 export type SlotComponent = ReactType.ComponentType<{ slotProps?: unknown }>;
@@ -150,7 +163,11 @@ export interface PluginRegistry {
   registerNavItem(item: NavItem): void;
   /** Route under `/settings/plugins/{id}/...`, rendered inside the settings shell. */
   registerSettingsRoute(path: string, Component: ReactType.ComponentType): void;
-  /** Named slot injection, rendered by `<PluginSlot name .../>`. */
+  /**
+   * Named slot injection, rendered by `<PluginSlot name .../>`. The
+   * `app-status-bar-left` and `app-status-bar-right` receive
+   * `AppStatusBarSlotProps` from the host.
+   */
   registerComponent(slot: PluginSlotName, Component: SlotComponent): void;
   /** WS action handler, bridged into the existing `lib/ws` dispatch. */
   registerWsHandler(action: string, handler: WsHandler): void;

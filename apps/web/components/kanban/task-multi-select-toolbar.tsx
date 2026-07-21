@@ -145,7 +145,7 @@ export function TaskMultiSelectToolbar({
   return (
     <div
       className={cn(
-        "fixed bottom-6 left-1/2 -translate-x-1/2 z-50",
+        "fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] left-1/2 z-50 -translate-x-1/2",
         "flex items-center gap-2 px-4 py-2 rounded-xl shadow-lg border border-border",
         "bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/75",
       )}

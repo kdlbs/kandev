@@ -142,6 +142,8 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     const navItem = testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`);
     await expect(navItem).toBeVisible({ timeout: 15_000 });
     await expect(navItem).toHaveText("Hello E2E");
+    await expect(testPage.locator("#hello-status-left")).toHaveText("Hello status bar no-task");
+    await expect(testPage.locator("#hello-status-right")).toHaveText("Hello status bar no-task");
 
     // --- 2b. main-top-bar slot renders on the default app top bar (Home) ---
     await expect(testPage.locator("#hello-main-top-bar")).toBeVisible();
@@ -163,6 +165,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await session.waitForLoad();
     await expect(session.sidebar).toBeVisible({ timeout: 10_000 });
     await expect(testPage.locator("#hello-sidebar")).toBeVisible();
+    await expect(testPage.locator("#hello-status-left")).toContainText(seedTask.id);
 
     // --- 4. Back on the plugin's own page (mounted, no navigation from here
     // on): create a task and prove BOTH the live WS path (counter) and the
@@ -200,6 +203,8 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(pluginRow.getByText("Disabled", { exact: true })).toBeVisible({ timeout: 10_000 });
     await testPage.goto("/");
     await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toHaveCount(0);
+    await expect(testPage.locator("#hello-status-left")).toHaveCount(0);
+    await expect(testPage.locator("#hello-status-right")).toHaveCount(0);
 
     // --- 6. Re-enable: nav item reappears live (no reload needed) ---
     await testPage.goto("/settings/plugins");
@@ -207,6 +212,8 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible({ timeout: 10_000 });
     await testPage.goto("/");
     await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toBeVisible();
+    await expect(testPage.locator("#hello-status-left")).toHaveText("Hello status bar no-task");
+    await expect(testPage.locator("#hello-status-right")).toHaveText("Hello status bar no-task");
 
     await testPage.goto("/settings/plugins");
 
