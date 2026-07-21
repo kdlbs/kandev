@@ -333,9 +333,9 @@ export function ClarificationCarouselNav({
       <KeyboardShortcutTooltip
         shortcut={{ key: KEYS.ARROW_LEFT }}
         description="Previous question"
-        enabled={!isFirst}
+        enabled={!isFirst && !isSubmitting}
       >
-        <span className="inline-flex" tabIndex={isSubmitting ? 0 : undefined}>
+        <span className="inline-flex">
           <button
             type="button"
             onClick={onPrev}
@@ -356,9 +356,9 @@ export function ClarificationCarouselNav({
       <KeyboardShortcutTooltip
         shortcut={{ key: KEYS.ARROW_RIGHT }}
         description="Next question"
-        enabled={!isLast}
+        enabled={!isLast && !isSubmitting}
       >
-        <span className="inline-flex" tabIndex={isSubmitting ? 0 : undefined}>
+        <span className="inline-flex">
           <button
             type="button"
             onClick={onNext}

@@ -586,6 +586,47 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(nextTooltip).toContainText("→");
   });
 
+  test("question shortcuts stay disabled while answers are submitting", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification shortcuts while submitting",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await session.clarificationOption("PostgreSQL").click();
+    await session.clarificationOption("Go").click();
+    await session.clarificationOption("Docker").click();
+
+    let releaseResponse = () => undefined;
+    const heldResponse = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      await heldResponse;
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    await session.chat.focus();
+    await testPage.keyboard.press("ControlOrMeta+Enter");
+    await expect(session.clarificationSubmit()).toContainText("Submitting");
+
+    await testPage.keyboard.press("ArrowLeft");
+    await expect(session.clarificationStep(2)).toHaveAttribute("data-active", "true");
+
+    await testPage.getByTestId("clarification-submit-shortcut").hover();
+    await expect(testPage.getByRole("tooltip", { name: /Submit answers/ })).not.toBeVisible();
+
+    releaseResponse();
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+  });
+
   test("Esc skips the entire bundle from anywhere in the carousel", async ({
     testPage,
     apiClient,

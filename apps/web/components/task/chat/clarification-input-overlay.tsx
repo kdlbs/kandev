@@ -436,7 +436,7 @@ function ClarificationCarouselBody({
         />
       )}
       <CarouselKeyboardShortcuts
-        enabled={keyboardShortcutsEnabled}
+        enabled={keyboardShortcutsEnabled && !isSubmitting}
         scopeRef={shortcutScopeRef}
         meta={meta}
         activeIndex={activeIndex}
@@ -468,11 +468,15 @@ function ClarificationHeaderActions({
   return (
     <div className="flex items-center gap-2">
       {total > 1 && (
-        <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT} description="Submit answers">
+        <KeyboardShortcutTooltip
+          shortcut={SHORTCUTS.SUBMIT}
+          description="Submit answers"
+          enabled={!isSubmitting}
+        >
           <span
             className="inline-flex"
             data-testid="clarification-submit-shortcut"
-            tabIndex={!allAnswered || isSubmitting ? 0 : undefined}
+            tabIndex={!allAnswered && !isSubmitting ? 0 : undefined}
           >
             <button
               type="button"
@@ -492,12 +496,12 @@ function ClarificationHeaderActions({
           </span>
         </KeyboardShortcutTooltip>
       )}
-      <KeyboardShortcutTooltip shortcut={SHORTCUTS.CANCEL} description="Skip all questions">
-        <span
-          className="inline-flex"
-          data-testid="clarification-skip-shortcut"
-          tabIndex={isSubmitting ? 0 : undefined}
-        >
+      <KeyboardShortcutTooltip
+        shortcut={SHORTCUTS.CANCEL}
+        description="Skip all questions"
+        enabled={!isSubmitting}
+      >
+        <span className="inline-flex" data-testid="clarification-skip-shortcut">
           <button
             type="button"
             onClick={onSkip}
