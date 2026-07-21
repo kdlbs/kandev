@@ -182,6 +182,44 @@ func TestIsGitHubPRURL(t *testing.T) {
 	}
 }
 
+func TestShouldAssociateCreatedChange(t *testing.T) {
+	tests := []struct {
+		provider string
+		url      string
+		want     bool
+	}{
+		{provider: "github", url: "https://github.com/acme/widgets/pull/42", want: true},
+		{provider: "gitlab", url: "https://gitlab.example/acme/widgets/-/merge_requests/42", want: true},
+		{provider: "azure_repos", url: "https://dev.azure.com/acme/project/_git/widgets/pullrequest/42", want: false},
+		{provider: "gitlab", url: "https://github.com/acme/widgets/pull/42", want: false},
+	}
+	for _, tt := range tests {
+		if got := shouldAssociateCreatedChange(tt.provider, tt.url); got != tt.want {
+			t.Errorf("shouldAssociateCreatedChange(%q, %q) = %v, want %v", tt.provider, tt.url, got, tt.want)
+		}
+	}
+}
+
+func TestCreatePRResponsePreservesBranchPushedPartialState(t *testing.T) {
+	request := &ws.Message{ID: "request-1", Action: ws.ActionWorktreeCreatePR}
+	response, err := newCreatePRResponse(request, &client.PRCreateResult{
+		Provider:     "gitlab",
+		BranchPushed: true,
+		Error:        "branch was pushed; retry merge request creation",
+	})
+	if err != nil {
+		t.Fatalf("newCreatePRResponse: %v", err)
+	}
+	var decoded client.PRCreateResult
+	if err := json.Unmarshal(response.Payload, &decoded); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if decoded.Success || !decoded.BranchPushed || decoded.Provider != "gitlab" ||
+		decoded.Error != "branch was pushed; retry merge request creation" {
+		t.Fatalf("decoded response = %+v", decoded)
+	}
+}
+
 func TestNotifyGitOperationFailed_NilResult(t *testing.T) {
 	log := newTestLogger()
 	called := false

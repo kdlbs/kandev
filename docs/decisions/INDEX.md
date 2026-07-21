@@ -62,3 +62,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-20-explicit-local-repository-trust | [Explicit Local Repository Trust](2026-07-20-explicit-local-repository-trust.md) | accepted | backend, frontend | 2026-07-20 |
 | 2026-07-20-provider-neutral-remote-repositories | [Provider-neutral remote repositories](2026-07-20-provider-neutral-remote-repositories.md) | accepted | backend, frontend, protocol | 2026-07-20 |
 | 2026-07-21-workspace-selectable-github-app-registrations | [Select GitHub App Registrations Per Workspace](2026-07-21-workspace-selectable-github-app-registrations.md) | accepted | backend, frontend, security | 2026-07-21 |
+| 2026-07-20-repository-provider-origin-identity | [Persist Provider Origin In Repository Identity](2026-07-20-repository-provider-origin-identity.md) | accepted | backend, frontend | 2026-07-20 |

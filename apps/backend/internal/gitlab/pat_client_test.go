@@ -13,6 +13,10 @@ import (
 	"time"
 )
 
+func TestPATClientProviderActionContract(t *testing.T) {
+	var _ Client = (*PATClient)(nil)
+}
+
 // newTestServer wires a handler under /api/v4/* and returns the host URL.
 func newTestServer(t *testing.T, handler http.Handler) (host string, teardown func()) {
 	t.Helper()
@@ -112,6 +116,43 @@ func TestPATClient_GetMR(t *testing.T) {
 	}
 	if mr.AuthorUsername != "alice" {
 		t.Errorf("author = %q, want alice", mr.AuthorUsername)
+	}
+}
+
+func TestPATClientSetMRLabelsThenFeedbackHydratesReplacement(t *testing.T) {
+	labels := []string{"old"}
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			var body struct {
+				Labels string `json:"labels"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			labels = strings.Split(body.Labels, ",")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/approvals") {
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/discussions") || strings.Contains(r.URL.Path, "/pipelines") {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(rawMR{IID: 7, Labels: labels})
+	}))
+	defer stop()
+
+	client := NewPATClient(host, "tok")
+	if err := client.SetMRLabels(t.Context(), "team/repo", 7, []string{"bug", "backend"}); err != nil {
+		t.Fatalf("set labels: %v", err)
+	}
+	feedback, err := client.GetMRFeedback(t.Context(), "team/repo", 7)
+	if err != nil {
+		t.Fatalf("feedback: %v", err)
+	}
+	if got := feedback.MR.Labels; len(got) != 2 || got[0] != "bug" || got[1] != "backend" {
+		t.Fatalf("labels = %#v, want replacement", got)
 	}
 }
 

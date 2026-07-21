@@ -19,10 +19,14 @@ const (
 	// envGitHubToken is the environment variable name for GitHub authentication tokens.
 	envGitHubToken = "GITHUB_TOKEN"
 	// envGHToken is the gh CLI compatible environment variable name.
-	envGHToken = "GH_TOKEN"
+	envGHToken          = "GH_TOKEN"
+	envGitLabToken      = "GITLAB_TOKEN"
+	envGitLabHost       = "GITLAB_HOST"
+	envKandevGitLabHost = "KANDEV_GITLAB_HOST"
 
 	gitHubCredentialHelper = "!agentctl git-credential"
 	defaultGitHubHost      = "github.com"
+	gitLabCredentialHelper = `!f() { echo "username=oauth2"; echo "password=$GITLAB_TOKEN"; }; f`
 )
 
 var ErrGitHubCredentialBrokerURL = errors.New("invalid GitHub credential broker URL")
@@ -126,7 +130,7 @@ func (e *Executor) issueGitHubCredentialScope(
 		return nil, nil
 	}
 	repository := info.Repository
-	if repository.Provider != "" && !strings.EqualFold(repository.Provider, providerGitHub) {
+	if repository.Provider != "" && !strings.EqualFold(repository.Provider, "github") {
 		return nil, nil
 	}
 	owner := strings.TrimSpace(repository.ProviderOwner)
@@ -180,6 +184,91 @@ func appendGitConfig(env map[string]string, key, value string) {
 	env[fmt.Sprintf("GIT_CONFIG_KEY_%d", count)] = key
 	env[fmt.Sprintf("GIT_CONFIG_VALUE_%d", count)] = value
 	env["GIT_CONFIG_COUNT"] = strconv.Itoa(count + 1)
+}
+
+// injectGitLabWorkspaceCredentials overrides inherited GitLab credentials
+// with the current workspace's configured connection.
+func (e *Executor) injectGitLabWorkspaceCredentials(ctx context.Context, req *LaunchAgentRequest) {
+	if req.Env == nil {
+		req.Env = make(map[string]string)
+	}
+	req.Env[envGitLabToken] = ""
+	req.Env[envGitLabHost] = ""
+	req.Env[envKandevGitLabHost] = ""
+	removeGitLabCredentialHelpers(req.Env)
+	if e.gitlabCredentials == nil || req.WorkspaceID == "" {
+		return
+	}
+	host, token, err := e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, req.WorkspaceID)
+	if err != nil || strings.TrimSpace(host) == "" {
+		e.logger.Debug("GitLab execution credentials unavailable for workspace")
+		return
+	}
+	req.Env[envGitLabToken] = strings.TrimSpace(token)
+	req.Env[envGitLabHost] = strings.TrimSpace(host)
+	req.Env[envKandevGitLabHost] = strings.TrimSpace(host)
+	appendGitLabCredentialHelper(req.Env, host)
+}
+
+func removeGitLabCredentialHelpers(env map[string]string) {
+	count, _ := strconv.Atoi(env["GIT_CONFIG_COUNT"])
+	type entry struct{ key, value string }
+	entries := make([]entry, 0, count)
+	for i := 0; i < count; i++ {
+		keyName := fmt.Sprintf("GIT_CONFIG_KEY_%d", i)
+		valueName := fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)
+		key, keyOK := env[keyName]
+		value, valueOK := env[valueName]
+		delete(env, keyName)
+		delete(env, valueName)
+		if keyOK && valueOK && (!strings.HasPrefix(strings.ToLower(key), "credential.http") || value != gitLabCredentialHelper) {
+			entries = append(entries, entry{key: key, value: value})
+		}
+	}
+	for i, item := range entries {
+		env[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)] = item.key
+		env[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)] = item.value
+	}
+	if len(entries) == 0 {
+		delete(env, "GIT_CONFIG_COUNT")
+		return
+	}
+	env["GIT_CONFIG_COUNT"] = strconv.Itoa(len(entries))
+}
+
+func appendGitLabCredentialHelper(env map[string]string, host string) {
+	origin, err := url.Parse(strings.TrimSpace(host))
+	if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host == "" ||
+		origin.User != nil || (origin.Path != "" && origin.Path != "/") {
+		return
+	}
+	origin.Path = ""
+	origin.RawPath = ""
+	origin.RawQuery = ""
+	origin.Fragment = ""
+
+	count, _ := strconv.Atoi(env["GIT_CONFIG_COUNT"])
+	for i := 0; i < count; i++ {
+		key := env[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)]
+		if strings.EqualFold(key, "credential."+origin.String()+".helper") {
+			env[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)] = gitLabCredentialHelper
+			return
+		}
+	}
+	env[fmt.Sprintf("GIT_CONFIG_KEY_%d", count)] = "credential." + origin.String() + ".helper"
+	env[fmt.Sprintf("GIT_CONFIG_VALUE_%d", count)] = gitLabCredentialHelper
+	env["GIT_CONFIG_COUNT"] = strconv.Itoa(count + 1)
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // resolveRemoteCredentials handles explicit profile-level remote auth secrets.

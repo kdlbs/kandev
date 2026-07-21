@@ -219,6 +219,7 @@ export async function createRepositoryAction(payload: {
   local_path: string;
   provider: string;
   provider_repo_id: string;
+  provider_host?: string;
   provider_owner: string;
   provider_name: string;
   default_branch: string;
@@ -240,6 +241,7 @@ export async function createRepositoryAction(payload: {
         local_path: payload.local_path,
         provider: payload.provider,
         provider_repo_id: payload.provider_repo_id,
+        provider_host: payload.provider_host,
         provider_owner: payload.provider_owner,
         provider_name: payload.provider_name,
         default_branch: payload.default_branch,

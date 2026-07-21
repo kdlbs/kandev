@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,10 +15,10 @@ import (
 
 func TestGitCmdWithHTTPHeaderKeepsCredentialOutOfArguments(t *testing.T) {
 	t.Parallel()
-	cloner := &Cloner{}
 	cloneURL := "https://dev.azure.com/acme/p/_git/r"
 	header := "Authorization: Basic c2VjcmV0"
-	cmd := cloner.gitCmdWithHTTPHeader(context.Background(), cloneURL, header, "clone", cloneURL)
+	cmd := exec.CommandContext(context.Background(), "git", "clone", "--", cloneURL)
+	configureHTTPHeaderCommand(cmd, cloneURL, header)
 	if strings.Contains(strings.Join(cmd.Args, " "), "c2VjcmV0") {
 		t.Fatal("credential leaked into command arguments")
 	}
@@ -70,7 +71,7 @@ func TestEnsureWorkspaceClonedWithBasicAuthKeepsCredentialScopedToGitChild(t *te
 				defer cancel()
 			}
 			targetPath, err := cloner.EnsureWorkspaceClonedWithBasicAuth(
-				ctx, "workspace-a", "azure_devops", "https://dev.azure.com/acme/p/_git/r",
+				ctx, "workspace-a", "azure_devops", "", "https://dev.azure.com/acme/p/_git/r",
 				"p", "r", "kandev", "secret-pat",
 			)
 			if err == nil {

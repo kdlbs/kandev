@@ -539,6 +539,29 @@ func TestParseGitRemoteURL(t *testing.T) {
 	}
 }
 
+func TestParseGitRemoteIdentityPreservesOriginAndFullSubgroupPath(t *testing.T) {
+	tests := []struct {
+		name        string
+		remote      string
+		wantOrigin  string
+		wantProject string
+	}{
+		{"self-managed HTTP", "http://GitLab.Internal:8080/group/subgroup/project.git", "http://gitlab.internal:8080", "group/subgroup/project"},
+		{"self-managed HTTPS", "https://gitlab.internal/group/subgroup/project", "https://gitlab.internal", "group/subgroup/project"},
+		{"SSH URL", "ssh://git@gitlab.internal/group/subgroup/project.git", "ssh://gitlab.internal", "group/subgroup/project"},
+		{"SCP SSH", "git@gitlab.internal:group/subgroup/project.git", "ssh://gitlab.internal", "group/subgroup/project"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origin, project := ParseGitRemoteIdentity(tt.remote)
+			if origin != tt.wantOrigin || project != tt.wantProject {
+				t.Fatalf("ParseGitRemoteIdentity(%q) = (%q, %q), want (%q, %q)",
+					tt.remote, origin, project, tt.wantOrigin, tt.wantProject)
+			}
+		})
+	}
+}
+
 func TestParseGitConfigOriginURL(t *testing.T) {
 	config := `[core]
 	repositoryformatversion = 0

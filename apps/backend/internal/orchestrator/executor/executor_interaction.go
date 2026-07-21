@@ -550,6 +550,7 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Task, session *models.TaskSession, sessionID, newModel, prompt, acpSessionID string, execConfig executorConfig, running *models.ExecutorRunning) (*LaunchAgentRequest, error) {
 	req := &LaunchAgentRequest{
 		TaskID:            task.ID,
+		WorkspaceID:       task.WorkspaceID,
 		SessionID:         sessionID,
 		TaskTitle:         task.Title,
 		AgentProfileID:    session.AgentProfileID,
@@ -561,6 +562,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		IsEphemeral:       task.IsEphemeral,
 		IsPassthrough:     session.IsPassthrough,
 		TaskEnvironmentID: session.TaskEnvironmentID,
+		Env:               cloneStringMap(execConfig.ProfileEnv),
 	}
 
 	mcpMode, err := e.resolveTaskSessionMCPMode(ctx, task.ID, session)
@@ -579,6 +581,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 	if running != nil && running.WorktreePath != "" {
 		req.RepositoryURL = running.WorktreePath
 	}
+	e.injectGitLabWorkspaceCredentials(ctx, req)
 
 	return req, nil
 }

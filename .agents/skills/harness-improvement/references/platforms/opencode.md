@@ -40,6 +40,9 @@ Description must be 1-1024 characters.
 
 ## Agents
 
+Launch project workers with OpenCode's native `Task` tool. Kandev MCP task or
+session APIs must not be used as an OpenCode subagent fallback.
+
 OpenCode supports JSON config and Markdown agent files.
 
 Project Markdown agents:
@@ -54,7 +57,6 @@ Markdown example:
 ---
 description: Reviews code for quality and best practices.
 mode: subagent
-model: anthropic/claude-sonnet-4-20250514
 temperature: 0.1
 permission:
   edit: deny
@@ -78,7 +80,6 @@ JSON example:
     "code-reviewer": {
       "description": "Reviews code for best practices and potential issues",
       "mode": "subagent",
-      "model": "anthropic/claude-sonnet-4-20250514",
       "prompt": "You are a code reviewer. Focus on security, performance, and maintainability.",
       "permission": {
         "edit": "deny"
@@ -92,12 +93,23 @@ Important fields:
 
 - `description` is required.
 - `mode`: `primary`, `subagent`, or `all`; default is `all`.
-- `model`: provider/model-id format.
+- `model`: provider/model-id format when explicitly pinned. Kandev's OpenCode
+  mirrors omit it so the configured provider and primary model are inherited.
 - `temperature`: lower for planning/review; higher for brainstorming.
 - `steps`: max agentic iterations; legacy `maxSteps` is deprecated.
 - `permission`: use this instead of deprecated `tools`.
 - `hidden`: hide a subagent from autocomplete.
 - `permission.task`: restrict which subagents another agent can invoke.
+
+Kandev intentionally omits `model` from its OpenCode subagent mirrors so users
+can keep their configured provider. Because OpenCode then inherits the primary
+agent's model, this is the one platform mirror that does not guarantee worker
+cost separation. Every OpenCode worker sets `permission.task: deny` to prevent
+recursive delegation.
+
+OpenCode `temperature` controls sampling randomness, not reasoning effort. With
+`model` unpinned, provider-specific reasoning settings also remain inherited
+from the primary agent. Do not map Kandev role effort to `temperature`.
 
 ## Rules
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { resolveTaskPROpenAction } from "./task-pr-open";
+import { resolveTaskPROpenAction, resolveTaskReviewOpenAction } from "./task-pr-open";
 import type { TaskPR } from "@/lib/types/github";
+import type { TaskMR } from "@/lib/types/gitlab";
 
 function makePR(overrides: Partial<TaskPR>): TaskPR {
   return {
@@ -48,5 +49,21 @@ describe("resolveTaskPROpenAction", () => {
   it("asks for a pick when several PRs are linked", () => {
     const prs = [makePR({ id: "a" }), makePR({ id: "b", pr_number: 2 })];
     expect(resolveTaskPROpenAction(prs)).toEqual({ kind: "pick", prs });
+  });
+});
+
+describe("resolveTaskReviewOpenAction", () => {
+  it("opens one GitLab merge request directly", () => {
+    const mr = { id: "mr-1", mr_url: "https://gitlab.com/a/b/-/merge_requests/2" } as TaskMR;
+    expect(resolveTaskReviewOpenAction([], [mr])).toEqual({
+      kind: "open",
+      url: mr.mr_url,
+    });
+  });
+
+  it("uses the provider-aware picker for mixed linked reviews", () => {
+    const pr = makePR({ id: "pr" });
+    const mr = { id: "mr", mr_url: "https://gitlab.com/a/b/-/merge_requests/2" } as TaskMR;
+    expect(resolveTaskReviewOpenAction([pr], [mr])).toEqual({ kind: "pick" });
   });
 });

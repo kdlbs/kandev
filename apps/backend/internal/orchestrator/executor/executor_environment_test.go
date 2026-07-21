@@ -330,6 +330,9 @@ func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 func TestBuildResumeRequest_UsesExecutionProfileAndKeepsOfficeIdentity(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	exec.SetGitLabCredentialResolver(&fakeGitLabCredentialResolver{byWorkspace: map[string]struct{ host, token string }{
+		"workspace-1": {host: "https://gitlab.example", token: "resume-token"},
+	}})
 	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Task 1"}
 	session := &models.TaskSession{
 		ID:                 "session-1",
@@ -358,6 +361,9 @@ func TestBuildResumeRequest_UsesExecutionProfileAndKeepsOfficeIdentity(t *testin
 	}
 	if req.ACPSessionID != "claude-session" {
 		t.Fatalf("ACPSessionID = %q, want matching profile token", req.ACPSessionID)
+	}
+	if req.WorkspaceID != "workspace-1" || req.Env[envGitLabToken] != "resume-token" {
+		t.Fatalf("resume credentials not workspace scoped: workspace=%q env=%#v", req.WorkspaceID, req.Env)
 	}
 }
 

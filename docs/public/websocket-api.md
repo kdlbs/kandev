@@ -422,6 +422,8 @@ vscode.status
 vscode.stop
 ```
 
+`worktree.create_pr` is a provider-neutral compatibility action despite its name. For a successful GitLab remote it returns `success:true`, `provider:"gitlab"`, and the merge-request URL in `pr_url`; successful GitHub and Azure responses use the same URL field. See [Git Operations](git-operations.md#create-a-pull-request-or-merge-request) for provider detection, authentication, and partial-failure behavior.
+
 `ssh.test` checks an SSH profile and `ssh.sessions.list` reads the backend's active SSH-session view; both are registered with literal action names rather than `actions.go` constants. `user_shell.stop` is a compatibility alias for destroy. Port-tunnel handlers require the tunnel service to be wired. Git semantics and destructive behavior are documented in [Git Operations](git-operations.md); executor-specific filesystem and credential boundaries are documented in [Executors](executors.md).
 
 ### Settings, secrets, and automations

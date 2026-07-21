@@ -602,14 +602,21 @@ type ExecutorTypeCapabilities interface {
 	ShouldApplyPreferredShell(executorType string) bool
 }
 
+// GitLabCredentialResolver returns the configured origin and credential for
+// exactly one workspace. Implementations must not fall back across workspaces.
+type GitLabCredentialResolver interface {
+	ResolveGitLabExecutionCredentials(ctx context.Context, workspaceID string) (host, token string, err error)
+}
+
 // Executor manages agent execution for tasks
 type Executor struct {
-	agentManager AgentManagerClient
-	repo         executorStore
-	secretStore  secrets.SecretStore
-	shellPrefs   ShellPreferenceProvider
-	capabilities ExecutorTypeCapabilities
-	logger       *logger.Logger
+	agentManager      AgentManagerClient
+	repo              executorStore
+	secretStore       secrets.SecretStore
+	shellPrefs        ShellPreferenceProvider
+	capabilities      ExecutorTypeCapabilities
+	gitlabCredentials GitLabCredentialResolver
+	logger            *logger.Logger
 
 	githubCredentialIssuer    GitHubCredentialLeaseIssuer
 	githubCredentialBrokerURL string
@@ -692,33 +699,33 @@ func (e *Executor) taskEnvLock(taskID string) *sync.Mutex {
 
 // RepoCloner clones remote repositories to local disk.
 type RepoCloner interface {
-	EnsureWorkspaceCloned(
-		ctx context.Context,
-		workspaceID, provider, cloneURL, owner, name string,
+	EnsureWorkspaceClonedForProvider(
+		ctx context.Context, workspaceID, cloneURL, provider, providerHost,
+		owner, name, credentialHost, token string,
 	) (string, error)
 	ShouldRecloneForWorkspace(workspaceID, path string) bool
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
-	BuildCloneURL(provider, owner, name string) (string, error)
+	BuildCloneURLWithHost(provider, host, owner, name string) (string, error)
 }
 
 type authenticatedRepoCloner interface {
 	EnsureWorkspaceClonedWithBasicAuth(
-		ctx context.Context,
-		workspaceID, provider, cloneURL, owner, name, username, password string,
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, username, password string,
 	) (string, error)
 }
 
 func (e *Executor) ensureClonedWithWorkspaceAuth(
 	ctx context.Context, repo *models.Repository, cloneURL string,
 ) (string, error) {
+	credentialHost, token := "", ""
+	if strings.EqualFold(repo.Provider, "gitlab") && e.gitlabCredentials != nil {
+		credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
+	}
 	if repo.Provider != "azure_devops" || !strings.HasPrefix(cloneURL, "https://") {
-		return e.repoCloner.EnsureWorkspaceCloned(
-			ctx,
-			repo.WorkspaceID,
-			repo.Provider,
-			cloneURL,
-			repo.ProviderOwner,
-			repo.ProviderName,
+		return e.repoCloner.EnsureWorkspaceClonedForProvider(
+			ctx, repo.WorkspaceID, cloneURL, repo.Provider, repo.ProviderHost,
+			repo.ProviderOwner, repo.ProviderName, credentialHost, token,
 		)
 	}
 	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
@@ -731,14 +738,8 @@ func (e *Executor) ensureClonedWithWorkspaceAuth(
 	}
 	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
 	return authCloner.EnsureWorkspaceClonedWithBasicAuth(
-		ctx,
-		repo.WorkspaceID,
-		repo.Provider,
-		cloneURL,
-		repo.ProviderOwner,
-		repo.ProviderName,
-		"kandev",
-		pat,
+		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
+		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
 	)
 }
 
@@ -851,4 +852,9 @@ func (e *Executor) SetOnLaunchFailed(fn LaunchFailedFunc) {
 // SetCapabilities sets the executor type capabilities provider.
 func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
 	e.capabilities = c
+}
+
+// SetGitLabCredentialResolver wires workspace-scoped GitLab execution auth.
+func (e *Executor) SetGitLabCredentialResolver(resolver GitLabCredentialResolver) {
+	e.gitlabCredentials = resolver
 }

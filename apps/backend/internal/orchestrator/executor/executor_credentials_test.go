@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const (
@@ -215,6 +216,103 @@ func TestConfigureGitHubCredentialBrokerAllowsLocalLoopbackURL(t *testing.T) {
 	}
 	if issuer.calls != 1 {
 		t.Fatalf("IssueGitHubCredentialLease calls = %d, want 1", issuer.calls)
+	}
+}
+
+type fakeGitLabCredentialResolver struct {
+	byWorkspace map[string]struct{ host, token string }
+}
+
+func (f *fakeGitLabCredentialResolver) ResolveGitLabExecutionCredentials(_ context.Context, workspaceID string) (string, string, error) {
+	entry, ok := f.byWorkspace[workspaceID]
+	if !ok {
+		return "", "", fmt.Errorf("not configured")
+	}
+	return entry.host, entry.token, nil
+}
+
+func TestInjectGitLabWorkspaceCredentialsIsolatesWorkspaces(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitLabCredentialResolver(&fakeGitLabCredentialResolver{byWorkspace: map[string]struct{ host, token string }{
+		"workspace-a": {host: "https://gitlab.a.example", token: "token-a"},
+		"workspace-b": {host: "http://gitlab.b.internal", token: "token-b"},
+	}})
+
+	requestA := &LaunchAgentRequest{WorkspaceID: "workspace-a", Env: map[string]string{envGitLabToken: "stale-token"}}
+	exec.injectGitLabWorkspaceCredentials(context.Background(), requestA)
+	if requestA.Env[envGitLabToken] != "token-a" || requestA.Env[envKandevGitLabHost] != "https://gitlab.a.example" {
+		t.Fatalf("workspace A env = %#v", requestA.Env)
+	}
+	requestB := &LaunchAgentRequest{WorkspaceID: "workspace-b"}
+	exec.injectGitLabWorkspaceCredentials(context.Background(), requestB)
+	if requestB.Env[envGitLabToken] != "token-b" || requestB.Env[envKandevGitLabHost] != "http://gitlab.b.internal" {
+		t.Fatalf("workspace B env = %#v", requestB.Env)
+	}
+	if strings.Contains(fmt.Sprint(requestB.Env), "token-a") {
+		t.Fatalf("workspace B env leaked workspace A token: %#v", requestB.Env)
+	}
+}
+
+func TestInjectGitLabWorkspaceCredentialsClearsUnscopedInheritedToken(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitLabCredentialResolver(&fakeGitLabCredentialResolver{byWorkspace: map[string]struct{ host, token string }{}})
+	req := &LaunchAgentRequest{WorkspaceID: "unconfigured", Env: map[string]string{
+		envGitLabToken:      "global-token",
+		envKandevGitLabHost: "https://wrong.example",
+	}}
+	exec.injectGitLabWorkspaceCredentials(context.Background(), req)
+	if req.Env[envGitLabToken] != "" || req.Env[envKandevGitLabHost] != "" {
+		t.Fatalf("unconfigured workspace retained GitLab credentials: %#v", req.Env)
+	}
+}
+
+func TestInjectGitLabWorkspaceCredentialsAddsExactOriginHelperWithoutToken(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitLabCredentialResolver(&fakeGitLabCredentialResolver{byWorkspace: map[string]struct{ host, token string }{
+		"workspace-a": {host: "http://gitlab.internal:8080", token: "glpat-secret"},
+	}})
+	req := &LaunchAgentRequest{WorkspaceID: "workspace-a", Env: map[string]string{
+		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_KEY_0":   "safe.directory",
+		"GIT_CONFIG_VALUE_0": "*",
+	}}
+
+	exec.injectGitLabWorkspaceCredentials(context.Background(), req)
+
+	if got := req.Env["GIT_CONFIG_KEY_1"]; got != "credential.http://gitlab.internal:8080.helper" {
+		t.Fatalf("credential helper key = %q", got)
+	}
+	if got := req.Env["GIT_CONFIG_VALUE_1"]; got != gitLabCredentialHelper {
+		t.Fatalf("credential helper = %q", got)
+	}
+	if strings.Contains(req.Env["GIT_CONFIG_VALUE_1"], "glpat-secret") {
+		t.Fatal("credential helper persisted the token")
+	}
+}
+
+func TestStartAgentOnExistingWorkspaceRefreshesWorkspaceGitLabCredentials(t *testing.T) {
+	var captured map[string]string
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "execution-1", nil },
+		setExecutionEnvFunc: func(_ context.Context, _ string, env map[string]string) error {
+			captured = cloneStringMap(env)
+			return nil
+		},
+	}
+	repo := newMockRepository()
+	exec := newTestExecutor(t, manager, repo)
+	exec.SetGitLabCredentialResolver(&fakeGitLabCredentialResolver{byWorkspace: map[string]struct{ host, token string }{
+		"workspace-a": {host: "https://gitlab.a.example", token: "prepared-token"},
+	}})
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-a"}
+	session := &models.TaskSession{ID: "session-1", TaskID: task.ID, AgentProfileID: "profile-1"}
+	repo.sessions[session.ID] = session
+
+	_, _ = exec.startAgentOnExistingWorkspace(context.Background(), task, session, "prompt", true, "", map[string]string{
+		envGitLabToken: "stale-token",
+	})
+	if captured[envGitLabToken] != "prepared-token" || captured[envKandevGitLabHost] != "https://gitlab.a.example" {
+		t.Fatalf("prepared workspace env = %#v", captured)
 	}
 }
 

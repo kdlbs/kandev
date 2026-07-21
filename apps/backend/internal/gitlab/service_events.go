@@ -41,12 +41,16 @@ func (s *Service) publishNewReviewMREvent(ctx context.Context, watch *ReviewWatc
 	}
 	ev := &NewReviewMREvent{
 		ReviewWatchID:     watch.ID,
+		WatchGeneration:   watch.Generation,
 		WorkspaceID:       watch.WorkspaceID,
 		WorkflowID:        watch.WorkflowID,
 		WorkflowStepID:    watch.WorkflowStepID,
 		AgentProfileID:    watch.AgentProfileID,
 		ExecutorProfileID: watch.ExecutorProfileID,
 		Prompt:            watch.Prompt,
+		RepositoryID:      watch.RepositoryID,
+		BaseBranch:        watch.BaseBranch,
+		MaxInflightTasks:  watch.MaxInflightTasks,
 		MR:                mr,
 	}
 	if err := eb.Publish(ctx, events.GitLabNewReviewMR, bus.NewEvent(events.GitLabNewReviewMR, eventSource, ev)); err != nil {
@@ -64,12 +68,16 @@ func (s *Service) publishNewIssueEvent(ctx context.Context, watch *IssueWatch, i
 	}
 	ev := &NewIssueEvent{
 		IssueWatchID:      watch.ID,
+		WatchGeneration:   watch.Generation,
 		WorkspaceID:       watch.WorkspaceID,
 		WorkflowID:        watch.WorkflowID,
 		WorkflowStepID:    watch.WorkflowStepID,
 		AgentProfileID:    watch.AgentProfileID,
 		ExecutorProfileID: watch.ExecutorProfileID,
 		Prompt:            watch.Prompt,
+		RepositoryID:      watch.RepositoryID,
+		BaseBranch:        watch.BaseBranch,
+		MaxInflightTasks:  watch.MaxInflightTasks,
 		Issue:             issue,
 	}
 	if err := eb.Publish(ctx, events.GitLabNewIssue, bus.NewEvent(events.GitLabNewIssue, eventSource, ev)); err != nil {

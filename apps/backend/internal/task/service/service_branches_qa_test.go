@@ -99,7 +99,7 @@ func TestAddBranchToTask_QA_RegisteredProviderRepoSkipsProbe(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{
 		ID: "repo-existing", WorkspaceID: "ws-1", Name: "acme/widgets",
-		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
+		Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "acme", ProviderName: "widgets",
 		DefaultBranch: "trunk", SourceType: "provider",
 	})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
@@ -148,7 +148,7 @@ func TestAddBranchToTask_QA_BackfillsExistingEmptyDefaultBranch(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{
 		ID: "repo-empty", WorkspaceID: "ws-1", Name: "acme/widgets",
-		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
+		Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "acme", ProviderName: "widgets",
 		DefaultBranch: "", SourceType: "provider", // legacy orphan with empty default
 	})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})

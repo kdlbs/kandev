@@ -239,38 +239,60 @@ function branchRequestForURL(rawURL: string, workspaceId: string | null): Branch
   }
   const parsed = parseRemoteURL(rawURL);
   if (!parsed) return null;
-  if (parsed.hostname === "github.com") {
-    const parts = parsed.pathname
-      .replace(/^\//, "")
-      .replace(/\.git$/, "")
-      .split("/");
-    if (parts.length >= 2 && workspaceId) {
-      return (signal) => fetchRepoBranches(workspaceId, parts[0], parts[1], { init: { signal } });
-    }
+
+  switch (parsed.hostname) {
+    case "github.com":
+      return githubBranchRequest(parsed, workspaceId);
+    case "gitlab.com":
+      return gitLabBranchRequest(parsed, workspaceId);
+    case "dev.azure.com":
+      return azureHTTPSBranchRequest(parsed, workspaceId);
+    case "ssh.dev.azure.com":
+      return azureSSHBranchRequest(parsed, workspaceId);
+    default:
+      return selfManagedGitLabBranchRequest(parsed, workspaceId);
   }
-  if (parsed.hostname === "gitlab.com") {
-    const project = parsed.pathname.replace(/^\//, "").replace(/\.git$/, "");
-    return (signal) => listProjectBranches(project, { init: { signal } });
-  }
-  return azureBranchRequest(parsed, workspaceId);
 }
 
-function azureBranchRequest(parsed: URL, workspaceId: string | null): BranchRequest | null {
-  if (parsed.hostname === "dev.azure.com" && workspaceId) {
-    const parts = parsed.pathname.split("/").filter(Boolean);
-    if (parts.length === 4 && parts[2] === "_git") {
-      return (signal) =>
-        listAzureDevOpsBranches(workspaceId, parts[0], parts[1], parts[3], { init: { signal } });
-    }
-  }
-  if (parsed.hostname === "ssh.dev.azure.com" && workspaceId) {
-    const parts = parsed.pathname.split("/").filter(Boolean);
-    if (parts.length === 4 && parts[0] === "v3") {
-      return (signal) =>
-        listAzureDevOpsBranches(workspaceId, parts[1], parts[2], parts[3], { init: { signal } });
-    }
-  }
-  return null;
+function githubBranchRequest(parsed: URL, workspaceId: string | null): BranchRequest | null {
+  if (!workspaceId) return null;
+  const parts = parsed.pathname
+    .replace(/^\//, "")
+    .replace(/\.git$/, "")
+    .split("/");
+  if (parts.length < 2) return null;
+  return (signal) => fetchRepoBranches(workspaceId, parts[0], parts[1], { init: { signal } });
+}
+
+function gitLabBranchRequest(parsed: URL, workspaceId: string | null): BranchRequest | null {
+  if (!workspaceId) return null;
+  const project = parsed.pathname.replace(/^\//, "").replace(/\.git$/, "");
+  if (!project.includes("/")) return null;
+  return (signal) => listProjectBranches(workspaceId, project, { init: { signal } });
+}
+
+function azureHTTPSBranchRequest(parsed: URL, workspaceId: string | null): BranchRequest | null {
+  if (!workspaceId) return null;
+  const parts = parsed.pathname.split("/").filter(Boolean);
+  if (parts.length !== 4 || parts[2] !== "_git") return null;
+  return (signal) =>
+    listAzureDevOpsBranches(workspaceId, parts[0], parts[1], parts[3], { init: { signal } });
+}
+
+function azureSSHBranchRequest(parsed: URL, workspaceId: string | null): BranchRequest | null {
+  if (!workspaceId) return null;
+  const parts = parsed.pathname.split("/").filter(Boolean);
+  if (parts.length !== 4 || parts[0] !== "v3") return null;
+  return (signal) =>
+    listAzureDevOpsBranches(workspaceId, parts[1], parts[2], parts[3], { init: { signal } });
+}
+
+function selfManagedGitLabBranchRequest(
+  parsed: URL,
+  workspaceId: string | null,
+): BranchRequest | null {
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  return gitLabBranchRequest(parsed, workspaceId);
 }
 
 function parseRemoteURL(raw: string): URL | null {

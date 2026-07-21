@@ -9,23 +9,24 @@ import { useAppStore } from "@/components/state-provider";
  * counts surfaced on the /gitlab page header. Per-mount attempted flag
  * prevents an infinite re-fetch loop when GitLab is unreachable.
  */
-export function useGitLabStats() {
+export function useGitLabStats(workspaceId: string | null) {
   const stats = useAppStore((state) => state.gitlabStats.data);
   const loading = useAppStore((state) => state.gitlabStats.loading);
   const loadedAt = useAppStore((state) => state.gitlabStats.loadedAt);
   const setStats = useAppStore((state) => state.setGitLabStats);
   const setStatsLoading = useAppStore((state) => state.setGitLabStatsLoading);
-  const attemptedRef = useRef(false);
+  const attemptedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (loading || loadedAt !== null || attemptedRef.current) return;
-    attemptedRef.current = true;
+    if (!workspaceId || loading || loadedAt !== null || attemptedRef.current.has(workspaceId))
+      return;
+    attemptedRef.current.add(workspaceId);
     setStatsLoading(true);
-    fetchGitLabStats()
+    fetchGitLabStats(workspaceId)
       .then((res) => setStats(res ?? null))
       .catch(() => setStats(null))
       .finally(() => setStatsLoading(false));
-  }, [loading, loadedAt, setStats, setStatsLoading]);
+  }, [loading, loadedAt, setStats, setStatsLoading, workspaceId]);
 
   return { stats, loading };
 }

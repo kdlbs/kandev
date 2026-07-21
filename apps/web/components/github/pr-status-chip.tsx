@@ -32,6 +32,7 @@ import { useAppStore } from "@/components/state-provider";
 import {
   hasPRChecksInProgressForDisplay,
   hasPRChecksPassedForDisplay,
+  isPRDraft,
   isPRAwaitingReview,
   isPRReadyToMerge,
   isPRWaitingOnBranchProtection,
@@ -53,6 +54,7 @@ type ChipStatus =
   | "conflict"
   | "blocked"
   | "behind"
+  | "draft"
   | "waiting"
   | "in_progress"
   | "neutral";
@@ -69,6 +71,7 @@ function chipStatus(pr: TaskPR): ChipStatus {
   // getPRStatusColor + PRStatusIcon (dirty = red, behind = amber).
   if (pr.mergeable_state === "dirty") return "conflict";
   if (pr.mergeable_state === "behind") return "behind";
+  if (isPRDraft(pr)) return "draft";
   // Pending checks / pending review must beat checks_state === "success" so a
   // PR with all checks green but reviewers still outstanding renders as
   // in-progress, not passed. Without this order, the chip flips to green the
@@ -93,6 +96,7 @@ const CHIP_STATUS_RANK: Record<ChipStatus, number> = {
   conflict: 5,
   blocked: 4,
   behind: 3,
+  draft: 0.5,
   in_progress: 2,
   waiting: 1.5,
   passed: 1,
@@ -557,6 +561,8 @@ function ChipStatusGlyph({ status }: { status: ChipStatus }) {
       return <IconAlertTriangleFilled className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />;
     case "behind":
       return <IconAlertTriangleFilled className="h-3.5 w-3.5 text-yellow-500" aria-hidden="true" />;
+    case "draft":
+      return <IconPointFilled className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />;
     case "blocked":
       return (
         <IconShield

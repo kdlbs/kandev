@@ -25,6 +25,10 @@ Project-local Kandev skills use `.agents/skills/<name>/SKILL.md`.
 
 ## Custom Agents / Subagents
 
+Launch workers with Codex-native `spawn_agent`, coordinate with
+`send_message`/`followup_task`, and collect them with `wait_agent`. Do not use
+Kandev MCP task/session APIs for Codex delegation.
+
 Codex custom agents are standalone TOML files:
 
 ```text
@@ -45,7 +49,7 @@ Lead with concrete findings and cite files.
 Useful optional fields:
 
 ```toml
-model = "gpt-5.4"
+model = "gpt-5.6-terra"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 nickname_candidates = ["Atlas", "Delta"]

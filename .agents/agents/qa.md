@@ -1,9 +1,10 @@
 ---
 name: qa
 description: Verify integrated Kandev work after implementation. Use after spec-driven task waves or before PRs to check wiring, behavior, edge cases, test coverage, and readiness.
-tools: Bash, Read, Edit, Write, Grep, Glob
-model: opus
-permissionMode: acceptEdits
+tools: Bash, Read, Grep, Glob
+model: sonnet
+effort: medium
+permissionMode: plan
 ---
 
 # QA
@@ -20,7 +21,7 @@ Create these tasks immediately (use your task/todo tracking tool if available):
 2. **Trace the wiring** — Verify the feature is actually connected end-to-end
 3. **Test the happy path** — Run the feature as a user would
 4. **Try to break it** — Boundary values, error paths, concurrency, auth
-5. **Verify test coverage** — Check for missing tests, write them if needed
+5. **Verify test coverage** — Check for missing tests and report gaps
 6. **Report** — Summarize findings with verdict
 
 Mark each task in_progress when you begin it and completed when you finish it. Do not skip phases — tracing the wiring before testing catches disconnected code early, and testing the happy path before edge cases establishes a working baseline.
@@ -108,7 +109,8 @@ Check that the implementation has tests covering the behaviors you just verified
 - Are edge cases from Phase 4 covered?
 - Are tests at the right level: unit for pure logic, integration for boundaries, E2E for critical browser flows?
 - Do tests assert behavior/state/output rather than implementation details or mock behavior?
-- If tests are missing, write them following TDD (write failing test first, then verify it passes with existing code), or recommend the `test-engineer` subagent for focused coverage work.
+- If tests are missing, report the exact behavior and recommended test level so
+  the planner can assign a focused `test-engineer` task.
 - Avoid snapshot tests unless the snapshot change will be deliberately reviewed.
 
 Mark task 5 as completed.
@@ -140,4 +142,4 @@ For spec-driven development, include:
 
 Mark task 6 as completed.
 
-Do not spawn subagents. The parent agent owns orchestration.
+Do not spawn subagents. The planner owns orchestration and assigns fixes.

@@ -16,7 +16,7 @@ import (
 
 var uploadHTTPStatusRE = regexp.MustCompile(`(?i)\b(?:http|status)\s*:?\s*(\d{3})\b`)
 
-// injectGitHubTokenIntoCloneURL injects a GitHub token into a clone URL so
+// injectGitHubTokenIntoCloneURL injects only GitHub credentials into a clone URL so
 // in-container `git clone` works without prompting. Honours both
 // GITHUB_TOKEN and GH_TOKEN (gh CLI uses GH_TOKEN; Actions/most workflows
 // use GITHUB_TOKEN — accepting either keeps callers from a 401 because they
@@ -25,21 +25,22 @@ var uploadHTTPStatusRE = regexp.MustCompile(`(?i)\b(?:http|status)\s*:?\s*(\d{3}
 // `https://x-access-token:T@github.com/` form, which works for both clone
 // and gh CLI authentication.
 //
+// GitLab credentials are deliberately provided through an exact-origin
+// ephemeral git credential helper in the execution environment, never in a URL.
 // Used by both Docker and Sprites executors. SSH→HTTPS rewrite is delegated
 // to rewriteGitHubSSHToHTTPS so the two surfaces never drift again.
 func injectGitHubTokenIntoCloneURL(cloneURL string, env map[string]string) string {
-	token := env["GITHUB_TOKEN"]
-	if token == "" {
-		token = env["GH_TOKEN"]
+	githubToken := env["GITHUB_TOKEN"]
+	if githubToken == "" {
+		githubToken = env["GH_TOKEN"]
 	}
-	if token == "" {
-		return cloneURL
-	}
-	if converted := rewriteGitHubSSHToHTTPS(cloneURL); converted != "" {
-		cloneURL = converted
-	}
-	if strings.HasPrefix(cloneURL, "https://github.com/") {
-		return strings.Replace(cloneURL, "https://github.com/", "https://x-access-token:"+token+"@github.com/", 1)
+	if githubToken != "" {
+		if converted := rewriteGitHubSSHToHTTPS(cloneURL); converted != "" {
+			cloneURL = converted
+		}
+		if strings.HasPrefix(cloneURL, "https://github.com/") {
+			return strings.Replace(cloneURL, "https://github.com/", "https://x-access-token:"+githubToken+"@github.com/", 1)
+		}
 	}
 	return cloneURL
 }

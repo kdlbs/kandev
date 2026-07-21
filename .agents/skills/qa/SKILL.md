@@ -5,14 +5,22 @@ description: Verify a feature works after implementation. Actively try to break 
 
 # QA
 
+## Planner Entry
+
+The user-started primary session delegates this
+entire procedure to the registered `qa` worker, reviews its report, and creates
+new implementer assignments for any fixes. It does not run QA or fix findings
+directly. An explicitly assigned `qa` worker continues below and does not spawn
+other workers.
+
 Verify that a feature works as intended after implementation. Assume bugs exist and hunt for them.
 
 Mindset: you are not confirming it works — you are discovering where it breaks.
 
 ## Available skills
 
-- **`/tdd`** — Use to write tests for any gaps found during QA.
-- **`/e2e`** — Use to write Playwright E2E tests for user-facing flows that lack coverage.
+- **`/tdd`** — Recommend for an implementer assignment when unit or integration coverage is missing.
+- **`/e2e`** — Recommend for an implementer assignment when a user-facing flow lacks browser coverage.
 
 ---
 
@@ -24,7 +32,7 @@ Create these tasks immediately (use your task/todo tracking tool if available):
 2. **Trace the wiring** — Verify the feature is actually connected end-to-end
 3. **Test the happy path** — Run the feature as a user would
 4. **Try to break it** — Boundary values, error paths, concurrency, auth
-5. **Verify test coverage** — Check for missing tests, write them if needed
+5. **Verify test coverage** — Check for missing tests and report gaps
 6. **Report** — Summarize findings with verdict
 
 Mark each task in_progress when you begin it and completed when you finish it.
@@ -111,7 +119,8 @@ Check that the implementation has tests covering the behaviors you just verified
 - Are edge cases from Phase 4 covered?
 - Are tests at the right level: unit for pure logic, integration for boundaries, E2E for critical browser flows?
 - Do tests assert behavior/state/output rather than implementation details or mock behavior?
-- If tests are missing, write them using `/tdd` (or `/e2e` for user-facing flows)
+- If tests are missing, report the exact behavior and recommended test level so
+  the planner can assign a `test-engineer` worker.
 - Avoid snapshot tests unless the snapshot change will be deliberately reviewed.
 
 Mark task 5 as completed.

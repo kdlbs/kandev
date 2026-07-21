@@ -2291,9 +2291,14 @@ func TestRepositoryCloneURL(t *testing.T) {
 			want: "https://github.com/acme/app.git",
 		},
 		{
-			name: "gitlab repo",
+			name: "gitlab self-managed repo",
+			repo: &models.Repository{Provider: "gitlab", ProviderHost: "http://gitlab.internal", ProviderOwner: "group/subgroup", ProviderName: "app"},
+			want: "http://gitlab.internal/group/subgroup/app.git",
+		},
+		{
+			name: "gitlab unknown host fails closed",
 			repo: &models.Repository{Provider: "gitlab", ProviderOwner: "acme", ProviderName: "app"},
-			want: "https://gitlab.com/acme/app.git",
+			want: "",
 		},
 		{
 			name: "bitbucket repo",
@@ -2343,8 +2348,8 @@ type recordingAuthenticatedCloner struct {
 	password    string
 }
 
-func (c *recordingAuthenticatedCloner) EnsureWorkspaceCloned(
-	_ context.Context, workspaceID, provider, _, _, _ string,
+func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedForProvider(
+	_ context.Context, workspaceID, _, provider, _, _, _, _, _ string,
 ) (string, error) {
 	c.normalCalls++
 	c.workspaceID = workspaceID
@@ -2354,12 +2359,12 @@ func (c *recordingAuthenticatedCloner) EnsureWorkspaceCloned(
 
 func (c *recordingAuthenticatedCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
 
-func (c *recordingAuthenticatedCloner) BuildCloneURL(_, _, _ string) (string, error) {
+func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_, _, _, _ string) (string, error) {
 	return "", nil
 }
 
 func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedWithBasicAuth(
-	_ context.Context, workspaceID, provider, _, _, _, _, password string,
+	_ context.Context, workspaceID, provider, _, _, _, _, _, password string,
 ) (string, error) {
 	c.authCalls++
 	c.workspaceID = workspaceID

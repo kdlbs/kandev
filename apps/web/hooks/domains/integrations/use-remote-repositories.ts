@@ -63,6 +63,9 @@ async function loadRemoteRepositories(workspaceId: string): Promise<RemoteReposi
   const githubRequest = workspaceId
     ? fetchAccessibleRepos({ workspaceId, limit: 100 })
     : Promise.reject(new Error("workspace is required for GitHub repositories"));
+  const gitLabRequest = workspaceId
+    ? listUserProjects(workspaceId)
+    : Promise.reject(new Error("workspace is required for GitLab repositories"));
   const azureRequest = workspaceId
     ? loadAzureRepositories(workspaceId)
     : Promise.reject(new Error("workspace is required for Azure DevOps repositories"));
@@ -79,7 +82,7 @@ async function loadRemoteRepositories(workspaceId: string): Promise<RemoteReposi
         private: repo.private,
       })),
     ),
-    listUserProjects().then(({ projects = [] }) =>
+    gitLabRequest.then(({ projects = [] }) =>
       projects.map((project) => ({
         provider: "gitlab" as const,
         id: String(project.id),

@@ -171,7 +171,7 @@ function buildPRFeedbackItems(params: BuildContextItemsParams): ContextItem[] {
     {
       kind: "pr-feedback" as const,
       id: "pr-feedback",
-      label: `${pendingPRFeedback.length} PR feedback`,
+      label: `${pendingPRFeedback.length} ${pendingPRFeedback.every((comment) => comment.provider === "gitlab") ? "MR" : "PR"} feedback`,
       comments: pendingPRFeedback,
       onRemove: handleClearPRFeedback,
       onRemoveComment: (id: string) => handleRemovePRFeedback(id),

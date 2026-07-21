@@ -91,7 +91,7 @@ func TestCloneURLWithHost(t *testing.T) {
 		{
 			"http scheme honored",
 			"gitlab", "http://gitlab.local", "team", "service", ProtocolHTTPS,
-			"https://gitlab.local/team/service.git",
+			"http://gitlab.local/team/service.git",
 		},
 		{
 			// scp-style "git@host:path" can't carry a port; ssh:// URL

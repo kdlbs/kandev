@@ -1,14 +1,15 @@
 import type { StateCreator } from "zustand";
 import type { GitLabSlice, GitLabSliceState } from "./types";
+import { normalizeGitLabOrigin } from "@/lib/gitlab-identity";
 
 export const defaultGitLabState: GitLabSliceState = {
-  taskMRs: { byTaskId: {} },
+  taskMRs: { byWorkspaceId: {} },
   gitlabReviewWatches: { items: [], loaded: false, loading: false },
   gitlabIssueWatches: { items: [], loaded: false, loading: false },
   gitlabMRWatches: { items: [], loaded: false, loading: false },
   gitlabActionPresets: { byWorkspaceId: {}, loading: false },
   gitlabStats: { data: null, loading: false, loadedAt: null },
-  gitlabStatus: { data: null, loading: false, loadedAt: null },
+  gitlabStatus: { workspaceId: null, data: null, loading: false, loadedAt: null },
 };
 
 type ImmerSet = Parameters<
@@ -30,27 +31,48 @@ export const createGitLabSlice: GitLabSliceCreator = (set: ImmerSet) => ({
 
 function taskMRActions(set: ImmerSet) {
   return {
-    setTaskMRs: (mrs: Record<string, GitLabSliceState["taskMRs"]["byTaskId"][string]>) =>
+    setTaskMRs: (workspaceId: string, mrs: GitLabSliceState["taskMRs"]["byWorkspaceId"][string]) =>
       set((draft) => {
-        draft.taskMRs.byTaskId = mrs;
+        draft.taskMRs.byWorkspaceId[workspaceId] = mrs;
       }),
-    setTaskMR: (taskId: string, mr: GitLabSliceState["taskMRs"]["byTaskId"][string][number]) =>
+    setTaskMR: (
+      workspaceId: string,
+      taskId: string,
+      mr: GitLabSliceState["taskMRs"]["byWorkspaceId"][string][string][number],
+    ) =>
       set((draft) => {
-        const existing = draft.taskMRs.byTaskId[taskId] ?? [];
+        const workspaceMRs = draft.taskMRs.byWorkspaceId[workspaceId] ?? {};
+        const existing = workspaceMRs[taskId] ?? [];
         const repoKey = mr.repository_id ?? "";
         const idx = existing.findIndex(
           (m) =>
             (m.repository_id ?? "") === repoKey &&
+            normalizeGitLabOrigin(m.host) === normalizeGitLabOrigin(mr.host) &&
             m.project_path === mr.project_path &&
             m.mr_iid === mr.mr_iid,
         );
         if (idx >= 0) existing[idx] = mr;
         else existing.push(mr);
-        draft.taskMRs.byTaskId[taskId] = existing;
+        workspaceMRs[taskId] = existing;
+        draft.taskMRs.byWorkspaceId[workspaceId] = workspaceMRs;
       }),
-    resetTaskMRs: () =>
+    removeTaskMR: (workspaceId: string, associationId: string) =>
       set((draft) => {
-        draft.taskMRs.byTaskId = {};
+        const workspaceMRs = draft.taskMRs.byWorkspaceId[workspaceId];
+        if (!workspaceMRs) return;
+        for (const taskId of Object.keys(workspaceMRs)) {
+          workspaceMRs[taskId] = (workspaceMRs[taskId] ?? []).filter(
+            (mr) => mr.id !== associationId,
+          );
+        }
+      }),
+    resetTaskMRs: (workspaceId?: string) =>
+      set((draft) => {
+        if (workspaceId) {
+          delete draft.taskMRs.byWorkspaceId[workspaceId];
+          return;
+        }
+        draft.taskMRs.byWorkspaceId = {};
       }),
   };
 }
@@ -167,13 +189,18 @@ function statsActions(set: ImmerSet) {
 
 function statusActions(set: ImmerSet) {
   return {
-    setGitLabStatus: (status: GitLabSliceState["gitlabStatus"]["data"]) =>
+    setGitLabStatus: (
+      workspaceId: string | null,
+      status: GitLabSliceState["gitlabStatus"]["data"],
+    ) =>
       set((draft) => {
+        draft.gitlabStatus.workspaceId = workspaceId;
         draft.gitlabStatus.data = status;
         draft.gitlabStatus.loadedAt = Date.now();
       }),
-    setGitLabStatusLoading: (loading: boolean) =>
+    setGitLabStatusLoading: (workspaceId: string | null, loading: boolean) =>
       set((draft) => {
+        draft.gitlabStatus.workspaceId = workspaceId;
         draft.gitlabStatus.loading = loading;
       }),
   };

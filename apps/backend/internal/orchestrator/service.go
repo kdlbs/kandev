@@ -24,7 +24,6 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -351,9 +350,9 @@ type Service struct {
 	// issue watch events. When the task creators are nil the events are
 	// logged but no tasks are created — matches the GitHub flow when a
 	// workspace has no task creator wired.
-	gitlabService           *gitlab.Service
-	gitlabReviewTaskCreator GitLabReviewTaskCreator
-	gitlabIssueTaskCreator  GitLabIssueTaskCreator
+	gitlabService      GitLabWatchService
+	gitlabReviewSource *GitLabReviewWatcherSource
+	gitlabIssueSource  *GitLabIssueWatcherSource
 
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver

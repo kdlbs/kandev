@@ -12,6 +12,31 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+func TestProviderRepoPathSeparatesProviderHosts(t *testing.T) {
+	t.Parallel()
+
+	cloner := NewCloner(Config{}, ProtocolHTTPS, t.TempDir(), logger.Default())
+	gitHubPath, err := cloner.ProviderRepoPath("github", "https://github.com", "group", "project")
+	if err != nil {
+		t.Fatalf("GitHub ProviderRepoPath: %v", err)
+	}
+	gitLabPath, err := cloner.ProviderRepoPath("gitlab", "https://gitlab.com", "group", "project")
+	if err != nil {
+		t.Fatalf("GitLab ProviderRepoPath: %v", err)
+	}
+	selfManagedPath, err := cloner.ProviderRepoPath("gitlab", "https://gitlab.internal:8443", "group", "project")
+	if err != nil {
+		t.Fatalf("self-managed GitLab ProviderRepoPath: %v", err)
+	}
+
+	if gitHubPath == gitLabPath || gitLabPath == selfManagedPath || gitHubPath == selfManagedPath {
+		t.Fatalf("provider paths collided: github=%q gitlab=%q self-managed=%q", gitHubPath, gitLabPath, selfManagedPath)
+	}
+	if !strings.Contains(selfManagedPath, filepath.Join("gitlab", "gitlab.internal-8443")) {
+		t.Fatalf("self-managed path %q does not contain normalized provider and host", selfManagedPath)
+	}
+}
+
 func TestClone_PreservesNonDefaultRemoteBranches(t *testing.T) {
 	t.Parallel()
 
@@ -53,6 +78,41 @@ func TestWorkspaceRepoPathIsolatesManagedClones(t *testing.T) {
 	legacy := filepath.Join(basePath, "acme", "private")
 	if !cloner.ShouldRecloneForWorkspace("workspace-a", legacy) {
 		t.Fatal("legacy shared managed clone must be rematerialized")
+	}
+}
+
+func TestWorkspaceProviderRepoPathSeparatesSelfManagedOrigins(t *testing.T) {
+	t.Parallel()
+
+	basePath := t.TempDir()
+	cloner := NewCloner(Config{BasePath: basePath}, ProtocolHTTPS, "", logger.Default())
+	first, err := cloner.WorkspaceProviderRepoPath(
+		"workspace-a", "gitlab", "https://gitlab.first.internal", "acme", "api",
+	)
+	if err != nil {
+		t.Fatalf("first WorkspaceProviderRepoPath: %v", err)
+	}
+	second, err := cloner.WorkspaceProviderRepoPath(
+		"workspace-a", "gitlab", "https://gitlab.second.internal", "acme", "api",
+	)
+	if err != nil {
+		t.Fatalf("second WorkspaceProviderRepoPath: %v", err)
+	}
+	defaultOrigin, err := cloner.WorkspaceProviderRepoPath(
+		"workspace-a", "gitlab", "https://gitlab.com", "acme", "api",
+	)
+	if err != nil {
+		t.Fatalf("default WorkspaceProviderRepoPath: %v", err)
+	}
+	if first == second {
+		t.Fatalf("self-managed origins collided at %q", first)
+	}
+	if !strings.Contains(first, filepath.Join("gitlab", "gitlab.first.internal", "acme", "api")) {
+		t.Fatalf("first path did not retain normalized origin: %q", first)
+	}
+	wantDefault := filepath.Join(basePath, "workspaces", "workspace-a", "gitlab", "acme", "api")
+	if defaultOrigin != wantDefault {
+		t.Fatalf("default origin path = %q, want %q", defaultOrigin, wantDefault)
 	}
 }
 
@@ -143,9 +203,11 @@ printf '%s\n' "$GH_TOKEN|$GITHUB_TOKEN|$GIT_CONFIG_GLOBAL|$GIT_CONFIG_NOSYSTEM|$
 	if got, want := strings.Split(env, "|"), wantParts; strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("git auth environment = %#v, want %#v", got, want)
 	}
-	assertUniqueGitConfigEnv(t, cloner.gitCmd(context.Background(), &cloneAuth{
-		host: "github.com", username: "x-access-token", password: "workspace-token",
-	}).Env)
+	cmd := exec.CommandContext(context.Background(), "git", "version")
+	configureGitCommand(cmd, &cloneAuth{
+		origin: "https://github.com", username: "x-access-token", password: "workspace-token",
+	})
+	assertUniqueGitConfigEnv(t, cmd.Env)
 }
 
 func TestManagedGitCommandExecutesWithCompleteConfigAndNoAmbientAuth(t *testing.T) {
@@ -155,10 +217,10 @@ func TestManagedGitCommandExecutesWithCompleteConfigAndNoAmbientAuth(t *testing.
 	t.Setenv("GIT_CONFIG_KEY_0", "credential.helper")
 	t.Setenv("GIT_CONFIG_VALUE_0", "!printf 'password=ambient-token\\n'")
 
-	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", logger.Default())
-	cmd := cloner.gitCmd(context.Background(), &cloneAuth{
-		host: "github.com", username: "workspace-user", password: "workspace-token",
-	}, "credential", "fill")
+	cmd := exec.CommandContext(context.Background(), "git", "credential", "fill")
+	configureGitCommand(cmd, &cloneAuth{
+		origin: "https://github.com", username: "workspace-user", password: "workspace-token",
+	})
 	cmd.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=acme/private.git\n\n")
 
 	out, err := cmd.CombinedOutput()
@@ -193,7 +255,7 @@ func TestWorkspaceCloneAuthPreservesNonGitHubURL(t *testing.T) {
 	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolSSH, "", logger.Default())
 	want := "git@ssh.dev.azure.com:v3/acme/Platform/api"
 	got, auth, err := cloner.workspaceCloneAuth(
-		context.Background(), "workspace-a", "azure_devops", want, "Platform", "api",
+		context.Background(), "workspace-a", "azure_devops", want, "Platform", "api", "", "",
 	)
 	if err != nil {
 		t.Fatalf("workspaceCloneAuth() unexpected error: %v", err)
@@ -250,6 +312,53 @@ func envValue(env []string, key string) string {
 		}
 	}
 	return ""
+}
+
+func TestGitCmdBindsGitLabCredentialToExactOrigin(t *testing.T) {
+	auth, err := credentialAuth(
+		"https://gitlab.internal/group/repo.git", "https://gitlab.internal", "workspace-token",
+	)
+	if err != nil {
+		t.Fatalf("credentialAuth: %v", err)
+	}
+	cmd := exec.CommandContext(context.Background(), "git", "version")
+	configureGitCommand(cmd, auth)
+	joined := strings.Join(cmd.Env, "\n")
+	if !strings.Contains(joined, gitHubCredentialEnv+"=workspace-token") ||
+		!strings.Contains(joined, "GIT_CONFIG_KEY_1=credential.https://gitlab.internal.helper") {
+		t.Fatalf("credential env = %s", joined)
+	}
+	if _, err := credentialAuth(
+		"https://gitlab.com/group/repo.git", "https://gitlab.internal", "must-not-leak",
+	); err == nil {
+		t.Fatal("expected cross-host credential binding to fail")
+	}
+}
+
+func TestGitCmdUsesSSHAuthForMatchingWorkspaceGitLabHost(t *testing.T) {
+	for _, cloneURL := range []string{
+		"git@gitlab.internal:group/repo.git",
+		"ssh://git@gitlab.internal:2222/group/repo.git",
+	} {
+		auth, err := credentialAuth(cloneURL, "https://gitlab.internal:8443", "workspace-token")
+		if err != nil {
+			t.Fatalf("credentialAuth(%q): %v", cloneURL, err)
+		}
+		if auth != nil {
+			t.Fatalf("SSH clone received HTTP credentials: %#v", auth)
+		}
+	}
+}
+
+func TestGitCmdRejectsSSHCloneForDifferentWorkspaceGitLabHost(t *testing.T) {
+	for _, cloneURL := range []string{
+		"git@gitlab.other:group/repo.git",
+		"ssh://git@gitlab.other:2222/group/repo.git",
+	} {
+		if _, err := credentialAuth(cloneURL, "https://gitlab.internal", "must-not-leak"); err == nil {
+			t.Fatalf("gitCmd accepted mismatched SSH clone %q", cloneURL)
+		}
+	}
 }
 
 func initBareRepoWithReleaseBranch(t *testing.T) string {

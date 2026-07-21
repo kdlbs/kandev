@@ -254,14 +254,16 @@ type fakeRepoCloner struct {
 	workspaceID   string
 }
 
-func (f *fakeRepoCloner) EnsureWorkspaceCloned(_ context.Context, workspaceID, _, _, _, _ string) (string, error) {
+func (f *fakeRepoCloner) EnsureWorkspaceClonedForProvider(
+	_ context.Context, workspaceID, _, _, _, _, _, _, _ string,
+) (string, error) {
 	f.workspaceID = workspaceID
 	return f.returnPath, nil
 }
 
 func (f *fakeRepoCloner) ShouldRecloneForWorkspace(_, _ string) bool { return f.shouldReclone }
 
-func (f *fakeRepoCloner) BuildCloneURL(_, owner, name string) (string, error) {
+func (f *fakeRepoCloner) BuildCloneURLWithHost(_, _, owner, name string) (string, error) {
 	return "https://github.com/" + owner + "/" + name + ".git", nil
 }
 

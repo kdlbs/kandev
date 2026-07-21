@@ -1,13 +1,40 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import Link from "@/components/routing/app-link";
-import { IconBrandGitlab, IconCheck, IconClock, IconGitMerge, IconX } from "@tabler/icons-react";
+import {
+  IconBrandGitlab,
+  IconCheck,
+  IconClock,
+  IconExternalLink,
+  IconGitMerge,
+  IconLink,
+  IconPlus,
+  IconUnlink,
+  IconX,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
+import {
+  useGitLabAvailable,
+  useTaskMRs,
+  useWorkspaceMRs,
+} from "@/hooks/domains/gitlab/use-task-mr";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { useAppStore } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
+import { deleteTaskMR } from "@/lib/api/domains/gitlab-api";
 import type { TaskMR } from "@/lib/types/gitlab";
+import type { Repository } from "@/lib/types/http";
+import { TaskMRLinkDialog } from "./task-mr-link-dialog";
+import { useDockviewStore } from "@/lib/state/dockview-store";
+import { mrTaskKey } from "./mr-detail-panel";
 
 /**
  * Icon + colour for an MR's combined state. Mirrors github's pr-task-icon
@@ -36,60 +63,254 @@ function statusTextColor(mr: TaskMR): string {
   return "text-muted-foreground";
 }
 
-function MRSingleButton({ mr }: { mr: TaskMR }) {
-  const tooltip = `${mr.project_path} !${mr.mr_iid} — ${mr.mr_title}`;
+export function mrTriggerClass(compact: boolean, mobile: boolean): string {
+  if (mobile) return "h-11 w-11 cursor-pointer";
+  return compact ? "h-9 w-9 cursor-pointer" : "cursor-pointer gap-1.5 px-2";
+}
+
+export function openMobileMRReview(
+  setReview: (sessionId: string, mrKey: string) => void,
+  sessionId: string,
+  mr: TaskMR,
+) {
+  setReview(sessionId, mrTaskKey(mr));
+}
+
+export function openDesktopMRReview(
+  addMRPanel: (mrKey: string, sessionId?: string | null) => void,
+  sessionId: string | null,
+  mr: TaskMR,
+  schedule: (callback: FrameRequestCallback) => number = requestAnimationFrame,
+) {
+  const mrKey = mrTaskKey(mr);
+  addMRPanel(mrKey, sessionId);
+  schedule(() => {
+    schedule(() => addMRPanel(mrKey, sessionId));
+  });
+}
+
+function MRTriggerContent({
+  compact,
+  single,
+  count,
+}: {
+  compact: boolean;
+  single: TaskMR | null;
+  count: number;
+}) {
+  if (compact) return <IconBrandGitlab className="h-4 w-4 text-orange-500" />;
+  if (single) {
+    return (
+      <>
+        <IconGitMerge className={`h-4 w-4 ${statusTextColor(single)}`} />
+        <span className="text-xs font-medium">!{single.mr_iid}</span>
+        <MRStatusIcon mr={single} />
+      </>
+    );
+  }
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
+    <>
+      <IconBrandGitlab className="h-4 w-4 text-orange-500" />
+      <span className="text-xs font-medium">{count} MRs</span>
+    </>
+  );
+}
+
+function MRMenuButton({
+  mrs,
+  canLink,
+  compact,
+  mobile,
+  onLink,
+  onUnlink,
+}: {
+  mrs: TaskMR[];
+  canLink: boolean;
+  compact: boolean;
+  mobile: boolean;
+  onLink: () => void;
+  onUnlink: (associationId: string) => void;
+}) {
+  const single = mrs.length === 1 ? mrs[0] : null;
+  const addMRPanel = useDockviewStore((state) => state.addMRPanel);
+  const dockviewReady = useDockviewStore((state) => state.api !== null);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const setMobileSessionReview = useAppStore((state) => state.setMobileSessionReview);
+  const [pendingDesktopMR, setPendingDesktopMR] = useState<TaskMR | null>(null);
+
+  useEffect(() => {
+    if (!dockviewReady || !pendingDesktopMR) return;
+    openDesktopMRReview(addMRPanel, activeSessionId, pendingDesktopMR);
+    setPendingDesktopMR(null);
+  }, [activeSessionId, addMRPanel, dockviewReady, pendingDesktopMR]);
+
+  const openReview = (mr: TaskMR) => {
+    if (mobile) {
+      if (activeSessionId) openMobileMRReview(setMobileSessionReview, activeSessionId, mr);
+      return;
+    }
+    if (!dockviewReady) {
+      setPendingDesktopMR(mr);
+    } else {
+      openDesktopMRReview(addMRPanel, activeSessionId, mr);
+    }
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
         <Button
-          asChild
           data-testid="mr-topbar-button"
-          data-mr-iid={mr.mr_iid}
-          data-mr-state={mr.state}
-          size="sm"
+          data-mr-iid={single?.mr_iid}
+          data-mr-state={single?.state}
+          size={compact ? "icon-sm" : "sm"}
           variant="outline"
-          className="cursor-pointer gap-1.5 px-2"
+          className={mrTriggerClass(compact, mobile)}
+          aria-label={
+            single
+              ? `GitLab merge request !${single.mr_iid}`
+              : `${mrs.length} GitLab merge requests`
+          }
         >
-          <Link href={mr.mr_url} target="_blank" rel="noopener noreferrer">
-            <IconGitMerge className={`h-4 w-4 ${statusTextColor(mr)}`} />
-            <span className="text-xs font-medium">!{mr.mr_iid}</span>
-            <MRStatusIcon mr={mr} />
-          </Link>
+          <MRTriggerContent compact={compact} single={single} count={mrs.length} />
         </Button>
-      </TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
-    </Tooltip>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-72">
+        {mrs.map((mr) => (
+          <div key={mr.id}>
+            <DropdownMenuItem className="cursor-pointer" onSelect={() => openReview(mr)}>
+              <IconGitMerge className="h-4 w-4" />
+              <span className="min-w-0 truncate">
+                Review {mr.project_path}!{mr.mr_iid}
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild className="cursor-pointer">
+              <Link href={mr.mr_url} target="_blank" rel="noopener noreferrer">
+                <IconExternalLink className="h-4 w-4" /> Open in GitLab
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="cursor-pointer text-destructive focus:text-destructive"
+              onSelect={() => onUnlink(mr.id)}
+            >
+              <IconUnlink className="h-4 w-4" />
+              Unlink !{mr.mr_iid}
+            </DropdownMenuItem>
+          </div>
+        ))}
+        {canLink ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="cursor-pointer" onSelect={onLink}>
+              <IconPlus className="h-4 w-4" />
+              Link another merge request
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-function MRMultiButton({ mrs }: { mrs: TaskMR[] }) {
-  // 2+ MRs collapse into a single GitLab icon with a count. Detail panel
-  // / dropdown for fan-out lands with phase 4.
-  const failed = mrs.filter((m) => m.pipeline_state === "failure").length;
-  const merged = mrs.filter((m) => m.state === "merged").length;
-  const open = mrs.filter((m) => m.state === "open" || m.state === "opened").length;
+const EMPTY_REPOSITORIES: Repository[] = [];
+const EMPTY_TASK_REPOSITORIES: Array<{ repository_id: string }> = [];
+
+function MRTopbarControl({
+  mrs,
+  gitlabAvailable,
+  compact,
+  mobile,
+  onLink,
+  onUnlink,
+}: {
+  mrs: TaskMR[];
+  gitlabAvailable: boolean;
+  compact: boolean;
+  mobile: boolean;
+  onLink: () => void;
+  onUnlink: (associationId: string) => void;
+}) {
+  if (mrs.length > 0) {
+    return (
+      <MRMenuButton
+        mrs={mrs}
+        canLink={gitlabAvailable}
+        compact={compact}
+        mobile={mobile}
+        onLink={onLink}
+        onUnlink={onUnlink}
+      />
+    );
+  }
+  if (!gitlabAvailable) return null;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button size="sm" variant="outline" className="cursor-pointer gap-1.5 px-2">
-          <IconBrandGitlab className="h-4 w-4 text-orange-500" />
-          <span className="text-xs font-medium">{mrs.length} MRs</span>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {open > 0 && <div>{open} open</div>}
-        {failed > 0 && <div className="text-red-500">{failed} failing</div>}
-        {merged > 0 && <div className="text-purple-500">{merged} merged</div>}
-      </TooltipContent>
-    </Tooltip>
+    <Button
+      size={compact ? "icon-sm" : "sm"}
+      variant="outline"
+      className={mrTriggerClass(compact, mobile)}
+      onClick={onLink}
+      aria-label="Link GitLab merge request"
+    >
+      <IconLink className="h-4 w-4 text-orange-500" />
+      {!compact && <span className="text-xs font-medium">Link MR</span>}
+    </Button>
   );
 }
 
-export const MRTopbarButton = memo(function MRTopbarButton() {
+export const MRTopbarButton = memo(function MRTopbarButton({
+  compact = false,
+  mobile = false,
+}: {
+  compact?: boolean;
+  mobile?: boolean;
+}) {
+  const [linkOpen, setLinkOpen] = useState(false);
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const repositories = useAppStore((state) =>
+    workspaceId
+      ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_REPOSITORIES)
+      : EMPTY_REPOSITORIES,
+  );
+  const task = useTaskById(activeTaskId);
+  useWorkspaceMRs(workspaceId);
   const mrs = useTaskMRs(activeTaskId);
+  const gitlabAvailable = useGitLabAvailable();
+  const removeTaskMR = useAppStore((state) => state.removeTaskMR);
+  const { toast } = useToast();
 
-  if (mrs.length === 0) return null;
-  if (mrs.length === 1) return <MRSingleButton mr={mrs[0]} />;
-  return <MRMultiButton mrs={mrs} />;
+  if (!activeTaskId || !workspaceId) return null;
+
+  const unlink = async (associationId: string) => {
+    try {
+      await deleteTaskMR(associationId, workspaceId);
+      removeTaskMR(workspaceId, associationId);
+    } catch (error) {
+      toast({
+        title: "Failed to unlink merge request",
+        description: error instanceof Error ? error.message : "The merge request is still linked.",
+        variant: "error",
+      });
+    }
+  };
+
+  return (
+    <>
+      <MRTopbarControl
+        mrs={mrs}
+        gitlabAvailable={gitlabAvailable}
+        compact={compact}
+        mobile={mobile}
+        onLink={() => setLinkOpen(true)}
+        onUnlink={(associationId) => void unlink(associationId)}
+      />
+      <TaskMRLinkDialog
+        open={linkOpen}
+        onOpenChange={setLinkOpen}
+        taskId={activeTaskId}
+        workspaceId={workspaceId}
+        taskRepositories={task?.repositories ?? EMPTY_TASK_REPOSITORIES}
+        repositories={repositories}
+      />
+    </>
+  );
 });

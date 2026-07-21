@@ -57,6 +57,12 @@ func TestNoopClient_DataMethods_ReturnErrNoClient(t *testing.T) {
 		{"SubmitMRApproval", c.SubmitMRApproval(ctx, "g/p", 1)},
 		{"SubmitMRUnapproval", c.SubmitMRUnapproval(ctx, "g/p", 1)},
 		{"CreateMR", mustErr2(c.CreateMR(ctx, "g/p", "src", "dst", "t", "b", false))},
+		{"ListProjectMembers", mustErr2(c.ListProjectMembers(ctx, "g/p", "alice"))},
+		{"SetMRReviewers", c.SetMRReviewers(ctx, "g/p", 1, []int64{42})},
+		{"GetMRSubscription", mustErr2(c.GetMRSubscription(ctx, "g/p", 1))},
+		{"SetMRSubscription", mustErr2(c.SetMRSubscription(ctx, "g/p", 1, true))},
+		{"GetIssueSubscription", mustErr2(c.GetIssueSubscription(ctx, "g/p", 1))},
+		{"SetIssueSubscription", mustErr2(c.SetIssueSubscription(ctx, "g/p", 1, true))},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

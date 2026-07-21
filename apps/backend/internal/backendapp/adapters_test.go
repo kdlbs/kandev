@@ -257,6 +257,7 @@ func TestResolveForReviewRedetectsStoredMasterAfterClonePath(t *testing.T) {
 		Name:          "owner/repo",
 		SourceType:    "provider",
 		Provider:      "github",
+		ProviderHost:  "https://github.com",
 		ProviderOwner: "owner",
 		ProviderName:  "repo",
 		DefaultBranch: "master",

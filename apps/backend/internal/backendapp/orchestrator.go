@@ -735,7 +735,8 @@ type repositoryResolverAdapter struct {
 func (a *repositoryResolverAdapter) ResolveForReview(
 	ctx context.Context, workspaceID, provider, owner, name, defaultBranch string,
 ) (string, string, error) {
-	existing, err := a.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, provider, owner, name)
+	providerHost := "https://" + defaultProviderHostname(provider)
+	existing, err := a.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, provider, providerHost, owner, name)
 	if err != nil {
 		return "", "", fmt.Errorf("lookup repository by provider info: %w", err)
 	}
@@ -766,6 +767,7 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 	repo, _, err := a.taskSvc.FindOrCreateRepository(ctx, &taskservice.FindOrCreateRepositoryRequest{
 		WorkspaceID:   workspaceID,
 		Provider:      provider,
+		ProviderHost:  providerHost,
 		ProviderOwner: owner,
 		ProviderName:  name,
 		DefaultBranch: defaultBranch,
@@ -777,6 +779,17 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 
 	baseBranch := a.resolveReviewBaseBranch(ctx, repo, localPath, defaultBranch)
 	return repo.ID, baseBranch, nil
+}
+
+func defaultProviderHostname(provider string) string {
+	switch strings.ToLower(provider) {
+	case "gitlab":
+		return "gitlab.com"
+	case "bitbucket":
+		return "bitbucket.org"
+	default:
+		return "github.com"
+	}
 }
 
 func (a *repositoryResolverAdapter) resolveReviewBaseBranch(

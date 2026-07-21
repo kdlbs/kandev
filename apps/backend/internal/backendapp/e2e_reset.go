@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/gitlab"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -29,6 +30,7 @@ func registerE2EResetRoutes(
 	taskSvc *taskservice.Service,
 	automationSvc *automation.Service,
 	githubSvc *github.Service,
+	gitlabSvc *gitlab.Service,
 	log *logger.Logger,
 ) {
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
@@ -37,7 +39,7 @@ func registerE2EResetRoutes(
 	}
 
 	api := router.Group("/api/v1/e2e")
-	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, log))
+	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, log))
 	// Hidden-workflow factory: lets E2E tests cover the system-only
 	// workflow path (e.g. improve-kandev) without depending on the real
 	// bootstrap endpoint, which clones from GitHub and shells out to gh.
@@ -57,6 +59,7 @@ func handleE2EReset(
 	taskSvc *taskservice.Service,
 	automationSvc *automation.Service,
 	githubSvc *github.Service,
+	gitlabSvc *gitlab.Service,
 	log *logger.Logger,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -149,6 +152,17 @@ func handleE2EReset(
 			deletedWatches = n
 		}
 
+		var gitLabReset gitlab.E2EResetResult
+		if gitlabSvc != nil {
+			resetResult, resetErr := gitlabSvc.ResetWorkspaceE2E(ctx, workspaceID)
+			if resetErr != nil {
+				log.Error("e2e reset: GitLab workspace cleanup failed", zap.Error(resetErr))
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: resetErr.Error()})
+				return
+			}
+			gitLabReset = resetResult
+		}
+
 		// Route through the task service (rather than a raw SQL DELETE) so
 		// each delete spawns the async cleanup goroutine that stops the
 		// agentctl instance and releases its port. Without this, instances
@@ -199,10 +213,12 @@ func handleE2EReset(
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"deleted_tasks":          deletedTasks,
-			"deleted_workflows":      deletedWorkflows,
-			"deleted_automations":    deletedAutomations,
-			"deleted_review_watches": deletedWatches,
+			"deleted_tasks":                 deletedTasks,
+			"deleted_workflows":             deletedWorkflows,
+			"deleted_automations":           deletedAutomations,
+			"deleted_review_watches":        deletedWatches,
+			"deleted_gitlab_review_watches": gitLabReset.ReviewWatches,
+			"deleted_gitlab_issue_watches":  gitLabReset.IssueWatches,
 		})
 	}
 }

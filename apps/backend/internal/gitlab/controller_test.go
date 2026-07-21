@@ -40,6 +40,18 @@ func newControllerFixture(t *testing.T, username string) (*gin.Engine, *requestL
 
 	client := NewPATClient(srv.URL, "tok")
 	svc := NewService(srv.URL, client, AuthMethodPAT, nil, log)
+	store := newTestStore(t)
+	seedWorkspace(t, store, "workspace-test")
+	secrets := &configTestSecrets{values: map[string]string{
+		SecretKeyForWorkspace("workspace-test"): "tok",
+	}}
+	if err := store.UpsertConfigForWorkspace(t.Context(), "workspace-test", &GitLabConfig{
+		Host: srv.URL, AuthMethod: AuthMethodPAT,
+	}); err != nil {
+		t.Fatalf("seed GitLab config: %v", err)
+	}
+	svc.SetStore(store)
+	svc.SetWorkspaceSecretStore(secrets)
 	ctrl := NewController(svc, log)
 	router := gin.New()
 	ctrl.RegisterHTTPRoutes(router)
@@ -75,6 +87,13 @@ func (r *requestLog) findByPath(path string) *recordedRequest {
 
 // hit issues a GET against the in-process router and returns the response.
 func hit(router *gin.Engine, target string) *httptest.ResponseRecorder {
+	separator := "?"
+	if strings.Contains(target, "?") {
+		separator = "&"
+	}
+	if !strings.Contains(target, "workspace_id=") {
+		target += separator + "workspace_id=workspace-test"
+	}
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -215,6 +234,17 @@ func TestHttpSearchUserMRs_ReviewRequestedWithoutUsername_Returns500(t *testing.
 	gin.SetMode(gin.TestMode)
 	log := newTestLogger(t)
 	svc := NewService(srv.URL, NewPATClient(srv.URL, "tok"), AuthMethodPAT, nil, log)
+	store := newTestStore(t)
+	seedWorkspace(t, store, "workspace-test")
+	if err := store.UpsertConfigForWorkspace(t.Context(), "workspace-test", &GitLabConfig{
+		Host: srv.URL, AuthMethod: AuthMethodPAT,
+	}); err != nil {
+		t.Fatalf("seed GitLab config: %v", err)
+	}
+	svc.SetStore(store)
+	svc.SetWorkspaceSecretStore(&configTestSecrets{values: map[string]string{
+		SecretKeyForWorkspace("workspace-test"): "tok",
+	}})
 	router := gin.New()
 	NewController(svc, log).RegisterHTTPRoutes(router)
 

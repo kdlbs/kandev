@@ -203,6 +203,7 @@ export type Repository = {
   local_path: string;
   provider: string;
   provider_repo_id: string;
+  provider_host?: string;
   provider_owner: string;
   provider_name: string;
   default_branch: string;

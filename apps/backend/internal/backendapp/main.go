@@ -521,6 +521,7 @@ func startAgentInfrastructure(
 	// orchestrator so review/issue watch events get turned into tasks.
 	if services.GitLab != nil {
 		orchestratorSvc.SetGitLabService(services.GitLab)
+		orchestratorSvc.SetGitLabCredentialResolver(services.GitLab)
 		services.GitLab.SetTaskDeleter(&taskDeleterAdapter{svc: services.Task})
 		services.GitLab.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		glPoller := gitlabpkg.NewPoller(services.GitLab, eventBus, log)
@@ -651,7 +652,7 @@ func startGatewayAndServe(
 	gateway, _, notificationCtrl, terminalSvc, err := provideGateway(
 		ctx, log, eventBus, services.Task, services.User,
 		orchestratorSvc, lifecycleMgr, agentRegistry,
-		repos.Notification, repos.Task, repos.Terminal, services.GitHub,
+		repos.Notification, repos.Task, repos.Terminal, services.GitHub, services.GitLab,
 		cfg.ResolvedHomeDir(),
 	)
 	if terminalSvc != nil {

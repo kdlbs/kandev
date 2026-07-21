@@ -158,3 +158,27 @@ func (c *NoopClient) SetMRLabels(context.Context, string, int, []string) error {
 func (c *NoopClient) SetMRAssignees(context.Context, string, int, []int) error {
 	return ErrNoClient
 }
+
+func (c *NoopClient) ListProjectMembers(context.Context, string, string) ([]ProjectMember, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) SetMRReviewers(context.Context, string, int, []int64) error {
+	return ErrNoClient
+}
+
+func (c *NoopClient) GetMRSubscription(context.Context, string, int) (*SubscriptionState, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) SetMRSubscription(context.Context, string, int, bool) (*SubscriptionState, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) GetIssueSubscription(context.Context, string, int) (*SubscriptionState, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) SetIssueSubscription(context.Context, string, int, bool) (*SubscriptionState, error) {
+	return nil, ErrNoClient
+}

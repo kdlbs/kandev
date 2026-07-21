@@ -63,7 +63,9 @@ describe("useBranchesByURL", () => {
     expect(result.current.branches(REPO_A)[0]).toMatchObject({ name: "main", type: "remote" });
     expect(result.current.branches(REPO_B)[0]).toMatchObject({ name: "develop", type: "remote" });
   });
+});
 
+describe("useBranchesByURL provider routing", () => {
   it("dispatches GitLab and Azure URLs without calling GitHub", async () => {
     listProjectBranchesMock.mockResolvedValue({ branches: [{ name: "develop" }] });
     listAzureDevOpsBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
@@ -81,7 +83,11 @@ describe("useBranchesByURL", () => {
       expect(result.current.branches(azure)).toHaveLength(1);
     });
     expect(fetchRepoBranchesMock).not.toHaveBeenCalled();
-    expect(listProjectBranchesMock).toHaveBeenCalledWith("acme/platform/api", expect.anything());
+    expect(listProjectBranchesMock).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      "acme/platform/api",
+      expect.anything(),
+    );
     expect(listAzureDevOpsBranchesMock).toHaveBeenCalledWith(
       WORKSPACE_ID,
       "acme",
@@ -108,6 +114,27 @@ describe("useBranchesByURL", () => {
     );
   });
 
+  it("loads branches for a self-managed GitLab URL", async () => {
+    listProjectBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
+    const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
+    const gitlab = "https://gitlab.internal:8443/acme/platform/api.git";
+
+    act(() => result.current.ensure(gitlab));
+
+    await waitFor(() => {
+      expect(listProjectBranchesMock).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        "acme/platform/api",
+        expect.anything(),
+      );
+      expect(result.current.branches(gitlab)).toEqual([
+        expect.objectContaining({ name: "main", type: "remote" }),
+      ]);
+    });
+  });
+});
+
+describe("useBranchesByURL request state", () => {
   it("dedupes concurrent ensure() calls for the same URL into a single fetch", async () => {
     fetchRepoBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
 

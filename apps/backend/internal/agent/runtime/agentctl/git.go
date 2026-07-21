@@ -22,10 +22,12 @@ type GitOperationResult struct {
 // PRCreateResult represents the result of a PR creation operation.
 // This matches the server-side process.PRCreateResult.
 type PRCreateResult struct {
-	Success bool   `json:"success"`
-	PRURL   string `json:"pr_url,omitempty"`
-	Output  string `json:"output,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Success      bool   `json:"success"`
+	BranchPushed bool   `json:"branch_pushed,omitempty"`
+	PRURL        string `json:"pr_url,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	Output       string `json:"output,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 // GitPull performs a git pull operation on the worktree.

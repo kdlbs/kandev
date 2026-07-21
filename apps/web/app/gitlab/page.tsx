@@ -1,17 +1,27 @@
-import { listWorkspacesAction } from "@/app/actions/workspaces";
+import {
+  listWorkspacesAction,
+  listWorkflowsAction,
+  listRepositoriesAction,
+  listWorkspaceWorkflowStepsAction,
+} from "@/app/actions/workspaces";
 import { fetchUserSettings } from "@/lib/api";
 import { StateHydrator } from "@/components/state-hydrator";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { GitLabPageClient } from "./gitlab-page-client";
-import type { Workspace, UserSettingsResponse } from "@/lib/types/http";
+import type {
+  Repository,
+  Workflow,
+  WorkflowStep,
+  Workspace,
+  UserSettingsResponse,
+} from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 
-// Minimal SSR entrypoint for /gitlab. v1 surface: list the current user's
-// open MRs + issues and let them click through to GitLab. The browse-and-
-// trigger flow (review/issue watchers, presets) is parallel to /github and
-// will land alongside the watchers backend in a follow-up.
 export default async function GitLabPage() {
   let workspaces: Workspace[] = [];
+  let workflows: Workflow[] = [];
+  let steps: WorkflowStep[] = [];
+  let repositories: Repository[] = [];
   let workspaceId: string | undefined;
   let userSettingsResponse: UserSettingsResponse | null = null;
 
@@ -23,6 +33,16 @@ export default async function GitLabPage() {
     workspaces = workspacesResponse.workspaces;
     userSettingsResponse = settingsResponse;
     workspaceId = settingsResponse?.settings?.workspace_id || workspaces[0]?.id;
+    if (workspaceId) {
+      const [workflowsResponse, repositoriesResponse, stepsResponse] = await Promise.all([
+        listWorkflowsAction(workspaceId),
+        listRepositoriesAction(workspaceId),
+        listWorkspaceWorkflowStepsAction(workspaceId),
+      ]);
+      workflows = workflowsResponse.workflows;
+      repositories = repositoriesResponse.repositories;
+      steps = stepsResponse.steps;
+    }
   } catch (error) {
     console.error("Failed to load GitLab page data:", error);
   }
@@ -31,13 +51,29 @@ export default async function GitLabPage() {
 
   const initialState: Partial<AppState> = {
     workspaces: { items: workspaces, activeId: workspaceId ?? null },
+    workflows: {
+      items: workflows.map((workflow) => ({
+        id: workflow.id,
+        workspaceId: workflow.workspace_id,
+        name: workflow.name,
+        description: workflow.description ?? null,
+        sortOrder: workflow.sort_order ?? 0,
+        ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
+      })),
+      activeId: workflows[0]?.id ?? null,
+    },
     userSettings: { ...mappedUserSettings, workspaceId: workspaceId ?? null },
   };
 
   return (
     <>
       <StateHydrator initialState={initialState} />
-      <GitLabPageClient workspaceId={workspaceId} />
+      <GitLabPageClient
+        workspaceId={workspaceId}
+        workflows={workflows}
+        steps={steps}
+        repositories={repositories}
+      />
     </>
   );
 }
