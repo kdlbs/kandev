@@ -246,7 +246,9 @@ func (c *Cloner) workspaceCloneAuth(
 
 // gitCmd creates a git command that ignores all ambient credential sources.
 func (c *Cloner) gitCmd(ctx context.Context, auth *cloneAuth, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	// The executable is fixed and callers use an argument vector with validated
+	// workspace paths and option-terminated clone URLs; no shell interprets args.
+	cmd := exec.CommandContext(ctx, "git", args...) // lgtm[go/command-injection]
 	env := withoutEnv(os.Environ(),
 		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", gitHubCredentialEnv, gitHubCredentialUserEnv,
 		"GIT_ASKPASS", "SSH_ASKPASS", "GIT_SSH", "GIT_SSH_COMMAND",
@@ -311,7 +313,9 @@ func (c *Cloner) EnsureWorkspaceClonedWithBasicAuth(
 func (c *Cloner) gitCmdWithHTTPHeader(
 	ctx context.Context, authURL, header string, args ...string,
 ) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	// The executable is fixed and callers use an argument vector with validated
+	// workspace paths and option-terminated clone URLs; no shell interprets args.
+	cmd := exec.CommandContext(ctx, "git", args...) // lgtm[go/command-injection]
 	env := withoutEnv(os.Environ(),
 		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", gitHubCredentialEnv, gitHubCredentialUserEnv,
 		"GIT_ASKPASS", "SSH_ASKPASS", "GIT_SSH", "GIT_SSH_COMMAND",
@@ -350,7 +354,7 @@ func (c *Cloner) cloneWithHTTPHeader(ctx context.Context, cloneURL, targetPath, 
 	}
 	c.logger.Info("cloning authenticated repository", zap.String("url", cloneURL), zap.String("target", targetPath))
 	cmd := c.gitCmdWithHTTPHeader(
-		ctx, cloneURL, header, "clone", "--filter=blob:none", gitNoTags, cloneURL, targetPath,
+		ctx, cloneURL, header, "clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath,
 	)
 	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
@@ -396,7 +400,7 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath string, auth *c
 		zap.String("url", cloneURL),
 		zap.String("target", targetPath))
 
-	cmd := c.gitCmd(ctx, auth, "clone", "--filter=blob:none", gitNoTags, cloneURL, targetPath)
+	cmd := c.gitCmd(ctx, auth, "clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath)
 	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
 	}

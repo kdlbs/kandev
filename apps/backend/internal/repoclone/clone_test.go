@@ -132,6 +132,9 @@ printf '%s\n' "$GH_TOKEN|$GITHUB_TOKEN|$GIT_CONFIG_GLOBAL|$GIT_CONFIG_NOSYSTEM|$
 	if !strings.Contains(args, "https://github.com/acme/private.git") {
 		t.Fatalf("git args do not contain credential-compatible HTTPS URL: %s", args)
 	}
+	if !strings.Contains(args, "--\nhttps://github.com/acme/private.git") {
+		t.Fatalf("git args do not terminate clone options before the URL: %s", args)
+	}
 	if strings.Contains(args, "workspace-token") || strings.Contains(args, "ambient-") {
 		t.Fatalf("git args leaked credential material: %s", args)
 	}
