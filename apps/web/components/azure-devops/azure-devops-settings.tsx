@@ -336,7 +336,9 @@ function ConnectionFields({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="azure-devops-project">Default project</Label>
+          <div className="sm:flex sm:min-h-7 sm:items-center">
+            <Label htmlFor="azure-devops-project">Default project</Label>
+          </div>
           <Select
             value={state.form.defaultProjectId || undefined}
             onValueChange={(projectId) => {
@@ -364,7 +366,7 @@ function ConnectionFields({
           </Select>
         </div>
         <div className="space-y-1.5">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 sm:min-h-7">
             <Label htmlFor="azure-devops-pat">Personal Access Token</Label>
             <PATSetupHelp organizationUrl={state.form.organizationUrl} />
           </div>

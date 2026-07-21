@@ -88,6 +88,18 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
     `/settings/workspace/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
   );
 
+  const projectInput = testPage.locator("#azure-devops-project");
+  const patInput = testPage.getByTestId("azure-devops-pat");
+  await expect(projectInput).toBeVisible();
+  const [projectBox, patBox] = await Promise.all([
+    projectInput.boundingBox(),
+    patInput.boundingBox(),
+  ]);
+  expect(projectBox).not.toBeNull();
+  expect(patBox).not.toBeNull();
+  expect(Math.abs(projectBox!.y - patBox!.y)).toBeLessThanOrEqual(1);
+  expect(projectBox!.height).toBe(patBox!.height);
+
   await testPage.getByTestId("azure-devops-organization").fill("https://dev.azure.com/acme");
   await testPage.getByRole("button", { name: "How to create a personal access token" }).hover();
   const createTokenLink = testPage.getByTestId("azure-devops-pat-help").locator(":scope > a");
