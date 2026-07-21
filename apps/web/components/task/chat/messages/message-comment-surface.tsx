@@ -234,8 +234,8 @@ function MessageCommentDrawer({
   target: CommentTarget | null;
   open: boolean;
   onClose: () => void;
-  onAdd: (feedback: string) => void;
-  onRun: (feedback: string) => void;
+  onAdd: (feedback: string) => boolean | void;
+  onRun: (feedback: string) => boolean | void;
   onDelete: (() => void) | undefined;
   errorMessage?: string | null;
 }) {
@@ -249,10 +249,10 @@ function MessageCommentDrawer({
   if (!target) return null;
   const isEditing = target.editingCommentId !== undefined;
   const submit = () => {
-    if (feedback.trim()) onAdd(feedback.trim());
+    if (feedback.trim() && onAdd(feedback.trim()) !== false) onClose();
   };
   const run = () => {
-    if (feedback.trim()) onRun(feedback.trim());
+    if (feedback.trim() && onRun(feedback.trim()) !== false) onClose();
   };
 
   return (
@@ -456,17 +456,15 @@ function useMessageCommentActions({
   const handleAdd = useCallback(
     (feedback: string) => {
       if (!saveComment(feedback)) return false;
-      close();
       return true;
     },
-    [close, saveComment],
+    [saveComment],
   );
 
   const handleRun = useCallback(
     (feedback: string) => {
       const comment = saveComment(feedback);
       if (!comment) return false;
-      close();
       if (comment !== true) {
         void runComment(comment).catch((error) =>
           console.error("Failed to run agent message comment:", error),
@@ -474,7 +472,7 @@ function useMessageCommentActions({
       }
       return true;
     },
-    [close, runComment, saveComment],
+    [runComment, saveComment],
   );
 
   const deleteComment = useCallback(() => {

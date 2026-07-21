@@ -6,8 +6,11 @@ import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/li
 import { MessageCommentSurface } from "./message-comment-surface";
 
 const COMMENT_TEXT = vi.hoisted(() => "Make this concrete.");
+const TOUCH_DRAWER = vi.hoisted(() => ({ enabled: false }));
 
-vi.mock("@/hooks/use-compact-task-chrome", () => ({ useTouchDrawer: () => false }));
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => TOUCH_DRAWER.enabled,
+}));
 vi.mock("@/hooks/domains/comments/use-run-comment", () => ({
   useRunComment: () => ({ runComment: vi.fn() }),
 }));
@@ -82,6 +85,7 @@ function addPendingComment(content: string, selectedText: string) {
 afterEach(() => {
   cleanup();
   resetComments();
+  TOUCH_DRAWER.enabled = false;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -175,6 +179,49 @@ describe("MessageCommentSurface", () => {
 
     expect(screen.getByTestId("comment-popover")).not.toBeNull();
     expect(Object.values(useCommentsStore.getState().byId)).toHaveLength(0);
+    expect(screen.getByRole("alert").textContent).toBe(
+      "The agent response changed. Select the text again.",
+    );
+  });
+});
+
+describe("MessageCommentSurface mobile drawer", () => {
+  it("keeps mobile feedback open when the selected quote was rewritten", () => {
+    TOUCH_DRAWER.enabled = true;
+    const original = "The settled answer contains detail.";
+    const updated = "The response was completely rewritten.";
+    const { rerender } = render(
+      <MessageCommentSurface
+        message={message(original)}
+        sessionId={SESSION_ID}
+        isTurnActive={false}
+      >
+        <span data-testid={MESSAGE_TEXT_TEST_ID}>{original}</span>
+      </MessageCommentSurface>,
+    );
+
+    const text = screen.getByTestId(MESSAGE_TEXT_TEST_ID).firstChild!;
+    const range = document.createRange();
+    const start = original.indexOf(SELECTED_QUOTE);
+    range.setStart(text, start);
+    range.setEnd(text, start + SELECTED_QUOTE.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
+    fireEvent.click(screen.getByTestId("agent-message-comment-trigger"));
+    const input = screen.getByTestId("agent-message-comment-input");
+    fireEvent.change(input, { target: { value: COMMENT_TEXT } });
+
+    rerender(
+      <MessageCommentSurface message={message(updated)} sessionId={SESSION_ID} isTurnActive={false}>
+        <span data-testid={MESSAGE_TEXT_TEST_ID}>{updated}</span>
+      </MessageCommentSurface>,
+    );
+    fireEvent.click(screen.getByTestId("agent-message-comment-add"));
+
+    expect(screen.getByTestId("agent-message-comment-drawer")).not.toBeNull();
+    expect((input as HTMLTextAreaElement).value).toBe(COMMENT_TEXT);
     expect(screen.getByRole("alert").textContent).toBe(
       "The agent response changed. Select the text again.",
     );
