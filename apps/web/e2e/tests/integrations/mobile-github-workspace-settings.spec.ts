@@ -18,7 +18,8 @@ test.describe("GitHub workspace settings on mobile", () => {
     );
 
     await expect(scopeDescription).toBeVisible();
-    await expect(testPage.getByRole("button", { name: "Explain repository scope" })).toBeVisible();
+    const scopeHelpButton = testPage.getByRole("button", { name: "Explain repository scope" });
+    await expect(scopeHelpButton).toBeVisible();
 
     const [issueWatchesBox, repositoryScopeBox] = await Promise.all([
       issueWatchesHeading.boundingBox(),
@@ -27,5 +28,10 @@ test.describe("GitHub workspace settings on mobile", () => {
     expect(issueWatchesBox).not.toBeNull();
     expect(repositoryScopeBox).not.toBeNull();
     expect(repositoryScopeBox!.y).toBeGreaterThan(issueWatchesBox!.y);
+
+    await scopeHelpButton.click();
+    await expect(testPage.getByRole("dialog", { name: "Repository Scope" })).toContainText(
+      "including My GitHub results and review and issue watches",
+    );
   });
 });
