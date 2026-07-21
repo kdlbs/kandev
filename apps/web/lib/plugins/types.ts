@@ -77,8 +77,8 @@ export interface PluginRouteOptions {
  * `slotProps`), "chat-top-bar" (status in the session top bar, beside the
  * CPU/DB metrics — receives `{ taskId, taskTitle, workspaceId, activeSessionId,
  * sessionIds }`), and "plugin-settings" (inline UI on a plugin's own settings
- * page, Settings > Plugins > <plugin>, between the settings form and the
- * manifest card — receives `{ pluginId: string; status: PluginStatus }` as
+ * page, Settings > Plugins > <plugin>, at the top above the settings form —
+ * receives `{ pluginId: string; status: PluginStatus }` as
  * `slotProps`). "plugin-settings" is owner-scoped: the host renders only the
  * component registered by the plugin being viewed, so a plugin never appears on
  * another plugin's page and authors don't gate on the current id themselves.

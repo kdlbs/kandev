@@ -344,7 +344,7 @@ plugins at once. Available slots:
 | `main-nav-footer` | Footer of the main sidebar | — |
 | `chat-input-actions` | Chat composer toolbar, beside the model picker, mic, and send button | `{ taskId, taskTitle, activeSessionId, sessionIds }` |
 | `chat-top-bar` | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
-| `plugin-settings` | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), between the settings form and the manifest card | `{ pluginId, status }` |
+| `plugin-settings` | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }` |
 
 `plugin-settings` is the one exception to "every plugin's component renders":
 it is **owner-scoped**, so the host renders only the component registered by the
@@ -444,10 +444,10 @@ registry.registerComponent("chat-top-bar", makeTopBarStatus(host));
 ### Plugin settings page
 
 Register a `plugin-settings` component to render your own UI inline on your
-plugin's settings page (**Settings > Plugins > `<plugin>`**), between the
-schema-driven settings form and the manifest card. Use it for live integration
-health — e.g. "CLI installed ✅ v0.45.2" or "API token ✅ authenticated" — or any
-custom controls next to the config form. The host passes:
+plugin's settings page (**Settings > Plugins > `<plugin>`**), at the top above
+the schema-driven settings form. Use it for live integration health — e.g. "CLI
+installed ✅ v0.45.2" or "API token ✅ authenticated" — or any custom controls
+alongside the config form. The host passes:
 
 ```ts
 type PluginSettingsSlotProps = {
