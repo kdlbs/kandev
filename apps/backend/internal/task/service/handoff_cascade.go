@@ -408,6 +408,8 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 	}
 	candidates := survivingWorkspaceMemberIDs(group.OwnerTaskID, members, departing)
 	if len(candidates) == 0 {
+		// Every active member is departing, so last-member cleanup owns the
+		// environment teardown and no ownership transfer is needed.
 		return nil
 	}
 	newOwner, err := availableWorkspaceEnvironmentOwner(ctx, environments, env.ID, candidates)

@@ -725,6 +725,34 @@ func TestDeleteInheritedSubtaskBlockedWhenNoSurvivorCanOwnSharedEnvironment(t *t
 	}
 }
 
+func TestCascadeDeleteAllWorkspaceGroupMembersDestroysSharedEnvironment(t *testing.T) {
+	_, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	seedParentChildWorkspace(t, repo, "ws-shared-cascade", "wf-shared-cascade", "task-parent", "task-child")
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-shared", TaskID: "task-child", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create shared environment: %v", err)
+	}
+
+	groups := newFakeWSGroupRepo()
+	groups.groups["group-shared"] = &orchmodels.WorkspaceGroup{
+		ID: "group-shared", OwnerTaskID: "task-parent", MaterializedEnvironmentID: "env-shared",
+	}
+	groups.members["group-shared"] = map[string]string{
+		"task-parent": orchmodels.WorkspaceMemberRoleOwner,
+		"task-child":  orchmodels.WorkspaceMemberRoleMember,
+	}
+	handoff := NewHandoffService(repo, repo, nil, nil, groups, nil)
+
+	if _, err := handoff.DeleteTaskTree(ctx, "task-parent", true); err != nil {
+		t.Fatalf("DeleteTaskTree: %v", err)
+	}
+	if env, err := repo.GetTaskEnvironment(ctx, "env-shared"); err == nil || env != nil {
+		t.Fatalf("shared environment survived last-member cascade: env=%#v err=%v", env, err)
+	}
+}
+
 func TestPreparedCleanupIsNotRunnableUntilStarted(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()
