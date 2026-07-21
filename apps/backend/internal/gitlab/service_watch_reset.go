@@ -65,6 +65,7 @@ func (s *Service) ResetReviewWatch(ctx context.Context, watchID string) (int, er
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
+	reimportCtx := ctx
 	ctx = context.WithoutCancel(ctx)
 	invalidation, err := store.BeginReviewWatchReset(ctx, watchID)
 	if err != nil {
@@ -73,7 +74,7 @@ func (s *Service) ResetReviewWatch(ctx context.Context, watchID string) (int, er
 	deleted := s.deleteInvalidatedWatchTasks(ctx, watchID, invalidation.TaskIDs, deleter)
 	err = store.FinishReviewWatchReset(ctx, watchID, invalidation.Generation)
 	if err == nil {
-		go s.reimportReviewWatchAfterReset(context.Background(), watchID)
+		s.reimportReviewWatchAfterReset(reimportCtx, watchID)
 	}
 	return deleted, err
 }

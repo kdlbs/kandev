@@ -355,10 +355,6 @@ func sanitizePRFailure(message string, sensitiveValues ...string) string {
 	return sanitized
 }
 
-func sanitizeGitPushOutput(output string) string {
-	return sanitizePRFailure(output)
-}
-
 func (g *GitOperator) sanitizePRFailure(message string, sensitiveValues ...string) string {
 	values := append([]string{g.environmentValue(gitLabTokenEnv)}, sensitiveValues...)
 	return sanitizePRFailure(message, values...)

@@ -164,9 +164,13 @@ exec %q "$@"
 }
 
 func TestSanitizeGitPushOutputRedactsCredentialBearingURLsAndTokens(t *testing.T) {
-	t.Setenv(gitLabTokenEnv, "workspace-token")
-	got := sanitizeGitPushOutput("remote: https://oauth2:embedded-token@gitlab.example/g/r.git workspace-token")
-	for _, secret := range []string{"oauth2", "embedded-token", "workspace-token"} {
+	t.Setenv(gitLabTokenEnv, "process-token")
+	op := NewGitOperator(t.TempDir(), newTestLogger(t), nil)
+	op.setEnvironmentProvider(func() []string { return []string{gitLabTokenEnv + "=workspace-token"} })
+	got := op.sanitizeGitPushOutput(
+		"remote: https://oauth2:embedded-token@gitlab.example/g/r.git process-token workspace-token",
+	)
+	for _, secret := range []string{"oauth2", "embedded-token", "process-token", "workspace-token"} {
 		if strings.Contains(got, secret) {
 			t.Fatalf("sanitized push output contains %q: %q", secret, got)
 		}

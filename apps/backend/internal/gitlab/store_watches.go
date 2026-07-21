@@ -120,6 +120,7 @@ func (s *Store) ListActiveMRWatchesForWorkspace(ctx context.Context, workspaceID
 	return s.listMRWatchesForWorkspace(ctx, workspaceID, "1 = 1")
 }
 
+// predicate must be a package-owned SQL literal; never pass request data.
 func (s *Store) listMRWatchesForWorkspace(ctx context.Context, workspaceID, predicate string, args ...interface{}) ([]*MRWatch, error) {
 	queryArgs := append([]interface{}{workspaceID}, args...)
 	var rows []MRWatch

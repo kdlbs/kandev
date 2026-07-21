@@ -101,6 +101,7 @@ func TestStoreMigratesLegacyGitLabConfigRevision(t *testing.T) {
 		t.Fatalf("open legacy db: %v", err)
 	}
 	sqlDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	if _, err := sqlDB.Exec(`
 		CREATE TABLE workspaces (id TEXT PRIMARY KEY, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
 		CREATE TABLE gitlab_configs (
