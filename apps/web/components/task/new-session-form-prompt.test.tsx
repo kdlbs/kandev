@@ -42,11 +42,12 @@ const GENERATED_RESULT = {
   callId: "call-123",
   durationMs: 1_200,
 } satisfies UtilityGenerationResult;
+const ORIGINAL_PROMPT = "original prompt";
 
-function useSessionPromptHarness(initialPrompt = "original prompt") {
-  const promptRef = useRef<HTMLTextAreaElement | null>({
-    value: initialPrompt,
-  } as HTMLTextAreaElement);
+function useSessionPromptHarness(initialPrompt = ORIGINAL_PROMPT, hasTarget = true) {
+  const promptRef = useRef<HTMLTextAreaElement | null>(
+    hasTarget ? ({ value: initialPrompt } as HTMLTextAreaElement) : null,
+  );
   const [promptValue, setPromptValue] = useState(initialPrompt);
   const [hasPrompt, setHasPrompt] = useState(Boolean(initialPrompt.trim()));
   const controller = useSessionPromptController(
@@ -77,7 +78,7 @@ describe("SessionPromptField", () => {
     const { rerender } = render(
       <SessionPromptField
         promptRef={{ current: null }}
-        promptValue="original prompt"
+        promptValue={ORIGINAL_PROMPT}
         contextItems={[]}
         isBusy={false}
         isDragging={false}
@@ -107,7 +108,7 @@ describe("SessionPromptField", () => {
     rerender(
       <SessionPromptField
         promptRef={{ current: null }}
-        promptValue="original prompt"
+        promptValue={ORIGINAL_PROMPT}
         contextItems={[]}
         isBusy={false}
         isDragging={false}
@@ -159,7 +160,7 @@ describe("useSessionPromptController", () => {
       await result.current.handleEnhancePrompt();
     });
 
-    expect(result.current.promptValue).toBe("improved prompt");
+    expect(result.current.promptValue).toBe(GENERATED_RESULT.content);
     expect(result.current.hasPrompt).toBe(true);
     expect(result.current.pendingResult).toBeNull();
     expect(mockToast).toHaveBeenCalledWith(
@@ -196,7 +197,7 @@ describe("useSessionPromptController", () => {
       result.current.applyPending();
     });
 
-    expect(result.current.promptValue).toBe("improved prompt");
+    expect(result.current.promptValue).toBe(GENERATED_RESULT.content);
     expect(result.current.pendingResult).toBeNull();
   });
 
@@ -228,5 +229,24 @@ describe("useSessionPromptController", () => {
 
     expect(result.current.promptValue).toBe(editedPrompt);
     expect(result.current.pendingResult).toEqual(GENERATED_RESULT);
+  });
+
+  it("retains the enhanced prompt when the target is unavailable", async () => {
+    mockEnhancePrompt.mockImplementation(
+      async (_source: string, deliver: (result: UtilityGenerationResult) => Promise<boolean>) =>
+        deliver(GENERATED_RESULT),
+    );
+
+    const { result } = renderHook(() => useSessionPromptHarness(ORIGINAL_PROMPT, false));
+
+    await act(async () => {
+      await result.current.handleEnhancePrompt();
+    });
+
+    expect(result.current.promptValue).toBe(ORIGINAL_PROMPT);
+    expect(result.current.pendingResult).toEqual(GENERATED_RESULT);
+    expect(mockToast).not.toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Enhanced prompt applied.", variant: "success" }),
+    );
   });
 });

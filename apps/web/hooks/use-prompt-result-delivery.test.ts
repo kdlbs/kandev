@@ -96,6 +96,7 @@ it("applyPending clears only after apply succeeds", () => {
   act(() => {
     result.current.applyPending();
   });
+  expect(apply).toHaveBeenCalledTimes(2);
   expect(result.current.pendingResult).toBeNull();
 });
 

@@ -264,11 +264,8 @@ function useEnhanceForDialog(fs: DialogFormState) {
         return false;
       }
       input.setValue(value);
-      const applied = input.getValue() === value;
-      if (applied) {
-        fs.setHasDescription(true);
-      }
-      return applied;
+      fs.setHasDescription(value.trim().length > 0);
+      return true;
     },
     [fs],
   );

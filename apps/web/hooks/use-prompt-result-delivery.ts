@@ -70,14 +70,10 @@ export function usePromptResultDelivery({
   );
 
   const applyPending = useCallback(() => {
-    setPendingResult((current) => {
-      if (!current) {
-        return null;
-      }
-
-      return apply(current.content) ? null : current;
-    });
-  }, [apply]);
+    if (pendingResult && apply(pendingResult.content)) {
+      setPendingResult(null);
+    }
+  }, [apply, pendingResult]);
 
   const copyPending = useCallback(async () => {
     if (!pendingResult) {
