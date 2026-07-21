@@ -24,12 +24,6 @@ function getUserMessageIds(items: RenderItem[]): string[] {
   for (const item of items) {
     if (item.type === "message") {
       if (item.message.author_type === "user") ids.push(item.message.id);
-      continue;
-    }
-    if (item.type === "turn_group") {
-      for (const message of item.messages) {
-        if (message.author_type === "user") ids.push(message.id);
-      }
     }
   }
   return ids;

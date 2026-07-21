@@ -59,11 +59,6 @@ export function getUserMessageRenderStops(items: RenderItem[]): UserMessageRende
       if (item.message.author_type === "user") {
         stops.push({ messageId: item.message.id, itemIndex });
       }
-      return;
-    }
-    if (item.type !== "turn_group") return;
-    for (const message of item.messages) {
-      if (message.author_type === "user") stops.push({ messageId: message.id, itemIndex });
     }
   });
   return stops;

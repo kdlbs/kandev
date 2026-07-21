@@ -27,10 +27,6 @@ function messageItem(id: string, authorType: Message["author_type"]): RenderItem
   return { type: "message", message: makeMessage(id, authorType) };
 }
 
-function turnGroup(id: string, messages: Message[]): RenderItem {
-  return { type: "turn_group", id, turnId: id, messages };
-}
-
 type TestNavigationOptions = UserMessageNavigationOptions & { oldestCursor: string | null };
 
 function renderNavigation(items: RenderItem[], overrides: Partial<TestNavigationOptions> = {}) {
@@ -57,7 +53,13 @@ describe("useUserMessageNavigation", () => {
     const { result } = renderNavigation([
       messageItem("u1", "user"),
       messageItem("a1", "agent"),
-      turnGroup("turn-1", [makeMessage("a2", "agent"), makeMessage("u2", "user")]),
+      {
+        type: "turn_group",
+        id: "activity-1",
+        turnId: "turn-1",
+        messages: [makeMessage("not-a-prompt", "user")],
+      },
+      messageItem("u2", "user"),
       messageItem("u3", "user"),
     ]);
 

@@ -268,23 +268,18 @@ type MessageRenderProps = Omit<TurnGroupContentProps, "group">;
 
 function renderMessageEntry(message: Message, props: MessageRenderProps) {
   return (
-    <div
+    <MessageRenderer
       key={message.id}
-      id={`msg-${message.id}`}
-      data-user-message-id={message.author_type === "user" ? message.id : undefined}
-    >
-      <MessageRenderer
-        comment={message}
-        isTaskDescription={false}
-        taskId={props.taskId}
-        permissionsByToolCallId={props.permissionsByToolCallId}
-        childrenByParentToolCallId={props.childrenByParentToolCallId}
-        worktreePath={props.worktreePath}
-        sessionId={props.sessionId ?? undefined}
-        isTurnActive={props.isTurnActive && message.id === props.streamingMessageId}
-        onOpenFile={props.onOpenFile}
-      />
-    </div>
+      comment={message}
+      isTaskDescription={false}
+      taskId={props.taskId}
+      permissionsByToolCallId={props.permissionsByToolCallId}
+      childrenByParentToolCallId={props.childrenByParentToolCallId}
+      worktreePath={props.worktreePath}
+      sessionId={props.sessionId ?? undefined}
+      isTurnActive={props.isTurnActive && message.id === props.streamingMessageId}
+      onOpenFile={props.onOpenFile}
+    />
   );
 }
 

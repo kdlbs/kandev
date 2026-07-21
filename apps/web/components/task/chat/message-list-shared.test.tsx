@@ -145,7 +145,7 @@ describe("MessageItem navigation anchor", () => {
 });
 
 describe("user message navigation mapping", () => {
-  it("maps direct and grouped user prompts to their render-item indices", () => {
+  it("maps direct user prompts and ignores activity groups", () => {
     const user = (id: string) => ({ id, author_type: "user" }) as Message;
     const agent = (id: string) => ({ id, author_type: "agent" }) as Message;
     const items: RenderItem[] = [
@@ -154,10 +154,7 @@ describe("user message navigation mapping", () => {
       { type: "turn_group", id: "group-1", turnId: "turn-1", messages: [user("user-2")] },
     ];
 
-    expect(getUserMessageRenderStops(items)).toEqual([
-      { messageId: "user-1", itemIndex: 0 },
-      { messageId: "user-2", itemIndex: 2 },
-    ]);
+    expect(getUserMessageRenderStops(items)).toEqual([{ messageId: "user-1", itemIndex: 0 }]);
   });
 
   it("selects the prompt whose rendered bounds are nearest the viewport center", () => {

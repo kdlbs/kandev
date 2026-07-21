@@ -170,6 +170,7 @@ export function useVirtuosoUserNavigation(args: {
       }
       let element: HTMLElement | null = null;
       for (let attempt = 0; attempt < NAVIGATION_MOUNT_ATTEMPTS && !element; attempt++) {
+        // The imperative API is zero-based against totalCount; firstItemIndex only offsets rows.
         virtuosoRef.current.scrollToIndex({
           index: stop.itemIndex,
           align: "center",
