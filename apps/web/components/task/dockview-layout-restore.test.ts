@@ -284,9 +284,40 @@ describe("sanitizeLayout - session panel handling", () => {
   });
 });
 
-describe("tryRestoreLayout - phantom session panel filtering", () => {
+describe("tryRestoreLayout - env restore", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    document.body.replaceChildren();
+  });
+
+  it("reconciles a stale saved grid width with the live container before applying fixups", () => {
+    const layout = buildLayout({ centerSize: 650, rightSize: 900 });
+    layout.grid.width = 1900;
+    vi.spyOn(localStorage, "getEnvLayout").mockReturnValue(layout);
+    vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
+
+    const container = document.createElement("div");
+    const dockview = document.createElement("div");
+    dockview.className = "dv-dockview";
+    container.appendChild(dockview);
+    document.body.appendChild(container);
+    Object.defineProperties(container, {
+      clientWidth: { value: 1260 },
+      clientHeight: { value: 700 },
+    });
+
+    const api = makeFakeRestoreApi();
+    Object.defineProperties(api, {
+      width: { value: 1900, writable: true },
+      height: { value: 600, writable: true },
+    });
+
+    expect(tryRestoreLayout(api, "env-stale-width", VALID_COMPONENTS)).toBe(true);
+    expect(api.fromJSON).toHaveBeenCalledOnce();
+    expect(api.layout).toHaveBeenCalledWith(1260, 700);
+    expect((api.fromJSON as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]).toBeLessThan(
+      (api.layout as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
+    );
   });
 
   it("restores the (stripped) layout when every session in the saved env-layout is a phantom", () => {
