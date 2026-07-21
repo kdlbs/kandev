@@ -306,6 +306,7 @@ service Host {
   rpc ListState(ListStateRequest) returns (ListStateResponse);
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
+  rpc InvokeUtilityAgent(InvokeUtilityAgentRequest) returns (InvokeUtilityAgentResponse);
 }
 ```
 
@@ -319,13 +320,23 @@ service Host {
 - `EmitEvent(event_name, payload)` publishes `plugin.<plugin_id>.<event_name>` on the
   internal event bus for delivery to subscribers (replaces the old
   `POST /api/plugins/{plugin_id}/events/emit` HTTP endpoint).
+- `InvokeUtilityAgent(prompt)` runs a one-shot, non-interactive completion using
+  the operator-configured **utility agent** (an agent profile chosen in Settings
+  > System, stored as the `utility_agent_profile_id` user setting) and returns
+  its text. Requires `capabilities.agent_invoke: true`. It reuses kandev's
+  sessionless host-utility inference tier (ADR 0002) — no task, session, or
+  workspace — so a plugin can delegate a lightweight LLM step without holding a
+  provider API key. Returns gRPC `FailedPrecondition` when no utility agent is
+  configured (or the selected profile was deleted). See
+  [ADR 0048](../../decisions/0048-plugin-host-utility-agent-invoke.md).
 
 Every Host RPC is capability-gated: `GetState`/`SetState`/`DeleteState`/`ListState`
-check `capabilities.state`, `RevealSecret` checks `capabilities.secrets`, and each
-Host data API read RPC checks `capabilities.api_read` for its resource (see "Host
-data API" below) — all before the handler runs, returning gRPC status
-`PermissionDenied` with message `capability '<name>' not declared` on a miss.
-`EmitEvent` is ungated (no boolean capability applies). The Host data API write
+check `capabilities.state`, `RevealSecret` checks `capabilities.secrets`,
+`InvokeUtilityAgent` checks `capabilities.agent_invoke`, and each Host data API
+read RPC checks `capabilities.api_read` for its resource (see "Host data API"
+below) — all before the handler runs, returning gRPC status `PermissionDenied`
+with message `capability '<name>' not declared` on a miss. `EmitEvent` is
+ungated (no boolean capability applies). The Host data API write
 RPCs are not implemented yet, so they return gRPC `Unimplemented` unconditionally
 and never reach an `api_write` capability check (see "Write phase (deferred)").
 

@@ -79,6 +79,7 @@ function makeUnloadedSettings(): UserSettingsState {
     githubDefaultQueryPresets: undefined,
     gitlabSavedPresets: undefined,
     defaultUtilityAgentId: null,
+    utilityAgentProfileId: null,
     keyboardShortcuts: {},
     terminalLinkBehavior: "new_tab",
     terminalFontFamily: null,

@@ -76,6 +76,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		GitLabSavedPresets:          req.GitLabSavedPresets.ServiceValue(),
 		DefaultUtilityAgentID:       req.DefaultUtilityAgentID,
 		DefaultUtilityModel:         req.DefaultUtilityModel,
+		UtilityAgentProfileID:       req.UtilityAgentProfileID,
 		KeyboardShortcuts:           req.KeyboardShortcuts,
 		TerminalLinkBehavior:        req.TerminalLinkBehavior,
 		TerminalFontFamily:          req.TerminalFontFamily,

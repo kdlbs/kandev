@@ -309,6 +309,7 @@ function buildUserSettingsFromResponse(
     defaultEditorId: s.default_editor_id || null,
     enablePreviewOnClick: s.enable_preview_on_click ?? false,
     defaultUtilityAgentId: s.default_utility_agent_id || null,
+    utilityAgentProfileId: s.utility_agent_profile_id || null,
     keyboardShortcuts: s.keyboard_shortcuts ?? {},
     terminalLinkBehavior: parseTerminalLinkBehavior(s.terminal_link_behavior),
     terminalFontFamily: s.terminal_font_family || null,

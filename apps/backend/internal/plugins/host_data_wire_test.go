@@ -254,6 +254,38 @@ func TestPluginHostData_Wire_Messages(t *testing.T) {
 	})
 }
 
+// TestPluginHostData_Wire_InvokeUtilityAgent proves the agent_invoke gate and
+// the one-shot completion round-trip over the real transport: an undeclared
+// manifest is PermissionDenied, and a declared one resolves the configured
+// profile and returns the runner's text.
+func TestPluginHostData_Wire_InvokeUtilityAgent(t *testing.T) {
+	t.Run("DeniedWithoutCapability", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{})
+		host := dialPluginHostOverWire(t, d.host)
+
+		_, err := host.InvokeUtilityAgent(context.Background(), "hi")
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok, "expected a gRPC status error, got %v", err)
+		require.Equal(t, codes.PermissionDenied, st.Code())
+		require.Equal(t, "capability 'agent_invoke' not declared", st.Message())
+	})
+
+	t.Run("Succeeds", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
+		d.utilCfg.profileID = "p-1"
+		d.profileFixture("p-1", "claude-acp", "claude-opus-4-8")
+		d.utilRun.text = "summary text"
+		host := dialPluginHostOverWire(t, d.host)
+
+		got, err := host.InvokeUtilityAgent(context.Background(), "summarize")
+		require.NoError(t, err)
+		require.Equal(t, "summary text", got)
+		require.Equal(t, "claude-acp", d.utilRun.gotAgentType)
+		require.Equal(t, "claude-opus-4-8", d.utilRun.gotModel)
+	})
+}
+
 // TestPluginHostData_Wire_SessionsPagination seeds three sessions and drives
 // two Sessions().List calls over the real broker connection: Page{Limit: 2}
 // must return exactly 2 items plus a non-empty PageInfo.NextCursor, and a

@@ -359,6 +359,7 @@ export type UserSettingsUpdatedPayload = {
   github_default_query_presets?: object | null;
   gitlab_saved_presets?: unknown[] | null;
   default_utility_agent_id?: string;
+  utility_agent_profile_id?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminal_link_behavior?: string;
   changes_panel_layout?: "flat" | "tree";

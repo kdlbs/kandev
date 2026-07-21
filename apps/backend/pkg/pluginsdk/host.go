@@ -109,6 +109,13 @@ type Host interface {
 	// (capability api_read:messages). It reads historical user/agent
 	// conversation content; kandev-injected system blocks are stripped.
 	Messages() MessageReader
+
+	// InvokeUtilityAgent runs a one-shot, non-interactive completion using
+	// the operator-configured "utility agent" (Settings > System) and returns
+	// its text. Requires the `agent_invoke` capability. Returns a gRPC
+	// FailedPrecondition error when no utility agent is configured, so a
+	// plugin needs no API key of its own.
+	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
 }
 
 // TaskReader is the read-only accessor behind Host.Tasks(), mirroring the
@@ -289,6 +296,14 @@ func (h *grpcHostClient) Repositories() RepositoryReader {
 }
 
 func (h *grpcHostClient) Messages() MessageReader { return grpcMessageReader{client: h.client} }
+
+func (h *grpcHostClient) InvokeUtilityAgent(ctx context.Context, prompt string) (string, error) {
+	resp, err := h.client.InvokeUtilityAgent(ctx, &pluginv1.InvokeUtilityAgentRequest{Prompt: prompt})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetText(), nil
+}
 
 var _ Host = (*grpcHostClient)(nil)
 
@@ -530,6 +545,14 @@ func (s *grpcHostServer) EmitEvent(ctx context.Context, req *pluginv1.EmitEventR
 	return &pluginv1.EmitEventResponse{}, nil
 }
 
+func (s *grpcHostServer) InvokeUtilityAgent(ctx context.Context, req *pluginv1.InvokeUtilityAgentRequest) (*pluginv1.InvokeUtilityAgentResponse, error) {
+	text, err := s.impl.InvokeUtilityAgent(ctx, req.GetPrompt())
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.InvokeUtilityAgentResponse{Text: text}, nil
+}
+
 // ── Host data API reads (ADR 0043) ──────────────────────────────────────
 //
 // Each method below dispatches to the injected Go-native impl's resource
@@ -675,6 +698,15 @@ func (UnimplementedHostData) Repositories() RepositoryReader {
 	return unimplementedRepositoryReader{}
 }
 func (UnimplementedHostData) Messages() MessageReader { return unimplementedMessageReader{} }
+
+// InvokeUtilityAgent is the embeddable default for the agent_invoke Host
+// method (ADR 0048). It lives on UnimplementedHostData — the shared
+// "unimplemented Host extensions" embed both real Host implementations use —
+// so a Host that hasn't wired a utility agent (e.g. a test double) still
+// satisfies the interface, returning gRPC Unimplemented until overridden.
+func (UnimplementedHostData) InvokeUtilityAgent(context.Context, string) (string, error) {
+	return "", errUnimplementedHostData("utility_agent")
+}
 
 func errUnimplementedHostData(resource string) error {
 	return status.Errorf(codes.Unimplemented, "pluginsdk: Host data API %q not implemented", resource)

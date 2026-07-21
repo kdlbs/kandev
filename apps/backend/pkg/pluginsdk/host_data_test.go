@@ -31,12 +31,14 @@ type dataRecordingHost struct {
 	repositories  []Repository
 	messages      []Message
 	messagePage   *PageInfo
+	utilityText   string
 
 	lastTaskFilter    TaskFilter
 	lastSessionFilter SessionFilter
 	lastMessageFilter MessageFilter
 	lastWorkspaceID   string
 	lastWorkflowID    string
+	lastUtilityPrompt string
 }
 
 func (h *dataRecordingHost) GetState(context.Context, string, string, string) (map[string]any, bool, error) {
@@ -71,6 +73,10 @@ func (h *dataRecordingHost) Repositories() RepositoryReader {
 	return dataRecordingRepositoryReader{h}
 }
 func (h *dataRecordingHost) Messages() MessageReader { return dataRecordingMessageReader{h} }
+func (h *dataRecordingHost) InvokeUtilityAgent(_ context.Context, prompt string) (string, error) {
+	h.lastUtilityPrompt = prompt
+	return h.utilityText, nil
+}
 
 type dataRecordingTaskReader struct{ h *dataRecordingHost }
 
@@ -186,6 +192,16 @@ func TestHostData_Workspaces(t *testing.T) {
 	workspaces, _, err := host.Workspaces().List(context.Background(), Page{})
 	require.NoError(t, err)
 	require.Equal(t, impl.workspaces, workspaces)
+}
+
+func TestHostData_InvokeUtilityAgent(t *testing.T) {
+	impl := &dataRecordingHost{utilityText: "the completion"}
+	host := dialHostOverBufconn(t, impl)
+
+	text, err := host.InvokeUtilityAgent(context.Background(), "do the thing")
+	require.NoError(t, err)
+	require.Equal(t, "the completion", text)
+	require.Equal(t, "do the thing", impl.lastUtilityPrompt)
 }
 
 func TestHostData_Messages(t *testing.T) {

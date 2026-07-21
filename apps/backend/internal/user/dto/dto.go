@@ -48,6 +48,7 @@ type UserSettingsDTO struct {
 	GitLabSavedPresets          json.RawMessage                     `json:"gitlab_saved_presets,omitempty"`
 	DefaultUtilityAgentID       string                              `json:"default_utility_agent_id"`
 	DefaultUtilityModel         string                              `json:"default_utility_model"`
+	UtilityAgentProfileID       string                              `json:"utility_agent_profile_id"`
 	KeyboardShortcuts           map[string]interface{}              `json:"keyboard_shortcuts,omitempty"`
 	TerminalLinkBehavior        string                              `json:"terminal_link_behavior"`
 	TerminalFontFamily          string                              `json:"terminal_font_family"`
@@ -106,6 +107,7 @@ type UpdateUserSettingsRequest struct {
 	GitLabSavedPresets          NullableRawMessage                   `json:"gitlab_saved_presets,omitempty"`
 	DefaultUtilityAgentID       *string                              `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel         *string                              `json:"default_utility_model,omitempty"`
+	UtilityAgentProfileID       *string                              `json:"utility_agent_profile_id,omitempty"`
 	KeyboardShortcuts           *map[string]interface{}              `json:"keyboard_shortcuts,omitempty"`
 	TerminalLinkBehavior        *string                              `json:"terminal_link_behavior,omitempty"`
 	TerminalFontFamily          *string                              `json:"terminal_font_family,omitempty"`
@@ -220,6 +222,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		GitLabSavedPresets:          settings.GitLabSavedPresets,
 		DefaultUtilityAgentID:       settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:         settings.DefaultUtilityModel,
+		UtilityAgentProfileID:       settings.UtilityAgentProfileID,
 		KeyboardShortcuts:           settings.KeyboardShortcuts,
 		TerminalLinkBehavior:        settings.TerminalLinkBehavior,
 		TerminalFontFamily:          settings.TerminalFontFamily,

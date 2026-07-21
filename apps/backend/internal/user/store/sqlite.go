@@ -357,6 +357,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"gitlab_saved_presets":            settings.GitLabSavedPresets,
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
+		"utility_agent_profile_id":        settings.UtilityAgentProfileID,
 		"keyboard_shortcuts":              keyboardShortcuts,
 		"terminal_link_behavior":          settings.TerminalLinkBehavior,
 		"terminal_font_family":            settings.TerminalFontFamily,
@@ -499,6 +500,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		GitLabSavedPresets          json.RawMessage                     `json:"gitlab_saved_presets"`
 		DefaultUtilityAgentID       string                              `json:"default_utility_agent_id"`
 		DefaultUtilityModel         string                              `json:"default_utility_model"`
+		UtilityAgentProfileID       string                              `json:"utility_agent_profile_id"`
 		KeyboardShortcuts           map[string]interface{}              `json:"keyboard_shortcuts"`
 		TerminalLinkBehavior        string                              `json:"terminal_link_behavior"`
 		TerminalFontFamily          string                              `json:"terminal_font_family"`
@@ -571,6 +573,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.GitLabSavedPresets = payload.GitLabSavedPresets
 	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
 	settings.DefaultUtilityModel = payload.DefaultUtilityModel
+	settings.UtilityAgentProfileID = payload.UtilityAgentProfileID
 	settings.KeyboardShortcuts = payload.KeyboardShortcuts
 	if settings.KeyboardShortcuts == nil {
 		settings.KeyboardShortcuts = map[string]interface{}{}

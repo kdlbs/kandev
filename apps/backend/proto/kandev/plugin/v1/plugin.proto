@@ -85,6 +85,12 @@ service Host {
   // event — raw system prompts are never exposed to plugins.
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
 
+  // Utility agent — capability agent_invoke. Runs a one-shot, non-interactive
+  // completion using the operator-configured "utility agent" profile (Settings
+  // > System), so a plugin can delegate a lightweight LLM step without holding
+  // its own API key. FailedPrecondition when no utility agent is configured.
+  rpc InvokeUtilityAgent(InvokeUtilityAgentRequest) returns (InvokeUtilityAgentResponse);
+
   // Writes — capability api_write:<resource>. Declared now for a stable
   // contract; handlers land in a later phase (not implemented by this RPC
   // addition). Route through service methods so the corresponding task.*
@@ -421,6 +427,17 @@ message ListMessagesRequest {
 message ListMessagesResponse {
   repeated Message messages = 1;
   PageInfo page_info = 2;
+}
+
+// ── Utility agent invocation (agent_invoke) ──────────────────────────────────
+// A one-shot completion delegated to the operator-configured utility agent.
+// Adding fields here (e.g. a future system_prompt or max_tokens) is the
+// forward-compatible extension path — the SDK method stays source-stable.
+message InvokeUtilityAgentRequest {
+  string prompt = 1;
+}
+message InvokeUtilityAgentResponse {
+  string text = 1;
 }
 
 // ── Writes (phase 2; api_write) ──────────────────────────────────────────────

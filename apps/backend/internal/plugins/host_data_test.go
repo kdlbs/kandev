@@ -166,6 +166,8 @@ type testDataHost struct {
 	profiles  *fakeAgentProfileDataSource
 	codeStats *fakeSessionCodeStatsSource
 	messages  *fakeMessageDataSource
+	utilCfg   *fakeUtilitySettingsSource
+	utilRun   *fakeUtilityRunner
 }
 
 // newTestDataHost builds a fully-wired pluginHost (every Host data API
@@ -179,6 +181,8 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		profiles:  &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
 		codeStats: &fakeSessionCodeStatsSource{},
 		messages:  &fakeMessageDataSource{},
+		utilCfg:   &fakeUtilitySettingsSource{},
+		utilRun:   &fakeUtilityRunner{text: "ok"},
 	}
 	d.host = &pluginHost{
 		pluginID:         "p1",
@@ -189,6 +193,8 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		agentProfiles:    d.profiles,
 		sessionCodeStats: d.codeStats,
 		messageData:      d.messages,
+		utilitySettings:  d.utilCfg,
+		utilityRunner:    d.utilRun,
 	}
 	return d
 }

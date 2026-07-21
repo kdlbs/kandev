@@ -60,6 +60,7 @@ export const defaultSettingsState: SettingsSliceState = {
     githubDefaultQueryPresets: undefined,
     gitlabSavedPresets: undefined,
     defaultUtilityAgentId: null,
+    utilityAgentProfileId: null,
     keyboardShortcuts: {},
     terminalFontFamily: null,
     terminalFontSize: null,

@@ -714,6 +714,14 @@ func startGatewayAndServe(
 		services.Slack.SetRunner(slackRunner)
 	}
 
+	// Wire Host.InvokeUtilityAgent (ADR 0048): plugins delegate one-shot LLM
+	// calls to the operator-configured utility agent (Settings > System),
+	// resolved from user settings and run via the sessionless host-utility
+	// tier. Same landing point as the Slack runner — hostUtilityMgr is live.
+	if services.Plugins != nil && services.User != nil {
+		services.Plugins.SetUtilityAgent(services.User, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
+	}
+
 	if err := orchestratorSvc.Start(ctx); err != nil {
 		log.Error("Failed to start orchestrator", zap.Error(err))
 		return false

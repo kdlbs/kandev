@@ -62,6 +62,11 @@ type pluginHost struct {
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
+
+	// Utility agent invocation (ADR 0048), wired by Service.SetUtilityAgent.
+	// See host_utility.go.
+	utilitySettings utilitySettingsSource
+	utilityRunner   utilityRunner
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)

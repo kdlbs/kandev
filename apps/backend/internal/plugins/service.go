@@ -95,6 +95,10 @@ type Service struct {
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
 
+	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
+	utilitySettings utilitySettingsSource
+	utilityRunner   utilityRunner
+
 	// kandevVersion is the currently running kandev build version, used to
 	// enforce a package's manifest.min_kandev_version at Install (see
 	// SetKandevVersion / checkMinKandevVersion). Empty (the default) means
@@ -215,6 +219,18 @@ func (s *Service) SetDataSources(
 	s.messageData = messages
 }
 
+// SetUtilityAgent wires the dependencies behind Host.InvokeUtilityAgent
+// (ADR 0048): the settings source that reads the operator-configured utility
+// agent profile id, and the sessionless runner that executes a one-shot
+// completion. Wired by backendapp (not Provide) for the same import-cycle
+// reason as SetDataSources; a pluginHost built before this call falls back to
+// Unimplemented for InvokeUtilityAgent regardless of the agent_invoke
+// capability.
+func (s *Service) SetUtilityAgent(settings utilitySettingsSource, runner utilityRunner) {
+	s.utilitySettings = settings
+	s.utilityRunner = runner
+}
+
 // SetKandevVersion wires the currently running kandev build version,
 // enabling Install to enforce a package's manifest.min_kandev_version
 // (checkMinKandevVersion): a package requiring a newer kandev is rejected
@@ -313,6 +329,8 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		agentProfiles:    s.agentProfiles,
 		sessionCodeStats: s.sessionCodeStats,
 		messageData:      s.messageData,
+		utilitySettings:  s.utilitySettings,
+		utilityRunner:    s.utilityRunner,
 	}
 }
 

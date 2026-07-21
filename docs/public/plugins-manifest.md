@@ -42,6 +42,7 @@ capabilities:
   api_write: ["tasks"]                       # reserved, no Host RPC enforces this yet
   state: true
   secrets: true
+  agent_invoke: true                         # gates Host.InvokeUtilityAgent
 
 webhooks:
   - key: "slack-events"
@@ -82,6 +83,7 @@ ui:                                           # optional native frontend plugin
 | `capabilities.api_write` | no | string[] | **Reserved for future Host RPCs.** Declared but not enforced by anything today — no Host RPC currently writes kandev's own data. |
 | `capabilities.state` | no | bool | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `capabilities.secrets` | no | bool | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
+| `capabilities.agent_invoke` | no | bool | Gates `Host.InvokeUtilityAgent` — a one-shot completion run by the operator-configured utility agent (Settings > System). Calling it without this set to `true` returns gRPC `PermissionDenied`; calling it when no utility agent is configured returns gRPC `FailedPrecondition`. See ADR 0048. |
 | `webhooks[].key` | yes | string | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`. |
 | `webhooks[].description` | no | string | Free-form. |
 | `webhooks[].method` | no | string | **Informational only** — kandev does not validate or enforce the inbound HTTP method against this value. |
