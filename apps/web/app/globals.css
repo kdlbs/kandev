@@ -1671,14 +1671,17 @@
   border-radius: 2px;
 }
 .search-flash {
+  border-radius: 6px;
+  outline: 1px solid color-mix(in oklab, var(--ring) 42%, transparent);
+  outline-offset: 3px;
   animation: search-flash 1.2s ease-out;
 }
 @keyframes search-flash {
   0% {
-    background-color: color-mix(in oklab, var(--warning) 48%, transparent);
+    outline-color: color-mix(in oklab, var(--ring) 42%, transparent);
   }
   100% {
-    background-color: transparent;
+    outline-color: transparent;
   }
 }
 

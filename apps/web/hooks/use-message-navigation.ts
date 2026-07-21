@@ -31,15 +31,20 @@ function getUserMessageIds(items: RenderItem[]): string[] {
 
 type NavigationSnapshot = {
   userMessageIds: string[];
-  originId: string | null;
   hasOlder: boolean;
   oldestCursor: string | null;
 };
 
-function previousUserMessageId(snapshot: NavigationSnapshot): string | null {
-  if (!snapshot.originId) return null;
-  const index = snapshot.userMessageIds.indexOf(snapshot.originId);
+function previousUserMessageId(snapshot: NavigationSnapshot, originId: string): string | null {
+  const index = snapshot.userMessageIds.indexOf(originId);
   return index > 0 ? snapshot.userMessageIds[index - 1] : null;
+}
+
+function nextUserMessageId(snapshot: NavigationSnapshot, originId: string): string | null {
+  const index = snapshot.userMessageIds.indexOf(originId);
+  return index >= 0 && index < snapshot.userMessageIds.length - 1
+    ? snapshot.userMessageIds[index + 1]
+    : null;
 }
 
 type NavigationRuntime = {
@@ -51,7 +56,6 @@ type NavigationRuntime = {
   loadOlderRef: RefObject<() => Promise<number>>;
   navigateToRef: RefObject<(messageId: string) => boolean | Promise<boolean>>;
   setIsBusy: Dispatch<SetStateAction<boolean>>;
-  onDestination: (messageId: string) => void;
 };
 
 type ActiveAction = { generation: number; sessionId: string };
@@ -80,16 +84,6 @@ function finishAction(runtime: NavigationRuntime, action: ActiveAction) {
   runtime.setIsBusy(false);
 }
 
-async function focusDestination(
-  runtime: NavigationRuntime,
-  action: ActiveAction,
-  destinationId: string,
-) {
-  const didNavigate = await runtime.navigateToRef.current(destinationId);
-  if (!didNavigate || !isCurrentAction(runtime, action)) return;
-  runtime.onDestination(destinationId);
-}
-
 const SNAPSHOT_COMMIT_ATTEMPTS = 120;
 const SNAPSHOT_COMMIT_INTERVAL_MS = 16;
 
@@ -106,15 +100,16 @@ async function waitForSnapshotCommit(
   return runtime.snapshotRef.current.oldestCursor !== previousCursor;
 }
 
-async function runPreviousNavigation(runtime: NavigationRuntime) {
+async function runPreviousNavigation(runtime: NavigationRuntime, originId: string) {
+  if (!runtime.snapshotRef.current.userMessageIds.includes(originId)) return;
   const action = beginAction(runtime);
   if (!action) return;
   try {
     while (isCurrentAction(runtime, action)) {
       const snapshot = runtime.snapshotRef.current;
-      const destinationId = previousUserMessageId(snapshot);
+      const destinationId = previousUserMessageId(snapshot, originId);
       if (destinationId) {
-        await focusDestination(runtime, action, destinationId);
+        await runtime.navigateToRef.current(destinationId);
         return;
       }
       if (!snapshot.hasOlder) return;
@@ -130,12 +125,13 @@ async function runPreviousNavigation(runtime: NavigationRuntime) {
   }
 }
 
-async function runNextNavigation(runtime: NavigationRuntime, destinationId: string | null) {
+async function runNextNavigation(runtime: NavigationRuntime, originId: string) {
+  const destinationId = nextUserMessageId(runtime.snapshotRef.current, originId);
   if (!destinationId) return;
   const action = beginAction(runtime);
   if (!action) return;
   try {
-    await focusDestination(runtime, action, destinationId);
+    await runtime.navigateToRef.current(destinationId);
   } catch {
     // A failed scroll adapter leaves the current viewport unchanged.
   } finally {
@@ -152,7 +148,6 @@ export function useUserMessageNavigation({
   sessionId,
 }: UserMessageNavigationOptions) {
   const userMessageIds = useMemo(() => getUserMessageIds(items), [items]);
-  const [viewportOriginId, setViewportOriginState] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const busyRef = useRef(false);
   const actionGenerationRef = useRef(0);
@@ -160,26 +155,12 @@ export function useUserMessageNavigation({
   const sessionIdRef = useRef(sessionId);
   const loadOlderRef = useRef(loadOlder);
   const navigateToRef = useRef(navigateTo);
-  const setViewportOrigin = useCallback((messageId: string | null) => {
-    setViewportOriginState(messageId);
-  }, []);
-  const originId =
-    viewportOriginId && userMessageIds.includes(viewportOriginId)
-      ? viewportOriginId
-      : (userMessageIds[userMessageIds.length - 1] ?? null);
-  const originIndex = originId ? userMessageIds.indexOf(originId) : -1;
-  const previousId = originIndex > 0 ? userMessageIds[originIndex - 1] : null;
-  const nextId =
-    originIndex >= 0 && originIndex < userMessageIds.length - 1
-      ? userMessageIds[originIndex + 1]
-      : null;
   const snapshotRef = useRef<NavigationSnapshot>({
     userMessageIds,
-    originId,
     hasOlder,
     oldestCursor,
   });
-  snapshotRef.current = { userMessageIds, originId, hasOlder, oldestCursor };
+  snapshotRef.current = { userMessageIds, hasOlder, oldestCursor };
   sessionIdRef.current = sessionId;
   loadOlderRef.current = loadOlder;
   navigateToRef.current = navigateTo;
@@ -196,12 +177,8 @@ export function useUserMessageNavigation({
     actionGenerationRef.current++;
     busyRef.current = false;
     setIsBusy(false);
-    setViewportOriginState(null);
   }, [sessionId]);
 
-  const onDestination = useCallback((messageId: string) => {
-    setViewportOriginState(messageId);
-  }, []);
   const runtime: NavigationRuntime = {
     busyRef,
     generationRef: actionGenerationRef,
@@ -211,20 +188,35 @@ export function useUserMessageNavigation({
     loadOlderRef,
     navigateToRef,
     setIsBusy,
-    onDestination,
   };
   const runtimeRef = useRef(runtime);
   runtimeRef.current = runtime;
-  const goPrevious = useCallback(() => runPreviousNavigation(runtimeRef.current), []);
-  const goNext = useCallback(() => runNextNavigation(runtimeRef.current, nextId), [nextId]);
+  const canNavigatePrevious = useCallback(
+    (messageId: string) => {
+      const index = userMessageIds.indexOf(messageId);
+      return index >= 0 && (index > 0 || hasOlder);
+    },
+    [hasOlder, userMessageIds],
+  );
+  const canNavigateNext = useCallback(
+    (messageId: string) => {
+      const index = userMessageIds.indexOf(messageId);
+      return index >= 0 && index < userMessageIds.length - 1;
+    },
+    [userMessageIds],
+  );
+  const goPrevious = useCallback(
+    (messageId: string) => runPreviousNavigation(runtimeRef.current, messageId),
+    [],
+  );
+  const goNext = useCallback(
+    (messageId: string) => runNextNavigation(runtimeRef.current, messageId),
+    [],
+  );
   return {
     userMessageIds,
-    originId,
-    setViewportOrigin,
-    hasPrevious: originId !== null && (previousId !== null || hasOlder),
-    previousId,
-    hasNext: nextId !== null,
-    nextId,
+    canNavigatePrevious,
+    canNavigateNext,
     isBusy,
     goPrevious,
     goNext,

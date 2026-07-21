@@ -52,8 +52,6 @@ export type UserMessageRenderStop = {
   itemIndex: number;
 };
 
-export type ProgrammaticNavigation = { messageId: string; expiresAt: number } | null;
-
 export function getUserMessageRenderStops(items: RenderItem[]): UserMessageRenderStop[] {
   const stops: UserMessageRenderStop[] = [];
   items.forEach((item, itemIndex) => {
@@ -74,30 +72,6 @@ export function findUserMessageElement(
     if (element.dataset.userMessageId === messageId) return element;
   }
   return null;
-}
-
-export function findNearestUserMessageId(
-  scrollElement: HTMLElement,
-  allowedIds: string[],
-): string | null {
-  const allowed = new Set(allowedIds);
-  const viewport = scrollElement.getBoundingClientRect();
-  const viewportCenter = viewport.top + viewport.height / 2;
-  let nearest: { id: string; distance: number } | null = null;
-  for (const element of scrollElement.querySelectorAll<HTMLElement>("[data-user-message-id]")) {
-    const id = element.dataset.userMessageId;
-    if (!id || !allowed.has(id)) continue;
-    const rect = element.getBoundingClientRect();
-    const distance = distanceFromVerticalPoint(rect, viewportCenter);
-    if (!nearest || distance < nearest.distance) nearest = { id, distance };
-  }
-  return nearest?.id ?? null;
-}
-
-function distanceFromVerticalPoint(rect: DOMRect, point: number) {
-  if (point < rect.top) return rect.top - point;
-  if (point > rect.bottom) return point - rect.bottom;
-  return 0;
 }
 
 export function replayMessageHighlight(element: HTMLElement) {

@@ -3,8 +3,8 @@ import { SessionPage } from "../../pages/session-page";
 import {
   CURRENT_USER_PROMPT,
   OLD_USER_PROMPT,
-  expectLegacyRowArrowsAbsent,
   expectMessageAtNavigationPosition,
+  expectNavigationOutline,
   openLongHistory,
   seedLongUserMessageHistory,
 } from "./user-message-navigation-helpers";
@@ -15,6 +15,7 @@ test.describe("@chat user message navigation", () => {
       testPage,
       apiClient,
       seedData,
+      prCapture,
     }) => {
       test.setTimeout(180_000);
       const { taskId, sessionId } = await seedLongUserMessageHistory(apiClient, seedData);
@@ -22,23 +23,23 @@ test.describe("@chat user message navigation", () => {
       await testPage.emulateMedia({ reducedMotion: "reduce" });
       await openLongHistory(testPage, session, taskId, renderer);
       await testPage.mouse.move(0, 0);
-      const rail = session.userMessageNavigationRail();
-      const previous = session.previousUserMessageButton();
-      const next = session.nextUserMessageButton();
       const currentPrompt = session.userMessageContaining(CURRENT_USER_PROMPT);
+      const currentActions = currentPrompt.getByTestId("message-actions");
+      const previous = session.previousUserMessageButton(currentPrompt);
+      const next = session.nextUserMessageButton(currentPrompt);
 
-      await expect(rail).toHaveCSS("opacity", "0");
-      await session.messageScrollOwner().hover();
-      await expect(rail).toHaveCSS("opacity", "1");
+      await expect(session.activeChat().getByTestId("user-message-navigation-rail")).toHaveCount(0);
+      await expect(currentActions).toHaveCSS("opacity", "0");
+      await currentPrompt.getByText(CURRENT_USER_PROMPT, { exact: true }).hover();
+      await expect(currentActions).toHaveCSS("opacity", "1");
       await previous.focus();
       await expect(previous).toBeFocused();
-      await expect(rail).toHaveCSS("opacity", "1");
+      await expect(currentActions).toHaveCSS("opacity", "1");
 
       await expect(previous).toBeEnabled();
       await expect(next).toBeDisabled();
       await expect(session.loadOlderMessagesButton()).toBeVisible();
       await expect(session.loadOlderMessagesButton()).toBeEnabled();
-      await expectLegacyRowArrowsAbsent(currentPrompt);
 
       let olderPageRequests = 0;
       const countOlderPageRequest = (request: { url(): string }) => {
@@ -57,15 +58,23 @@ test.describe("@chat user message navigation", () => {
       const oldPrompt = session.userMessageContaining(OLD_USER_PROMPT);
       await expect(oldPrompt).toHaveClass(/search-flash/, { timeout: 60_000 });
       await expect(oldPrompt).toHaveCSS("animation-name", "none");
+      await expectNavigationOutline(oldPrompt);
       await expectMessageAtNavigationPosition(session.messageScrollOwner(), oldPrompt);
       expect(olderPageRequests).toBeGreaterThanOrEqual(3);
-      await expect(previous).toBeDisabled();
-      await expect(next).toBeEnabled();
-      await expectLegacyRowArrowsAbsent(oldPrompt);
+      const oldPrevious = session.previousUserMessageButton(oldPrompt);
+      const oldNext = session.nextUserMessageButton(oldPrompt);
+      await expect(oldPrevious).toBeDisabled();
+      await expect(oldNext).toBeEnabled();
+      await oldPrompt.getByText(OLD_USER_PROMPT, { exact: true }).hover();
+      await expect(oldPrompt.getByTestId("message-actions")).toHaveCSS("opacity", "1");
+      await prCapture.screenshot(`inline-user-message-navigation-${renderer}`, {
+        caption: `Inline user-message navigation using the ${renderer} renderer`,
+      });
 
       const requestsBeforeDown = olderPageRequests;
-      await next.click();
+      await oldNext.click();
       await expect(currentPrompt).toHaveClass(/search-flash/, { timeout: 15_000 });
+      await expectNavigationOutline(currentPrompt);
       await expectMessageAtNavigationPosition(session.messageScrollOwner(), currentPrompt);
       expect(olderPageRequests).toBe(requestsBeforeDown);
       await expect(previous).toBeEnabled();

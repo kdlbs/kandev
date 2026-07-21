@@ -2,14 +2,13 @@
 
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
-import { Virtuoso, type ListRange, type VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
-import { cn } from "@/lib/utils";
 import {
   type MessageListProps,
   MessageListStatus,
@@ -20,11 +19,7 @@ import {
   getLastTurnGroupId,
   getStreamingAgentMessageId,
 } from "./message-list-shared";
-import {
-  USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
-  UserMessageNavigationRail,
-  usePersistentUserMessageNavigationRail,
-} from "./user-message-navigation-rail";
+import { UserMessageNavigationProvider } from "./user-message-navigation-context";
 import { VirtuosoMessageListFallback } from "./message-list-virtuoso-fallback";
 import { useVirtuosoUserNavigation } from "./use-virtuoso-user-navigation";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -43,7 +38,7 @@ type VirtuosoBodyProps = MessageListProps & {
   Footer: () => React.ReactNode;
   firstItemIndex: number;
   virtuosoRef: React.RefObject<VirtuosoHandle | null>;
-  onVisibleRangeChanged: (range: ListRange) => void;
+  suspendFollowOutput: boolean;
 };
 
 function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
@@ -126,7 +121,7 @@ const FOLLOW_SMOOTH = "smooth" as const;
 const followOutput = (isAtBottom: boolean) => (isAtBottom ? FOLLOW_SMOOTH : false);
 
 function VirtuosoBody(props: VirtuosoBodyProps) {
-  const { scrollParent, Header, Footer, onVisibleRangeChanged } = props;
+  const { scrollParent, Header, Footer } = props;
   const { virtuosoRef, itemCount, firstItemIndex, handleStartReached, computeItemKey, renderItem } =
     useVirtuosoCallbacks(props);
 
@@ -159,9 +154,8 @@ function VirtuosoBody(props: VirtuosoBodyProps) {
       initialTopMostItemIndex={itemCount - 1}
       computeItemKey={computeItemKey}
       itemContent={renderItem}
-      followOutput={followOutput}
+      followOutput={props.suspendFollowOutput ? false : followOutput}
       startReached={handleStartReached}
-      rangeChanged={onVisibleRangeChanged}
       increaseViewportBy={200}
       atBottomThreshold={100}
       components={{ Header, Footer }}
@@ -378,7 +372,10 @@ function useVirtuosoHeaderFooter(args: HeaderFooterArgs) {
   return { Header, Footer, footerActions };
 }
 
-type VirtuosoMessageViewportProps = Omit<VirtuosoBodyProps, "scrollParent"> & {
+type VirtuosoMessageViewportProps = Omit<
+  VirtuosoBodyProps,
+  "scrollParent" | "suspendFollowOutput"
+> & {
   scrollParent: HTMLDivElement | null;
   navigation: ReturnType<typeof useVirtuosoUserNavigation>["navigation"];
   setScrollRef: (node: HTMLDivElement | null) => void;
@@ -390,28 +387,18 @@ function VirtuosoMessageViewport({
   scrollParent,
   ...bodyProps
 }: VirtuosoMessageViewportProps) {
-  const needsRailClearance = usePersistentUserMessageNavigationRail();
   return (
-    <div className="group/chat relative flex h-full min-h-0 flex-1">
-      <SessionPanelContent
-        ref={setScrollRef}
-        className={cn(
-          "relative p-4 chat-message-list",
-          needsRailClearance && USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
+    <UserMessageNavigationProvider value={navigation}>
+      <SessionPanelContent ref={setScrollRef} className="relative p-4 chat-message-list">
+        {scrollParent && (
+          <VirtuosoBody
+            {...bodyProps}
+            scrollParent={scrollParent}
+            suspendFollowOutput={navigation.isBusy}
+          />
         )}
-      >
-        {scrollParent && <VirtuosoBody {...bodyProps} scrollParent={scrollParent} />}
       </SessionPanelContent>
-      {scrollParent && navigation.userMessageIds.length > 0 && (
-        <UserMessageNavigationRail
-          canNavigatePrevious={navigation.hasPrevious}
-          canNavigateNext={navigation.hasNext}
-          isBusy={navigation.isBusy}
-          onPrevious={navigation.goPrevious}
-          onNext={navigation.goNext}
-        />
-      )}
-    </div>
+    </UserMessageNavigationProvider>
   );
 }
 
@@ -440,15 +427,14 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
   } = useLazyLoadMessages(sessionId);
   const isRunning = getSessionRunningState(sessionState);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
-  const { navigation, onVisibleRangeChanged, firstItemIndex, virtuosoRef } =
-    useVirtuosoUserNavigation({
-      items,
-      sessionId,
-      scrollParent,
-      hasMore,
-      oldestCursor: oldestCursor ?? null,
-      loadMore,
-    });
+  const { navigation, firstItemIndex, virtuosoRef } = useVirtuosoUserNavigation({
+    items,
+    sessionId,
+    scrollParent,
+    hasMore,
+    oldestCursor: oldestCursor ?? null,
+    loadMore,
+  });
 
   // Track which render branch fires and how itemCount/messageCount transition.
   // See useVirtuosoDebugSnapshot for details on the remote-executor scroll bug.
@@ -506,7 +492,6 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
       Footer={Footer}
       firstItemIndex={firstItemIndex}
       virtuosoRef={virtuosoRef}
-      onVisibleRangeChanged={onVisibleRangeChanged}
       navigation={navigation}
       setScrollRef={setScrollRef}
     />

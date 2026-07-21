@@ -105,7 +105,7 @@ export async function expectMessageAtNavigationPosition(scrollOwner: Locator, me
     .toBe(true);
 }
 
-export async function expectLegacyRowArrowsAbsent(message: Locator) {
-  await expect(message.getByRole("button", { name: "Go to previous message" })).toHaveCount(0);
-  await expect(message.getByRole("button", { name: "Go to next message" })).toHaveCount(0);
+export async function expectNavigationOutline(message: Locator) {
+  await expect(message).toHaveCSS("outline-style", "solid");
+  await expect(message).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 }

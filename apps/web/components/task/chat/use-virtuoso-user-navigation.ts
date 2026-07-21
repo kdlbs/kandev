@@ -1,13 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ListRange, VirtuosoHandle } from "react-virtuoso";
+import type { VirtuosoHandle } from "react-virtuoso";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
-  type ProgrammaticNavigation,
-  findNearestUserMessageId,
   getItemKey,
   getNavigationScrollBehavior,
   getUserMessageRenderStops,
@@ -60,76 +58,6 @@ function useStableFirstItemIndex(items: RenderItem[]) {
 
 const NAVIGATION_MOUNT_ATTEMPTS = 4;
 
-export function resolveVirtuosoViewportOrigin(
-  scrollParent: HTMLDivElement,
-  userStops: ReturnType<typeof getUserMessageRenderStops>,
-  visibleRange: ListRange | null,
-  firstItemIndex: number,
-) {
-  const mountedOrigin = findNearestUserMessageId(
-    scrollParent,
-    userStops.map((stop) => stop.messageId),
-  );
-  if (mountedOrigin || !visibleRange) return mountedOrigin;
-  const midpoint = (visibleRange.startIndex + visibleRange.endIndex) / 2;
-  let nearest: { messageId: string; distance: number } | null = null;
-  for (const stop of userStops) {
-    const distance = Math.abs(firstItemIndex + stop.itemIndex - midpoint);
-    if (!nearest || distance < nearest.distance) {
-      nearest = { messageId: stop.messageId, distance };
-    }
-  }
-  return nearest?.messageId ?? null;
-}
-
-function useViewportOrigin(
-  scrollParent: HTMLDivElement | null,
-  userStops: ReturnType<typeof getUserMessageRenderStops>,
-  firstItemIndex: number,
-  setViewportOrigin: (messageId: string | null) => void,
-  programmaticRef: React.RefObject<ProgrammaticNavigation>,
-) {
-  const frameRef = useRef(0);
-  const visibleRangeRef = useRef<ListRange | null>(null);
-  const updateOrigin = useCallback(() => {
-    if (!scrollParent) return;
-    const nearestId = resolveVirtuosoViewportOrigin(
-      scrollParent,
-      userStops,
-      visibleRangeRef.current,
-      firstItemIndex,
-    );
-    if (!nearestId && userStops.length > 0) return;
-    const programmatic = programmaticRef.current;
-    if (programmatic && Date.now() < programmatic.expiresAt) {
-      if (nearestId !== programmatic.messageId) return;
-    } else if (programmatic) {
-      programmaticRef.current = null;
-    }
-    setViewportOrigin(nearestId);
-  }, [firstItemIndex, programmaticRef, scrollParent, setViewportOrigin, userStops]);
-  const scheduleUpdate = useCallback(() => {
-    cancelAnimationFrame(frameRef.current);
-    frameRef.current = requestAnimationFrame(updateOrigin);
-  }, [updateOrigin]);
-  useEffect(() => {
-    if (!scrollParent) return;
-    scrollParent.addEventListener("scroll", scheduleUpdate, { passive: true });
-    scheduleUpdate();
-    return () => {
-      cancelAnimationFrame(frameRef.current);
-      scrollParent.removeEventListener("scroll", scheduleUpdate);
-    };
-  }, [scheduleUpdate, scrollParent]);
-  return useCallback(
-    (range: ListRange) => {
-      visibleRangeRef.current = range;
-      scheduleUpdate();
-    },
-    [scheduleUpdate],
-  );
-}
-
 export function useVirtuosoUserNavigation(args: {
   items: RenderItem[];
   sessionId: string | null;
@@ -141,7 +69,6 @@ export function useVirtuosoUserNavigation(args: {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const firstItemIndex = useStableFirstItemIndex(args.items);
   const userStops = useMemo(() => getUserMessageRenderStops(args.items), [args.items]);
-  const programmaticRef = useRef<ProgrammaticNavigation>(null);
   const mountedRef = useRef(true);
   const sessionIdRef = useRef(args.sessionId);
   sessionIdRef.current = args.sessionId;
@@ -158,7 +85,6 @@ export function useVirtuosoUserNavigation(args: {
       if (!stop) return false;
       const actionSessionId = args.sessionId;
       const previousScrollTop = args.scrollParent.scrollTop;
-      programmaticRef.current = { messageId, expiresAt: Date.now() + 3000 };
       if (isDebug()) {
         debugNavigation("scroll.start", {
           messageId,
@@ -196,14 +122,12 @@ export function useVirtuosoUserNavigation(args: {
             ).map((node) => node.dataset.userMessageId),
           });
         }
-        programmaticRef.current = null;
         if (mountedRef.current && sessionIdRef.current === actionSessionId) {
           args.scrollParent.scrollTop = previousScrollTop;
         }
         return false;
       }
       if (isDebug()) debugNavigation("scroll.complete", { messageId });
-      programmaticRef.current = { messageId, expiresAt: Date.now() + 500 };
       replayMessageHighlight(element);
       return true;
     },
@@ -217,12 +141,5 @@ export function useVirtuosoUserNavigation(args: {
     loadOlder: args.loadMore,
     navigateTo,
   });
-  const onVisibleRangeChanged = useViewportOrigin(
-    args.scrollParent,
-    userStops,
-    firstItemIndex,
-    navigation.setViewportOrigin,
-    programmaticRef,
-  );
-  return { navigation, onVisibleRangeChanged, firstItemIndex, virtuosoRef };
+  return { navigation, firstItemIndex, virtuosoRef };
 }

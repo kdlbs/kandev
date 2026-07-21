@@ -8,10 +8,9 @@ import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
-import { cn } from "@/lib/utils";
+import { UserMessageNavigationProvider } from "./user-message-navigation-context";
 import {
   type MessageListProps,
-  type ProgrammaticNavigation,
   MessageListStatus,
   MessageItem,
   getItemKey,
@@ -19,17 +18,11 @@ import {
   getSessionRunningState,
   getLastTurnGroupId,
   getStreamingAgentMessageId,
-  findNearestUserMessageId,
   findUserMessageElement,
   getNavigationScrollBehavior,
   replayMessageHighlight,
   waitForUserMessageElement,
 } from "./message-list-shared";
-import {
-  USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
-  UserMessageNavigationRail,
-  usePersistentUserMessageNavigationRail,
-} from "./user-message-navigation-rail";
 
 /**
  * Continuously captures scroll state via scroll listener.
@@ -180,40 +173,6 @@ function useAutoScroll(
 
 const NAVIGATION_SETTLE_ATTEMPTS = 4;
 
-function useViewportOrigin(
-  scrollRef: React.RefObject<HTMLDivElement | null>,
-  userMessageIds: string[],
-  setViewportOrigin: (messageId: string | null) => void,
-  programmaticRef: React.RefObject<ProgrammaticNavigation>,
-) {
-  useEffect(() => {
-    const scrollElement = scrollRef.current;
-    if (!scrollElement) return;
-    let frame = 0;
-    const updateOrigin = () => {
-      frame = 0;
-      const nearestId = findNearestUserMessageId(scrollElement, userMessageIds);
-      const programmatic = programmaticRef.current;
-      if (programmatic && Date.now() < programmatic.expiresAt) {
-        if (nearestId !== programmatic.messageId) return;
-      } else if (programmatic) {
-        programmaticRef.current = null;
-      }
-      setViewportOrigin(nearestId);
-    };
-    const onScroll = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(updateOrigin);
-    };
-    scrollElement.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => {
-      cancelAnimationFrame(frame);
-      scrollElement.removeEventListener("scroll", onScroll);
-    };
-  }, [programmaticRef, scrollRef, setViewportOrigin, userMessageIds]);
-}
-
 function useNativeUserNavigation(args: {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   sessionId: string | null;
@@ -222,7 +181,6 @@ function useNativeUserNavigation(args: {
   oldestCursor: string | null;
   loadMore: () => Promise<number>;
 }) {
-  const programmaticNavigationRef = useRef<ProgrammaticNavigation>(null);
   const mountedRef = useRef(true);
   const sessionIdRef = useRef(args.sessionId);
   sessionIdRef.current = args.sessionId;
@@ -238,7 +196,6 @@ function useNativeUserNavigation(args: {
       if (!scrollElement || !args.sessionId) return false;
       const actionSessionId = args.sessionId;
       const previousScrollTop = scrollElement.scrollTop;
-      programmaticNavigationRef.current = { messageId, expiresAt: Date.now() + 3000 };
       for (let attempt = 0; attempt < NAVIGATION_SETTLE_ATTEMPTS; attempt++) {
         const element = findUserMessageElement(scrollElement, messageId);
         if (!element) break;
@@ -252,12 +209,10 @@ function useNativeUserNavigation(args: {
           () => mountedRef.current && sessionIdRef.current === actionSessionId,
         );
         if (settled) {
-          programmaticNavigationRef.current = { messageId, expiresAt: Date.now() + 500 };
           replayMessageHighlight(settled);
           return true;
         }
       }
-      programmaticNavigationRef.current = null;
       if (mountedRef.current && sessionIdRef.current === actionSessionId) {
         scrollElement.scrollTop = previousScrollTop;
       }
@@ -273,12 +228,6 @@ function useNativeUserNavigation(args: {
     loadOlder: args.loadMore,
     navigateTo,
   });
-  useViewportOrigin(
-    args.scrollRef,
-    navigation.userMessageIds,
-    navigation.setViewportOrigin,
-    programmaticNavigationRef,
-  );
   return navigation;
 }
 
@@ -315,8 +264,6 @@ export const NativeMessageList = memo(function NativeMessageList({
   onOpenFile,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const needsRailClearance = usePersistentUserMessageNavigationRail();
-
   const { isInitialLoading, showLoadingState } = getConversationLoadingState({
     messagesLoading,
     messagesCount: messages.length,
@@ -347,14 +294,8 @@ export const NativeMessageList = memo(function NativeMessageList({
   useInitialScrollToBottom(scrollRef, items.length);
 
   return (
-    <div className="group/chat relative flex h-full min-h-0 flex-1">
-      <SessionPanelContent
-        ref={scrollRef}
-        className={cn(
-          "relative p-4 chat-message-list",
-          needsRailClearance && USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
-        )}
-      >
+    <UserMessageNavigationProvider value={navigation}>
+      <SessionPanelContent ref={scrollRef} className="relative p-4 chat-message-list">
         {hasMore && <div ref={sentinelRef} className="h-px" />}
 
         <MessageListStatus
@@ -395,15 +336,6 @@ export const NativeMessageList = memo(function NativeMessageList({
         {/* Bottom anchor — browser keeps scroll pinned here when new content appends */}
         <div style={{ overflowAnchor: "auto", height: 1 }} />
       </SessionPanelContent>
-      {navigation.userMessageIds.length > 0 && (
-        <UserMessageNavigationRail
-          canNavigatePrevious={navigation.hasPrevious}
-          canNavigateNext={navigation.hasNext}
-          isBusy={navigation.isBusy}
-          onPrevious={navigation.goPrevious}
-          onNext={navigation.goNext}
-        />
-      )}
-    </div>
+    </UserMessageNavigationProvider>
   );
 });

@@ -14,6 +14,7 @@ import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
+import { useUserMessageNavigationActions } from "@/components/task/chat/user-message-navigation-context";
 import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { markdownComponents } from "@/components/shared/markdown-components";
@@ -390,6 +391,7 @@ function UserMessageContent({
   worktreePath,
   onOpenFile,
 }: UserMessageProps) {
+  const navigation = useUserMessageNavigationActions(comment.id);
   const promptNames = usePromptMentionNames();
   const promptMentionComponents = usePromptMentionMarkdownComponents(promptNames);
   const {
@@ -456,6 +458,7 @@ function UserMessageContent({
           hasHiddenPrompts={hasHiddenPrompts}
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
+          navigation={navigation}
         />
       </div>
     </div>

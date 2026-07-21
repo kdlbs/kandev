@@ -99,18 +99,12 @@ export class SessionPage {
     return this.activeChat().locator(".chat-message-list");
   }
 
-  userMessageNavigationRail(): Locator {
-    return this.activeChat().getByTestId("user-message-navigation-rail");
+  previousUserMessageButton(message: Locator): Locator {
+    return message.getByRole("button", { name: "Previous user message" });
   }
 
-  previousUserMessageButton(): Locator {
-    return this.userMessageNavigationRail().getByRole("button", {
-      name: "Previous user message",
-    });
-  }
-
-  nextUserMessageButton(): Locator {
-    return this.userMessageNavigationRail().getByRole("button", { name: "Next user message" });
+  nextUserMessageButton(message: Locator): Locator {
+    return message.getByRole("button", { name: "Next user message" });
   }
 
   userMessageContaining(text: string): Locator {

@@ -1,16 +1,14 @@
 import { forwardRef, type HTMLAttributes } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import type { Message } from "@/lib/types/http";
-import { USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS } from "./user-message-navigation-rail";
 
 const navigation = vi.hoisted(() => ({
   goPrevious: vi.fn(),
   goNext: vi.fn(),
   options: null as null | { navigateTo: (id: string) => boolean | Promise<boolean> },
 }));
-const breakpoint = vi.hoisted(() => ({ isFinePointer: false, isMobile: true }));
 
 vi.mock("@/hooks/use-message-navigation", () => ({
   useUserMessageNavigation: (options: {
@@ -19,18 +17,13 @@ vi.mock("@/hooks/use-message-navigation", () => ({
     navigation.options = options;
     return {
       userMessageIds: ["user-1"],
-      originId: "user-1",
-      setViewportOrigin: vi.fn(),
-      hasPrevious: true,
-      hasNext: false,
+      canNavigatePrevious: vi.fn(() => true),
+      canNavigateNext: vi.fn(() => false),
       isBusy: false,
       goPrevious: navigation.goPrevious,
       goNext: navigation.goNext,
     };
   },
-}));
-vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => breakpoint,
 }));
 vi.mock("@/hooks/use-lazy-load-messages", () => ({
   useLazyLoadMessages: () => ({ loadMore: vi.fn(async () => 0), hasMore: true, isLoading: false }),
@@ -76,30 +69,14 @@ function props() {
 }
 
 describe("NativeMessageList user navigation", () => {
-  beforeEach(() => {
-    breakpoint.isFinePointer = false;
-    breakpoint.isMobile = true;
-  });
-  it("mounts the rail outside the scroll owner and reserves mobile content clearance", () => {
+  it("does not mount the former floating rail or reserve its content clearance", () => {
     const { container } = render(<NativeMessageList {...props()} />);
 
-    const viewport = screen.getByTestId("user-message-navigation-rail").parentElement;
-    expect(viewport?.className).toContain("group/chat");
-    expect(viewport?.querySelector('[data-testid="native-scroll-owner"] nav')).toBeNull();
-    expect(screen.getByTestId("native-scroll-owner").className).toContain(
-      USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
+    expect(screen.queryByTestId("user-message-navigation-rail")).toBeNull();
+    expect(screen.getByTestId("native-scroll-owner").className).not.toContain(
+      "safe-area-inset-right",
     );
     expect(container.querySelector('[data-testid="load-older-messages"]')).not.toBeNull();
-  });
-
-  it("does not reserve rail clearance for a fine-pointer desktop", () => {
-    breakpoint.isFinePointer = true;
-    breakpoint.isMobile = false;
-    render(<NativeMessageList {...props()} />);
-
-    expect(screen.getByTestId("native-scroll-owner").className).not.toContain(
-      USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
-    );
   });
 
   it("centers the destination DOM prompt and replays its highlight", async () => {

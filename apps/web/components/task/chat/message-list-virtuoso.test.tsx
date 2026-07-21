@@ -3,7 +3,6 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import type { Message } from "@/lib/types/http";
-import { USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS } from "./user-message-navigation-rail";
 import { waitForUserMessageElement } from "./message-list-shared";
 
 const SCROLL_OWNER_TEST_ID = "virtuoso-scroll-owner";
@@ -15,9 +14,9 @@ const SEARCH_FLASH_CLASS = "search-flash";
 const navigation = vi.hoisted(() => ({
   options: null as null | { navigateTo: (id: string) => boolean | Promise<boolean> },
   scrollToIndex: vi.fn(),
-  setViewportOrigin: vi.fn(),
-  rangeChanged: null as null | ((range: { startIndex: number; endIndex: number }) => void),
   renderOffset: 0,
+  isBusy: false,
+  followOutput: undefined as false | ((isAtBottom: boolean) => "smooth" | false) | undefined,
   scrollOwners: [] as HTMLDivElement[],
 }));
 const breakpoint = vi.hoisted(() => ({ isFinePointer: false, isMobile: true }));
@@ -29,11 +28,9 @@ vi.mock("@/hooks/use-message-navigation", () => ({
     navigation.options = options;
     return {
       userMessageIds: [USER_ONE_ID, USER_TWO_ID],
-      originId: USER_ONE_ID,
-      setViewportOrigin: navigation.setViewportOrigin,
-      hasPrevious: true,
-      hasNext: false,
-      isBusy: false,
+      canNavigatePrevious: vi.fn(() => true),
+      canNavigateNext: vi.fn(() => false),
+      isBusy: navigation.isBusy,
       goPrevious: vi.fn(),
       goNext: vi.fn(),
     };
@@ -72,12 +69,12 @@ vi.mock("react-virtuoso", () => ({
         firstItemIndex: number;
         itemContent: (index: number) => React.ReactNode;
         components: { Header: () => React.ReactNode };
-        rangeChanged: (range: { startIndex: number; endIndex: number }) => void;
+        followOutput: false | ((isAtBottom: boolean) => "smooth" | false);
       },
       ref,
     ) => {
       useImperativeHandle(ref, () => ({ scrollToIndex: navigation.scrollToIndex }));
-      navigation.rangeChanged = props.rangeChanged;
+      navigation.followOutput = props.followOutput;
       return (
         <div data-testid="virtuoso-body">
           {props.components.Header()}
@@ -113,9 +110,9 @@ function props() {
 
 beforeEach(() => {
   navigation.renderOffset = 0;
+  navigation.isBusy = false;
+  navigation.followOutput = undefined;
   navigation.scrollToIndex.mockReset();
-  navigation.setViewportOrigin.mockClear();
-  navigation.rangeChanged = null;
   navigation.scrollOwners = [];
 });
 
@@ -127,16 +124,21 @@ describe("VirtuosoMessageList structure", () => {
     expect(screen.getByTestId(SCROLL_OWNER_TEST_ID)).toBe(navigation.scrollOwners[0]);
   });
 
-  it("mounts the rail outside the virtual scroll owner and reserves mobile clearance", () => {
+  it("does not mount the former floating rail or reserve its content clearance", () => {
     render(<VirtuosoMessageList {...props()} />);
 
-    const viewport = screen.getByTestId("user-message-navigation-rail").parentElement;
-    expect(viewport?.className).toContain("group/chat");
-    expect(viewport?.querySelector(`[data-testid="${SCROLL_OWNER_TEST_ID}"] nav`)).toBeNull();
-    expect(screen.getByTestId(SCROLL_OWNER_TEST_ID).className).toContain(
-      USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
+    expect(screen.queryByTestId("user-message-navigation-rail")).toBeNull();
+    expect(screen.getByTestId(SCROLL_OWNER_TEST_ID).className).not.toContain(
+      "safe-area-inset-right",
     );
     expect(screen.getByTestId("load-older-messages")).not.toBeNull();
+  });
+
+  it("suspends live bottom-follow while explicit navigation is busy", () => {
+    navigation.isBusy = true;
+    render(<VirtuosoMessageList {...props()} />);
+
+    expect(navigation.followOutput).toBe(false);
   });
 });
 
@@ -258,34 +260,5 @@ describe("VirtuosoMessageList destination navigation", () => {
     expect(scrollOwner.scrollTop).toBe(240);
     expect(container.querySelector(`[data-user-message-id="${USER_TWO_ID}"]`)).toBeNull();
     vi.useRealTimers();
-  });
-});
-
-describe("VirtuosoMessageList viewport origin", () => {
-  it("uses the nearest user render stop when no user prompt is mounted", async () => {
-    const agent = (id: string) => ({ id, author_type: "agent", type: "message" }) as Message;
-    const user = (id: string) => ({ id, author_type: "user", type: "message" }) as Message;
-    const messages = [
-      user(USER_ONE_ID),
-      agent("agent-1"),
-      agent("agent-2"),
-      agent("agent-3"),
-      agent("agent-4"),
-      agent("agent-5"),
-      user(USER_TWO_ID),
-    ];
-    navigation.renderOffset = 4;
-    render(
-      <VirtuosoMessageList
-        {...props()}
-        items={messages.map((message) => ({ type: "message", message }))}
-        messages={messages}
-      />,
-    );
-
-    await act(async () => navigation.rangeChanged?.({ startIndex: 99998, endIndex: 99998 }));
-    await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-
-    expect(navigation.setViewportOrigin).toHaveBeenLastCalledWith(USER_TWO_ID);
   });
 });

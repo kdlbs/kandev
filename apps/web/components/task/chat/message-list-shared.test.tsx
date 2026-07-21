@@ -64,7 +64,6 @@ vi.mock("@/lib/api/domains/session-api", () => ({
 import {
   MessageItem,
   MessageListStatus,
-  findNearestUserMessageId,
   getNavigationScrollBehavior,
   getUserMessageRenderStops,
   getConversationLoadingState,
@@ -155,32 +154,6 @@ describe("user message navigation mapping", () => {
     ];
 
     expect(getUserMessageRenderStops(items)).toEqual([{ messageId: "user-1", itemIndex: 0 }]);
-  });
-
-  it("selects the prompt whose rendered bounds are nearest the viewport center", () => {
-    const { container } = render(
-      <div>
-        <div data-user-message-id="user-1" />
-        <div data-user-message-id="user-2" />
-      </div>,
-    );
-    const scrollElement = container.firstElementChild as HTMLElement;
-    const [first, second] = Array.from(scrollElement.children) as HTMLElement[];
-    vi.spyOn(scrollElement, "getBoundingClientRect").mockReturnValue({
-      top: 0,
-      bottom: 400,
-      height: 400,
-    } as DOMRect);
-    vi.spyOn(first, "getBoundingClientRect").mockReturnValue({
-      top: 20,
-      bottom: 80,
-    } as DOMRect);
-    vi.spyOn(second, "getBoundingClientRect").mockReturnValue({
-      top: 180,
-      bottom: 260,
-    } as DOMRect);
-
-    expect(findNearestUserMessageId(scrollElement, ["user-1", "user-2"])).toBe("user-2");
   });
 
   it("disables smooth scrolling when reduced motion is requested", () => {

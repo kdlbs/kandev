@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { ChatMessage } from "./chat-message";
+import { UserMessageNavigationProvider } from "../user-message-navigation-context";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -389,8 +390,10 @@ Visible agent response.`;
 });
 
 describe("ChatMessage navigation actions", () => {
-  it("does not render navigation controls below user messages", () => {
+  it("renders navigation controls for the user message that owns the action row", () => {
     const current = userMessage({ id: "msg-2" });
+    const goPrevious = vi.fn(async () => {});
+    const goNext = vi.fn(async () => {});
     render(
       <StateProvider
         initialState={{
@@ -401,12 +404,27 @@ describe("ChatMessage navigation actions", () => {
           } as never,
         }}
       >
-        <ChatMessage comment={current} label="Message" className="" sessionId="sess-1" />
+        <UserMessageNavigationProvider
+          value={{
+            canNavigatePrevious: (messageId) => messageId === "msg-2",
+            canNavigateNext: () => false,
+            isBusy: false,
+            goPrevious,
+            goNext,
+          }}
+        >
+          <ChatMessage comment={current} label="Message" className="" sessionId="sess-1" />
+        </UserMessageNavigationProvider>
       </StateProvider>,
     );
 
-    expect(screen.queryByRole("button", { name: "Go to previous message" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Go to next message" })).toBeNull();
+    const previous = screen.getByRole("button", { name: "Previous user message" });
+    const next = screen.getByRole("button", { name: "Next user message" });
+    expect(previous.hasAttribute("disabled")).toBe(false);
+    expect(next.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(previous);
+    expect(goPrevious).toHaveBeenCalledWith("msg-2");
+    expect(goNext).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Copy message to clipboard" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Show raw text" })).not.toBeNull();
   });

@@ -2,7 +2,15 @@
 
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { IconCheck, IconCopy, IconCode, IconEyeCode, IconInfoCircle } from "@tabler/icons-react";
+import {
+  IconArrowDown,
+  IconArrowUp,
+  IconCheck,
+  IconCopy,
+  IconCode,
+  IconEyeCode,
+  IconInfoCircle,
+} from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -28,7 +36,48 @@ type MessageActionsProps = {
   showModel?: boolean;
   isRawView?: boolean;
   onToggleRaw?: () => void;
+  navigation?: MessageNavigationActions;
 };
+
+export type MessageNavigationActions = {
+  canNavigatePrevious: boolean;
+  canNavigateNext: boolean;
+  isBusy: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+};
+
+function NavigationButton({
+  direction,
+  disabled,
+  isBusy,
+  onClick,
+}: {
+  direction: "previous" | "next";
+  disabled: boolean;
+  isBusy: boolean;
+  onClick: () => void;
+}) {
+  const isPrevious = direction === "previous";
+  const label = isPrevious ? "Previous user message" : "Next user message";
+  const Icon = isPrevious ? IconArrowUp : IconArrowDown;
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.currentTarget.blur();
+        onClick();
+      }}
+      disabled={disabled}
+      aria-label={label}
+      aria-busy={isBusy || undefined}
+      title={label}
+      className="h-11 w-11 cursor-pointer rounded p-3 transition-colors duration-200 hover:bg-muted disabled:cursor-default disabled:opacity-35 sm:h-5 sm:w-5 sm:p-1"
+    >
+      <Icon className="h-full w-full" />
+    </button>
+  );
+}
 
 function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void }) {
   return (
@@ -165,6 +214,7 @@ export function MessageActions({
   showModel = false,
   isRawView = false,
   onToggleRaw,
+  navigation,
 }: MessageActionsProps) {
   const { copied, copy } = useCopyToClipboard();
   const { turn, usageMultiplier } = useAppStore(
@@ -191,7 +241,10 @@ export function MessageActions({
   };
 
   return (
-    <div className="flex items-center gap-2 mt-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+    <div
+      data-testid="message-actions"
+      className="mt-2 flex items-center gap-2 opacity-100 transition-opacity focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+    >
       {showCopy && <CopyButton copied={copied} onCopy={handleCopy} />}
       {showRawToggle && onToggleRaw && (
         <RawToggleButton
@@ -201,6 +254,22 @@ export function MessageActions({
         />
       )}
       <MessageDebugDialog message={message} turn={turn} usageMultiplier={usageMultiplier} />
+      {message.author_type === "user" && navigation && (
+        <>
+          <NavigationButton
+            direction="previous"
+            disabled={navigation.isBusy || !navigation.canNavigatePrevious}
+            isBusy={navigation.isBusy}
+            onClick={navigation.onPrevious}
+          />
+          <NavigationButton
+            direction="next"
+            disabled={navigation.isBusy || !navigation.canNavigateNext}
+            isBusy={navigation.isBusy}
+            onClick={navigation.onNext}
+          />
+        </>
+      )}
       <MessageMetaInfo
         showModel={showModel}
         sessionConfigText={sessionConfigText}

@@ -3,8 +3,8 @@ import { SessionPage } from "../../pages/session-page";
 import {
   CURRENT_USER_PROMPT,
   OLD_USER_PROMPT,
-  expectLegacyRowArrowsAbsent,
   expectMessageAtNavigationPosition,
+  expectNavigationOutline,
   openLongHistory,
   seedLongUserMessageHistory,
 } from "./user-message-navigation-helpers";
@@ -14,30 +14,28 @@ test.describe("User message navigation on mobile", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(180_000);
     const { taskId } = await seedLongUserMessageHistory(apiClient, seedData);
     const session = new SessionPage(testPage);
     await openLongHistory(testPage, session, taskId);
 
-    const rail = session.userMessageNavigationRail();
-    const previous = session.previousUserMessageButton();
-    const next = session.nextUserMessageButton();
     const currentPrompt = session.userMessageContaining(CURRENT_USER_PROMPT);
-    await expect(rail).toHaveCSS("opacity", "1");
+    const previous = session.previousUserMessageButton(currentPrompt);
+    const next = session.nextUserMessageButton(currentPrompt);
+    await expect(currentPrompt.getByTestId("message-actions")).toHaveCSS("opacity", "1");
+    await expect(session.activeChat().getByTestId("user-message-navigation-rail")).toHaveCount(0);
     await expect(session.loadOlderMessagesButton()).toBeVisible();
     await expect(session.loadOlderMessagesButton()).toBeEnabled();
-    await expectLegacyRowArrowsAbsent(currentPrompt);
 
     const viewport = testPage.viewportSize();
     if (!viewport) throw new Error("Expected a mobile viewport");
-    const [railBox, previousBox, nextBox, currentTextBox] = await Promise.all([
-      rail.boundingBox(),
+    const [previousBox, nextBox, currentTextBox] = await Promise.all([
       previous.boundingBox(),
       next.boundingBox(),
       currentPrompt.getByText(CURRENT_USER_PROMPT, { exact: true }).boundingBox(),
     ]);
-    expect(railBox).not.toBeNull();
     expect(previousBox).not.toBeNull();
     expect(nextBox).not.toBeNull();
     expect(currentTextBox).not.toBeNull();
@@ -45,12 +43,12 @@ test.describe("User message navigation on mobile", () => {
     expect(previousBox!.height).toBeGreaterThanOrEqual(44);
     expect(nextBox!.width).toBeGreaterThanOrEqual(44);
     expect(nextBox!.height).toBeGreaterThanOrEqual(44);
-    expect(railBox!.x).toBeGreaterThanOrEqual(0);
-    expect(railBox!.y).toBeGreaterThanOrEqual(0);
-    expect(railBox!.x + railBox!.width).toBeLessThanOrEqual(viewport.width);
-    expect(railBox!.y + railBox!.height).toBeLessThanOrEqual(viewport.height);
+    expect(previousBox!.x).toBeGreaterThanOrEqual(0);
+    expect(previousBox!.x + previousBox!.width).toBeLessThanOrEqual(viewport.width);
+    expect(nextBox!.x).toBeGreaterThanOrEqual(0);
+    expect(nextBox!.x + nextBox!.width).toBeLessThanOrEqual(viewport.width);
     expect(currentTextBox!.x).toBeGreaterThanOrEqual(0);
-    expect(currentTextBox!.x + currentTextBox!.width).toBeLessThanOrEqual(railBox!.x);
+    expect(currentTextBox!.x + currentTextBox!.width).toBeLessThanOrEqual(viewport.width);
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -58,12 +56,19 @@ test.describe("User message navigation on mobile", () => {
     await previous.click();
     const oldPrompt = session.userMessageContaining(OLD_USER_PROMPT);
     await expect(oldPrompt).toHaveClass(/search-flash/, { timeout: 60_000 });
+    await expectNavigationOutline(oldPrompt);
     await expectMessageAtNavigationPosition(session.messageScrollOwner(), oldPrompt);
-    await expect(previous).toBeDisabled();
-    await expect(next).toBeEnabled();
+    const oldPrevious = session.previousUserMessageButton(oldPrompt);
+    const oldNext = session.nextUserMessageButton(oldPrompt);
+    await expect(oldPrevious).toBeDisabled();
+    await expect(oldNext).toBeEnabled();
+    await prCapture.screenshot("inline-user-message-navigation-mobile", {
+      caption: "Touch-sized navigation actions on a user message",
+    });
 
-    await next.click();
+    await oldNext.click();
     await expect(currentPrompt).toHaveClass(/search-flash/, { timeout: 15_000 });
+    await expectNavigationOutline(currentPrompt);
     await expectMessageAtNavigationPosition(session.messageScrollOwner(), currentPrompt);
     await expect(next).toBeDisabled();
     expect(

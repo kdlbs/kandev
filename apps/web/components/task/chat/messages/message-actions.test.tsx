@@ -18,19 +18,58 @@ const message: Message = {
 };
 
 describe("MessageActions", () => {
-  it("keeps message actions without rendering per-message navigation", () => {
+  it("renders user navigation alongside the existing actions", () => {
     const onToggleRaw = vi.fn();
+    const onPrevious = vi.fn();
+    const onNext = vi.fn();
     render(
       <StateProvider>
-        <MessageActions message={message} onToggleRaw={onToggleRaw} />
+        <MessageActions
+          message={message}
+          onToggleRaw={onToggleRaw}
+          navigation={{
+            canNavigatePrevious: true,
+            canNavigateNext: false,
+            isBusy: false,
+            onPrevious,
+            onNext,
+          }}
+        />
       </StateProvider>,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Show raw text" }));
+    const previous = screen.getByRole("button", { name: "Previous user message" });
+    previous.focus();
+    fireEvent.click(previous);
 
     expect(onToggleRaw).toHaveBeenCalledOnce();
+    expect(onPrevious).toHaveBeenCalledOnce();
+    expect(onNext).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(previous);
     expect(screen.getByRole("button", { name: "Copy message to clipboard" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "Go to previous message" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Go to next message" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Next user message" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+  });
+
+  it("does not render navigation for an agent message", () => {
+    render(
+      <StateProvider>
+        <MessageActions
+          message={{ ...message, author_type: "agent" }}
+          navigation={{
+            canNavigatePrevious: true,
+            canNavigateNext: true,
+            isBusy: false,
+            onPrevious: vi.fn(),
+            onNext: vi.fn(),
+          }}
+        />
+      </StateProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Previous user message" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Next user message" })).toBeNull();
   });
 });

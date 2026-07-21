@@ -66,34 +66,17 @@ describe("useUserMessageNavigation", () => {
     expect(result.current.userMessageIds).toEqual(["u1", "u2", "u3"]);
   });
 
-  it("uses the newest rendered prompt until the viewport reports an origin", () => {
-    const { result } = renderNavigation([messageItem("u1", "user"), messageItem("u2", "user")]);
-
-    expect(result.current.originId).toBe("u2");
-  });
-
-  it("accepts viewport-origin updates", () => {
-    const { result } = renderNavigation([messageItem("u1", "user")]);
-
-    expect(result.current.setViewportOrigin).toEqual(expect.any(Function));
-  });
-
-  it("selects adjacent prompts from the reported viewport origin", () => {
+  it("derives boundaries for each user prompt", () => {
     const { result } = renderNavigation([
       messageItem("u1", "user"),
       messageItem("u2", "user"),
       messageItem("u3", "user"),
     ]);
 
-    act(() => result.current.setViewportOrigin("u2"));
-
-    expect(result.current).toMatchObject({
-      originId: "u2",
-      hasPrevious: true,
-      previousId: "u1",
-      hasNext: true,
-      nextId: "u3",
-    });
+    expect(result.current.canNavigatePrevious("u1")).toBe(false);
+    expect(result.current.canNavigatePrevious("u2")).toBe(true);
+    expect(result.current.canNavigateNext("u2")).toBe(true);
+    expect(result.current.canNavigateNext("u3")).toBe(false);
   });
 
   it("exposes directional navigation actions", () => {
@@ -110,13 +93,10 @@ describe("useUserMessageNavigation", () => {
       navigateTo,
       loadOlder,
     });
-    act(() => result.current.setViewportOrigin("u1"));
-
-    await act(() => result.current.goNext());
+    await act(() => result.current.goNext("u1"));
 
     expect(navigateTo).toHaveBeenCalledWith("u2");
     expect(loadOlder).not.toHaveBeenCalled();
-    expect(result.current.originId).toBe("u2");
   });
 });
 
@@ -134,7 +114,7 @@ describe("useUserMessageNavigation pagination", () => {
 
     let navigation!: Promise<void>;
     act(() => {
-      navigation = hook.result.current.goPrevious();
+      navigation = hook.result.current.goPrevious("u-current");
     });
     await act(async () => Promise.resolve());
     expect(navigateTo).not.toHaveBeenCalled();
@@ -167,7 +147,7 @@ describe("useUserMessageNavigation pagination", () => {
 
     let navigation!: Promise<void>;
     act(() => {
-      navigation = hook.result.current.goPrevious();
+      navigation = hook.result.current.goPrevious("u-current");
     });
     await act(async () => Promise.resolve());
     await act(async () => vi.advanceTimersByTimeAsync(250));
@@ -202,7 +182,7 @@ describe("useUserMessageNavigation paginated actions", () => {
 
     let navigation!: Promise<void>;
     act(() => {
-      navigation = hook.result.current.goPrevious();
+      navigation = hook.result.current.goPrevious("u-current");
     });
     hook.rerender({
       sessionId: SESSION_ID,
@@ -231,11 +211,8 @@ describe("useUserMessageNavigation paginated actions", () => {
 
     expect(loadOlder).toHaveBeenCalledTimes(2);
     expect(navigateTo).toHaveBeenCalledWith("u-old");
-    expect(hook.result.current).toMatchObject({
-      isBusy: false,
-      originId: "u-old",
-      hasPrevious: false,
-    });
+    expect(hook.result.current.isBusy).toBe(false);
+    expect(hook.result.current.canNavigatePrevious("u-old")).toBe(false);
   });
 
   it("blocks duplicate actions while destination navigation is pending", async () => {
@@ -246,12 +223,10 @@ describe("useUserMessageNavigation paginated actions", () => {
     const { result } = renderNavigation([messageItem("u1", "user"), messageItem("u2", "user")], {
       navigateTo,
     });
-    act(() => result.current.setViewportOrigin("u1"));
-
     let firstAction!: Promise<void>;
     act(() => {
-      firstAction = result.current.goNext();
-      void result.current.goNext();
+      firstAction = result.current.goNext("u1");
+      void result.current.goNext("u1");
     });
 
     expect(navigateTo).toHaveBeenCalledTimes(1);
@@ -269,7 +244,7 @@ describe("useUserMessageNavigation boundaries and cancellation", () => {
       oldestCursor: "cursor-1",
     });
 
-    expect(result.current.hasPrevious).toBe(false);
+    expect(result.current.canNavigatePrevious("missing-user")).toBe(false);
   });
 
   it("leaves previous enabled after a failed or no-progress page", async () => {
@@ -282,13 +257,10 @@ describe("useUserMessageNavigation boundaries and cancellation", () => {
       navigateTo,
     });
 
-    await act(() => result.current.goPrevious());
+    await act(() => result.current.goPrevious("u1"));
 
-    expect(result.current).toMatchObject({
-      originId: "u1",
-      hasPrevious: true,
-      isBusy: false,
-    });
+    expect(result.current.canNavigatePrevious("u1")).toBe(true);
+    expect(result.current.isBusy).toBe(false);
     expect(navigateTo).not.toHaveBeenCalled();
   });
 
@@ -303,7 +275,7 @@ describe("useUserMessageNavigation boundaries and cancellation", () => {
     });
     let navigation!: Promise<void>;
     act(() => {
-      navigation = hook.result.current.goPrevious();
+      navigation = hook.result.current.goPrevious("u1");
     });
     hook.rerender({
       sessionId: SESSION_ID,
@@ -319,7 +291,7 @@ describe("useUserMessageNavigation boundaries and cancellation", () => {
     await act(() => navigation);
 
     expect(loadOlder).toHaveBeenCalledTimes(1);
-    expect(hook.result.current.hasPrevious).toBe(true);
+    expect(hook.result.current.canNavigatePrevious("u1")).toBe(true);
     vi.useRealTimers();
   });
 
@@ -335,7 +307,7 @@ describe("useUserMessageNavigation boundaries and cancellation", () => {
     });
     let navigation!: Promise<void>;
     act(() => {
-      navigation = hook.result.current.goPrevious();
+      navigation = hook.result.current.goPrevious("u1");
     });
     hook.rerender({
       sessionId: "sess-2",
@@ -350,6 +322,6 @@ describe("useUserMessageNavigation boundaries and cancellation", () => {
     await act(() => navigation);
 
     expect(navigateTo).not.toHaveBeenCalled();
-    expect(hook.result.current).toMatchObject({ originId: "u-new", isBusy: false });
+    expect(hook.result.current.isBusy).toBe(false);
   });
 });
