@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGitLabReviewWatches } from "./use-gitlab-review-watches";
 import type { ReviewWatch } from "@/lib/types/gitlab";
@@ -94,6 +94,23 @@ describe("useGitLabReviewWatches", () => {
     expect(api.update).toHaveBeenCalledWith("watch-1", "ws-1", { enabled: false });
     expect(api.previewReset).toHaveBeenCalledWith("watch-1", "ws-1");
     expect(api.reset).toHaveBeenCalledWith("watch-1", "ws-1");
+  });
+
+  it("restarts the list request after its effect is cleaned up", async () => {
+    const pending = deferred<{ watches: ReviewWatch[] }>();
+    api.list.mockReturnValue(pending.promise);
+    const { rerender } = renderHook(({ workspaceId }) => useGitLabReviewWatches(workspaceId), {
+      initialProps: { workspaceId: "ws-1" as string | null },
+    });
+
+    rerender({ workspaceId: null });
+    rerender({ workspaceId: "ws-1" });
+    await act(async () => pending.resolve({ watches: [] }));
+
+    expect(api.list).toHaveBeenCalledTimes(2);
+    await waitFor(() =>
+      expect(state.setGitLabReviewWatchesLoading).toHaveBeenLastCalledWith(false),
+    );
   });
 
   it("hides workspace A rows synchronously when switching to workspace B", () => {

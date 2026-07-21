@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGitLabIssueWatches } from "./use-gitlab-issue-watches";
 import type { IssueWatch } from "@/lib/types/gitlab";
@@ -95,6 +95,21 @@ describe("useGitLabIssueWatches", () => {
 
     expect(api.remove).toHaveBeenCalledWith("watch-2", "ws-row");
     expect(api.trigger).toHaveBeenCalledWith("watch-2", "ws-row");
+  });
+
+  it("restarts the list request after its effect is cleaned up", async () => {
+    const pending = deferred<{ watches: IssueWatch[] }>();
+    api.list.mockReturnValue(pending.promise);
+    const { rerender } = renderHook(({ workspaceId }) => useGitLabIssueWatches(workspaceId), {
+      initialProps: { workspaceId: "ws-1" as string | null },
+    });
+
+    rerender({ workspaceId: null });
+    rerender({ workspaceId: "ws-1" });
+    await act(async () => pending.resolve({ watches: [] }));
+
+    expect(api.list).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(state.setGitLabIssueWatchesLoading).toHaveBeenLastCalledWith(false));
   });
 
   it("hides workspace A rows synchronously when switching to workspace B", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback } from "react";
 import {
   listIssueWatches,
   createIssueWatch,
@@ -24,11 +24,6 @@ function filterByWorkspace<T extends { workspace_id: string }>(
   return workspaceId ? items.filter((watch) => watch.workspace_id === workspaceId) : [];
 }
 
-/**
- * useGitLabIssueWatches mirrors useGitLabReviewWatches — the per-instance
- * lastFetchedRef triggers a refetch on workspace switch, working around the
- * fact that the slice-level `loaded` flag is shared across all consumers.
- */
 export function useGitLabIssueWatches(workspaceId: string | null) {
   const items = useAppStore((state) => state.gitlabIssueWatches.items);
   const loaded = useAppStore((state) => state.gitlabIssueWatches.loaded);
@@ -38,12 +33,10 @@ export function useGitLabIssueWatches(workspaceId: string | null) {
   const add = useAppStore((state) => state.addGitLabIssueWatch);
   const upd = useAppStore((state) => state.updateGitLabIssueWatchInStore);
   const rm = useAppStore((state) => state.removeGitLabIssueWatch);
-  const lastFetchedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!workspaceId || lastFetchedRef.current === workspaceId) return;
+    if (!workspaceId) return;
     let cancelled = false;
-    lastFetchedRef.current = workspaceId;
     setLoading(true);
     listIssueWatches(workspaceId, { cache: "no-store" })
       .then((response) => {

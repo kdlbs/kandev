@@ -31,6 +31,8 @@ import {
   type TaskState,
 } from "@/lib/types/http";
 
+const EMPTY_REPOSITORIES: Repository[] = [];
+
 export interface Task {
   id: string;
   title: string;
@@ -384,7 +386,9 @@ export function dispatchKanbanCardClick(
 function useActiveWorkspaceRepositories() {
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   return useAppStore((state) =>
-    activeWorkspaceId ? (state.repositories.itemsByWorkspaceId[activeWorkspaceId] ?? []) : [],
+    activeWorkspaceId
+      ? (state.repositories.itemsByWorkspaceId[activeWorkspaceId] ?? EMPTY_REPOSITORIES)
+      : EMPTY_REPOSITORIES,
   );
 }
 
