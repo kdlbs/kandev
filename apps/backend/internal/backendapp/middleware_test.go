@@ -86,30 +86,31 @@ func TestCORSMiddlewareBlocksDisallowedOriginStateChange(t *testing.T) {
 	}
 }
 
-// TestCORSMiddlewareAllowsDisallowedOriginSafeGET pins the intended read
-// behavior: a disallowed-origin GET still reaches the handler, but without CORS
-// headers, so the browser cannot read the response (and nothing is mutated).
-func TestCORSMiddlewareAllowsDisallowedOriginSafeGET(t *testing.T) {
+// TestCORSMiddlewareBlocksDisallowedOriginGET guards against treating GET as
+// side-effect-free: some endpoints (e.g. plugin webhooks, registered for GET as
+// well as POST) mutate state on GET, so a disallowed-origin GET must also be
+// rejected with 403 before the handler runs.
+func TestCORSMiddlewareBlocksDisallowedOriginGET(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handlerRan := false
 	router := gin.New()
 	router.Use(corsMiddleware())
-	router.GET("/ping", func(c *gin.Context) {
+	router.GET("/api/plugins/:id/webhooks/:key", func(c *gin.Context) {
 		handlerRan = true
 		c.String(http.StatusOK, "pong")
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/plugins/p/webhooks/k", nil)
 	req.Host = "localhost:38429"
 	req.Header.Set("Origin", "https://evil.invalid")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	if !handlerRan {
-		t.Fatal("safe GET handler should still run for disallowed origin")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for disallowed cross-origin GET", rec.Code)
 	}
-	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
-		t.Fatalf("Access-Control-Allow-Origin = %q, want none for disallowed origin", got)
+	if handlerRan {
+		t.Fatal("handler executed for disallowed cross-origin GET — side effect not blocked")
 	}
 }
 

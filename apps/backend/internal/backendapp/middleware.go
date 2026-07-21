@@ -13,23 +13,20 @@ func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if origin := c.Request.Header.Get("Origin"); origin != "" {
 			if !httpmw.AllowedOrigin(origin, c.Request.Host) {
-				// Disallowed cross-origin browser request. Reject the CORS
-				// preflight *and* every state-changing method outright. A
-				// browser "simple request" — e.g. a multipart/form-data POST,
-				// which is CORS-safelisted and therefore skips preflight —
-				// would otherwise still execute the handler's side effect even
-				// though the browser can't read the (CORS-blocked) response.
-				// That is a drive-by CSRF primitive against mutating endpoints
-				// (a malicious page could POST to a loopback-bound backend).
-				// A stray safe method (GET/HEAD) is still allowed to fall
-				// through without CORS headers, so the browser cannot read the
-				// response and no state is changed.
-				if !isCORSSafeMethod(c.Request.Method) {
-					c.AbortWithStatus(http.StatusForbidden)
-					return
-				}
-
-				c.Next()
+				// Disallowed cross-origin browser request: reject every method
+				// (including GET/HEAD) with 403. Letting one reach the handler
+				// yields nothing legitimate — a response the browser could read
+				// cross-origin needs CORS headers we only emit for allowed
+				// origins — but it does expose side-effecting endpoints to
+				// drive-by CSRF: a browser "simple request" (e.g. a
+				// multipart/form-data POST, CORS-safelisted so it skips
+				// preflight) or even a plain GET (plugin webhooks are
+				// registered for GET as well as POST, see plugins/handlers.go)
+				// would still trigger the side effect even though the page
+				// can't read the response. Non-browser clients (CLI/curl) and
+				// resource loads (<img>/<script>) send no Origin and take the
+				// branch below, so this doesn't break them.
+				c.AbortWithStatus(http.StatusForbidden)
 				return
 			}
 
@@ -48,18 +45,5 @@ func corsMiddleware() gin.HandlerFunc {
 		}
 
 		c.Next()
-	}
-}
-
-// isCORSSafeMethod reports whether an HTTP method is a CORS "safe" method that
-// cannot mutate server state. Only these may fall through to the handler for a
-// disallowed cross-origin browser request; OPTIONS (preflight) and every
-// state-changing method (POST/PUT/PATCH/DELETE) are rejected with 403.
-func isCORSSafeMethod(method string) bool {
-	switch method {
-	case http.MethodGet, http.MethodHead:
-		return true
-	default:
-		return false
 	}
 }
