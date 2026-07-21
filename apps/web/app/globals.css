@@ -603,7 +603,6 @@
   .chat-input-glow-starting::after,
   .border-flash-animation::after,
   .node-border-running::after,
-  .search-flash,
   .animate-queue-open,
   .animate-queue-close {
     animation: none;
@@ -1680,6 +1679,12 @@
   }
   100% {
     background-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-flash {
+    animation: none;
   }
 }
 

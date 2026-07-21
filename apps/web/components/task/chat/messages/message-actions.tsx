@@ -2,15 +2,7 @@
 
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import {
-  IconCheck,
-  IconCopy,
-  IconCode,
-  IconChevronLeft,
-  IconChevronRight,
-  IconEyeCode,
-  IconInfoCircle,
-} from "@tabler/icons-react";
+import { IconCheck, IconCopy, IconCode, IconEyeCode, IconInfoCircle } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -33,14 +25,9 @@ type MessageActionsProps = {
   showTimestamp?: boolean;
   showRawToggle?: boolean;
   hasHiddenPrompts?: boolean;
-  showNavigation?: boolean;
   showModel?: boolean;
   isRawView?: boolean;
   onToggleRaw?: () => void;
-  onNavigatePrev?: () => void;
-  onNavigateNext?: () => void;
-  hasPrev?: boolean;
-  hasNext?: boolean;
 };
 
 function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void }) {
@@ -58,51 +45,6 @@ function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void })
     >
       {copied ? <IconCheck className="h-full w-full" /> : <IconCopy className="h-full w-full" />}
     </button>
-  );
-}
-
-function NavigationButtons({
-  hasPrev,
-  hasNext,
-  onNavigatePrev,
-  onNavigateNext,
-}: {
-  hasPrev: boolean;
-  hasNext: boolean;
-  onNavigatePrev?: () => void;
-  onNavigateNext?: () => void;
-}) {
-  return (
-    <>
-      <button
-        onClick={onNavigatePrev}
-        disabled={!hasPrev}
-        className={cn(
-          ACTION_BUTTON_SIZE,
-          ACTION_BUTTON_HOVER,
-          ACTION_BUTTON_TRANSITION,
-          "disabled:opacity-30 disabled:cursor-not-allowed",
-        )}
-        title="Previous message"
-        aria-label="Go to previous message"
-      >
-        <IconChevronLeft className="h-full w-full" />
-      </button>
-      <button
-        onClick={onNavigateNext}
-        disabled={!hasNext}
-        className={cn(
-          ACTION_BUTTON_SIZE,
-          ACTION_BUTTON_HOVER,
-          ACTION_BUTTON_TRANSITION,
-          "disabled:opacity-30 disabled:cursor-not-allowed",
-        )}
-        title="Next message"
-        aria-label="Go to next message"
-      >
-        <IconChevronRight className="h-full w-full" />
-      </button>
-    </>
   );
 }
 
@@ -220,14 +162,9 @@ export function MessageActions({
   showTimestamp = true,
   showRawToggle = true,
   hasHiddenPrompts = false,
-  showNavigation = false,
   showModel = false,
   isRawView = false,
   onToggleRaw,
-  onNavigatePrev,
-  onNavigateNext,
-  hasPrev = false,
-  hasNext = false,
 }: MessageActionsProps) {
   const { copied, copy } = useCopyToClipboard();
   const { turn, usageMultiplier } = useAppStore(
@@ -261,14 +198,6 @@ export function MessageActions({
           isRawView={isRawView}
           onToggleRaw={onToggleRaw}
           hasHiddenPrompts={hasHiddenPrompts}
-        />
-      )}
-      {showNavigation && (
-        <NavigationButtons
-          hasPrev={hasPrev}
-          hasNext={hasNext}
-          onNavigatePrev={onNavigatePrev}
-          onNavigateNext={onNavigateNext}
         />
       )}
       <MessageDebugDialog message={message} turn={turn} usageMultiplier={usageMultiplier} />

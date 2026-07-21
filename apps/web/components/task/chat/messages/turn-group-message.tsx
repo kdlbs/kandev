@@ -22,7 +22,6 @@ type TurnGroupMessageProps = {
   /** Whether the turn is still active (agent is running) */
   isTurnActive?: boolean;
   streamingMessageId?: string | null;
-  onScrollToMessage?: (messageId: string) => void;
 };
 
 function countMessageTypes(messages: Message[]): { toolCalls: number; subagents: number } {
@@ -154,7 +153,6 @@ type TurnGroupContentProps = {
   onOpenFile?: (path: string) => void;
   isTurnActive?: boolean;
   streamingMessageId?: string | null;
-  onScrollToMessage?: (messageId: string) => void;
 };
 
 const MIN_REPEAT_TOOL_RUN = 4;
@@ -270,19 +268,23 @@ type MessageRenderProps = Omit<TurnGroupContentProps, "group">;
 
 function renderMessageEntry(message: Message, props: MessageRenderProps) {
   return (
-    <MessageRenderer
+    <div
       key={message.id}
-      comment={message}
-      isTaskDescription={false}
-      taskId={props.taskId}
-      permissionsByToolCallId={props.permissionsByToolCallId}
-      childrenByParentToolCallId={props.childrenByParentToolCallId}
-      worktreePath={props.worktreePath}
-      sessionId={props.sessionId ?? undefined}
-      isTurnActive={props.isTurnActive && message.id === props.streamingMessageId}
-      onOpenFile={props.onOpenFile}
-      onScrollToMessage={props.onScrollToMessage}
-    />
+      id={`msg-${message.id}`}
+      data-user-message-id={message.author_type === "user" ? message.id : undefined}
+    >
+      <MessageRenderer
+        comment={message}
+        isTaskDescription={false}
+        taskId={props.taskId}
+        permissionsByToolCallId={props.permissionsByToolCallId}
+        childrenByParentToolCallId={props.childrenByParentToolCallId}
+        worktreePath={props.worktreePath}
+        sessionId={props.sessionId ?? undefined}
+        isTurnActive={props.isTurnActive && message.id === props.streamingMessageId}
+        onOpenFile={props.onOpenFile}
+      />
+    </div>
   );
 }
 
@@ -334,7 +336,6 @@ function TurnGroupContent({
   onOpenFile,
   isTurnActive,
   streamingMessageId,
-  onScrollToMessage,
 }: TurnGroupContentProps) {
   const renderProps: MessageRenderProps = {
     sessionId,
@@ -345,7 +346,6 @@ function TurnGroupContent({
     onOpenFile,
     isTurnActive,
     streamingMessageId,
-    onScrollToMessage,
   };
   const compacted = useMemo(() => compactTurnGroupMessages(group.messages), [group.messages]);
   return (
@@ -372,7 +372,6 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
   isLastGroup = false,
   isTurnActive = false,
   streamingMessageId,
-  onScrollToMessage,
 }: TurnGroupMessageProps) {
   const isGroupRunning = hasRunningTool(group.messages);
   const hasPending = hasPendingPermission(group.messages, permissionsByToolCallId);
@@ -411,7 +410,6 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
           onOpenFile={onOpenFile}
           isTurnActive={isTurnActive}
           streamingMessageId={streamingMessageId}
-          onScrollToMessage={onScrollToMessage}
         />
       )}
     </div>

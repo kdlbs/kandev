@@ -38,7 +38,6 @@ type AdapterContext = {
   worktreePath?: string;
   sessionId?: string;
   onOpenFile?: (path: string) => void;
-  onScrollToMessage?: (messageId: string) => void;
   isTurnActive?: boolean;
 };
 
@@ -98,7 +97,6 @@ function TaskDescriptionMessage({
   sessionId,
   worktreePath,
   onOpenFile,
-  onScrollToMessage,
   isTurnActive = false,
 }: {
   comment: Message;
@@ -106,7 +104,6 @@ function TaskDescriptionMessage({
   sessionId?: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
-  onScrollToMessage?: (messageId: string) => void;
   isTurnActive?: boolean;
 }) {
   const sessionState = useSessionStateValue(sessionId);
@@ -123,7 +120,6 @@ function TaskDescriptionMessage({
         isTurnActive={isTurnActive}
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}
-        onScrollToMessage={onScrollToMessage}
       />
     );
   }
@@ -139,7 +135,6 @@ function TaskDescriptionMessage({
         isTurnActive={isTurnActive}
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}
-        onScrollToMessage={onScrollToMessage}
       />
       {showStartButton && <TaskDescriptionStartButton taskId={taskId!} sessionId={sessionId!} />}
     </>
@@ -326,7 +321,6 @@ const adapters: MessageAdapter[] = [
             sessionId={ctx.sessionId}
             worktreePath={ctx.worktreePath}
             onOpenFile={ctx.onOpenFile}
-            onScrollToMessage={ctx.onScrollToMessage}
             isTurnActive={ctx.isTurnActive}
           />
         );
@@ -340,7 +334,6 @@ const adapters: MessageAdapter[] = [
             sessionId={ctx.sessionId}
             worktreePath={ctx.worktreePath}
             onOpenFile={ctx.onOpenFile}
-            onScrollToMessage={ctx.onScrollToMessage}
             isTurnActive={ctx.isTurnActive}
           />
         );
@@ -354,7 +347,6 @@ const adapters: MessageAdapter[] = [
           sessionId={ctx.sessionId}
           worktreePath={ctx.worktreePath}
           onOpenFile={ctx.onOpenFile}
-          onScrollToMessage={ctx.onScrollToMessage}
           isTurnActive={ctx.isTurnActive}
         />
       );
@@ -371,7 +363,6 @@ type MessageRendererProps = {
   worktreePath?: string;
   sessionId?: string;
   onOpenFile?: (path: string) => void;
-  onScrollToMessage?: (messageId: string) => void;
   isTurnActive?: boolean;
 };
 
@@ -384,7 +375,6 @@ export const MessageRenderer = memo(function MessageRenderer({
   worktreePath,
   sessionId,
   onOpenFile,
-  onScrollToMessage,
   isTurnActive = false,
 }: MessageRendererProps) {
   const ctx = {
@@ -395,7 +385,6 @@ export const MessageRenderer = memo(function MessageRenderer({
     worktreePath,
     sessionId,
     onOpenFile,
-    onScrollToMessage,
     isTurnActive,
   };
   const adapter =

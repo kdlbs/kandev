@@ -2,13 +2,14 @@
 
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso, type ListRange, type VirtuosoHandle } from "react-virtuoso";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { cn } from "@/lib/utils";
 import {
   type MessageListProps,
   MessageListStatus,
@@ -19,13 +20,17 @@ import {
   getLastTurnGroupId,
   getStreamingAgentMessageId,
 } from "./message-list-shared";
+import {
+  USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
+  UserMessageNavigationRail,
+  usePersistentUserMessageNavigationRail,
+} from "./user-message-navigation-rail";
+import { VirtuosoMessageListFallback } from "./message-list-virtuoso-fallback";
+import { useVirtuosoUserNavigation } from "./use-virtuoso-user-navigation";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
-
-const FIRST_INDEX_BASE = 100_000;
 
 const debugVirtuoso = createDebugLogger("chat:virtuoso");
 const debugScrollParent = createDebugLogger("chat:virtuoso:scrollParent");
-const debugFirstIndex = createDebugLogger("chat:virtuoso:firstIndex");
 
 type VirtuosoBodyProps = MessageListProps & {
   scrollParent: HTMLDivElement;
@@ -36,66 +41,10 @@ type VirtuosoBodyProps = MessageListProps & {
   loadMore: () => Promise<number>;
   Header: () => React.ReactNode;
   Footer: () => React.ReactNode;
+  firstItemIndex: number;
+  virtuosoRef: React.RefObject<VirtuosoHandle | null>;
+  onVisibleRangeChanged: (range: ListRange) => void;
 };
-
-function computeFirstItemIndex(prevKeys: string[], prevIndex: number, keys: string[]): number {
-  if (prevKeys.length > 0 && keys.length > prevKeys.length) {
-    const oldFirstKey = prevKeys[0];
-    const newPos = keys.indexOf(oldFirstKey);
-    if (newPos > 0) return prevIndex - newPos;
-    if (newPos === -1) {
-      for (let i = 0; i < prevKeys.length; i++) {
-        const idx = keys.indexOf(prevKeys[i]);
-        if (idx >= 0) return prevIndex - (idx - i);
-      }
-    }
-    return prevIndex;
-  }
-  if (prevKeys.length === 0 && keys.length > 0) {
-    return FIRST_INDEX_BASE - keys.length + 1;
-  }
-  return prevIndex;
-}
-
-type IndexState = { keys: string[]; firstItemIndex: number };
-
-function useStableFirstItemIndex(items: RenderItem[]) {
-  const keys = useMemo(() => items.map(getItemKey), [items]);
-
-  const [state, setState] = useState<IndexState>(() => {
-    const firstItemIndex = FIRST_INDEX_BASE - keys.length + 1;
-    if (isDebug()) {
-      debugFirstIndex("init", {
-        keyCount: keys.length,
-        firstItemIndex,
-        firstKey: keys[0] ?? "-",
-        lastKey: keys[keys.length - 1] ?? "-",
-      });
-    }
-    return { keys, firstItemIndex };
-  });
-
-  if (keys !== state.keys) {
-    const nextIndex = computeFirstItemIndex(state.keys, state.firstItemIndex, keys);
-    if (isDebug()) {
-      debugFirstIndex("transition", {
-        prevKeyCount: state.keys.length,
-        nextKeyCount: keys.length,
-        prevIndex: state.firstItemIndex,
-        nextIndex,
-        delta: nextIndex - state.firstItemIndex,
-        prevFirstKey: state.keys[0] ?? "-",
-        nextFirstKey: keys[0] ?? "-",
-        prevLastKey: state.keys[state.keys.length - 1] ?? "-",
-        nextLastKey: keys[keys.length - 1] ?? "-",
-      });
-    }
-    setState({ keys, firstItemIndex: nextIndex });
-    return nextIndex;
-  }
-
-  return state.firstItemIndex;
-}
 
 function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
   const {
@@ -108,10 +57,9 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
   } = props;
   const { worktreePath, onOpenFile, lastTurnGroupId, isRunning } = props;
   const { hasMore, isLoadingMore, loadMore } = props;
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const { virtuosoRef, firstItemIndex } = props;
   const itemCount = items.length;
   const streamingMessageId = getStreamingAgentMessageId(messages);
-  const firstItemIndex = useStableFirstItemIndex(items);
 
   const loadCooldownRef = useRef(false);
   const handleStartReached = useCallback(() => {
@@ -124,19 +72,6 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
       });
     }
   }, [hasMore, isLoadingMore, loadMore]);
-
-  const handleScrollToMessage = useCallback(
-    (messageId: string) => {
-      const idx = items.findIndex((item) => {
-        if (item.type === "turn_group") return item.messages.some((m) => m.id === messageId);
-        if (item.type === "message") return item.message.id === messageId;
-        return false;
-      });
-      if (idx >= 0)
-        virtuosoRef.current?.scrollToIndex({ index: firstItemIndex + idx, align: "center" });
-    },
-    [items, firstItemIndex],
-  );
 
   const computeItemKey = useCallback(
     (index: number) => {
@@ -165,7 +100,6 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
             isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
             isTurnActive={isRunning}
             streamingMessageId={streamingMessageId}
-            onScrollToMessage={handleScrollToMessage}
           />
         </div>
       );
@@ -182,7 +116,6 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
       lastTurnGroupId,
       isRunning,
       streamingMessageId,
-      handleScrollToMessage,
     ],
   );
 
@@ -193,7 +126,7 @@ const FOLLOW_SMOOTH = "smooth" as const;
 const followOutput = (isAtBottom: boolean) => (isAtBottom ? FOLLOW_SMOOTH : false);
 
 function VirtuosoBody(props: VirtuosoBodyProps) {
-  const { scrollParent, Header, Footer } = props;
+  const { scrollParent, Header, Footer, onVisibleRangeChanged } = props;
   const { virtuosoRef, itemCount, firstItemIndex, handleStartReached, computeItemKey, renderItem } =
     useVirtuosoCallbacks(props);
 
@@ -228,6 +161,7 @@ function VirtuosoBody(props: VirtuosoBodyProps) {
       itemContent={renderItem}
       followOutput={followOutput}
       startReached={handleStartReached}
+      rangeChanged={onVisibleRangeChanged}
       increaseViewportBy={200}
       atBottomThreshold={100}
       components={{ Header, Footer }}
@@ -444,6 +378,43 @@ function useVirtuosoHeaderFooter(args: HeaderFooterArgs) {
   return { Header, Footer, footerActions };
 }
 
+type VirtuosoMessageViewportProps = Omit<VirtuosoBodyProps, "scrollParent"> & {
+  scrollParent: HTMLDivElement | null;
+  navigation: ReturnType<typeof useVirtuosoUserNavigation>["navigation"];
+  setScrollRef: (node: HTMLDivElement | null) => void;
+};
+
+function VirtuosoMessageViewport({
+  navigation,
+  setScrollRef,
+  scrollParent,
+  ...bodyProps
+}: VirtuosoMessageViewportProps) {
+  const needsRailClearance = usePersistentUserMessageNavigationRail();
+  return (
+    <div className="group/chat relative flex h-full min-h-0 flex-1">
+      <SessionPanelContent
+        ref={setScrollRef}
+        className={cn(
+          "relative p-4 chat-message-list",
+          needsRailClearance && USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
+        )}
+      >
+        {scrollParent && <VirtuosoBody {...bodyProps} scrollParent={scrollParent} />}
+      </SessionPanelContent>
+      {scrollParent && navigation.userMessageIds.length > 0 && (
+        <UserMessageNavigationRail
+          canNavigatePrevious={navigation.hasPrevious}
+          canNavigateNext={navigation.hasNext}
+          isBusy={navigation.isBusy}
+          onPrevious={navigation.goPrevious}
+          onNext={navigation.goNext}
+        />
+      )}
+    </div>
+  );
+}
+
 export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: MessageListProps) {
   const {
     items,
@@ -461,9 +432,23 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
     isWorking,
     sessionState,
   });
-  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
+  const {
+    loadMore,
+    hasMore,
+    isLoading: isLoadingMore,
+    oldestCursor,
+  } = useLazyLoadMessages(sessionId);
   const isRunning = getSessionRunningState(sessionState);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
+  const { navigation, onVisibleRangeChanged, firstItemIndex, virtuosoRef } =
+    useVirtuosoUserNavigation({
+      items,
+      sessionId,
+      scrollParent,
+      hasMore,
+      oldestCursor: oldestCursor ?? null,
+      loadMore,
+    });
 
   // Track which render branch fires and how itemCount/messageCount transition.
   // See useVirtuosoDebugSnapshot for details on the remote-executor scroll bug.
@@ -493,39 +478,37 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
 
   if (isInitialLoading || items.length === 0) {
     return (
-      <SessionPanelContent className="relative p-4 chat-message-list">
-        <MessageListStatus
-          isLoadingMore={isLoadingMore}
-          hasMore={hasMore}
-          showLoadingState={showLoadingState}
-          messagesLoading={messagesLoading}
-          isInitialLoading={isInitialLoading}
-          messagesCount={messages.length}
-          onLoadMore={loadMore}
-        />
-        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
-        {footerActions.map((msg) => (
-          <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
-        ))}
-      </SessionPanelContent>
+      <VirtuosoMessageListFallback
+        isLoadingMore={isLoadingMore}
+        hasMore={hasMore}
+        showLoadingState={showLoadingState}
+        messagesLoading={messagesLoading}
+        isInitialLoading={isInitialLoading}
+        messages={messages}
+        loadMore={loadMore}
+        sessionState={sessionState}
+        sessionId={sessionId}
+        footerActions={footerActions}
+      />
     );
   }
 
   return (
-    <SessionPanelContent ref={setScrollRef} className="relative p-4 chat-message-list">
-      {scrollParent && (
-        <VirtuosoBody
-          {...props}
-          scrollParent={scrollParent}
-          isRunning={isRunning}
-          lastTurnGroupId={lastTurnGroupId}
-          hasMore={hasMore}
-          isLoadingMore={isLoadingMore}
-          loadMore={loadMore}
-          Header={Header}
-          Footer={Footer}
-        />
-      )}
-    </SessionPanelContent>
+    <VirtuosoMessageViewport
+      {...props}
+      scrollParent={scrollParent}
+      isRunning={isRunning}
+      lastTurnGroupId={lastTurnGroupId}
+      hasMore={hasMore}
+      isLoadingMore={isLoadingMore}
+      loadMore={loadMore}
+      Header={Header}
+      Footer={Footer}
+      firstItemIndex={firstItemIndex}
+      virtuosoRef={virtuosoRef}
+      onVisibleRangeChanged={onVisibleRangeChanged}
+      navigation={navigation}
+      setScrollRef={setScrollRef}
+    />
   );
 });

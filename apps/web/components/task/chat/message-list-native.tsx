@@ -7,6 +7,8 @@ import type { Message } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
+import { cn } from "@/lib/utils";
 import {
   type MessageListProps,
   MessageListStatus,
@@ -16,7 +18,16 @@ import {
   getSessionRunningState,
   getLastTurnGroupId,
   getStreamingAgentMessageId,
+  findNearestUserMessageId,
+  findUserMessageElement,
+  getNavigationScrollBehavior,
+  replayMessageHighlight,
 } from "./message-list-shared";
+import {
+  USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
+  UserMessageNavigationRail,
+  usePersistentUserMessageNavigationRail,
+} from "./user-message-navigation-rail";
 
 /**
  * Continuously captures scroll state via scroll listener.
@@ -165,11 +176,96 @@ function useAutoScroll(
   }, [messages, scrollRef]);
 }
 
-function useScrollToMessage() {
-  return useCallback((messageId: string) => {
-    const el = document.getElementById(`msg-${messageId}`);
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, []);
+type ProgrammaticNavigation = { messageId: string; expiresAt: number } | null;
+
+function useViewportOrigin(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  userMessageIds: string[],
+  setViewportOrigin: (messageId: string | null) => void,
+  programmaticRef: React.RefObject<ProgrammaticNavigation>,
+) {
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement) return;
+    let frame = 0;
+    const updateOrigin = () => {
+      frame = 0;
+      const nearestId = findNearestUserMessageId(scrollElement, userMessageIds);
+      const programmatic = programmaticRef.current;
+      if (programmatic && Date.now() < programmatic.expiresAt) {
+        if (nearestId !== programmatic.messageId) return;
+        programmaticRef.current = null;
+      }
+      setViewportOrigin(nearestId);
+    };
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateOrigin);
+    };
+    scrollElement.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => {
+      cancelAnimationFrame(frame);
+      scrollElement.removeEventListener("scroll", onScroll);
+    };
+  }, [programmaticRef, scrollRef, setViewportOrigin, userMessageIds]);
+}
+
+function useNativeUserNavigation(args: {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  sessionId: string | null;
+  items: MessageListProps["items"];
+  hasMore: boolean;
+  oldestCursor: string | null;
+  loadMore: () => Promise<number>;
+}) {
+  const programmaticNavigationRef = useRef<ProgrammaticNavigation>(null);
+  const navigateTo = useCallback(
+    (messageId: string) => {
+      const scrollElement = args.scrollRef.current;
+      if (!scrollElement) return false;
+      const element = findUserMessageElement(scrollElement, messageId);
+      if (!element) return false;
+      programmaticNavigationRef.current = { messageId, expiresAt: Date.now() + 1000 };
+      element.scrollIntoView({ block: "center", behavior: getNavigationScrollBehavior() });
+      replayMessageHighlight(element);
+      return true;
+    },
+    [args.scrollRef],
+  );
+  const navigation = useUserMessageNavigation({
+    sessionId: args.sessionId,
+    items: args.items,
+    hasOlder: args.hasMore,
+    oldestCursor: args.oldestCursor,
+    loadOlder: args.loadMore,
+    navigateTo,
+  });
+  useViewportOrigin(
+    args.scrollRef,
+    navigation.userMessageIds,
+    navigation.setViewportOrigin,
+    programmaticNavigationRef,
+  );
+  return navigation;
+}
+
+function useInitialScrollToBottom(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  itemCount: number,
+) {
+  const didInitialScroll = useRef(false);
+  useEffect(() => {
+    if (didInitialScroll.current || itemCount === 0) return;
+    const element = scrollRef.current;
+    if (!element) return;
+    if (useDockviewStore.getState().pendingChatScrollTop !== null) {
+      didInitialScroll.current = true;
+      return;
+    }
+    element.scrollTop = element.scrollHeight;
+    didInitialScroll.current = true;
+  }, [itemCount, scrollRef]);
 }
 
 export const NativeMessageList = memo(function NativeMessageList({
@@ -187,6 +283,7 @@ export const NativeMessageList = memo(function NativeMessageList({
   onOpenFile,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const needsRailClearance = usePersistentUserMessageNavigationRail();
 
   const { isInitialLoading, showLoadingState } = getConversationLoadingState({
     messagesLoading,
@@ -194,75 +291,87 @@ export const NativeMessageList = memo(function NativeMessageList({
     isWorking,
     sessionState,
   });
-  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
+  const {
+    loadMore,
+    hasMore,
+    isLoading: isLoadingMore,
+    oldestCursor,
+  } = useLazyLoadMessages(sessionId);
   const isRunning = getSessionRunningState(sessionState);
   const streamingMessageId = getStreamingAgentMessageId(messages);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
-  const handleScrollToMessage = useScrollToMessage();
+  const navigation = useNativeUserNavigation({
+    scrollRef,
+    sessionId,
+    items,
+    hasMore,
+    oldestCursor: oldestCursor ?? null,
+    loadMore,
+  });
 
   useScrollPositionOnPrepend(scrollRef, items.length);
   const sentinelRef = useLazyLoadSentinel(scrollRef, hasMore, isLoadingMore, loadMore);
   useAutoScroll(scrollRef, messages, isWorking);
-
-  // Scroll to bottom on initial load
-  const didInitialScroll = useRef(false);
-  useEffect(() => {
-    if (didInitialScroll.current || items.length === 0) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    // If a layout rebuild scroll restore is pending, skip initial scroll
-    // (the restore handler will set the correct position)
-    if (useDockviewStore.getState().pendingChatScrollTop !== null) {
-      didInitialScroll.current = true;
-      return;
-    }
-    el.scrollTop = el.scrollHeight;
-    didInitialScroll.current = true;
-  }, [items.length]);
+  useInitialScrollToBottom(scrollRef, items.length);
 
   return (
-    <SessionPanelContent ref={scrollRef} className="relative p-4 chat-message-list">
-      {/* Sentinel for lazy loading older messages */}
-      {hasMore && <div ref={sentinelRef} className="h-px" />}
+    <div className="group/chat relative flex h-full min-h-0 flex-1">
+      <SessionPanelContent
+        ref={scrollRef}
+        className={cn(
+          "relative p-4 chat-message-list",
+          needsRailClearance && USER_MESSAGE_NAVIGATION_MOBILE_CLEARANCE_CLASS,
+        )}
+      >
+        {hasMore && <div ref={sentinelRef} className="h-px" />}
 
-      <MessageListStatus
-        isLoadingMore={isLoadingMore}
-        hasMore={hasMore}
-        showLoadingState={showLoadingState}
-        messagesLoading={messagesLoading}
-        isInitialLoading={isInitialLoading}
-        messagesCount={messages.length}
-        onLoadMore={loadMore}
-      />
+        <MessageListStatus
+          isLoadingMore={isLoadingMore}
+          hasMore={hasMore}
+          showLoadingState={showLoadingState}
+          messagesLoading={messagesLoading}
+          isInitialLoading={isInitialLoading}
+          messagesCount={messages.length}
+          onLoadMore={loadMore}
+        />
 
-      {items.map((item) => {
-        const key = getItemKey(item);
-        return (
-          <div key={key} id={`msg-${key}`} className="pb-2" style={{ overflowAnchor: "none" }}>
-            <MessageItem
-              item={item}
-              sessionId={sessionId}
-              permissionsByToolCallId={permissionsByToolCallId}
-              childrenByParentToolCallId={childrenByParentToolCallId}
-              taskId={taskId}
-              worktreePath={worktreePath}
-              onOpenFile={onOpenFile}
-              isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
-              isTurnActive={isRunning}
-              streamingMessageId={streamingMessageId}
-              onScrollToMessage={handleScrollToMessage}
-            />
-          </div>
-        );
-      })}
+        {items.map((item) => {
+          const key = getItemKey(item);
+          return (
+            <div key={key} className="pb-2" style={{ overflowAnchor: "none" }}>
+              <MessageItem
+                item={item}
+                sessionId={sessionId}
+                permissionsByToolCallId={permissionsByToolCallId}
+                childrenByParentToolCallId={childrenByParentToolCallId}
+                taskId={taskId}
+                worktreePath={worktreePath}
+                onOpenFile={onOpenFile}
+                isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
+                isTurnActive={isRunning}
+                streamingMessageId={streamingMessageId}
+              />
+            </div>
+          );
+        })}
 
-      <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
-      {(footerActionMessages ?? []).map((msg: Message) => (
-        <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
-      ))}
+        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
+        {(footerActionMessages ?? []).map((msg: Message) => (
+          <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
+        ))}
 
-      {/* Bottom anchor — browser keeps scroll pinned here when new content appends */}
-      <div style={{ overflowAnchor: "auto", height: 1 }} />
-    </SessionPanelContent>
+        {/* Bottom anchor — browser keeps scroll pinned here when new content appends */}
+        <div style={{ overflowAnchor: "auto", height: 1 }} />
+      </SessionPanelContent>
+      {navigation.userMessageIds.length > 0 && (
+        <UserMessageNavigationRail
+          canNavigatePrevious={navigation.hasPrevious}
+          canNavigateNext={navigation.hasNext}
+          isBusy={navigation.isBusy}
+          onPrevious={navigation.goPrevious}
+          onNext={navigation.goNext}
+        />
+      )}
+    </div>
   );
 });

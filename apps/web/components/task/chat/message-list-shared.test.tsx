@@ -64,6 +64,9 @@ vi.mock("@/lib/api/domains/session-api", () => ({
 import {
   MessageItem,
   MessageListStatus,
+  findNearestUserMessageId,
+  getNavigationScrollBehavior,
+  getUserMessageRenderStops,
   getConversationLoadingState,
   getStreamingAgentMessageId,
 } from "./message-list-shared";
@@ -85,7 +88,6 @@ function row(onOpenFile: (p: string) => void) {
       onOpenFile={onOpenFile}
       isLastGroup={false}
       isTurnActive={false}
-      onScrollToMessage={noop}
     />
   );
 }
@@ -121,6 +123,76 @@ describe("MessageItem memo boundary", () => {
   });
 });
 
+describe("MessageItem navigation anchor", () => {
+  it("marks a rendered user prompt with its stable message id", () => {
+    const { container } = render(
+      <MessageItem
+        item={{
+          type: "message",
+          message: { id: "user-1", author_type: "user" } as Message,
+        }}
+        sessionId="s1"
+        permissionsByToolCallId={perm}
+        childrenByParentToolCallId={kids}
+        isLastGroup={false}
+        isTurnActive={false}
+      />,
+    );
+
+    const anchor = container.querySelector('[data-user-message-id="user-1"]');
+    expect(anchor?.id).toBe("msg-user-1");
+  });
+});
+
+describe("user message navigation mapping", () => {
+  it("maps direct and grouped user prompts to their render-item indices", () => {
+    const user = (id: string) => ({ id, author_type: "user" }) as Message;
+    const agent = (id: string) => ({ id, author_type: "agent" }) as Message;
+    const items: RenderItem[] = [
+      { type: "message", message: user("user-1") },
+      { type: "message", message: agent("agent-1") },
+      { type: "turn_group", id: "group-1", turnId: "turn-1", messages: [user("user-2")] },
+    ];
+
+    expect(getUserMessageRenderStops(items)).toEqual([
+      { messageId: "user-1", itemIndex: 0 },
+      { messageId: "user-2", itemIndex: 2 },
+    ]);
+  });
+
+  it("selects the prompt whose rendered bounds are nearest the viewport center", () => {
+    const { container } = render(
+      <div>
+        <div data-user-message-id="user-1" />
+        <div data-user-message-id="user-2" />
+      </div>,
+    );
+    const scrollElement = container.firstElementChild as HTMLElement;
+    const [first, second] = Array.from(scrollElement.children) as HTMLElement[];
+    vi.spyOn(scrollElement, "getBoundingClientRect").mockReturnValue({
+      top: 0,
+      bottom: 400,
+      height: 400,
+    } as DOMRect);
+    vi.spyOn(first, "getBoundingClientRect").mockReturnValue({
+      top: 20,
+      bottom: 80,
+    } as DOMRect);
+    vi.spyOn(second, "getBoundingClientRect").mockReturnValue({
+      top: 180,
+      bottom: 260,
+    } as DOMRect);
+
+    expect(findNearestUserMessageId(scrollElement, ["user-1", "user-2"])).toBe("user-2");
+  });
+
+  it("disables smooth scrolling when reduced motion is requested", () => {
+    vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
+
+    expect(getNavigationScrollBehavior()).toBe("auto");
+  });
+});
+
 describe("MessageItem agent error notice", () => {
   it("shows retained agent errors even when there are no messages", () => {
     render(
@@ -140,7 +212,6 @@ describe("MessageItem agent error notice", () => {
         taskId="t1"
         isLastGroup={false}
         isTurnActive={false}
-        onScrollToMessage={noop}
       />,
     );
 

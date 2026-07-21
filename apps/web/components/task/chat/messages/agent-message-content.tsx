@@ -57,7 +57,6 @@ export const AgentMessageContent = memo(function AgentMessageContent({
           showTimestamp={true}
           showRawToggle={true}
           showModel={true}
-          showNavigation={false}
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
         />

@@ -388,6 +388,30 @@ Visible agent response.`;
   });
 });
 
+describe("ChatMessage navigation actions", () => {
+  it("does not render navigation controls below user messages", () => {
+    const current = userMessage({ id: "msg-2" });
+    render(
+      <StateProvider
+        initialState={{
+          messages: {
+            bySession: {
+              "sess-1": [userMessage({ id: "msg-1" }), current],
+            },
+          } as never,
+        }}
+      >
+        <ChatMessage comment={current} label="Message" className="" sessionId="sess-1" />
+      </StateProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Go to previous message" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Go to next message" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Copy message to clipboard" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Show raw text" })).not.toBeNull();
+  });
+});
+
 describe("ChatMessage agent session config metadata", () => {
   it("opens markdown file links with the provided chat file opener", () => {
     const onOpenFile = vi.fn();
