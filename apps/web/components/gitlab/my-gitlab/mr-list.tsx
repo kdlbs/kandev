@@ -10,12 +10,19 @@ import {
 import type { Icon } from "@tabler/icons-react";
 import { Spinner } from "@kandev/ui/spinner";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import type { MR } from "@/lib/types/gitlab";
+import type { MR, TaskMR } from "@/lib/types/gitlab";
+import type { GitLabLaunchPayload, GitLabTaskPreset } from "./quick-task-launcher";
+import { gitLabMRKey } from "@/lib/gitlab-identity";
+import { MRRowTaskIndicator } from "./mr-row-task-indicator";
+import { StartTaskMenu } from "./start-task-menu";
 
 type MRListProps = {
   items: MR[];
   loading: boolean;
   error: string | null;
+  presets?: GitLabTaskPreset[];
+  onStartTask?: (payload: GitLabLaunchPayload) => void;
+  mrKeyToTasks?: Map<string, TaskMR[]>;
 };
 
 function mrStateIcon(mr: MR): { Icon: Icon; className: string } {
@@ -28,7 +35,17 @@ function mrStateIcon(mr: MR): { Icon: Icon; className: string } {
   return { Icon: IconGitPullRequest, className: "text-emerald-600 dark:text-emerald-400" };
 }
 
-function MRRow({ mr }: { mr: MR }) {
+function MRRow({
+  mr,
+  tasks,
+  presets,
+  onStartTask,
+}: {
+  mr: MR;
+  tasks: TaskMR[] | undefined;
+  presets: GitLabTaskPreset[];
+  onStartTask?: MRListProps["onStartTask"];
+}) {
   const { Icon: StateIcon, className: stateIconClass } = mrStateIcon(mr);
   return (
     <div
@@ -59,13 +76,29 @@ function MRRow({ mr }: { mr: MR }) {
           <span className="whitespace-nowrap">
             by {mr.author_username} · opened {formatRelativeTime(mr.created_at)}
           </span>
+          <MRRowTaskIndicator tasks={tasks} />
         </div>
+      </div>
+      <div className="shrink-0">
+        {onStartTask ? (
+          <StartTaskMenu
+            presets={presets}
+            onSelect={(preset) => onStartTask({ kind: "mr", mr, preset })}
+          />
+        ) : null}
       </div>
     </div>
   );
 }
 
-function MRListBody({ loading, error, items }: MRListProps) {
+function MRListBody({
+  loading,
+  error,
+  items,
+  presets = [],
+  onStartTask,
+  mrKeyToTasks,
+}: MRListProps) {
   if (loading) {
     return (
       <div className="flex justify-center py-10">
@@ -86,7 +119,13 @@ function MRListBody({ loading, error, items }: MRListProps) {
   return (
     <div className="divide-y">
       {items.map((mr) => (
-        <MRRow key={`${mr.project_path}-${mr.iid}`} mr={mr} />
+        <MRRow
+          key={`${mr.project_path}-${mr.iid}`}
+          mr={mr}
+          tasks={mrKeyToTasks?.get(gitLabMRKey(mr.web_url, mr.project_path, mr.iid))}
+          presets={presets}
+          onStartTask={onStartTask}
+        />
       ))}
     </div>
   );

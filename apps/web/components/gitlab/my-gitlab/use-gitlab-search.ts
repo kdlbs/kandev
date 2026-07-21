@@ -16,6 +16,7 @@ type SearchState = {
   error: string | null;
   lastFetchedAt: Date | null;
   total: number;
+  workspaceId: string;
 };
 
 type FetchArgs = {
@@ -25,6 +26,7 @@ type FetchArgs = {
 };
 
 type UseGitLabSearchOptions = {
+  workspaceId: string;
   kind: SearchKind;
   presets: PresetOption[];
   preset: string;
@@ -35,6 +37,17 @@ type UseGitLabSearchOptions = {
   // firing the search would only produce failing (500) requests in the console.
   enabled?: boolean;
 };
+
+function initialSearchState(workspaceId: string): SearchState {
+  return {
+    items: [],
+    loading: false,
+    error: null,
+    lastFetchedAt: null,
+    total: 0,
+    workspaceId,
+  };
+}
 
 export function pickFilter(
   presets: PresetOption[],
@@ -60,6 +73,7 @@ function filterByProject(items: Item[], project: string): Item[] {
 }
 
 export function useGitLabSearch({
+  workspaceId,
   kind,
   presets,
   preset,
@@ -67,13 +81,7 @@ export function useGitLabSearch({
   projectFilter = "",
   enabled = true,
 }: UseGitLabSearchOptions) {
-  const [state, setState] = useState<SearchState>({
-    items: [],
-    loading: false,
-    error: null,
-    lastFetchedAt: null,
-    total: 0,
-  });
+  const [state, setState] = useState<SearchState>(() => initialSearchState(workspaceId));
   const [page, setPage] = useState(1);
   const requestSeq = useRef(0);
 
@@ -83,11 +91,29 @@ export function useGitLabSearch({
 
   const fetchData = useCallback(
     async ({ filter: ef, customQuery: ec, page: epage }: FetchArgs) => {
-      if (!enabled) return;
+      if (!enabled || !workspaceId) return;
       const seq = ++requestSeq.current;
-      setState((s) => ({ ...s, loading: true, error: null }));
+      const requestedWorkspaceId = workspaceId;
+      setState((s) =>
+        s.workspaceId === requestedWorkspaceId
+          ? { ...s, loading: true, error: null }
+          : {
+              items: [],
+              loading: true,
+              error: null,
+              lastFetchedAt: null,
+              total: 0,
+              workspaceId: requestedWorkspaceId,
+            },
+      );
       try {
-        const params = { filter: ef, customQuery: ec, page: epage, perPage: SEARCH_PAGE_SIZE };
+        const params = {
+          workspaceId,
+          filter: ef,
+          customQuery: ec,
+          page: epage,
+          perPage: SEARCH_PAGE_SIZE,
+        };
         const response =
           kind === "mr" ? await searchUserMRs(params) : await searchUserIssues(params);
         if (seq !== requestSeq.current) return;
@@ -101,6 +127,7 @@ export function useGitLabSearch({
           error: null,
           lastFetchedAt: new Date(),
           total: response?.total_count ?? items.length,
+          workspaceId: requestedWorkspaceId,
         });
       } catch (err) {
         if (seq !== requestSeq.current) return;
@@ -110,10 +137,11 @@ export function useGitLabSearch({
           error: err instanceof Error ? err.message : "Failed to search GitLab",
           lastFetchedAt: s.lastFetchedAt,
           total: 0,
+          workspaceId: requestedWorkspaceId,
         }));
       }
     },
-    [kind, enabled],
+    [kind, enabled, workspaceId],
   );
 
   const resolved = useMemo(
@@ -125,18 +153,20 @@ export function useGitLabSearch({
     // Gate at the effect level too (mirrors the Linear hook, which guards both
     // its run callback and its debounce effect) so a disabled integration never
     // schedules a fetch. The callback keeps its own guard to also cover refresh().
-    if (!enabled) return;
+    if (!enabled || !workspaceId) return;
     void fetchData({ filter: resolved.filter, customQuery: resolved.customQuery, page });
-  }, [fetchData, enabled, resolved.filter, resolved.customQuery, page]);
+  }, [fetchData, enabled, workspaceId, resolved.filter, resolved.customQuery, page]);
 
   const refresh = useCallback(
     () => fetchData({ filter: resolved.filter, customQuery: resolved.customQuery, page }),
     [fetchData, resolved.filter, resolved.customQuery, page],
   );
 
+  const isCurrentWorkspace = state.workspaceId === workspaceId;
+  const currentItems = enabled && workspaceId && isCurrentWorkspace ? state.items : [];
   const filtered = useMemo(
-    () => filterByProject(state.items, projectFilter),
-    [state.items, projectFilter],
+    () => filterByProject(currentItems, projectFilter),
+    [currentItems, projectFilter],
   );
 
   // `total` is the server-side count (used by pagination so the user can still
@@ -145,11 +175,11 @@ export function useGitLabSearch({
   // page client, which shows filtered.length next to the title when narrowing.
   return {
     items: filtered,
-    rawItems: state.items,
-    loading: state.loading,
-    error: state.error,
+    rawItems: currentItems,
+    loading: enabled && Boolean(workspaceId) && (!isCurrentWorkspace || state.loading),
+    error: isCurrentWorkspace ? state.error : null,
     lastFetchedAt: state.lastFetchedAt,
-    total: state.total,
+    total: isCurrentWorkspace ? state.total : 0,
     page,
     setPage,
     pageSize: SEARCH_PAGE_SIZE,

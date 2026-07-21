@@ -62,6 +62,10 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
   return pr.review_state === "" && pr.pending_review_count === 0;
 }
 
+export function isPRDraft(pr: TaskPR): boolean {
+  return pr.state === "open" && pr.mergeable_state === "draft";
+}
+
 // CI passed but the PR is still waiting on human review (reviewers requested
 // or pending review state). Distinct from yellow "CI running". An approved
 // PR with extra reviewers still pending also counts — GitHub's
@@ -104,6 +108,9 @@ export function getPRStatusColor(pr: TaskPR): string {
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
     return "text-red-500";
   }
+  if (isPRDraft(pr)) {
+    return MUTED_FOREGROUND;
+  }
   const blockerColor = openMergeBlockerColor(pr);
   if (blockerColor) return blockerColor;
   if (isPRReadyToMerge(pr)) {
@@ -133,7 +140,9 @@ export function getPRTooltip(pr: TaskPR): string {
   if (pr.state !== "open") parts.push(`State: ${pr.state}`);
   if (pr.review_state) parts.push(`Review: ${pr.review_state}`);
   if (pr.checks_state) parts.push(`CI: ${pr.checks_state}`);
-  if (isPRReadyToMerge(pr)) {
+  if (isPRDraft(pr)) {
+    parts.push("Draft");
+  } else if (isPRReadyToMerge(pr)) {
     parts.push("Ready to merge");
   } else if (pr.mergeable_state && pr.mergeable_state !== "unknown" && pr.state === "open") {
     parts.push(`Mergeable: ${pr.mergeable_state}`);

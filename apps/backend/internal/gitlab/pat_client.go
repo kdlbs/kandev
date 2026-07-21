@@ -32,7 +32,7 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	return fmt.Sprintf("GitLab API %s returned %d: %s", e.Endpoint, e.StatusCode, e.Body)
+	return fmt.Sprintf("GitLab API %s returned status %d", e.Endpoint, e.StatusCode)
 }
 
 // PATClient implements Client against the GitLab REST v4 API using a
@@ -626,6 +626,11 @@ func (c *PATClient) postJSON(ctx context.Context, endpoint string, payload, resu
 }
 
 func (c *PATClient) doWrite(ctx context.Context, method, endpoint string, body []byte, result any) error {
+	_, err := c.doWriteWithStatus(ctx, method, endpoint, body, result)
+	return err
+}
+
+func (c *PATClient) doWriteWithStatus(ctx context.Context, method, endpoint string, body []byte, result any) (int, error) {
 	u := c.host + apiPathPrefix + endpoint
 	var bodyReader io.Reader
 	if body != nil {
@@ -633,7 +638,7 @@ func (c *PATClient) doWrite(ctx context.Context, method, endpoint string, body [
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u, bodyReader)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	c.setHeaders(req)
 	if body != nil {
@@ -642,20 +647,20 @@ func (c *PATClient) doWrite(ctx context.Context, method, endpoint string, body [
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request %s %s: %w", method, endpoint, err)
+		return 0, fmt.Errorf("request %s %s: %w", method, endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, defaultErrBytes))
-		return &APIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
+		return resp.StatusCode, &APIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
 	}
 	if result == nil {
 		// Drain to allow HTTP/1.1 connection reuse on the next call.
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil
+		return resp.StatusCode, nil
 	}
-	return json.NewDecoder(resp.Body).Decode(result)
+	return resp.StatusCode, json.NewDecoder(resp.Body).Decode(result)
 }
 
 // parseNextLink extracts the "next" URL path+query from a GitLab Link header

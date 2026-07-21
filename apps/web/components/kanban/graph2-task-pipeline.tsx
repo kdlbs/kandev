@@ -16,6 +16,7 @@ import { needsAction } from "@/lib/utils/needs-action";
 import { useAppStore } from "@/components/state-provider";
 import { Graph2StepNode } from "./graph2-step-node";
 import { Graph2Connector } from "./graph2-connector";
+import { isOrphanMoveTarget } from "./swimlane-kanban-content";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 
@@ -68,6 +69,31 @@ function getConnectorType(
   return "transition";
 }
 
+export type StepAdjacency = {
+  hasPrev: boolean;
+  prevStepId?: string;
+  hasNext: boolean;
+  nextStepId?: string;
+};
+
+/**
+ * Computes the prev/next move targets for the node at `index`. The synthetic
+ * "Needs Reassignment" node is display-only: it marks where an orphaned task
+ * currently sits, but is never itself a valid move destination (there is no
+ * backing workflow step to move into), so it is excluded as an adjacency
+ * target in either direction.
+ */
+export function getStepAdjacency(steps: WorkflowStep[], index: number): StepAdjacency {
+  const hasPrev = index > 0 && !isOrphanMoveTarget(steps[index - 1].id);
+  const hasNext = index < steps.length - 1 && !isOrphanMoveTarget(steps[index + 1].id);
+  return {
+    hasPrev,
+    prevStepId: hasPrev ? steps[index - 1].id : undefined,
+    hasNext,
+    nextStepId: hasNext ? steps[index + 1].id : undefined,
+  };
+}
+
 function PipelineStepNodes({
   steps,
   currentStepIndex,
@@ -92,16 +118,18 @@ function PipelineStepNodes({
           ? getConnectorType(phase, getStepPhase(index + 1, currentStepIndex))
           : null;
 
+        const { hasPrev, prevStepId, hasNext, nextStepId } = getStepAdjacency(steps, index);
+
         return (
           <div key={step.id} className="flex items-center">
             <Graph2StepNode
               step={step}
               phase={phase}
               task={task}
-              hasPrev={index > 0}
-              hasNext={index < steps.length - 1}
-              prevStepId={index > 0 ? steps[index - 1].id : undefined}
-              nextStepId={index < steps.length - 1 ? steps[index + 1].id : undefined}
+              hasPrev={hasPrev}
+              hasNext={hasNext}
+              prevStepId={prevStepId}
+              nextStepId={nextStepId}
               onMoveTask={onMoveTask}
               onPreviewTask={onPreviewTask}
               isMoving={isMoving}

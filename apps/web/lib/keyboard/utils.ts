@@ -46,13 +46,13 @@ function collectModifierNames(
   const parts: string[] = [];
 
   if (modifiers.ctrlOrCmd) {
-    parts.push(currentPlatform === "mac" ? "Cmd" : "Ctrl");
+    parts.push(currentPlatform === "mac" ? "⌘" : "Ctrl");
   } else {
-    if (modifiers.ctrl) parts.push("Ctrl");
-    if (modifiers.cmd && currentPlatform === "mac") parts.push("Cmd");
+    if (modifiers.ctrl) parts.push(currentPlatform === "mac" ? "⌃" : "Ctrl");
+    if (modifiers.cmd && currentPlatform === "mac") parts.push("⌘");
   }
-  if (modifiers.alt) parts.push(currentPlatform === "mac" ? "Option" : "Alt");
-  if (modifiers.shift) parts.push("Shift");
+  if (modifiers.alt) parts.push(currentPlatform === "mac" ? "⌥" : "Alt");
+  if (modifiers.shift) parts.push(currentPlatform === "mac" ? "⇧" : "Shift");
   return parts;
 }
 
@@ -60,7 +60,7 @@ function collectModifierNames(
  * Format a keyboard shortcut for display based on platform
  * @param shortcut - The keyboard shortcut definition
  * @param platform - Optional platform override (defaults to current platform)
- * @returns Formatted string like "Cmd+Enter" or "Ctrl+Enter"
+ * @returns Formatted string like "⌘+Enter" or "Ctrl+Enter"
  */
 export function formatShortcut(shortcut: KeyboardShortcut, platform?: Platform): string {
   const currentPlatform = platform ?? detectPlatform();

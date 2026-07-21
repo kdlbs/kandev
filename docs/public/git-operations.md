@@ -1,17 +1,17 @@
 ---
 title: "Git Operations"
-description: "Use Kandev worktrees, commits, remote operations, pull requests, and cleanup safely."
+description: "Use Kandev worktrees, commits, remote operations, change requests, and cleanup safely."
 ---
 
 # Git Operations
 
 Kandev runs Git commands in the selected repository workspace for a task session. The Worktree executor gives a session a dedicated host worktree; Local uses the configured shared checkout, while container and remote executors use runtime-specific workspace behavior described in [Executors](executors.md). The browser sends a WebSocket request to the backend, which forwards it to `agentctl` in that executor. This keeps the command's filesystem, Git configuration, network access, SSH agent, and provider CLI in the same environment as the agent.
 
-Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset, or rename a branch. The task toolbar and command panel also expose **Commit Changes**, **Push**, **Pull**, **Create PR**, **Rebase**, and **Merge** when a Git-capable session is selected.
+Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset, or rename a branch. The task toolbar and command panel also expose **Commit Changes**, **Push**, **Pull**, provider-appropriate pull-request or merge-request creation, **Rebase**, and **Merge** when a Git-capable session is selected.
 
 ## Prerequisites and trust boundary
 
-The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials before relying on Pull, Push, Rebase, Merge, or Create PR.
+The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials before relying on Pull, Push, Rebase, Merge, or change-request creation.
 
 These UI operations enter through Kandev's `/ws` endpoint, which currently has no backend authentication. Anyone who can reach an unprotected backend can invoke destructive Git actions with the executor's permissions. Keep Kandev on loopback or behind an authenticated, origin-protected reverse proxy; see [WebSocket API](websocket-api.md).
 
@@ -89,7 +89,7 @@ Two similarly named actions have very different semantics:
 
 Do not reset or amend commits already consumed by other users unless you intend to rewrite and force-push the branch. Kandev hides some revert/reset actions for commits it knows are pushed, but that UI guard is not a repository policy or API authorization boundary.
 
-## Create a pull request
+## Create a pull request or merge request
 
 **Create PR** first runs:
 
@@ -102,11 +102,14 @@ It then selects a provider from the `origin` hostname:
 | Provider | Required runtime tools | Creation behavior |
 |----------|------------------------|-------------------|
 | GitHub | Authenticated `gh` CLI | `gh pr create` with title, body, current head, optional base, and optional `--draft`. |
+| GitLab | Authenticated `glab` CLI or the active workspace's matching GitLab PAT | Reuses an existing open MR for the same source/target or creates one with title, description, current source, explicit or project-default target, and optional draft state. The configured GitLab origin must match the HTTPS or SSH `origin`. |
 | Azure Repos | Authenticated `az` CLI plus the `azure-devops` extension | `az repos pr create` with parsed organization, project, repository, source, optional target, and optional draft. |
 
-Other remote providers are rejected by this action. A normal Git push can still work with another provider. Kandev's GitHub-specific task association is performed only for a returned GitHub `/pull/` URL; an Azure PR can be created without becoming a GitHub watch.
+Other remote providers are rejected by this action. A normal Git push can still work with another provider. A returned GitHub PR or GitLab MR is asynchronously associated with the originating task repository. Azure creation returns a URL but does not create a provider review association.
 
-Title is required. Body and base branch may be empty; if base is empty, the provider chooses its default. The web UI defaults new PRs to draft and waits up to 120 seconds. Provider credentials and remote push permission must exist in the executor, and Git hooks or branch policies can still reject the push or PR.
+Title is required. Body and base branch may be empty. GitHub and Azure delegate an empty base to their provider CLI; GitLab resolves the project default branch before creation. The web UI defaults new change requests to draft and waits up to 120 seconds. Provider credentials and remote push permission must exist in the executor, and Git hooks or branch policies can still reject the push or change request.
+
+For GitLab, Kandev preserves a self-managed connection's scheme and never retries against another host. It prefers `glab` when installed and uses the workspace-injected `GITLAB_TOKEN` REST path when the CLI is absent or its create command fails. The successful WebSocket payload keeps the compatibility field name `pr_url` and adds `provider:"gitlab"`. Association runs after that response; use **Link GitLab merge request** if the MR was created but the link is missing.
 
 ## WebSocket operation reference
 
@@ -123,7 +126,7 @@ These are the registered Kandev WebSocket actions. Every payload requires `sessi
 | `worktree.stage` | `paths` list; empty means all |
 | `worktree.unstage` | `paths` list; empty means all |
 | `worktree.discard` | required non-empty `paths` list |
-| `worktree.create_pr` | required `title`; `body`; `base_branch`; `draft` |
+| `worktree.create_pr` | required `title`; `body`; `base_branch`; `draft`; response can include `pr_url` and `provider` (`github`, `gitlab`, or `azure_repos`) |
 | `worktree.revert_commit` | required `commit_sha`, which must be exact `HEAD` |
 | `worktree.rename_branch` | required `new_name` |
 | `worktree.reset` | required `commit_sha`; `mode` is `soft`, `mixed`, or `hard` |
@@ -178,7 +181,7 @@ Before deleting a task or performing a hard reset, commit and push anything you 
 - **Pull fetched the wrong branch:** Kandev always uses `origin` and, once any upstream exists, the current local branch name. Align local and remote branch names or use an explicit terminal command.
 - **Rebase failed but no rebase remains:** detected rebase conflicts are auto-aborted. Use the returned `conflict_files`, resolve with a manual workflow, or merge instead.
 - **Merge remains conflicted:** this is expected. Resolve and commit, or choose Abort Merge. Do not start another Git operation until the repository is consistent.
-- **Create PR failed after push:** the branch may already be remote. Fix `gh`/`az` authentication, install the Azure extension if applicable, then retry PR creation without assuming the push was rolled back.
+- **Change-request creation failed after push:** the branch may already be remote. Fix `gh`, `glab`, GitLab workspace-token, or `az` authentication as applicable, then retry without assuming the push was rolled back. GitLab retries reuse an existing open MR with the same source and target.
 - **Operation timed out:** inspect status before retrying. A client timeout or lost WebSocket response does not prove the underlying command did nothing.
 - **Multi-repository operation failed at workspace root:** choose the repository in the toolbar or include its exact `repo` subpath in the request.
 - **Missing work after cleanup:** inspect the preserved local branch for Reset Environment/handoff, or the remote branch if it was pushed. Task deletion may already have force-deleted the local branch.

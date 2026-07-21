@@ -19,19 +19,17 @@ import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Spinner } from "@kandev/ui/spinner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
-import {
-  clearGitLabToken,
-  configureGitLabHost,
-  configureGitLabToken,
-  fetchGitLabStatus,
-} from "@/lib/api/domains/gitlab-api";
-import type { GitLabStatus } from "@/lib/types/gitlab";
+import { clearGitLabToken, fetchGitLabStatus, setGitLabConfig } from "@/lib/api/domains/gitlab-api";
+import type { GitLabConfig, GitLabStatus } from "@/lib/types/gitlab";
+import { GitLabWatchSettings } from "./watch-settings";
+import { GitLabActionPresetsSection } from "./action-presets-section";
 
 const DEFAULT_HOST = "https://gitlab.com";
 
@@ -54,6 +52,16 @@ function StatusBadge({ status }: { status: GitLabStatus | null }) {
         className="gap-1 border-amber-500/60 text-amber-700 dark:text-amber-300"
       >
         <IconAlertTriangle className="h-3 w-3" /> Unreachable
+      </Badge>
+    );
+  }
+  if (status.token_configured || status.auth_method !== "none") {
+    return (
+      <Badge
+        variant="outline"
+        className="gap-1 border-amber-500/60 text-amber-700 dark:text-amber-300"
+      >
+        <IconAlertTriangle className="h-3 w-3" /> Reconnect required
       </Badge>
     );
   }
@@ -88,6 +96,7 @@ function AuthMethodBadge({ method }: { method: GitLabStatus["auth_method"] }) {
   const labels: Record<GitLabStatus["auth_method"], string> = {
     glab_cli: "glab CLI",
     pat: "Personal access token",
+    environment: "Environment token",
     none: "Not configured",
     mock: "Mock (test)",
   };
@@ -95,149 +104,201 @@ function AuthMethodBadge({ method }: { method: GitLabStatus["auth_method"] }) {
 }
 
 function HostForm({
-  initial,
-  onSaved,
-  onDirtyChange,
+  host,
+  baseline,
+  onHostChange,
 }: {
-  initial: string;
-  onSaved: () => void;
-  onDirtyChange: (isDirty: boolean) => void;
+  host: string;
+  baseline: string;
+  onHostChange: (host: string) => void;
 }) {
-  const [host, setHost] = useState(initial);
-  const [baseline, setBaseline] = useState(initial);
-  const [syncedInitial, setSyncedInitial] = useState(initial);
-  const { toast } = useToast();
   const isDirty = host !== baseline;
-
-  useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
-
-  if (initial !== syncedInitial && host === baseline) {
-    setSyncedInitial(initial);
-    setBaseline(initial);
-    setHost(initial);
-  }
-
-  const save = useCallback(async () => {
-    const submitted = host.trim();
-    try {
-      await configureGitLabHost(submitted);
-      setBaseline(submitted);
-      setHost((current) => (current.trim() === submitted ? submitted : current));
-      toast({ description: "GitLab host updated", variant: "success" });
-      onSaved();
-    } catch (err) {
-      toast({
-        description: err instanceof Error ? err.message : "Failed to update host",
-        variant: "error",
-      });
-      throw err;
-    }
-  }, [host, toast, onSaved]);
-  const discard = useCallback(() => setHost(baseline), [baseline]);
-  const validHost = (() => {
-    try {
-      const url = new URL(host.trim());
-      return (
-        (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password
-      );
-    } catch {
-      return false;
-    }
-  })();
-
-  useSettingsSaveContributor({
-    id: "gitlab-host",
-    revision: host,
-    isDirty,
-    canSave: validHost,
-    invalidReason: validHost ? undefined : "Enter a valid HTTP or HTTPS GitLab host URL.",
-    save,
-    discard,
-  });
-
   return (
     <div className="flex gap-2 items-center">
       <IconWorld className="h-4 w-4 text-muted-foreground shrink-0" />
       <Input
+        data-testid="gitlab-host-input"
         type="url"
         placeholder={DEFAULT_HOST}
         value={host}
         data-settings-dirty={isDirty}
-        onChange={(e) => setHost(e.target.value)}
+        onChange={(event) => onHostChange(event.target.value)}
         className="font-mono text-sm"
       />
     </div>
   );
 }
 
-function TokenForm({
-  onSuccess,
-  onDirtyChange,
-}: {
-  onSuccess: () => void;
+type GitLabCredentialsFormProps = {
+  initial: GitLabConfig["auth_method"];
+  initialHost: string;
+  host: string;
+  workspaceId: string;
+  hasToken: boolean;
+  onChange: (method: GitLabConfig["auth_method"]) => void;
+  onSaved: () => void;
   onDirtyChange: (isDirty: boolean) => void;
-}) {
+  onHostChange: (host: string) => void;
+};
+
+function isValidGitLabHost(host: string): boolean {
+  try {
+    const url = new URL(host.trim());
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password
+    );
+  } catch {
+    return false;
+  }
+}
+
+function credentialInvalidReason(validHost: boolean, patNeedsToken: boolean) {
+  if (!validHost) return "Enter a valid HTTP or HTTPS GitLab host URL.";
+  if (patNeedsToken) return "Enter a personal access token to switch to PAT.";
+  return undefined;
+}
+
+function useGitLabCredentialDraft({
+  initial,
+  initialHost,
+  host,
+  workspaceId,
+  hasToken,
+  onChange,
+  onSaved,
+  onDirtyChange,
+  onHostChange,
+}: GitLabCredentialsFormProps) {
+  const [method, setMethod] = useState(initial);
+  const [baseline, setBaseline] = useState(initial);
+  const [syncedInitial, setSyncedInitial] = useState(initial);
+  const [hostBaseline, setHostBaseline] = useState(initialHost);
   const [token, setToken] = useState("");
-  const [showToken, setShowToken] = useState(false);
   const { toast } = useToast();
-  const isDirty = Boolean(token);
-
+  const isDirty = method !== baseline || Boolean(token) || host.trim() !== hostBaseline;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
-
+  if (initial !== syncedInitial && method === baseline) {
+    setSyncedInitial(initial);
+    setBaseline(initial);
+    setMethod(initial);
+  }
+  if (initialHost !== hostBaseline && !token && method === baseline) {
+    setHostBaseline(initialHost);
+  }
   const save = useCallback(async () => {
-    const submitted = token.trim();
     try {
-      await configureGitLabToken(submitted);
-      toast({ description: "GitLab token configured", variant: "success" });
-      setToken((current) => (current.trim() === submitted ? "" : current));
-      onSuccess();
-    } catch (err) {
+      const submittedToken = token.trim();
+      await setGitLabConfig(
+        {
+          host: host.trim(),
+          auth_method: method,
+          ...(method === "pat" && submittedToken ? { token: submittedToken } : {}),
+        },
+        { workspaceId },
+      );
+      setBaseline(method);
+      setHostBaseline(host.trim());
+      setToken((current) => (current.trim() === submittedToken ? "" : current));
+      toast({ description: "GitLab authentication method updated", variant: "success" });
+      onSaved();
+    } catch (error) {
       toast({
-        description: err instanceof Error ? err.message : "Failed to save token",
+        description:
+          error instanceof Error ? error.message : "Failed to update authentication method",
         variant: "error",
       });
-      throw err;
+      throw error;
     }
-  }, [token, toast, onSuccess]);
-  const discard = useCallback(() => setToken(""), []);
-
+  }, [host, method, onSaved, toast, token, workspaceId]);
+  const patNeedsToken = method === "pat" && !hasToken && !token.trim();
+  const validHost = isValidGitLabHost(host);
   useSettingsSaveContributor({
-    id: "gitlab-token",
-    revision: token,
+    id: "gitlab-credentials",
+    revision: JSON.stringify({ host: host.trim(), method, token }),
     isDirty,
-    canSave: Boolean(token.trim()),
-    invalidReason: token && !token.trim() ? "A GitLab token is required." : undefined,
+    canSave: validHost && !patNeedsToken,
+    invalidReason: credentialInvalidReason(validHost, patNeedsToken),
     save,
-    discard,
+    discard: () => {
+      setMethod(baseline);
+      setToken("");
+      onHostChange(hostBaseline);
+      onChange(baseline);
+    },
   });
+  const selectMethod = (value: string) => {
+    const next = value as GitLabConfig["auth_method"];
+    setMethod(next);
+    onChange(next);
+  };
+  return { method, token, setToken, selectMethod, isDirty };
+}
 
+export function GitLabCredentialsForm(props: GitLabCredentialsFormProps) {
+  const draft = useGitLabCredentialDraft(props);
+  const [showToken, setShowToken] = useState(false);
   return (
-    <div className="flex gap-2 items-center">
-      <IconKey className="h-4 w-4 text-muted-foreground shrink-0" />
-      <div className="relative flex-1">
-        <Input
-          type={showToken ? "text" : "password"}
-          placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
-          value={token}
-          data-settings-dirty={isDirty}
-          onChange={(e) => setToken(e.target.value)}
-          className="font-mono text-sm pr-9"
-          autoComplete="off"
-        />
-        <button
-          type="button"
-          onClick={() => setShowToken((v) => !v)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-          aria-label={showToken ? "Hide token" : "Show token"}
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        Choose a workspace PAT, the local glab CLI login, or an environment-provided token. CLI and
+        environment credentials must already be available to the kandev backend.
+      </p>
+      <Select value={draft.method} onValueChange={draft.selectMethod}>
+        <SelectTrigger
+          aria-label="Authentication method"
+          className="w-full cursor-pointer sm:w-64"
+          data-settings-dirty={draft.isDirty}
         >
-          {showToken ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
-        </button>
-      </div>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="pat" className="cursor-pointer">
+            Personal access token
+          </SelectItem>
+          <SelectItem value="glab_cli" className="cursor-pointer">
+            glab CLI
+          </SelectItem>
+          <SelectItem value="environment" className="cursor-pointer">
+            Environment token
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      {draft.method === "pat" ? (
+        <div className="flex items-center gap-2">
+          <IconKey className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="relative flex-1">
+            <Input
+              data-testid="gitlab-token-input"
+              type={showToken ? "text" : "password"}
+              placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
+              value={draft.token}
+              data-settings-dirty={Boolean(draft.token)}
+              onChange={(event) => draft.setToken(event.target.value)}
+              className="font-mono text-sm pr-9"
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              onClick={() => setShowToken((value) => !value)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer text-muted-foreground hover:text-foreground"
+              aria-label={showToken ? "Hide token" : "Show token"}
+            >
+              {showToken ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function ClearTokenButton({ onCleared }: { onCleared: () => void }) {
+function ClearTokenButton({
+  workspaceId,
+  onCleared,
+}: {
+  workspaceId: string;
+  onCleared: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
   return (
@@ -248,7 +309,7 @@ function ClearTokenButton({ onCleared }: { onCleared: () => void }) {
       onClick={async () => {
         setBusy(true);
         try {
-          await clearGitLabToken();
+          await clearGitLabToken({ workspaceId });
           toast({ description: "GitLab token cleared" });
           onCleared();
         } catch (err) {
@@ -275,33 +336,70 @@ type GitLabIntegrationPageProps = {
 export function GitLabIntegrationPage({ workspaceId }: GitLabIntegrationPageProps = {}) {
   return (
     <WorkspaceScopedSection workspaceId={workspaceId}>
-      {(ws) => <GitLabConnectionSection key={ws} />}
+      {(ws) => (
+        <div key={ws} className="space-y-8">
+          <GitLabConnectionSection workspaceId={ws} />
+          <GitLabActionPresetsSection workspaceId={ws} />
+          <GitLabWatchSettings workspaceId={ws} />
+        </div>
+      )}
     </WorkspaceScopedSection>
   );
 }
 
-function GitLabConnectionSection() {
-  const [status, setStatus] = useState<GitLabStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [hostDirty, setHostDirty] = useState(false);
-  const [tokenDirty, setTokenDirty] = useState(false);
+function editableAuthMethod(status: GitLabStatus | null): GitLabConfig["auth_method"] {
+  return status?.auth_method === "glab_cli" || status?.auth_method === "environment"
+    ? status.auth_method
+    : "pat";
+}
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const next = await fetchGitLabStatus({ cache: "no-store" });
-      setStatus(next);
-    } catch {
-      setStatus(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+type ConnectionCardProps = {
+  workspaceId: string;
+  status: GitLabStatus | null;
+  loading: boolean;
+  authMethodDirty: boolean;
+  hostDraft: string;
+  authMethodDraft: GitLabConfig["auth_method"];
+  setHostDraft: (host: string) => void;
+  setAuthMethodDraft: (method: GitLabConfig["auth_method"]) => void;
+  setAuthMethodDirty: (dirty: boolean) => void;
+  reload: () => Promise<void>;
+};
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+function ConnectionStatusRow({ status }: { status: GitLabStatus | null }) {
+  return (
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <StatusBadge status={status} />
+        {status && <AuthMethodBadge method={status.auth_method} />}
+        {status?.glab_version ? (
+          <Badge variant="outline" className="font-mono text-xs">
+            glab {status.glab_version}
+          </Badge>
+        ) : null}
+      </div>
+      {status?.username ? (
+        <span className="text-xs text-muted-foreground">
+          Logged in as <span className="font-medium">{status.username}</span>
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
+function GitLabConnectionCard(props: ConnectionCardProps) {
+  const {
+    workspaceId,
+    status,
+    loading,
+    authMethodDirty,
+    hostDraft,
+    authMethodDraft,
+    setHostDraft,
+    setAuthMethodDraft,
+    setAuthMethodDirty,
+    reload,
+  } = props;
   return (
     <SettingsSection
       title="GitLab"
@@ -315,59 +413,86 @@ function GitLabConnectionSection() {
           disabled={loading}
           className="gap-1 cursor-pointer"
         >
-          <IconRefresh className="h-3 w-3" />
-          Refresh
+          <IconRefresh className="h-3 w-3" /> Refresh
         </Button>
       }
     >
-      <SettingsCard isDirty={hostDirty || tokenDirty}>
+      <SettingsCard isDirty={authMethodDirty}>
         <CardContent className="space-y-4 py-4">
           <ConnectionErrorAlert status={status} />
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <StatusBadge status={status} />
-              {status && <AuthMethodBadge method={status.auth_method} />}
-              {status?.glab_version && (
-                <Badge variant="outline" className="font-mono text-xs">
-                  glab {status.glab_version}
-                </Badge>
-              )}
-            </div>
-            {status?.username && (
-              <span className="text-xs text-muted-foreground">
-                Logged in as <span className="font-medium">{status.username}</span>
-              </span>
-            )}
-          </div>
-
+          <ConnectionStatusRow status={status} />
           <Separator />
-
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground">
               GitLab host URL. Override for self-managed instances; leave at the default for
               gitlab.com.
             </p>
             <HostForm
-              initial={status?.host ?? DEFAULT_HOST}
-              onSaved={() => void reload()}
-              onDirtyChange={setHostDirty}
+              host={hostDraft}
+              baseline={status?.host ?? DEFAULT_HOST}
+              onHostChange={setHostDraft}
             />
           </div>
-
           <Separator />
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                Personal access token. Required scopes: <code>api</code>, <code>read_user</code>.
-                Stored encrypted in the kandev secret store.
-              </p>
-              {status?.token_configured && <ClearTokenButton onCleared={() => void reload()} />}
+          <GitLabCredentialsForm
+            initial={editableAuthMethod(status)}
+            initialHost={status?.host ?? DEFAULT_HOST}
+            host={hostDraft}
+            workspaceId={workspaceId}
+            hasToken={Boolean(status?.token_configured)}
+            onChange={setAuthMethodDraft}
+            onSaved={() => void reload()}
+            onDirtyChange={setAuthMethodDirty}
+            onHostChange={setHostDraft}
+          />
+          {authMethodDraft === "pat" && status?.token_configured ? (
+            <div className="flex justify-end">
+              <ClearTokenButton workspaceId={workspaceId} onCleared={() => void reload()} />
             </div>
-            <TokenForm onSuccess={() => void reload()} onDirtyChange={setTokenDirty} />
-          </div>
+          ) : null}
         </CardContent>
       </SettingsCard>
     </SettingsSection>
+  );
+}
+
+function GitLabConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const [status, setStatus] = useState<GitLabStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [authMethodDirty, setAuthMethodDirty] = useState(false);
+  const [hostDraft, setHostDraft] = useState(DEFAULT_HOST);
+  const [authMethodDraft, setAuthMethodDraft] = useState<GitLabConfig["auth_method"]>("pat");
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const next = await fetchGitLabStatus({ cache: "no-store", workspaceId });
+      setStatus(next);
+      setHostDraft(next?.host ?? DEFAULT_HOST);
+      setAuthMethodDraft(editableAuthMethod(next));
+    } catch {
+      setStatus(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return (
+    <GitLabConnectionCard
+      workspaceId={workspaceId}
+      status={status}
+      loading={loading}
+      authMethodDirty={authMethodDirty}
+      hostDraft={hostDraft}
+      authMethodDraft={authMethodDraft}
+      setHostDraft={setHostDraft}
+      setAuthMethodDraft={setAuthMethodDraft}
+      setAuthMethodDirty={setAuthMethodDirty}
+      reload={reload}
+    />
   );
 }

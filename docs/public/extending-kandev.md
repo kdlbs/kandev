@@ -38,7 +38,7 @@ Choose the closest existing provider domain under `apps/backend/internal/`. Ther
 
 - Jira and Linear use workspace-scoped connection state;
 - Sentry supports multiple named workspace instances;
-- GitHub and GitLab split some global authentication/host state from workspace watches or presets;
+- GitHub keeps installation-wide authentication with workspace settings, while GitLab owns one connection and its watches per workspace;
 - Slack follows a workspace-oriented pattern.
 
 A domain may contain a client, store/repository, service, provider, handlers, and poller. Shared helpers under `internal/integrations/` cover secret adapters, health polling, and workspace scope. Construction and non-fatal provider startup live in `internal/backendapp/`. Web clients/hooks live in `lib/api/domains/` and `hooks/domains/`; settings and shared provider UI live under `app/settings/` and `components/integrations/`.

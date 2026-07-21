@@ -5,22 +5,32 @@ description: Run format, typecheck, test, and lint across the monorepo. Use afte
 
 # Verify
 
-Delegate to the **registered `verify` subagent** to run the full verification pipeline (rebase, format, typecheck, test, lint) and fix any issues it finds when the runtime supports delegated helpers. The subagent runs on Sonnet, which is cheaper than the main session and well-suited to the mechanical run-parse-fix loop. Do not substitute a generic agent: it may lack the required GitHub network access or shared-worktree write permissions.
+In the user-started primary session, delegate the
+full verification pipeline to the registered `verify` worker. Do not substitute
+a generic agent: it may lack the required GitHub network access or
+shared-worktree write permissions. If the worker cannot be launched or access
+the required resources, stop and report that verification is blocked.
 
-If runtime policy forbids delegated helpers/subagents unless the user explicitly requested them, the named helper is not registered, or the helper fails to start, initialize, or access the required Git/network/worktree resources, treat delegation as unavailable and use the direct-command fallback below. Do not stop at a partial check just because delegation is unavailable.
+An explicitly assigned `verify` worker follows the worker procedure below,
+reports verification failures without fixing source or test logic, and does not
+spawn workers. The planner assigns failures to an `implementer`, then launches
+a fresh `verify` assignment.
 
 ## What to do
 
-Invoke the `verify` subagent in a single call when available. Wait for it to complete and surface the result.
+Invoke the `verify` worker in a single call. Wait for it to complete and surface the result.
 
 - If verify passes cleanly: report success.
-- If verify cannot fix all failures: surface the remaining errors to the user — do not proceed with downstream actions (commit, push, PR) that depended on a green verify.
+- If verify fails: create a bounded remediation assignment from its report and
+  do not proceed with downstream actions that depend on green verification.
 
-Do NOT run the verification commands yourself in the main session when the helper is available — that defeats the cost saving. The subagent's prompt already contains the full procedure (see `.claude/agents/verify.md`).
+Do not run verification commands in the planner session. The worker's prompt
+contains the full procedure in `.agents/agents/verify.md`.
 
-## Direct-command fallback
+## Worker Procedure
 
-Use this only when the runtime does not permit delegated helpers/subagents. Run the full pipeline directly from the repository root and report the exact commands and results:
+The assigned `verify` worker runs the full pipeline from the repository root and
+reports the exact commands and results:
 
 ```bash
 # Fresh worktrees share .git/ but not apps/node_modules.
@@ -33,7 +43,6 @@ PR_BASE="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null || true)"
 if [ -n "$PR_BASE" ]; then
   git fetch origin "$PR_BASE"
   git merge-base --is-ancestor "origin/$PR_BASE" HEAD || echo "branch is behind origin/$PR_BASE"
-  git rebase "origin/$PR_BASE"
 else
   echo "No PR base resolved; skipping rebase to avoid rewriting a stacked branch."
 fi
@@ -102,16 +111,18 @@ installed matching rustup toolchain, extending `PATH` rather than replacing it
 and losing Node/pnpm. If no matching toolchain is installed, report the exact
 requirement or request installation instead of silently skipping Rust tests.
 
-When a PR base was resolved, check whether `origin/$PR_BASE` is already an
-ancestor of `HEAD` before rebasing.
-If tracked files for the intended change are dirty, stash only those pathspecs
-before `git rebase "origin/$PR_BASE"`, then pop the stash before running
-`make fmt/typecheck/test/lint`. Do not use a broad `git stash` that could hide
-unrelated user changes. If you miss this and `git rebase "origin/$PR_BASE"` fails
-because of unstaged tracked changes, apply the same pathspec-only stash flow,
-then rerun the rebase. Resolve conflicts before continuing verification.
+When a PR base was resolved, report whether `origin/$PR_BASE` is already an
+ancestor of `HEAD`. Do not rebase, stash, or resolve conflicts in this role;
+those require a bounded implementer assignment before verification continues.
 
-If `make fmt` changes files, review the diff and continue with the remaining commands. If any command fails, fix the issue and re-run the failed command; for formatter-caused changes, re-run any affected checks before reporting success.
+For source, test, type, or lint failures, stop after capturing targeted failure
+evidence. Report the command, quiet-log path and relevant lines, likely owned
+files, and a concise remediation recommendation. Do not edit logic or rerun the
+whole pipeline until the planner has assigned and integrated a fix.
+
+If `make fmt` changes files, review and report the formatter diff, then continue
+with the remaining commands. If a later command fails, capture targeted evidence
+and stop for planner-assigned remediation.
 
 `make test` includes backend, web, CLI, and `test-scripts`; do not silently skip
 `test-scripts` or its desktop smoke coverage while reporting full verification

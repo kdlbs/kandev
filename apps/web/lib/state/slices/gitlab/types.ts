@@ -9,8 +9,8 @@ import type {
 } from "@/lib/types/gitlab";
 
 export type TaskMRsState = {
-  /** Each task may have multiple MRs (one per repository for multi-repo tasks). */
-  byTaskId: Record<string, TaskMR[]>;
+  /** Workspace -> task -> linked MRs. */
+  byWorkspaceId: Record<string, Record<string, TaskMR[]>>;
 };
 
 export type LoadableList<T> = {
@@ -35,6 +35,7 @@ export type GitLabStatsState = {
 };
 
 export type GitLabStatusState = {
+  workspaceId: string | null;
   data: GitLabStatus | null;
   loading: boolean;
   loadedAt: number | null;
@@ -52,9 +53,10 @@ export type GitLabSliceState = {
 
 export type GitLabSliceActions = {
   // TaskMR — keeping legacy names; do not collide with github slice.
-  setTaskMRs: (mrs: Record<string, TaskMR[]>) => void;
-  setTaskMR: (taskId: string, mr: TaskMR) => void;
-  resetTaskMRs: () => void;
+  setTaskMRs: (workspaceId: string, mrs: Record<string, TaskMR[]>) => void;
+  setTaskMR: (workspaceId: string, taskId: string, mr: TaskMR) => void;
+  removeTaskMR: (workspaceId: string, associationId: string) => void;
+  resetTaskMRs: (workspaceId?: string) => void;
 
   setGitLabReviewWatches: (watches: ReviewWatch[]) => void;
   setGitLabReviewWatchesLoading: (loading: boolean) => void;
@@ -78,8 +80,8 @@ export type GitLabSliceActions = {
   setGitLabStats: (stats: GitLabStats | null) => void;
   setGitLabStatsLoading: (loading: boolean) => void;
 
-  setGitLabStatus: (status: GitLabStatus | null) => void;
-  setGitLabStatusLoading: (loading: boolean) => void;
+  setGitLabStatus: (workspaceId: string | null, status: GitLabStatus | null) => void;
+  setGitLabStatusLoading: (workspaceId: string | null, loading: boolean) => void;
 };
 
 export type GitLabSlice = GitLabSliceState & GitLabSliceActions;

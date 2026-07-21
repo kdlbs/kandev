@@ -89,6 +89,65 @@ func (h *Handlers) deferMoveTask(
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"move_task requires message queue support while the source session is active", nil)
 	}
+
+	// Validate the target step exists and belongs to the requested workflow
+	// before committing the deferred move. Without this check a stale or
+	// foreign step_id would be stored and silently fail at turn-end, leaving
+	// the task orphaned on the board.
+	if h.workflowCtrl != nil {
+		stepResp, err := h.workflowCtrl.GetStep(ctx, req.WorkflowStepID)
+		if err != nil || stepResp == nil || stepResp.Step == nil {
+			h.logger.Error("move_task: target step not found",
+				zap.String("task_id", req.TaskID),
+				zap.String("workflow_step_id", req.WorkflowStepID),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				"target workflow_step_id does not exist", nil)
+		}
+		if stepResp.Step.WorkflowID != req.WorkflowID {
+			h.logger.Error("move_task: target step belongs to a different workflow",
+				zap.String("task_id", req.TaskID),
+				zap.String("workflow_step_id", req.WorkflowStepID),
+				zap.String("step_workflow_id", stepResp.Step.WorkflowID),
+				zap.String("requested_workflow_id", req.WorkflowID))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				"target workflow_step_id does not belong to the requested workflow_id", nil)
+		}
+	}
+
+	// Validate the target workflow lives in the same workspace as the task.
+	// The immediate-apply path (task.Service.MoveTask) already enforces this
+	// via validateTaskMove; the deferred path bypasses that service entirely
+	// (see applyPendingMove's doc comment), so it must check independently or
+	// a cross-workspace move_task_kandev call would silently succeed.
+	if h.taskSvc != nil {
+		task, err := h.taskSvc.GetTask(ctx, req.TaskID)
+		if err != nil {
+			h.logger.Error("move_task: failed to load task for workspace validation",
+				zap.String("task_id", req.TaskID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to load task for move validation", nil)
+		}
+		targetWorkflow, err := h.taskSvc.GetWorkflow(ctx, req.WorkflowID)
+		if err != nil {
+			h.logger.Error("move_task: target workflow not found",
+				zap.String("task_id", req.TaskID),
+				zap.String("workflow_id", req.WorkflowID),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				"target workflow_id does not exist", nil)
+		}
+		if targetWorkflow.WorkspaceID != task.WorkspaceID {
+			h.logger.Error("move_task: target workflow is in a different workspace",
+				zap.String("task_id", req.TaskID),
+				zap.String("workflow_id", req.WorkflowID),
+				zap.String("task_workspace_id", task.WorkspaceID),
+				zap.String("target_workspace_id", targetWorkflow.WorkspaceID))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				"target workflow is in a different workspace", nil)
+		}
+	}
+
 	if req.Prompt != "" {
 		wrapped := "You were moved to this step with the following message: " + req.Prompt
 		if err := h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped); err != nil {

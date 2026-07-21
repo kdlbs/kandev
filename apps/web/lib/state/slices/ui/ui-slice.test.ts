@@ -56,6 +56,21 @@ describe("migrateView", () => {
   });
 });
 
+describe("mobile merge request review selection", () => {
+  it("persists the exact MR key and clears invalid selections back to chat", () => {
+    const store = makeStore();
+    store.getState().setMobileSessionReview("session-1", "https://gitlab.example|group/b|22");
+    expect(store.getState().mobileSession).toMatchObject({
+      activePanelBySessionId: { "session-1": "review" },
+      reviewMRKeyBySessionId: { "session-1": "https://gitlab.example|group/b|22" },
+    });
+
+    store.getState().setMobileSessionReview("session-1", null);
+    expect(store.getState().mobileSession.activePanelBySessionId["session-1"]).toBe("chat");
+    expect(store.getState().mobileSession.reviewMRKeyBySessionId["session-1"]).toBeUndefined();
+  });
+});
+
 describe("toggleSubtaskCollapsed", () => {
   beforeEach(() => {
     window.sessionStorage.clear();

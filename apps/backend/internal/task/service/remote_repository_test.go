@@ -21,7 +21,7 @@ func TestParseRemoteRepositoryURL(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			provider, owner, repo, canonical, err := parseRemoteRepositoryURL(tc.raw)
+			provider, owner, repo, canonical, err := parseRemoteRepositoryURL(tc.raw, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -34,7 +34,26 @@ func TestParseRemoteRepositoryURL(t *testing.T) {
 
 func TestParseRemoteRepositoryURLRejectsUnsupportedHost(t *testing.T) {
 	t.Parallel()
-	if _, _, _, _, err := parseRemoteRepositoryURL("https://example.com/acme/api"); err == nil {
+	if _, _, _, _, err := parseRemoteRepositoryURL("https://example.com/acme/api", ""); err == nil {
 		t.Fatal("expected unsupported host error")
+	}
+}
+
+func TestParseRemoteRepositoryURLAcceptsProviderHintForSelfManagedGitLab(t *testing.T) {
+	t.Parallel()
+
+	provider, owner, repo, canonical, err := parseRemoteRepositoryURL(
+		"https://gitlab.internal:8443/acme/platform/api",
+		"gitlab",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider != "gitlab" || owner != "acme/platform" || repo != "api" ||
+		canonical != "https://gitlab.internal:8443/acme/platform/api.git" {
+		t.Fatalf("got (%q, %q, %q, %q)", provider, owner, repo, canonical)
+	}
+	if host := remoteProviderHost(provider, canonical); host != "https://gitlab.internal:8443" {
+		t.Fatalf("provider host = %q", host)
 	}
 }

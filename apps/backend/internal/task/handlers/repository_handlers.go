@@ -268,6 +268,7 @@ type httpCreateRepositoryRequest struct {
 	LocalPath              string `json:"local_path"`
 	Provider               string `json:"provider"`
 	ProviderRepoID         string `json:"provider_repo_id"`
+	ProviderHost           string `json:"provider_host"`
 	ProviderOwner          string `json:"provider_owner"`
 	ProviderName           string `json:"provider_name"`
 	DefaultBranch          string `json:"default_branch"`
@@ -330,6 +331,7 @@ func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
 		LocalPath:              body.LocalPath,
 		Provider:               body.Provider,
 		ProviderRepoID:         body.ProviderRepoID,
+		ProviderHost:           body.ProviderHost,
 		ProviderOwner:          body.ProviderOwner,
 		ProviderName:           body.ProviderName,
 		DefaultBranch:          body.DefaultBranch,
@@ -418,6 +420,7 @@ type httpUpdateRepositoryRequest struct {
 	LocalPath              *string `json:"local_path"`
 	Provider               *string `json:"provider"`
 	ProviderRepoID         *string `json:"provider_repo_id"`
+	ProviderHost           *string `json:"provider_host"`
 	ProviderOwner          *string `json:"provider_owner"`
 	ProviderName           *string `json:"provider_name"`
 	DefaultBranch          *string `json:"default_branch"`
@@ -442,6 +445,7 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		LocalPath:              body.LocalPath,
 		Provider:               body.Provider,
 		ProviderRepoID:         body.ProviderRepoID,
+		ProviderHost:           body.ProviderHost,
 		ProviderOwner:          body.ProviderOwner,
 		ProviderName:           body.ProviderName,
 		DefaultBranch:          body.DefaultBranch,
@@ -520,6 +524,7 @@ type wsCreateRepositoryRequest struct {
 	LocalPath              string `json:"local_path"`
 	Provider               string `json:"provider"`
 	ProviderRepoID         string `json:"provider_repo_id"`
+	ProviderHost           string `json:"provider_host"`
 	ProviderOwner          string `json:"provider_owner"`
 	ProviderName           string `json:"provider_name"`
 	DefaultBranch          string `json:"default_branch"`
@@ -546,6 +551,7 @@ func (h *RepositoryHandlers) wsCreateRepository(ctx context.Context, msg *ws.Mes
 		LocalPath:              req.LocalPath,
 		Provider:               req.Provider,
 		ProviderRepoID:         req.ProviderRepoID,
+		ProviderHost:           req.ProviderHost,
 		ProviderOwner:          req.ProviderOwner,
 		ProviderName:           req.ProviderName,
 		DefaultBranch:          req.DefaultBranch,
@@ -592,6 +598,7 @@ type wsUpdateRepositoryRequest struct {
 	LocalPath              *string `json:"local_path,omitempty"`
 	Provider               *string `json:"provider,omitempty"`
 	ProviderRepoID         *string `json:"provider_repo_id,omitempty"`
+	ProviderHost           *string `json:"provider_host,omitempty"`
 	ProviderOwner          *string `json:"provider_owner,omitempty"`
 	ProviderName           *string `json:"provider_name,omitempty"`
 	DefaultBranch          *string `json:"default_branch,omitempty"`
@@ -617,6 +624,7 @@ func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Mes
 		LocalPath:              req.LocalPath,
 		Provider:               req.Provider,
 		ProviderRepoID:         req.ProviderRepoID,
+		ProviderHost:           req.ProviderHost,
 		ProviderOwner:          req.ProviderOwner,
 		ProviderName:           req.ProviderName,
 		DefaultBranch:          req.DefaultBranch,

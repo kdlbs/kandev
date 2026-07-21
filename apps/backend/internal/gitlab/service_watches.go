@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/watchreset"
 )
 
 // eventSource is the `source` field on every bus.Event published by this
@@ -17,6 +19,7 @@ const eventSource = "gitlab"
 const (
 	defaultWatchPollIntervalSec = 300
 	minWatchPollIntervalSec     = 60
+	watchDeleteTimeout          = 30 * time.Second
 )
 
 // --- MR Watch ---
@@ -99,6 +102,45 @@ func (s *Service) DeleteMRWatch(ctx context.Context, id string) error {
 	return store.DeleteMRWatch(ctx, id)
 }
 
+func (s *Service) ListMRWatchesBySessionForWorkspace(ctx context.Context, workspaceID, sessionID string) ([]*MRWatch, error) {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.ListMRWatchesBySessionForWorkspace(ctx, workspaceID, sessionID)
+}
+
+func (s *Service) ListMRWatchesByTaskForWorkspace(ctx context.Context, workspaceID, taskID string) ([]*MRWatch, error) {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.ListMRWatchesByTaskForWorkspace(ctx, workspaceID, taskID)
+}
+
+func (s *Service) ListActiveMRWatchesForWorkspace(ctx context.Context, workspaceID string) ([]*MRWatch, error) {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.ListActiveMRWatchesForWorkspace(ctx, workspaceID)
+}
+
+func (s *Service) DeleteMRWatchForWorkspace(ctx context.Context, workspaceID, id string) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	deleted, err := store.DeleteMRWatchForWorkspace(ctx, workspaceID, id)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return ErrWatchNotFound
+	}
+	return nil
+}
+
 // errStoreUnavailable is returned by Service methods that require the
 // SQLite store to be wired but the runtime didn't manage to create it
 // (table migration failure on boot). Distinct error so callers can render
@@ -110,6 +152,10 @@ var errStoreUnavailable = fmt.Errorf("gitlab store not configured")
 // than 500.
 var ErrWatchNotFound = fmt.Errorf("watch not found")
 
+// ErrWatchOwnershipLost means an event belongs to a watch generation that was
+// invalidated by reset or delete. Callers must not retain the created task.
+var ErrWatchOwnershipLost = fmt.Errorf("watch ownership lost")
+
 // CheckMRWatch polls a watch once: returns the latest MR status and whether
 // the underlying MR moved into a state worth notifying about (new note,
 // pipeline transition, approval transition).
@@ -117,9 +163,9 @@ func (s *Service) CheckMRWatch(ctx context.Context, watch *MRWatch) (*MRStatus, 
 	if watch == nil {
 		return nil, false, fmt.Errorf("watch is nil")
 	}
-	client := s.Client()
-	if client == nil {
-		return nil, false, ErrNoClient
+	client, err := s.clientForTask(ctx, watch.TaskID)
+	if err != nil {
+		return nil, false, err
 	}
 	store := s.requireStore()
 	if store == nil {
@@ -164,6 +210,13 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 	if !IsValidCleanupPolicy(req.CleanupPolicy) {
 		return nil, fmt.Errorf("invalid cleanup_policy: %q", req.CleanupPolicy)
 	}
+	if err := s.validateWatchDependencies(ctx, req.WorkspaceID, req.WorkflowID, req.WorkflowStepID, req.AgentProfileID, req.ExecutorProfileID); err != nil {
+		return nil, err
+	}
+	repositoryID, baseBranch, err := s.resolveWatchRepository(ctx, req.WorkspaceID, req.RepositoryID, req.BaseBranch)
+	if err != nil {
+		return nil, err
+	}
 	interval := req.PollIntervalSeconds
 	if interval <= 0 {
 		interval = defaultWatchPollIntervalSec
@@ -183,11 +236,17 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 		AgentProfileID:      req.AgentProfileID,
 		ExecutorProfileID:   req.ExecutorProfileID,
 		Prompt:              req.Prompt,
+		RepositoryID:        repositoryID,
+		BaseBranch:          baseBranch,
 		ReviewScope:         scope,
 		CustomQuery:         req.CustomQuery,
 		Enabled:             true,
 		PollIntervalSeconds: interval,
 		CleanupPolicy:       NormalizeCleanupPolicy(req.CleanupPolicy),
+		MaxInflightTasks:    req.MaxInflightTasks,
+	}
+	if err := validateWatchMaxInflight(rw.MaxInflightTasks); err != nil {
+		return nil, err
 	}
 	store := s.requireStore()
 	if store == nil {
@@ -219,6 +278,14 @@ func (s *Service) GetReviewWatch(ctx context.Context, id string) (*ReviewWatch, 
 		return nil, errStoreUnavailable
 	}
 	return store.GetReviewWatch(ctx, id)
+}
+
+func (s *Service) GetReviewWatchIncludingDeleting(ctx context.Context, id string) (*ReviewWatch, error) {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.GetReviewWatchIncludingDeleting(ctx, id)
 }
 
 // ListReviewWatches lists review watches in a workspace.
@@ -256,8 +323,21 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 		return fmt.Errorf("%w: review watch %s", ErrWatchNotFound, id)
 	}
 	applyReviewWatchPatch(rw, req)
+	if err := s.validateWatchDependencies(ctx, rw.WorkspaceID, rw.WorkflowID, rw.WorkflowStepID, rw.AgentProfileID, rw.ExecutorProfileID); err != nil {
+		return err
+	}
+	if req.RepositoryID != nil || req.BaseBranch != nil {
+		repositoryID, baseBranch, err := s.resolveWatchRepository(ctx, rw.WorkspaceID, rw.RepositoryID, rw.BaseBranch)
+		if err != nil {
+			return err
+		}
+		rw.RepositoryID, rw.BaseBranch = repositoryID, baseBranch
+	}
 	if req.CleanupPolicy != nil && !IsValidCleanupPolicy(*req.CleanupPolicy) {
 		return fmt.Errorf("invalid cleanup_policy: %q", *req.CleanupPolicy)
+	}
+	if err := validateWatchMaxInflight(rw.MaxInflightTasks); err != nil {
+		return err
 	}
 	return store.UpdateReviewWatch(ctx, rw)
 }
@@ -287,6 +367,15 @@ func applyReviewWatchPatch(rw *ReviewWatch, req *UpdateReviewWatchRequest) {
 	if req.Prompt != nil {
 		rw.Prompt = *req.Prompt
 	}
+	if req.RepositoryID != nil {
+		rw.RepositoryID = *req.RepositoryID
+		if rw.RepositoryID == "" {
+			rw.BaseBranch = ""
+		}
+	}
+	if req.BaseBranch != nil && rw.RepositoryID != "" {
+		rw.BaseBranch = *req.BaseBranch
+	}
 	if req.ReviewScope != nil {
 		rw.ReviewScope = *req.ReviewScope
 	}
@@ -295,12 +384,23 @@ func applyReviewWatchPatch(rw *ReviewWatch, req *UpdateReviewWatchRequest) {
 	}
 	if req.Enabled != nil {
 		rw.Enabled = *req.Enabled
+		if rw.Enabled {
+			rw.LastError = ""
+			rw.LastErrorAt = nil
+		}
 	}
 	if req.PollIntervalSeconds != nil {
 		rw.PollIntervalSeconds = clampPollInterval(*req.PollIntervalSeconds)
 	}
 	if req.CleanupPolicy != nil {
 		rw.CleanupPolicy = NormalizeCleanupPolicy(*req.CleanupPolicy)
+	}
+	if req.MaxInflightTasks != nil {
+		if *req.MaxInflightTasks == 0 {
+			rw.MaxInflightTasks = nil
+		} else {
+			rw.MaxInflightTasks = req.MaxInflightTasks
+		}
 	}
 }
 
@@ -316,6 +416,13 @@ func clampPollInterval(seconds int) int {
 	return seconds
 }
 
+func validateWatchMaxInflight(max *int) error {
+	if max != nil && *max <= 0 {
+		return fmt.Errorf("max_inflight_tasks must be positive")
+	}
+	return nil
+}
+
 // DeleteReviewWatch removes a review watch and best-effort reaps any tasks
 // it owned (tasks survive when the dedup row dies, so pre-sweep first).
 func (s *Service) DeleteReviewWatch(ctx context.Context, id string) error {
@@ -323,31 +430,41 @@ func (s *Service) DeleteReviewWatch(ctx context.Context, id string) error {
 	if store == nil {
 		return errStoreUnavailable
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), watchDeleteTimeout)
+	defer cancel()
 	s.mu.RLock()
 	deleter := s.taskDeleter
+	cascadeDeleter := s.cascadeTaskDeleter
 	s.mu.RUnlock()
-	if deleter != nil {
-		mrTasks, err := store.ListReviewMRTasksByWatch(ctx, id)
-		if err != nil {
-			s.logger.Warn("failed to list review MR tasks for pre-delete sweep",
-				zap.String("watch_id", id), zap.Error(err))
-		} else {
-			s.sweepReviewWatchTasks(ctx, id, mrTasks, deleter)
-		}
+	invalidation, err := store.BeginReviewWatchDelete(deleteCtx, id)
+	if err != nil {
+		return err
 	}
-	return store.DeleteReviewWatch(ctx, id)
+	if invalidation.Missing {
+		return nil
+	}
+	s.cleanupInvalidatedWatchTasks(deleteCtx, id, invalidation.TaskIDs, cascadeDeleter, deleter)
+	return store.DeleteReviewWatch(deleteCtx, id)
 }
 
-func (s *Service) sweepReviewWatchTasks(ctx context.Context, watchID string, tasks []*ReviewMRTask, deleter TaskDeleter) {
-	for _, t := range tasks {
-		if t.TaskID == "" {
+func (s *Service) cleanupInvalidatedWatchTasks(ctx context.Context, watchID string, ids []string, cascadeDeleter watchreset.TaskDeleter, deleter TaskDeleter) {
+	if cascadeDeleter != nil {
+		s.deleteWatchTaskTrees(ctx, watchID, ids, cascadeDeleter)
+		return
+	}
+	if deleter == nil {
+		return
+	}
+	for _, taskID := range ids {
+		if taskID == "" {
 			continue
 		}
-		if err := deleter.DeleteTask(ctx, t.TaskID); err != nil {
-			s.logger.Warn("failed to delete review task during watch cleanup",
-				zap.String("watch_id", watchID),
-				zap.String("task_id", t.TaskID),
-				zap.Error(err))
+		if err := deleter.DeleteTask(ctx, taskID); err != nil {
+			s.logger.Warn("failed to delete task during watch cleanup",
+				zap.String("watch_id", watchID), zap.String("task_id", taskID), zap.Error(err))
 		}
 	}
 }
@@ -366,10 +483,6 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	}
 	if !watch.Enabled {
 		return nil, nil
-	}
-	client := s.Client()
-	if client == nil {
-		return nil, ErrNoClient
 	}
 	store := s.requireStore()
 	if store == nil {
@@ -398,7 +511,10 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 }
 
 func (s *Service) fetchReviewMRs(ctx context.Context, watch *ReviewWatch) ([]*MR, error) {
-	client := s.Client()
+	client, err := s.ClientForWorkspace(ctx, watch.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
 	username, err := client.GetAuthenticatedUser(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("resolve gitlab username: %w", err)
@@ -471,6 +587,31 @@ func (s *Service) TriggerReviewWatchAll(ctx context.Context) (int, error) {
 		}
 		for _, mr := range found {
 			s.publishNewReviewMREvent(ctx, rw, mr)
+		}
+		total += len(found)
+	}
+	return total, nil
+}
+
+// TriggerReviewWatchAllForWorkspace runs only watches owned by workspaceID.
+func (s *Service) TriggerReviewWatchAllForWorkspace(ctx context.Context, workspaceID string) (int, error) {
+	store := s.requireStore()
+	if store == nil {
+		return 0, errStoreUnavailable
+	}
+	watches, err := store.ListEnabledReviewWatchesForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, watch := range watches {
+		found, checkErr := s.CheckReviewWatch(ctx, watch)
+		if checkErr != nil {
+			s.logger.Warn("trigger workspace review watches", zap.String("watch_id", watch.ID), zap.Error(checkErr))
+			continue
+		}
+		for _, mr := range found {
+			s.publishNewReviewMREvent(ctx, watch, mr)
 		}
 		total += len(found)
 	}

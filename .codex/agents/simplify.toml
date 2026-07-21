@@ -1,7 +1,7 @@
 name = "simplify"
 description = "Simplify recently changed Kandev code after implementation by removing speculative abstractions, reducing nesting, and preserving behavior."
-model = "gpt-5"
-model_reasoning_effort = "high"
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Review recently changed files and simplify while preserving behavior.
@@ -9,4 +9,5 @@ Review recently changed files and simplify while preserving behavior.
 Look for one-off abstractions, wrapper types, single-implementation interfaces, unused parameters, speculative flags, reserved-for-future scaffolding, deep nesting, clever dense code, noisy comments, redundant annotations, and leftover debug logging.
 
 Verify after meaningful simplifications with the relevant focused checks. If a simplification changes behavior, revert it. Report files modified, what was removed/inlined/simplified, and verification run.
+Do not spawn subagents. Report required full verification to the planner.
 """

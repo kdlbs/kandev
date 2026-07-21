@@ -121,17 +121,26 @@ function resetMocks() {
   searchUserIssuesMock.mockReset();
 }
 
+const WORKSPACE_ID = "ws-1";
+
 describe("useGitLabSearch — fetch wiring", () => {
   beforeEach(resetMocks);
 
   it("forwards preset filter to MR API", async () => {
     searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
     renderHook(() =>
-      useGitLabSearch({ kind: "mr", presets: PRESETS, preset: PRESET_REVIEW, customQuery: "" }),
+      useGitLabSearch({
+        workspaceId: WORKSPACE_ID,
+        kind: "mr",
+        presets: PRESETS,
+        preset: PRESET_REVIEW,
+        customQuery: "",
+      }),
     );
     await waitFor(() => expect(searchUserMRsMock).toHaveBeenCalled());
     const args = searchUserMRsMock.mock.calls[0][0] as Record<string, unknown>;
     expect(args.filter).toBe(PRESET_REVIEW);
+    expect(args.workspaceId).toBe(WORKSPACE_ID);
     expect(args.customQuery).toBe("");
     expect(args.page).toBe(1);
   });
@@ -140,6 +149,7 @@ describe("useGitLabSearch — fetch wiring", () => {
     searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
     renderHook(() =>
       useGitLabSearch({
+        workspaceId: WORKSPACE_ID,
         kind: "mr",
         presets: PRESETS,
         preset: PRESET_REVIEW,
@@ -156,6 +166,7 @@ describe("useGitLabSearch — fetch wiring", () => {
     searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
     const { result } = renderHook(() =>
       useGitLabSearch({
+        workspaceId: WORKSPACE_ID,
         kind: "mr",
         presets: PRESETS,
         preset: PRESET_REVIEW,
@@ -176,6 +187,7 @@ describe("useGitLabSearch — fetch wiring", () => {
     const { rerender } = renderHook(
       ({ enabled }: { enabled: boolean }) =>
         useGitLabSearch({
+          workspaceId: WORKSPACE_ID,
           kind: "mr",
           presets: PRESETS,
           preset: PRESET_REVIEW,
@@ -200,6 +212,7 @@ describe("useGitLabSearch — fetch wiring", () => {
     });
     const { result } = renderHook(() =>
       useGitLabSearch({
+        workspaceId: WORKSPACE_ID,
         kind: "issue",
         presets: PRESETS,
         preset: PRESET_ASSIGNED,
@@ -219,7 +232,13 @@ describe("useGitLabSearch — state", () => {
     const mr = fakeMR();
     searchUserMRsMock.mockResolvedValue({ mrs: [mr], total_count: 1, page: 1, per_page: 25 });
     const { result } = renderHook(() =>
-      useGitLabSearch({ kind: "mr", presets: PRESETS, preset: PRESET_ASSIGNED, customQuery: "" }),
+      useGitLabSearch({
+        workspaceId: WORKSPACE_ID,
+        kind: "mr",
+        presets: PRESETS,
+        preset: PRESET_ASSIGNED,
+        customQuery: "",
+      }),
     );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items).toEqual([mr]);
@@ -230,7 +249,13 @@ describe("useGitLabSearch — state", () => {
   it("surfaces error message without items", async () => {
     searchUserMRsMock.mockRejectedValue(new Error("boom"));
     const { result } = renderHook(() =>
-      useGitLabSearch({ kind: "mr", presets: PRESETS, preset: PRESET_ASSIGNED, customQuery: "" }),
+      useGitLabSearch({
+        workspaceId: WORKSPACE_ID,
+        kind: "mr",
+        presets: PRESETS,
+        preset: PRESET_ASSIGNED,
+        customQuery: "",
+      }),
     );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBe("boom");
@@ -243,6 +268,7 @@ describe("useGitLabSearch — state", () => {
     searchUserMRsMock.mockResolvedValue({ mrs: [a, b], total_count: 99, page: 1, per_page: 25 });
     const { result } = renderHook(() =>
       useGitLabSearch({
+        workspaceId: WORKSPACE_ID,
         kind: "mr",
         presets: PRESETS,
         preset: PRESET_ASSIGNED,
@@ -267,7 +293,13 @@ describe("useGitLabSearch — pagination & sequencing", () => {
     searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
     const { result, rerender } = renderHook(
       ({ p }: { p: string }) =>
-        useGitLabSearch({ kind: "mr", presets: PRESETS, preset: p, customQuery: "" }),
+        useGitLabSearch({
+          workspaceId: WORKSPACE_ID,
+          kind: "mr",
+          presets: PRESETS,
+          preset: p,
+          customQuery: "",
+        }),
       { initialProps: { p: PRESET_ASSIGNED } },
     );
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -294,7 +326,13 @@ describe("useGitLabSearch — pagination & sequencing", () => {
 
     const { result, rerender } = renderHook(
       ({ p }: { p: string }) =>
-        useGitLabSearch({ kind: "mr", presets: PRESETS, preset: p, customQuery: "" }),
+        useGitLabSearch({
+          workspaceId: WORKSPACE_ID,
+          kind: "mr",
+          presets: PRESETS,
+          preset: p,
+          customQuery: "",
+        }),
       { initialProps: { p: PRESET_ASSIGNED } },
     );
     rerender({ p: PRESET_REVIEW });
@@ -307,5 +345,37 @@ describe("useGitLabSearch — pagination & sequencing", () => {
     });
     await new Promise((r) => setTimeout(r, 10));
     expect(result.current.items).toEqual([second]);
+  });
+
+  it("synchronously masks the prior workspace while the replacement loads", async () => {
+    searchUserMRsMock.mockResolvedValueOnce({
+      mrs: [fakeMR({ title: "workspace A" })],
+      total_count: 1,
+      page: 1,
+      per_page: 25,
+    });
+    let resolveB: (value: MRSearchPage) => void = () => undefined;
+    searchUserMRsMock.mockReturnValueOnce(
+      new Promise<MRSearchPage>((resolve) => {
+        resolveB = resolve;
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ workspaceId }) =>
+        useGitLabSearch({
+          workspaceId,
+          kind: "mr",
+          presets: PRESETS,
+          preset: PRESET_ASSIGNED,
+          customQuery: "",
+        }),
+      { initialProps: { workspaceId: "ws-a" } },
+    );
+    await waitFor(() => expect(result.current.items[0]?.title).toBe("workspace A"));
+
+    rerender({ workspaceId: "ws-b" });
+    expect(result.current.items).toEqual([]);
+    expect(result.current.loading).toBe(true);
+    resolveB(EMPTY_PAGE);
   });
 });

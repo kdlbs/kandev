@@ -118,6 +118,7 @@ func (f *fakeWSGroupRepoCascade) ReleaseWorkspaceGroupMember(_ context.Context, 
 
 type recordingCleanupCoordinator struct {
 	mu                    sync.Mutex
+	prepareErr            error
 	prepared              []string
 	deleteEnvironmentRows []bool
 	started               []string
@@ -142,7 +143,7 @@ func (c *recordingCleanupCoordinator) PrepareTaskResourceCleanup(
 	defer c.mu.Unlock()
 	c.prepared = append(c.prepared, operationID)
 	c.deleteEnvironmentRows = append(c.deleteEnvironmentRows, deleteEnvironmentRow)
-	return nil
+	return c.prepareErr
 }
 
 func TestDeleteTaskTreePreparedCleanupDeletesEnvironmentRow(t *testing.T) {
@@ -618,7 +619,7 @@ type fakeEventPublisher struct {
 	archived []bool // archivedAt nil/non-nil per updated entry
 }
 
-func (f *fakeEventPublisher) PublishTaskUpdated(_ context.Context, task *models.Task) {
+func (f *fakeEventPublisher) PublishTaskUpdated(_ context.Context, task *models.Task, _ ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updated = append(f.updated, task.ID)

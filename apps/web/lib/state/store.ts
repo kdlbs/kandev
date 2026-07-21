@@ -92,7 +92,6 @@ import type {
 
 // Re-export all types from slices for backwards compatibility.
 export type * from "./store-reexports";
-import type { TaskMR } from "@/lib/types/gitlab";
 import type { GitLabSliceActions } from "./slices/gitlab/types";
 import type { JiraIssueWatch } from "@/lib/types/jira";
 import type { LinearIssueWatch } from "@/lib/types/linear";
@@ -253,9 +252,10 @@ export type AppState = {
   dismissedAgentErrors: (typeof defaultUIState)["dismissedAgentErrors"];
 
   // GitLab actions
-  setTaskMRs: (mrs: Record<string, TaskMR[]>) => void;
-  setTaskMR: (taskId: string, mr: TaskMR) => void;
-  resetTaskMRs: () => void;
+  setTaskMRs: GitLabSliceActions["setTaskMRs"];
+  setTaskMR: GitLabSliceActions["setTaskMR"];
+  removeTaskMR: GitLabSliceActions["removeTaskMR"];
+  resetTaskMRs: GitLabSliceActions["resetTaskMRs"];
   setGitLabReviewWatches: GitLabSliceActions["setGitLabReviewWatches"];
   setGitLabReviewWatchesLoading: GitLabSliceActions["setGitLabReviewWatchesLoading"];
   addGitLabReviewWatch: GitLabSliceActions["addGitLabReviewWatch"];
@@ -379,6 +379,7 @@ export type AppState = {
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: UISliceTypes.MobileSessionPanel) => void;
+  setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setActiveDocument: (sessionId: string, doc: UISliceTypes.ActiveDocument | null) => void;

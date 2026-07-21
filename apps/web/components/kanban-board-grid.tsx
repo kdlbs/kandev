@@ -123,6 +123,7 @@ function MobileLayout({
             />
             <SwipeableColumns
               steps={steps}
+              moveTargetSteps={steps}
               tasks={tasks}
               activeIndex={activeColumnIndex}
               onIndexChange={setActiveColumnIndex}

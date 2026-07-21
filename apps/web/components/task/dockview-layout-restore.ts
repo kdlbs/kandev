@@ -185,6 +185,8 @@ function applyFixupsWithMaximize(
   if (savedMax) {
     applySavedMaximize(api, savedMax, savedRightWidth);
   } else {
+    const { width, height } = measureDockviewContainer(api);
+    api.layout(width, height);
     // Anchor the right column to its per-env saved width (see
     // `captureRightTarget`) so a page reload restores the task's remembered
     // width instead of resetting it to the default.

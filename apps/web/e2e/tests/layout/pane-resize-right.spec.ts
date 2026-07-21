@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { computeRightMaxPx } from "../../../lib/state/layout-manager/caps";
+import { TERMINAL_DEFAULT_ID } from "../../../lib/state/layout-manager/constants";
 import {
   WIDE_VIEWPORT,
   openWideTask,
@@ -46,6 +47,73 @@ test.describe("Right pane resize — container-proportional cap", () => {
 
     const after = await getDockviewGroupWidth(testPage, "files");
     expectApproxWidth(after, before, 12);
+  });
+
+  test("initial restore reconciles a stale saved grid width without a manual resize", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 2200, height: 900 });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Right stale grid restore",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("created task did not return a session_id");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForDockviewReady();
+    expect(await resizeColumnViaSplitview(testPage, "right", 900)).toBeGreaterThan(800);
+
+    const staleLayout = await testPage.evaluate((sessionId) => {
+      type StoreWindow = Window & {
+        __KANDEV_E2E_STORE__?: {
+          getState: () => { environmentIdBySessionId: Record<string, string> };
+        };
+      };
+      const store = (window as StoreWindow).__KANDEV_E2E_STORE__;
+      const envId = store?.getState().environmentIdBySessionId[sessionId];
+      if (!envId) throw new Error("environment id not hydrated");
+      const key = `kandev.dockview.env-layout-v3.${envId}`;
+      const raw = window.sessionStorage.getItem(key);
+      if (!raw) throw new Error("env layout was not persisted");
+      const layout = JSON.parse(raw);
+      const columns = layout.grid?.root?.data;
+      if (!Array.isArray(columns) || columns.length < 2) {
+        throw new Error("saved layout does not contain center and right columns");
+      }
+      layout.grid.width = 1900;
+      columns[0].size = 1000;
+      columns[columns.length - 1].size = 900;
+      return { key, json: JSON.stringify(layout) };
+    }, task.session_id);
+
+    await testPage.addInitScript(({ key, json }) => {
+      window.sessionStorage.setItem(key, json);
+    }, staleLayout);
+    await testPage.setViewportSize({ width: 1540, height: 900 });
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForDockviewReady();
+
+    const dockviewBox = await testPage.locator(".dv-dockview").boundingBox();
+    expect(dockviewBox).not.toBeNull();
+    const rightWidth = await getDockviewGroupWidth(testPage, "files");
+    const terminalWidth = await getDockviewGroupWidth(testPage, TERMINAL_DEFAULT_ID);
+    const centerWidth = await getDockviewGroupWidth(testPage, `session:${task.session_id}`);
+    const cap = computeRightMaxPx(dockviewBox?.width ?? 0);
+    expect(rightWidth).toBeLessThanOrEqual(cap + 10);
+    expectApproxWidth(terminalWidth, rightWidth, 10);
+    // Allow 2px of rendering tolerance around the 480px center comfort reserve.
+    expect(centerWidth).toBeGreaterThanOrEqual(478);
   });
 
   test("viewport shrink re-clamps an over-cap pinned width", async ({

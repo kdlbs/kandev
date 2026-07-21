@@ -21,10 +21,11 @@ agentctl exposes these route groups (see `server/api/`):
 | Remote host | CLI | Notes |
 |-------------|-----|-------|
 | `github.com`, `*.github.com` | `gh pr create` | Requires `gh` on `PATH` (included in the Kandev Docker image). |
+| `gitlab.com`, configured self-managed host | `glab mr create` or REST v4 | `KANDEV_GITLAB_HOST` binds detection/auth to the workspace origin. `GITLAB_TOKEN` is used only for that exact host; the REST fallback resolves the project default branch and reuses an existing open source/target MR on retry. |
 | `dev.azure.com`, `ssh.dev.azure.com`, `*.visualstudio.com` | `az repos pr create` | Requires `az` on `PATH`, `azure-devops` extension (both in the Kandev Docker image). Auth: `az login` or `AZURE_DEVOPS_EXT_PAT`. |
-| Other hosts (e.g. GitLab) | — | Returns an unsupported-remote error. Use host-specific CLIs outside agentctl (e.g. `/pr` skill `glab` for GitLab). |
+| Other hosts | — | Returns an unsupported-remote error. |
 
-Azure PR URLs are returned to the client but do not trigger backend `onPRCreated` / TaskPR linkage (GitHub-only today). The web UI keeps a session-scoped pending PR URL so the changes panel hides **Create PR** after a successful Azure create.
+GitHub PR and GitLab MR URLs trigger backend association callbacks. Azure PR URLs are returned to the client but do not trigger TaskPR linkage. The web UI keeps a session-scoped pending URL so the changes panel hides the create action after any successful provider response.
 
 ## Adapter Model
 

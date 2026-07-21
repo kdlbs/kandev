@@ -51,6 +51,25 @@ func TestInjectTokenIntoURL_HonoursGHTokenFallback(t *testing.T) {
 	require.Equal(t, "https://x-access-token:gh-token@github.com/org/repo.git", got)
 }
 
+func TestInjectTokenIntoURL_NeverEmbedsWorkspaceGitLabToken(t *testing.T) {
+	env := map[string]string{
+		"GITLAB_TOKEN":       "glpat-workspace",
+		"KANDEV_GITLAB_HOST": "http://gitlab.internal:8080",
+	}
+	got := injectGitHubTokenIntoCloneURL("http://gitlab.internal:8080/group/repo.git", env)
+	require.Equal(t, "http://gitlab.internal:8080/group/repo.git", got)
+	require.NotContains(t, got, "glpat-workspace")
+}
+
+func TestInjectTokenIntoURL_NeverUsesGitLabTokenAcrossHosts(t *testing.T) {
+	env := map[string]string{
+		"GITLAB_TOKEN":       "glpat-workspace",
+		"KANDEV_GITLAB_HOST": "https://gitlab.internal",
+	}
+	got := injectGitHubTokenIntoCloneURL("https://gitlab.com/group/repo.git", env)
+	require.Equal(t, "https://gitlab.com/group/repo.git", got)
+}
+
 func TestIsTransientUploadError(t *testing.T) {
 	require.True(t, isTransientUploadError(errors.New("request canceled (Client.Timeout exceeded while awaiting headers)")))
 	require.True(t, isTransientUploadError(errors.New("connection reset by peer")))

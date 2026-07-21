@@ -16,9 +16,13 @@ import (
 
 // PublishTaskUpdated publishes a task.updated event for the given task.
 // Used when task metadata changes (e.g., primary session assignment) that
-// don't go through the normal UpdateTask path.
-func (s *Service) PublishTaskUpdated(ctx context.Context, task *models.Task) {
-	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+// don't go through the normal UpdateTask path. Callers that changed the
+// task's workflow (e.g. a cross-workflow transition) should pass the
+// pre-move workflow ID so the payload carries old_workflow_id — the
+// frontend uses that field to remove the task from its previous
+// workflow's snapshot instead of leaving a stale duplicate until reload.
+func (s *Service) PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string) {
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowIDs...)
 }
 
 // PublishTaskStateChanged publishes a task.state_changed event for callers
@@ -442,6 +446,7 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"local_path":             repository.LocalPath,
 		"provider":               repository.Provider,
 		"provider_repo_id":       repository.ProviderRepoID,
+		"provider_host":          repository.ProviderHost,
 		"provider_owner":         repository.ProviderOwner,
 		"provider_name":          repository.ProviderName,
 		"default_branch":         repository.DefaultBranch,

@@ -1,9 +1,32 @@
 package gitlab
 
 import (
+	"encoding/json"
 	"net/url"
 	"testing"
 )
+
+func TestConvertReviewersPreservesNumericUserID(t *testing.T) {
+	var user rawUser
+	if err := json.Unmarshal([]byte(`{"id":42,"username":"alice","name":"Alice"}`), &user); err != nil {
+		t.Fatalf("unmarshal reviewer: %v", err)
+	}
+	reviewers := convertReviewers([]rawUser{user})
+	encoded, err := json.Marshal(reviewers)
+	if err != nil {
+		t.Fatalf("marshal reviewers: %v", err)
+	}
+	if got, want := string(encoded), `[{"id":42,"username":"alice","name":"Alice","type":"user"}]`; got != want {
+		t.Fatalf("reviewers JSON = %s, want %s", got, want)
+	}
+}
+
+func TestConvertRawMRHydratesLabels(t *testing.T) {
+	mr := convertRawMR(&rawMR{Labels: []string{"bug", "backend"}})
+	if got, want := mr.Labels, []string{"bug", "backend"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("labels = %#v, want %#v", got, want)
+	}
+}
 
 // User-supplied filter keys must override defaults seeded by the caller.
 // The previous implementation used values.Add(), which kept the default

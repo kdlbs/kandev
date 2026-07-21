@@ -3,6 +3,7 @@ package repoclone
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -44,8 +45,16 @@ func CloneURL(provider, owner, name, protocol string) (string, error) {
 // provider's default — used for self-managed GitLab. When host is empty,
 // behaves exactly like CloneURL.
 func CloneURLWithHost(provider, host, owner, name, protocol string) (string, error) {
-	resolvedHost := strings.TrimRight(host, "/")
-	resolvedHost = strings.TrimPrefix(strings.TrimPrefix(resolvedHost, "https://"), "http://")
+	resolvedHost := strings.TrimSpace(strings.TrimRight(host, "/"))
+	httpsScheme := "https"
+	if strings.Contains(resolvedHost, "://") {
+		parsed, err := url.Parse(resolvedHost)
+		if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || (parsed.Path != "" && parsed.Path != "/") {
+			return "", fmt.Errorf("invalid git provider host: %q", host)
+		}
+		resolvedHost = parsed.Host
+		httpsScheme = parsed.Scheme
+	}
 	if resolvedHost == "" {
 		var err error
 		resolvedHost, err = providerHost(provider)
@@ -62,7 +71,7 @@ func CloneURLWithHost(provider, host, owner, name, protocol string) (string, err
 		}
 		return fmt.Sprintf("git@%s:%s/%s.git", resolvedHost, owner, name), nil
 	}
-	return fmt.Sprintf("https://%s/%s/%s.git", resolvedHost, owner, name), nil
+	return fmt.Sprintf("%s://%s/%s/%s.git", httpsScheme, resolvedHost, owner, name), nil
 }
 
 // providerHost maps a provider name to its git host.

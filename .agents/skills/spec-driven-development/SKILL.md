@@ -1,28 +1,31 @@
 ---
 name: spec-driven-development
-description: "Single entrypoint for Kandev spec-driven implementation. Use when developing a feature or behavior-changing fix through the full flow: clarify intent, create/update specs, create a plan, split into independent verifiable tasks, execute with subagents/worktrees when possible, use TDD, verify, and report progress."
+description: "Single planner entrypoint for Kandev spec-driven implementation. Use when developing a feature or behavior-changing fix through the full flow: clarify intent, create/update specs, create a plan, split independent verifiable tasks, delegate every execution step to workers, verify, and report progress."
 ---
 
 # Spec-Driven Development
 
 Use this as the default development workflow for non-trivial features and behavior-changing fixes. It is an orchestration skill: load referenced skills as phase guides when needed, but the user only needs to invoke this one.
 
-## Subagents
+## Planner And Workers
 
-Use these helpers when the runtime supports delegated subagents. The parent agent remains the orchestrator; subagents do not spawn other subagents.
+The user-started primary session owns planning,
+delegation, progress, approvals, and user communication. It does not implement,
+test, integrate, verify, or ship code. Workers do not spawn other workers.
 
-- **`architect`** - creates/updates the spec, plan, independent task files, waves, and acceptance/verification criteria.
+- **`architect`** - optional frontier-model design reviewer for unusually risky architecture; it is not the default planner.
 - **`implementer`** - implements one assigned task with TDD in the current worktree or an assigned git worktree.
 - **`test-engineer`** - designs or adds focused tests when coverage is unclear, a bug needs a Prove-It regression, or a task is test-heavy.
 - **`qa`** - validates integrated waves against the spec/plan, checks wiring, tests edge cases, and reports readiness.
 - **`security-auditor`** - reviews security-sensitive changes such as auth, workspace isolation, filesystem/process execution, integrations, webhooks, secrets, or agent/tool permissions.
 
-If subagents are unavailable, execute the same phases directly in the parent session.
+If a required worker cannot be launched, stop and report the unavailable role.
+Never execute that worker's phase in the planner session.
 
 ## Core Flow
 
 ```text
-Intent -> Architect -> Parent approval -> Implementers by wave -> QA -> Verify -> Report
+Intent -> Planner artifacts -> User approval -> Workers by wave -> QA -> Verify -> Report
 ```
 
 Do not skip from intent to code unless the user explicitly asks to bypass the process.
@@ -32,11 +35,10 @@ requested change looks small. Do not replace the spec, plan, or task files with
 inline notes in chat. If the correct durable artifact is unclear, stop and ask
 where to record it instead of coding.
 
-Before implementation begins, pause at the parent-approval checkpoint with:
+Before implementation begins, pause at the user-approval checkpoint with:
 - Spec path and a short summary of the intended behavior.
 - Plan path and the planned file/test touch points.
-- Task files grouped by waves, including which tasks will use subagents or why
-  they cannot.
+- Task files grouped by waves, including the worker role and model tier for each.
 - Exact verification commands.
 
 Only proceed past that checkpoint after the user approves, or after the user
@@ -58,12 +60,10 @@ Mark each phase in progress/completed as you go.
 
 ## Phase 1: Clarify Intent
 
-Use the `architect` subagent for phases 1-4 when available. Otherwise use `/interview-me` only if the request is underspecified. Prefer `ask_user_question_kandev` when available so the user can answer 2-4 focused questions at once.
-
-At the start of the turn, check whether subagent tooling is available. If the
-runtime exposes subagents, use the `architect` for phases 1-4. If subagents are
-not available, say so in the visible progress update and execute the same
-phases directly.
+The planner owns phases 1-4. Use `/interview-me` only if the request is
+underspecified. Prefer the active harness's native user-question UI when it can
+ask 2-4 focused questions together. Use the `architect` only for a bounded
+second opinion when the design has unusually high architectural risk.
 
 Exit criteria:
 - Outcome, user, success criteria, constraints, and out-of-scope are clear.
@@ -71,7 +71,7 @@ Exit criteria:
 
 ## Phase 2: Spec
 
-Use the `architect` subagent when available; otherwise use `/spec` to create or update the product spec under `docs/specs/`.
+The planner uses `/spec` to create or update the product spec under `docs/specs/`.
 
 For bug fixes:
 - If the fix only restores intended behavior, use `/fix` and regression tests instead of a feature spec.
@@ -87,7 +87,7 @@ Spec exit criteria:
 
 ## Phase 3: Plan
 
-Use the `architect` subagent when available; otherwise use `/plan` to create `docs/plans/<slug>/plan.md`.
+The planner uses `/plan` to create `docs/plans/<slug>/plan.md`.
 
 The plan must include:
 - Exact files likely touched.
@@ -113,9 +113,11 @@ Task file naming:
   `docs/plans/<slug>/task-01-backend-contracts.md`.
 - Start each file with frontmatter: `id`, `title`, `status`, `wave`,
   `depends_on`, and `plan`.
-- Initial `status` is `pending`; the implementing agent updates it to
-  `in_progress` when starting and `done` when finished.
-- `plan.md` must reference every task file and show its current status.
+- Initial `status` is `pending`; the implementing worker updates only its
+  owned task file to `in_progress` when starting and `done` when finished.
+- `plan.md` must reference every task file and show its current status. The
+  planner updates those statuses after accepting worker results, or delegates
+  a serialized update to a worker with explicit shared-plan ownership.
 
 Each task needs:
 - **Title:** one behavior or layer, no "and" unless inseparable.
@@ -133,7 +135,7 @@ Independence test:
 
 If any answer is no, split the task or put it in a later sequential wave.
 
-The parent agent must review and approve the architect's task files and wave graph before implementation starts. Do not fan out implementers from an unreviewed plan.
+The planner must review its task files and wave graph before implementation starts. Do not fan out implementers from an unreviewed plan.
 
 ## Phase 5: Waves And Parallelism
 
@@ -150,11 +152,19 @@ Parallelize only when safe:
 - Backend packages can often run in parallel if they do not edit the same files or migrations.
 - Frontend tasks are usually sequential because Vite/React SPA build, type, and state surfaces overlap.
 - Database migrations, generated API types, shared DTOs, and package-wide config are sequential.
+- Parallel workers update only their owned task files. Never let them update
+  `plan.md` concurrently; serialize plan-status updates even when shared-plan
+  ownership is explicitly assigned.
 - E2E runs happen after backend/frontend integration is coherent.
 
 ### Worktrees
 
-If multi-agent tools and git worktrees are available, prefer one worktree per independent task:
+If the active harness's native subagent tools and git worktrees are available,
+the planner may request one worktree per independent task. Worktree creation,
+branch operations, and integration are bounded implementer assignments; the
+planner does not run Git commands itself.
+
+The assigned setup worker may use:
 
 ```bash
 git worktree add ../kandev-task-<short-name> -b task/<short-name> HEAD
@@ -162,23 +172,25 @@ git worktree add ../kandev-task-<short-name> -b task/<short-name> HEAD
 
 Rules:
 - Do not create a worktree from a dirty parent state unless the task explicitly depends on those local changes.
-- Give each subagent its worktree path, branch name, task acceptance criteria, and verification command.
-- Merge or cherry-pick completed task branches back in dependency order.
+- The planner gives each subagent its worktree path, branch name, task acceptance criteria, and verification command.
+- Assign merging or cherry-picking completed task branches to an implementer in dependency order.
 - If worktrees are unavailable or risky, run tasks sequentially in the current worktree.
 
 ## Phase 6: Implementation
 
 For each task:
-- Update the task file frontmatter to `status: in_progress` before coding.
+- Update only the owned task file frontmatter to `status: in_progress` before
+  coding.
 - Use `/tdd` for code changes.
 - Use `/e2e` for browser/user-flow coverage.
 - Use `/mobile-parity` for frontend UI changes.
 - Use `/debug` when diagnosis or instrumentation is needed; remove temporary logs before PR.
 - Update the task file frontmatter to `status: done` after the task's
-  acceptance criteria and targeted verification pass, and update the linked
-  status in `plan.md`.
+  acceptance criteria and targeted verification pass. Do not update
+  `plan.md` unless the work packet explicitly owns that shared file and the
+  update is serialized outside parallel execution.
 
-When available, assign each independent task to an `implementer` subagent. Launch implementers in parallel only for tasks in the same wave that do not share mutable files. Use this prompt shape:
+Assign every independent task to an `implementer` worker. Launch implementers in parallel only for tasks in the same wave that do not share mutable files. Use this prompt shape:
 
 ```text
 Task: <title>
@@ -193,25 +205,29 @@ Files/patterns:
 Constraints:
 - Follow scoped AGENTS.md.
 - Use TDD. Do not broaden scope.
+- Update only the assigned task file; do not edit `plan.md` without explicit,
+  serialized shared-plan ownership.
 Output:
 - Summary, files changed, tests run, blockers, risks, and task file status update.
 ```
 
-The parent agent coordinates waves, resolves conflicts, merges/cherry-picks worktree branches, and keeps progress state. It should not debug every subtask inline unless delegation is unavailable.
+The planner coordinates waves and keeps progress state. Conflict resolution,
+branch integration, and follow-up fixes are new bounded `implementer`
+assignments. The planner never handles them inline.
 
 ## Phase 7: Integrate And Verify
 
 After each wave:
-- Run targeted tests for changed backend packages or frontend modules.
-- Resolve conflicts and re-run affected tests.
+- Delegate targeted tests for changed backend packages or frontend modules.
+- Delegate conflict resolution and rerun affected tests through an implementer.
 - Update the plan if the task files or wave graph changed.
 
 At the end:
-- Run the `test-engineer` subagent when coverage is disputed, missing, or hard to place at the right test level.
-- Run the `qa` subagent, or `/qa` directly, for integration and behavior verification.
+- Run the `test-engineer` worker when coverage is disputed, missing, or hard to place at the right test level.
+- Run the `qa` worker for integration and behavior verification.
 - Run the `security-auditor` subagent for security-sensitive changes before declaring readiness.
-- Run `/simplify` if implementation grew speculative abstractions.
-- Run `/verify` for full format, typecheck, tests, and lint.
+- Run the `simplify` worker if implementation grew speculative abstractions.
+- Run the `verify` worker for full format, typecheck, tests, and lint.
 - Use `/record` for ADR/spec updates if implementation discovered a durable decision or behavior change.
 
 ## Stop Conditions
@@ -221,6 +237,7 @@ Stop and ask the user when:
 - A task cannot be made independent without changing scope.
 - A fix requires a new architecture, dependency, data model, permission rule, or public contract not covered by the spec.
 - The same verification failure repeats after three focused attempts.
+- A required worker role cannot be launched or cannot access its assigned worktree.
 
 ## Final Report
 

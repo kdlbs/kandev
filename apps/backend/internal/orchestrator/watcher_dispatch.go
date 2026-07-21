@@ -194,6 +194,13 @@ type WatcherSource interface {
 	SelfHeal(ctx context.Context, evt any, cause string) error
 }
 
+// terminalAttachErrorClassifier marks attachment failures where the task no
+// longer belongs to the event's watch generation. The source has already
+// performed any required cleanup, so dispatch must stop before auto-start.
+type terminalAttachErrorClassifier interface {
+	IsTerminalAttachError(error) bool
+}
+
 // preflightDeletedProfile returns true when the watcher's bound profile has
 // been soft-deleted (the production bug that orphans watchers via the
 // reconciler's cleanup of disabled agent types). On a true return the
@@ -363,6 +370,9 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 			zap.Error(err))
 		// Do NOT release here — matches existing Linear/Jira behaviour:
 		// attach is a best-effort step, the task is already created.
+		if classifier, ok := src.(terminalAttachErrorClassifier); ok && classifier.IsTerminalAttachError(err) {
+			return
+		}
 	}
 
 	c.logger.Info("watcher dispatch: created issue task",

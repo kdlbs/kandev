@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { useAppStore } from "@/components/state-provider";
 
 // GitOperationResult matches the backend response
 export interface GitOperationResult {
@@ -15,9 +16,46 @@ export interface GitOperationResult {
 // PRCreateResult matches the backend PR creation response
 export interface PRCreateResult {
   success: boolean;
+  branch_pushed?: boolean;
   pr_url?: string;
+  provider?: string;
   output?: string;
   error?: string;
+}
+
+export function getChangeRequestTerminology(provider?: string) {
+  return provider?.toLowerCase() === "gitlab"
+    ? { longName: "Merge Request", shortName: "MR" }
+    : { longName: "Pull Request", shortName: "PR" };
+}
+
+export function resolveChangeRequestTerminology(
+  provider: string | undefined,
+  fallback: ReturnType<typeof getChangeRequestTerminology>,
+) {
+  return provider ? getChangeRequestTerminology(provider) : fallback;
+}
+
+export function useChangeRequestTerminology(sessionId?: string | null, repoName?: string) {
+  const provider = useAppStore((state) => {
+    const taskId = sessionId ? state.taskSessions.items[sessionId]?.task_id : undefined;
+    const task = taskId
+      ? state.kanban.tasks.find((candidate: { id: string }) => candidate.id === taskId)
+      : undefined;
+    if (!task) return undefined;
+    const repositories = Object.values(state.repositories.itemsByWorkspaceId).flat();
+    const linkedRepositoryIds = new Set(
+      task.repositories?.map((repository) => repository.repository_id) ?? [],
+    );
+    if (repoName) {
+      return repositories.find(
+        (repository) => linkedRepositoryIds.has(repository.id) && repository.name === repoName,
+      )?.provider;
+    }
+    const primaryRepositoryId = task.repositories?.[0]?.repository_id;
+    return repositories.find((repository) => repository.id === primaryRepositoryId)?.provider;
+  });
+  return useMemo(() => getChangeRequestTerminology(provider), [provider]);
 }
 
 interface UseGitOperationsReturn {

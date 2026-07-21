@@ -27,6 +27,24 @@ import { useCommittedQuery } from "@/components/gitlab/my-gitlab/use-committed-q
 import { ListToolbar } from "@/components/gitlab/my-gitlab/list-toolbar";
 import { ResultsPagination } from "@/components/gitlab/my-gitlab/results-pagination";
 import { SavePresetDialog } from "@/components/gitlab/my-gitlab/save-preset-dialog";
+import { useMRKeyToTasks } from "@/hooks/domains/gitlab/use-mr-key-to-tasks";
+import { useGitLabActionPresets } from "@/hooks/domains/gitlab/use-gitlab-action-presets";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import type { Repository, Workflow, WorkflowStep } from "@/lib/types/http";
+import {
+  QuickTaskLauncher,
+  type GitLabLaunchPayload,
+  type GitLabTaskPreset,
+} from "@/components/gitlab/my-gitlab/quick-task-launcher";
+import { toGitLabTaskPreset } from "@/components/gitlab/my-gitlab/task-presets";
+import { useAppStore } from "@/components/state-provider";
+
+type GitLabPageClientProps = {
+  workspaceId?: string;
+  workflows?: Workflow[];
+  steps?: WorkflowStep[];
+  repositories?: Repository[];
+};
 
 function PageHeader({
   host,
@@ -46,7 +64,7 @@ function PageHeader({
             variant="outline"
             size="icon-lg"
             onClick={onOpenMobileSidebar}
-            className="md:hidden cursor-pointer"
+            className="h-11 w-11 md:hidden cursor-pointer"
             data-testid="gitlab-mobile-menu-button"
             aria-label="Open GitLab filters"
           >
@@ -58,11 +76,13 @@ function PageHeader({
   );
 }
 
-function NotConnectedNotice() {
+function NotConnectedNotice({ reconnect }: { reconnect?: boolean }) {
   return (
     <Alert>
       <AlertDescription>
-        GitLab is not connected. Configure GitLab authentication in{" "}
+        {reconnect
+          ? "GitLab credentials are configured, but authentication failed. Reconnect in "
+          : "GitLab is not connected. Configure GitLab authentication in "}
         <Link href="/settings/integrations/gitlab" className="underline font-medium cursor-pointer">
           Settings → GitLab
         </Link>{" "}
@@ -88,16 +108,47 @@ function ResultsList({
   items,
   loading,
   error,
+  mrPresets,
+  issuePresets,
+  onStartTask,
+  mrKeyToTasks,
+  workspaceId,
+  host,
 }: {
   selection: SidebarSelection;
   items: Array<MR | Issue>;
   loading: boolean;
   error: string | null;
+  mrPresets: GitLabTaskPreset[];
+  issuePresets: GitLabTaskPreset[];
+  onStartTask: (payload: GitLabLaunchPayload) => void;
+  mrKeyToTasks: ReturnType<typeof useMRKeyToTasks>;
+  workspaceId?: string;
+  host: string;
 }) {
   if (selection.kind === "mr") {
-    return <MRList items={items as MR[]} loading={loading} error={error} />;
+    return (
+      <MRList
+        items={items as MR[]}
+        loading={loading}
+        error={error}
+        presets={mrPresets}
+        onStartTask={onStartTask}
+        mrKeyToTasks={mrKeyToTasks}
+      />
+    );
   }
-  return <IssueList items={items as Issue[]} loading={loading} error={error} />;
+  return (
+    <IssueList
+      items={items as Issue[]}
+      loading={loading}
+      error={error}
+      presets={issuePresets}
+      onStartTask={onStartTask}
+      workspaceId={workspaceId}
+      host={host}
+    />
+  );
 }
 
 type GitLabPageState = ReturnType<typeof useGitLabPageState>;
@@ -121,7 +172,7 @@ function useProjectOptions(
   }, [knownProjects, projectFilter]);
 }
 
-function useGitLabPageState(searchEnabled: boolean) {
+function useGitLabPageState(searchEnabled: boolean, workspaceId?: string) {
   const [selection, setSelection] = useState<SidebarSelection>(() => ({
     kind: "mr",
     source: "preset",
@@ -144,12 +195,13 @@ function useGitLabPageState(searchEnabled: boolean) {
 
   const presets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
   const search = useGitLabSearch({
+    workspaceId: workspaceId ?? "",
     kind: selection.kind,
     presets,
     preset: selection.source === "preset" ? selection.id : "",
     customQuery: committedQuery,
     projectFilter,
-    enabled: searchEnabled,
+    enabled: searchEnabled && Boolean(workspaceId),
   });
   const projectOptions = useProjectOptions(
     selection,
@@ -224,8 +276,24 @@ function useGitLabPageState(searchEnabled: boolean) {
   };
 }
 
-function AuthenticatedLayout({ state }: { state: GitLabPageState }) {
+function AuthenticatedLayout({
+  workspaceId,
+  state,
+  mrPresets,
+  issuePresets,
+  onStartTask,
+  host,
+}: {
+  workspaceId?: string;
+  state: GitLabPageState;
+  mrPresets: GitLabTaskPreset[];
+  issuePresets: GitLabTaskPreset[];
+  onStartTask: (payload: GitLabLaunchPayload) => void;
+  host: string;
+}) {
   const { selection, search, projectOptions, title } = state;
+  const mrKeyToTasks = useMRKeyToTasks(workspaceId ?? null);
+  useAllWorkflowSnapshots(workspaceId ?? null);
   // When the user narrows by project, the toolbar badge shows how many of the
   // current page actually match (so it never reads "47" while three rows
   // render). Pagination still uses search.total so the user can navigate to
@@ -262,6 +330,12 @@ function AuthenticatedLayout({ state }: { state: GitLabPageState }) {
           items={search.items}
           loading={search.loading}
           error={search.error}
+          mrPresets={mrPresets}
+          issuePresets={issuePresets}
+          onStartTask={onStartTask}
+          mrKeyToTasks={mrKeyToTasks}
+          workspaceId={workspaceId}
+          host={host}
         />
       </div>
       <ResultsPagination
@@ -274,18 +348,26 @@ function AuthenticatedLayout({ state }: { state: GitLabPageState }) {
   );
 }
 
-function useGitLabStatusFetch() {
-  const [status, setStatus] = useState<GitLabStatus | null>(null);
+function useGitLabStatusFetch(workspaceId: string | undefined, enabled: boolean) {
+  const [result, setResult] = useState<{ workspaceId?: string; status: GitLabStatus | null }>({
+    workspaceId,
+    status: null,
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!enabled || !workspaceId) {
+      setLoading(true);
+      return;
+    }
     let cancelled = false;
-    fetchGitLabStatus({ cache: "no-store" })
+    setLoading(true);
+    fetchGitLabStatus({ cache: "no-store", workspaceId })
       .then((s) => {
-        if (!cancelled) setStatus(s);
+        if (!cancelled) setResult({ workspaceId, status: s });
       })
       .catch(() => {
-        if (!cancelled) setStatus(null);
+        if (!cancelled) setResult({ workspaceId, status: null });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -293,49 +375,88 @@ function useGitLabStatusFetch() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled, workspaceId]);
 
-  return { status, loading };
+  const current = enabled && result.workspaceId === workspaceId;
+  return { status: current ? result.status : null, loading: !current || loading };
 }
 
-export function GitLabPageClient(_props: { workspaceId?: string } = {}) {
-  const { status, loading: statusLoading } = useGitLabStatusFetch();
-  const connected = !!(status?.authenticated || status?.token_configured);
-  const host = status?.host ?? "https://gitlab.com";
-  const state = useGitLabPageState(!statusLoading && connected);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-
-  useEffect(() => resetKnownProjectsStore, []);
-
-  const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
-  const { onSelect, onOpenSaveDialog } = state;
-  const onMobileSidebarSelect = useCallback(
-    (s: Parameters<typeof onSelect>[0]) => {
-      onSelect(s);
-      setMobileSidebarOpen(false);
-    },
-    [onSelect],
-  );
-  const onMobileSaveCurrent = useCallback(() => {
-    setMobileSidebarOpen(false);
-    onOpenSaveDialog();
-  }, [onOpenSaveDialog]);
-
+function GitLabPageBody({
+  statusLoading,
+  connected,
+  reconnect,
+  workspaceId,
+  state,
+  mrPresets,
+  issuePresets,
+  onStartTask,
+  host,
+}: {
+  statusLoading: boolean;
+  connected: boolean;
+  reconnect: boolean;
+  workspaceId?: string;
+  state: GitLabPageState;
+  mrPresets: GitLabTaskPreset[];
+  issuePresets: GitLabTaskPreset[];
+  onStartTask: (payload: GitLabLaunchPayload) => void;
+  host: string;
+}) {
+  if (statusLoading) {
+    return <div className="p-6 text-sm text-muted-foreground">Checking GitLab status…</div>;
+  }
+  if (!connected) {
+    return (
+      <div className="p-6 max-w-2xl">
+        <NotConnectedNotice reconnect={reconnect} />
+      </div>
+    );
+  }
   return (
-    <div className="h-screen w-full flex flex-col bg-background">
-      <PageHeader
-        host={host}
-        onOpenMobileSidebar={!statusLoading && connected ? onOpenMobileSidebar : undefined}
-      />
-      {statusLoading && (
-        <div className="p-6 text-sm text-muted-foreground">Checking GitLab status…</div>
-      )}
-      {!statusLoading && !connected && (
-        <div className="p-6 max-w-2xl">
-          <NotConnectedNotice />
-        </div>
-      )}
-      {!statusLoading && connected && <AuthenticatedLayout state={state} />}
+    <AuthenticatedLayout
+      workspaceId={workspaceId}
+      state={state}
+      mrPresets={mrPresets}
+      issuePresets={issuePresets}
+      onStartTask={onStartTask}
+      host={host}
+    />
+  );
+}
+
+function GitLabPageOverlays({
+  state,
+  mobileSidebarOpen,
+  setMobileSidebarOpen,
+  workspaceId,
+  workflows,
+  steps,
+  repositories,
+  configuredHost,
+  launchPayload,
+  setLaunchPayload,
+}: {
+  state: GitLabPageState;
+  mobileSidebarOpen: boolean;
+  setMobileSidebarOpen: (open: boolean) => void;
+  workspaceId?: string;
+  workflows: Workflow[];
+  steps: WorkflowStep[];
+  repositories: Repository[];
+  configuredHost: string;
+  launchPayload: GitLabLaunchPayload | null;
+  setLaunchPayload: (payload: GitLabLaunchPayload | null) => void;
+}) {
+  const onMobileSidebarSelect = (selection: Parameters<typeof state.onSelect>[0]) => {
+    state.onSelect(selection);
+    setMobileSidebarOpen(false);
+  };
+  const onMobileSaveCurrent = () => {
+    setMobileSidebarOpen(false);
+    state.onOpenSaveDialog();
+  };
+  return (
+    <>
       <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
         <SheetContent
           side="right"
@@ -363,6 +484,94 @@ export function GitLabPageClient(_props: { workspaceId?: string } = {}) {
         projectFilter={state.projectFilter}
         suggestedLabel={state.suggestedLabel}
         onSave={state.onConfirmSave}
+      />
+      <QuickTaskLauncher
+        workspaceId={workspaceId ?? null}
+        configuredHost={configuredHost}
+        workflows={workflows}
+        steps={steps}
+        repositories={repositories}
+        payload={launchPayload}
+        onClose={() => setLaunchPayload(null)}
+      />
+    </>
+  );
+}
+
+function useGitLabWorkspaceScope(serverWorkspaceId?: string) {
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceId = activeWorkspaceId ?? serverWorkspaceId;
+  const switching = Boolean(serverWorkspaceId && workspaceId && serverWorkspaceId !== workspaceId);
+  const { status, loading } = useGitLabStatusFetch(workspaceId, !switching);
+  useEffect(() => {
+    if (switching) window.location.reload();
+  }, [switching]);
+  return {
+    workspaceId,
+    switching,
+    status,
+    statusLoading: switching || loading,
+    connected: Boolean(status?.authenticated),
+    reconnect: Boolean(status?.token_configured && !status.authenticated),
+  };
+}
+
+function useGitLabTaskPresets(workspaceId: string | undefined, switching: boolean) {
+  const { presets } = useGitLabActionPresets(switching ? null : workspaceId);
+  const mrPresets = useMemo(() => (presets?.mr ?? []).map(toGitLabTaskPreset), [presets?.mr]);
+  const issuePresets = useMemo(
+    () => (presets?.issue ?? []).map(toGitLabTaskPreset),
+    [presets?.issue],
+  );
+  return { mrPresets, issuePresets };
+}
+
+export function GitLabPageClient({
+  workspaceId,
+  workflows = [],
+  steps = [],
+  repositories = [],
+}: GitLabPageClientProps = {}) {
+  const scope = useGitLabWorkspaceScope(workspaceId);
+  const { status, statusLoading, connected, reconnect } = scope;
+  const host = status?.host ?? "https://gitlab.com";
+  const state = useGitLabPageState(!statusLoading && connected, scope.workspaceId);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [launchPayload, setLaunchPayload] = useState<GitLabLaunchPayload | null>(null);
+  const { mrPresets, issuePresets } = useGitLabTaskPresets(scope.workspaceId, scope.switching);
+
+  useEffect(() => resetKnownProjectsStore, []);
+
+  const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
+
+  return (
+    <div className="h-screen w-full flex flex-col bg-background">
+      <PageHeader
+        host={host}
+        onOpenMobileSidebar={!statusLoading && connected ? onOpenMobileSidebar : undefined}
+      />
+      <GitLabPageBody
+        statusLoading={statusLoading}
+        connected={connected}
+        reconnect={reconnect}
+        workspaceId={scope.workspaceId}
+        state={state}
+        mrPresets={mrPresets}
+        issuePresets={issuePresets}
+        onStartTask={setLaunchPayload}
+        host={host}
+      />
+      <GitLabPageOverlays
+        state={state}
+        mobileSidebarOpen={mobileSidebarOpen}
+        setMobileSidebarOpen={setMobileSidebarOpen}
+        workspaceId={scope.workspaceId}
+        workflows={workflows}
+        steps={steps}
+        repositories={repositories}
+        configuredHost={host}
+        launchPayload={launchPayload}
+        setLaunchPayload={setLaunchPayload}
       />
     </div>
   );

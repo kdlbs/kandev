@@ -82,12 +82,12 @@ describe("isMac", () => {
 });
 
 describe("formatShortcut", () => {
-  it("formats Cmd+Enter on Mac", () => {
+  it("formats Command+Enter with the macOS symbol", () => {
     const shortcut: KeyboardShortcut = {
       key: KEYS.ENTER,
       modifiers: { ctrlOrCmd: true },
     };
-    expect(formatShortcut(shortcut, "mac")).toBe("Cmd+Enter");
+    expect(formatShortcut(shortcut, "mac")).toBe("⌘+Enter");
   });
 
   it("formats Ctrl+Enter on Windows", () => {
@@ -114,20 +114,28 @@ describe("formatShortcut", () => {
     expect(formatShortcut(shortcut, "windows")).toBe("Ctrl+S");
   });
 
-  it("formats Cmd+S on Mac", () => {
+  it("formats Command+S with the macOS symbol", () => {
     const shortcut: KeyboardShortcut = {
       key: KEYS.S,
       modifiers: { cmd: true },
     };
-    expect(formatShortcut(shortcut, "mac")).toBe("Cmd+S");
+    expect(formatShortcut(shortcut, "mac")).toBe("⌘+S");
   });
 
-  it("formats Alt as Option on Mac", () => {
+  it("formats Alt with the macOS Option symbol", () => {
     const shortcut: KeyboardShortcut = {
       key: KEYS.A,
       modifiers: { alt: true },
     };
-    expect(formatShortcut(shortcut, "mac")).toBe("Option+A");
+    expect(formatShortcut(shortcut, "mac")).toBe("⌥+A");
+  });
+
+  it("formats every macOS modifier with its keyboard symbol", () => {
+    const shortcut: KeyboardShortcut = {
+      key: KEYS.S,
+      modifiers: { ctrl: true, cmd: true, alt: true, shift: true },
+    };
+    expect(formatShortcut(shortcut, "mac")).toBe("⌃+⌘+⌥+⇧+S");
   });
 
   it("formats Alt on Windows", () => {
@@ -181,7 +189,7 @@ describe("formatShortcut", () => {
       key: KEYS.ENTER,
       modifiers: { ctrlOrCmd: true },
     };
-    expect(formatShortcut(shortcut)).toBe("Cmd+Enter");
+    expect(formatShortcut(shortcut)).toBe("⌘+Enter");
   });
 });
 
