@@ -10,6 +10,7 @@ import { useSessionResumption } from "@/hooks/domains/session/use-session-resump
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { MessageSendError } from "@/lib/chat/message-send-error";
 import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { EnsureSessionErrorEmptyState } from "./ensure-session-error";
@@ -152,7 +153,12 @@ export function PreviewSessionBody({ session, taskId }: { session: TaskSession; 
   const handleSendMessage = useCallback(
     async (content: string) => {
       const client = getWebSocketClient();
-      if (!client) throw new Error("WebSocket client unavailable");
+      if (!client) {
+        throw new MessageSendError(
+          "connection-unavailable",
+          "Connection unavailable. Reconnect and try again.",
+        );
+      }
       await client.request(
         "message.add",
         { task_id: taskId, session_id: session.id, content },

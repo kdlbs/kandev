@@ -38,7 +38,11 @@ describe("PreviewSessionBody send failures", () => {
     mocks.getWebSocketClient.mockReturnValue(null);
     render(<PreviewSessionBody session={session} taskId="task-1" />);
 
-    await expect(mocks.onSend?.("hello")).rejects.toThrow("WebSocket client unavailable");
+    await expect(mocks.onSend?.("hello")).rejects.toMatchObject({
+      name: "MessageSendError",
+      code: "connection-unavailable",
+      message: "Connection unavailable. Reconnect and try again.",
+    });
   });
 
   it("rethrows message.add failures to the chat input", async () => {
