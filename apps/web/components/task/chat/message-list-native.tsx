@@ -15,6 +15,7 @@ import {
   getConversationLoadingState,
   getSessionRunningState,
   getLastTurnGroupId,
+  getStreamingAgentMessageId,
 } from "./message-list-shared";
 
 /**
@@ -195,6 +196,7 @@ export const NativeMessageList = memo(function NativeMessageList({
   });
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
   const isRunning = getSessionRunningState(sessionState);
+  const streamingMessageId = getStreamingAgentMessageId(messages);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
   const handleScrollToMessage = useScrollToMessage();
 
@@ -247,6 +249,7 @@ export const NativeMessageList = memo(function NativeMessageList({
               onOpenFile={onOpenFile}
               isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
               isTurnActive={isRunning}
+              streamingMessageId={streamingMessageId}
               onScrollToMessage={handleScrollToMessage}
             />
           </div>

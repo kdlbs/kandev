@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import type { DiffComment, PlanComment, WalkthroughComment } from "@/lib/state/slices/comments";
+import type {
+  AgentMessageComment,
+  DiffComment,
+  PlanComment,
+  WalkthroughComment,
+} from "@/lib/state/slices/comments";
 
 // ---------------------------------------------------------------------------
 // Mocks — declared before imports that use them
@@ -36,6 +41,8 @@ vi.mock("@/lib/state/slices/comments/format", () => ({
   formatPRFeedbackAsMarkdown: () => "[pr-feedback]",
   formatWalkthroughCommentsAsMarkdown: (comments: WalkthroughComment[]) =>
     `[walkthrough] ${comments[0]?.text ?? ""}`,
+  formatAgentMessageCommentsAsMarkdown: (comments: AgentMessageComment[]) =>
+    `[agent-message] ${comments[0]?.text ?? ""}`,
 }));
 
 import { useRunComment } from "./use-run-comment";
@@ -98,6 +105,27 @@ function makeWalkthroughComment(text = "explain this step"): WalkthroughComment 
     startLine: 10,
     endLine: 12,
     stepText: "Agent explanation",
+    text,
+    createdAt: new Date().toISOString(),
+    status: "pending",
+  };
+}
+
+function makeAgentMessageComment(text = "expand this answer"): AgentMessageComment {
+  return {
+    id: "c-4",
+    source: "agent-message",
+    sessionId: "sess-1",
+    messageId: "reply-1",
+    selectedText: "settled answer",
+    anchor: {
+      messageId: "reply-1",
+      start: 0,
+      end: 14,
+      selectedText: "settled answer",
+      prefix: "",
+      suffix: "",
+    },
     text,
     createdAt: new Date().toISOString(),
     status: "pending",
@@ -258,6 +286,20 @@ describe("useRunComment — busy agent queues", () => {
       expect.objectContaining({ content: "[walkthrough] please expand" }),
     );
     expect(mockMarkCommentsSent).toHaveBeenCalledWith(["c-3"]);
+  });
+
+  it("formats agent message comments when queuing", async () => {
+    mockStoreState = makeStoreState("RUNNING");
+    const { result } = renderCommentHook();
+
+    await act(async () => {
+      await result.current.runComment(makeAgentMessageComment("please expand"));
+    });
+
+    expect(mockAppendToQueue).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "[agent-message] please expand" }),
+    );
+    expect(mockMarkCommentsSent).toHaveBeenCalledWith(["c-4"]);
   });
 });
 

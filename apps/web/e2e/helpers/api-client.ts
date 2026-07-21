@@ -493,6 +493,19 @@ export class ApiClient {
     });
   }
 
+  async startQuickChat(
+    workspaceId: string,
+    agentProfileId: string,
+    title: string,
+  ): Promise<{ task_id: string; session_id: string }> {
+    const response = await this.rawRequest("POST", `/api/v1/workspaces/${workspaceId}/quick-chat`, {
+      title,
+      agent_profile_id: agentProfileId,
+    });
+    if (!response.ok) throw new Error(`start quick chat failed: ${response.status}`);
+    return response.json() as Promise<{ task_id: string; session_id: string }>;
+  }
+
   /** Start a config chat session via the dedicated config-chat endpoint. */
   async startConfigChat(
     workspaceId: string,

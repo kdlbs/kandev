@@ -4,9 +4,16 @@ import {
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
+  formatAgentMessageCommentsAsMarkdown,
   formatCommentsForMessage,
 } from "./format";
-import type { PlanComment, DiffComment, PRFeedbackComment, WalkthroughComment } from "./types";
+import type {
+  AgentMessageComment,
+  PlanComment,
+  DiffComment,
+  PRFeedbackComment,
+  WalkthroughComment,
+} from "./types";
 
 function makePlanComment(overrides: Partial<PlanComment> = {}): PlanComment {
   return {
@@ -209,5 +216,64 @@ describe("formatCommentsForMessage", () => {
     expect(result.planComments).toHaveLength(1);
     expect(result.prFeedbackComments).toHaveLength(0);
     expect(result.walkthroughComments).toHaveLength(0);
+  });
+
+  it("separates agent-message comments for prompt formatting", () => {
+    const messageId = "agent-reply-1";
+    const selectedText = "the exact answer";
+    const messageComment: AgentMessageComment = {
+      id: "m1",
+      sessionId: "s",
+      source: "agent-message",
+      messageId,
+      selectedText,
+      anchor: {
+        messageId,
+        start: 0,
+        end: 15,
+        selectedText,
+        prefix: "",
+        suffix: " continues",
+      },
+      text: "Please expand this.",
+      createdAt: "",
+      status: "pending",
+    };
+
+    const result = formatCommentsForMessage([messageComment]);
+
+    expect((result as { agentMessageComments: unknown[] }).agentMessageComments).toEqual([
+      messageComment,
+    ]);
+  });
+});
+
+describe("formatAgentMessageCommentsAsMarkdown", () => {
+  it("formats selected reply text and multiline feedback as markdown", () => {
+    const comment = {
+      id: "m1",
+      sessionId: "s",
+      source: "agent-message",
+      messageId: "agent-reply-1",
+      selectedText: "the exact answer",
+      anchor: {
+        messageId: "agent-reply-1",
+        start: 0,
+        end: 15,
+        selectedText: "the exact answer",
+        prefix: "",
+        suffix: " continues",
+      },
+      text: "Please expand this.\nInclude one example.",
+      createdAt: "",
+      status: "pending",
+    } as never;
+
+    const result = formatAgentMessageCommentsAsMarkdown([comment]);
+
+    expect(result).toContain("### Agent Message Comments");
+    expect(result).toContain("> the exact answer");
+    expect(result).toContain("> Please expand this.\n> Include one example.");
+    expect(result).toContain("---");
   });
 });

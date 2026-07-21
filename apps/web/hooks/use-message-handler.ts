@@ -155,9 +155,11 @@ type SendMessagePayload = {
   contextFilesMeta?: Array<{ path: string; name: string }>;
 };
 
-async function sendMessageRequest(payload: SendMessagePayload): Promise<Message | undefined> {
+export async function sendMessageRequest(
+  payload: SendMessagePayload,
+): Promise<Message | undefined> {
   const client = getWebSocketClient();
-  if (!client) return undefined;
+  if (!client) throw new Error("WebSocket client unavailable");
 
   const {
     taskId,
@@ -227,8 +229,9 @@ export function useMessageHandler({
       inlineTaskMentions?: TaskMentionData[],
     ) => {
       if (!taskId || !resolvedSessionId) {
-        console.error("No active task session. Start an agent before sending a message.");
-        return;
+        const error = new Error("No active task session. Start an agent before sending a message.");
+        console.error(error.message);
+        throw error;
       }
 
       const { finalMessage, allContextFiles } = buildFinalMessage(

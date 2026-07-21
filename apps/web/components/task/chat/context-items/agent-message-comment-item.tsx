@@ -1,20 +1,19 @@
 "use client";
 
 import { memo } from "react";
-import type { PlanCommentContextItem } from "@/lib/types/context";
+import type { AgentMessageCommentContextItem } from "@/lib/types/context";
 import { SelectionCommentItem } from "./selection-comment-item";
 
-export const PlanCommentItem = memo(function PlanCommentItem({
+export const AgentMessageCommentItem = memo(function AgentMessageCommentItem({
   item,
 }: {
-  item: PlanCommentContextItem;
+  item: AgentMessageCommentContextItem;
 }) {
   return (
     <SelectionCommentItem
-      kind="plan-comment"
+      kind="agent-message-comment"
       label={item.label}
       comments={item.comments}
-      onClick={item.onOpen}
       onRemove={item.onRemove}
     />
   );

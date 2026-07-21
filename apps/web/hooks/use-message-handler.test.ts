@@ -1,7 +1,17 @@
-import { describe, it, expect } from "vitest";
-import { buildContextFilesContext, buildTaskMentionsContext } from "./use-message-handler";
+import { describe, it, expect, vi } from "vitest";
+import {
+  buildContextFilesContext,
+  buildTaskMentionsContext,
+  sendMessageRequest,
+} from "./use-message-handler";
 import type { AppState } from "@/lib/state/store";
 import type { TaskMentionData } from "./use-inline-mention";
+
+const getWebSocketClientMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: getWebSocketClientMock,
+}));
 
 const IMPROVE_HARNESS_PROMPT = "improve-harness";
 const IMPROVE_HARNESS_CONTENT = "Review this session for durable harness improvements.";
@@ -182,5 +192,21 @@ describe("buildContextFilesContext", () => {
     expect(out).toContain("### improve-harness");
     expect(out).toContain(IMPROVE_HARNESS_CONTENT);
     expect(out).not.toContain("### @improve-harness");
+  });
+});
+
+describe("sendMessageRequest", () => {
+  it("fails when the WebSocket client is unavailable", async () => {
+    getWebSocketClientMock.mockReturnValue(null);
+
+    await expect(
+      sendMessageRequest({
+        taskId: "task-1",
+        resolvedSessionId: "session-1",
+        finalMessage: "hello",
+        modelToSend: undefined,
+        planMode: false,
+      }),
+    ).rejects.toThrow("WebSocket client unavailable");
   });
 });

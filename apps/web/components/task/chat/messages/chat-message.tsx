@@ -13,7 +13,6 @@ import type { Components } from "react-markdown";
 import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
-import { RichBlocks } from "@/components/task/chat/messages/rich-blocks";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
@@ -33,6 +32,7 @@ import {
   type WorkflowMessageMetadata,
   type WorkflowStepMessageInfo,
 } from "./workflow-step-message-badge";
+import { AgentMessageContent } from "./agent-message-content";
 
 type ChatMessageProps = {
   comment: Message;
@@ -43,6 +43,7 @@ type ChatMessageProps = {
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
   onScrollToMessage?: (messageId: string) => void;
+  isTurnActive?: boolean;
 };
 
 // Regex to match @file references (file paths after @)
@@ -479,57 +480,6 @@ function UserMessageContent({
   );
 }
 
-// ── Agent message sub-component ─────────────────────────────────────
-
-type AgentMessageProps = {
-  comment: Message;
-  showRaw: boolean;
-  onToggleRaw: () => void;
-  showRichBlocks?: boolean;
-  worktreePath?: string;
-  onOpenFile?: (path: string) => void;
-};
-
-function AgentMessageContent({
-  comment,
-  showRaw,
-  onToggleRaw,
-  showRichBlocks,
-  worktreePath,
-  onOpenFile,
-}: AgentMessageProps) {
-  return (
-    <div className="flex items-start gap-2 sm:gap-3 w-full group">
-      <div className="flex-1 min-w-0">
-        {showRaw ? (
-          <pre className="whitespace-pre-wrap font-mono text-xs bg-muted/20 p-3 rounded-md">
-            {comment.raw_content || comment.content || "(empty)"}
-          </pre>
-        ) : (
-          <div className="markdown-body max-w-none">
-            <MemoizedMarkdown
-              content={comment.content || "(empty)"}
-              worktreePath={worktreePath}
-              onOpenFile={onOpenFile}
-            />
-            {showRichBlocks ? <RichBlocks comment={comment} /> : null}
-          </div>
-        )}
-        <MessageActions
-          message={comment}
-          showCopy={true}
-          showTimestamp={true}
-          showRawToggle={true}
-          showModel={true}
-          showNavigation={false}
-          isRawView={showRaw}
-          onToggleRaw={onToggleRaw}
-        />
-      </div>
-    </div>
-  );
-}
-
 // ── Main component ──────────────────────────────────────────────────
 
 export const ChatMessage = memo(function ChatMessage({
@@ -541,6 +491,7 @@ export const ChatMessage = memo(function ChatMessage({
   worktreePath,
   onOpenFile,
   onScrollToMessage,
+  isTurnActive = false,
 }: ChatMessageProps) {
   const [showRaw, setShowRaw] = useState(false);
   const toggleRaw = useCallback(() => setShowRaw((v) => !v), []);
@@ -585,6 +536,8 @@ export const ChatMessage = memo(function ChatMessage({
       showRaw={showRaw}
       onToggleRaw={toggleRaw}
       showRichBlocks={showRichBlocks}
+      sessionId={sessionId}
+      isTurnActive={isTurnActive}
       worktreePath={worktreePath}
       onOpenFile={onOpenFile}
     />

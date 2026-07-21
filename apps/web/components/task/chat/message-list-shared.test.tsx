@@ -61,7 +61,12 @@ vi.mock("@/lib/api/domains/session-api", () => ({
   dismissLastAgentError: vi.fn(),
 }));
 
-import { MessageItem, MessageListStatus, getConversationLoadingState } from "./message-list-shared";
+import {
+  MessageItem,
+  MessageListStatus,
+  getConversationLoadingState,
+  getStreamingAgentMessageId,
+} from "./message-list-shared";
 
 const item: RenderItem = { type: "message", message: { id: "m1" } as Message };
 const noop = () => {};
@@ -211,6 +216,23 @@ describe("getConversationLoadingState", () => {
         sessionState: "CREATED",
       }),
     ).toEqual({ isInitialLoading: false, showLoadingState: false });
+  });
+});
+
+describe("getStreamingAgentMessageId", () => {
+  it("only marks an agent reply after the latest user prompt as streaming", () => {
+    const message = (id: string, author_type: "user" | "agent", type = "message") =>
+      ({ id, author_type, type }) as Message;
+
+    expect(
+      getStreamingAgentMessageId([
+        message("old-reply", "agent"),
+        message("prompt", "user"),
+        message("reply", "agent"),
+        message("status", "agent", "status"),
+      ]),
+    ).toBe("reply");
+    expect(getStreamingAgentMessageId([message("old-reply", "agent")])).toBeNull();
   });
 });
 

@@ -23,6 +23,10 @@ vi.mock("@/components/shared/markdown-components", () => ({
 
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { __markdownParseCount, __resetMarkdownCounters } from "@/lib/markdown/normalize-cache";
+import {
+  createMessageTextAnchor,
+  restoreMessageCommentHighlights,
+} from "@/lib/chat/agent-message-comments";
 
 type Row = { id: string; content: string };
 
@@ -120,5 +124,33 @@ describe("chat render-cost evals", () => {
     ];
     render(<MessageList rows={rows} panel={false} />);
     expect(__markdownParseCount()).toBe(1);
+  });
+
+  it("scenario 5: restoring many inline highlights does not reparse markdown rows", () => {
+    const rows = makeRows(20);
+    render(<MessageList rows={rows} panel={false} />);
+    const parsesAfterMount = __markdownParseCount();
+    const content = Array.from({ length: 20 }, (_, index) => `reply-${index}`).join(" ");
+    const root = document.createElement("div");
+    root.textContent = content;
+    const comments = Array.from({ length: 20 }, (_, index) => {
+      const selectedText = `reply-${index}`;
+      const start = content.indexOf(selectedText);
+      return {
+        id: `comment-${index}`,
+        sessionId: "session-1",
+        source: "agent-message" as const,
+        messageId: "reply-1",
+        selectedText,
+        text: "feedback",
+        createdAt: "2026-07-20T00:00:00Z",
+        status: "pending" as const,
+        anchor: createMessageTextAnchor("reply-1", content, start, start + selectedText.length),
+      };
+    });
+
+    expect(restoreMessageCommentHighlights(root, comments)).toBe(20);
+    expect(root.querySelectorAll("mark[data-agent-message-comment-id]")).toHaveLength(20);
+    expect(__markdownParseCount() - parsesAfterMount).toBe(0);
   });
 });

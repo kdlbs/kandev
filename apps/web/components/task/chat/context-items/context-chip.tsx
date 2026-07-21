@@ -26,6 +26,7 @@ const ICON_BY_KIND: Record<ContextItemKind, TablerIcon> = {
   "file-attachment": IconFile,
   prompt: IconAt,
   "pr-feedback": IconGitPullRequest,
+  "agent-message-comment": IconMessageDots,
 };
 
 type ContextChipProps = {
@@ -87,7 +88,8 @@ export const ContextChip = memo(function ContextChip({
             e.stopPropagation();
             onRemove();
           }}
-          className="opacity-0 group-hover:opacity-100 ml-0.5 hover:text-foreground cursor-pointer"
+          aria-label={`Remove ${label}`}
+          className="min-h-11 min-w-11 opacity-100 ml-0.5 hover:text-foreground cursor-pointer sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
         >
           <IconX className="h-2.5 w-2.5" />
         </button>

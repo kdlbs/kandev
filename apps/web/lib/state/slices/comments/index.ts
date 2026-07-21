@@ -6,6 +6,8 @@ export {
   type FileEditorComment,
   type PRFeedbackComment,
   type WalkthroughComment,
+  type AgentMessageComment,
+  type MessageTextAnchor,
   type AnnotationSide,
   type CommentsState,
   type CommentsActions,
@@ -15,12 +17,14 @@ export {
   isFileEditorComment,
   isPRFeedbackComment,
   isWalkthroughComment,
+  isAgentMessageComment,
 } from "./types";
 export {
   formatReviewCommentsAsMarkdown,
   formatPlanCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
+  formatAgentMessageCommentsAsMarkdown,
   formatCommentsForMessage,
 } from "./format";
 export {

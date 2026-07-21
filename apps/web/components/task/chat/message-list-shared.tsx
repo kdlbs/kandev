@@ -47,6 +47,28 @@ export function getSessionRunningState(sessionState: string | null | undefined) 
   return sessionState === "CREATED" || sessionState === "STARTING" || sessionState === "RUNNING";
 }
 
+/** Only a final ordinary agent row can be the currently streaming reply. */
+export function getStreamingAgentMessageId(messages: Message[]): string | null {
+  let latestUserIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].author_type === "user") {
+      latestUserIndex = i;
+      break;
+    }
+  }
+  if (latestUserIndex === -1) return null;
+  for (let i = messages.length - 1; i > latestUserIndex; i--) {
+    const message = messages[i];
+    if (
+      message.author_type === "agent" &&
+      (message.type === "message" || message.type === "content" || !message.type)
+    ) {
+      return message.id;
+    }
+  }
+  return null;
+}
+
 export function getLastTurnGroupId(items: RenderItem[]) {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
@@ -220,6 +242,7 @@ export const MessageItem = memo(function MessageItem({
   onOpenFile,
   isLastGroup,
   isTurnActive,
+  streamingMessageId,
   onScrollToMessage,
 }: {
   item: RenderItem;
@@ -231,6 +254,7 @@ export const MessageItem = memo(function MessageItem({
   onOpenFile?: (path: string) => void;
   isLastGroup: boolean;
   isTurnActive: boolean;
+  streamingMessageId?: string | null;
   onScrollToMessage: (id: string) => void;
 }) {
   if (item.type === "prepare_progress") {
@@ -250,7 +274,13 @@ export const MessageItem = memo(function MessageItem({
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}
         isLastGroup={isLastGroup}
-        isTurnActive={isTurnActive}
+        isTurnActive={
+          isTurnActive &&
+          (streamingMessageId
+            ? item.messages.some((message) => message.id === streamingMessageId)
+            : false)
+        }
+        streamingMessageId={streamingMessageId}
         onScrollToMessage={onScrollToMessage}
       />
     );
@@ -264,6 +294,7 @@ export const MessageItem = memo(function MessageItem({
       childrenByParentToolCallId={childrenByParentToolCallId}
       worktreePath={worktreePath}
       sessionId={sessionId ?? undefined}
+      isTurnActive={isTurnActive && item.message.id === streamingMessageId}
       onOpenFile={onOpenFile}
       onScrollToMessage={onScrollToMessage}
     />

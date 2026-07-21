@@ -160,6 +160,8 @@ vi.mock("./chat/use-chat-panel-state", () => ({
     planComments: [],
     pendingPRFeedback: [],
     walkthroughComments: [],
+    messageComments: [],
+    handleClearMessageComments: vi.fn(),
     pendingCommentsByFile: mockPendingByFile,
   }),
 }));
