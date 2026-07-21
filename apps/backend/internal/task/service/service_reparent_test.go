@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -80,13 +81,14 @@ func TestService_UpdateTask_NestsUnderParent(t *testing.T) {
 }
 
 func TestService_UpdateTask_UnnestsWhenParentCleared(t *testing.T) {
-	svc, _, _, create := reparentFixture(t)
+	svc, eventBus, _, create := reparentFixture(t)
 	ctx := context.Background()
 	parent := create("Parent")
 	child := create("Child")
 	if _, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr(parent.ID)}); err != nil {
 		t.Fatalf("nest: %v", err)
 	}
+	eventBus.ClearEvents()
 
 	if _, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr("")}); err != nil {
 		t.Fatalf("unnest: %v", err)
@@ -98,6 +100,69 @@ func TestService_UpdateTask_UnnestsWhenParentCleared(t *testing.T) {
 	}
 	if got.ParentID != "" {
 		t.Errorf("persisted ParentID = %q, want empty", got.ParentID)
+	}
+
+	// The un-nest event must carry an explicit parent_id: nil so clients can
+	// distinguish "parent removed" from "parent unchanged".
+	events := eventBus.GetPublishedEvents()
+	if len(events) == 0 {
+		t.Fatalf("expected a task.updated event, got none")
+	}
+	last := events[len(events)-1]
+	data, ok := last.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data type = %T", last.Data)
+	}
+	val, present := data["parent_id"]
+	if !present {
+		t.Errorf("un-nest event is missing parent_id key")
+	}
+	if val != nil {
+		t.Errorf("un-nest event parent_id = %#v, want nil", val)
+	}
+}
+
+func TestService_UpdateTask_RejectsArchivedParent(t *testing.T) {
+	svc, _, repo, create := reparentFixture(t)
+	ctx := context.Background()
+	parent := create("Parent")
+	child := create("Child")
+	if err := svc.ArchiveTask(ctx, parent.ID); err != nil {
+		t.Fatalf("archive parent: %v", err)
+	}
+	_ = repo
+
+	_, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr(parent.ID)})
+	if err == nil || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("expected archived-parent error, got %v", err)
+	}
+	if !errors.Is(err, ErrInvalidParent) {
+		t.Errorf("archived-parent error should wrap ErrInvalidParent, got %v", err)
+	}
+}
+
+func TestService_UpdateTask_ValidationErrorsWrapErrInvalidParent(t *testing.T) {
+	svc, _, _, create := reparentFixture(t)
+	ctx := context.Background()
+	a := create("A")
+	b := create("B")
+	if _, err := svc.UpdateTask(ctx, b.ID, &UpdateTaskRequest{ParentID: strptr(a.ID)}); err != nil {
+		t.Fatalf("nest B under A: %v", err)
+	}
+
+	cases := map[string]string{
+		"self":     a.ID,
+		"cycle":    b.ID, // A under B would cycle
+		"nonexist": "missing-task",
+	}
+	for name, parentID := range cases {
+		_, err := svc.UpdateTask(ctx, a.ID, &UpdateTaskRequest{ParentID: strptr(parentID)})
+		if err == nil {
+			t.Fatalf("%s: expected error, got nil", name)
+		}
+		if !errors.Is(err, ErrInvalidParent) {
+			t.Errorf("%s: error should wrap ErrInvalidParent so it maps to HTTP 400, got %v", name, err)
+		}
 	}
 }
 

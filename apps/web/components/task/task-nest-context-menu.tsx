@@ -26,9 +26,17 @@ type TaskNestContextMenuItemsProps = {
  */
 export function TaskNestContextMenuItems({ task, disabled }: TaskNestContextMenuItemsProps) {
   const workflowId = task.workflowId;
-  const tasks = useAppStore((s) =>
-    workflowId ? s.kanbanMulti?.snapshots?.[workflowId]?.tasks : undefined,
-  );
+  // Prefer the all-workflows snapshot; fall back to the active kanban tasks,
+  // which the sidebar also renders from before the multi-snapshot fetch
+  // resolves (e.g. initial /t/:id load). Without the fallback the menu would
+  // show "No other tasks" even though rows are visible.
+  const tasks = useAppStore((s) => {
+    if (!workflowId) return undefined;
+    return (
+      s.kanbanMulti?.snapshots?.[workflowId]?.tasks ??
+      (s.kanban?.workflowId === workflowId ? s.kanban?.tasks : undefined)
+    );
+  });
   const nestTask = useNestTask();
 
   if (!workflowId) return null;

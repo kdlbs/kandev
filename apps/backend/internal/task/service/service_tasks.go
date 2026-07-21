@@ -979,10 +979,12 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if req.Metadata != nil {
 		task.Metadata = req.Metadata
 	}
-	if req.ParentID != nil {
+	parentCleared := false
+	if req.ParentID != nil && *req.ParentID != task.ParentID {
 		if err := s.resolveParentID(ctx, task, *req.ParentID); err != nil {
 			return nil, err
 		}
+		parentCleared = *req.ParentID == ""
 		task.ParentID = *req.ParentID
 	}
 	task.UpdatedAt = time.Now().UTC()
@@ -1010,7 +1012,15 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if stateChanged && oldState != nil {
 		s.publishTaskEvent(ctx, events.TaskStateChanged, task, oldState)
 	}
-	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	if parentCleared {
+		// Explicitly signal the un-nest with parent_id: nil so clients can
+		// distinguish "parent removed" from "parent unchanged" — matching the
+		// detach path's event contract. publishTaskEvent otherwise omits an
+		// empty parent_id entirely.
+		s.publishTaskEventWithExtra(ctx, events.TaskUpdated, task, nil, map[string]interface{}{parentIDEventField: nil})
+	} else {
+		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	}
 	s.logger.Info("task updated", zap.String("task_id", task.ID))
 
 	return task, nil
@@ -1021,30 +1031,43 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 // nowhere near this depth.
 const parentChainWalkLimit = 1000
 
+// parentIDEventField is the task-event payload key carrying a task's parent.
+// Emitting it explicitly (as nil) on un-nest lets clients tell "parent
+// removed" apart from "parent unchanged".
+const parentIDEventField = "parent_id"
+
+// ErrInvalidParent wraps every rejection from resolveParentID so HTTP/WS
+// handlers can classify a bad re-parent request as a client error (400)
+// rather than an internal error (500).
+var ErrInvalidParent = errors.New("invalid parent")
+
 // resolveParentID validates a proposed parent assignment for task. An empty
 // parentID (un-nest) is always allowed. A non-empty parentID must reference a
-// different, existing task in the same workspace, and must not introduce a
-// cycle (nesting a task under one of its own descendants).
+// different, existing, non-archived task in the same workspace, and must not
+// introduce a cycle (nesting a task under one of its own descendants).
 func (s *Service) resolveParentID(ctx context.Context, task *models.Task, parentID string) error {
 	if parentID == "" {
 		return nil
 	}
 	if parentID == task.ID {
-		return fmt.Errorf("a task cannot be its own parent")
+		return fmt.Errorf("%w: a task cannot be its own parent", ErrInvalidParent)
 	}
 	parent, err := s.tasks.GetTask(ctx, parentID)
 	if err != nil {
-		return fmt.Errorf("parent task not found: %s", parentID)
+		return fmt.Errorf("%w: parent task not found: %s", ErrInvalidParent, parentID)
 	}
 	if parent.WorkspaceID != task.WorkspaceID {
-		return fmt.Errorf("parent task must belong to the same workspace")
+		return fmt.Errorf("%w: parent task must belong to the same workspace", ErrInvalidParent)
+	}
+	if parent.ArchivedAt != nil {
+		return fmt.Errorf("%w: parent task is archived", ErrInvalidParent)
 	}
 	// Walk up the parent's ancestor chain. Reaching task.ID means the new
 	// edge would close a cycle (task -> ... -> parent -> task).
 	current := parent
 	for i := 0; i < parentChainWalkLimit; i++ {
 		if current.ID == task.ID {
-			return fmt.Errorf("nesting would create a cycle")
+			return fmt.Errorf("%w: nesting would create a cycle", ErrInvalidParent)
 		}
 		if current.ParentID == "" {
 			return nil
@@ -1057,7 +1080,7 @@ func (s *Service) resolveParentID(ctx context.Context, task *models.Task, parent
 		}
 		current = ancestor
 	}
-	return fmt.Errorf("parent chain too deep")
+	return fmt.Errorf("%w: parent chain too deep", ErrInvalidParent)
 }
 
 type taskMessageRollbackRepository interface {
