@@ -112,6 +112,7 @@ test.describe("Right pane resize — container-proportional cap", () => {
     const cap = computeRightMaxPx(dockviewBox?.width ?? 0);
     expect(rightWidth).toBeLessThanOrEqual(cap + 10);
     expectApproxWidth(terminalWidth, rightWidth, 10);
+    // Allow 2px of rendering tolerance around the 480px center comfort reserve.
     expect(centerWidth).toBeGreaterThanOrEqual(478);
   });
 
