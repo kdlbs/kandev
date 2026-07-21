@@ -9,6 +9,7 @@ import {
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
 import { useToast } from "@/components/toast-provider";
+import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import type { Repository } from "@/lib/types/http";
 import type { SubtaskWorkspaceMode, useSubtaskFormState } from "./new-subtask-form-state";
@@ -153,40 +154,71 @@ export function useSubtaskPromptZone(opts: {
   inputDisabled: boolean;
   contextValue: string;
   initialPrompt: string | null;
+  promptValue: string;
+  setPromptValue: (value: string) => void;
   setHasPrompt: (v: boolean) => void;
 }) {
-  const { taskTitle, inputDisabled, contextValue, initialPrompt, setHasPrompt } = opts;
+  const {
+    taskTitle,
+    inputDisabled,
+    contextValue,
+    initialPrompt,
+    promptValue,
+    setPromptValue,
+    setHasPrompt,
+  } = opts;
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const latestPromptValueRef = useRef(promptValue);
+  latestPromptValueRef.current = promptValue;
+  const { toast } = useToast();
   const attachments = useDialogAttachments(inputDisabled);
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId: null,
     taskTitle,
   });
-  const handleEnhancePrompt = useCallback(() => {
-    const current = promptRef.current?.value?.trim();
-    if (!current) return;
-    enhancePrompt(current, (enhanced) => {
-      if (promptRef.current) {
-        promptRef.current.value = enhanced;
-        setHasPrompt(true);
+  const promptResultDelivery = usePromptResultDelivery({
+    getCurrent: () => (promptRef.current ? latestPromptValueRef.current.trim() : null),
+    apply: (value) => {
+      if (!promptRef.current) {
+        return false;
       }
+
+      setPromptValue(value);
+      setHasPrompt(value.trim().length > 0);
+      return true;
+    },
+  });
+  const handleEnhancePrompt = useCallback(async () => {
+    const current = latestPromptValueRef.current.trim();
+    if (!current) return;
+
+    await enhancePrompt(current, (enhanced) => {
+      const delivered = promptResultDelivery.deliver(current, enhanced);
+      if (delivered) {
+        toast({ description: "Enhanced prompt applied.", variant: "success" });
+      }
+
+      return delivered;
     });
-  }, [enhancePrompt, setHasPrompt]);
+  }, [enhancePrompt, promptResultDelivery, toast]);
   const contextItems = useMemo(
     () => toContextItems(attachments.attachments, attachments.handleRemoveAttachment),
     [attachments.attachments, attachments.handleRemoveAttachment],
   );
   const resolvePrompt = useCallback(() => {
-    const typed = promptRef.current?.value?.trim() ?? "";
+    const typed = promptValue.trim();
     if (contextValue === "copy_prompt" && !typed && initialPrompt) return initialPrompt;
     return typed;
-  }, [contextValue, initialPrompt]);
+  }, [contextValue, initialPrompt, promptValue]);
   return {
     promptRef,
     attachments,
     contextItems,
     handleEnhancePrompt,
     isEnhancingPrompt,
+    pendingResult: promptResultDelivery.pendingResult,
+    applyPending: promptResultDelivery.applyPending,
+    copyPending: promptResultDelivery.copyPending,
     resolvePrompt,
   };
 }
