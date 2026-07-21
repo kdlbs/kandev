@@ -38,6 +38,20 @@ func (r *officeRebindRaceRepository) UpdateTaskSessionIfCurrentState(
 	return r.mockRepository.UpdateTaskSessionIfCurrentState(ctx, session, expected)
 }
 
+func (r *officeRebindRaceRepository) UpdateTaskSessionIfCurrentStateWithMetadata(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	metadata map[string]interface{},
+) (bool, error) {
+	if r.beforeGuardedUpdate != nil {
+		hook := r.beforeGuardedUpdate
+		r.beforeGuardedUpdate = nil
+		hook()
+	}
+	return r.mockRepository.UpdateTaskSessionIfCurrentStateWithMetadata(ctx, session, expected, metadata)
+}
+
 func TestEnsureSessionForAgent_CreatesWhenMissing(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -83,6 +97,7 @@ func TestEnsureSessionForAgent_RebindsExecutionProfileOnReuse(t *testing.T) {
 			models.SessionMetaKeyACPConfigBaseline:      map[string]string{"model": "codex-model"},
 			models.SessionMetaKeyACPModelState:          map[string]interface{}{"current_model_id": "codex-model"},
 			"context_window":                            map[string]interface{}{"size": int64(200000)},
+			models.SessionMetaKeyLastAgentError:         models.LastAgentError{Message: "old provider failed"},
 			models.SessionMetaKeyPendingStepCompletion:  true,
 		},
 	}
@@ -108,6 +123,7 @@ func TestEnsureSessionForAgent_RebindsExecutionProfileOnReuse(t *testing.T) {
 		models.SessionMetaKeyACPConfigBaseline,
 		models.SessionMetaKeyACPModelState,
 		"context_window",
+		models.SessionMetaKeyLastAgentError,
 	} {
 		if _, exists := got.Metadata[key]; exists {
 			t.Errorf("provider runtime metadata %q survived execution profile change", key)

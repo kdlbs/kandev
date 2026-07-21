@@ -406,6 +406,17 @@ func (m *mockRepository) UpdateTaskSessionIfCurrentState(
 	return true, nil
 }
 
+func (m *mockRepository) UpdateTaskSessionIfCurrentStateWithMetadata(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	metadata map[string]interface{},
+) (bool, error) {
+	updated := cloneMockTaskSession(session)
+	updated.Metadata = cloneMockSessionMap(metadata)
+	return m.UpdateTaskSessionIfCurrentState(ctx, updated, expected)
+}
+
 func cloneMockTaskSession(session *models.TaskSession) *models.TaskSession {
 	if session == nil {
 		return nil

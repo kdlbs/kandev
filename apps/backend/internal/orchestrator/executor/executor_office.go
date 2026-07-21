@@ -14,6 +14,15 @@ import (
 	"go.uber.org/zap"
 )
 
+type officeSessionMetadataUpdater interface {
+	UpdateTaskSessionIfCurrentStateWithMetadata(
+		ctx context.Context,
+		session *models.TaskSession,
+		expected models.TaskSessionState,
+		metadata map[string]interface{},
+	) (bool, error)
+}
+
 // EnsureSessionForAgent returns a persistent task session for the (task,
 // agent) pair, creating one when no row exists. This is the office run
 // entry point — every run for a participant agent ends up here. Distinct
@@ -97,10 +106,15 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 			models.SessionMetaKeyACPConfigBaseline,
 			models.SessionMetaKeyACPModelState,
 			"context_window",
+			models.SessionMetaKeyLastAgentError,
 		} {
 			delete(updated.Metadata, key)
 		}
-		changed, err := e.repo.UpdateTaskSessionIfCurrentState(ctx, &updated, expectedState)
+		updater, ok := e.repo.(officeSessionMetadataUpdater)
+		if !ok {
+			return errors.New("office session rebind requires guarded metadata updates")
+		}
+		changed, err := updater.UpdateTaskSessionIfCurrentStateWithMetadata(ctx, &updated, expectedState, updated.Metadata)
 		if err != nil {
 			return fmt.Errorf("update office execution profile: %w", err)
 		}

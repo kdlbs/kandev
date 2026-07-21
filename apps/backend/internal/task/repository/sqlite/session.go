@@ -452,6 +452,38 @@ func (r *Repository) UpdateTaskSessionIfCurrentState(
 	return r.updateTaskSessionWithStateGuard(ctx, r.db, session, &expected)
 }
 
+// UpdateTaskSessionIfCurrentStateWithMetadata persists a full session row and
+// metadata atomically while the stored state still matches expected. This is
+// used when a guarded row update must also reset provider-owned metadata.
+func (r *Repository) UpdateTaskSessionIfCurrentStateWithMetadata(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	metadata map[string]interface{},
+) (bool, error) {
+	session.UpdatedAt = time.Now().UTC()
+	metadataJSON, err := marshalSessionMetadata(metadata)
+	if err != nil {
+		return false, err
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	changed, err := r.updateTaskSessionWithStateGuard(ctx, tx, session, &expected)
+	if err != nil || !changed {
+		return changed, err
+	}
+	if err := r.updateSessionMetadataJSON(ctx, tx, session.ID, metadataJSON, session.UpdatedAt); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // UpdateTaskSessionWithMetadata updates the session row and metadata column in
 // one transaction so callers cannot observe a partially-applied update.
 func (r *Repository) UpdateTaskSessionWithMetadata(
