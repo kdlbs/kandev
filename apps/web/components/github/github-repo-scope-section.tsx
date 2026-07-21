@@ -66,7 +66,6 @@ function RepositoryScopeHelp() {
       aria-haspopup="dialog"
       aria-expanded={open}
       aria-label="Explain repository scope"
-      onClick={() => setOpen(true)}
     >
       <IconInfoCircle className="h-4 w-4" />
     </Button>
