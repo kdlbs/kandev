@@ -81,6 +81,8 @@ function useDecorationClickHandler(
   return useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
       if (isInteractiveMessageTarget(event.target)) return;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
       const decoration = messageCommentDecorationAtPoint(decorations, event.clientX, event.clientY);
       if (!decoration) return;
       event.preventDefault();

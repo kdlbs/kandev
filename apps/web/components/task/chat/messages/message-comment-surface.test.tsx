@@ -248,6 +248,27 @@ describe("MessageCommentSurface fallback highlights", () => {
 });
 
 describe("MessageCommentSurface highlighted interactions", () => {
+  it("does not open a highlighted comment while text is selected", () => {
+    vi.spyOn(Range.prototype, "getClientRects").mockReturnValue([
+      new DOMRect(0, 0, 100, 20),
+    ] as unknown as DOMRectList);
+    const content = "Read the settled answer.";
+    addPendingComment(content, "settled answer");
+    const { container } = render(
+      <MessageCommentSurface message={message(content)} sessionId={SESSION_ID} isTurnActive={false}>
+        <span>{content}</span>
+      </MessageCommentSurface>,
+    );
+    vi.spyOn(window, "getSelection").mockReturnValue({ isCollapsed: false } as Selection);
+
+    fireEvent.click(container.querySelector("[data-agent-message-body]")!, {
+      clientX: 10,
+      clientY: 10,
+    });
+
+    expect(screen.queryByTestId("comment-popover")).toBeNull();
+  });
+
   it("preserves native link clicks inside a highlighted range", () => {
     vi.spyOn(Range.prototype, "getClientRects").mockReturnValue([
       new DOMRect(0, 0, 100, 20),
