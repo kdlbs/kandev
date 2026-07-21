@@ -14,7 +14,7 @@ flow:
 2. Create or update the product spec with `/spec`.
 3. Create the implementation plan with `/plan`.
 4. Decompose into independent tasks with acceptance criteria, exact verification, likely files, dependencies, and wave ordering.
-5. Delegate every execution step to `implementer`, `test-engineer`, `qa`, `security-auditor`, `code-review`, `simplify`, and `verify` as appropriate. Use `architect` only for an unusually risky design review.
+5. Delegate every execution step to `implementer`, `test-engineer`, `qa`, `security-auditor`, `code-review`, `simplify`, and `verify` as appropriate. Use `architect` only for a bounded second opinion on unusually risky design decisions.
 
 Keep the primary planner responsible for orchestration, integration order, user
 communication, and final status. It must not implement, test, integrate, verify,
