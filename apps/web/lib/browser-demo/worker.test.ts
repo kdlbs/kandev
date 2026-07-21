@@ -103,7 +103,9 @@ describe("browser demo worker HTTP runtime", () => {
       expect.arrayContaining([expect.objectContaining({ conclusion: "success" })]),
     );
   });
+});
 
+describe("browser demo worker HTTP reporting and remote repositories", () => {
   it("serves every statistics section used by the statistics page", async () => {
     const sections = [
       "global",
@@ -124,6 +126,24 @@ describe("browser demo worker HTTP runtime", () => {
     expect(responses[0].body).toMatchObject({ total_tasks: expect.any(Number) });
   });
 
+  it("routes agent command preview and system settings surfaces without fallbacks", async () => {
+    const [preview, disk, database, storage, runs, quarantine] = await Promise.all([
+      requestHttp("POST", "/api/v1/agent-command-preview/mock", { model: "demo-fast" }),
+      get("/api/v1/system/disk-usage"),
+      get("/api/v1/system/database"),
+      get("/api/v1/system/storage"),
+      get("/api/v1/system/storage/runs?limit=20"),
+      get("/api/v1/system/storage/quarantine"),
+    ]);
+
+    expect(preview).toMatchObject({ status: 200, body: { supported: true } });
+    expect(disk).toMatchObject({ status: 200, body: { computing: false } });
+    expect(database).toMatchObject({ status: 200, body: { driver: "sqlite" } });
+    expect(storage).toMatchObject({ status: 200, body: { settings: { enabled: true } } });
+    expect(runs).toMatchObject({ status: 200, body: { runs: expect.any(Array) } });
+    expect(quarantine).toMatchObject({ status: 200, body: { entries: expect.any(Array) } });
+  });
+
   it("returns explicit errors for unknown routed resources", async () => {
     const missingWorkflow = await get("/api/v1/workflows/missing/snapshot");
     const missingTask = await get("/api/v1/tasks/missing");
@@ -135,6 +155,46 @@ describe("browser demo worker HTTP runtime", () => {
       status: 501,
       body: { demo_mode: true, unsupported: "/api/v1/not-implemented" },
     });
+  });
+});
+
+describe("browser demo worker remote repository picker", () => {
+  it("serves remote repositories and their branches for the new task dialog", async () => {
+    const repositories = await get("/api/v1/github/repos?limit=100");
+    const webBranches = await get("/api/v1/github/repos/kandev-demo/acme-web/branches");
+    const apiBranches = await get("/api/v1/github/repos/kandev-demo/acme-api/branches");
+
+    expect(repositories).toMatchObject({
+      status: 200,
+      body: {
+        repos: [
+          {
+            full_name: "kandev-demo/acme-web",
+            default_branch: "main",
+            private: false,
+          },
+          {
+            full_name: "kandev-demo/acme-api",
+            default_branch: "main",
+            private: true,
+          },
+        ],
+      },
+    });
+    expect(webBranches.status).toBe(200);
+    expect((webBranches.body as { branches: { name: string }[] }).branches).toEqual(
+      expect.arrayContaining([{ name: "main" }, { name: "kandev/audit-logging" }]),
+    );
+    expect(apiBranches.status).toBe(200);
+    expect((apiBranches.body as { branches: { name: string }[] }).branches).toEqual(
+      expect.arrayContaining([{ name: "main" }, { name: "develop" }]),
+    );
+  });
+
+  it("returns a not-found response for branches of an unknown remote repository", async () => {
+    const response = await get("/api/v1/github/repos/kandev-demo/missing/branches");
+
+    expect(response).toMatchObject({ status: 404, body: { error: "Repository not found" } });
   });
 });
 
@@ -181,6 +241,92 @@ describe("browser demo worker HTTP task mutations", () => {
     expect(actions).toEqual(
       expect.arrayContaining(["task.created", "task.updated", "task.deleted"]),
     );
+  });
+});
+
+describe("browser demo worker integration settings", () => {
+  it("serves a healthy Jira configuration and its watcher list", async () => {
+    const [config, watches] = await Promise.all([
+      get(`/api/v1/jira/config?workspace_id=${DEMO_IDS.workspace}`),
+      get(`/api/v1/jira/watches/issue?workspace_id=${DEMO_IDS.workspace}`),
+    ]);
+
+    expect(config).toMatchObject({
+      status: 200,
+      body: {
+        workspaceId: DEMO_IDS.workspace,
+        siteUrl: "https://acme-platform.atlassian.net",
+        defaultProjectKey: "PLAT",
+        hasSecret: true,
+        lastOk: true,
+      },
+    });
+    expect(watches).toMatchObject({ status: 200, body: { watches: [] } });
+  });
+
+  it("serves Linear configuration, teams, and watchers", async () => {
+    const [config, teams, watches] = await Promise.all([
+      get(`/api/v1/linear/config?workspace_id=${DEMO_IDS.workspace}`),
+      get(`/api/v1/linear/teams?workspace_id=${DEMO_IDS.workspace}`),
+      get(`/api/v1/linear/watches/issue?workspace_id=${DEMO_IDS.workspace}`),
+    ]);
+
+    expect(config).toMatchObject({
+      status: 200,
+      body: { defaultTeamKey: "ENG", orgSlug: "acme-platform", hasSecret: true, lastOk: true },
+    });
+    expect(teams).toMatchObject({
+      status: 200,
+      body: { teams: [{ key: "ENG", name: "Engineering" }, { key: "PLAT" }] },
+    });
+    expect(watches).toMatchObject({ status: 200, body: { watches: [] } });
+  });
+
+  it("serves configured Sentry instances and their watcher list", async () => {
+    const [instances, watches] = await Promise.all([
+      get(`/api/v1/sentry/instances?workspace_id=${DEMO_IDS.workspace}`),
+      get(`/api/v1/sentry/watches/issue?workspace_id=${DEMO_IDS.workspace}`),
+    ]);
+
+    expect(instances).toMatchObject({
+      status: 200,
+      body: {
+        instances: [
+          {
+            workspaceId: DEMO_IDS.workspace,
+            name: "Production",
+            url: "https://sentry.io",
+            hasSecret: true,
+            lastOk: true,
+          },
+        ],
+      },
+    });
+    expect(watches).toMatchObject({ status: 200, body: { watches: [] } });
+  });
+
+  it("serves Slack configuration and its selected utility agent", async () => {
+    const [config, agents] = await Promise.all([
+      get(`/api/v1/slack/config?workspace_id=${DEMO_IDS.workspace}`),
+      get("/api/v1/utility/agents"),
+    ]);
+
+    expect(config).toMatchObject({
+      status: 200,
+      body: {
+        commandPrefix: "!kandev",
+        utilityAgentId: "demo-utility-triage",
+        hasToken: true,
+        hasCookie: true,
+        lastOk: true,
+      },
+    });
+    expect(agents).toMatchObject({
+      status: 200,
+      body: {
+        agents: [{ id: "demo-utility-triage", name: "Slack task triage", enabled: true }],
+      },
+    });
   });
 });
 

@@ -261,6 +261,40 @@ export const demoApiRepository: Repository = {
   copy_files: ".env",
 };
 
+export const demoAccessibleRepositories = [
+  {
+    full_name: "kandev-demo/acme-web",
+    owner: "kandev-demo",
+    name: "acme-web",
+    private: false,
+    default_branch: "main",
+    description: "Customer checkout and account experience",
+    pushed_at: "2026-07-18T11:48:00Z",
+  },
+  {
+    full_name: "kandev-demo/acme-api",
+    owner: "kandev-demo",
+    name: "acme-api",
+    private: true,
+    default_branch: "main",
+    description: "Payments, sessions, and audit APIs",
+    pushed_at: "2026-07-18T10:22:00Z",
+  },
+];
+
+export const demoRepositoryBranches: Record<string, { name: string }[]> = {
+  "kandev-demo/acme-web": [
+    { name: "main" },
+    { name: "kandev/audit-logging" },
+    { name: "fix/checkout-timeout" },
+  ],
+  "kandev-demo/acme-api": [
+    { name: "main" },
+    { name: "develop" },
+    { name: "feature/session-refresh" },
+  ],
+};
+
 export const demoUpgradePlan: TaskPlan = {
   id: "demo-plan-react",
   task_id: "demo-task-react",

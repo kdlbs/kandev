@@ -3,6 +3,11 @@
 /* eslint-disable max-lines -- The worker intentionally keeps the complete in-browser backend fixture in one module. */
 
 import type { Message, Task, TaskPlan, TaskPlanRevision, TaskSession } from "@/lib/types/http";
+import type { UtilityAgent } from "@/lib/api/domains/utility-api";
+import type { JiraConfig } from "@/lib/types/jira";
+import type { LinearConfig, LinearTeam } from "@/lib/types/linear";
+import type { SentryConfig } from "@/lib/types/sentry";
+import type { SlackConfig } from "@/lib/types/slack";
 import type {
   CumulativeDiff,
   FileInfo,
@@ -20,12 +25,14 @@ import {
   createBootPayload,
   createDemoState,
   createTaskFromInput,
+  demoAccessibleRepositories,
   demoAgents,
   demoApiRepository,
   demoExecutors,
   demoGitHubPR,
   demoPRFeedback,
   demoRepository,
+  demoRepositoryBranches,
   demoSteps,
   demoSupportSteps,
   demoSupportWorkflow,
@@ -37,11 +44,13 @@ import {
 } from "./scenario";
 import { createDemoStats } from "./stats";
 import { createDemoFiles } from "./demo-files";
+import { createDemoSystemRuntime } from "./system-runtime";
 
 const scope: DedicatedWorkerGlobalScope = self as never;
 let state = createDemoState();
 let files = createDemoFiles();
 let plansByTask = createDemoPlans();
+let systemRuntime = createDemoSystemRuntime();
 const fileReviewsBySession = new Map<
   string,
   Map<string, { reviewed: boolean; diffHash: string }>
@@ -55,6 +64,84 @@ const DEMO_TIMESTAMP = "2026-07-18T12:00:00.000Z";
 const TASK_NOT_FOUND = "Task not found";
 const PLAN_NOT_FOUND = "Task plan not found";
 const TASK_UPDATED_EVENT = "task.updated";
+const DEMO_SLACK_UTILITY_AGENT_ID = "demo-utility-triage";
+const DEMO_JIRA_CONFIG: JiraConfig = {
+  workspaceId: DEMO_IDS.workspace,
+  siteUrl: "https://acme-platform.atlassian.net",
+  email: "mira@acme.example",
+  authMethod: "api_token",
+  instanceType: "cloud",
+  defaultProjectKey: "PLAT",
+  hasSecret: true,
+  secretExpiresAt: null,
+  lastCheckedAt: DEMO_TIMESTAMP,
+  lastOk: true,
+  lastError: "",
+  createdAt: DEMO_TIMESTAMP,
+  updatedAt: DEMO_TIMESTAMP,
+};
+const DEMO_LINEAR_CONFIG: LinearConfig = {
+  workspaceId: DEMO_IDS.workspace,
+  authMethod: "api_key",
+  defaultTeamKey: "ENG",
+  hasSecret: true,
+  orgSlug: "acme-platform",
+  lastCheckedAt: DEMO_TIMESTAMP,
+  lastOk: true,
+  lastError: "",
+  createdAt: DEMO_TIMESTAMP,
+  updatedAt: DEMO_TIMESTAMP,
+};
+const DEMO_LINEAR_TEAMS: LinearTeam[] = [
+  { id: "demo-linear-team-eng", key: "ENG", name: "Engineering" },
+  { id: "demo-linear-team-plat", key: "PLAT", name: "Platform" },
+];
+const DEMO_SENTRY_INSTANCES: SentryConfig[] = [
+  {
+    id: "demo-sentry-production",
+    workspaceId: DEMO_IDS.workspace,
+    name: "Production",
+    authMethod: "auth_token",
+    url: "https://sentry.io",
+    hasSecret: true,
+    lastCheckedAt: DEMO_TIMESTAMP,
+    lastOk: true,
+    lastError: "",
+    createdAt: DEMO_TIMESTAMP,
+    updatedAt: DEMO_TIMESTAMP,
+  },
+];
+const DEMO_SLACK_CONFIG: SlackConfig = {
+  workspaceId: DEMO_IDS.workspace,
+  authMethod: "cookie",
+  commandPrefix: "!kandev",
+  utilityAgentId: DEMO_SLACK_UTILITY_AGENT_ID,
+  pollIntervalSeconds: 30,
+  slackTeamId: "T0ACME",
+  slackUserId: "U0KANDEV",
+  lastSeenTs: "1721304000.000000",
+  hasToken: true,
+  hasCookie: true,
+  lastCheckedAt: DEMO_TIMESTAMP,
+  lastOk: true,
+  lastError: "",
+  createdAt: DEMO_TIMESTAMP,
+  updatedAt: DEMO_TIMESTAMP,
+};
+const DEMO_UTILITY_AGENTS: UtilityAgent[] = [
+  {
+    id: DEMO_SLACK_UTILITY_AGENT_ID,
+    name: "Slack task triage",
+    description: "Turns Slack requests into scoped Kandev tasks.",
+    prompt: "Route this Slack request to the correct workspace and workflow.",
+    agent_id: DEMO_IDS.agent,
+    model: "gpt-5",
+    builtin: false,
+    enabled: true,
+    created_at: DEMO_TIMESTAMP,
+    updated_at: DEMO_TIMESTAMP,
+  },
+];
 const DEMO_REPOSITORY_SCRIPTS = [
   {
     id: "demo-script-test",
@@ -82,6 +169,7 @@ scope.onmessage = (event: MessageEvent<DemoWorkerRequest>) => {
     state = restoreState(message.persistedState);
     files = createDemoFiles();
     plansByTask = createDemoPlans();
+    systemRuntime = createDemoSystemRuntime();
     fileReviewsBySession.clear();
     post({ kind: "result", id: message.id, value: createBootPayload(state) });
     return;
@@ -135,10 +223,12 @@ type HttpRouter = (context: HttpRouteContext) => DemoHttpResponse | null;
 
 const HTTP_ROUTERS: HttpRouter[] = [
   routeCoreHttp,
+  (context) => systemRuntime.route(context),
   routeRepositoryHttp,
   routeWorkflowHttp,
   routeStatsHttp,
   routeGitHubHttp,
+  routeIntegrationsHttp,
   routeTaskHttp,
 ];
 
@@ -261,6 +351,16 @@ function routeGitHubHttp({ path }: HttpRouteContext): DemoHttpResponse | null {
   if (path === "/api/v1/github/user/issues") {
     return json({ issues: [], total_count: 0, page: 1, per_page: 25 });
   }
+  if (path === "/api/v1/github/repos") {
+    return json({ repos: demoAccessibleRepositories });
+  }
+  const branchesMatch = path.match(/^\/api\/v1\/github\/repos\/([^/]+)\/([^/]+)\/branches$/);
+  if (branchesMatch) {
+    const owner = decodeURIComponent(branchesMatch[1]);
+    const repo = decodeURIComponent(branchesMatch[2]);
+    const branches = demoRepositoryBranches[`${owner}/${repo}`];
+    return branches ? json({ branches }) : json({ error: "Repository not found" }, 404);
+  }
   if (path === "/api/v1/github/workspace-settings") return githubWorkspaceSettings();
   if (path === "/api/v1/github/action-presets") {
     return json({ workspace_id: DEMO_IDS.workspace, pr: [], issue: [] });
@@ -290,6 +390,20 @@ function githubWorkspaceSettings(): DemoHttpResponse {
     created_at: DEMO_TIMESTAMP,
     updated_at: DEMO_TIMESTAMP,
   });
+}
+
+function routeIntegrationsHttp({ path, method }: HttpRouteContext): DemoHttpResponse | null {
+  if (method !== "GET") return null;
+  if (path === "/api/v1/jira/config") return json(DEMO_JIRA_CONFIG);
+  if (path === "/api/v1/jira/watches/issue") return json({ watches: [] });
+  if (path === "/api/v1/linear/config") return json(DEMO_LINEAR_CONFIG);
+  if (path === "/api/v1/linear/teams") return json({ teams: DEMO_LINEAR_TEAMS });
+  if (path === "/api/v1/linear/watches/issue") return json({ watches: [] });
+  if (path === "/api/v1/sentry/instances") return json({ instances: DEMO_SENTRY_INSTANCES });
+  if (path === "/api/v1/sentry/watches/issue") return json({ watches: [] });
+  if (path === "/api/v1/slack/config") return json(DEMO_SLACK_CONFIG);
+  if (path === "/api/v1/utility/agents") return json({ agents: DEMO_UTILITY_AGENTS });
+  return null;
 }
 
 function routeTaskHttp(context: HttpRouteContext): DemoHttpResponse | null {
