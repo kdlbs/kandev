@@ -184,7 +184,7 @@ export function isSelectableAgentMessage(
 ): boolean {
   if (isTurnActive || isRawView) return false;
   if (message.author_type !== "agent") return false;
-  if (message.type !== "message" && message.type !== "content") return false;
+  if (message.type && message.type !== "message" && message.type !== "content") return false;
   if (!message.content.trim()) return false;
   return true;
 }

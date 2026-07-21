@@ -61,6 +61,7 @@ describe("agent message comment anchors", () => {
 
   it("only permits settled ordinary agent prose", () => {
     expect(isSelectableAgentMessage(message(), false, false)).toBe(true);
+    expect(isSelectableAgentMessage(message({ type: undefined }), false, false)).toBe(true);
     expect(isSelectableAgentMessage(message({ author_type: "user" }), false, false)).toBe(false);
     expect(isSelectableAgentMessage(message({ type: "thinking" }), false, false)).toBe(false);
     for (const type of ["tool_call", "status", "agent_plan"] as const) {
