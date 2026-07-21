@@ -25,6 +25,17 @@ test.describe("GitHub workspace authentication", () => {
       { host: "github.com", login: "alice-automation", active: true, state: "active" },
       { host: "github.com", login: "bob-cli", active: false, state: "active" },
     ]);
+    let releaseWorkspaceBStatus: () => void = () => {};
+    const workspaceBStatusGate = new Promise<void>((resolve) => {
+      releaseWorkspaceBStatus = resolve;
+    });
+    await testPage.route("**/api/v1/github/status?*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("workspace_id") === workspaceB.id) {
+        await workspaceBStatusGate;
+      }
+      await route.continue();
+    });
 
     await testPage.goto(settingsPath(seedData.workspaceId));
     const automation = testPage.getByTestId("github-workspace-automation");
@@ -44,17 +55,14 @@ test.describe("GitHub workspace authentication", () => {
     await testPage.keyboard.press("Escape");
     await testPage.keyboard.press("Escape");
 
-    await testPage.route("**/api/v1/github/status?*", async (route) => {
-      const url = new URL(route.request().url());
-      if (url.searchParams.get("workspace_id") === workspaceB.id) {
-        await new Promise((resolve) => setTimeout(resolve, 350));
-      }
-      await route.continue();
-    });
-    await testPage.goto(settingsPath(workspaceB.id));
+    await testPage.evaluate((path) => {
+      window.history.pushState({}, "", path);
+      window.dispatchEvent(new Event("kandev:navigation"));
+    }, settingsPath(workspaceB.id));
 
     await expect(testPage.getByText("Checking GitHub connection...").first()).toBeVisible();
     await expect(automation.getByText("alice-automation", { exact: true })).toHaveCount(0);
+    releaseWorkspaceBStatus();
     await expect(automation.getByText("bob-cli", { exact: true })).toBeVisible({
       timeout: 15_000,
     });

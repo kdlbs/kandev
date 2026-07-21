@@ -13,16 +13,21 @@ export default async function IntegrationsGitHubPage({
   const status = workspaceId
     ? await fetchGitHubStatus(workspaceId, { cache: "no-store" }).catch(() => null)
     : null;
-  const initialState = status
-    ? {
-        githubStatus: {
-          workspaceId: workspaceId ?? status.workspace_id ?? null,
-          status: normalizeGitHubStatus(status),
-          loaded: true,
-          loading: false,
-        },
-      }
-    : {};
+  const statusWorkspaceId = workspaceId ?? status?.workspace_id;
+  const initialState =
+    status && statusWorkspaceId
+      ? {
+          githubStatus: {
+            byWorkspaceId: {
+              [statusWorkspaceId]: {
+                status: normalizeGitHubStatus(status),
+                loaded: true,
+                loading: false,
+              },
+            },
+          },
+        }
+      : {};
   return (
     <>
       <StateHydrator initialState={initialState} />

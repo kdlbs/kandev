@@ -1,10 +1,71 @@
-import { describe, expect, it } from "vitest";
+import { act, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
 import { getGitHubMutationActor } from "@/lib/github-auth";
-import { normalizeGitHubStatus } from "./use-github-status";
+import type { GitHubStatusResponse } from "@/lib/types/github";
+import { normalizeGitHubStatus, useGitHubStatus } from "./use-github-status";
+
+const fetchGitHubStatusMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/api/domains/github-api", () => ({
+  fetchGitHubStatus: fetchGitHubStatusMock,
+}));
 
 const WORKSPACE_A = "workspace-a";
 const GITHUB_COM = "github.com";
 const AUTOMATION_USER = "automation-user";
+
+afterEach(() => {
+  fetchGitHubStatusMock.mockReset();
+});
+
+describe("useGitHubStatus workspace scoping", () => {
+  it("does not clear a scoped status while the active workspace is unavailable", async () => {
+    const response: GitHubStatusResponse = {
+      workspace_id: WORKSPACE_A,
+      authenticated: false,
+      username: "",
+      auth_method: "none",
+      token_configured: false,
+      required_scopes: [],
+      automation: null,
+      personal: null,
+    };
+    fetchGitHubStatusMock.mockResolvedValue(response);
+
+    function ScopedProbe() {
+      useGitHubStatus(WORKSPACE_A);
+      return null;
+    }
+
+    function UnscopedProbe() {
+      useGitHubStatus();
+      return null;
+    }
+
+    render(
+      <StateProvider
+        initialState={{
+          githubStatus: {
+            byWorkspaceId: {
+              [WORKSPACE_A]: {
+                status: normalizeGitHubStatus(response),
+                loaded: true,
+                loading: false,
+              },
+            },
+          },
+        }}
+      >
+        <ScopedProbe />
+        <UnscopedProbe />
+      </StateProvider>,
+    );
+
+    await act(async () => Promise.resolve());
+    expect(fetchGitHubStatusMock).not.toHaveBeenCalled();
+  });
+});
 
 describe("normalizeGitHubStatus for GitHub Apps", () => {
   it("uses the personal identity for App-backed workspaces", () => {

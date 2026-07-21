@@ -11,6 +11,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useRepoMergeMethods } from "@/hooks/domains/github/use-repo-merge-methods";
 import { mergePR } from "@/lib/api/domains/github-api";
 import { getGitHubMutationActor } from "@/lib/github-auth";
@@ -91,7 +92,7 @@ export function PRMergeButton({
   const [merged, setMerged] = useState(false);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const methods = useRepoMergeMethods(workspaceId, taskPR.owner, taskPR.repo);
-  const status = useAppStore((state) => state.githubStatus.status);
+  const { status } = useGitHubStatus(workspaceId);
   const mutationActor = getGitHubMutationActor(status);
 
   // If the same component instance ever renders a different PR (e.g. the user

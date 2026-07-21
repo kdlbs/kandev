@@ -65,6 +65,10 @@ test.describe("Create task Remote repo picker on mobile", () => {
     seedData,
     testPage,
   }) => {
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
     await apiClient.mockAzureDevOpsSeed({
       authenticated: true,
       projects: [{ id: "project-1", name: "Platform", url: "https://dev.azure.com/acme/Platform" }],

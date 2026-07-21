@@ -13,7 +13,7 @@ const hookMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
-  useGitHubStatus: vi.fn(),
+  useGitHubStatus: () => ({ status: null }),
 }));
 
 vi.mock("@/hooks/domains/github/use-pr-ci-popover", () => ({

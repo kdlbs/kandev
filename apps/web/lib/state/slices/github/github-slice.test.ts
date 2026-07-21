@@ -74,11 +74,24 @@ const baseStatus: GitHubStatus = {
   required_scopes: ["repo"],
 };
 
+const legacyStatus: GitHubStatus = {
+  ...baseStatus,
+  automation: {
+    workspace_id: "ws-1",
+    source: "legacy_shared",
+    github_host: "github.com",
+    status: "active",
+    credential_generation: 1,
+  },
+};
+
 describe("applyGitHubRateLimitUpdate", () => {
   it("merges incoming snapshots into the existing status", () => {
     const store = makeStore();
     store.getState().resetGitHubStatus("ws-1");
-    store.getState().setGitHubStatus("ws-1", { ...baseStatus });
+    store.getState().setGitHubStatus("ws-1", { ...legacyStatus });
+    store.getState().resetGitHubStatus("ws-2");
+    store.getState().setGitHubStatus("ws-2", { ...baseStatus });
 
     store.getState().applyGitHubRateLimitUpdate({
       trigger: "graphql",
@@ -100,17 +113,18 @@ describe("applyGitHubRateLimitUpdate", () => {
       ],
     });
 
-    const status = store.getState().githubStatus.status;
+    const status = store.getState().githubStatus.byWorkspaceId["ws-1"]?.status;
     expect(status?.rate_limit?.graphql?.remaining).toBe(0);
     expect(status?.rate_limit?.graphql?.limit).toBe(5000);
     expect(status?.rate_limit?.core?.remaining).toBe(4500);
+    expect(store.getState().githubStatus.byWorkspaceId["ws-2"]?.status?.rate_limit).toBeUndefined();
   });
 
   it("overwrites only the resources present in the update", () => {
     const store = makeStore();
     store.getState().resetGitHubStatus("ws-1");
     store.getState().setGitHubStatus("ws-1", {
-      ...baseStatus,
+      ...legacyStatus,
       rate_limit: {
         core: {
           resource: "core",
@@ -135,14 +149,14 @@ describe("applyGitHubRateLimitUpdate", () => {
       ],
     });
 
-    const rl = store.getState().githubStatus.status?.rate_limit;
+    const rl = store.getState().githubStatus.byWorkspaceId["ws-1"]?.status?.rate_limit;
     expect(rl?.core?.remaining).toBe(4500); // untouched
     expect(rl?.graphql?.remaining).toBe(100);
   });
 
   it("is a no-op when status has not been hydrated yet", () => {
     const store = makeStore();
-    expect(store.getState().githubStatus.status).toBeNull();
+    expect(store.getState().githubStatus.byWorkspaceId).toEqual({});
 
     store.getState().applyGitHubRateLimitUpdate({
       trigger: "core",
@@ -157,34 +171,40 @@ describe("applyGitHubRateLimitUpdate", () => {
       ],
     });
 
-    expect(store.getState().githubStatus.status).toBeNull();
+    expect(store.getState().githubStatus.byWorkspaceId).toEqual({});
   });
 });
 
 describe("workspace-scoped GitHub status", () => {
-  it("clears the previous workspace actor before the next fetch", () => {
+  it("keeps workspace actors isolated", () => {
     const store = makeStore();
     store.getState().resetGitHubStatus(WORKSPACE_A);
     store.getState().setGitHubStatus(WORKSPACE_A, { ...baseStatus, username: "alice" });
 
     store.getState().resetGitHubStatus(WORKSPACE_B);
 
-    expect(store.getState().githubStatus).toMatchObject({
-      workspaceId: WORKSPACE_B,
+    expect(store.getState().githubStatus.byWorkspaceId[WORKSPACE_A]).toMatchObject({
+      status: { username: "alice" },
+      loaded: true,
+    });
+    expect(store.getState().githubStatus.byWorkspaceId[WORKSPACE_B]).toMatchObject({
       status: null,
       loaded: false,
       loading: false,
     });
   });
 
-  it("ignores a late response from the previous workspace", () => {
+  it("stores a late response under its original workspace", () => {
     const store = makeStore();
     store.getState().resetGitHubStatus(WORKSPACE_A);
     store.getState().resetGitHubStatus(WORKSPACE_B);
 
     store.getState().setGitHubStatus(WORKSPACE_A, { ...baseStatus, username: "alice" });
 
-    expect(store.getState().githubStatus.status).toBeNull();
+    expect(store.getState().githubStatus.byWorkspaceId[WORKSPACE_A]?.status?.username).toBe(
+      "alice",
+    );
+    expect(store.getState().githubStatus.byWorkspaceId[WORKSPACE_B]?.status).toBeNull();
   });
 });
 

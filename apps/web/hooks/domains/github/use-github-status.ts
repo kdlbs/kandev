@@ -27,7 +27,9 @@ export function normalizeGitHubStatus(response: GitHubStatusResponse): GitHubSta
 export function useGitHubStatus(requestedWorkspaceId?: string | null) {
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const workspaceId = requestedWorkspaceId ?? activeWorkspaceId;
-  const statusState = useAppStore((state) => state.githubStatus);
+  const statusState = useAppStore((state) =>
+    workspaceId ? state.githubStatus.byWorkspaceId[workspaceId] : undefined,
+  );
   const setGitHubStatus = useAppStore((state) => state.setGitHubStatus);
   const setGitHubStatusLoading = useAppStore((state) => state.setGitHubStatusLoading);
   const resetGitHubStatus = useAppStore((state) => state.resetGitHubStatus);
@@ -43,24 +45,14 @@ export function useGitHubStatus(requestedWorkspaceId?: string | null) {
   }, [setGitHubStatus, setGitHubStatusLoading, workspaceId]);
 
   useEffect(() => {
-    if (!workspaceId) {
-      resetGitHubStatus(null);
-      return;
-    }
-    if (statusState.workspaceId !== workspaceId) {
+    if (!workspaceId) return;
+    if (!statusState) {
       resetGitHubStatus(workspaceId);
       doFetch();
       return;
     }
     if (!statusState.loaded && !statusState.loading) doFetch();
-  }, [
-    doFetch,
-    resetGitHubStatus,
-    statusState.loaded,
-    statusState.loading,
-    statusState.workspaceId,
-    workspaceId,
-  ]);
+  }, [doFetch, resetGitHubStatus, statusState?.loaded, statusState?.loading, workspaceId]);
 
   useEffect(() => subscribeIntegrationAvailability(doFetch), [doFetch]);
 
@@ -71,12 +63,11 @@ export function useGitHubStatus(requestedWorkspaceId?: string | null) {
     doFetch();
   }, [doFetch, invalidateSystemHealth, resetGitHubStatus, workspaceId]);
 
-  const current = statusState.workspaceId === workspaceId;
   return {
     workspaceId,
-    status: current ? statusState.status : null,
-    loaded: current ? statusState.loaded : false,
-    loading: current ? statusState.loading : false,
+    status: statusState?.status ?? null,
+    loaded: statusState?.loaded ?? false,
+    loading: statusState?.loading ?? false,
     refresh,
   };
 }
