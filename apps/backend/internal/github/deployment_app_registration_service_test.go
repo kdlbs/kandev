@@ -308,6 +308,33 @@ func TestDeploymentAppRegistrationWebhookHealthUsesOnlySignedDeliveries(t *testi
 	}
 }
 
+func TestDeploymentAppWebhookHealthPersistenceFailureDoesNotRetryProcessedDelivery(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	webhooks := NewGitHubWebhookService(
+		"webhook-secret", &githubWebhookMemoryStore{}, nil, nil,
+	)
+	service := &Service{
+		store:  store,
+		logger: testLogger(t),
+		deploymentAppRuntime: &githubAppRuntime{
+			source: DeploymentAppSourceManaged, generation: 1, webhookAuth: webhooks,
+		},
+	}
+	if _, err := store.db.Exec(`DROP TABLE github_app_registration`); err != nil {
+		t.Fatal(err)
+	}
+
+	valid := signedWebhookRequest("webhook-secret", "delivery-1", "ping", []byte(`{}`))
+	if _, err := service.HandleAppWebhook(ctx, valid); err != nil {
+		t.Fatalf("processed webhook returned health persistence error: %v", err)
+	}
+	health := service.currentDeploymentAppWebhookHealth()
+	if health.status != DeploymentAppWebhookVerified || health.lastWebhookAt == nil {
+		t.Fatalf("in-memory health after processed webhook = %+v", health)
+	}
+}
+
 func TestDeploymentAppRegistrationDelayedOldGenerationWebhookCannotChangeCurrentHealth(t *testing.T) {
 	for _, transition := range []string{"replacement", "deletion"} {
 		t.Run(transition, func(t *testing.T) {

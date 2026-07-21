@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 const (
@@ -68,6 +70,38 @@ type GitHubWebhookRequest struct {
 	Event      string
 	Signature  string
 	Payload    []byte
+}
+
+func (s *Service) HandleAppWebhook(
+	ctx context.Context,
+	request GitHubWebhookRequest,
+) (GitHubWebhookResult, error) {
+	runtime := s.currentDeploymentAppRuntime()
+	if runtime == nil || runtime.webhookAuth == nil {
+		return GitHubWebhookResult{}, ErrGitHubNotConfigured
+	}
+	service := runtime.webhookAuth
+	signed := service.Authenticates(request)
+	result, err := service.Handle(ctx, request)
+	if !signed {
+		return result, err
+	}
+	status := DeploymentAppWebhookVerified
+	reason := ""
+	if err != nil {
+		status = DeploymentAppWebhookFailing
+		reason = "signed webhook processing failed"
+	}
+	observedAt := service.now().UTC()
+	if runtime.source == DeploymentAppSourceManaged && s.store != nil {
+		if healthErr := s.store.updateDeploymentAppWebhookHealth(
+			ctx, runtime.generation, status, observedAt, reason,
+		); healthErr != nil && s.logger != nil {
+			s.logger.Warn("deployment App webhook health persistence failed", zap.Error(healthErr))
+		}
+	}
+	s.updateDeploymentAppWebhookHealth(runtime, status, observedAt, reason)
+	return result, err
 }
 
 type GitHubWebhookResult struct {

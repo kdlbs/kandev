@@ -606,40 +606,6 @@ func (s *Service) DisconnectPersonalAuth(ctx context.Context, workspaceID, userI
 	return service.Revoke(ctx, workspaceID, userID)
 }
 
-func (s *Service) HandleAppWebhook(
-	ctx context.Context,
-	request GitHubWebhookRequest,
-) (GitHubWebhookResult, error) {
-	runtime := s.currentDeploymentAppRuntime()
-	if runtime == nil {
-		return GitHubWebhookResult{}, ErrGitHubNotConfigured
-	}
-	service := runtime.webhookAuth
-	if service == nil {
-		return GitHubWebhookResult{}, ErrGitHubNotConfigured
-	}
-	signed := service.Authenticates(request)
-	result, err := service.Handle(ctx, request)
-	if !signed {
-		return result, err
-	}
-	status := DeploymentAppWebhookVerified
-	reason := ""
-	if err != nil {
-		status = DeploymentAppWebhookFailing
-		reason = "signed webhook processing failed"
-	}
-	observedAt := service.now().UTC()
-	var healthErr error
-	if runtime.source == DeploymentAppSourceManaged && s.store != nil {
-		healthErr = s.store.updateDeploymentAppWebhookHealth(
-			ctx, runtime.generation, status, observedAt, reason,
-		)
-	}
-	s.updateDeploymentAppWebhookHealth(runtime, status, observedAt, reason)
-	return result, errors.Join(err, healthErr)
-}
-
 type serviceAppConnectionStore struct {
 	service *Service
 }
