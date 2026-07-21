@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
+import type { ExecutePromptRequest } from "@/lib/api/domains/utility-api";
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
@@ -11,9 +12,21 @@ test.describe("Enhance prompt button in task creation", () => {
     apiClient,
     seedData,
   }) => {
+    let executeBody: ExecutePromptRequest | null = null;
+    await testPage.route("**/api/v1/utility/execute", async (route) => {
+      executeBody = route.request().postDataJSON() as ExecutePromptRequest;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          call_id: "call-stub",
+          response: "Stubbed enhanced task description.",
+        }),
+      });
+    });
+
     // Seed a default utility agent pointing at mock-agent (by name, not UUID).
-    // The mock agent isn't inference-capable so the actual enhance call won't
-    // succeed, but the button should render as enabled.
     const { agents } = await apiClient.listAgents();
     const mockAgent = agents.find((a) => a.name === "mock-agent");
     expect(mockAgent, "mock-agent must be registered").toBeTruthy();
@@ -30,12 +43,20 @@ test.describe("Enhance prompt button in task creation", () => {
 
     // Fill the description textarea
     const textarea = testPage.getByTestId("task-description-input");
-    await textarea.fill("fix the login bug");
+    await textarea.fill("Draft task description.");
 
     // The enhance button should be visible and enabled
     const enhanceBtn = testPage.getByTestId("enhance-prompt-button");
     await expect(enhanceBtn).toBeVisible();
     await expect(enhanceBtn).toBeEnabled();
+
+    await enhanceBtn.click();
+
+    await expect(textarea).toHaveValue("Stubbed enhanced task description.");
+    expect(executeBody).toMatchObject({
+      utility_agent_id: "builtin-enhance-prompt",
+      session_id: "",
+    });
   });
 
   test("enhance button is disabled when no utility agent is configured", async ({
