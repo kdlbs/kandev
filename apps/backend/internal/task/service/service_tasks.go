@@ -29,6 +29,9 @@ const defaultPriority = "medium"
 const (
 	providerAzureDevOps = "azure_devops"
 	providerGitHub      = "github"
+	providerGitLab      = "gitlab"
+	protocolHTTP        = "http"
+	protocolHTTPS       = "https"
 )
 
 const defaultKandevTaskWorktreePathSegment = "/.kandev/tasks/"
@@ -389,7 +392,7 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 // empty. Best-effort: lookup failures degrade to the next fallback.
 func (s *Service) repoDisplayLabel(ctx context.Context, repoInput TaskRepositoryInput, repositoryID string) string {
 	if remoteURL := effectiveRemoteURL(repoInput); remoteURL != "" {
-		if _, owner, name, _, err := parseRemoteRepositoryURL(remoteURL); err == nil {
+		if _, owner, name, _, err := parseRemoteRepositoryURL(remoteURL, repoInput.Provider); err == nil {
 			return owner + "/" + name
 		}
 	}
@@ -686,7 +689,9 @@ func (s *Service) resolveRepoInputLocal(
 func (s *Service) resolveRepoInputRemote(
 	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, baseBranch string,
 ) (string, string, bool, error) {
-	provider, owner, name, canonicalURL, parseErr := parseRemoteRepositoryURL(effectiveRemoteURL(repoInput))
+	provider, owner, name, canonicalURL, parseErr := parseRemoteRepositoryURL(
+		effectiveRemoteURL(repoInput), repoInput.Provider,
+	)
 	if parseErr != nil {
 		return "", "", false, parseErr
 	}
@@ -701,12 +706,7 @@ func (s *Service) resolveRepoInputRemote(
 	if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil && provider == providerGitHub {
 		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, provider, owner, name)
 	}
-	providerHost := ""
-	if provider == providerGitHub {
-		providerHost = githubProviderHost
-	} else if provider == "gitlab" {
-		providerHost = "https://gitlab.com"
-	}
+	providerHost := remoteProviderHost(provider, canonicalURL)
 	repo, repoCreated, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
 		WorkspaceID:    workspaceID,
 		Provider:       provider,
@@ -757,23 +757,28 @@ func effectiveRemoteURL(input TaskRepositoryInput) string {
 	return strings.TrimSpace(input.GitHubURL)
 }
 
-func parseRemoteRepositoryURL(raw string) (provider, owner, name, canonical string, err error) {
+func parseRemoteRepositoryURL(raw, providerHint string) (provider, owner, name, canonical string, err error) {
 	parsed, sshStyle, parseErr := normalizeRemoteRepositoryURL(raw)
 	if parseErr != nil {
 		return "", "", "", "", parseErr
 	}
 	host := strings.ToLower(parsed.Hostname())
+	originHost := strings.ToLower(parsed.Host)
 	parts := strings.Split(strings.Trim(strings.TrimSuffix(parsed.Path, ".git"), "/"), "/")
 	switch host {
 	case "github.com", "www.github.com":
 		return parseGitHubRemote(host, parts, sshStyle)
 	case "gitlab.com", "www.gitlab.com":
-		return parseGitLabRemote(host, parts, sshStyle)
+		return parseGitLabRemote(parsed.Scheme, strings.TrimPrefix(originHost, "www."), parts, sshStyle)
 	case "dev.azure.com":
 		return parseAzureHTTPSRemote(parts)
 	case "ssh.dev.azure.com":
 		return parseAzureSSHRemote(parts)
 	default:
+		if strings.EqualFold(providerHint, providerGitLab) &&
+			(parsed.Scheme == protocolHTTP || parsed.Scheme == protocolHTTPS) {
+			return parseGitLabRemote(parsed.Scheme, originHost, parts, false)
+		}
 		return "", "", "", "", fmt.Errorf("unsupported remote repository host: %s", host)
 	}
 }
@@ -810,7 +815,7 @@ func parseGitHubRemote(host string, parts []string, sshStyle bool) (string, stri
 	return providerGitHub, owner, name, canonical, nil
 }
 
-func parseGitLabRemote(host string, parts []string, sshStyle bool) (string, string, string, string, error) {
+func parseGitLabRemote(scheme, host string, parts []string, sshStyle bool) (string, string, string, string, error) {
 	for index, part := range parts {
 		if part == "-" {
 			parts = parts[:index]
@@ -824,11 +829,31 @@ func parseGitLabRemote(host string, parts []string, sshStyle bool) (string, stri
 	if owner == "" || name == "" {
 		return "", "", "", "", fmt.Errorf("remote repository owner and name are required")
 	}
-	canonical := fmt.Sprintf("https://gitlab.com/%s/%s.git", owner, name)
+	if scheme != protocolHTTP && scheme != protocolHTTPS {
+		scheme = protocolHTTPS
+	}
+	canonical := fmt.Sprintf("%s://%s/%s/%s.git", scheme, host, owner, name)
 	if sshStyle {
 		canonical = fmt.Sprintf("git@%s:%s/%s.git", host, owner, name)
 	}
-	return "gitlab", owner, name, canonical, nil
+	return providerGitLab, owner, name, canonical, nil
+}
+
+func remoteProviderHost(provider, remoteURL string) string {
+	if provider == providerGitHub {
+		return githubProviderHost
+	}
+	if !strings.EqualFold(provider, providerGitLab) {
+		return ""
+	}
+	origin, _ := ParseGitRemoteIdentity(remoteURL)
+	if strings.HasPrefix(origin, protocolHTTP+"://") || strings.HasPrefix(origin, protocolHTTPS+"://") {
+		return origin
+	}
+	if sshHost := strings.TrimPrefix(origin, "ssh://"); sshHost != origin && sshHost != "" {
+		return protocolHTTPS + "://" + sshHost
+	}
+	return ""
 }
 
 func parseAzureHTTPSRemote(parts []string) (string, string, string, string, error) {
@@ -883,7 +908,7 @@ func (s *Service) probeProviderDefaultBranchIfMissing(
 // Supports: https://github.com/owner/repo, github.com/owner/repo,
 // https://github.com/owner/repo.git, with optional trailing slashes.
 func parseGitHubRepoURL(rawURL string) (owner, name string, err error) {
-	provider, owner, name, _, parseErr := parseRemoteRepositoryURL(rawURL)
+	provider, owner, name, _, parseErr := parseRemoteRepositoryURL(rawURL, "")
 	if parseErr != nil {
 		return "", "", parseErr
 	}

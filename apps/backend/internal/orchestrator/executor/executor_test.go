@@ -2346,14 +2346,14 @@ type recordingAuthenticatedCloner struct {
 	password    string
 }
 
-func (c *recordingAuthenticatedCloner) EnsureCloned(
-	_ context.Context, _, _, _ string,
+func (c *recordingAuthenticatedCloner) EnsureClonedForProvider(
+	_ context.Context, _, _, _, _, _, _, _ string,
 ) (string, error) {
 	c.normalCalls++
 	return "/repos/normal", nil
 }
 
-func (c *recordingAuthenticatedCloner) BuildCloneURL(_, _, _ string) (string, error) {
+func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_, _, _, _ string) (string, error) {
 	return "", nil
 }
 

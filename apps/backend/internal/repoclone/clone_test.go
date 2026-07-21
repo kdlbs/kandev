@@ -80,7 +80,7 @@ func TestRepoPathConfinesRepositoryToCloneBase(t *testing.T) {
 				t.Fatal("RepoPath() accepted a path outside the clone base")
 			}
 		})
- 	}
+	}
 }
 
 func TestGitCmdBindsGitLabCredentialToExactOrigin(t *testing.T) {
