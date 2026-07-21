@@ -135,6 +135,18 @@ class PluginRegistryStore {
       .map((entry) => entry.value.Component);
   }
 
+  /**
+   * Slot components for `slot` registered by `pluginId` only. Used by
+   * owner-scoped slots (e.g. "plugin-settings") that render on a specific
+   * plugin's own surface, so the host filters by owner instead of making
+   * every plugin author gate on the current plugin id.
+   */
+  getSlotComponentsForPlugin(slot: string, pluginId: string): SlotComponent[] {
+    return this.slotComponents
+      .filter((entry) => entry.value.slot === slot && entry.pluginId === pluginId)
+      .map((entry) => entry.value.Component);
+  }
+
   getWsHandlers(action: string): WsHandler[] {
     return this.wsHandlers
       .filter((entry) => entry.value.action === action)

@@ -252,7 +252,8 @@ interface PluginRegistry {
   // Route under /settings/plugins/{id}/..., rendered inside the settings shell.
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
   // Named slot injection. Initial slots: "task-sidebar", "settings-nav",
-  // "main-nav-footer", "chat-input-actions" (see "Chat toolbar actions" below).
+  // "main-nav-footer", "chat-input-actions", "chat-top-bar", "plugin-settings"
+  // (see "Named slots" below).
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
   // WS action handler, bridged into the existing lib/ws dispatch.
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
@@ -343,6 +344,11 @@ plugins at once. Available slots:
 | `main-nav-footer` | Footer of the main sidebar | — |
 | `chat-input-actions` | Chat composer toolbar, beside the model picker, mic, and send button | `{ taskId, taskTitle, activeSessionId, sessionIds }` |
 | `chat-top-bar` | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
+| `plugin-settings` | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), between the settings form and the manifest card | `{ pluginId, status }` |
+
+`plugin-settings` is the one exception to "every plugin's component renders":
+it is **owner-scoped**, so the host renders only the component registered by the
+plugin whose settings page is being viewed. See "Plugin settings page" below.
 
 ### Chat toolbar actions
 
@@ -433,6 +439,33 @@ metric chips.
 ```js
 // inside initialize(registry, host):
 registry.registerComponent("chat-top-bar", makeTopBarStatus(host));
+```
+
+### Plugin settings page
+
+Register a `plugin-settings` component to render your own UI inline on your
+plugin's settings page (**Settings > Plugins > `<plugin>`**), between the
+schema-driven settings form and the manifest card. Use it for live integration
+health — e.g. "CLI installed ✅ v0.45.2" or "API token ✅ authenticated" — or any
+custom controls next to the config form. The host passes:
+
+```ts
+type PluginSettingsSlotProps = {
+  pluginId: string; // the plugin whose settings page is being viewed (always yours)
+  status: "registered" | "active" | "error" | "disabled" | "uninstalled";
+};
+```
+
+Unlike the other slots, `plugin-settings` is **owner-scoped**: the host renders
+only the component registered by the plugin currently being viewed, so your card
+appears on your own settings page and never on another plugin's — you do **not**
+need to gate on `slotProps.pluginId` yourself. The host provides no wrapper card,
+so your component owns its own card and can render `null` when it has nothing to
+show.
+
+```js
+// inside initialize(registry, host):
+registry.registerComponent("plugin-settings", makeSettingsStatus(host));
 ```
 
 ## Three integration patterns

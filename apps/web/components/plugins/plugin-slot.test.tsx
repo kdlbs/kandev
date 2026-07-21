@@ -4,6 +4,7 @@ import { pluginRegistry } from "@/lib/plugins/registry";
 import { PluginSlot } from "./plugin-slot";
 
 const SLOT = "task-sidebar";
+const OWNER_SLOT = "plugin-settings";
 
 function cleanupPlugins(...pluginIds: string[]) {
   pluginIds.forEach((id) => pluginRegistry.unregisterPlugin(id));
@@ -54,6 +55,51 @@ describe("PluginSlot", () => {
     render(<PluginSlot name={SLOT} slotProps={{ label: "hello" }} />);
 
     expect(screen.getByTestId("slot-a").textContent).toBe("hello");
+  });
+
+  it("renders only the owning plugin's component when ownerPluginId is set", () => {
+    // "plugin-settings" is owner-scoped: the host isolates by owner, so a
+    // registered component never has to gate on the current plugin id itself.
+    const Card = ({ slotProps }: { slotProps?: unknown }) => (
+      <div data-testid="settings-card">
+        card for {String((slotProps as { pluginId: string })?.pluginId)}
+      </div>
+    );
+    pluginRegistry.forPlugin("plugin-a").registerComponent(OWNER_SLOT, Card);
+    pluginRegistry.forPlugin("plugin-b").registerComponent(OWNER_SLOT, Card);
+
+    // Viewing plugin-b's page: only plugin-b's component renders, with its id.
+    render(
+      <PluginSlot
+        name={OWNER_SLOT}
+        ownerPluginId="plugin-b"
+        slotProps={{ pluginId: "plugin-b", status: "active" }}
+      />,
+    );
+
+    const cards = screen.getAllByTestId("settings-card");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.textContent).toBe("card for plugin-b");
+  });
+
+  it("resets the error boundary when the owner changes so a healthy plugin's card is not hidden", () => {
+    // eslint-disable-next-line no-console -- expected error boundary log, assert + silence it
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    pluginRegistry.forPlugin("plugin-a").registerComponent(OWNER_SLOT, () => {
+      throw new Error("boom");
+    });
+    pluginRegistry
+      .forPlugin("plugin-b")
+      .registerComponent(OWNER_SLOT, () => <div data-testid="slot-b">B</div>);
+
+    // Same PluginSlot instance: plugin-a throws, then we "navigate" to plugin-b.
+    const { rerender } = render(<PluginSlot name={OWNER_SLOT} ownerPluginId="plugin-a" />);
+    rerender(<PluginSlot name={OWNER_SLOT} ownerPluginId="plugin-b" />);
+
+    // plugin-b is healthy and must render, not be hidden behind plugin-a's error.
+    expect(screen.getByTestId("slot-b")).not.toBeNull();
+    consoleError.mockRestore();
   });
 
   it("isolates a throwing slot component so a sibling still renders", () => {
