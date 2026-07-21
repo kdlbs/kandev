@@ -30,26 +30,21 @@ func (r *officeRebindRaceRepository) UpdateTaskSessionIfCurrentState(
 	session *models.TaskSession,
 	expected models.TaskSessionState,
 ) (bool, error) {
-	if r.beforeGuardedUpdate != nil {
-		hook := r.beforeGuardedUpdate
-		r.beforeGuardedUpdate = nil
-		hook()
-	}
 	return r.mockRepository.UpdateTaskSessionIfCurrentState(ctx, session, expected)
 }
 
-func (r *officeRebindRaceRepository) UpdateTaskSessionIfCurrentStateWithMetadata(
+func (r *officeRebindRaceRepository) UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
 	ctx context.Context,
 	session *models.TaskSession,
 	expected models.TaskSessionState,
-	metadata map[string]interface{},
+	keys []string,
 ) (bool, error) {
 	if r.beforeGuardedUpdate != nil {
 		hook := r.beforeGuardedUpdate
 		r.beforeGuardedUpdate = nil
 		hook()
 	}
-	return r.mockRepository.UpdateTaskSessionIfCurrentStateWithMetadata(ctx, session, expected, metadata)
+	return r.mockRepository.UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(ctx, session, expected, keys)
 }
 
 func TestEnsureSessionForAgent_CreatesWhenMissing(t *testing.T) {

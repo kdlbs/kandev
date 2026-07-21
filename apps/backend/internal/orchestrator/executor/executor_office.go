@@ -15,11 +15,11 @@ import (
 )
 
 type officeSessionMetadataUpdater interface {
-	UpdateTaskSessionIfCurrentStateWithMetadata(
+	UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
 		ctx context.Context,
 		session *models.TaskSession,
 		expected models.TaskSessionState,
-		metadata map[string]interface{},
+		keys []string,
 	) (bool, error)
 }
 
@@ -114,7 +114,16 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 		} {
 			delete(updated.Metadata, key)
 		}
-		changed, err := updater.UpdateTaskSessionIfCurrentStateWithMetadata(ctx, &updated, expectedState, updated.Metadata)
+		changed, err := updater.UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(ctx, &updated, expectedState, []string{
+			"acp_session_id",
+			models.SessionMetaKeySessionMode,
+			models.SessionMetaKeyRuntimeConfig,
+			models.SessionMetaKeyRuntimeConfigOverrides,
+			models.SessionMetaKeyACPConfigBaseline,
+			models.SessionMetaKeyACPModelState,
+			"context_window",
+			models.SessionMetaKeyLastAgentError,
+		})
 		if err != nil {
 			return fmt.Errorf("update office execution profile: %w", err)
 		}

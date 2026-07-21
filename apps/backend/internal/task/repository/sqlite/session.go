@@ -452,20 +452,16 @@ func (r *Repository) UpdateTaskSessionIfCurrentState(
 	return r.updateTaskSessionWithStateGuard(ctx, r.db, session, &expected)
 }
 
-// UpdateTaskSessionIfCurrentStateWithMetadata persists a full session row and
-// metadata atomically while the stored state still matches expected. This is
-// used when a guarded row update must also reset provider-owned metadata.
-func (r *Repository) UpdateTaskSessionIfCurrentStateWithMetadata(
+// UpdateTaskSessionIfCurrentStateRemovingMetadataKeys persists a full session
+// row and removes provider-owned metadata atomically while the stored state
+// still matches expected. JSON removal preserves unrelated concurrent keys.
+func (r *Repository) UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
 	ctx context.Context,
 	session *models.TaskSession,
 	expected models.TaskSessionState,
-	metadata map[string]interface{},
+	keys []string,
 ) (bool, error) {
 	session.UpdatedAt = time.Now().UTC()
-	metadataJSON, err := marshalSessionMetadata(metadata)
-	if err != nil {
-		return false, err
-	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -475,13 +471,58 @@ func (r *Repository) UpdateTaskSessionIfCurrentStateWithMetadata(
 	if err != nil || !changed {
 		return changed, err
 	}
-	if err := r.updateSessionMetadataJSON(ctx, tx, session.ID, metadataJSON, session.UpdatedAt); err != nil {
+	if err := r.removeSessionMetadataKeys(ctx, tx, session.ID, keys, session.UpdatedAt); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func (r *Repository) removeSessionMetadataKeys(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	sessionID string,
+	keys []string,
+	updatedAt time.Time,
+) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	driver := r.db.DriverName()
+	var query string
+	args := make([]interface{}, 0, len(keys)+2)
+	if dialect.IsPostgres(driver) {
+		expr := "(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END)"
+		for range keys {
+			expr = fmt.Sprintf("(%s #- ARRAY[?]::text[])", expr)
+		}
+		for _, key := range keys {
+			args = append(args, key)
+		}
+		query = fmt.Sprintf("UPDATE task_sessions SET metadata = %s::text, updated_at = ? WHERE id = ?", expr)
+	} else {
+		paths := make([]string, len(keys))
+		for i, key := range keys {
+			paths[i] = "?"
+			args = append(args, "$."+key)
+		}
+		query = fmt.Sprintf(
+			"UPDATE task_sessions SET metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, %s), updated_at = ? WHERE id = ?",
+			strings.Join(paths, ", "),
+		)
+	}
+	args = append(args, updatedAt, sessionID)
+	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", sessionID)
+	}
+	return nil
 }
 
 // UpdateTaskSessionWithMetadata updates the session row and metadata column in

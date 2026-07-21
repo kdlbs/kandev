@@ -406,14 +406,16 @@ func (m *mockRepository) UpdateTaskSessionIfCurrentState(
 	return true, nil
 }
 
-func (m *mockRepository) UpdateTaskSessionIfCurrentStateWithMetadata(
+func (m *mockRepository) UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
 	ctx context.Context,
 	session *models.TaskSession,
 	expected models.TaskSessionState,
-	metadata map[string]interface{},
+	keys []string,
 ) (bool, error) {
 	updated := cloneMockTaskSession(session)
-	updated.Metadata = cloneMockSessionMap(metadata)
+	for _, key := range keys {
+		delete(updated.Metadata, key)
+	}
 	return m.UpdateTaskSessionIfCurrentState(ctx, updated, expected)
 }
 
