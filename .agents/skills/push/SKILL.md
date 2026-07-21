@@ -1,35 +1,41 @@
 ---
 name: push
-description: Commit and push to the current branch. Use --fixup to also wait for CI and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, then fix issues.
+description: Push an already verified and committed branch. With --fixup, return control to the planner for delegated CI and review handling.
 ---
 
 # Push
 
+## Planner Entry
+
+Load `/planner-orchestration`. The user-started primary session delegates any
+required verification and commit first, then assigns the push to an
+`implementer` worker. With `--fixup`, the planner coordinates `/pr-fixup`
+workers after the push. It does not run Git or GitHub commands directly.
+
+An explicitly assigned push worker pushes only the already verified and
+committed branch and does not spawn other workers.
+
 ## Available skills
 
-- **`/commit`** — Stage and commit changes using Conventional Commits. Runs `/verify` internally.
+- **`/commit`** — Planner-side prerequisite for verified, committed changes.
 - **`/pr-fixup`** — Wait for CI checks and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix any failures or valid comments, and push again.
-
-## Context
-
-- Current branch: !`git branch --show-current`
-- Current git status: !`git status`
 
 ## Options
 
-- `--fixup` — after pushing, run `/pr-fixup` to wait for CI and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix issues, and push again.
+- `--fixup` — after pushing, report that the planner should begin the delegated `/pr-fixup` workflow.
 
 > **Note:** This skill only uses `git push`. GitHub CLI dependency is indirect via `/pr-fixup`.
 
 ## Your task
 
-Commit any pending changes and push to the remote branch.
+Push the already committed branch to its remote.
 
 ### Steps
 
 **Create a todo/task for each step below and mark them as completed as you go.**
 
-1. **Uncommitted changes:** If there are dirty or staged changes, run `/commit` first (it runs `/verify` internally).
+1. **Uncommitted changes:** If there are dirty or staged changes, stop and tell
+   the planner that verification and commit assignments are required first.
 
 2. **Safety check:** Verify the current branch is NOT `main` or `master`. If it is, stop and ask the user — direct pushes to the default branch should go through a PR.
 
@@ -49,4 +55,5 @@ Commit any pending changes and push to the remote branch.
 
 4. **Report** the pushed commit hash and branch.
 
-5. **If `--fixup`:** Run `/pr-fixup` to wait for CI checks and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix any failures or valid comments, and push.
+5. **If `--fixup`:** Return the pushed branch state to the planner so it can
+   coordinate `/pr-fixup`. Do not poll, fix, verify, or spawn another worker.

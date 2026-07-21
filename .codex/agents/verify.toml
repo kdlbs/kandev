@@ -1,14 +1,15 @@
 name = "verify"
-description = "Run Kandev format, typecheck, tests, and lint before commit, then fix failures and rerun focused failed commands until clean."
-model = "gpt-5"
-model_reasoning_effort = "medium"
+description = "Run Kandev format, typecheck, tests, and lint before commit, then report failures without fixing source or test logic."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
 sandbox_mode = "workspace-write"
 developer_instructions = """
-Run the monorepo verification pipeline and fix issues found.
+Run the monorepo verification pipeline and report issues found.
 
-Install apps dependencies when missing. Resolve the current PR base with gh pr view --json baseRefName; fetch and rebase only when it resolves, otherwise report that rebasing was skipped. Do not infer stacked-PR bases from Git upstream.
+Install apps dependencies when missing. Resolve the current PR base with gh pr view --json baseRefName; fetch and report whether it is an ancestor of HEAD. Do not rebase, stash, resolve conflicts, or infer stacked-PR bases from Git upstream.
 
 Generate web metadata, then run make fmt, make typecheck, make test, and make lint through scripts/run-quiet. Inspect only targeted log ranges. Full verification requires every test subtarget, including CLI, scripts, and desktop smoke coverage; run scoped Rust tests for Rust/Tauri changes after checking the required rust-version.
 
-Fix root causes rather than suppressing checks. Retry loopback-bind failures with normal sandbox escalation and use invocation-specific writable temp/Go/lint caches for environment failures. Rerun only the failed focused command after each fix. Finish only when the complete pipeline passes, or report a concrete blocker.
+Do not fix production or test logic. Retry environment-only failures with normal sandbox escalation and invocation-specific writable temp/Go/lint caches. For source failures, return the failed command, targeted log evidence, likely files, and a remediation recommendation for an implementer. Finish with a compact pass/fail report.
+Do not spawn subagents.
 """

@@ -5,12 +5,19 @@ description: Write and run web E2E tests (Playwright) using TDD — locations, p
 
 # E2E Tests
 
+## Execution Context
+
+Load `/planner-orchestration`. The user-started primary session delegates this
+procedure to an `implementer` or `test-engineer` worker and does not write or run
+E2E tests directly. An explicitly assigned worker continues below and does not
+spawn other workers.
+
 Write E2E tests using TDD (Red-Green-Refactor). Always run the tests you create and watch them fail before implementing.
 
 ## Available skills and subagents
 
 - **`/tdd`** — Follow the Red-Green-Refactor cycle when writing tests.
-- **`/verify`** — Run after completing tests to ensure everything passes across the monorepo.
+- **`/verify`** — The planner launches this separately after targeted E2E tests pass.
 - **`/playwright-cli`** — Interactive browser automation. Use to validate features against the dev server before writing tests, and to debug failing tests with `--debug=cli`.
 
 ## Location
@@ -389,4 +396,5 @@ Follow `/tdd` when writing E2E tests:
 1. **RED** — Write the spec, run it, watch it fail (missing `data-testid`, feature not implemented, etc.)
 2. **GREEN** — Implement the feature/fix, add `data-testid` attributes, run the test until green
 3. **REFACTOR** — Extract page objects, clean up selectors, keep tests green
-4. Run `/verify` when done
+4. Run the targeted E2E spec when done and report that full verification is
+   required as a separate planner assignment

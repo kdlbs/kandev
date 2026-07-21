@@ -7,6 +7,13 @@ description: Simplify recently changed code — inline one-off abstractions, rem
 
 Post-implementation simplification pass. Review recently changed code and actively simplify it while preserving all behavior.
 
+## Planner Entry
+
+Load `/planner-orchestration`. The user-started primary session delegates this
+procedure to the registered `simplify` worker and assigns verification to the
+`verify` worker afterward. It does not edit or verify the code directly. An
+explicitly assigned simplify worker continues below and does not spawn workers.
+
 The best code is code you don't have to write. The second best is code anyone can read.
 
 ## Available skills and subagents
@@ -52,7 +59,9 @@ Work through each changed file. For each simplification, verify tests still pass
 
 ### 3. Verify
 
-Delegate to the **`verify` sub-agent** to ensure all tests, lints, and typechecks still pass. If anything breaks, the simplification changed behavior — revert it.
+Report the required full verification to the planner. The planner delegates it
+to the `verify` worker. If anything breaks, the simplification changed behavior
+and the planner assigns the correction to a worker.
 
 ### 4. Summary
 

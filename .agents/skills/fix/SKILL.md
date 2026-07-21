@@ -7,12 +7,27 @@ description: Fix bugs and issues — reproduce, find root cause, minimal fix wit
 
 Systematic bug fixing: reproduce the problem, find the root cause, apply a minimal fix with a regression test.
 
+## Planner Entry
+
+Load `/planner-orchestration`. In the user-started primary session:
+
+1. Delegate reproduction and root-cause diagnosis to an `implementer` worker
+   with production edits forbidden.
+2. Review the evidence and present the root cause to the user.
+3. Delegate the regression test and minimal patch to an `implementer` worker.
+4. Delegate QA and full verification to their named workers.
+
+Stop after dispatching and coordinating these assignments. Do not continue into
+the direct fix procedure below. A diagnostic worker performs phases 0-2 and
+returns evidence. A fix implementer performs phase 3 plus targeted tests. No
+worker performs planner phases 4-5 or spawns other workers.
+
 ## Available skills and subagents
 
 - **`/tdd`** — Use for implementing the fix with a regression test (Red-Green-Refactor).
 - **`/e2e`** — Use when the bug is in a user-facing flow and needs a Playwright regression test.
-- **`/verify`** — Run after fixing to ensure nothing else broke.
-- **`/record`** — Record architectural decisions or insights discovered during the fix.
+- **`/verify`** — The planner launches this after the fix worker reports targeted checks green.
+- **`/record`** — The planner uses this when the worker reports a durable architectural decision.
 
 ## What a fix produces (and what it doesn't)
 
@@ -35,8 +50,8 @@ Create these tasks immediately (use your task/todo tracking tool if available):
 1. **Reproduce the bug** — Write a test or find a reliable reproduction case
 2. **Find the root cause** — Trace the code path, narrow the scope, state the cause clearly
 3. **Fix with TDD** — Minimal fix with regression test, no surrounding refactors
-4. **Verify** — Run full verification, check for similar patterns elsewhere
-5. **Record** — Save any architectural decisions or insights, AND update the related feature spec if the bug exposed a requirement gap
+4. **Verify** — Planner delegates full verification and assigns any remediation
+5. **Record** — Planner updates durable artifacts when worker evidence exposes a requirement or architecture gap
 
 Then start with task 0 when the bug is issue-sourced, otherwise task 1. Mark each task in_progress when you begin it and completed when you finish it. Do not skip ahead — fixing without reading the source issue (when one exists) or reproducing leads to patches that don't address the real problem. Fixing without understanding the root cause leads to whack-a-mole.
 
@@ -126,9 +141,9 @@ Mark task 3 as completed.
 
 Mark task 4 as in_progress.
 
-1. Run `/verify` to ensure nothing else broke
-2. Check that the fix addresses the root cause, not just the symptom
-3. If the same category of bug could occur elsewhere, grep for similar patterns and flag them
+This is a planner coordination phase. Launch the registered `verify` worker,
+review its report, and assign any failures to a new implementer. The fix worker
+only reports its targeted test results and any similar patterns it noticed.
 
 Mark task 4 as completed.
 
@@ -145,7 +160,9 @@ Two questions, in order:
 A bug can mean the spec was wrong, ambiguous, or silent about the scenario that broke. Ask: "If someone re-implemented this feature from the spec alone, would they reproduce this bug?" If yes, the spec is incomplete.
 
 - Find the related spec under `docs/specs/<slug>/spec.md` (check `docs/specs/INDEX.md`).
-- Update it to cover the missing requirement — usually a new line under **What** and/or a new **GIVEN/WHEN/THEN** scenario. Keep it observable and behavior-focused; don't paste the root cause or the fix.
+- The planner updates it to cover the missing requirement, usually with a new
+  line under **What** or a new GIVEN/WHEN/THEN scenario. The fix worker only
+  reports the gap.
 - If no spec exists yet but should (this category of behavior is feature-shaped and load-bearing), flag it to the user — don't create one unilaterally during a fix.
 - If the bug was in infra, tooling, or behavior not covered by any feature spec, skip — there is nothing to update.
 
@@ -153,7 +170,10 @@ A bug can mean the spec was wrong, ambiguous, or silent about the scenario that 
 
 **2. Did the fix encode a new project-wide convention?**
 
-If the root cause exposed an architectural gap, a non-obvious constraint, or a rule that should bind future code (e.g., "GC code must fail-closed", "all bulk deletes must be transactional"), run `/record decision` to capture it as an ADR.
+If the root cause exposed an architectural gap, a non-obvious constraint, or a
+rule that should bind future code, the planner runs `/record decision`. The fix
+worker reports the candidate decision and alternatives; it does not create the
+ADR.
 
 If neither question applies, skip this phase.
 

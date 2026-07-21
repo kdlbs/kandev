@@ -7,6 +7,15 @@ description: Discover and choose the right Kandev agent skill for a task. Use wh
 
 Use this as the routing map for Kandev's local skills. Prefer the repo's existing skills over importing adjacent upstream names.
 
+## Session Role
+
+Load `/planner-orchestration` before routing development work. The user-started
+primary session plans and delegates through the active harness's native
+subagent tool; registered custom agents execute bounded worker assignments.
+Execution skills below describe what the assigned worker does, not work the
+planner performs directly. Never use Kandev MCP task/session APIs as worker
+delegation or as a fallback for unavailable native subagents.
+
 ## Skill Map
 
 ```text
@@ -38,13 +47,15 @@ Task arrives
 
 ## Operating Rules
 
-1. Check for an applicable local skill before starting non-trivial work.
-2. If multiple skills apply, use the smallest set that covers the task and state the order.
-3. Skills are workflows, not suggestions. Follow required verification and stop conditions.
-4. Surface assumptions before building on them. If requirements, specs, and code disagree, stop and name the conflict.
-5. Keep scope tight. Do not refactor adjacent systems or add "useful" features that are not in the request/spec.
-6. Verify with evidence: targeted tests, full `/verify` when needed, browser/E2E proof for user-facing flows.
-7. Product media always invokes `/product-demo-seeding` before `/product-video-capture`, even when a prior seed or capture exists. Re-prove current `origin/main`, disposable runtime/data, and teardown; never capture a developer instance or database.
+1. Determine whether the current session is the planner or an assigned worker.
+2. Check for an applicable local skill before starting non-trivial work.
+3. If multiple skills apply, use the smallest set that covers the task and state the order.
+4. Skills are workflows, not suggestions. Follow required verification and stop conditions.
+5. Surface assumptions before building on them. If requirements, specs, and code disagree, stop and name the conflict.
+6. Keep scope tight. Do not refactor adjacent systems or add "useful" features that are not in the request/spec.
+7. Verify with evidence: targeted tests, full `/verify` when needed, browser/E2E proof for user-facing flows.
+8. The planner never uses a direct execution fallback when a worker is unavailable.
+9. Product media always invokes `/product-demo-seeding` before `/product-video-capture`, even when a prior seed or capture exists. Re-prove current `origin/main`, disposable runtime/data, and teardown; never capture a developer instance or database.
 
 ## Upstream Name Mapping
 

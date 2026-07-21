@@ -7,22 +7,34 @@ description: Wait for CI checks and automated reviews (CodeRabbit, Greptile, Cla
 
 Wait for CI and code review to complete on a pull request, fix any failures or valid comments, then push.
 
+## Planner Entry
+
+Load `/planner-orchestration`. The user-started primary session coordinates this
+workflow by delegating polling to `pr-poller`, code/comment remediation to an
+`implementer`, full checks to `verify`, and commit/push actions to a final
+bounded implementer assignment. It does not run GitHub, test, edit, commit, or
+push commands directly. If a required worker is unavailable, stop and report
+the blocked phase.
+
+Each worker uses only the procedure for its assigned phase: `pr-poller` gathers
+state, a remediation implementer handles CI logs/code/comments, `verify` runs
+checks and reports failures, and a delivery implementer commits or pushes an
+already verified result. Workers never invoke one another.
+
 > **GitHub tool selection:** This skill uses `gh` CLI commands by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools) for PR checks, comments, replies, and reviews. Some operations (reactions, resolving threads, fetching CI logs) may not be available in all environments — skip gracefully.
 > **Helper scripts location:** `scripts/pr-state`, `scripts/pr-resolve`, and `scripts/run-quiet` are at the worktree root (`<worktree>/scripts/...`), not under `.agents/skills/pr-fixup/scripts/`.
 
 ## Available skills and subagents
 
-- **`pr-poller` subagent (Sonnet)** — Polls CI checks and the 5 review bots until terminal, returns a compact structured report. Replaces the old steps 1-3 and the post-push re-check (step 6).
-- **`verify` subagent (Sonnet)** — Run the full verification pipeline (format, typecheck, test, lint) before pushing fixes.
+- **`pr-poller` worker** — Polls CI checks and the 5 review bots until terminal, returns a compact structured report.
+- **`verify` worker** — Runs the full verification pipeline and returns a compact pass/fail report before delivery.
 - **`/e2e`** — Read for debugging guidance when E2E tests fail in CI. Covers test patterns, run commands, failure triage, and local reproduction.
 - **`/commit`** — Use for staging and committing fixes with Conventional Commits format.
 
-Prefer the registered `pr-poller` and `verify` helpers when the runtime supports delegated helpers. If runtime policy forbids delegated helpers/subagents unless explicitly requested by the user, either named helper is not registered, or a helper fails to start, initialize, or access the required GitHub network/shared-worktree resources, treat helper delegation as unavailable and use the direct-command fallback. Do not substitute a generic/general subagent for polling; it returns too slowly for the 30s cadence and can look hung, and may lack DNS or shared `.git` write access. If helper delegation is unavailable, follow the direct-command fallback sections below and keep the same output contract: compact CI state, compact review state, bounded polling, and full local verification before pushing.
-
-## Context
-
-- Current branch: !`git branch --show-current`
-- Current PR: !`gh pr view --json number,url,title`
+The planner uses the registered `pr-poller` and `verify` workers. Do not
+substitute generic agents. Any command procedure belongs only to the worker
+assigned that section: polling, remediation, verification, or delivery. It is
+never a planner fallback.
 
 ## Before anything else: create the pipeline
 
@@ -32,12 +44,12 @@ Create these tasks immediately in the current session's todo/checklist tool. Do
 not create Kandev subtasks or persistent work items unless the user explicitly
 requests task tracking:
 
-1. **Gather PR state** — Use `pr-poller` when available; otherwise gather compact CI + bot review state via `scripts/pr-state`; always check PR mergeability and local conflict state
+1. **Gather PR state** — Delegate to `pr-poller`; always include PR mergeability and local conflict state
 2. **Fix failing CI checks** — Read failing run logs (via `scripts/run-quiet gh-run -- gh run view ...`), fix issues, run E2E tests locally if needed
 3. **Triage review comments** — Classify each comment as valid, already addressed, nitpick, or wrong
 4. **Address each comment** — Fix or reply with reasoning, resolve threads
-5. **Verify, commit, push** — Use `verify` when available; otherwise run the full verification commands directly; commit fixes; push
-6. **Re-check** — Use `pr-poller` again when available; otherwise re-check directly until failures, pending checks, and unresolved review threads are clear. If new failures, loop back to task 2
+5. **Verify, commit, push** — Delegate verification, then separate bounded commit/push delivery
+6. **Re-check** — Delegate to `pr-poller` again; if new failures, loop back to task 2
 7. **Summary** — Report what was done
 
 Then start with task 1. Mark each task in_progress when you begin it and completed when you finish it.
@@ -50,7 +62,7 @@ Then start with task 1. Mark each task in_progress when you begin it and complet
 
 Mark task 1 as in_progress.
 
-If available, invoke the `pr-poller` subagent with the PR number (or let it resolve via `gh pr view` against the current branch). The subagent:
+The planner invokes the registered `pr-poller` with the PR number. The worker:
 - Fetches the current CI/bot/comment state once
 - Polls (30s cadence, **20 min cap**) until every CI check and every bot (CodeRabbit, Greptile, Claude, OpenCode, cubic) reaches a terminal state
 - Counts unresolved review threads and bot issue comments
@@ -60,7 +72,10 @@ If available, invoke the `pr-poller` subagent with the PR number (or let it reso
 
 Always check for merge conflicts during task 1 before acting on any clean-poller shortcut. A PR can be blocked by conflicts before any check fails.
 
-Inspect GitHub's `mergeable` / `mergeStateStatus` fields and the local index (`git ls-files -u`) before fixing CI or review comments. If GitHub reports file-level conflicts, the local index is unmerged, or conflict markers exist in tracked source files, load `references/merge-conflicts.md` and resolve the conflicts first. Do not start a new merge/rebase while the index is already unmerged, and do not discard unrelated user changes to make conflict resolution easier.
+The planner asks `pr-poller` to include GitHub mergeability and local unmerged
+index state. If either reports conflicts, assign a bounded implementer to load
+`references/merge-conflicts.md`, resolve them, and return targeted verification
+before continuing. The planner does not inspect or resolve conflicts directly.
 
 **Parse the report.** The fields you care about:
 
@@ -73,9 +88,11 @@ Inspect GitHub's `mergeable` / `mergeStateStatus` fields and the local index (`g
 
 **Do not fetch poll output yourself** — that is what burns context. The report is the only thing that enters your context.
 
-#### Direct-command fallback
+#### Polling Worker Reference
 
-If delegated polling is unavailable, gather the same information directly without streaming long logs into context:
+The commands below document what the registered `pr-poller` gathers. They are
+not a planner or remediation-worker fallback. If `pr-poller` cannot be launched,
+stop and report the blocked phase.
 
 ```bash
 scripts/pr-state --summary <PR>
@@ -155,6 +172,10 @@ Mark task 1 as completed.
 
 Mark task 2 as in_progress.
 
+The planner assigns this section to a remediation implementer with the poller
+report, failed run IDs, owned files, and acceptance criteria. The implementer
+does not invoke other workers.
+
 **Sanity-check the poller's `ci_failed` before fixing anything.** Confirm each reported check `name` actually appears in `gh pr checks <PR>` output and its `run_id` resolves (`gh run view <run_id>` must not 404). If the report cites checks the repo doesn't have, discard it and re-gather state directly before touching code.
 
 Prefer `scripts/pr-state <PR>` for this cross-check before falling back to raw `gh` output. It already gives you raw checks with normalized names plus extracted `run_id`s in one JSON snapshot.
@@ -200,6 +221,9 @@ Mark task 2 as completed.
 ### 3. Triage review comments
 
 Mark task 3 as in_progress.
+
+The planner assigns this section to a remediation implementer with the compact
+thread list and relevant diff scope.
 
 Use the report's `unresolved_review_threads` and `issue_comments_from_bots` counts to know whether there's anything to triage. If both are 0, mark this step completed and move on.
 
@@ -272,6 +296,9 @@ Mark task 3 as completed.
 ### 4. Address each comment
 
 Mark task 4 as in_progress.
+
+The same bounded remediation implementer addresses only the assigned threads
+and reports its edits, replies, and targeted checks.
 
 Every comment must get a response — either a fix or a reply explaining why it was skipped.
 
@@ -380,35 +407,6 @@ done
 
 Run `scripts/pr-resolve list <PR>` — output must be empty. Run it again after pushing fixes and resolving threads; automated reviewers may add duplicate or new threads on the latest pushed SHA.
 
-Or confirm via GraphQL that unresolved thread count is 0:
-
-```bash
-gh api graphql -f query='query { repository(owner:"kdlbs", name:"kandev") { pullRequest(number:<PR>) { reviewThreads(first:100) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
-```
-
-Manual fallback when you reply outside `scripts/pr-resolve`:
-
-```bash
-set -euo pipefail
-
-# Get the first comment's REST databaseId for one thread:
-db_id="$(gh api graphql -f query='query { node(id:"PRRT_xxx") { ... on PullRequestReviewThread { comments(first:1){ nodes{ databaseId } } } } }' --jq '.data.node.comments.nodes[0].databaseId')"
-if [[ -z "$db_id" || "$db_id" == "null" ]]; then
-  echo "failed to fetch first comment databaseId for PRRT_xxx" >&2
-  exit 1
-fi
-
-# Reply to THAT id (a guessed id 404s with "Parent comment not found"):
-gh api --method POST repos/:owner/:repo/pulls/<PR>/comments/"$db_id"/replies --input reply.json >/dev/null
-
-# Resolve:
-resolved="$(gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"PRRT_xxx"}){ thread { isResolved } } }' --jq '.data.resolveReviewThread.thread.isResolved')"
-if [[ "$resolved" != "true" ]]; then
-  echo "failed to resolve PRRT_xxx" >&2
-  exit 1
-fi
-```
-
 Informational threads (acknowledged, no code change) still need `scripts/pr-resolve reply` + resolve — skipping them leaves the PR blocked.
 
 Mark task 4 as completed.
@@ -417,64 +415,50 @@ Mark task 4 as completed.
 
 Mark task 5 as in_progress.
 
-1. Use the **`verify` sub-agent** when available to run the full verification pipeline (format, typecheck, test, lint). It will fix any issues it finds. Wait for it to complete.
+1. The planner launches the registered `verify` worker. It reports failures
+   without changing source/test logic.
+2. If verification fails, the planner creates a new bounded remediation packet,
+   then launches a fresh verification assignment. Do not deliver until green.
+3. After a green report, the planner delegates commit and push as bounded
+   delivery assignments using `/commit` and `/push`. Supply the verification
+   result and exact intended paths. Workers do not invoke one another.
 
-   If delegated verification is unavailable, run the full verification pipeline directly:
-   ```bash
-   make fmt
-   make typecheck
-   make test
-   make lint
-   ```
-
-   If formatting changes files, re-run the affected checks after reviewing the diff.
-   When combining format and test commands in one shell invocation, keep path roots consistent. For example, run `gofmt -w apps/backend/...` from the repo root, but run `go test ./internal/...` from `apps/backend`; do not chain root-relative `gofmt` paths inside an `apps/backend` working directory.
-
-2. Stage and commit the fixes directly. Use a descriptive Conventional Commits message, e.g.:
-   ```
-   fix: address PR review feedback
-   fix: resolve CI lint failures
-   fix: address review feedback and fix CI failures
-   ```
-
-   Before staging, remove generated helper caches such as `.github/scripts/__pycache__/` if local Python scripts or `make test` created them. Do not include those caches in fixup commits.
-
-   For conflict-fix PRs, after merging or rebasing `origin/main`, check unresolved review threads again before pushing because conflict-resolution diffs can trigger new comments:
-   ```bash
-   scripts/pr-resolve list <PR>
-   scripts/pr-resolve reply <PR> <COMMENT_ID> <THREAD_ID> "Fixed in the conflict resolution."
-   ```
-
-3. Push:
-   ```bash
-   git push
-   ```
-
-   If verification or conflict resolution rebased the branch, local commit SHAs changed and a plain push may fail non-fast-forward. When the pre-rebase remote SHA is known, use an exact lease:
-   ```bash
-   git push --force-with-lease=refs/heads/<branch>:<expected-remote-sha> origin HEAD:refs/heads/<branch>
-   ```
-   Otherwise use generic `git push --force-with-lease`; never force push unconditionally.
-   Mark task 5 as completed.
+Mark task 5 as completed after the delivery worker reports the pushed commit.
 
 ### 6. Re-check PR state
 
 Mark task 6 as in_progress.
 
-After the push, CI restarts and bots may re-review. Use `pr-poller` again when available — same helper, same contract, same 20-min cap. If delegated polling is unavailable, use the direct-command fallback from step 1. Parse the new report:
+After the push, CI restarts and bots may re-review. The planner launches
+`pr-poller` again with the same contract and 20-minute cap. If it cannot be
+launched, stop and report the blocked phase. Parse the returned report:
 
-- Before waiting on CI, run `scripts/pr-resolve list <PR>` and address any newly opened review threads. Review bots may add new unresolved threads after earlier threads were resolved.
-- The final re-check must include `scripts/pr-state --summary <PR>` (or a fresh pr-poller report), not only CI status. New review threads can arrive after a fresh push even when the previous unresolved count was zero.
-- If `ci_failed:` is empty AND `unresolved_review_threads: 0` AND `issue_comments_from_bots: 0` (no new bot comments to address) → keep polling until the equivalent `scripts/pr-state --summary <PR>` fields are also clean: `failed_checks: []`, `pending_checks: []`, and `unresolved_review_thread_count: 0`.
-- Treat a clean intermediate state as provisional while bot checks are still pending. Reviewer services can add new unresolved threads after CI is mostly green, so after resolving bot feedback and pushing a fixup, wait for both `pending_checks: []` and `unresolved_review_thread_count: 0` before declaring done.
-- In direct-command fallback, do not report the PR as review-clean while harness lint or bot review checks such as `Harness files pass lint`, `Claude Code Review`, `OpenCode Code Review`, CodeRabbit, Greptile, or cubic are still queued or in progress, unless the bounded poll cap is reached. Keep polling those review/lint checks until terminal, or explicitly report that review is still pending and may create new threads.
-- If only long-running checks such as CodeQL, preview deploy, or E2E remain pending after full local verification is green, `failed_checks: []`, and `unresolved_review_thread_count: 0`, you may stop at the 20-minute cap or 3-iteration loop limit and report the exact pending checks. Continue immediately if any check fails or a new unresolved thread appears.
-- If a pushed fix restarts CI while previous checks were already in progress, continue using `scripts/pr-state --summary <PR>`. Treat `filtered_review_thread_count` as informational when `unresolved_review_thread_count` is `0`; do not re-open or re-handle already-resolved historical/current-head filtered threads. Current-head CI can legitimately reset to queued after a push, especially for long E2E, CodeQL, or preview jobs. If checks remain pending when the 20-min cap or 3-iteration loop limit is reached, report the exact pending checks instead of waiting indefinitely unless the user explicitly asks to keep waiting.
+- Require the new poller report to include newly opened review threads before
+  waiting on CI. Review bots may add threads after earlier ones were resolved.
+- Treat the PR as clean only when `ci_failed:` is absent, `ci_pending: none`,
+  `unresolved_review_threads: 0`, `issue_comments_from_bots: 0`, and every bot
+  row is terminal (`done`, `rate_limited`, or `timeout`).
+- Treat a clean intermediate state as provisional while `ci_pending` is not
+  `none` or any bot row is `pending`/`unknown`. Reviewer services may add new
+  threads after CI is mostly green.
+- Do not report the PR as review-clean while harness lint or bot review checks
+  are queued or in progress unless the bounded poll cap is reached. Report the
+  pending checks exactly from the poller result.
+- If only long-running checks remain in `ci_pending` after full local
+  verification is green, `ci_failed:` is absent, and
+  `unresolved_review_threads: 0`, stop at the bounded cap and report the exact
+  pending checks. Continue immediately if a check fails or a new thread appears.
+- If a pushed fix restarts CI while previous checks were in progress, launch a
+  fresh poller packet. If checks remain pending at the cap, report their exact
+  names from `ci_pending`.
 - If new CI failures appeared from the latest commit → loop back to task 2 and reset task 2-5 to `in_progress` as needed.
 - If new review comments appeared after the push → loop back to task 3.
 - If the poller hit its cap (`recommendation:` mentions "timed out") → surface the remaining pending items to the user and stop.
 
-Before declaring the PR complete, run `gh pr view <PR> --json headRefOid,baseRefName,mergeable,mergeStateStatus` and `git ls-files -u`. If GitHub reports `CONFLICTING` / `DIRTY` or the index is unmerged, load `references/merge-conflicts.md` and repeat conflict resolution, verification, push, and post-push checks. Long CI waits can make the initial result stale.
+Before declaring the PR complete, launch one final `pr-poller` assignment that
+includes head SHA, mergeability, and local unmerged-index state. If conflicts
+appear, assign conflict resolution, verification, delivery, and re-polling as
+new bounded packets.
 
 Cap re-check loops at **3 iterations** to prevent runaway sessions. After 3, surface the remaining state to the user and stop.
 
@@ -482,7 +466,11 @@ Mark task 6 as completed.
 
 ### Multi-round bot reviews
 
-**Expect new threads after every push.** CodeRabbit, Greptile, Claude, OpenCode, and cubic often re-review the latest commit and open fresh inline threads even when earlier ones were resolved. On cross-cutting changes (backend event payloads + frontend WS handlers + E2E), plan for 2–3 fixup rounds. After each push, always run `scripts/pr-state --summary <PR>` plus `scripts/pr-resolve list <PR>` before declaring done — do not rely on the prior round's zero count or CI status alone.
+**Expect new threads after every push.** CodeRabbit, Greptile, Claude, OpenCode,
+and cubic often re-review the latest commit. On cross-cutting changes, plan for
+2-3 fixup rounds. After each push, launch `pr-poller` again and require its
+report to include both summary state and actionable unresolved threads; do not
+rely on the prior round.
 
 **Stop when green unless the next comment is clearly worth another cycle.** Tiny review-only commits restart the full CI and bot-review stack. Once the PR is green with no unresolved threads, avoid nonessential cleanup that would trigger another round unless the comment is blocking, clearly valid, or requested by the user.
 

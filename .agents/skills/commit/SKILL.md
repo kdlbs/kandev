@@ -5,11 +5,20 @@ description: Stage and commit changes using Conventional Commits. Use when there
 
 # Commit
 
+## Planner Entry
+
+Load `/planner-orchestration`. The user-started primary session delegates full
+verification to `verify`, then delegates staging and committing the verified
+checkout to an `implementer` worker. It does not run Git commands directly. The
+commit worker must receive the successful verification result and must not spawn
+other workers.
+
 Create a git commit following this project's Conventional Commits convention. These messages are used by git-cliff (`cliff.toml`) to auto-generate changelogs and release notes. PRs are squash-merged, so the PR title becomes the commit on `main` — CI validates it via `pr-title.yml`.
 
 ## Available skills and subagents
 
-- **`verify` subagent** — Run fmt, typecheck, test, and lint. Delegate to this before committing to catch issues early.
+- **`verify` worker** — The planner runs this prerequisite before assigning the
+  commit worker.
 
 ## Format
 
@@ -78,7 +87,11 @@ explicitly requests task tracking.
 
    Why this matters: a missing hook lets lint regressions slip past local commits and only surface in CI (e.g. funlen / cognitive complexity on backend Go code). The hook catches them in <1s at commit time. See `Makefile`'s `doctor` target for the idempotent install command.
 
-3. **Run verify (MANDATORY — do NOT skip):** Run `/verify` to complete the full verification pipeline (rebase, format, typecheck, test, lint). Depending on runtime policy, `/verify` may delegate to the `verify` subagent or use its documented direct-command fallback. **Wait for it to complete before proceeding.** Do NOT proceed to step 4 until verify passes. If verify cannot fix the failures, stop and surface the errors to the user — do not commit. Do NOT substitute this with a partial check (e.g. running only the changed package's tests).
+3. **Require verify (MANDATORY — do NOT skip):** Confirm the planner supplied a
+   successful `verify` worker result for the current checkout. If the checkout
+   changed afterward or no result was supplied, stop and report that a new
+   verification assignment is required. Do not spawn or run verification from
+   the commit worker.
 
 4. **Stage files:** Stage relevant files (prefer specific files over `git add -A`).
    - **Splitting commits with new files:** When introducing a brand-new file alongside the file that uses it, stage them together. The Go lint pre-commit hook stashes *unstaged* changes before linting but keeps *untracked* files in the working tree — so a new helper committed alone, while its (still-unstaged) caller sits in the working tree, lints as `unused` and rejects the commit.

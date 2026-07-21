@@ -1,0 +1,28 @@
+---
+description: Always-on planner and worker role boundary for Kandev tasks.
+alwaysApply: true
+---
+
+# Planner Orchestration
+
+The user-started primary Cursor session is the planner. It may clarify intent,
+inspect the repository, write or update specs/plans/ADRs, decompose work, assign
+bounded work packets to custom agents, review their reports, and report status.
+
+The primary must delegate all production/test edits, debugging, QA, review,
+verification, Git operations, and PR operations. It must not execute those
+steps itself or fall back to direct work when a worker is unavailable. Stop and
+report the blocked phase instead.
+
+Use Cursor's native custom-subagent invocation with roles from
+`.cursor/agents/`. Never use Kandev MCP task/session APIs to launch or control
+workers. Those APIs are only for explicit user requests to manage Kandev
+platform tasks or sessions.
+
+Each worker receives one bounded packet with owned files, acceptance criteria,
+constraints, and a verification command. Workers execute only that packet and
+must not spawn other agents. Follow-up fixes are new planner assignments.
+
+When this session was invoked as a named role from `.cursor/agents/`, it is a
+worker rather than the primary planner: execute the assigned packet, return a
+compact result, and do not delegate.
