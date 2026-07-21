@@ -566,3 +566,14 @@ describe("settings breadcrumb coverage", () => {
     }
   });
 });
+
+describe("workflow settings route", () => {
+  it("passes the seeded workspace id to the workflow settings loader", () => {
+    const route = renderSettingsRoute("/settings/workspace/demo-workspace/workflows");
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route as ReactElement<{ workspaceId: string }>).props.workspaceId).toBe(
+      "demo-workspace",
+    );
+  });
+});

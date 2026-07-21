@@ -13,6 +13,7 @@ import type {
   WorkflowStep,
 } from "@/lib/types/http";
 import type { GitHubPR, PRFeedback, TaskPR } from "@/lib/types/github";
+import type { DemoWorkflowRuntimeSnapshot } from "./workflow-runtime";
 
 export const DEMO_STORAGE_KEY = "kandev-browser-demo:v1";
 export const DEMO_SCENARIO_VERSION = 4;
@@ -44,6 +45,7 @@ export type DemoState = {
   sessions: TaskSession[];
   messagesBySession: Record<string, Message[]>;
   taskPRs: Record<string, TaskPR[]>;
+  workflowRuntime?: DemoWorkflowRuntimeSnapshot;
 };
 
 const NOW = "2026-07-18T12:00:00.000Z";
@@ -1265,11 +1267,24 @@ export function createDemoState(): DemoState {
 }
 
 export function createBootPayload(state: DemoState): BootPayload {
-  const snapshot = createSnapshot(state.tasks);
-  const supportSnapshot = createWorkflowSnapshot(
+  const workflows = state.workflowRuntime?.workflows ?? demoWorkflows;
+  const workflowSteps = state.workflowRuntime?.steps ?? [...demoSteps, ...demoSupportSteps];
+  const activeWorkflow =
+    workflows.find((workflow) => workflow.id === DEMO_IDS.workflow) ?? workflows[0] ?? demoWorkflow;
+  const snapshot = createWorkflowSnapshot(
     state.tasks,
-    demoSupportWorkflow,
-    demoSupportSteps,
+    activeWorkflow,
+    workflowSteps.filter((step) => step.workflow_id === activeWorkflow.id),
+  );
+  const snapshots = Object.fromEntries(
+    workflows.map((workflow) => [
+      workflow.id,
+      createWorkflowSnapshot(
+        state.tasks,
+        workflow,
+        workflowSteps.filter((step) => step.workflow_id === workflow.id),
+      ),
+    ]),
   );
   return {
     version: 1,
@@ -1292,7 +1307,7 @@ export function createBootPayload(state: DemoState): BootPayload {
         activeId: DEMO_IDS.workspace,
       },
       workflows: {
-        items: demoWorkflows.map((workflow) => ({
+        items: workflows.map((workflow) => ({
           id: workflow.id,
           workspaceId: workflow.workspace_id,
           name: workflow.name,
@@ -1301,7 +1316,7 @@ export function createBootPayload(state: DemoState): BootPayload {
           agent_profile_id: workflow.agent_profile_id,
           style: workflow.style,
         })),
-        activeId: DEMO_IDS.workflow,
+        activeId: activeWorkflow.id,
       },
       repositories: {
         itemsByWorkspaceId: { [DEMO_IDS.workspace]: [demoRepository, demoApiRepository] },
@@ -1332,10 +1347,7 @@ export function createBootPayload(state: DemoState): BootPayload {
       },
       kanban: { ...snapshot, isLoading: false },
       kanbanMulti: {
-        snapshots: {
-          [DEMO_IDS.workflow]: snapshot,
-          [DEMO_IDS.supportWorkflow]: supportSnapshot,
-        },
+        snapshots,
         isLoading: false,
       },
       taskSessions: {
