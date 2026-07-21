@@ -86,6 +86,10 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 		return nil
 	}
 	snapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, executionProfileID)
+	updater, ok := e.repo.(officeSessionMetadataUpdater)
+	if !ok {
+		return errors.New("office session rebind requires guarded metadata updates")
+	}
 	for {
 		if isStopTerminalSessionState(session.State) {
 			return nil
@@ -109,10 +113,6 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 			models.SessionMetaKeyLastAgentError,
 		} {
 			delete(updated.Metadata, key)
-		}
-		updater, ok := e.repo.(officeSessionMetadataUpdater)
-		if !ok {
-			return errors.New("office session rebind requires guarded metadata updates")
 		}
 		changed, err := updater.UpdateTaskSessionIfCurrentStateWithMetadata(ctx, &updated, expectedState, updated.Metadata)
 		if err != nil {
