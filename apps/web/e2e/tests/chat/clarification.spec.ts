@@ -569,7 +569,7 @@ test.describe("Multi-question clarification carousel", () => {
 
     await testPage.getByTestId("clarification-submit-shortcut").hover();
     const submitTooltip = testPage.getByRole("tooltip", { name: /Submit answers/ });
-    await expect(submitTooltip).toContainText("Ctrl");
+    await expect(submitTooltip).toContainText(/Ctrl|⌘/);
     await expect(submitTooltip).toContainText("Enter");
 
     await testPage.getByTestId("clarification-skip-shortcut").hover();
