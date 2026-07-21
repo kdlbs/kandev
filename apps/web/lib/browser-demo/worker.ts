@@ -34,10 +34,7 @@ import {
   demoRepository,
   demoRepositoryBranches,
   demoSteps,
-  demoSupportSteps,
-  demoSupportWorkflow,
   demoUpgradePlan,
-  demoWorkflows,
   makeMessage,
   makeSession,
   type DemoState,
@@ -45,12 +42,14 @@ import {
 import { createDemoStats } from "./stats";
 import { createDemoFiles } from "./demo-files";
 import { createDemoSystemRuntime } from "./system-runtime";
+import { createDemoWorkflowRuntime } from "./workflow-runtime";
 
 const scope: DedicatedWorkerGlobalScope = self as never;
 let state = createDemoState();
 let files = createDemoFiles();
 let plansByTask = createDemoPlans();
 let systemRuntime = createDemoSystemRuntime();
+let workflowRuntime = makeWorkflowRuntime();
 const fileReviewsBySession = new Map<
   string,
   Map<string, { reviewed: boolean; diffHash: string }>
@@ -170,6 +169,7 @@ scope.onmessage = (event: MessageEvent<DemoWorkerRequest>) => {
     files = createDemoFiles();
     plansByTask = createDemoPlans();
     systemRuntime = createDemoSystemRuntime();
+    workflowRuntime = makeWorkflowRuntime();
     fileReviewsBySession.clear();
     post({ kind: "result", id: message.id, value: createBootPayload(state) });
     return;
@@ -217,6 +217,8 @@ type HttpRouteContext = {
   path: string;
   method: string;
   input: Record<string, unknown>;
+  rawBody?: string;
+  searchParams: URLSearchParams;
 };
 
 type HttpRouter = (context: HttpRouteContext) => DemoHttpResponse | null;
@@ -225,7 +227,7 @@ const HTTP_ROUTERS: HttpRouter[] = [
   routeCoreHttp,
   (context) => systemRuntime.route(context),
   routeRepositoryHttp,
-  routeWorkflowHttp,
+  (context) => workflowRuntime.route(context),
   routeStatsHttp,
   routeGitHubHttp,
   routeIntegrationsHttp,
@@ -233,10 +235,13 @@ const HTTP_ROUTERS: HttpRouter[] = [
 ];
 
 export async function handleHttp(request: DemoHttpRequest): Promise<DemoHttpResponse> {
+  const url = new URL(request.path, "https://demo.kandev.com");
   const context: HttpRouteContext = {
-    path: new URL(request.path, "https://demo.kandev.com").pathname,
+    path: url.pathname,
     method: request.method.toUpperCase(),
     input: parseBody(request.body),
+    rawBody: request.body,
+    searchParams: url.searchParams,
   };
   for (const router of HTTP_ROUTERS) {
     const response = router(context);
@@ -292,41 +297,6 @@ function routeRepositoryHttp({ path }: HttpRouteContext): DemoHttpResponse | nul
     return json({ roots: [], repositories: [], total: 0 });
   }
   return null;
-}
-
-function routeWorkflowHttp({ path }: HttpRouteContext): DemoHttpResponse | null {
-  const workflowListPaths = [
-    "/api/v1/workflows",
-    `/api/v1/workspaces/${DEMO_IDS.workspace}/workflows`,
-  ];
-  if (workflowListPaths.includes(path)) {
-    return json({ workflows: demoWorkflows, total: demoWorkflows.length });
-  }
-  if (path === "/api/v1/workflow-templates") return json({ templates: [], total: 0 });
-  const snapshotMatch = path.match(/^\/api\/v1\/workflows\/([^/]+)\/snapshot$/);
-  if (snapshotMatch) return workflowSnapshotResponse(snapshotMatch[1]);
-  const stepsMatch = path.match(/^\/api\/v1\/workflows\/([^/]+)\/workflow\/steps$/);
-  if (stepsMatch) {
-    const steps = stepsMatch[1] === demoSupportWorkflow.id ? demoSupportSteps : demoSteps;
-    return json({ steps, total: steps.length });
-  }
-  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/workflow-steps`) {
-    const steps = [...demoSteps, ...demoSupportSteps];
-    return json({ steps, total: steps.length });
-  }
-  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/tasks`) {
-    const tasks = activeTasks();
-    return json({ tasks, total: tasks.length });
-  }
-  return null;
-}
-
-function workflowSnapshotResponse(workflowId: string): DemoHttpResponse {
-  const workflow = demoWorkflows.find((item) => item.id === workflowId);
-  if (!workflow) return json({ error: "Workflow not found" }, 404);
-  const steps = workflow.id === demoSupportWorkflow.id ? demoSupportSteps : demoSteps;
-  const tasks = activeTasks().filter((task) => task.workflow_id === workflow.id);
-  return json({ workflow, steps, tasks });
 }
 
 function routeStatsHttp({ path }: HttpRouteContext): DemoHttpResponse | null {
@@ -408,6 +378,10 @@ function routeIntegrationsHttp({ path, method }: HttpRouteContext): DemoHttpResp
 
 function routeTaskHttp(context: HttpRouteContext): DemoHttpResponse | null {
   const { path, method, input } = context;
+  if (path === `/api/v1/workspaces/${DEMO_IDS.workspace}/tasks` && method === "GET") {
+    const tasks = activeTasks();
+    return json({ tasks, total: tasks.length });
+  }
   if (path === "/api/v1/tasks" && method === "POST") return createTask(input);
   const taskMatch = path.match(/^\/api\/v1\/tasks\/([^/]+)$/);
   if (taskMatch) return taskResponse(taskMatch[1], method, input);
@@ -970,6 +944,12 @@ function demoGitData(sessionId: string): DemoGitData {
   const task = state.tasks.find((candidate) => candidate.primary_session_id === sessionId);
   if (task?.id === "demo-task-checkout") return checkoutGitData(sessionId);
   if (task?.id === "demo-task-audit") return auditGitData(sessionId);
+  if (
+    task?.state === "REVIEW" &&
+    state.messagesBySession[sessionId]?.some((message) => message.id === `${sessionId}-summary`)
+  ) {
+    return completedDemoTaskGitData(sessionId, task.id);
+  }
   return emptyGitData(sessionId, task?.id ?? "task");
 }
 
@@ -1053,6 +1033,32 @@ function emptyGitData(sessionId: string, taskId: string): DemoGitData {
     status: makeGitStatus(`kandev/${taskId}`, {}, 0, 0),
     commits: [],
     cumulativeDiff: null,
+  };
+}
+
+function completedDemoTaskGitData(sessionId: string, taskId: string): DemoGitData {
+  const files: Record<string, FileInfo> = {
+    "src/pages/dashboard-page.tsx": {
+      path: "src/pages/dashboard-page.tsx",
+      status: "modified",
+      staged: false,
+      additions: 7,
+      deletions: 1,
+      diff: "@@ -8,1 +8,1 @@\n-return <main><h1>Operations</h1></main>;\n+return <main><h1>Operations</h1><ServiceHealthSummary /></main>;",
+    },
+    "tests/dashboard.test.tsx": {
+      path: "tests/dashboard.test.tsx",
+      status: "added",
+      staged: false,
+      additions: 28,
+      deletions: 0,
+      diff: '@@ -0,0 +1,5 @@\n+describe("service health", () => {\n+  it("shows current service details", () => {\n+    expect(renderDashboard()).toHaveTextContent("12 services healthy");\n+  });\n+});',
+    },
+  };
+  return {
+    status: makeGitStatus(`kandev/${taskId}`, files, 0, 0),
+    commits: [],
+    cumulativeDiff: makeCumulativeDiff(sessionId, files, 0),
   };
 }
 
@@ -1160,19 +1166,175 @@ function startAgent(task: Task, prompt: string) {
   state.messagesBySession[sessionId] = [user];
   notify(TASK_UPDATED_EVENT, taskEvent(task));
   notify("session.message.added", messageEvent(user));
-  setTimeout(() => {
-    const agent = makeMessage(
-      `${sessionId}-agent`,
+  scheduleAgentRun(task, session);
+  return session;
+}
+
+function scheduleAgentRun(task: Task, session: TaskSession) {
+  const messages = makeAgentRunMessages(task, session.id);
+  messages.forEach((message, index) => {
+    setTimeout(
+      () => {
+        if (!state.tasks.includes(task) || !state.sessions.includes(session)) return;
+        state.messagesBySession[session.id]?.push(message);
+        notify("session.message.added", messageEvent(message));
+        if (index === messages.length - 1) finishAgentRun(task, session);
+        persist();
+      },
+      (index + 1) * 450,
+    );
+  });
+}
+
+function finishAgentRun(task: Task, session: TaskSession) {
+  const now = new Date().toISOString();
+  const oldSessionState = session.state;
+  session.state = "IDLE";
+  session.updated_at = now;
+  task.state = "REVIEW";
+  task.workflow_step_id = DEMO_IDS.steps.review;
+  task.primary_session_state = "IDLE";
+  task.primary_session_pending_action = null;
+  task.review_status = "pending";
+  task.updated_at = now;
+  notify("session.state_changed", {
+    task_id: task.id,
+    session_id: session.id,
+    old_state: oldSessionState,
+    new_state: session.state,
+    updated_at: now,
+  });
+  notify(TASK_UPDATED_EVENT, taskEvent(task));
+  notifyGitStatus(session.id);
+}
+
+// The detailed tool metadata is intentionally colocated so the streamed turn stays coherent.
+// eslint-disable-next-line max-lines-per-function
+function makeAgentRunMessages(task: Task, sessionId: string): Message[] {
+  const turnId = `${sessionId}-implementation`;
+  const worktree = `/demo/worktrees/${task.id}`;
+  return [
+    makeMessage(
+      `${sessionId}-thinking`,
       sessionId,
       task.id,
       "agent",
-      "I have mapped the relevant code paths. Next I will implement the change, update focused tests, and prepare the diff for review.",
-    );
-    state.messagesBySession[sessionId].push(agent);
-    persist();
-    notify("session.message.added", messageEvent(agent));
-  }, 900);
-  return session;
+      "I will trace the user-facing path first, then make the smallest implementation change and verify it with a focused regression test.",
+      {
+        type: "thinking",
+        turnId,
+        metadata: {
+          thinking:
+            "The task touches an existing workflow, so I should understand its entry point and current coverage before editing.",
+        },
+      },
+    ),
+    makeMessage(
+      `${sessionId}-search`,
+      sessionId,
+      task.id,
+      "agent",
+      "Searched the application for the relevant feature path",
+      {
+        type: "tool_search",
+        turnId,
+        metadata: {
+          status: "complete",
+          normalized: {
+            code_search: {
+              query: task.title,
+              path: "src",
+              output: {
+                files: ["src/app.tsx", "src/pages/dashboard-page.tsx", "tests/dashboard.test.tsx"],
+                file_count: 3,
+              },
+            },
+          },
+        },
+      },
+    ),
+    makeMessage(
+      `${sessionId}-read`,
+      sessionId,
+      task.id,
+      "agent",
+      "Read src/pages/dashboard-page.tsx and its focused tests",
+      {
+        type: "tool_read",
+        turnId,
+        metadata: {
+          status: "complete",
+          normalized: {
+            read_file: {
+              file_path: `${worktree}/src/pages/dashboard-page.tsx`,
+              offset: 1,
+              limit: 160,
+              output: { line_count: 42, language: "tsx", truncated: false },
+            },
+          },
+        },
+      },
+    ),
+    makeMessage(
+      `${sessionId}-edit`,
+      sessionId,
+      task.id,
+      "agent",
+      "Updated the dashboard behavior and added regression coverage",
+      {
+        type: "tool_edit",
+        turnId,
+        metadata: {
+          status: "complete",
+          normalized: {
+            modify_file: {
+              file_path: `${worktree}/src/pages/dashboard-page.tsx`,
+              mutations: [
+                {
+                  type: "patch",
+                  old_content: "return <main><h1>Operations</h1></main>;",
+                  new_content: "return <main><h1>Operations</h1><ServiceHealthSummary /></main>;",
+                  diff: "@@ -8,1 +8,1 @@\n-return <main><h1>Operations</h1></main>;\n+return <main><h1>Operations</h1><ServiceHealthSummary /></main>;",
+                  start_line: 8,
+                  end_line: 8,
+                },
+              ],
+            },
+          },
+        },
+      },
+    ),
+    makeMessage(
+      `${sessionId}-test`,
+      sessionId,
+      task.id,
+      "agent",
+      "pnpm test tests/dashboard.test.tsx --runInBand",
+      {
+        type: "tool_execute",
+        turnId,
+        metadata: {
+          status: "complete",
+          normalized: {
+            shell_exec: {
+              command: "pnpm test tests/dashboard.test.tsx --runInBand",
+              work_dir: worktree,
+              description: "Run focused dashboard regression tests",
+              output: { exit_code: 0, has_output: true, stdout_bytes: 986, stderr_bytes: 0 },
+            },
+          },
+        },
+      },
+    ),
+    makeMessage(
+      `${sessionId}-summary`,
+      sessionId,
+      task.id,
+      "agent",
+      `Implemented **${task.title}** and added focused coverage for the updated behavior.\n\n\`\`\`text\nPASS tests/dashboard.test.tsx\nTests: 4 passed, 4 total\n\`\`\`\n\nThe task is ready for review.`,
+      { turnId },
+    ),
+  ];
 }
 
 function demoWorkspace() {
@@ -1400,6 +1562,18 @@ function socketMessage(socketId: string, value: unknown) {
 
 function persist() {
   post({ kind: "persist", state: JSON.stringify(state) });
+}
+
+function makeWorkflowRuntime() {
+  return createDemoWorkflowRuntime({
+    snapshot: state.workflowRuntime,
+    getTasks: activeTasks,
+    onChange(snapshot) {
+      state.workflowRuntime = snapshot;
+      persist();
+    },
+    notify,
+  });
 }
 
 function json(body: unknown, status = 200): DemoHttpResponse {

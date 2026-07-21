@@ -127,6 +127,15 @@ describe("renderSettingsRoute", () => {
     expect(gitLabRouteWorkspaceId("/settings/workspace/ws-2/integrations/gitlab")).toBe("ws-2");
     expect(gitLabRouteWorkspaceId("/settings/workspace/ws%202/integrations/gitlab")).toBe("ws 2");
   });
+
+  it("passes the seeded workspace id to the workflow settings loader", () => {
+    const route = renderSettingsRoute("/settings/workspace/demo-workspace/workflows");
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route as ReactElement<{ workspaceId: string }>).props.workspaceId).toBe(
+      "demo-workspace",
+    );
+  });
 });
 
 function buildState(

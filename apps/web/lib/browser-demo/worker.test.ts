@@ -75,16 +75,21 @@ describe("browser demo worker HTTP runtime", () => {
   });
 
   it("serves the resources required to navigate to tasks and configure new ones", async () => {
-    const [agents, executors, workflows, supportSnapshot] = await Promise.all([
+    const [agents, executors, workflows, workflowTemplates, supportSnapshot] = await Promise.all([
       get("/api/v1/agents"),
       get("/api/v1/executors"),
       get(`/api/v1/workspaces/${DEMO_IDS.workspace}/workflows`),
+      get("/api/v1/workflow/templates"),
       get(`/api/v1/workflows/${DEMO_IDS.supportWorkflow}/snapshot`),
     ]);
 
     expect(agents).toMatchObject({ status: 200, body: { total: 1 } });
     expect(executors).toMatchObject({ status: 200, body: { total: 1 } });
     expect(workflows).toMatchObject({ status: 200, body: { total: 2 } });
+    expect(workflowTemplates).toMatchObject({
+      status: 200,
+      body: { templates: [{ name: "Kanban" }, { name: "Plan and execute" }], total: 2 },
+    });
     expect(supportSnapshot).toMatchObject({
       status: 200,
       body: { workflow: { id: DEMO_IDS.supportWorkflow }, steps: { length: 3 } },

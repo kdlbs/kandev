@@ -9,6 +9,7 @@ export type DemoHttpResponse = {
   status: number;
   headers?: Record<string, string>;
   body?: unknown;
+  bodyFormat?: "json" | "text";
 };
 
 export type DemoWorkerRequest =

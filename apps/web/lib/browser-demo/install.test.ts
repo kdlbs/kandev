@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootPayload } from "@/src/boot-payload";
 import { resetKanbanPreviewState } from "@/lib/local-storage";
-import { applyBrowserDemoDefaults, installBrowserDemo, rejectPendingRequests } from "./install";
+import {
+  applyBrowserDemoDefaults,
+  installBrowserDemo,
+  rejectPendingRequests,
+  serializeDemoHttpResponseBody,
+} from "./install";
 
 const nativeFetch = window.fetch;
 const nativeWebSocket = window.WebSocket;
@@ -51,6 +56,19 @@ describe("browser demo preview state", () => {
     expect(localStorage.getItem("kandev.kanban.preview.open")).toBeNull();
     expect(localStorage.getItem("kandev.kanban.preview.selectedTask")).toBeNull();
     expect(localStorage.getItem("kandev.kanban.preview.width")).toBe("560");
+  });
+});
+
+describe("browser demo response serialization", () => {
+  it("passes YAML exports through as text instead of JSON-quoting them", () => {
+    const yaml = 'version: 1\ntype: kandev_workflow\nworkflows:\n  - name: "Release"\n';
+
+    expect(serializeDemoHttpResponseBody({ status: 200, body: yaml, bodyFormat: "text" })).toBe(
+      yaml,
+    );
+    expect(serializeDemoHttpResponseBody({ status: 200, body: { created: ["Release"] } })).toBe(
+      '{"created":["Release"]}',
+    );
   });
 });
 

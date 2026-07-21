@@ -110,7 +110,7 @@ export async function installBrowserDemo(): Promise<void> {
         body: serializeBody(body),
       },
     })) as DemoHttpResponse;
-    const responseBody = response.body === undefined ? null : JSON.stringify(response.body);
+    const responseBody = serializeDemoHttpResponseBody(response);
     return new Response(responseBody, { status: response.status, headers: response.headers });
   };
 
@@ -201,6 +201,11 @@ export async function installBrowserDemo(): Promise<void> {
     { source: "kandev-browser-demo", kind: "ready" },
     window.location.origin,
   );
+}
+
+export function serializeDemoHttpResponseBody(response: DemoHttpResponse): string | null {
+  if (response.body === undefined) return null;
+  return response.bodyFormat === "text" ? String(response.body) : JSON.stringify(response.body);
 }
 
 export function applyBrowserDemoDefaults(payload: BootPayload): BootPayload {
