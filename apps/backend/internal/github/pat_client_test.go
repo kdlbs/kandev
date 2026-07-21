@@ -108,6 +108,27 @@ func TestConvertPatPR_Merged(t *testing.T) {
 	}
 }
 
+func TestPATClientSearchPreservesImmutableIdentity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search/issues" {
+			t.Errorf("path = %q, want /search/issues", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"total_count":1,"items":[{"id":101,"node_id":"PR_kwDOA","number":7,"title":"Fix auth","html_url":"https://github.com/acme/web/pull/7","state":"open","repository_url":"https://api.github.com/repos/acme/web","pull_request":{}}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := newPATClientPointingAt(t, srv.URL)
+	page, err := client.SearchPRsPaged(context.Background(), "", "auth", 1, 5)
+	if err != nil {
+		t.Fatalf("search PRs: %v", err)
+	}
+	if len(page.PRs) != 1 || page.PRs[0].ID != 101 || page.PRs[0].NodeID != "PR_kwDOA" {
+		t.Fatalf("PRs = %#v", page.PRs)
+	}
+}
+
 func TestPATClient_ListCheckRunsPaginatesCheckRuns(t *testing.T) {
 	var requestedPages []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

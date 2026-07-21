@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  createMessageHistorySelector,
   extractUserHistory,
   navigateHistory,
   fuzzyScore,
   searchHistory,
   type HistoryState,
 } from "./message-history";
+import * as messageHistory from "./message-history";
 import type { Message } from "@/lib/types/http";
 
 function msg(partial: Partial<Message>): Message {
@@ -20,6 +22,106 @@ function msg(partial: Partial<Message>): Message {
     ...partial,
   };
 }
+
+describe("createMessageHistorySelector", () => {
+  it("keeps the selector snapshot stable when only agent output changes", () => {
+    const selector = createMessageHistorySelector("s1");
+    const first = selector({
+      messages: {
+        bySession: { s1: [msg({ id: "user-1", content: "keep me" })] },
+        metaBySession: {},
+      },
+    });
+    const afterAgentStream = selector({
+      messages: {
+        bySession: {
+          s1: [
+            msg({ id: "user-1", content: "keep me" }),
+            msg({ id: "agent-1", author_type: "agent", content: "streaming" }),
+          ],
+        },
+        metaBySession: {},
+      },
+    });
+
+    expect(afterAgentStream).toBe(first);
+  });
+
+  it("returns a new selector snapshot when reference metadata changes", () => {
+    const selector = createMessageHistorySelector("s1");
+    const reference = {
+      version: 1,
+      ref: "mention:v1:sentry:issue:sentry.example.test%2Forg-1:issue-1",
+      provider: "sentry",
+      kind: "issue",
+      id: "issue-1",
+      key: "WEB-1",
+      title: "Login crash",
+      url: "https://sentry.example.test/issues/1",
+      scope: "sentry.example.test/org-1",
+    };
+    const first = selector({
+      messages: {
+        bySession: {
+          s1: [msg({ id: "user-1", content: "See #WEB-1", metadata: { entity_references: [] } })],
+        },
+        metaBySession: {},
+      },
+    });
+    const withReference = selector({
+      messages: {
+        bySession: {
+          s1: [
+            msg({
+              id: "user-1",
+              content: "See #WEB-1",
+              metadata: { entity_references: [reference] },
+            }),
+          ],
+        },
+        metaBySession: {},
+      },
+    });
+
+    expect(withReference).not.toBe(first);
+    expect(withReference[0]?.entityReferences).toEqual([reference]);
+  });
+});
+
+describe("extractUserHistoryEntries", () => {
+  it("provides structured history entries for rich-editor recall", () => {
+    expect(typeof (messageHistory as Record<string, unknown>).extractUserHistoryEntries).toBe(
+      "function",
+    );
+  });
+
+  it("keeps entity reference metadata with recalled message content", () => {
+    const reference = {
+      version: 1,
+      ref: "mention:v1:sentry:issue:sentry.example.test%2Forg-1:issue-1",
+      provider: "sentry",
+      kind: "issue",
+      id: "issue-1",
+      key: "WEB-1",
+      title: "Login crash",
+      url: "https://sentry.example.test/issues/1",
+      scope: "sentry.example.test/org-1",
+    };
+    const entries = messageHistory.extractUserHistoryEntries([
+      msg({
+        content: "See [#WEB-1](https://sentry.example.test/issues/1)",
+        metadata: { entity_references: [reference, reference] },
+      }),
+    ]);
+
+    expect(entries).toEqual([
+      {
+        content: "See [#WEB-1](https://sentry.example.test/issues/1)",
+        entityReferences: [reference],
+      },
+    ]);
+  });
+});
 
 describe("extractUserHistory", () => {
   it("returns user message contents newest-first", () => {

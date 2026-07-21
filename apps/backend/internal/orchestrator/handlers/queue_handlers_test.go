@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,6 +43,25 @@ type mockQueueDrainer struct {
 	err       error
 }
 
+type fakeReferenceSubmissionValidator struct {
+	calls     int
+	sessionID string
+	taskID    string
+	result    []v1.EntityReference
+	err       error
+}
+
+func (f *fakeReferenceSubmissionValidator) ValidateForSubmission(
+	_ context.Context,
+	sessionID, taskID string,
+	_ []v1.EntityReference,
+) ([]v1.EntityReference, error) {
+	f.calls++
+	f.sessionID = sessionID
+	f.taskID = taskID
+	return f.result, f.err
+}
+
 func (m *mockQueueDrainer) DrainQueuedMessage(_ context.Context, sessionID string) (bool, error) {
 	m.calls++
 	m.sessionID = sessionID
@@ -61,6 +82,18 @@ func setupQueueHandlersWithDrainer(t *testing.T, drainer QueueDrainer) (*QueueHa
 	require.NoError(t, err)
 	svc := messagequeue.NewServiceMemory(log)
 	return NewQueueHandlers(svc, &mockEventBus{}, log, drainer), svc
+}
+
+func setupQueueHandlersWithValidator(t *testing.T, validator entityrefs.SubmissionValidator) (*QueueHandlers, *messagequeue.Service) {
+	t.Helper()
+	log, err := logger.NewLogger(logger.LoggingConfig{
+		Level:      "error",
+		Format:     "console",
+		OutputPath: "stderr",
+	})
+	require.NoError(t, err)
+	svc := messagequeue.NewServiceMemory(log)
+	return NewQueueHandlers(svc, &mockEventBus{}, log, nil, validator), svc
 }
 
 func createTestMessage(t *testing.T, action string, payload interface{}) *ws.Message {
@@ -148,6 +181,88 @@ func TestWsQueueMessage(t *testing.T) {
 		assert.Equal(t, "queue_full", errPayload.Code)
 		assert.EqualValues(t, messagequeue.DefaultMaxPerSession, errPayload.Details["queue_size"])
 		assert.EqualValues(t, messagequeue.DefaultMaxPerSession, errPayload.Details["max"])
+	})
+
+	t.Run("rejects entity references without an authorization validator", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+
+		response, err := handlers.wsQueueMessage(ctx, createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
+			"session_id": "s",
+			"task_id":    "t",
+			"content":    "reference it",
+			"entity_references": []map[string]interface{}{
+				{
+					"version":  1,
+					"ref":      "mention:v1:kandev:task:workspace-1:task-2",
+					"provider": "kandev",
+					"kind":     "task",
+					"id":       "task-2",
+					"key":      "TASK-2",
+					"title":    "Referenced task",
+					"url":      "/t/task-2",
+					"scope":    "workspace-1",
+				},
+			},
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, ws.ErrorCodeValidation, parseError(t, response).Code)
+		assert.Zero(t, svc.GetStatus(ctx, "s").Count, "validation must happen before queue mutation")
+	})
+
+	t.Run("persists references returned by authorization validator", func(t *testing.T) {
+		normalized := v1.EntityReference{
+			Version:  v1.EntityReferenceVersion,
+			Ref:      "mention:v1:kandev:task:workspace-1:task-2",
+			Provider: "kandev",
+			Kind:     "task",
+			ID:       "task-2",
+			Key:      "TASK-2",
+			Title:    "Referenced task",
+			URL:      "/t/task-2",
+			Scope:    "workspace-1",
+		}
+		validator := &fakeReferenceSubmissionValidator{result: []v1.EntityReference{normalized}}
+		handlers, svc := setupQueueHandlersWithValidator(t, validator)
+		ctx := context.Background()
+
+		response, err := handlers.wsQueueMessage(ctx, createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
+			"session_id":        "s",
+			"task_id":           "t",
+			"content":           "reference it",
+			"entity_references": []v1.EntityReference{normalized},
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		assert.Equal(t, 1, validator.calls)
+		assert.Equal(t, "s", validator.sessionID)
+		assert.Equal(t, "t", validator.taskID)
+
+		entries := svc.GetStatus(ctx, "s").Entries
+		require.Len(t, entries, 1)
+		assert.Equal(t, []v1.EntityReference{normalized}, entries[0].Metadata["entity_references"])
+	})
+
+	t.Run("rejects passthrough reference scope before queue mutation", func(t *testing.T) {
+		reference := v1.EntityReference{
+			Version: v1.EntityReferenceVersion,
+			Ref:     "mention:v1:kandev:task:workspace-1:task-2", Provider: "kandev", Kind: "task",
+			ID: "task-2", Title: "Referenced task", URL: "/t/task-2", Scope: "workspace-1",
+		}
+		validator := &fakeReferenceSubmissionValidator{err: entityrefs.ErrUnauthorizedReference}
+		handlers, svc := setupQueueHandlersWithValidator(t, validator)
+		ctx := context.Background()
+		response, err := handlers.wsQueueMessage(ctx, createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
+			"session_id":        "passthrough-session",
+			"task_id":           "t",
+			"content":           "reference it",
+			"entity_references": []v1.EntityReference{reference},
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, 1, validator.calls)
+		assert.Zero(t, svc.GetStatus(ctx, "passthrough-session").Count)
 	})
 }
 
@@ -347,6 +462,116 @@ func TestWsUpdateMessage(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
 		assert.Equal(t, "edited", svc.GetStatus(ctx, "s").Entries[0].Content)
+	})
+
+	t.Run("omitted references clear stale metadata and preserve unrelated keys", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+		queued, err := svc.QueueMessageWithMetadata(
+			ctx, "s", "t", "original", "", "u", false, nil,
+			map[string]interface{}{
+				"entity_references": []interface{}{"stale"},
+				"origin":            "inter-task",
+			},
+		)
+		require.NoError(t, err)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   queued.ID,
+				"content":    "edited",
+				"user_id":    "u",
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+
+		entries := svc.GetStatus(ctx, "s").Entries
+		require.Len(t, entries, 1)
+		assert.Equal(t, "inter-task", entries[0].Metadata["origin"])
+		_, exists := entries[0].Metadata["entity_references"]
+		assert.False(t, exists, "omitted update must remove stale references")
+	})
+
+	t.Run("rejects references before editing when validator is unavailable", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+		queued, err := svc.QueueMessage(ctx, "s", "t", "original", "", "u", false, nil)
+		require.NoError(t, err)
+		reference := v1.EntityReference{
+			Version: v1.EntityReferenceVersion,
+			Ref:     "mention:v1:kandev:task:workspace-1:task-2", Provider: "kandev", Kind: "task",
+			ID: "task-2", Title: "Referenced task", URL: "/t/task-2", Scope: "workspace-1",
+		}
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id":        "s",
+				"entry_id":          queued.ID,
+				"content":           "edited",
+				"user_id":           "u",
+				"entity_references": []v1.EntityReference{reference},
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, "original", svc.GetStatus(ctx, "s").Entries[0].Content)
+	})
+
+	t.Run("rejects passthrough reference scope before editing", func(t *testing.T) {
+		validator := &fakeReferenceSubmissionValidator{err: entityrefs.ErrUnauthorizedReference}
+		handlers, svc := setupQueueHandlersWithValidator(t, validator)
+		ctx := context.Background()
+		queued, err := svc.QueueMessage(ctx, "passthrough-session", "t", "original", "", "u", false, nil)
+		require.NoError(t, err)
+		reference := v1.EntityReference{
+			Version: v1.EntityReferenceVersion,
+			Ref:     "mention:v1:kandev:task:workspace-1:task-2", Provider: "kandev", Kind: "task",
+			ID: "task-2", Title: "Referenced task", URL: "/t/task-2", Scope: "workspace-1",
+		}
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id":        "passthrough-session",
+				"entry_id":          queued.ID,
+				"content":           "edited",
+				"user_id":           "u",
+				"entity_references": []v1.EntityReference{reference},
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, 1, validator.calls)
+		assert.Equal(t, "original", svc.GetStatus(ctx, "passthrough-session").Entries[0].Content)
+	})
+
+	t.Run("authorizes and replaces references", func(t *testing.T) {
+		normalized := v1.EntityReference{
+			Version: v1.EntityReferenceVersion,
+			Ref:     "mention:v1:kandev:task:workspace-1:task-2", Provider: "kandev", Kind: "task",
+			ID: "task-2", Key: "TASK-2", Title: "Referenced task", URL: "/t/task-2", Scope: "workspace-1",
+		}
+		validator := &fakeReferenceSubmissionValidator{result: []v1.EntityReference{normalized}}
+		handlers, svc := setupQueueHandlersWithValidator(t, validator)
+		ctx := context.Background()
+		queued, err := svc.QueueMessage(ctx, "s", "t", "original", "", "u", false, nil)
+		require.NoError(t, err)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id":        "s",
+				"entry_id":          queued.ID,
+				"content":           "edited",
+				"user_id":           "u",
+				"entity_references": []v1.EntityReference{normalized},
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		assert.Equal(t, 1, validator.calls)
+		assert.Equal(t, "s", validator.sessionID)
+		assert.Empty(t, validator.taskID, "queue edit resolves task from trusted session")
+
+		entries := svc.GetStatus(ctx, "s").Entries
+		require.Len(t, entries, 1)
+		assert.Equal(t, []v1.EntityReference{normalized}, entries[0].Metadata["entity_references"])
 	})
 
 	t.Run("returns entry_not_found when drained", func(t *testing.T) {

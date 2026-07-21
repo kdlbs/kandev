@@ -187,6 +187,69 @@ func TestSQLiteRepository_UpdateContent(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_UpdateContentAndMetadataPreservesUnrelatedKeys(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	msg := &QueuedMessage{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "original",
+		QueuedBy:  "user-1",
+		Metadata: map[string]interface{}{
+			"entity_references": []interface{}{"old"},
+			"origin":            "inter-task",
+		},
+	}
+	if err := repo.Insert(ctx, msg, 0); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	if err := repo.UpdateContentAndMetadata(
+		ctx, "s1", msg.ID, "edited", nil,
+		map[string]interface{}{"entity_references": []interface{}{"new"}},
+		"user-1",
+	); err != nil {
+		t.Fatalf("update content and metadata: %v", err)
+	}
+
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one entry, got %d", len(entries))
+	}
+	if entries[0].Content != "edited" {
+		t.Fatalf("content = %q, want edited", entries[0].Content)
+	}
+	if entries[0].Metadata["origin"] != "inter-task" {
+		t.Fatalf("unrelated metadata lost: %+v", entries[0].Metadata)
+	}
+	wantReferences := []interface{}{"new"}
+	gotReferences, ok := entries[0].Metadata["entity_references"].([]interface{})
+	if !ok || len(gotReferences) != len(wantReferences) || gotReferences[0] != wantReferences[0] {
+		t.Fatalf("entity references = %#v, want %#v", entries[0].Metadata["entity_references"], wantReferences)
+	}
+
+	if err := repo.UpdateContentAndMetadata(
+		ctx, "s1", msg.ID, "edited again", nil,
+		map[string]interface{}{"entity_references": nil},
+		"user-1",
+	); err != nil {
+		t.Fatalf("clear references: %v", err)
+	}
+	entries, err = repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list after clear: %v", err)
+	}
+	if entries[0].Metadata["origin"] != "inter-task" {
+		t.Fatalf("unrelated metadata lost while clearing: %+v", entries[0].Metadata)
+	}
+	if _, exists := entries[0].Metadata["entity_references"]; exists {
+		t.Fatalf("stale references survived clear: %+v", entries[0].Metadata)
+	}
+}
+
 func TestSQLiteRepository_ReplaceCoalescedDetectsMissingRow(t *testing.T) {
 	repo := newTestSQLiteRepo(t).(*sqliteRepository)
 	ctx := context.Background()

@@ -17,7 +17,6 @@ import { MessageActions } from "@/components/task/chat/messages/message-actions"
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
-import { markdownComponents } from "@/components/shared/markdown-components";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
@@ -33,6 +32,9 @@ import {
   type WorkflowStepMessageInfo,
 } from "./workflow-step-message-badge";
 import { AgentMessageContent } from "./agent-message-content";
+import { buildEntityReferenceMarkdownComponents } from "./entity-reference-chip";
+import { entityReferencesFromMetadata } from "@/lib/entity-references/message-references";
+import type { EntityReference } from "@/lib/types/entity-reference";
 
 type ChatMessageProps = {
   comment: Message;
@@ -179,14 +181,20 @@ function usePromptMentionNames() {
   return useMemo(() => prompts.map((prompt) => prompt.name), [prompts]);
 }
 
-function usePromptMentionMarkdownComponents(promptNames: string[]): Components | undefined {
+function usePromptMentionMarkdownComponents(
+  promptNames: string[],
+  entityReferences: readonly EntityReference[],
+): Components | undefined {
   return useMemo(() => {
     const mentionNames = buildPromptMentionNames(promptNames);
-    if (mentionNames.length === 0) return undefined;
+    const baseComponents = buildEntityReferenceMarkdownComponents(entityReferences);
+    if (mentionNames.length === 0) {
+      return entityReferences.length === 0 ? undefined : baseComponents;
+    }
     const renderChildren = (children: ReactNode, keyPrefix: string) =>
       renderChildrenWithPromptMentions(children, mentionNames, keyPrefix);
     return {
-      ...markdownComponents,
+      ...baseComponents,
       p: ({ children, node, ...props }: MarkdownChildrenProps<"p">) => {
         void node;
         return <p {...props}>{renderChildren(children, "p")}</p>;
@@ -232,7 +240,7 @@ function usePromptMentionMarkdownComponents(promptNames: string[]): Components |
         return <th {...props}>{renderChildren(children, "th")}</th>;
       },
     };
-  }, [promptNames]);
+  }, [promptNames, entityReferences]);
 }
 
 function renderChildrenWithPromptMentions(
@@ -398,7 +406,11 @@ function UserMessageContent({
 }: UserMessageProps) {
   const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
   const promptNames = usePromptMentionNames();
-  const promptMentionComponents = usePromptMentionMarkdownComponents(promptNames);
+  const entityReferences = useMemo(
+    () => entityReferencesFromMetadata(comment.metadata),
+    [comment.metadata],
+  );
+  const promptMentionComponents = usePromptMentionMarkdownComponents(promptNames, entityReferences);
   const {
     imageAttachments,
     fileAttachments,

@@ -116,6 +116,17 @@ type TaskRepository interface {
 	GetWorkspaceTaskPrefix(ctx context.Context, workspaceID string) (prefix, officeWorkflowID string, err error)
 }
 
+// TaskMentionRepository provides the lightweight task lookup used by mention
+// autocomplete. Returned tasks contain only ID, WorkspaceID, Identifier, and
+// Title; callers needing full task data must use TaskRepository.GetTask.
+type TaskMentionRepository interface {
+	SearchMentionTasks(
+		ctx context.Context,
+		workspaceID, query, excludeTaskID string,
+		limit int,
+	) ([]*models.Task, error)
+}
+
 // TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).
 // Named TaskRepoRepository to reduce reader confusion with the TaskRepository sub-interface above.
 type TaskRepoRepository interface {

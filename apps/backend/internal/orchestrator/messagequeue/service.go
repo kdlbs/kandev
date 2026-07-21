@@ -200,7 +200,13 @@ func (s *Service) TakeQueuedEntry(ctx context.Context, sessionID, entryID string
 // was already drained, the session doesn't own it, or the queuedBy guard
 // rejects the caller.
 func (s *Service) UpdateMessage(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
-	if err := s.repo.UpdateContent(ctx, sessionID, entryID, content, attachments, queuedBy); err != nil {
+	return s.UpdateMessageWithMetadata(ctx, sessionID, entryID, content, attachments, nil, queuedBy)
+}
+
+// UpdateMessageWithMetadata atomically edits queue content and applies
+// metadata replacements while retaining unrelated metadata keys.
+func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
+	if err := s.repo.UpdateContentAndMetadata(ctx, sessionID, entryID, content, attachments, metadataUpdates, queuedBy); err != nil {
 		return err
 	}
 	s.logger.Info("queued entry updated",

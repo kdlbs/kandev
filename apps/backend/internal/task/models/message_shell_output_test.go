@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/entityrefs"
+	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,6 +36,32 @@ func TestMessageToAPIProjectsTypedShellOutputWithoutMutation(t *testing.T) {
 	require.Equal(t, true, output["truncated"])
 	require.Equal(t, "pass ✓\n", normalized.ShellExec().Output.Stdout)
 	require.Equal(t, "warning\n", normalized.ShellExec().Output.Stderr)
+}
+
+func TestProjectMessageMetadataNormalizesEntityReferencesWithoutMutation(t *testing.T) {
+	valid := apiv1.EntityReference{
+		Version:  apiv1.EntityReferenceVersion,
+		Ref:      entityrefs.CanonicalRef("linear", "issue", "acme", "issue-1"),
+		Provider: "linear", Kind: "issue", ID: "issue-1", Key: "ENG-1",
+		Title: "Fix auth", URL: "https://linear.app/acme/issue/ENG-1", Scope: "acme",
+	}
+	originalRefs := []any{
+		map[string]any{
+			"version": float64(valid.Version), "ref": valid.Ref, "provider": valid.Provider,
+			"kind": valid.Kind, "id": valid.ID, "key": valid.Key, "title": valid.Title,
+			"url": valid.URL, "scope": valid.Scope,
+		},
+		map[string]any{"version": float64(1), "ref": "bad"},
+	}
+	metadata := map[string]any{"status": "sent", "entity_references": originalRefs}
+
+	projected := ProjectMessageMetadata(metadata)
+	references, ok := projected["entity_references"].([]apiv1.EntityReference)
+	require.True(t, ok)
+	require.Equal(t, []apiv1.EntityReference{valid}, references)
+	require.Equal(t, originalRefs, metadata["entity_references"])
+	projected["status"] = "changed"
+	require.Equal(t, "sent", metadata["status"])
 }
 
 func TestMessageToAPIProjectsPersistedShellOutputWithoutMutation(t *testing.T) {

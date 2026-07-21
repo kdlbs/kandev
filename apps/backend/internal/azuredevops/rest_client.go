@@ -179,8 +179,11 @@ func (c *RESTClient) ListPullRequests(ctx context.Context, filter PullRequestFil
 		top = defaultPRPageSize
 	}
 	values.Set("$top", strconv.Itoa(top))
-	endpoint := fmt.Sprintf("/%s/_apis/git/repositories/%s/pullrequests?%s",
-		pathPart(filter.ProjectID), pathPart(filter.RepositoryID), values.Encode())
+	endpoint := fmt.Sprintf("/%s/_apis/git/pullrequests?%s", pathPart(filter.ProjectID), values.Encode())
+	if strings.TrimSpace(filter.RepositoryID) != "" {
+		endpoint = fmt.Sprintf("/%s/_apis/git/repositories/%s/pullrequests?%s",
+			pathPart(filter.ProjectID), pathPart(filter.RepositoryID), values.Encode())
+	}
 	var response struct {
 		Count int              `json:"count"`
 		Value []rawPullRequest `json:"value"`

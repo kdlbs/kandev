@@ -10,17 +10,16 @@ import {
   useMemo,
 } from "react";
 import { EditorContent } from "@tiptap/react";
-import { useShallow } from "zustand/react/shallow";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { EditorContextProvider } from "./editor-context";
+import { EntityReferenceMenu } from "./entity-reference-menu";
 import { MentionMenu } from "./mention-menu";
 import { MessageHistorySearch } from "./message-history-search";
 import { SlashCommandMenu } from "./slash-command-menu";
-import { buildTaskMentionItems } from "./task-mention-items";
-import { extractUserHistory } from "./message-history";
+import { createMessageHistorySelector, type MessageHistoryEntry } from "./message-history";
 import { useDrainOlderMessages } from "./use-drain-older-messages";
 import {
   createMentionSuggestion,
@@ -33,6 +32,7 @@ import { useTipTapEditor, type TipTapInputHandle } from "./use-tiptap-editor";
 import type { MentionItem } from "@/hooks/use-inline-mention";
 import type { SlashCommand } from "./slash-command-types";
 import type { ContextFile } from "@/lib/state/context-files-store";
+import { useEntityReferenceComposer } from "./use-entity-reference-composer";
 
 export type { TipTapInputHandle } from "./use-tiptap-editor";
 
@@ -52,6 +52,8 @@ type TipTapInputProps = {
   // TipTap-specific
   sessionId: string | null;
   taskId?: string | null;
+  workspaceId?: string | null;
+  entityReferencesEnabled?: boolean;
   onAddContextFile?: (file: ContextFile) => void;
   onToggleContextFile?: (file: ContextFile) => void;
   planContextEnabled?: boolean;
@@ -122,12 +124,10 @@ async function fetchFileResults(
   return results;
 }
 
-function useMentionItems(sessionId: string | null, taskId: string | null) {
+function useMentionItems(sessionId: string | null) {
   const { prompts } = useCustomPrompts();
-  const storeApi = useAppStoreApi();
   const promptsRef = useRef(prompts);
   const sessionIdRef = useRef(sessionId);
-  const taskIdRef = useRef(taskId);
   const lastFileSearchRef = useRef<{ query: string; results: string[] }>({
     query: "",
     results: [],
@@ -135,57 +135,51 @@ function useMentionItems(sessionId: string | null, taskId: string | null) {
   useLayoutEffect(() => {
     promptsRef.current = prompts;
     sessionIdRef.current = sessionId;
-    taskIdRef.current = taskId;
   });
 
-  return useCallback(
-    async (query: string): Promise<MentionItem[]> => {
-      const allItems: MentionItem[] = [];
-      allItems.push(...buildTaskMentionItems(storeApi.getState(), taskIdRef.current));
+  return useCallback(async (query: string): Promise<MentionItem[]> => {
+    const allItems: MentionItem[] = [];
+    allItems.push({
+      id: "__plan__",
+      kind: "plan",
+      label: "Plan",
+      description: "Include the plan as context",
+      onSelect: () => {},
+    });
+    for (const p of promptsRef.current) {
       allItems.push({
-        id: "__plan__",
-        kind: "plan",
-        label: "Plan",
-        description: "Include the plan as context",
+        id: p.id,
+        kind: "prompt",
+        label: p.name,
+        description: p.content.length > 100 ? p.content.slice(0, 100) + "..." : p.content,
         onSelect: () => {},
       });
-      for (const p of promptsRef.current) {
-        allItems.push({
-          id: p.id,
-          kind: "prompt",
-          label: p.name,
-          description: p.content.length > 100 ? p.content.slice(0, 100) + "..." : p.content,
-          onSelect: () => {},
-        });
-      }
-      const sid = sessionIdRef.current;
-      if (sid) {
-        try {
-          const files = await fetchFileResults(sid, query, lastFileSearchRef.current);
-          for (const filePath of files) {
-            allItems.push({
-              id: filePath,
-              kind: "file",
-              label: filePath,
-              description: "File",
-              onSelect: () => {},
-            });
-          }
-        } catch {
-          // ignore
+    }
+    const sid = sessionIdRef.current;
+    if (sid) {
+      try {
+        const files = await fetchFileResults(sid, query, lastFileSearchRef.current);
+        for (const filePath of files) {
+          allItems.push({
+            id: filePath,
+            kind: "file",
+            label: filePath,
+            description: "File",
+            onSelect: () => {},
+          });
         }
+      } catch {
+        // ignore
       }
-      return filterItems(allItems, query);
-    },
-    [storeApi],
-  );
+    }
+    return filterItems(allItems, query);
+  }, []);
 }
 
 // ── Suggestion configs hook ──────────────────────────────────────────
 
 type SuggestionConfigsInput = {
   sessionId: string | null;
-  taskId: string | null;
   onMentionKeyDown: (event: KeyboardEvent) => boolean;
   onSlashKeyDown: (event: KeyboardEvent) => boolean;
   setMentionMenu: React.Dispatch<React.SetStateAction<MenuState<MentionItem>>>;
@@ -194,7 +188,6 @@ type SuggestionConfigsInput = {
 
 function useSuggestionConfigs({
   sessionId,
-  taskId,
   onMentionKeyDown,
   onSlashKeyDown,
   setMentionMenu,
@@ -216,7 +209,7 @@ function useSuggestionConfigs({
       }));
   }, [agentCommands]);
 
-  const getMentionItems = useMentionItems(sessionId, taskId);
+  const getMentionItems = useMentionItems(sessionId);
   const mentionCallbacks = useMemo(
     (): MentionSuggestionCallbacks => ({ getItems: getMentionItems }),
     [getMentionItems],
@@ -361,6 +354,8 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onBlur,
     sessionId,
     taskId,
+    workspaceId = null,
+    entityReferencesEnabled = false,
     onImagePaste,
   },
   ref,
@@ -368,15 +363,21 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   const menu = useMenuHandlers();
   const { mentionSuggestion, slashSuggestion, slashCommands } = useSuggestionConfigs({
     sessionId,
-    taskId: taskId ?? null,
     onMentionKeyDown: menu.onMentionKeyDown,
     onSlashKeyDown: menu.onSlashKeyDown,
     setMentionMenu: menu.setMentionMenu,
     setSlashMenu: menu.setSlashMenu,
   });
+  const entityReferences = useEntityReferenceComposer({
+    enabled: entityReferencesEnabled,
+    workspaceId,
+    sessionId,
+    taskId: taskId ?? null,
+  });
   const isSuggestionMenuOpen =
     (menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0) ||
-    (menu.slashMenu.isOpen && menu.slashMenu.items.length > 0);
+    (menu.slashMenu.isOpen && menu.slashMenu.items.length > 0) ||
+    entityReferences.isOpen;
   const { history, getHistory } = useChatHistory(sessionId);
   const { editorWrapperRef, ...overlay } = useReverseSearchOverlay(sessionId);
   const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen);
@@ -396,6 +397,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onImagePaste,
     mentionSuggestion,
     slashSuggestion,
+    entityReferenceSuggestion: entityReferences.suggestion,
     slashCommands,
     isSuggestionMenuOpen,
     getHistory,
@@ -416,6 +418,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     <>
       <TipTapPopups
         menu={menu}
+        entityReferences={entityReferences}
         overlay={overlay}
         history={history}
         isDraining={isDraining}
@@ -435,14 +438,16 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
 
 type TipTapPopupsProps = {
   menu: ReturnType<typeof useMenuHandlers>;
+  entityReferences: ReturnType<typeof useEntityReferenceComposer>;
   overlay: Omit<ReturnType<typeof useReverseSearchOverlay>, "editorWrapperRef">;
-  history: readonly string[];
+  history: readonly MessageHistoryEntry[];
   isDraining: boolean;
   onReverseSearchSelect: (index: number) => void;
 };
 
 function TipTapPopups({
   menu,
+  entityReferences,
   overlay,
   history,
   isDraining,
@@ -460,6 +465,19 @@ function TipTapPopups({
         onSelect={menu.handleMentionSelect}
         onClose={menu.handleMentionClose}
         setSelectedIndex={menu.setMentionSelectedIndex}
+      />
+      <EntityReferenceMenu
+        isOpen={entityReferences.isOpen}
+        clientRect={entityReferences.clientRect}
+        groups={entityReferences.groups}
+        query={entityReferences.query}
+        selectedIndex={entityReferences.selectedIndex}
+        isSearching={entityReferences.isSearching}
+        error={entityReferences.error}
+        onRetry={entityReferences.retry}
+        onSelect={entityReferences.selectReference}
+        onClose={entityReferences.close}
+        setSelectedIndex={entityReferences.setSelectedIndex}
       />
       <SlashCommandMenu
         isOpen={menu.slashMenu.isOpen}
@@ -483,16 +501,11 @@ function TipTapPopups({
   );
 }
 
-function useMessageHistoryForSession(sessionId: string | null): string[] {
-  // Subscribe to the *derived* user history (not the raw messages array) via a
-  // shallow comparison: agent streaming tokens churn the messages array every
-  // frame but don't change the user's sent-message history, so the rich editor
-  // only re-renders when the history list itself changes.
-  return useAppStore(
-    useShallow((s) =>
-      extractUserHistory((sessionId ? s.messages.bySession[sessionId] : undefined) ?? []),
-    ),
-  );
+function useMessageHistoryForSession(sessionId: string | null): MessageHistoryEntry[] {
+  // The memoized selector keeps its snapshot stable while agent messages
+  // stream, but still reacts to user content or reference-metadata changes.
+  const selector = useMemo(() => createMessageHistorySelector(sessionId), [sessionId]);
+  return useAppStore(selector);
 }
 
 function useChatHistory(sessionId: string | null) {

@@ -38,6 +38,7 @@ import (
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
@@ -840,6 +841,9 @@ func resolveRepositoryIDForSessionSubpath(ctx context.Context, taskRepo *sqliter
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
 func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	if p.services != nil {
+		registerMentionRoutes(p.router, p.services.Mentions)
+	}
 	taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	if p.services != nil && p.services.User != nil {
@@ -865,9 +869,13 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.agentList, p.log)
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	var referenceValidators []entityrefs.SubmissionValidator
+	if p.services != nil && p.services.Mentions != nil && p.services.Mentions.Submission != nil {
+		referenceValidators = append(referenceValidators, p.services.Mentions.Submission)
+	}
 	taskhandlers.RegisterMessageRoutes(
 		p.router, p.gateway.Dispatcher, p.taskSvc,
-		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log,
+		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
 	taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
 	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.log)
