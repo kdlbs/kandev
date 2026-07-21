@@ -295,6 +295,63 @@ func TestIsPassthroughProfile(t *testing.T) {
 	})
 }
 
+// TestShouldUpgradePassthroughPrepare pins the launchPrepare upgrade decision.
+//
+// Regression guard for the prompt-delivery break introduced by the passthrough
+// upgrade (PR #744): the two-phase create flow does a cheap prompt-less prepare
+// followed by an async IntentStartCreated that carries the prompt. If a
+// passthrough prepare is eagerly upgraded to a full launch there, the PTY spawns
+// with an empty prompt and the prompt-bearing start is rejected against the
+// now-running session — so the agent sits at an empty prompt. DeferredStart must
+// suppress the upgrade so that follow-up start launches the passthrough WITH the
+// prompt, exactly as ACP already does.
+func TestShouldUpgradePassthroughPrepare(t *testing.T) {
+	repo := setupTestRepo(t)
+	passthrough := &mockAgentManager{isPassthrough: true}
+	regular := &mockAgentManager{isPassthrough: false}
+
+	tests := []struct {
+		name string
+		mgr  *mockAgentManager
+		req  LaunchSessionRequest
+		want bool
+	}{
+		{
+			name: "prepare-only passthrough upgrades (quick-chat terminal needs a PTY)",
+			mgr:  passthrough,
+			req:  LaunchSessionRequest{AgentProfileID: "profile1"},
+			want: true,
+		},
+		{
+			name: "deferred-start passthrough does NOT upgrade (prompt-bearing start follows)",
+			mgr:  passthrough,
+			req:  LaunchSessionRequest{AgentProfileID: "profile1", DeferredStart: true},
+			want: false,
+		},
+		{
+			name: "auto-start passthrough does NOT upgrade (avoids launchStart bounce)",
+			mgr:  passthrough,
+			req:  LaunchSessionRequest{AgentProfileID: "profile1", AutoStart: true},
+			want: false,
+		},
+		{
+			name: "non-passthrough never upgrades",
+			mgr:  regular,
+			req:  LaunchSessionRequest{AgentProfileID: "profile1"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), tt.mgr)
+			if got := svc.shouldUpgradePassthroughPrepare(context.Background(), &tt.req); got != tt.want {
+				t.Errorf("shouldUpgradePassthroughPrepare()=%v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestLaunchPrepare_PassthroughDoesNotRecurse guards against an infinite
 // launchStart ↔ launchPrepare bounce when a passthrough profile is combined
 // with AutoStart=true and a step that blocks auto-start.

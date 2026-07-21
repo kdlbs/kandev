@@ -2,9 +2,14 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 )
 
 // ErrActionNotYetWired is the sentinel returned by Phase 2 callbacks when a
@@ -24,12 +29,20 @@ const (
 	defaultQueueReasonR = "queue_run"
 )
 
-// PrimaryAgentResolver resolves the step's "primary" agent profile id. The
-// engine asks via this interface when a queue_run target is "primary" — the
-// answer is just step.PrimaryAgentProfileID for kanban-style steps. The
-// indirection keeps the engine package free of model imports.
+// PrimaryAgentResolver resolves the task's "primary" agent profile id. The
+// engine asks via this interface when a queue_run target is "primary". The
+// answer is task-aware so office steps can prefer the task's current runner
+// participant while kanban-style steps still fall back to the step primary.
+// The indirection keeps the engine package free of model imports.
 type PrimaryAgentResolver interface {
-	PrimaryAgentProfileID(ctx context.Context, stepID string) (string, error)
+	PrimaryAgentProfileID(ctx context.Context, stepID, taskID string) (string, error)
+}
+
+// TargetTaskStepResolver resolves a task's current workflow step for cross-task
+// queue_run actions. The engine only has the triggering task's StepSpec, so
+// adapters that read task storage provide this for target task lookups.
+type TargetTaskStepResolver interface {
+	WorkflowStepIDForTask(ctx context.Context, taskID string) (string, error)
 }
 
 // QueueRunCallback executes the queue_run action by resolving Target/TaskID
@@ -39,6 +52,7 @@ type QueueRunCallback struct {
 	Participants ParticipantStore
 	CEOResolver  CEOAgentResolver
 	Primary      PrimaryAgentResolver
+	TaskSteps    TargetTaskStepResolver
 }
 
 // Execute satisfies ActionCallback.
@@ -50,7 +64,7 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 		return ActionResult{}, fmt.Errorf("queue_run action missing QueueRun config")
 	}
 	taskID := resolveTaskID(in.Action.QueueRun.TaskID, in.State.TaskID)
-	agentIDs, err := c.resolveTarget(ctx, in)
+	agentIDs, workflowStepID, err := c.resolveTarget(ctx, in, taskID)
 	if err != nil {
 		return ActionResult{}, err
 	}
@@ -58,10 +72,10 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 		req := QueueRunRequest{
 			AgentProfileID: agentID,
 			TaskID:         taskID,
-			WorkflowStepID: in.Step.ID,
+			WorkflowStepID: workflowStepID,
 			Reason:         queueRunReason(in),
 			IdempotencyKey: idempotencyKey(in, agentID, taskID),
-			Payload:        in.Action.QueueRun.Payload,
+			Payload:        queueRunPayload(in, in.Action.QueueRun.Payload, taskID),
 		}
 		if err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for agent %s: %w", agentID, err)
@@ -70,32 +84,79 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 	return ActionResult{}, nil
 }
 
-func (c QueueRunCallback) resolveTarget(ctx context.Context, in ActionInput) ([]string, error) {
+func (c QueueRunCallback) resolveTarget(
+	ctx context.Context, in ActionInput, taskID string,
+) ([]string, string, error) {
 	target := strings.TrimSpace(in.Action.QueueRun.Target)
 	switch {
 	case target == "" || target == TargetPrimary:
-		return c.resolvePrimary(ctx, in.Step.ID)
+		stepID, err := c.resolveTargetStepID(ctx, in, taskID, pickStepResolver(c.Primary, c.TaskSteps))
+		if err != nil {
+			return nil, "", err
+		}
+		agentIDs, err := c.resolvePrimary(ctx, taskID, stepID)
+		return agentIDs, stepID, err
 	case strings.HasPrefix(target, TargetParticipant):
 		role := strings.TrimPrefix(target, TargetParticipant)
-		return c.resolveParticipantRole(ctx, in.Step.ID, in.State.TaskID, role)
+		stepID, err := c.resolveTargetStepID(ctx, in, taskID, pickStepResolver(c.Participants, c.TaskSteps))
+		if err != nil {
+			return nil, "", err
+		}
+		agentIDs, err := c.resolveParticipantRole(ctx, stepID, taskID, role)
+		return agentIDs, stepID, err
 	case strings.HasPrefix(target, TargetAgentProfile):
 		id := strings.TrimPrefix(target, TargetAgentProfile)
 		if id == "" {
-			return nil, fmt.Errorf("queue_run agent_profile_id target is empty")
+			return nil, "", fmt.Errorf("queue_run agent_profile_id target is empty")
 		}
-		return []string{id}, nil
+		stepID, err := c.resolveTargetStepID(ctx, in, taskID, c.TaskSteps)
+		if err != nil {
+			return nil, "", err
+		}
+		return []string{id}, stepID, nil
 	case target == TargetWorkspaceCEO:
-		return c.resolveCEO(ctx, in.State.TaskID)
+		stepID, err := c.resolveTargetStepID(ctx, in, taskID, c.TaskSteps)
+		if err != nil {
+			return nil, "", err
+		}
+		agentIDs, err := c.resolveCEO(ctx, taskID)
+		return agentIDs, stepID, err
 	default:
-		return nil, fmt.Errorf("queue_run: unsupported target %q", target)
+		return nil, "", fmt.Errorf("queue_run: unsupported target %q", target)
 	}
 }
 
-func (c QueueRunCallback) resolvePrimary(ctx context.Context, stepID string) ([]string, error) {
+func (c QueueRunCallback) resolveTargetStepID(
+	ctx context.Context, in ActionInput, taskID string, resolver TargetTaskStepResolver,
+) (string, error) {
+	if taskID == in.State.TaskID {
+		return in.Step.ID, nil
+	}
+	if resolver == nil {
+		return "", fmt.Errorf("%w: queue_run cross-task target requires TargetTaskStepResolver", ErrActionNotYetWired)
+	}
+	stepID, err := resolver.WorkflowStepIDForTask(ctx, taskID)
+	if err != nil {
+		return "", fmt.Errorf("queue_run resolve target task step: %w", err)
+	}
+	if stepID == "" {
+		return "", fmt.Errorf("queue_run: task %s has no workflow step", taskID)
+	}
+	return stepID, nil
+}
+
+func pickStepResolver(v any, fallback TargetTaskStepResolver) TargetTaskStepResolver {
+	if resolver, ok := v.(TargetTaskStepResolver); ok {
+		return resolver
+	}
+	return fallback
+}
+
+func (c QueueRunCallback) resolvePrimary(ctx context.Context, taskID, stepID string) ([]string, error) {
 	if c.Primary == nil {
 		return nil, fmt.Errorf("%w: queue_run target=primary requires PrimaryAgentResolver", ErrActionNotYetWired)
 	}
-	id, err := c.Primary.PrimaryAgentProfileID(ctx, stepID)
+	id, err := c.Primary.PrimaryAgentProfileID(ctx, stepID, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("queue_run resolve primary: %w", err)
 	}
@@ -163,13 +224,94 @@ func queueRunReason(in ActionInput) string {
 
 // idempotencyKey synthesises a deterministic key from the engine's
 // operation id (already idempotent across retries) plus action-specific
-// salt. When OperationID is empty, the adapter sees an empty key and is
-// expected to dedupe via its own mechanism (or accept the duplicate).
+// salt. Comment status lookups map runs back through payload.comment_id, so
+// even same-task primary comment wakes keep agent/task/action salt. That lets
+// a later wake for the same comment reach a newly resolved runner instead of
+// being suppressed by a bare task_comment:<comment_id> key.
+// When OperationID is empty, the adapter sees an empty key and is expected to
+// dedupe via its own mechanism (or accept the duplicate).
 func idempotencyKey(in ActionInput, agentID, taskID string) string {
 	if in.OperationID == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s:%s:%s:%s", in.OperationID, in.Step.ID, taskID, agentID)
+	return fmt.Sprintf("%s:%s:%s:%s:%s",
+		in.OperationID, in.Step.ID, taskID, agentID, queueActionDigest(in))
+}
+
+func queueActionDigest(in ActionInput) string {
+	key := struct {
+		Kind    ActionKind     `json:"kind"`
+		Target  string         `json:"target,omitempty"`
+		TaskID  string         `json:"task_id,omitempty"`
+		Role    string         `json:"role,omitempty"`
+		Reason  string         `json:"reason"`
+		Payload map[string]any `json:"payload,omitempty"`
+	}{
+		Kind: in.Action.Kind,
+	}
+	switch in.Action.Kind {
+	case ActionQueueRun:
+		if in.Action.QueueRun != nil {
+			key.Target = strings.TrimSpace(in.Action.QueueRun.Target)
+			key.TaskID = strings.TrimSpace(in.Action.QueueRun.TaskID)
+			key.Reason = queueRunReason(in)
+			key.Payload = in.Action.QueueRun.Payload
+		}
+	case ActionQueueRunForEachParticipant:
+		if in.Action.QueueRunForEachParticipant != nil {
+			cfg := in.Action.QueueRunForEachParticipant
+			key.Role = strings.TrimSpace(cfg.Role)
+			key.Reason = queueRunForEachParticipantReason(in)
+			key.Payload = cfg.Payload
+		}
+	}
+	b, err := json.Marshal(key)
+	if err != nil {
+		b = []byte(string(key.Kind) + "\x00" + key.Target + "\x00" +
+			key.TaskID + "\x00" + key.Role + "\x00" + key.Reason)
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
+}
+
+func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID string) map[string]any {
+	out := make(map[string]any, len(actionPayload))
+	comment, ok := commentPayload(in.Payload)
+	if ok {
+		if comment.CommentID != "" {
+			out["comment_id"] = comment.CommentID
+		}
+		if comment.AuthorID != "" {
+			out["author_id"] = comment.AuthorID
+		}
+	}
+	// Workflow-authored payload fields are explicit overrides. The trigger's
+	// comment_id/author_id only provide defaults for ordinary comment wakes.
+	for k, v := range actionPayload {
+		out[k] = v
+	}
+	if targetTaskID != "" &&
+		in.State.TaskID != "" &&
+		targetTaskID != in.State.TaskID &&
+		(ok || commentkeys.HasTaskCommentPrefix(in.OperationID)) {
+		out["source_task_id"] = in.State.TaskID
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func commentPayload(payload any) (OnCommentPayload, bool) {
+	switch p := payload.(type) {
+	case OnCommentPayload:
+		return p, true
+	case *OnCommentPayload:
+		if p != nil {
+			return *p, true
+		}
+	}
+	return OnCommentPayload{}, false
 }
 
 // ClearDecisionsCallback executes the clear_decisions action by deleting all
@@ -213,10 +355,7 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 	if err != nil {
 		return ActionResult{}, fmt.Errorf("queue_run_for_each_participant list participants: %w", err)
 	}
-	reason := cfg.Reason
-	if reason == "" {
-		reason = string(in.Trigger)
-	}
+	reason := queueRunForEachParticipantReason(in)
 	for _, p := range all {
 		if p.Role != cfg.Role {
 			continue
@@ -227,13 +366,20 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 			WorkflowStepID: in.Step.ID,
 			Reason:         reason,
 			IdempotencyKey: idempotencyKey(in, p.AgentProfileID, taskID),
-			Payload:        cfg.Payload,
+			Payload:        queueRunPayload(in, cfg.Payload, taskID),
 		}
 		if err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for participant %s: %w", p.ID, err)
 		}
 	}
 	return ActionResult{}, nil
+}
+
+func queueRunForEachParticipantReason(in ActionInput) string {
+	if in.Action.QueueRunForEachParticipant != nil && in.Action.QueueRunForEachParticipant.Reason != "" {
+		return in.Action.QueueRunForEachParticipant.Reason
+	}
+	return string(in.Trigger)
 }
 
 // PlaceholderQueueRunCallback is preserved as a typed alias for backward

@@ -29,6 +29,7 @@ export type FloatingButtonPosition = {
 
 type UseMonacoEditorStateOpts = {
   path: string;
+  repo?: string;
   enableComments: boolean;
   sessionId?: string;
   wrapperRef: RefObject<HTMLDivElement | null>;
@@ -43,7 +44,7 @@ type UseMonacoEditorStateOpts = {
 
 // eslint-disable-next-line max-lines-per-function
 export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
-  const { path, enableComments, sessionId, wrapperRef, onChange, onSave, contentRef } = opts;
+  const { path, repo, enableComments, sessionId, wrapperRef, onChange, onSave, contentRef } = opts;
 
   const [wrapEnabled, setWrapEnabled] = useState(true);
   const [formZoneRange, setFormZoneRange] = useState<FormZoneRange>(null);
@@ -109,7 +110,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       setEditorInstance(editor);
       decorationsRef.current = editor.createDecorationsCollection([]);
       diffDecorationsRef.current = editor.createDecorationsCollection([]);
-      const pendingPos = consumePendingCursorPosition(path);
+      const pendingPos = consumePendingCursorPosition(path, repo);
       if (pendingPos) {
         editor.setPosition({ lineNumber: pendingPos.line, column: pendingPos.column });
         editor.revealLineInCenter(pendingPos.line);
@@ -160,7 +161,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
         setWrapEnabled((prev) => !prev);
       });
     },
-    [path, enableComments, sessionId, setCommandPanelOpen, setWrapEnabled],
+    [path, repo, enableComments, sessionId, setCommandPanelOpen, setWrapEnabled],
   );
 
   // Cleanup
@@ -213,7 +214,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
           isWholeLine: true,
           className: "monaco-comment-line",
           lineNumberClassName: "monaco-comment-line-number",
-          linesDecorationsClassName: firstLines.has(lineNum)
+          firstLineDecorationClassName: firstLines.has(lineNum)
             ? "monaco-comment-bar-icon"
             : "monaco-comment-bar",
         },

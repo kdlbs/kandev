@@ -7,9 +7,15 @@ import {
   updateLinearIssueWatch,
   deleteLinearIssueWatch,
   triggerLinearIssueWatch,
+  previewResetLinearIssueWatch,
+  resetLinearIssueWatch,
 } from "@/lib/api/domains/linear-api";
 import { useAppStore } from "@/components/state-provider";
 import type { CreateLinearIssueWatchInput, UpdateLinearIssueWatchInput } from "@/lib/types/linear";
+
+// WORKSPACE_REQUIRED is thrown by per-row mutation callbacks when the
+// install-wide listing case forgets to forward the row's workspaceId.
+const WORKSPACE_REQUIRED = "workspaceId required";
 
 /**
  * useLinearIssueWatches owns the Linear-watcher list:
@@ -69,7 +75,7 @@ export function useLinearIssueWatches(workspaceId?: string | null) {
   const update = useCallback(
     async (id: string, req: UpdateLinearIssueWatchInput, rowWorkspaceId?: string) => {
       const ws = rowWorkspaceId ?? workspaceId;
-      if (!ws) throw new Error("workspaceId required");
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
       const watch = await updateLinearIssueWatch(ws, id, req);
       updateWatch(watch);
       return watch;
@@ -80,7 +86,7 @@ export function useLinearIssueWatches(workspaceId?: string | null) {
   const remove = useCallback(
     async (id: string, rowWorkspaceId?: string) => {
       const ws = rowWorkspaceId ?? workspaceId;
-      if (!ws) throw new Error("workspaceId required");
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
       await deleteLinearIssueWatch(ws, id);
       removeWatch(id);
     },
@@ -90,11 +96,31 @@ export function useLinearIssueWatches(workspaceId?: string | null) {
   const trigger = useCallback(
     async (id: string, rowWorkspaceId?: string) => {
       const ws = rowWorkspaceId ?? workspaceId;
-      if (!ws) throw new Error("workspaceId required");
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
       return triggerLinearIssueWatch(ws, id);
     },
     [workspaceId],
   );
 
-  return { items, loaded, loading, create, update, remove, trigger };
+  const previewReset = useCallback(
+    async (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      return previewResetLinearIssueWatch(ws, id);
+    },
+    [workspaceId],
+  );
+
+  const reset = useCallback(
+    async (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      const res = await resetLinearIssueWatch(ws, id);
+      resetWatches();
+      return res;
+    },
+    [workspaceId, resetWatches],
+  );
+
+  return { items, loaded, loading, create, update, remove, trigger, previewReset, reset };
 }

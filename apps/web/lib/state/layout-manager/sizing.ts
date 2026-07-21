@@ -1,24 +1,49 @@
 import type { LayoutColumn, LayoutGroup } from "./types";
-import { LAYOUT_SIDEBAR_RATIO } from "./constants";
+import { LAYOUT_RIGHT_RATIO, LAYOUT_SIDEBAR_RATIO } from "./constants";
+import { computePinnedMaxPxFor, computeSidebarMaxPx, LAYOUT_PINNED_MIN_PX } from "./caps";
+import { getGlobalSidebarWidth } from "@/lib/local-storage";
+
+// Legacy hard caps used to clamp the *initial* default width. Users can still
+// drag past these via setConstraints (which uses the larger runtime cap),
+// but a fresh task env opens at the same width it always did.
+const LEGACY_SIDEBAR_INITIAL_CAP = 350;
+const LEGACY_RIGHT_INITIAL_CAP = 450;
 
 /**
- * Get the effective pinned width for a column,
- * considering user overrides, maxWidth cap, and ratio-based default.
+ * Get the effective pinned width for a column.
+ *
+ * - User overrides (from a prior resize, captured in the in-memory
+ *   pinnedWidths map) are clamped to the runtime cap.
+ * - The initial default (no override) preserves legacy behavior: ratio-based
+ *   width clamped to the old hard cap. New environments open exactly as
+ *   they did before this PR.
  */
 export function getPinnedWidth(
   column: LayoutColumn,
   totalWidth: number,
   override?: number,
 ): number {
+  const runtimeMax = column.maxWidth ?? computePinnedMaxPxFor(column.id);
+  const min = column.minWidth ?? LAYOUT_PINNED_MIN_PX;
   if (override !== undefined) {
-    const max = column.maxWidth ?? Infinity;
-    const min = column.minWidth ?? 50;
-    return Math.max(min, Math.min(override, max));
+    return Math.max(min, Math.min(override, runtimeMax));
   }
-  const ratioWidth = Math.round(totalWidth * LAYOUT_SIDEBAR_RATIO);
-  const max = column.maxWidth ?? Infinity;
-  const min = column.minWidth ?? 50;
-  return Math.max(min, Math.min(ratioWidth, max));
+  // No override: the left sidebar honors the persisted GLOBAL width pref so it
+  // opens identically across every task. Clamp-to-fit against the current
+  // screen (the raw value stays in storage, so a wider monitor restores it).
+  if (column.id === "sidebar") {
+    const pref = getGlobalSidebarWidth();
+    if (pref !== null) {
+      const max = column.maxWidth ?? computeSidebarMaxPx(totalWidth);
+      return Math.max(min, Math.min(pref, max));
+    }
+  }
+  const ratio = column.id === "sidebar" ? LAYOUT_SIDEBAR_RATIO : LAYOUT_RIGHT_RATIO;
+  const ratioWidth = Math.round(totalWidth * ratio);
+  const initialCap =
+    column.maxWidth ??
+    (column.id === "sidebar" ? LEGACY_SIDEBAR_INITIAL_CAP : LEGACY_RIGHT_INITIAL_CAP);
+  return Math.max(min, Math.min(ratioWidth, initialCap));
 }
 
 type ColumnBucket = {

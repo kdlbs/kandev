@@ -3,7 +3,12 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createGitHubSlice } from "./github-slice";
 import type { GitHubSlice } from "./types";
-import type { GitHubStatus, TaskPR } from "@/lib/types/github";
+import type {
+  GitHubStatus,
+  TaskCIAutomationOptions,
+  TaskIssueLink,
+  TaskPR,
+} from "@/lib/types/github";
 
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
@@ -40,6 +45,20 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
 
 function makeStore() {
   return create<GitHubSlice>()(immer((...a) => createGitHubSlice(...a)));
+}
+
+function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
+  return {
+    task_id: "task-1",
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    auto_fix_prompt_override: null,
+    effective_auto_fix_prompt: "Default CI prompt",
+    using_default_prompt: true,
+    updated_at: "2026-06-18T10:00:00Z",
+    pr_states: [],
+    ...overrides,
+  };
 }
 
 const FUTURE_RESET = "2030-01-01T00:00:00Z";
@@ -164,6 +183,27 @@ describe("setTaskPR", () => {
     expect(list.find((p) => p.repository_id === "repo-b")?.id).toBe("b");
   });
 
+  it("keeps multi-branch PRs as siblings (same repo, different pr_number)", () => {
+    const store = makeStore();
+    const pr1 = makePR({ id: "p1", repository_id: "repo-a", pr_number: 1221 });
+    const pr2 = makePR({ id: "p2", repository_id: "repo-a", pr_number: 1222 });
+    const pr1Updated = makePR({
+      id: "p1",
+      repository_id: "repo-a",
+      pr_number: 1221,
+      additions: 99,
+    });
+
+    store.getState().setTaskPR("task-1", pr1);
+    store.getState().setTaskPR("task-1", pr2);
+    store.getState().setTaskPR("task-1", pr1Updated);
+
+    const list = store.getState().taskPRs.byTaskId["task-1"];
+    expect(list).toHaveLength(2);
+    expect(list.find((p) => p.pr_number === 1221)?.additions).toBe(99);
+    expect(list.find((p) => p.pr_number === 1222)?.id).toBe("p2");
+  });
+
   it("heals a corrupted non-array entry instead of throwing", () => {
     // Simulates a stray payload landing in byTaskId[taskId] as something other
     // than an array (e.g. a partial hydration). The next setTaskPR call must
@@ -178,5 +218,97 @@ describe("setTaskPR", () => {
 
     expect(Array.isArray(store.getState().taskPRs.byTaskId["task-1"])).toBe(true);
     expect(store.getState().taskPRs.byTaskId["task-1"]).toEqual([pr]);
+  });
+});
+
+describe("setTaskIssues", () => {
+  const link: TaskIssueLink = {
+    task_id: "task-1",
+    task_title: "Fix issue",
+    owner: "kdlbs",
+    repo: "kandev",
+    issue_number: 1672,
+    issue_url: "https://github.com/kdlbs/kandev/issues/1672",
+    issue_title: "Issue title",
+  };
+
+  it("replaces workspace issue links by task id", () => {
+    const store = makeStore();
+
+    store.getState().setTaskIssues("ws-1", { "task-1": link });
+
+    expect(store.getState().taskIssues).toEqual({
+      workspaceId: "ws-1",
+      byTaskId: { "task-1": link },
+    });
+  });
+
+  it("upserts issue links only for the active workspace", () => {
+    const store = makeStore();
+    store.getState().setTaskIssues("ws-1", {});
+
+    store.getState().upsertTaskIssue("ws-2", link);
+    expect(store.getState().taskIssues.byTaskId).toEqual({});
+
+    store.getState().upsertTaskIssue("ws-1", link);
+    expect(store.getState().taskIssues.byTaskId).toEqual({ "task-1": link });
+  });
+
+  it("initializes an unloaded workspace with a newly linked issue", () => {
+    const store = makeStore();
+
+    store.getState().upsertTaskIssue("ws-1", link);
+
+    expect(store.getState().taskIssues).toEqual({
+      workspaceId: "ws-1",
+      byTaskId: { "task-1": link },
+    });
+  });
+});
+
+describe("setPendingPrUrlForTask", () => {
+  it("stores a pending PR URL until TaskPR sync clears it", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .setPendingPrUrlForTask("task-1", "", "https://dev.azure.com/o/p/_git/r/pullrequest/1");
+    expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]?.[""]).toBe(
+      "https://dev.azure.com/o/p/_git/r/pullrequest/1",
+    );
+
+    store.getState().setTaskPR("task-1", makePR());
+    expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]).toBeUndefined();
+  });
+
+  it("clears only the synced repo pending URL in multi-repo tasks", () => {
+    const store = makeStore();
+    const urlA = "https://dev.azure.com/o/p/_git/a/pullrequest/1";
+    const urlB = "https://dev.azure.com/o/p/_git/b/pullrequest/2";
+
+    store.getState().setPendingPrUrlForTask("task-1", "repo-a", urlA);
+    store.getState().setPendingPrUrlForTask("task-1", "repo-b", urlB);
+    store.getState().setTaskPR("task-1", makePR({ repository_id: "repo-a", pr_url: urlA }));
+
+    expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]?.["repo-b"]).toBe(urlB);
+    expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]?.["repo-a"]).toBeUndefined();
+  });
+});
+
+describe("task CI automation options", () => {
+  it("stores task options and per-task loading/saving/error state", () => {
+    const store = makeStore();
+    const options = makeCIOptions({ auto_fix_enabled: true });
+
+    store.getState().setTaskCIAutomationLoading("task-1", true);
+    store.getState().setTaskCIAutomationSaving("task-1", true);
+    store.getState().setTaskCIAutomationError("task-1", "failed");
+    store.getState().setTaskCIAutomationOptions("task-1", options);
+
+    const state = store.getState().taskCIAutomation;
+    expect(state.loading["task-1"]).toBe(true);
+    expect(state.saving["task-1"]).toBe(true);
+    expect(state.errors["task-1"]).toBe("failed");
+    expect(state.byTaskId["task-1"]).toEqual(options);
   });
 });

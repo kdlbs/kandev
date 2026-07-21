@@ -85,6 +85,7 @@ type HandleResult struct {
 	ToStepID     string
 	DataPatch    map[string]any
 	Idempotent   bool
+	ActionCount  int
 }
 
 // Option configures an Engine at construction time. Use With* helpers below.
@@ -213,7 +214,7 @@ func (e *Engine) processActions(
 		}
 	}
 
-	result := HandleResult{DataPatch: dataPatch}
+	result := HandleResult{DataPatch: dataPatch, ActionCount: len(actions)}
 	if targetStepID != "" && targetStepID != state.CurrentStepID {
 		if !in.EvaluateOnly {
 			if err := e.applyTransition(ctx, in, state, targetStepID); err != nil {

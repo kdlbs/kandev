@@ -186,6 +186,10 @@ func providePostgres(cfg *config.Config, log *logger.Logger) (*db.Pool, func() e
 	pgDB := sqlx.NewDb(dbConn, "pgx")
 	// For Postgres, writer and reader share the same pool.
 	pool := db.NewPool(pgDB, pgDB)
+	if err := ensureMetaTable(pgDB); err != nil {
+		_ = pool.Close()
+		return nil, nil, fmt.Errorf("ensure meta table: %w", err)
+	}
 
 	if log != nil {
 		log.Info("pre-migration backup skipped: postgres driver (use pg_dump)")

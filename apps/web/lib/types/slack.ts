@@ -1,6 +1,7 @@
 export type SlackAuthMethod = "cookie";
 
 export interface SlackConfig {
+  workspaceId?: string;
   authMethod: SlackAuthMethod;
   commandPrefix: string;
   /** ID of a utility agent (`utility_agents.id`) the trigger invokes for each match. */

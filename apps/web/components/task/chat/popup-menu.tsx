@@ -63,13 +63,18 @@ export function PopupMenu({
     return null;
   }
 
-  // Calculate position with content-based width
+  // z-index sits above Radix Dialog overlay/content (both z-50) so the popup
+  // renders on top when it is invoked from within a modal (e.g. task-create).
+  // pointer-events: auto restores click-handling on the popup itself when
+  // Radix Dialog has set pointer-events: none on <body> for modal isolation;
+  // without this, the popup is visible but unclickable inside a dialog.
   const menuStyle: React.CSSProperties = {
     position: "fixed",
     left: Math.max(8, resolvedPosition.x),
     maxWidth: Math.min(MENU_MAX_WIDTH, window.innerWidth - resolvedPosition.x - 8),
     maxHeight: MENU_HEIGHT,
-    zIndex: 50,
+    zIndex: 60,
+    pointerEvents: "auto",
     ...(placement === "below"
       ? { top: resolvedPosition.y + 8 }
       : { bottom: window.innerHeight - resolvedPosition.y + 8 }),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import {
   IconAlertTriangle,
   IconCheck,
@@ -31,6 +31,7 @@ import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery"
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { AgentLogo } from "@/components/agent-logo";
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
+import { AgentUsageSection } from "@/components/settings/agent-usage-section";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import { InstallAgentCard } from "@/components/settings/install-agent-card";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
@@ -217,14 +218,14 @@ function InstalledAgentsSection({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h3 className="text-lg font-semibold">Installed Agents</h3>
           <p className="text-sm text-muted-foreground">
             Agents detected on this machine are ready to configure.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex w-full gap-2 sm:w-auto">
           <Button
             variant="outline"
             size="sm"
@@ -561,6 +562,8 @@ export default function AgentsSettingsPage() {
           Discover installed agents, install new ones, and manage their profiles.
         </p>
       </div>
+
+      <AgentUsageSection />
 
       <Separator />
 

@@ -38,7 +38,18 @@ type Client struct {
 	// WebSocket connections for streaming
 	agentStreamConn     *websocket.Conn
 	workspaceStreamConn *websocket.Conn
-	mu                  sync.RWMutex
+	// workspaceStream is the most-recent workspace stream returned by
+	// StreamWorkspace, retained so Client.Close can wait for its read/write
+	// goroutines to drain. Cleared by readWorkspaceStream's defer once the
+	// stream tears down.
+	workspaceStream *WorkspaceStream
+	// closed flips to true on Client.Close and prevents new StreamWorkspace
+	// dials from leaking goroutines past the close barrier. Agent (updates)
+	// stream is not gated on this flag because the cascade flow legitimately
+	// stops + restarts the agent stream on the same client; gating it would
+	// strand workflow step transitions on a closed client.
+	closed bool
+	mu     sync.RWMutex
 
 	// Shared write mutex for agent stream (used by StreamUpdates and sendStreamRequest)
 	streamWriteMu sync.Mutex
@@ -656,10 +667,32 @@ type (
 	ProcessStatusUpdate         = types.ProcessStatusUpdate
 )
 
-// Close closes all connections and releases resources
+// Close closes all connections and releases resources. It is a drain
+// barrier for workspace stream goroutines: when Close returns, the workspace
+// read/write loops have fully exited and future StreamWorkspace calls return
+// immediately with an error. The agent (updates) stream is closed but not
+// drained synchronously — the cascade flow legitimately calls Close on a
+// client whose updates stream is still mid-event, and blocking would stall
+// workflow step transitions.
 func (c *Client) Close() {
+	c.mu.Lock()
+	c.closed = true
+	ws := c.workspaceStream
+	c.mu.Unlock()
+
 	c.CloseUpdatesStream()
+	// CloseWorkspaceStream closes the raw conn to wake the blocked read loop.
+	// ws.Close (below) is needed to close the writeLoop's closeCh; closeOnce
+	// makes ws.Close idempotent so the duplicate conn.Close it issues just
+	// logs at Debug. Both calls together wake both goroutines deterministically.
 	c.CloseWorkspaceStream()
+
+	// Wait for the workspace stream's read/write goroutines to fully unwind.
+	if ws != nil {
+		ws.Close()
+		ws.Wait()
+	}
+
 	if c.httpClient != nil {
 		c.httpClient.CloseIdleConnections()
 	}

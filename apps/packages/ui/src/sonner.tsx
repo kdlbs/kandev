@@ -1,6 +1,6 @@
 "use client";
 
-import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 import {
   IconCircleCheck,
@@ -10,12 +10,23 @@ import {
   IconLoader,
 } from "@tabler/icons-react";
 
+function readDocumentTheme(): ToasterProps["theme"] {
+  if (typeof document === "undefined") return "system";
+  return document.documentElement.classList.contains("dark") ? "dark" : "light";
+}
+
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme();
+  const [theme, setTheme] = useState<ToasterProps["theme"]>(() => readDocumentTheme());
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => setTheme(readDocumentTheme()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={theme}
       className="toaster group"
       icons={{
         success: <IconCircleCheck className="size-4" />,

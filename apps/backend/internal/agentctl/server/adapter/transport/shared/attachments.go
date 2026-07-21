@@ -2,6 +2,7 @@ package shared
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,6 +65,7 @@ func (m *AttachmentManager) SaveAttachments(attachments []v1.MessageAttachment) 
 	}
 
 	var saved []SavedAttachment
+	usedNames := make(map[string]bool, len(attachments))
 	for _, att := range attachments {
 		name := att.Name
 		if name == "" {
@@ -75,18 +77,18 @@ func (m *AttachmentManager) SaveAttachments(attachments []v1.MessageAttachment) 
 			m.logger.Warn("skipping attachment with invalid name", zap.String("original_name", att.Name))
 			continue
 		}
-
 		decoded, err := base64.StdEncoding.DecodeString(att.Data)
 		if err != nil {
 			m.logger.Warn("failed to decode attachment", zap.String("name", name), zap.Error(err))
 			continue
 		}
 
-		absPath := filepath.Join(dir, name)
-		if err := os.WriteFile(absPath, decoded, 0o644); err != nil {
+		name, absPath, err := writeUniqueAttachmentFile(dir, name, usedNames, decoded)
+		if err != nil {
 			m.logger.Warn("failed to write attachment", zap.String("path", absPath), zap.Error(err))
 			continue
 		}
+		usedNames[name] = true
 
 		relPath := filepath.Join(".kandev", "attachments", m.sessionID, name)
 		saved = append(saved, SavedAttachment{
@@ -117,7 +119,7 @@ func (m *AttachmentManager) Cleanup() {
 
 // BuildAttachmentPrompt generates prompt text referencing saved attachment files.
 // Used by adapters that don't support native multimodal content.
-func BuildAttachmentPrompt(saved []SavedAttachment) string {
+func BuildAttachmentPrompt(saved []SavedAttachment, writable bool) string {
 	if len(saved) == 0 {
 		return ""
 	}
@@ -125,15 +127,70 @@ func BuildAttachmentPrompt(saved []SavedAttachment) string {
 	var sb strings.Builder
 	if len(saved) == 1 {
 		s := saved[0]
-		fmt.Fprintf(&sb, "The user attached a file: %s (saved to %s in the workspace). Use your file reading tools to access it.\n\n", s.Name, s.RelPath)
-	} else {
-		sb.WriteString("The user attached files that you should read and analyze:\n")
-		for _, s := range saved {
-			fmt.Fprintf(&sb, "- %s (saved to %s)\n", s.Name, s.RelPath)
+		name := sanitizePromptValue(s.Name)
+		relPath := sanitizePromptValue(s.RelPath)
+		if writable {
+			fmt.Fprintf(&sb, "The user attached a writable file: %s (saved to %s in the workspace). Use your file reading tools to access or modify it.\n\n", name, relPath)
+		} else {
+			fmt.Fprintf(&sb, "The user attached a file: %s (saved to %s in the workspace). Use your file reading tools to access it.\n\n", name, relPath)
 		}
-		sb.WriteString("\nUse your file reading tools to access them.\n\n")
+	} else {
+		if writable {
+			sb.WriteString("The user attached writable files that you should read and analyze:\n")
+		} else {
+			sb.WriteString("The user attached files that you should read and analyze:\n")
+		}
+		for _, s := range saved {
+			fmt.Fprintf(&sb, "- %s (saved to %s)\n", sanitizePromptValue(s.Name), sanitizePromptValue(s.RelPath))
+		}
+		if writable {
+			sb.WriteString("\nUse your file reading tools to access or modify them.\n\n")
+		} else {
+			sb.WriteString("\nUse your file reading tools to access them.\n\n")
+		}
 	}
 	return sb.String()
+}
+
+func writeUniqueAttachmentFile(dir, name string, used map[string]bool, data []byte) (string, string, error) {
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	for i := 1; ; i++ {
+		candidate := name
+		if i > 1 {
+			candidate = fmt.Sprintf("%s-%d%s", base, i, ext)
+		}
+		if used[candidate] {
+			continue
+		}
+
+		absPath := filepath.Join(dir, candidate)
+		file, err := os.OpenFile(absPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, os.ErrExist) {
+			used[candidate] = true
+			continue
+		}
+		if err != nil {
+			return "", absPath, err
+		}
+
+		_, writeErr := file.Write(data)
+		closeErr := file.Close()
+		if writeErr != nil {
+			_ = os.Remove(absPath)
+			return "", absPath, writeErr
+		}
+		if closeErr != nil {
+			_ = os.Remove(absPath)
+			return "", absPath, closeErr
+		}
+		return candidate, absPath, nil
+	}
+}
+
+func sanitizePromptValue(value string) string {
+	replacer := strings.NewReplacer("\r", " ", "\n", " ", "<", "(", ">", ")", "`", "'")
+	return strings.TrimSpace(replacer.Replace(value))
 }
 
 // generateName creates a filename for attachments that don't have a Name field.

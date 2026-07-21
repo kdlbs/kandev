@@ -2,7 +2,6 @@ package websocket
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -16,10 +15,7 @@ import (
 var upgrader = gorillaws.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// TODO: In production, validate origin
-		return true
-	},
+	CheckOrigin:     checkWebSocketOrigin,
 }
 
 // Handler handles WebSocket connections

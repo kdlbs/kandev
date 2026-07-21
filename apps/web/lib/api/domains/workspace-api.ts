@@ -85,16 +85,37 @@ export async function listRepositoryScripts(repositoryId: string, options?: ApiR
 }
 
 // Quick Chat operations
-export type StartQuickChatRequest = {
+type StartQuickChatCommon = {
   title?: string;
-  repository_id?: string;
   agent_profile_id?: string;
   executor_id?: string;
   prompt?: string;
+};
+
+type StartQuickChatLegacyRepository = {
+  repositories?: never;
+  repository_id?: string;
   local_path?: string;
   repository_name?: string;
   default_branch?: string;
   base_branch?: string;
+};
+
+type StartQuickChatRepositories = {
+  repositories: QuickChatRepositoryInput[];
+  repository_id?: never;
+  local_path?: never;
+  repository_name?: never;
+  default_branch?: never;
+  base_branch?: never;
+};
+
+export type StartQuickChatRequest = StartQuickChatCommon &
+  (StartQuickChatLegacyRepository | StartQuickChatRepositories);
+
+export type QuickChatRepositoryInput = {
+  repository_id: string;
+  base_branch: string;
 };
 
 export type StartQuickChatResponse = {
@@ -121,6 +142,8 @@ export async function listQuickChatSessions(workspaceId: string, options?: ApiRe
       workspace_id: string;
       primary_session_id?: string | null;
       metadata?: Record<string, unknown> | null;
+      origin?: string | null;
+      updated_at?: string;
     }>;
   }>(`/api/v1/workspaces/${workspaceId}/tasks?only_ephemeral=true&exclude_config=true`, options);
 }

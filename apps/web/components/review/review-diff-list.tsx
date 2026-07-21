@@ -3,7 +3,8 @@
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { IconAlertTriangle, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
-import { FileDiffViewer } from "@/components/diff";
+import { FileDiffViewer, DiffErrorBoundary } from "@/components/diff";
+import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import type { RevertBlockInfo } from "@/components/diff";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, updateFileContent } from "@/lib/ws/workspace-files";
@@ -11,8 +12,14 @@ import { generateUnifiedDiff, calculateHash } from "@/lib/utils/file-diff";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
+import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
 import type { DiffComment } from "@/lib/diff/types";
-import { diffSkipReasonLabel, reviewFileKey } from "./types";
+import {
+  diffSkipReasonLabel,
+  hasTextualDiff,
+  reviewDiffUnavailableLabel,
+  reviewFileKey,
+} from "./types";
 import type { ReviewFile } from "./types";
 import { RepoGroupHeader } from "./review-diff-list-groups";
 import { FileDiffToolbar } from "./review-diff-toolbar";
@@ -28,7 +35,7 @@ type ReviewDiffListProps = {
   selectedFile?: string | null;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 };
@@ -48,6 +55,16 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  // Resolve base branches once per list (not per row) — the value is identical
+  // for every file. Only a single-repo task has an unambiguous fallback; with
+  // multiple repos a committed file lacking `repository_name` must NOT borrow
+  // an arbitrary repo's base branch, so the fallback stays undefined there.
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
+  const fallbackBaseBranch = useMemo(() => {
+    const branches = Object.values(baseBranchByRepo);
+    return branches.length === 1 ? branches[0] : undefined;
+  }, [baseBranchByRepo]);
   // All in-memory state (selectedFile, reviewedFiles, staleFiles, fileRefs)
   // is keyed by `reviewFileKey(file)` so two files at the same path in
   // different repos (e.g. `kandev/README.md` + `lvc/README.md`) get
@@ -92,6 +109,8 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 onPreviewMarkdown={onPreviewMarkdown}
                 sectionRef={fileRefs.get(key)}
                 scrollContainer={scrollContainerRef}
+                baseBranchByRepo={baseBranchByRepo}
+                fallbackBaseBranch={fallbackBaseBranch}
               />
             );
           })}
@@ -119,10 +138,14 @@ type FileDiffSectionProps = {
   forceLoad?: boolean;
   onToggleReviewed: (key: string, reviewed: boolean) => void;
   onDiscard: (key: string) => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   sectionRef?: React.RefObject<HTMLDivElement | null>;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
+  /** Per-repo base branches + single-repo fallback, resolved once by the list
+   *  and shared across rows so diff expansion can fetch the correct old side. */
+  baseBranchByRepo: Record<string, string>;
+  fallbackBaseBranch?: string;
 };
 
 function useLazyVisible(scrollContainer: React.RefObject<HTMLDivElement | null>) {
@@ -204,7 +227,7 @@ type FileDiffHeaderProps = {
   expandUnchanged: boolean;
   onCheckboxChange: (checked: boolean | "indeterminate") => void;
   onDiscard: () => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onToggleCollapse: () => void;
   onToggleExpandUnchanged: () => void;
@@ -228,7 +251,11 @@ function FileDiffHeader({
   onToggleWordWrap,
 }: FileDiffHeaderProps) {
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2 bg-card/95 backdrop-blur-sm border-b border-border/50">
+    <div
+      data-testid="review-file-header"
+      data-file-path={file.path}
+      className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2 bg-card/95 backdrop-blur-sm border-b border-border/50"
+    >
       <Checkbox
         checked={isReviewed}
         onCheckedChange={onCheckboxChange}
@@ -245,6 +272,7 @@ function FileDiffHeader({
         )}
         <span className="text-[13px] font-medium truncate">{file.path}</span>
       </button>
+      <FileStatusIcon status={file.status} oldPath={file.old_path} className="sm:hidden" />
       {isStale && (
         <span className="flex items-center gap-1 text-xs text-yellow-500">
           <IconAlertTriangle className="h-3.5 w-3.5" />
@@ -268,6 +296,7 @@ function FileDiffHeader({
         onPreviewMarkdown={onPreviewMarkdown}
         onToggleExpandUnchanged={onToggleExpandUnchanged}
         onToggleWordWrap={onToggleWordWrap}
+        repo={file.repository_name}
       />
     </div>
   );
@@ -348,12 +377,62 @@ function useScrollIntoViewOnSelect(
   }, [isSelected, sectionRef, setCollapsed]);
 }
 
+/**
+ * Decide whether a review row can expand its collapsed context, and which git
+ * ref supplies the "old" side when reconstructing full file context.
+ *
+ * Expansion reveals the *unmodified* lines hidden between hunks. @pierre/diffs
+ * needs the full old+new file contents (paired with the patch) to render those
+ * controls; we fetch the new side from the working tree and the old side from
+ * `baseRef`. The ref has to match the base the diff was computed against, or
+ * the reparse comes out inconsistent and silently falls back to a partial
+ * (controls-less) render:
+ *
+ *  - uncommitted rows: diff is working-tree-vs-HEAD, so baseRef="HEAD".
+ *  - committed rows: diff is base-branch-vs-HEAD, so baseRef is the repo's
+ *    base branch. HEAD already contains the commits, so expanding against it
+ *    pairs identical old/new content and yields no controls (the bug behind
+ *    "expansion stopped working in the review screen"). With no known base
+ *    branch we can't fetch the pre-change content, so expansion is disabled
+ *    rather than rendering dead separators.
+ *  - PR rows: the working tree belongs to the local branch, not the PR head,
+ *    so the fetched content would be paired with the wrong patch — disabled.
+ *  - untracked files: a synthetic all-additions hunk against /dev/null with no
+ *    real context to expand — disabled.
+ *
+ * The @pierre/diffs trailing-context guard in `useExpandableDiff` keeps any
+ * mismatch (stale snapshot, wrong base, file edited mid-flight) from crashing
+ * the renderer, so enabling expansion here is always safe.
+ */
+export function resolveDiffExpansion(
+  file: Pick<ReviewFile, "source" | "status" | "repository_name">,
+  baseBranchByRepo: Record<string, string>,
+  fallbackBaseBranch?: string,
+): { enableExpansion: boolean; baseRef: string } {
+  if (file.source === "pr" || file.status === "untracked") {
+    return { enableExpansion: false, baseRef: "HEAD" };
+  }
+  if (file.source === "committed") {
+    const repoName = file.repository_name ?? "";
+    // Exact per-repo base wins. Fall back to the task's sole base branch ONLY
+    // for single-repo files (no repository_name) — a multi-repo file whose repo
+    // isn't in the map must NOT borrow another repo's base branch, which would
+    // fetch the wrong "old" content and silently drop expansion.
+    const base = baseBranchByRepo[repoName] ?? (repoName === "" ? fallbackBaseBranch : undefined);
+    if (!base) return { enableExpansion: false, baseRef: "HEAD" };
+    return { enableExpansion: true, baseRef: base };
+  }
+  return { enableExpansion: true, baseRef: "HEAD" };
+}
+
 function renderDiffContent(opts: {
   shouldRender: boolean;
   file: ReviewFile;
   sessionId: string;
   wordWrap: boolean;
   expandUnchanged: boolean;
+  enableExpansion: boolean;
+  baseRef: string;
   onRevertBlock: (filePath: string, info: RevertBlockInfo) => void;
   onCommentRun: (comment: DiffComment) => void;
   onToggleExpandUnchanged: () => void;
@@ -364,37 +443,35 @@ function renderDiffContent(opts: {
     sessionId,
     wordWrap,
     expandUnchanged,
+    enableExpansion,
+    baseRef,
     onRevertBlock,
     onCommentRun,
     onToggleExpandUnchanged,
   } = opts;
-  if (shouldRender && file.diff) {
-    // Expansion fetches the file content from the working tree to reconstruct
-    // full context around hunks. For PR files the working tree's content
-    // belongs to the local branch, not the PR head — when the same file has
-    // both PR and local changes, the wrong content gets paired with the PR
-    // patch and @pierre/diffs 1.1.x renders nothing/errors. Disable expansion
-    // for PR-sourced rows; uncommitted/committed rows still get it.
-    const enableExpansion = file.source !== "pr";
+  const hasText = hasTextualDiff(file);
+  if (shouldRender && hasText) {
     return (
       <>
-        <FileDiffViewer
-          filePath={file.path}
-          diff={file.diff}
-          status={file.status}
-          enableComments
-          enableAcceptReject
-          onRevertBlock={onRevertBlock}
-          onCommentRun={onCommentRun}
-          sessionId={sessionId}
-          wordWrap={wordWrap}
-          enableExpansion={enableExpansion}
-          baseRef="HEAD"
-          hideHeader
-          expandUnchanged={expandUnchanged}
-          onToggleExpandUnchanged={onToggleExpandUnchanged}
-          repo={file.repository_name}
-        />
+        <DiffErrorBoundary filePath={file.path}>
+          <FileDiffViewer
+            filePath={file.path}
+            diff={file.diff}
+            status={file.status}
+            enableComments
+            enableAcceptReject
+            onRevertBlock={onRevertBlock}
+            onCommentRun={onCommentRun}
+            sessionId={sessionId}
+            wordWrap={wordWrap}
+            enableExpansion={enableExpansion}
+            baseRef={baseRef}
+            hideHeader
+            expandUnchanged={expandUnchanged}
+            onToggleExpandUnchanged={onToggleExpandUnchanged}
+            repo={file.repository_name}
+          />
+        </DiffErrorBoundary>
         {file.diff_skip_reason === "truncated" && (
           <div className="py-1 text-center text-xs text-muted-foreground border-t">
             Diff truncated — showing first 256 KB
@@ -403,9 +480,12 @@ function renderDiffContent(opts: {
       </>
     );
   }
+  const message = hasText
+    ? diffSkipReasonLabel(file.diff_skip_reason)
+    : reviewDiffUnavailableLabel(file);
   return (
     <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-      {diffSkipReasonLabel(file.diff_skip_reason)}
+      {message}
     </div>
   );
 }
@@ -426,6 +506,8 @@ function FileDiffSection({
   onPreviewMarkdown,
   sectionRef,
   scrollContainer,
+  baseBranchByRepo,
+  fallbackBaseBranch,
 }: FileDiffSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandUnchanged, setExpandUnchanged] = useState(false);
@@ -470,6 +552,12 @@ function FileDiffSection({
 
   const handleCommentRun = useCommentRunHandler(sessionId);
 
+  const { enableExpansion, baseRef } = resolveDiffExpansion(
+    file,
+    baseBranchByRepo,
+    fallbackBaseBranch,
+  );
+
   return (
     <div ref={sectionRef} className="border-b border-border">
       <div ref={scrollSentinelRef} className="h-0" />
@@ -497,6 +585,8 @@ function FileDiffSection({
           sessionId,
           wordWrap: effectiveWordWrap,
           expandUnchanged,
+          enableExpansion,
+          baseRef,
           onRevertBlock: handleRevertBlock,
           onCommentRun: handleCommentRun,
           onToggleExpandUnchanged: handleToggleExpandUnchanged,

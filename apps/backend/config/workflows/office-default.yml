@@ -1,9 +1,15 @@
+# Internal workflow TEMPLATE definition — NOT the portable import/export format.
+# Steps here reference each other by string `step_id`; the importable YAML uses a
+# `version`/`type`/`workflows` envelope and `step_position`. Don't paste this file
+# (or its `step_id` transitions) into the workflow import endpoint.
+# Format reference: docs/workflow-import-export.md
 id: office-default
 name: Office Default
 description: >-
   Five-step office workflow with a primary agent doing the work, multi-agent
   reviewers, and multi-agent approvers. Tasks flow Backlog -> Work -> Review
   -> Approval -> Done with quorum-gated transitions.
+hidden: true
 
 steps:
   - id: backlog
@@ -117,3 +123,10 @@ steps:
     stage_type: custom
     allow_manual_move: true
     show_in_command_panel: true
+    events:
+      on_comment:
+        - type: queue_run
+          config:
+            target: primary
+            task_id: this
+            reason: task_comment

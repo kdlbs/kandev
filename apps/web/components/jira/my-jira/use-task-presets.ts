@@ -1,14 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_JIRA_PRESETS,
   resolveJiraTaskPresets,
   type JiraStoredPreset,
   type JiraTaskPreset,
 } from "./presets";
-
-const STORAGE_KEY = "kandev:jira:task-presets:v1";
+import { fetchUserSettings } from "@/lib/api/domains/settings-api";
+import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
 
 function isStoredPreset(v: unknown): v is JiraStoredPreset {
   if (!v || typeof v !== "object") return false;
@@ -22,47 +22,31 @@ function isStoredPreset(v: unknown): v is JiraStoredPreset {
   );
 }
 
-function readStorage(): JiraStoredPreset[] | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    // An explicitly-saved empty array means "the user cleared their presets"
-    // and should beat the built-in defaults. Only the absent-key case should
-    // fall back to defaults.
-    return parsed.filter(isStoredPreset);
-  } catch {
-    return null;
-  }
+function readServerPresets(value: unknown): JiraStoredPreset[] | null | undefined {
+  if (value === null) return null;
+  if (!Array.isArray(value)) return undefined;
+  return value.filter(isStoredPreset);
 }
 
-function writeStorage(presets: JiraStoredPreset[] | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (presets === null) {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } else {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
-    }
-  } catch {
-    // Quota or private-mode: swallow. Presets just won't persist.
-  }
-}
+const syncServer = createQueuedUserSettingsSync<JiraStoredPreset[] | null>((presets) => ({
+  jira_task_presets: presets,
+}));
 
 export function useJiraTaskPresets() {
   const [stored, setStored] = useState<JiraStoredPreset[] | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const writeVersion = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    const initialVersion = writeVersion.current;
     async function init() {
-      const value = readStorage();
-      if (!cancelled) {
-        setStored(value);
-        setLoaded(true);
+      const response = await fetchUserSettings({ cache: "no-store" }).catch(() => null);
+      const serverValue = readServerPresets(response?.settings.jira_task_presets);
+      if (!cancelled && serverValue !== undefined && writeVersion.current === initialVersion) {
+        setStored(serverValue);
       }
+      if (!cancelled) setLoaded(true);
     }
     void init();
     return () => {
@@ -70,13 +54,15 @@ export function useJiraTaskPresets() {
     };
   }, []);
 
-  const save = useCallback((next: JiraStoredPreset[]) => {
-    writeStorage(next);
+  const save = useCallback(async (next: JiraStoredPreset[]) => {
+    writeVersion.current += 1;
+    await syncServer(next);
     setStored(next);
   }, []);
 
-  const reset = useCallback(() => {
-    writeStorage(null);
+  const reset = useCallback(async () => {
+    writeVersion.current += 1;
+    await syncServer(null);
     setStored(null);
   }, []);
 

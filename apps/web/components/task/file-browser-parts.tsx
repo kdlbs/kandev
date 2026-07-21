@@ -43,6 +43,7 @@ type TreeNodeRowProps = {
   onOpenFile: (path: string) => void;
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+  onDownloadFile?: (path: string) => Promise<boolean>;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   isSelectedFn?: (path: string) => boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
@@ -135,8 +136,16 @@ function getTreeNodeRowClass(
 
 export function TreeNodeItem(props: TreeNodeRowProps) {
   const { row, activeFolderPath, activeFilePath, visibleLoadingPaths } = props;
-  const { fileStatuses, tree, onToggleExpand, onOpenFile, onDeleteFile, onRenameFile, setTree } =
-    props;
+  const {
+    fileStatuses,
+    tree,
+    onToggleExpand,
+    onOpenFile,
+    onDeleteFile,
+    onRenameFile,
+    onDownloadFile,
+    setTree,
+  } = props;
   const node = row.node;
 
   const isExpanded = row.isExpanded;
@@ -204,6 +213,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       setTree={setTree}
       onDeleteFile={onDeleteFile}
       onRenameFile={onRenameFile}
+      onDownloadFile={onDownloadFile}
       onStartRename={rename.handleStartRename}
       selectedCount={props.selectedCount}
       selectedPaths={props.selectedPaths}
@@ -288,6 +298,7 @@ type FileBrowserContentAreaProps = {
   onToggleExpand: (node: FileTreeNode) => void;
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+  onDownloadFile?: (path: string) => Promise<boolean>;
   onCreateFileSubmit: (parentPath: string, name: string) => void;
   onCancelCreate: () => void;
   onRetry: () => void;
@@ -317,6 +328,7 @@ function rowToItemProps(props: FileBrowserContentAreaProps, row: FileBrowserRow)
     onOpenFile: props.onOpenFile,
     onDeleteFile: props.onDeleteFile,
     onRenameFile: props.onRenameFile,
+    onDownloadFile: props.onDownloadFile,
     setTree: props.setTree,
     isSelectedFn: props.isSelectedFn,
     onSelect: props.onSelect,

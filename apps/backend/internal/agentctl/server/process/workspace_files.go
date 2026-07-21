@@ -19,6 +19,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/readselector"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -30,6 +32,8 @@ const (
 )
 
 const maxFileSize = 10 * 1024 * 1024 // 10MB
+
+var errPathTraversal = errors.New("path traversal detected")
 
 // updateFiles updates the file listing
 func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
@@ -58,7 +62,7 @@ func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpda
 	// --exclude-standard: respect .gitignore
 	cmd := exec.CommandContext(ctx, "git", "ls-files", "--cached", "--others", "--exclude-standard")
 	cmd.Dir = wt.workDir
-	out, err := cmd.Output()
+	out, err := subproc.RunGitOutput(ctx, cmd)
 	if err != nil {
 		return update, err
 	}
@@ -168,6 +172,25 @@ func (wt *WorkspaceTracker) resolvedWorkDir() string {
 	return resolved
 }
 
+func absoluteReadPath(reqPath string) (string, bool) {
+	cleanReqPath := filepath.Clean(reqPath)
+	if !filepath.IsAbs(cleanReqPath) {
+		return "", false
+	}
+
+	realPath, err := filepath.EvalSymlinks(cleanReqPath)
+	if err != nil {
+		return "", false
+	}
+
+	// codeql[go/path-injection] Intentional read-only absolute file access; see ADR 0016.
+	info, err := os.Stat(realPath)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", false
+	}
+	return realPath, true
+}
+
 // resolveSafePath resolves reqPath to an absolute path within workDir,
 // rejecting any path traversal attempts. The returned path is always
 // constructed as filepath.Join(resolvedWorkDir, validatedRelPath) so that
@@ -215,7 +238,7 @@ func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 
 	// Ensure the relative path doesn't escape the workspace
 	if strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) || relPath == ".." {
-		return "", fmt.Errorf("path traversal detected: %s", reqPath)
+		return "", fmt.Errorf("%w: %s", errPathTraversal, reqPath)
 	}
 
 	// Reconstruct the absolute path from the trusted workspace root and the
@@ -257,33 +280,120 @@ func resolveNonExistentPath(path string) (string, error) {
 // If the file is not valid UTF-8, it is base64-encoded and isBinary is true.
 // If the file is a symlink, resolvedPath contains the target path relative to the workspace root.
 func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool, string, error) {
+	// Try the path exactly as requested first, so a real workspace file whose
+	// name contains a colon (e.g. "notes.txt:2-3") or a literal "~" path
+	// segment still opens. Only if the literal open fails do we treat a
+	// trailing piece as an omp read selector (e.g. "foo.go:43-94", multi-range)
+	// and/or a "~"-home shorthand, strip/expand it, and retry — so agent links
+	// that embed a selector open without breaking valid filenames.
+	content, size, isBinary, resolved, err := wt.readResolvedPath(reqPath)
+	if err == nil {
+		return content, size, isBinary, resolved, nil
+	}
+	if alt := expandHomePath(stripReadSelector(reqPath)); alt != reqPath {
+		c, s, b, r, altErr := wt.readResolvedPath(alt)
+		if altErr == nil {
+			return c, s, b, r, nil
+		}
+		// When the request used a "~" home shorthand, the literal attempt
+		// joins the tilde onto the workspace root (".../<workspace>/~/...:
+		// no such file"), which reads as a mangled path rather than a missing
+		// file. Surface the expanded-path error, which names the real home
+		// location that was actually checked.
+		if isHomeShorthand(reqPath) {
+			return c, s, b, r, altErr
+		}
+	}
+	// Neither the literal path nor the stripped/expanded fallback opened;
+	// surface the original (literal-path) error.
+	return content, size, isBinary, resolved, err
+}
+
+// stripReadSelector removes a trailing omp read selector from reqPath (the line
+// range itself is irrelevant to serving content); paths without a selector are
+// returned unchanged.
+func stripReadSelector(reqPath string) string {
+	clean, _, _ := readselector.Split(reqPath)
+	return clean
+}
+
+// readResolvedPath resolves reqPath within the workspace, falling back to the
+// read-only external-absolute-path path (ADR 0016), and returns its content.
+func (wt *WorkspaceTracker) readResolvedPath(reqPath string) (string, int64, bool, string, error) {
 	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
+		if errors.Is(err, errPathTraversal) {
+			externalPath, ok := absoluteReadPath(reqPath)
+			if ok {
+				content, size, isBinary, readErr := readFileContent(externalPath)
+				return content, size, isBinary, "", readErr
+			}
+			// An absolute path that simply doesn't exist is not a traversal
+			// attempt — report a plain "file not found" naming the real path
+			// instead of the alarming "path traversal detected". Only remap
+			// genuine not-exist errors; permission/IO failures keep the
+			// original error so they aren't mislabeled as missing.
+			if cleaned := filepath.Clean(reqPath); filepath.IsAbs(cleaned) {
+				if _, statErr := os.Stat(cleaned); errors.Is(statErr, fs.ErrNotExist) {
+					return "", 0, false, "", fmt.Errorf("file not found: %w", statErr)
+				}
+			}
+			return "", 0, false, "", err
+		}
 		return "", 0, false, "", err
 	}
 
 	// Check if the original path is a symlink and compute the resolved relative path.
 	resolvedPath := wt.resolveSymlinkRelPath(reqPath)
 
+	content, size, isBinary, err := readFileContent(safePath)
+	return content, size, isBinary, resolvedPath, err
+}
+
+// expandHomePath expands a leading "~" or "~/" to the current user's home
+// directory. omp emits read paths like "~/.kandev/…"; a literal tilde is not a
+// real filesystem path, so it must be expanded before stat/serve. Other paths
+// (absolute, workspace-relative) are returned unchanged.
+func expandHomePath(path string) string {
+	if !isHomeShorthand(path) {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
+}
+
+// isHomeShorthand reports whether path uses the leading "~" / "~/" (or "~\" on
+// Windows) home shorthand that expandHomePath rewrites.
+func isHomeShorthand(path string) bool {
+	return path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`)
+}
+
+func readFileContent(safePath string) (string, int64, bool, error) {
 	// Check if file exists and is a regular file
 	info, err := os.Stat(safePath)
 	if err != nil {
-		return "", 0, false, "", fmt.Errorf("file not found: %w", err)
+		return "", 0, false, fmt.Errorf("file not found: %w", err)
 	}
 
-	if info.IsDir() {
-		return "", 0, false, "", fmt.Errorf("path is a directory, not a file")
+	if !info.Mode().IsRegular() {
+		return "", 0, false, fmt.Errorf("path is not a regular file")
 	}
 
 	// Check file size
 	if info.Size() > maxFileSize {
-		return "", info.Size(), false, "", fmt.Errorf("file too large (max 10MB)")
+		return "", info.Size(), false, fmt.Errorf("file too large (max 10MB)")
 	}
 
 	// Read file content
 	file, err := os.Open(safePath)
 	if err != nil {
-		return "", 0, false, "", fmt.Errorf("failed to open file: %w", err)
+		return "", 0, false, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer func() {
 		_ = file.Close()
@@ -291,16 +401,16 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 
 	content, err := io.ReadAll(file)
 	if err != nil {
-		return "", 0, false, "", fmt.Errorf("failed to read file: %w", err)
+		return "", 0, false, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	// Detect binary: if content is not valid UTF-8, base64-encode it
 	if !utf8.Valid(content) {
 		encoded := base64.StdEncoding.EncodeToString(content)
-		return encoded, info.Size(), true, resolvedPath, nil
+		return encoded, info.Size(), true, nil
 	}
 
-	return string(content), info.Size(), false, resolvedPath, nil
+	return string(content), info.Size(), false, nil
 }
 
 // resolveSymlinkRelPath checks if reqPath is a symlink and returns the resolved
@@ -338,7 +448,7 @@ func (wt *WorkspaceTracker) resolveSymlinkRelPath(reqPath string) string {
 // When desiredContent is provided and the diff cannot be applied (hash conflict),
 // the file is overwritten with the desired content as a fallback.
 // Returns the new hash and a resolution string ("applied" or "overwritten").
-func (wt *WorkspaceTracker) ApplyFileDiff(reqPath, unifiedDiff, originalHash string, desiredContent *string) (string, string, error) {
+func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedDiff, originalHash string, desiredContent *string) (string, string, error) {
 	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		return "", "", err
@@ -376,11 +486,17 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath, unifiedDiff, originalHash str
 	}()
 
 	// Use git apply to apply the patch directly to the file
-	cmd := exec.Command("git", "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
+	cmd := exec.CommandContext(ctx, "git", "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
 	cmd.Dir = wt.workDir
 
-	output, err := cmd.CombinedOutput()
+	output, err := subproc.RunGitCombinedOutput(ctx, cmd)
 	if err != nil {
+		// Treat caller cancellation / deadline as a transient failure and
+		// propagate rather than overwriting the file from desiredContent —
+		// the user pressing cancel must NOT silently clobber what's on disk.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", "", fmt.Errorf("git apply cancelled: %w", err)
+		}
 		if desiredContent != nil {
 			return wt.writeDesiredContent(safePath, cleanWorkDir, reqPath, *desiredContent, currentHash)
 		}
@@ -671,7 +787,7 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 	sizeCmd := exec.CommandContext(ctx, "git", "cat-file", "-s", gitRef)
 	sizeCmd.Dir = wt.workDir
 	sizeCmd.Env = append(os.Environ(), "LC_ALL=C")
-	sizeOut, err := sizeCmd.CombinedOutput()
+	sizeOut, err := subproc.RunGitCombinedOutput(ctx, sizeCmd)
 	if err != nil {
 		output := string(sizeOut)
 		if strings.Contains(output, "does not exist") ||
@@ -693,7 +809,7 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 	cmd := exec.CommandContext(ctx, "git", "show", gitRef)
 	cmd.Dir = wt.workDir
 
-	content, err := cmd.Output()
+	content, err := subproc.RunGitOutput(ctx, cmd)
 	if err != nil {
 		return "", 0, false, fmt.Errorf("failed to get file at ref: %w", err)
 	}

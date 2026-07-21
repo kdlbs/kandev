@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createUISlice } from "@/lib/state/slices/ui/ui-slice";
+import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { getStoredQuickChatNames } from "@/lib/local-storage";
 import type { UISlice } from "@/lib/state/slices/ui/types";
 
@@ -47,6 +48,41 @@ describe("openQuickChat agentProfileId persistence", () => {
     store.getState().openQuickChat(SESSION_ID, WORKSPACE_ID, PROFILE_ID);
     store.getState().openQuickChat(SESSION_ID, WORKSPACE_ID); // no profile
     expect(findSession(store)?.agentProfileId).toBe(PROFILE_ID);
+  });
+});
+
+describe("Quick Chat workspace isolation", () => {
+  it("keeps typed setup tabs isolated by workspace", () => {
+    const store = makeStore();
+    store.getState().openQuickChat("", "ws-a");
+    store.getState().openQuickChat("", "ws-b");
+
+    expect(store.getState().quickChat.sessions).toEqual([
+      {
+        sessionId: getQuickChatSetupSessionId("ws-a", "chat"),
+        workspaceId: "ws-a",
+        kind: "chat",
+      },
+      {
+        sessionId: getQuickChatSetupSessionId("ws-b", "chat"),
+        workspaceId: "ws-b",
+        kind: "chat",
+      },
+    ]);
+    expect(store.getState().quickChat.activeSessionId).toBe(
+      getQuickChatSetupSessionId("ws-b", "chat"),
+    );
+  });
+
+  it("falls back to a tab from the closed session workspace", () => {
+    const store = makeStore();
+    store.getState().openQuickChat("session-a", "ws-a");
+    store.getState().openQuickChat("session-b-1", "ws-b");
+    store.getState().openQuickChat("session-b-2", "ws-b");
+
+    store.getState().closeQuickChatSession("session-b-2");
+
+    expect(store.getState().quickChat.activeSessionId).toBe("session-b-1");
   });
 });
 

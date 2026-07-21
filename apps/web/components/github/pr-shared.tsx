@@ -44,7 +44,6 @@ export function formatElapsed(startedAt: string): string {
 
 export function AuthorAvatar({ src, author }: { src: string; author: string }) {
   const inner = src ? (
-    // eslint-disable-next-line @next/next/no-img-element
     <img src={src} alt={author} className="h-5 w-5 rounded-full shrink-0" />
   ) : (
     <div className="h-5 w-5 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium text-muted-foreground">

@@ -4,13 +4,11 @@ package acp
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -20,7 +18,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
@@ -40,17 +37,63 @@ const (
 	contentTypeImage    = "image"
 	contentTypeAudio    = "audio"
 	contentTypeResource = "resource"
+	contentTypeText     = "text"
+	toolContentType     = "content"
 
 	// configOptionIDModel is the well-known ConfigOption ID/Category value used
 	// by ACP agents to surface the active model as a selectable option.
 	configOptionIDModel = "model"
 )
 
-// runPromptTimeout bounds how long a synthetic run prompt can run.
-// Run turns can perform real work (the model often runs a few tool calls
+// wakeupPromptTimeout bounds how long a synthetic wakeup prompt can run.
+// Wakeup turns can perform real work (the model often runs a few tool calls
 // before stopping) so we mirror what a normal user-initiated prompt would
 // allow rather than a tight RPC deadline.
-const runPromptTimeout = 30 * time.Minute
+const wakeupPromptTimeout = 30 * time.Minute
+
+// notifQueueCapacity sizes the buffered channel that feeds the update
+// worker. 4096 covers any realistic session/load replay burst (the failure
+// case that motivated this was ~5-10k notifications spread over several
+// seconds, well within the worker's sub-microsecond drain rate). This is
+// the internal hand-off between the SDK's update handler and our worker;
+// it sits in front of the larger acpNotifQueueDefault SDK inbound queue and
+// can be smaller because the worker drains it well under SDK fill rate.
+const notifQueueCapacity = 4096
+
+// acpNotifQueueDefault is the per-connection capacity passed to the SDK's
+// inbound notification queue. Long session/load replays can emit tens of
+// thousands of notifications before the response, so default to the configured
+// ceiling instead of requiring operators to know about KANDEV_ACP_NOTIF_QUEUE.
+// The SDK still bounds memory to (capacity * avg notification size).
+const acpNotifQueueDefault = 131072
+
+// acpNotifQueueMin / acpNotifQueueMax clamp KANDEV_ACP_NOTIF_QUEUE so a
+// misconfigured value can't either re-introduce the overflow (too low) or
+// blow the heap (too high).
+const (
+	acpNotifQueueMin = 1024
+	acpNotifQueueMax = 131072
+)
+
+// acpNotifQueueCapacity returns the per-connection inbound notification queue
+// capacity, honoring KANDEV_ACP_NOTIF_QUEUE when set and parseable.
+func acpNotifQueueCapacity() int {
+	raw := os.Getenv("KANDEV_ACP_NOTIF_QUEUE")
+	if raw == "" {
+		return acpNotifQueueDefault
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return acpNotifQueueDefault
+	}
+	if n < acpNotifQueueMin {
+		return acpNotifQueueMin
+	}
+	if n > acpNotifQueueMax {
+		return acpNotifQueueMax
+	}
+	return n
+}
 
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
@@ -88,6 +131,26 @@ type Adapter struct {
 	// Update channel
 	updatesCh chan AgentEvent
 
+	// notifQueue decouples the ACP SDK's notification goroutine from the
+	// per-notification processing we do in handleACPUpdate. The SDK's inbound
+	// channel is a 1024-slot non-blocking send — if our handler ever stalls
+	// (slow disk, GC, downstream backpressure on updatesCh), the SDK closes
+	// the connection. By front-loading a buffered channel + dedicated worker,
+	// the SDK only ever sees nanosecond-scale enqueues. workerWg lets Close
+	// wait for in-flight notifications to drain before tearing down updatesCh.
+	//
+	// Items are notifWork so the queue can also carry barrier-sync requests
+	// from syncNotifQueue — the worker closes the barrier's channel in FIFO
+	// order, which lets sendPrompt wait for queued text chunks before it
+	// emits EventTypeComplete.
+	//
+	// Drained-by-cancel, not by close: Close cancels lifetimeCtx (which the
+	// worker selects on) but never closes notifQueue, so any items queued
+	// after Close are dropped on the floor rather than re-delivered. Close
+	// is terminal — fine for shutdown but worth knowing when reading the loop.
+	notifQueue chan notifWork
+	workerWg   sync.WaitGroup
+
 	// Permission handler
 	permissionHandler PermissionHandler
 
@@ -116,15 +179,16 @@ type Adapter struct {
 	// and rebuilt during session/load replay.
 	activeMonitors map[string]map[string]string
 
-	// ScheduleRun tracking. The Claude Agent SDK's ScheduleRun tool fires
-	// its timer inside the SDK's async-iterator, but the upstream
+	// ScheduleWakeup tracking. The Claude Agent SDK's ScheduleWakeup tool
+	// fires its timer inside the SDK's async-iterator, but the upstream
 	// @agentclientprotocol/claude-agent-acp bridge only drains that iterator
-	// inside its prompt() handler — so a run that fires while no prompt is
-	// in flight produces no output. run re-injects the run as a synthetic
-	// session/prompt at fire time. pendingRuns tracks per-tool-call info
-	// (prompt + scheduledFor) since these arrive in separate notifications.
-	run         *runScheduler
-	pendingRuns map[string]*pendingRun
+	// inside its prompt() handler — so a wakeup that fires while no prompt
+	// is in flight produces no output. wakeup re-injects the wakeup as a
+	// synthetic session/prompt at fire time. pendingWakeups tracks per-tool-
+	// call info (prompt + scheduledFor) since these arrive in separate
+	// notifications.
+	wakeup         *wakeupScheduler
+	pendingWakeups map[string]*pendingWakeup
 
 	// OTel tracing: active prompt span context.
 	// Notification spans become children of the prompt span for visual grouping.
@@ -136,7 +200,7 @@ type Adapter struct {
 
 	// Available models from the most recent session creation/load.
 	// Used by SetModel to validate the requested model exists.
-	availableModels []acp.ModelInfo
+	availableModels []modelInfo
 
 	// usageDelta tracks the running cumulative `usage_update.used` and
 	// the most recent USD cost reported per session. codex-acp emits no
@@ -164,17 +228,68 @@ type Adapter struct {
 	// the options list when the model is changed.
 	availableConfigOptions []streams.ConfigOption
 
+	dialect acpDialect
+
+	// Session configuration changes are serialized across model and option
+	// RPCs. configGeneration is incremented when a change begins so an older
+	// completion cannot overwrite a newer selection.
+	configChangeMu   sync.Mutex
+	configGeneration uint64
+	contextSamples   map[string]contextWindowSample
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
 
+	// promptTurn tracks the in-flight session/prompt RPC so Cancel can interrupt it
+	// and wait for acknowledgment before reporting success.
+	promptTurnMu sync.Mutex
+	promptTurn   *promptTurnState
+
+	// promptGate is a 1-slot semaphore that serializes session/prompt calls so
+	// at most one is in flight against the bridge at a time. The ScheduleWakeup
+	// path injects a synthetic prompt via fireWakeup; without this gate it can
+	// race a user prompt, and the claude-agent-acp bridge then returns each
+	// prompt's stop_reason against the wrong turn — shifting chat turns one
+	// prompt behind. A queued synthetic prompt waits here and drains the wakeup
+	// turn once the in-flight prompt finishes. It is a channel rather than a
+	// sync.Mutex so the wait honours the caller's context (a wakeup whose
+	// timeout/lifetime context is cancelled while queued aborts instead of
+	// blocking on a stuck turn).
+	promptGate chan struct{}
+
+	// asyncTurnFinalizers synthesize a turn completion for ACP updates that
+	// arrive while no session/prompt RPC is active. Claude's Monitor tool can
+	// produce assistant chunks from a background callback without returning a
+	// prompt response, so sendPrompt's normal complete emission never runs.
+	asyncTurnMu         sync.Mutex
+	asyncTurnFinalizers map[string]*asyncTurnFinalizer
+	asyncTurnEpochs     map[string]uint64
+
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
-	// the call site (e.g. the synthetic run prompt goroutine) derives its
+	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
 	// context from this one so it aborts when the adapter shuts down rather
 	// than continuing to drive a dead subprocess.
 	lifetimeCtx    context.Context
 	lifetimeCancel context.CancelFunc
 }
+
+// promptTurnState holds synchronization for one in-flight session/prompt RPC.
+type promptTurnState struct {
+	endTurn context.CancelCauseFunc
+	rpcDone chan struct{}
+	abortCh chan struct{}
+}
+
+type asyncTurnFinalizer struct {
+	timer       *time.Timer
+	seq         uint64
+	promptEpoch uint64
+}
+
+// promptCancelJoinTimeout bounds how long Cancel and sendPrompt wait for a stuck
+// session/prompt RPC to end after a user cancel. Exposed as a var for tests.
+var promptCancelJoinTimeout = 3 * time.Second
 
 // NewAdapter creates a new ACP protocol adapter.
 // Call Connect() after starting the subprocess to wire up stdin/stdout.
@@ -183,20 +298,32 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	l := log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID))
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Adapter{
-		cfg:             cfg,
-		logger:          l,
-		agentID:         cfg.AgentID,
-		normalizer:      NewNormalizer(),
-		updatesCh:       make(chan AgentEvent, 100),
-		activeToolCalls: make(map[string]*streams.NormalizedPayload),
-		activeMonitors:  make(map[string]map[string]string),
-		pendingRuns:     make(map[string]*pendingRun),
-		usageBySession:  make(map[string]*usageTracker),
-		attachMgr:       shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
-		lifetimeCtx:     ctx,
-		lifetimeCancel:  cancel,
+		cfg:                 cfg,
+		logger:              l,
+		agentID:             cfg.AgentID,
+		normalizer:          NewNormalizer(cfg.AgentID),
+		dialect:             newACPDialect(cfg.AgentID),
+		updatesCh:           make(chan AgentEvent, 100),
+		notifQueue:          make(chan notifWork, notifQueueCapacity),
+		activeToolCalls:     make(map[string]*streams.NormalizedPayload),
+		activeMonitors:      make(map[string]map[string]string),
+		pendingWakeups:      make(map[string]*pendingWakeup),
+		usageBySession:      make(map[string]*usageTracker),
+		contextSamples:      make(map[string]contextWindowSample),
+		attachMgr:           shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
+		promptGate:          make(chan struct{}, 1),
+		asyncTurnFinalizers: make(map[string]*asyncTurnFinalizer),
+		asyncTurnEpochs:     make(map[string]uint64),
+		lifetimeCtx:         ctx,
+		lifetimeCancel:      cancel,
 	}
-	a.run = newRunScheduler(l, a.fireRun)
+	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
+	// Start the update worker before returning so any caller that connects
+	// the SDK (Initialize, or any future direct wiring) always has a live
+	// consumer for notifQueue. Moving this out of Initialize closes a latent
+	// footgun where a future caller bypassing Initialize would silently fill
+	// the queue and lose notifications.
+	a.startUpdateWorker()
 	return a
 }
 
@@ -232,17 +359,26 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	a.logger.Info("initializing ACP adapter",
 		zap.String("workdir", a.cfg.WorkDir))
 
-	// Create ACP client with update handler that converts to AgentEvent
+	// Create ACP client with update handler that enqueues for the worker.
 	a.acpClient = acpclient.NewClient(
 		acpclient.WithLogger(a.logger.Zap()),
 		acpclient.WithWorkspaceRoot(a.cfg.WorkDir),
-		acpclient.WithUpdateHandler(a.handleACPUpdate),
+		acpclient.WithUpdateHandler(a.enqueueACPUpdate),
 		acpclient.WithPermissionHandler(a.handlePermissionRequest),
 	)
 
-	// Create ACP SDK connection
-	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout)
+	// Create ACP SDK connection. Raise the inbound notification queue cap
+	// to acpNotifQueueDefault (well above the SDK's built-in default) so
+	// long session/load replays don't overflow and tear the connection
+	// down. The internal notifQueueCapacity channel sits in front of this
+	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
+	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
+	notifQueueCap := acpNotifQueueCapacity()
+	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
+		acp.WithMaxQueuedNotifications(notifQueueCap))
 	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
+	a.logger.Debug("ACP connection notification queue sized",
+		zap.Int("capacity", notifQueueCap))
 
 	// Perform ACP handshake - this exchanges capabilities with the agent
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "initialize")
@@ -250,6 +386,9 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
+		ClientCapabilities: acp.ClientCapabilities{
+			Meta: map[string]any{"terminal_output": true},
+		},
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",
@@ -305,552 +444,6 @@ func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
 }
 
-// NewSession creates a new agent session.
-func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
-	a.mu.Lock()
-	conn := a.acpConn
-	a.mu.Unlock()
-
-	if conn == nil {
-		return "", fmt.Errorf("adapter not initialized")
-	}
-
-	// A fresh session invalidates any pending run keyed to the prior
-	// session. Reset pendingRuns and cancel the scheduler under one
-	// a.mu critical section so a concurrent handleRunEvent can't slip
-	// a stale entry between the two operations.
-	a.mu.Lock()
-	a.pendingRuns = make(map[string]*pendingRun)
-	a.run.cancel()
-	a.mu.Unlock()
-
-	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
-	defer span.End()
-
-	caps := a.capabilities.McpCapabilities
-	if a.cfg.AssumeMcpSse {
-		caps.Sse = true
-	}
-	filteredServers := filterMcpServersByCapabilities(mcpServers, caps, a.logger)
-	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
-		Cwd:        a.cfg.WorkDir,
-		McpServers: toACPMcpServers(filteredServers),
-	})
-	if err != nil {
-		span.RecordError(err)
-		if a.maybeEmitAuthRequired(err) {
-			return "", fmt.Errorf("authentication required: %w", err)
-		}
-		return "", fmt.Errorf("failed to create session: %w", err)
-	}
-
-	a.mu.Lock()
-	a.sessionID = string(resp.SessionId)
-	sessionID := a.sessionID
-	if resp.Models != nil {
-		a.availableModels = resp.Models.AvailableModels
-	}
-	a.mu.Unlock()
-	a.attachMgr.SetSessionID(sessionID)
-
-	span.SetAttributes(attribute.String("session_id", sessionID))
-	a.logger.Info("created new session", zap.String("session_id", sessionID))
-
-	// Emit initial session mode if the agent returned mode state
-	if resp.Modes != nil {
-		a.emitInitialModeState(resp.Modes)
-	}
-
-	// Emit session models if the agent returned model state
-	if resp.Models != nil {
-		a.emitSessionModels(sessionID, resp.Models, resp.Meta, resp.ConfigOptions)
-	}
-
-	// Emit session status event to normalize with other adapters.
-	// This eliminates the need for ReportsStatusViaStream flag.
-	a.sendUpdate(AgentEvent{
-		Type:          streams.EventTypeSessionStatus,
-		SessionID:     sessionID,
-		SessionStatus: streams.SessionStatusNew,
-		Data: map[string]any{
-			"session_status": streams.SessionStatusNew,
-			"init":           true,
-		},
-	})
-
-	return sessionID, nil
-}
-
-// filterMcpServersByCapabilities removes MCP servers that the agent doesn't support.
-// Stdio servers are always allowed; SSE/HTTP servers require the corresponding capability.
-// If multiple servers share the same name (e.g., dual SSE+HTTP injection), only the first
-// surviving entry is kept to prevent duplicate tool registration.
-func filterMcpServersByCapabilities(servers []types.McpServer, caps acp.McpCapabilities, logger *logger.Logger) []types.McpServer {
-	filtered := make([]types.McpServer, 0, len(servers))
-	seenNames := make(map[string]bool)
-	for _, s := range servers {
-		switch s.Type {
-		case "sse":
-			if !caps.Sse {
-				logger.Warn("filtering out SSE MCP server (agent does not support SSE)", zap.String("name", s.Name))
-				continue
-			}
-		case "http", "streamable_http":
-			if !caps.Http {
-				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", zap.String("name", s.Name), zap.String("type", s.Type))
-				continue
-			}
-		}
-		// Skip duplicate names - first surviving entry wins
-		if seenNames[s.Name] {
-			logger.Debug("skipping duplicate MCP server name", zap.String("name", s.Name), zap.String("type", s.Type))
-			continue
-		}
-		seenNames[s.Name] = true
-		filtered = append(filtered, s)
-	}
-	return filtered
-}
-
-func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
-	if len(servers) == 0 {
-		return []acp.McpServer{}
-	}
-	out := make([]acp.McpServer, 0, len(servers))
-	for _, server := range servers {
-		switch server.Type {
-		case "sse":
-			out = append(out, acp.McpServer{
-				Sse: &acp.McpServerSseInline{
-					Name:    server.Name,
-					Url:     server.URL,
-					Type:    "sse",
-					Headers: mapToHTTPHeaders(server.Headers),
-				},
-			})
-		case "http", "streamable_http":
-			out = append(out, acp.McpServer{
-				Http: &acp.McpServerHttpInline{
-					Name:    server.Name,
-					Url:     server.URL,
-					Type:    server.Type,
-					Headers: mapToHTTPHeaders(server.Headers),
-				},
-			})
-		default: // stdio
-			out = append(out, acp.McpServer{
-				Stdio: &acp.McpServerStdio{
-					Name:    server.Name,
-					Command: server.Command,
-					Args:    append([]string{}, server.Args...),
-					Env:     mapToEnvVars(server.Env),
-				},
-			})
-		}
-	}
-	return out
-}
-
-// mapToEnvVars converts a string map to ACP EnvVariable slice.
-// Returns an empty (non-nil) slice when the map is empty to satisfy the ACP SDK's non-omitempty field.
-func mapToEnvVars(env map[string]string) []acp.EnvVariable {
-	if len(env) == 0 {
-		return []acp.EnvVariable{}
-	}
-	vars := make([]acp.EnvVariable, 0, len(env))
-	for k, v := range env {
-		vars = append(vars, acp.EnvVariable{Name: k, Value: v})
-	}
-	return vars
-}
-
-// mapToHTTPHeaders converts a string map to ACP HttpHeader slice.
-// Returns an empty (non-nil) slice when the map is empty to satisfy the ACP SDK's non-omitempty field.
-func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
-	if len(headers) == 0 {
-		return []acp.HttpHeader{}
-	}
-	hdrs := make([]acp.HttpHeader, 0, len(headers))
-	for k, v := range headers {
-		hdrs = append(hdrs, acp.HttpHeader{Name: k, Value: v})
-	}
-	return hdrs
-}
-
-// LoadSession resumes an existing session.
-// Returns an error if the agent does not support session loading (LoadSession capability).
-// mcpServers are passed to the agent so it can reconnect to MCP servers on the new
-// agentctl instance (critical for agents that receive MCP configs via the protocol).
-func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
-	a.mu.Lock()
-	conn := a.acpConn
-	supportsLoad := a.capabilities.LoadSession
-	a.mu.Unlock()
-
-	if conn == nil {
-		return fmt.Errorf("adapter not initialized")
-	}
-
-	// Check if the agent supports session loading
-	if !supportsLoad {
-		a.logger.Debug("session/load rejected: agent does not advertise LoadSession capability",
-			zap.String("session_id", sessionID))
-		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
-	}
-
-	// Loading a different session invalidates any pending run keyed to the
-	// prior session — same reset block as NewSession to avoid leaving an armed
-	// timer for a session id that's about to change and accumulating stale
-	// pendingRuns entries across reloads.
-	a.mu.Lock()
-	a.pendingRuns = make(map[string]*pendingRun)
-	a.run.cancel()
-	a.mu.Unlock()
-
-	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
-	defer span.End()
-
-	// Filter MCP servers by agent capabilities (same logic as NewSession).
-	caps := a.capabilities.McpCapabilities
-	if a.cfg.AssumeMcpSse {
-		caps.Sse = true
-	}
-	filteredServers := filterMcpServersByCapabilities(mcpServers, caps, a.logger)
-
-	// Suppress history replay notifications during load.
-	// ACP session/load replays the entire conversation history asynchronously.
-	// We set a flag to suppress these notifications to avoid duplicating messages in the database.
-	// The flag will be cleared when we send the next prompt (see Prompt method).
-	a.mu.Lock()
-	a.isLoadingSession = true
-	a.mu.Unlock()
-
-	resp, err := conn.LoadSession(ctx, acp.LoadSessionRequest{
-		SessionId:  acp.SessionId(sessionID),
-		Cwd:        a.cfg.WorkDir,
-		McpServers: toACPMcpServers(filteredServers),
-	})
-
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to load session: %w", err)
-	}
-
-	a.mu.Lock()
-	a.sessionID = sessionID
-	if resp.Models != nil {
-		a.availableModels = resp.Models.AvailableModels
-	}
-	a.mu.Unlock()
-	a.attachMgr.SetSessionID(sessionID)
-
-	span.SetAttributes(attribute.String("session_id", sessionID))
-	a.logger.Info("loaded session", zap.String("session_id", sessionID))
-
-	// Emit initial session mode if the agent returned mode state
-	if resp.Modes != nil {
-		a.emitInitialModeState(resp.Modes)
-	}
-
-	// Emit session models if the agent returned model state
-	if resp.Models != nil {
-		a.emitSessionModels(sessionID, resp.Models, resp.Meta, resp.ConfigOptions)
-	}
-
-	// Re-emit plan captured during history replay and clear the loading flag.
-	// The ACP SDK guarantees all replay notifications are processed before
-	// LoadSession returns (via notificationWg.Wait), so captured state is complete.
-	// Clearing isLoadingSession here allows post-replay notifications (e.g.
-	// AvailableCommandsUpdate "ready" signals) to pass through normally.
-	a.mu.Lock()
-	replayPlan := a.loadReplayPlan
-	a.loadReplayPlan = nil
-	a.isLoadingSession = false
-	a.mu.Unlock()
-
-	// Any Monitor still tracked at this point was running in pre-restart history
-	// but has no live process to back it now — emit synthetic cancellations so
-	// the frontend doesn't render a stuck "watching" card.
-	a.sweepMonitorsOnReplayEnd(sessionID)
-
-	if replayPlan != nil {
-		entries := make([]PlanEntry, len(replayPlan.Entries))
-		for i, e := range replayPlan.Entries {
-			entries[i] = PlanEntry{
-				Description: e.Content,
-				Status:      string(e.Status),
-				Priority:    string(e.Priority),
-			}
-		}
-		a.sendUpdate(AgentEvent{
-			Type:        streams.EventTypePlan,
-			SessionID:   sessionID,
-			PlanEntries: entries,
-		})
-	}
-
-	// Emit session status event to normalize with other adapters.
-	// This eliminates the need for ReportsStatusViaStream flag.
-	a.sendUpdate(AgentEvent{
-		Type:          streams.EventTypeSessionStatus,
-		SessionID:     sessionID,
-		SessionStatus: streams.SessionStatusResumed,
-		Data: map[string]any{
-			"session_status": streams.SessionStatusResumed,
-			"init":           true,
-		},
-	})
-
-	return nil
-}
-
-// ResetSession creates a new session on the existing connection, effectively resetting
-// the agent's conversation context without restarting the subprocess. This is much faster
-// than a full process restart since the ACP protocol supports multiple sessions per connection.
-func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
-	return a.NewSession(ctx, mcpServers)
-}
-
-// Prompt sends a prompt to the agent.
-// If pending context is set (from SetPendingContext), it will be prepended to the message.
-// Attachments (images) are converted to ACP ImageBlocks and included in the prompt.
-// When the prompt completes, a complete event is emitted via the updates channel.
-func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment) error {
-	a.mu.Lock()
-	conn := a.acpConn
-	sessionID := a.sessionID
-	pendingContext := a.pendingContext
-	a.pendingContext = "" // Clear after use
-	a.mu.Unlock()
-
-	if conn == nil {
-		return fmt.Errorf("adapter not initialized")
-	}
-
-	// Inject pending context if available (fork_session pattern)
-	finalMessage := message
-	if pendingContext != "" {
-		finalMessage = pendingContext
-		a.logger.Info("injecting resume context into prompt",
-			zap.String("session_id", sessionID),
-			zap.Int("context_length", len(pendingContext)))
-	}
-
-	// Build content blocks: text first, then images
-	contentBlocks := []acp.ContentBlock{acp.TextBlock(finalMessage)}
-
-	// Add media attachments as typed content blocks
-	for _, att := range attachments {
-		switch att.Type {
-		case contentTypeImage:
-			contentBlocks = append(contentBlocks, acp.ImageBlock(att.Data, att.MimeType))
-		case contentTypeAudio:
-			contentBlocks = append(contentBlocks, acp.AudioBlock(att.Data, att.MimeType))
-		case contentTypeResource:
-			if a.capabilities.PromptCapabilities.EmbeddedContext {
-				contentBlocks = append(contentBlocks, buildResourceBlock(att))
-			} else {
-				// Agent doesn't support embedded resources — save to workspace and reference in text
-				saved, saveErr := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
-				if saveErr != nil || len(saved) == 0 {
-					a.logger.Warn("failed to save attachment to workspace, falling back to resource block",
-						zap.String("name", att.Name), zap.Error(saveErr))
-					contentBlocks = append(contentBlocks, buildResourceBlock(att))
-				} else {
-					contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved)))
-				}
-			}
-		}
-	}
-
-	// Start prompt span — notification spans become children via getPromptTraceCtx()
-	promptCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "prompt")
-	promptSpan.SetAttributes(
-		attribute.String("session_id", sessionID),
-		attribute.Int("prompt_length", len(finalMessage)),
-		attribute.Int("image_count", len(attachments)),
-	)
-	a.setPromptTraceCtx(promptCtx)
-
-	// Clear the loading flag before sending the prompt.
-	// If we're resuming a session, history replay is complete by the time we send a new prompt.
-	a.mu.Lock()
-	wasLoading := a.isLoadingSession
-	a.isLoadingSession = false
-	a.mu.Unlock()
-
-	if wasLoading {
-		a.logger.Info("cleared session load suppression flag before sending new prompt",
-			zap.String("session_id", sessionID))
-	}
-
-	a.logger.Info("sending prompt",
-		zap.String("session_id", sessionID),
-		zap.Int("content_blocks", len(contentBlocks)),
-		zap.Int("image_attachments", len(attachments)))
-
-	resp, err := conn.Prompt(promptCtx, acp.PromptRequest{
-		SessionId: acp.SessionId(sessionID),
-		Prompt:    contentBlocks,
-	})
-
-	// Clear prompt context and end span regardless of outcome
-	a.clearPromptTraceCtx()
-	stopReason := ""
-	if err != nil {
-		promptSpan.RecordError(err)
-	} else {
-		stopReason = string(resp.StopReason)
-		promptSpan.SetAttributes(attribute.String("stop_reason", stopReason))
-	}
-	promptSpan.End()
-
-	if err != nil {
-		return err
-	}
-
-	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
-	// tool_call without a terminal status update from the agent).
-	a.cancelActiveToolCalls(sessionID)
-
-	// Mark any tracked Monitors as ended. They live longer than a typical tool
-	// call (the script keeps running across model turns), so this sweep runs
-	// after `cancelActiveToolCalls` to give the Monitor card a clean terminal
-	// state when the parent prompt completes naturally.
-	a.sweepMonitorsOnPromptEnd(sessionID)
-
-	// Emit complete event via the stream, including the StopReason from the agent.
-	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).
-	a.logger.Debug("emitting complete event after prompt",
-		zap.String("session_id", sessionID),
-		zap.String("stop_reason", stopReason))
-	usage := extractUsage(&resp)
-	// codex-acp emits no per-turn usage frame, only cumulative
-	// usage_update.used. Fall back to the inferred delta so the office
-	// cost subscriber sees at least an approximate input count. The
-	// resulting cost is off (no input/output split) — flagged via
-	// PromptUsage.Estimated so downstream rows carry estimated=true.
-	delta, costSubcents := a.consumeUsageDelta(sessionID)
-	if usage == nil {
-		if delta > 0 || costSubcents > 0 {
-			usage = &streams.PromptUsage{
-				InputTokens:                  delta,
-				Estimated:                    true,
-				ProviderReportedCostSubcents: costSubcents,
-			}
-		}
-	} else if costSubcents > 0 {
-		// claude-acp: usage_update.cost.amount carries the authoritative
-		// USD cost — attach it to the typed usage frame so Layer A wins
-		// downstream and the office cost subscriber stores the row
-		// verbatim instead of falling back to models.dev. claude-acp's
-		// model id is a logical alias (sonnet / haiku) that won't match
-		// any pricing entry, so this is the only accurate cost path.
-		usage.ProviderReportedCostSubcents = costSubcents
-	}
-	a.sendUpdate(AgentEvent{
-		Type:      streams.EventTypeComplete,
-		SessionID: sessionID,
-		Data:      map[string]any{"stop_reason": stopReason},
-		Usage:     usage,
-	})
-
-	// Clean up saved attachments — agent has finished reading them
-	a.attachMgr.Cleanup()
-
-	return nil
-}
-
-// fireRun is invoked by runScheduler when a ScheduleRun timer
-// elapses. It issues a synthetic session/prompt so the upstream
-// @agentclientprotocol/claude-agent-acp bridge drains the SDK's queued run
-// turn and emits visible ACP frames. The session must still match (the user
-// hasn't started a fresh session) and the adapter must not be closed.
-//
-// Concurrent-prompt safety: if a user prompt is already in flight when this
-// runs, both end up calling conn.Prompt() on the same ClientSideConnection.
-// That's safe at the wire level — the ACP SDK's Connection.sendMessage
-// holds a write mutex, so request frames never interleave on stdin, and
-// JSON-RPC pairs each response back to its originating request via id —
-// but it does mean two prompts can be in flight against the bridge at
-// once. The bridge serialises them in the order it receives them, which
-// is exactly what we want for a run that races a user message.
-func (a *Adapter) fireRun(sessionID, prompt string) {
-	a.mu.RLock()
-	closed := a.closed
-	currentSession := a.sessionID
-	a.mu.RUnlock()
-
-	if closed {
-		a.logger.Debug("skipping run fire: adapter closed",
-			zap.String("session_id", sessionID))
-		return
-	}
-	if currentSession != sessionID {
-		a.logger.Info("skipping run fire: session changed",
-			zap.String("scheduled_for", sessionID),
-			zap.String("current", currentSession))
-		return
-	}
-
-	a.logger.Info("injecting synthetic run prompt",
-		zap.String("session_id", sessionID),
-		zap.Int("prompt_len", len(prompt)))
-
-	go func() {
-		// Derive from lifetimeCtx so a concurrent Close aborts the in-flight
-		// prompt instead of letting it run against a dead subprocess.
-		ctx, cancel := context.WithTimeout(a.lifetimeCtx, runPromptTimeout)
-		defer cancel()
-		if err := a.Prompt(ctx, prompt, nil); err != nil {
-			a.logger.Error("synthetic run prompt failed",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
-	}()
-}
-
-// handleRunEvent inspects a tool-call meta + rawInput pair, accumulates
-// pending state per toolCallID, and schedules a run once both the prompt
-// and scheduledFor timestamp are known. terminal=true means the tool call has
-// reached a terminal state, so any pending entry should be cleaned up.
-func (a *Adapter) handleRunEvent(sessionID, toolCallID string, meta any, rawInput any, terminal bool) {
-	if toolCallID == "" {
-		return
-	}
-
-	scheduledForMs, isRun := extractScheduleRun(meta)
-
-	a.mu.Lock()
-	pw, tracked := a.pendingRuns[toolCallID]
-	if !tracked {
-		if !isRun {
-			a.mu.Unlock()
-			return
-		}
-		pw = &pendingRun{}
-		a.pendingRuns[toolCallID] = pw
-	}
-
-	if scheduledForMs > 0 {
-		pw.scheduledForMs = scheduledForMs
-	}
-	if prompt, ok := extractRunPrompt(rawInput); ok {
-		pw.prompt = prompt
-	}
-
-	prompt := pw.prompt
-	stamp := pw.scheduledForMs
-	if (prompt != "" && stamp > 0) || terminal {
-		delete(a.pendingRuns, toolCallID)
-	}
-	a.mu.Unlock()
-
-	if prompt != "" && stamp > 0 {
-		a.run.schedule(sessionID, prompt, stamp)
-	}
-}
-
 // SetPendingContext sets the context to be injected into the next prompt.
 // This is used by the fork_session pattern for ACP agents that don't support session/load.
 // The context will be prepended to the first prompt sent to this session.
@@ -858,76 +451,6 @@ func (a *Adapter) SetPendingContext(context string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.pendingContext = context
-}
-
-// Cancel cancels the current operation.
-// Per ACP spec, the client must immediately mark non-finished tool calls as cancelled.
-func (a *Adapter) Cancel(ctx context.Context) error {
-	a.mu.RLock()
-	conn := a.acpConn
-	sessionID := a.sessionID
-	a.mu.RUnlock()
-
-	if conn == nil {
-		return fmt.Errorf("adapter not initialized")
-	}
-
-	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "cancel")
-	defer span.End()
-	span.SetAttributes(attribute.String("session_id", sessionID))
-
-	a.logger.Info("cancelling session", zap.String("session_id", sessionID))
-
-	// Mark all active tool calls as cancelled before sending cancel to agent.
-	a.cancelActiveToolCalls(sessionID)
-
-	err := conn.Cancel(ctx, acp.CancelNotification{
-		SessionId: acp.SessionId(sessionID),
-	})
-	if err != nil {
-		span.RecordError(err)
-	}
-	return err
-}
-
-// cancelActiveToolCalls emits cancelled tool_update events for all in-flight tool calls
-// and clears the activeToolCalls map.
-//
-// Monitor tool calls are intentionally skipped here — they are tracked in
-// activeMonitors and given their own terminal sweep (sweepMonitorsOnPromptEnd
-// or sweepMonitorsOnReplayEnd) which uses the appropriate status and a
-// payload snapshot. Without this skip the Monitor would receive two
-// terminal events with conflicting states.
-func (a *Adapter) cancelActiveToolCalls(sessionID string) {
-	a.mu.Lock()
-	monitorToolCallIDs := make(map[string]bool)
-	for _, tcID := range a.activeMonitors[sessionID] {
-		monitorToolCallIDs[tcID] = true
-	}
-	toCancel := make(map[string]*streams.NormalizedPayload)
-	preserved := make(map[string]*streams.NormalizedPayload)
-	for tcID, payload := range a.activeToolCalls {
-		if monitorToolCallIDs[tcID] {
-			preserved[tcID] = payload
-		} else {
-			toCancel[tcID] = payload
-		}
-	}
-	a.activeToolCalls = preserved
-	a.mu.Unlock()
-
-	for toolCallID, normalized := range toCancel {
-		a.logger.Debug("cancelling active tool call",
-			zap.String("session_id", sessionID),
-			zap.String("tool_call_id", toolCallID))
-		a.sendUpdate(AgentEvent{
-			Type:              streams.EventTypeToolUpdate,
-			SessionID:         sessionID,
-			ToolCallID:        toolCallID,
-			ToolStatus:        "cancelled",
-			NormalizedPayload: normalized,
-		})
-	}
 }
 
 // Updates returns the channel for agent events.
@@ -961,36 +484,53 @@ func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 func (a *Adapter) sendUpdate(event AgentEvent) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	if !a.sendUpdateLocked(event) && !a.closed {
+		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
+	}
+}
+
+// sendUpdateLocked enqueues an event without acquiring a.mu. Callers must
+// hold a.mu for reading or writing.
+func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
-		return
+		return false
 	}
 	select {
 	case a.updatesCh <- event:
+		return true
 	default:
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
+		return false
 	}
 }
 
 // Close releases resources held by the adapter.
 func (a *Adapter) Close() error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	if a.closed {
+		a.mu.Unlock()
 		return nil
 	}
 	a.closed = true
+	a.mu.Unlock()
 
 	a.logger.Info("closing ACP adapter")
 
-	// Stop any pending ScheduleRun timer so it doesn't fire after close,
-	// and cancel the lifetime context so any in-flight run prompt aborts.
-	if a.run != nil {
-		a.run.cancel()
+	// Stop any pending ScheduleWakeup timer so it doesn't fire after close,
+	// and cancel the lifetime context so any in-flight wakeup prompt aborts.
+	// Cancelling lifetimeCtx also unblocks enqueueACPUpdate senders and
+	// signals the update worker to exit.
+	if a.wakeup != nil {
+		a.wakeup.cancel()
 	}
+	a.cancelAllAsyncTurnCompletes()
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
 	}
+
+	// Wait for the update worker to exit before closing updatesCh.
+	// handleACPUpdate may call sendUpdate, so updatesCh must remain open
+	// until the worker is gone.
+	a.workerWg.Wait()
 
 	// Clean up any saved attachments
 	a.attachMgr.Cleanup()
@@ -1004,9 +544,14 @@ func (a *Adapter) Close() error {
 	return nil
 }
 
-// RequiresProcessKill returns false because ACP agents exit when stdin is closed.
+// RequiresProcessKill reports whether the agent's process group must be killed
+// on shutdown. Most ACP agents exit cleanly when stdin closes, but some (notably
+// opencode acp) keep an HTTP server and MCP child tree alive after EOF —
+// those agents set cfg.RequiresProcessKill so the process manager reaps the
+// entire group instead of waiting for a graceful exit that never comes.
+// See GH issue #1247.
 func (a *Adapter) RequiresProcessKill() bool {
-	return false
+	return a.cfg != nil && a.cfg.RequiresProcessKill
 }
 
 // getPromptTraceCtx returns the current prompt span context for child-span linking.
@@ -1039,1044 +584,4 @@ func (a *Adapter) GetACPConnection() *acp.ClientSideConnection {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.acpConn
-}
-
-// handleACPUpdate converts ACP SessionNotification to protocol-agnostic AgentEvent.
-func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
-	// Marshal once for both debug logging and tracing
-	rawData, _ := json.Marshal(n)
-
-	// Log raw event for debugging
-	if len(rawData) > 0 {
-		shared.LogRawEvent(shared.ProtocolACP, a.agentID, "session_notification", rawData)
-	}
-
-	// During session/load, suppress history replay notifications.
-	// ACP agents stream the entire conversation history during load, which should not
-	// be emitted as new message events to avoid duplicating messages in the UI.
-	// We suppress: message chunks, thinking chunks, tool calls, and tool updates.
-	a.mu.RLock()
-	isLoading := a.isLoadingSession
-	a.mu.RUnlock()
-
-	if isLoading {
-		u := n.Update
-		// Capture the last Plan from replay so we can re-emit it after load completes.
-		a.mu.Lock()
-		if u.Plan != nil {
-			a.loadReplayPlan = u.Plan
-		}
-		a.mu.Unlock()
-
-		// Even though we suppress replay notifications from reaching clients,
-		// reconstruct any in-progress Monitor registrations so the post-replay
-		// sweep can mark them ended-on-restart. Without this, a session where
-		// Monitor was running before agentctl died would keep showing a
-		// "watching" card forever after resume.
-		a.captureReplayMonitor(string(n.SessionId), u)
-
-		// Suppress conversation history events during load.
-		// AvailableCommandsUpdate is intentionally NOT suppressed — it may arrive
-		// after the replay completes as a "ready" signal, and the frontend treats
-		// the last one as authoritative (last-write-wins).
-		if u.AgentMessageChunk != nil || u.UserMessageChunk != nil || u.AgentThoughtChunk != nil ||
-			u.ToolCall != nil || u.ToolCallUpdate != nil ||
-			u.Plan != nil || u.CurrentModeUpdate != nil || u.ConfigOptionUpdate != nil {
-			a.logger.Debug("suppressing history replay notification during session load",
-				zap.String("session_id", string(n.SessionId)))
-			return
-		}
-	}
-
-	sessionID := string(n.SessionId)
-
-	event := a.convertNotification(n)
-	if event == nil {
-		// Try untyped updates not yet supported by the ACP SDK.
-		event = a.tryConvertUntypedUpdate(rawData, sessionID)
-	}
-	if event != nil {
-		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, event)
-		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
-			event.Type, rawData, event)
-		a.sendUpdate(*event)
-	} else if updateJSON, err := json.Marshal(n.Update); err == nil {
-		a.logger.Warn("unhandled ACP session notification",
-			zap.String("session_id", sessionID),
-			zap.String("update_json", string(updateJSON)))
-	}
-}
-
-// convertNotification converts an ACP SessionNotification to an AgentEvent.
-func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
-	u := n.Update
-	sessionID := string(n.SessionId)
-
-	switch {
-	case u.AgentMessageChunk != nil:
-		return a.convertMessageChunk(sessionID, u.AgentMessageChunk.Content, "assistant")
-
-	case u.UserMessageChunk != nil:
-		return a.convertMessageChunk(sessionID, u.UserMessageChunk.Content, "user")
-
-	case u.AgentThoughtChunk != nil:
-		if u.AgentThoughtChunk.Content.Text != nil {
-			return &AgentEvent{
-				Type:          streams.EventTypeReasoning,
-				SessionID:     sessionID,
-				ReasoningText: u.AgentThoughtChunk.Content.Text.Text,
-			}
-		}
-
-	case u.ToolCall != nil:
-		return a.convertToolCallUpdate(sessionID, u.ToolCall)
-
-	case u.ToolCallUpdate != nil:
-		return a.convertToolCallResultUpdate(sessionID, u.ToolCallUpdate)
-
-	case u.Plan != nil:
-		entries := make([]PlanEntry, len(u.Plan.Entries))
-		for i, e := range u.Plan.Entries {
-			entries[i] = PlanEntry{
-				Description: e.Content,
-				Status:      string(e.Status),
-				Priority:    string(e.Priority),
-			}
-		}
-		return &AgentEvent{
-			Type:        streams.EventTypePlan,
-			SessionID:   sessionID,
-			PlanEntries: entries,
-		}
-
-	case u.AvailableCommandsUpdate != nil:
-		return a.convertAvailableCommands(sessionID, u.AvailableCommandsUpdate)
-
-	case u.CurrentModeUpdate != nil:
-		return &AgentEvent{
-			Type:          streams.EventTypeSessionMode,
-			SessionID:     sessionID,
-			CurrentModeID: string(u.CurrentModeUpdate.CurrentModeId),
-		}
-
-	case u.ConfigOptionUpdate != nil:
-		configOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
-		if len(configOptions) > 0 {
-			// Refresh the cached config options so emitSetModelEvent
-			// (called from SetModel) doesn't reuse the stale snapshot from
-			// session/new. Include the cached available models so the event
-			// doesn't overwrite the model list set during session init.
-			a.mu.Lock()
-			cachedModels := a.availableModels
-			a.availableConfigOptions = configOptions
-			a.mu.Unlock()
-			currentModelID := resolveCurrentModelFromConfig(configOptions)
-			return &AgentEvent{
-				Type:           streams.EventTypeSessionModels,
-				SessionID:      sessionID,
-				CurrentModelID: currentModelID,
-				SessionModels:  convertSessionModels(cachedModels),
-				ConfigOptions:  configOptions,
-			}
-		}
-	}
-
-	return nil
-}
-
-// acpUsageUpdate represents the ACP "usage_update" session notification.
-// TODO: Replace with acp.SessionUsageUpdate when the ACP SDK adds native support.
-type acpUsageUpdate struct {
-	SessionUpdate string `json:"sessionUpdate"`
-	Size          int64  `json:"size"`
-	Used          int64  `json:"used"`
-	Cost          *struct {
-		Amount   float64 `json:"amount"`
-		Currency string  `json:"currency"`
-	} `json:"cost,omitempty"`
-}
-
-// usageTracker carries the running cumulative usage state for one ACP
-// session — used to infer codex-acp's per-turn deltas. Reset when the
-// prompt-complete handler consumes it; lastUsed sticks so subsequent
-// updates compute deltas from the new baseline.
-//
-// lastCostSubcents is the most recent USD cost (Layer A from spec) in
-// hundredths of a cent; pumped through to PromptUsage.
-// ProviderReportedCostSubcents at consume time. The actual claude-acp
-// frames carry a cumulative number, but we treat the most-recent value
-// as the per-turn cost because claude-code already emits one cost
-// snapshot per session/prompt cycle.
-type usageTracker struct {
-	lastUsed         int64
-	lastCostSubcents int64
-}
-
-// recordUsageDelta updates the per-session tracker. Returns the
-// integer delta against the previous `used` snapshot — the next prompt
-// complete call consumes this via consumeUsageDelta. Cost is forwarded
-// as the latest value (claude-acp emits a per-turn cumulative cost; we
-// treat the most recent value as the turn's cost).
-func (a *Adapter) recordUsageDelta(sessionID string, used int64, costSubcents int64) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	tr := a.usageBySession[sessionID]
-	if tr == nil {
-		tr = &usageTracker{}
-		a.usageBySession[sessionID] = tr
-	}
-	if used > tr.lastUsed {
-		tr.lastUsed = used
-	}
-	if costSubcents > 0 {
-		tr.lastCostSubcents = costSubcents
-	}
-}
-
-// consumeUsageDelta returns the delta of cumulative `used` since the
-// last consumption + the most recent USD cost (subcents). Both fields
-// are reset to zero after read so the next turn starts fresh.
-func (a *Adapter) consumeUsageDelta(sessionID string) (int64, int64) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	tr := a.usageBySession[sessionID]
-	if tr == nil {
-		return 0, 0
-	}
-	delta := tr.lastUsed
-	cost := tr.lastCostSubcents
-	tr.lastUsed = 0
-	tr.lastCostSubcents = 0
-	return delta, cost
-}
-
-// tryConvertUntypedUpdate handles ACP session update types not yet supported by the SDK.
-// When the SDK adds native support, move the handling into convertNotification and delete this.
-func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID string) *AgentEvent {
-	var envelope struct {
-		Update json.RawMessage `json:"update"`
-	}
-	if err := json.Unmarshal(rawNotification, &envelope); err != nil {
-		return nil
-	}
-
-	var usage acpUsageUpdate
-	if err := json.Unmarshal(envelope.Update, &usage); err != nil {
-		return nil
-	}
-	if usage.SessionUpdate != "usage_update" || usage.Size <= 0 {
-		return nil
-	}
-
-	// Forward usage_update.cost to the prompt-complete handler via the
-	// per-session tracker. claude-acp emits a USD float; we convert to
-	// hundredths-of-a-cent (subcents). The actual cost frame might be
-	// "cumulative-this-session"; the prompt-complete handler currently
-	// treats the value as the turn's cost — close enough for the
-	// budget+display surface today and revisited if claude-acp's
-	// semantics change.
-	var costSubcents int64
-	if usage.Cost != nil {
-		costSubcents = int64(usage.Cost.Amount * 10000)
-	}
-	a.recordUsageDelta(sessionID, usage.Used, costSubcents)
-
-	remaining := max(usage.Size-usage.Used, 0)
-	return &AgentEvent{
-		Type:                   streams.EventTypeContextWindow,
-		SessionID:              sessionID,
-		ContextWindowSize:      usage.Size,
-		ContextWindowUsed:      usage.Used,
-		ContextWindowRemaining: remaining,
-		ContextEfficiency:      float64(usage.Used) / float64(usage.Size) * 100,
-	}
-}
-
-// convertMessageChunk converts an ACP ContentBlock to an AgentEvent, handling multimodal content.
-// For text-only messages, sets the Text field for backward compatibility.
-// For non-text content, populates ContentBlocks.
-func (a *Adapter) convertMessageChunk(sessionID string, content acp.ContentBlock, role string) *AgentEvent {
-	event := &AgentEvent{
-		Type:      streams.EventTypeMessageChunk,
-		SessionID: sessionID,
-	}
-
-	// Only set Role for user messages (assistant is the default)
-	if role == "user" {
-		event.Role = role
-	}
-
-	// Text content goes directly into the Text field for backward compatibility
-	if content.Text != nil {
-		text := content.Text.Text
-		// Claude-acp's Monitor tool injects each script line back to the model
-		// as a `<task-notification>` user turn. The wrapper suppresses the
-		// user_message_chunk so the model often "echoes" the envelope into its
-		// own assistant text. Parse those out into proper Monitor events and
-		// strip them from the chat text. Assistant role only — genuine user
-		// messages don't carry these.
-		if role == "assistant" {
-			text = a.routeMonitorEvents(sessionID, text)
-			if isMonitorHumanEcho(text) {
-				return nil
-			}
-			if strings.TrimSpace(text) == "" {
-				return nil
-			}
-		}
-		event.Text = text
-		return event
-	}
-
-	// Non-text content uses the shared converter
-	cb := a.convertContentBlockToStreams(content)
-	if cb == nil {
-		return nil
-	}
-	event.ContentBlocks = []streams.ContentBlock{*cb}
-	return event
-}
-
-// routeMonitorEvents extracts Monitor `<task-notification>` envelopes from an
-// agent_message_chunk text, emits a synthetic tool_call_update for each event
-// against the originating Monitor's toolCallID, and returns the cleaned text.
-// Returns the original text unchanged when no envelope is present (the common
-// case for non-Monitor sessions).
-func (a *Adapter) routeMonitorEvents(sessionID, text string) string {
-	cleaned, events := extractMonitorEvents(text)
-	if len(events) == 0 {
-		return text
-	}
-	for _, ev := range events {
-		toolCallID, ok := a.lookupMonitorByTaskID(sessionID, ev.TaskID)
-		if !ok {
-			a.logger.Debug("monitor event for unknown task, dropping envelope and event body",
-				zap.String("session_id", sessionID),
-				zap.String("task_id", ev.TaskID))
-			continue
-		}
-		a.mu.Lock()
-		payload := a.activeToolCalls[toolCallID]
-		appendMonitorEvent(payload, ev.TaskID, monitorCommandFromPayload(payload), ev.Body)
-		a.mu.Unlock()
-		a.sendUpdate(monitorEventEvent(sessionID, toolCallID, ev.Body, payload))
-		a.logger.Debug("monitor event routed",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", ev.TaskID),
-			zap.String("tool_call_id", toolCallID),
-			zap.Int("body_len", len(ev.Body)))
-	}
-	return cleaned
-}
-
-// convertAvailableCommands converts an ACP AvailableCommandsUpdate to an AgentEvent,
-// including input hints when available.
-func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.SessionAvailableCommandsUpdate) *AgentEvent {
-	seen := make(map[string]struct{}, len(update.AvailableCommands))
-	commands := make([]streams.AvailableCommand, 0, len(update.AvailableCommands))
-	for _, cmd := range update.AvailableCommands {
-		if _, dup := seen[cmd.Name]; dup {
-			continue
-		}
-		seen[cmd.Name] = struct{}{}
-		ac := streams.AvailableCommand{
-			Name:        cmd.Name,
-			Description: cmd.Description,
-		}
-		if cmd.Input != nil && cmd.Input.Unstructured != nil {
-			ac.InputHint = cmd.Input.Unstructured.Hint
-		}
-		commands = append(commands, ac)
-	}
-	return &AgentEvent{
-		Type:              streams.EventTypeAvailableCommands,
-		SessionID:         sessionID,
-		AvailableCommands: commands,
-	}
-}
-
-// emitInitialModeState emits a session_mode event from the session response's Modes field.
-// Called after session/new and session/load to provide the initial mode state.
-func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
-	availModes := make([]streams.SessionModeInfo, 0, len(modes.AvailableModes))
-	for _, m := range modes.AvailableModes {
-		availModes = append(availModes, streams.SessionModeInfo{
-			ID:          string(m.Id),
-			Name:        m.Name,
-			Description: derefStr(m.Description),
-		})
-	}
-	// Cache available modes so SetMode can include them in subsequent events.
-	a.mu.Lock()
-	a.availableModes = availModes
-	a.mu.Unlock()
-
-	a.sendUpdate(AgentEvent{
-		Type:           streams.EventTypeSessionMode,
-		SessionID:      a.sessionID,
-		CurrentModeID:  string(modes.CurrentModeId),
-		AvailableModes: availModes,
-	})
-}
-
-// emitSessionModels emits a session_models event from the session response.
-func (a *Adapter) emitSessionModels(sessionID string, models *acp.SessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption) {
-	currentModelID := string(models.CurrentModelId)
-	// Prefer typed config options from the response; fall back to _meta extraction for older agents
-	configOptions := convertACPConfigOptions(acpConfigOptions)
-	if len(configOptions) == 0 {
-		configOptions = extractConfigOptions(meta)
-	}
-
-	// Fallback: if the SDK didn't parse currentModelId (some agents omit it),
-	// try to resolve it from a model-shaped configOption. We deliberately do
-	// NOT fall back to AvailableModels[0]: agents like auggie return an
-	// alphabetically-sorted list whose first entry is a pseudo-agent ("Build
-	// Analyzer"), which clobbered the profile model in the UI. When neither
-	// CurrentModelId nor a configOption surface a value, emit empty and let
-	// the frontend fall through to its profile/snapshot resolution.
-	if currentModelID == "" {
-		currentModelID = resolveCurrentModelFromConfig(configOptions)
-	}
-
-	// Cache config options so emitSetModelEvent can include them in the
-	// convergence event emitted after a successful SetModel call.
-	a.mu.Lock()
-	a.availableConfigOptions = configOptions
-	a.mu.Unlock()
-
-	a.logger.Info("emitting session_models event",
-		zap.String("session_id", sessionID),
-		zap.String("current_model_id", currentModelID),
-		zap.Int("available_models", len(models.AvailableModels)),
-	)
-	a.sendUpdate(AgentEvent{
-		Type:           streams.EventTypeSessionModels,
-		SessionID:      sessionID,
-		CurrentModelID: currentModelID,
-		SessionModels:  convertSessionModels(models.AvailableModels),
-		ConfigOptions:  configOptions,
-	})
-}
-
-// emitSetModelEvent emits a session_models convergence event after SetModel
-// applies a new model. The frontend uses this to update its current-model
-// view: without it the only session_models event is the one from session/new,
-// which carries the agent's (possibly stale or empty) currentModelId.
-//
-// Callers MUST pass the sessionID and cached state captured under the same
-// RLock used to read the connection, so concurrent session switches can't
-// route this event to the wrong session. cachedConfig is copied before mutation
-// so the model-shaped option's CurrentValue can be rewritten to match modelID
-// — this prevents a downstream consumer that reads ConfigOptions[model]
-// .CurrentValue (codex-style agents surface the current model there) from
-// disagreeing with the CurrentModelID emitted on the same event.
-func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []acp.ModelInfo, cachedConfig []streams.ConfigOption) {
-	outConfig := cachedConfig
-	if len(cachedConfig) > 0 {
-		// Shallow copy: only CurrentValue (a string) is rewritten below, so
-		// sharing the inner Options slice with the caller is safe today. If a
-		// future caller mutates ConfigOption.Options in place, switch to a
-		// deep copy to avoid aliasing the caller's backing array.
-		outConfig = make([]streams.ConfigOption, len(cachedConfig))
-		copy(outConfig, cachedConfig)
-		for i := range outConfig {
-			if outConfig[i].ID == configOptionIDModel || outConfig[i].Category == configOptionIDModel {
-				outConfig[i].CurrentValue = modelID
-			}
-		}
-	}
-
-	a.logger.Info("emitting session_models convergence event after SetModel",
-		zap.String("session_id", sessionID),
-		zap.String("model_id", modelID),
-	)
-	a.sendUpdate(AgentEvent{
-		Type:           streams.EventTypeSessionModels,
-		SessionID:      sessionID,
-		CurrentModelID: modelID,
-		SessionModels:  convertSessionModels(cachedModels),
-		ConfigOptions:  outConfig,
-	})
-}
-
-// resolveCurrentModelFromConfig extracts current model ID from configOptions.
-func resolveCurrentModelFromConfig(options []streams.ConfigOption) string {
-	for _, opt := range options {
-		if opt.ID == configOptionIDModel || opt.Category == configOptionIDModel {
-			return opt.CurrentValue
-		}
-	}
-	return ""
-}
-
-// SetMode changes the agent's session mode via ACP session/set_mode.
-func (a *Adapter) SetMode(ctx context.Context, modeID string) error {
-	a.mu.RLock()
-	conn := a.acpConn
-	sessionID := a.sessionID
-	a.mu.RUnlock()
-
-	if conn == nil {
-		return fmt.Errorf("adapter not initialized")
-	}
-
-	_, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
-		SessionId: acp.SessionId(sessionID),
-		ModeId:    acp.SessionModeId(modeID),
-	})
-	if err != nil {
-		return fmt.Errorf("set session mode failed: %w", err)
-	}
-
-	a.mu.RLock()
-	cachedModes := a.availableModes
-	a.mu.RUnlock()
-
-	a.sendUpdate(AgentEvent{
-		Type:           streams.EventTypeSessionMode,
-		SessionID:      sessionID,
-		CurrentModeID:  modeID,
-		AvailableModes: cachedModes,
-	})
-	return nil
-}
-
-// SetModel changes the agent's model via ACP session/set_model (unstable SDK method).
-// If the model ID doesn't exist in the agent's available models, the call is skipped to avoid 404.
-func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
-	// Snapshot sessionID + cached state under a single RLock so the
-	// convergence event emitted on success is bound to the same session
-	// (and the same cached models/options) used to issue the RPC.
-	a.mu.RLock()
-	conn := a.acpConn
-	sessionID := a.sessionID
-	available := a.availableModels
-	cachedConfig := a.availableConfigOptions
-	a.mu.RUnlock()
-
-	if conn == nil {
-		return fmt.Errorf("adapter not initialized")
-	}
-
-	// Validate model exists in the agent's available models (if known).
-	if len(available) > 0 {
-		found := false
-		for _, m := range available {
-			if string(m.ModelId) == modelID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			a.logger.Warn("skipping SetModel: model not in agent's available models",
-				zap.String("model_id", modelID),
-				zap.Int("available_count", len(available)))
-			return nil
-		}
-	}
-
-	_, err := conn.UnstableSetSessionModel(ctx, acp.UnstableSetSessionModelRequest{
-		SessionId: acp.SessionId(sessionID),
-		ModelId:   acp.UnstableModelId(modelID),
-	})
-	if err != nil {
-		return fmt.Errorf("set session model failed: %w", err)
-	}
-	a.emitSetModelEvent(sessionID, modelID, available, cachedConfig)
-	return nil
-}
-
-// maybeEmitAuthRequired inspects an ACP error and, if it represents an
-// AuthenticationRequired (-32000) failure, emits an EventTypeAuthRequired
-// carrying the cached auth methods so the frontend can drive the
-// authenticate → session/new retry. Returns true when the event was emitted.
-//
-// The emitted event has no SessionID by design: the failure occurred while
-// session/new was attempting to create a session, so no session ID exists
-// yet. Consumers that correlate events by session must treat
-// EventTypeAuthRequired as a connection-scoped (not session-scoped) signal.
-//
-// Returns false when no auth methods are cached. Without methods to choose
-// from, the frontend can't drive the picker — letting the error fall through
-// to the generic "failed to create session" path is more actionable than a
-// pseudo-auth-required signal with no options.
-func (a *Adapter) maybeEmitAuthRequired(err error) bool {
-	var reqErr *acp.RequestError
-	if !errors.As(err, &reqErr) || reqErr.Code != -32000 {
-		return false
-	}
-
-	a.mu.RLock()
-	methods := a.availableAuthMethods
-	a.mu.RUnlock()
-
-	if len(methods) == 0 {
-		return false
-	}
-
-	a.sendUpdate(AgentEvent{
-		Type:        streams.EventTypeAuthRequired,
-		AuthMethods: methods,
-		Error:       reqErr.Message,
-	})
-	return true
-}
-
-// SetConfigOption sets a session configuration option via ACP session/set_config_option.
-// configID is the option's ID; value is the option-value ID to apply.
-func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) error {
-	a.mu.RLock()
-	conn := a.acpConn
-	sessionID := a.sessionID
-	a.mu.RUnlock()
-
-	if conn == nil {
-		return fmt.Errorf("adapter not initialized")
-	}
-	if sessionID == "" {
-		return fmt.Errorf("no active session: call NewSession before SetConfigOption")
-	}
-
-	_, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
-		ValueId: &acp.SetSessionConfigOptionValueId{
-			SessionId: acp.SessionId(sessionID),
-			ConfigId:  acp.SessionConfigId(configID),
-			Value:     acp.SessionConfigValueId(value),
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("set session config option failed: %w", err)
-	}
-	return nil
-}
-
-// Authenticate triggers ACP session/authenticate for a given auth method.
-func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
-	a.mu.RLock()
-	conn := a.acpConn
-	a.mu.RUnlock()
-
-	if conn == nil {
-		return fmt.Errorf("adapter not initialized")
-	}
-
-	_, err := conn.Authenticate(ctx, acp.AuthenticateRequest{
-		MethodId: methodID,
-	})
-	if err != nil {
-		return fmt.Errorf("authenticate failed: %w", err)
-	}
-	return nil
-}
-
-// derefStr safely dereferences a string pointer, returning empty string if nil.
-func derefStr(s *string) string {
-	if s != nil {
-		return *s
-	}
-	return ""
-}
-
-// buildResourceBlock constructs an ACP ResourceBlock from a MessageAttachment.
-// Text-based MIME types use TextResourceContents; everything else uses BlobResourceContents.
-func buildResourceBlock(att v1.MessageAttachment) acp.ContentBlock {
-	uri := att.Name // Use filename as URI if no explicit URI
-	if uri == "" {
-		uri = "attachment"
-	}
-	if isTextMimeType(att.MimeType) {
-		text := att.Data
-		if decoded, err := base64.StdEncoding.DecodeString(att.Data); err == nil {
-			text = string(decoded)
-		}
-		return acp.ResourceBlock(acp.EmbeddedResourceResource{
-			TextResourceContents: &acp.TextResourceContents{
-				Uri:      uri,
-				Text:     text,
-				MimeType: acp.Ptr(att.MimeType),
-			},
-		})
-	}
-	return acp.ResourceBlock(acp.EmbeddedResourceResource{
-		BlobResourceContents: &acp.BlobResourceContents{
-			Uri:      uri,
-			Blob:     att.Data,
-			MimeType: acp.Ptr(att.MimeType),
-		},
-	})
-}
-
-// isTextMimeType returns true for MIME types that represent text content.
-func isTextMimeType(mimeType string) bool {
-	if strings.HasPrefix(mimeType, "text/") {
-		return true
-	}
-	switch mimeType {
-	case "application/json", "application/xml", "application/javascript",
-		"application/typescript", "application/x-yaml", "application/toml",
-		"application/x-sh", "application/sql":
-		return true
-	}
-	return false
-}
-
-// convertToolCallContents converts ACP ToolCallContent items to our protocol-agnostic type.
-func (a *Adapter) convertToolCallContents(contents []acp.ToolCallContent) []streams.ToolCallContentItem {
-	if len(contents) == 0 {
-		return nil
-	}
-	items := make([]streams.ToolCallContentItem, 0, len(contents))
-	for _, c := range contents {
-		switch {
-		case c.Diff != nil:
-			items = append(items, streams.ToolCallContentItem{
-				Type:    "diff",
-				Path:    c.Diff.Path,
-				OldText: c.Diff.OldText,
-				NewText: c.Diff.NewText,
-			})
-		case c.Content != nil:
-			cb := a.convertContentBlockToStreams(c.Content.Content)
-			if cb != nil {
-				items = append(items, streams.ToolCallContentItem{
-					Type:    "content",
-					Content: cb,
-				})
-			}
-		case c.Terminal != nil:
-			items = append(items, streams.ToolCallContentItem{
-				Type:       "terminal",
-				TerminalID: c.Terminal.TerminalId,
-			})
-		}
-	}
-	if len(items) == 0 {
-		return nil
-	}
-	return items
-}
-
-// convertContentBlockToStreams converts an ACP ContentBlock to a streams.ContentBlock.
-func (a *Adapter) convertContentBlockToStreams(cb acp.ContentBlock) *streams.ContentBlock {
-	switch {
-	case cb.Text != nil:
-		return &streams.ContentBlock{Type: "text", Text: cb.Text.Text}
-	case cb.Image != nil:
-		return &streams.ContentBlock{Type: contentTypeImage, Data: cb.Image.Data, MimeType: cb.Image.MimeType, URI: derefStr(cb.Image.Uri)}
-	case cb.Audio != nil:
-		return &streams.ContentBlock{Type: contentTypeAudio, Data: cb.Audio.Data, MimeType: cb.Audio.MimeType}
-	case cb.ResourceLink != nil:
-		return &streams.ContentBlock{
-			Type: "resource_link", URI: cb.ResourceLink.Uri, Name: cb.ResourceLink.Name,
-			MimeType: derefStr(cb.ResourceLink.MimeType), Title: derefStr(cb.ResourceLink.Title),
-			Description: derefStr(cb.ResourceLink.Description), Size: cb.ResourceLink.Size,
-		}
-	case cb.Resource != nil:
-		block := &streams.ContentBlock{Type: "resource"}
-		res := cb.Resource.Resource
-		switch {
-		case res.TextResourceContents != nil:
-			block.URI = res.TextResourceContents.Uri
-			block.Text = res.TextResourceContents.Text
-			block.MimeType = derefStr(res.TextResourceContents.MimeType)
-		case res.BlobResourceContents != nil:
-			block.URI = res.BlobResourceContents.Uri
-			block.Data = res.BlobResourceContents.Blob
-			block.MimeType = derefStr(res.BlobResourceContents.MimeType)
-		}
-		return block
-	default:
-		return nil
-	}
-}
-
-// convertToolCallUpdate converts a ToolCall notification to an AgentEvent.
-func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateToolCall) *AgentEvent {
-	args := map[string]any{}
-
-	if tc.Kind != "" {
-		args["kind"] = string(tc.Kind)
-	}
-
-	if len(tc.Locations) > 0 {
-		locations := make([]map[string]any, len(tc.Locations))
-		for i, loc := range tc.Locations {
-			locMap := map[string]any{"path": loc.Path}
-			if loc.Line != nil {
-				locMap["line"] = *loc.Line
-			}
-			locations[i] = locMap
-		}
-		args["locations"] = locations
-		args["path"] = tc.Locations[0].Path
-	}
-
-	if tc.RawInput != nil {
-		args["raw_input"] = tc.RawInput
-	}
-
-	toolKind := string(tc.Kind)
-	normalizedPayload := a.normalizer.NormalizeToolCall(toolKind, args)
-
-	toolCallID := string(tc.ToolCallId)
-	a.mu.Lock()
-	a.activeToolCalls[toolCallID] = normalizedPayload
-	a.mu.Unlock()
-
-	// ScheduleRun tracking: meta carries `_meta.claudeCode.toolName`
-	// on the initial tool_call; rawInput is usually empty here but record
-	// the prompt eagerly when it does arrive in the same notification.
-	a.handleRunEvent(sessionID, toolCallID, tc.Meta, tc.RawInput, false)
-
-	// Detect tool type for logging
-	toolType := DetectToolOperationType(toolKind, args)
-	_ = toolType // Used for normalization
-
-	status := string(tc.Status)
-	if status == "" {
-		status = "in_progress"
-	}
-
-	return &AgentEvent{
-		Type:              streams.EventTypeToolCall,
-		SessionID:         sessionID,
-		ToolCallID:        toolCallID,
-		ToolName:          toolKind, // Kind is effectively the tool name
-		ToolTitle:         tc.Title,
-		ToolStatus:        status,
-		NormalizedPayload: normalizedPayload,
-		ToolCallContents:  a.convertToolCallContents(tc.Content),
-	}
-}
-
-// convertToolCallResultUpdate converts a ToolCallUpdate notification to an AgentEvent.
-func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.SessionToolCallUpdate) *AgentEvent {
-	toolCallID := string(tcu.ToolCallId)
-	status := ""
-	if tcu.Status != nil {
-		status = string(*tcu.Status)
-	}
-	// Normalize status - "completed" -> "complete" for frontend consistency
-	if status == "completed" {
-		status = toolStatusComplete
-	}
-	// Claude-acp sends incremental updates (title, rawInput, content) with no
-	// Status field — e.g. the second tool_call_update for Bash carries the actual
-	// command and human-readable title. The orchestrator only persists updates
-	// with a known status, so without a synthesized "in_progress" here those
-	// fields are silently dropped and the message stays on the placeholder
-	// "Terminal" title from the initial pending tool_call.
-	if status == "" && (tcu.Title != nil || tcu.RawInput != nil || len(tcu.Content) > 0) {
-		status = "in_progress"
-	}
-
-	// Recognize Monitor registration: claude-acp sends `tool_call_update` with
-	// status="completed" and a `Monitor started (task X, …)` rawOutput about a
-	// second after the Monitor starts. That status is misleading — the Monitor
-	// itself is just beginning. Override to "in_progress" so the card stays
-	// open, and remember taskID -> toolCallID so subsequent task-notification
-	// envelopes can route their events back to this card.
-	monitorTaskID, isMonitorRegistration := recognizeMonitorRegistration(tcu.Meta, tcu.RawOutput)
-	if isMonitorRegistration && status == toolStatusComplete {
-		a.trackMonitor(sessionID, monitorTaskID, toolCallID)
-		status = "in_progress"
-		a.logger.Info("monitor registered",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", monitorTaskID),
-			zap.String("tool_call_id", toolCallID))
-	}
-
-	// A terminal tool_call_update for an already-tracked Monitor (the agent
-	// proactively ended the watch). NormalizeToolResult would otherwise stomp
-	// the `{monitor: …}` view in Generic.Output with the raw string body, so
-	// we suppress the normalize call and let the closing-out logic below mark
-	// the view as ended instead.
-	isTrackedMonitorTerminal := !isMonitorRegistration && isMonitorMeta(tcu.Meta) && a.isTrackedMonitor(sessionID, toolCallID)
-
-	isTerminal := status == toolStatusComplete || status == toolStatusError || status == "cancelled"
-
-	a.mu.Lock()
-	payload := a.activeToolCalls[toolCallID]
-
-	// Update stored payload with incremental rawInput (e.g. Claude Code sends
-	// command/cwd in a tool_call_update after the initial empty tool_call)
-	if tcu.RawInput != nil && payload != nil {
-		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput)
-	}
-
-	// Update stored payload with tool result output. Skip for tracked-Monitor
-	// terminal updates so Generic.Output stays the structured `{monitor: …}`
-	// view rather than getting clobbered by the rawOutput string.
-	if tcu.RawOutput != nil && payload != nil && !isTrackedMonitorTerminal {
-		a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
-	}
-
-	// Seed the Monitor view AFTER NormalizeToolResult so we overwrite the
-	// banner string the normalizer just stuffed into Generic.Output. The
-	// Monitor card detects itself by `output.monitor` presence — the banner
-	// would shadow it and the frontend would render this as a generic
-	// tool_call instead.
-	if isMonitorRegistration && payload != nil {
-		seedMonitorView(payload, monitorTaskID, monitorCommandFromPayload(payload))
-	}
-
-	// Preserve and mark-ended the Monitor view on tracked-Monitor terminal
-	// updates so the card flips from "watching" to "ended" without losing
-	// the accumulated event count or recent-events tail.
-	if isTrackedMonitorTerminal && payload != nil {
-		markMonitorEnded(payload, "exited")
-	}
-
-	// Enrich modify_file payload from tool_call_contents.
-	// Claude ACP sends path and content in tool_call_update, not in the initial tool_call.
-	if payload != nil && payload.Kind() == streams.ToolKindModifyFile {
-		if mf := payload.ModifyFile(); mf != nil {
-			enrichModifyFileFromContents(mf, tcu.Content)
-		}
-	}
-
-	// Enrich read_file payload path from title if still empty.
-	if payload != nil && payload.Kind() == streams.ToolKindReadFile {
-		if rf := payload.ReadFile(); rf != nil && rf.FilePath == "" && tcu.Title != nil {
-			rf.FilePath = extractPathFromTitle(*tcu.Title)
-		}
-	}
-
-	if isTerminal {
-		delete(a.activeToolCalls, toolCallID)
-		// Also drop tracked Monitor: this terminal update is the
-		// agent-emitted close, so the prompt-end sweep must not re-emit a
-		// "Monitor exited" event for this same toolCallID.
-		if isTrackedMonitorTerminal {
-			a.dropMonitorByToolCallIDLocked(sessionID, toolCallID)
-		}
-	}
-	a.mu.Unlock()
-
-	// ScheduleRun tracking: tool_call_update is where rawInput.prompt and
-	// `_meta.claudeCode.toolResponse.scheduledFor` typically arrive. Once both
-	// are known, schedule the synthetic prompt; on terminal status, clean up.
-	a.handleRunEvent(sessionID, toolCallID, tcu.Meta, tcu.RawInput, isTerminal)
-
-	// When a switch_mode tool carries a plan (e.g. ExitPlanMode), emit it
-	// as an agent_plan event so the orchestrator creates a visible plan message.
-	if tcu.RawInput != nil {
-		if inputMap, ok := tcu.RawInput.(map[string]any); ok {
-			if planContent, ok := inputMap["plan"].(string); ok && planContent != "" {
-				a.sendUpdate(AgentEvent{
-					Type:        streams.EventTypeAgentPlan,
-					SessionID:   sessionID,
-					PlanContent: planContent,
-				})
-			}
-		}
-	}
-
-	// Extract title from update if present
-	var title string
-	if tcu.Title != nil {
-		title = *tcu.Title
-	}
-
-	return &AgentEvent{
-		Type:              streams.EventTypeToolUpdate,
-		SessionID:         sessionID,
-		ToolCallID:        toolCallID,
-		ToolTitle:         title,
-		ToolStatus:        status,
-		NormalizedPayload: payload,
-		ToolCallContents:  a.convertToolCallContents(tcu.Content),
-	}
-}
-
-// enrichModifyFileFromContents updates a ModifyFilePayload with data from
-// tool_call_contents. Claude ACP sends file path and content in tool_call_update
-// events rather than in the initial tool_call rawInput.
-func enrichModifyFileFromContents(mf *streams.ModifyFilePayload, contents []acp.ToolCallContent) {
-	for _, c := range contents {
-		if c.Diff == nil {
-			continue
-		}
-		if mf.FilePath == "" && c.Diff.Path != "" {
-			mf.FilePath = c.Diff.Path
-		}
-		if len(mf.Mutations) == 0 {
-			continue
-		}
-		mut := &mf.Mutations[0]
-		if mut.Diff != "" {
-			continue // Already has diff, don't overwrite
-		}
-		if c.Diff.OldText != nil {
-			diffPath := c.Diff.Path
-			if diffPath == "" {
-				diffPath = mf.FilePath
-			}
-			mut.Diff = shared.GenerateUnifiedDiff(*c.Diff.OldText, c.Diff.NewText, diffPath, mut.StartLine)
-		} else if c.Diff.NewText != "" {
-			mut.Type = streams.MutationCreate
-			mut.Content = c.Diff.NewText
-		}
-		break
-	}
-}
-
-// extractPathFromTitle extracts a file path from tool titles like "Read /path/to/file".
-func extractPathFromTitle(title string) string {
-	for _, prefix := range []string{"Read ", "Write ", "Edit "} {
-		if strings.HasPrefix(title, prefix) {
-			return strings.TrimPrefix(title, prefix)
-		}
-	}
-	return ""
-}
-
-// handlePermissionRequest handles permission requests from the agent.
-// Since both acpclient and adapter now use the shared types package,
-// no conversion is needed - we just forward to the handler.
-func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error) {
-	a.mu.RLock()
-	handler := a.permissionHandler
-	fallbackSessionID := a.sessionID
-	a.mu.RUnlock()
-
-	// Prefer session ID from the request; fall back to adapter-level session ID
-	sessionID := req.SessionID
-	if sessionID == "" {
-		sessionID = fallbackSessionID
-	}
-
-	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
-	// When a ToolCall notification exists (tracked in activeToolCalls), the message
-	// was already created by convertToolCallUpdate → handleToolCallEvent.
-	// Emitting a second tool_call for the same ID creates duplicate messages in the UI.
-	a.mu.RLock()
-	_, alreadyTracked := a.activeToolCalls[req.ToolCallID]
-	a.mu.RUnlock()
-
-	if !alreadyTracked {
-		toolCallEvent := AgentEvent{
-			Type:       streams.EventTypeToolCall,
-			SessionID:  sessionID,
-			ToolCallID: req.ToolCallID,
-			ToolName:   req.ActionType,
-			ToolTitle:  req.Title,
-			ToolStatus: "pending_permission",
-		}
-		a.sendUpdate(toolCallEvent)
-		a.logger.Debug("emitted synthetic tool_call for permission (no prior ToolCall)",
-			zap.String("tool_call_id", req.ToolCallID))
-	}
-
-	if handler == nil {
-		// Auto-approve if no handler
-		if len(req.Options) > 0 {
-			return &PermissionResponse{OptionID: req.Options[0].OptionID}, nil
-		}
-		return &PermissionResponse{Cancelled: true}, nil
-	}
-
-	// Forward directly to handler - types are already compatible
-	return handler(ctx, req)
 }

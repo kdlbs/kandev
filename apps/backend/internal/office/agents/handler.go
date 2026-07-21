@@ -151,6 +151,12 @@ func (h *Handler) createAgent(c *gin.Context) {
 		DesiredSkills:         req.DesiredSkills,
 		ExecutorPreference:    req.ExecutorPreference,
 	}
+	if req.AgentProfileID != "" {
+		if err := h.svc.ApplyProfileConfiguration(c.Request.Context(), agent, req.AgentProfileID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	if err := h.svc.CreateAgentInstanceWithCaller(c.Request.Context(), agent, agentCallerFromCtx(c), req.Reason); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -195,6 +201,12 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		if err := h.applyRoutingOverride(c, agent, *req.Routing); err != nil {
 			return
 		}
+	}
+	if req.AgentProfileID != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "agent_profile_id no longer selects an Office runtime; update the agent routing override or workspace tier profiles",
+		})
+		return
 	}
 	applyAgentUpdates(agent, &req)
 	if err := h.svc.UpdateAgentInstance(ctx, agent); err != nil {
@@ -526,10 +538,6 @@ func applyAgentUpdates(agent *models.AgentInstance, req *UpdateAgentRequest) {
 	if req.Name != nil {
 		agent.Name = *req.Name
 	}
-	// Wave G: AgentInstance.ID is the agent_profiles row id; the legacy
-	// AgentProfileID request field is now a no-op for updates (the row's id
-	// cannot change after creation). Accepting the field keeps existing
-	// clients valid; the value is intentionally ignored.
 	if req.Role != nil {
 		agent.Role = models.AgentRole(*req.Role)
 	}
@@ -562,5 +570,14 @@ func applyAgentUpdates(agent *models.AgentInstance, req *UpdateAgentRequest) {
 	}
 	if req.PauseReason != nil {
 		agent.PauseReason = *req.PauseReason
+	}
+	if req.AutoApprove != nil {
+		agent.AutoApprove = *req.AutoApprove
+	}
+	if req.AllowIndexing != nil {
+		agent.AllowIndexing = *req.AllowIndexing
+	}
+	if req.CLIPassthrough != nil {
+		agent.CLIPassthrough = *req.CLIPassthrough
 	}
 }

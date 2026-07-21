@@ -41,7 +41,7 @@ async function seedTaskAndWaitForIdle(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return { session, taskId: task.id, sessionId: task.session_id! };
 }

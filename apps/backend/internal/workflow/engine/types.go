@@ -42,6 +42,7 @@ const (
 	ActionAutoStartAgent    ActionKind = "auto_start_agent"
 	ActionResetAgentContext ActionKind = "reset_agent_context"
 	ActionSetWorkflowData   ActionKind = "set_workflow_data"
+	ActionSetSessionMode    ActionKind = "set_session_mode"
 
 	// New Phase 2 action kinds (ADR-0004). Defined and exposed via callbacks
 	// that intentionally return ErrActionNotYetWired — they will be wired
@@ -81,6 +82,7 @@ type Action struct {
 	MoveToStep                 *MoveToStepAction
 	AutoStartAgent             *AutoStartAgentAction
 	SetWorkflowData            *SetWorkflowDataAction
+	SetSessionMode             *SetSessionModeAction
 	QueueRun                   *QueueRunAction
 	ClearDecisions             *ClearDecisionsAction
 	QueueRunForEachParticipant *QueueRunForEachParticipantAction
@@ -129,6 +131,13 @@ type AutoStartAgentAction struct {
 type SetWorkflowDataAction struct {
 	Key   string
 	Value any
+}
+
+// SetSessionModeAction declares the agent session permission mode to apply when
+// the step is entered (e.g. "default", "acceptEdits"). Mode is read from the
+// action config's "mode" key by CompileStep. See issue #1183.
+type SetSessionModeAction struct {
+	Mode string
 }
 
 // QueueRunAction represents the Phase 2 "queue a run on a target task/agent"
@@ -282,6 +291,12 @@ func compileOnEnter(step *wfmodels.WorkflowStep) []Action {
 			actions = append(actions, Action{Kind: ActionAutoStartAgent, AutoStartAgent: &AutoStartAgentAction{QueueIfBusy: true}})
 		case wfmodels.OnEnterResetAgentContext:
 			actions = append(actions, Action{Kind: ActionResetAgentContext})
+		case wfmodels.OnEnterSetSessionMode:
+			mode := readSessionMode(action.Config)
+			if mode == "" {
+				continue // skip set_session_mode actions with no target mode
+			}
+			actions = append(actions, Action{Kind: ActionSetSessionMode, SetSessionMode: &SetSessionModeAction{Mode: mode}})
 		case wfmodels.OnEnterClearDecisions:
 			actions = append(actions, Action{
 				Kind:           ActionClearDecisions,
@@ -360,7 +375,26 @@ func compileOnExit(step *wfmodels.WorkflowStep) []Action {
 func compileGenericActions(actions []wfmodels.GenericAction) []Action {
 	out := make([]Action, 0, len(actions))
 	for _, a := range actions {
+		ra := ConfigRequiresApproval(a.Config)
+		guard := ConfigTransitionGuard(a.Config)
 		switch a.Type {
+		case wfmodels.GenericActionMoveToNext:
+			out = append(out, Action{Kind: ActionMoveToNext, RequiresApproval: ra, Guard: guard})
+		case wfmodels.GenericActionMoveToPrevious:
+			out = append(out, Action{Kind: ActionMoveToPrevious, RequiresApproval: ra, Guard: guard})
+		case wfmodels.GenericActionMoveToStep:
+			stepID, err := readStepID(a.Config)
+			if err != nil {
+				continue // skip malformed move_to_step actions
+			}
+			out = append(out, Action{
+				Kind:             ActionMoveToStep,
+				RequiresApproval: ra,
+				Guard:            guard,
+				MoveToStep:       &MoveToStepAction{StepID: stepID},
+			})
+		case wfmodels.GenericActionAutoStartAgent:
+			out = append(out, Action{Kind: ActionAutoStartAgent, AutoStartAgent: &AutoStartAgentAction{QueueIfBusy: true}})
 		case wfmodels.GenericActionQueueRun:
 			out = append(out, Action{
 				Kind:     ActionQueueRun,
@@ -421,6 +455,16 @@ func readQueueRunForEachParticipantConfig(config map[string]any) *QueueRunForEac
 	}
 }
 
+// readSessionMode reads the target mode for a set_session_mode action from its
+// config map. Returns "" when the config is missing or the mode key is unset.
+func readSessionMode(config map[string]any) string {
+	if config == nil {
+		return ""
+	}
+	mode, _ := config["mode"].(string)
+	return mode
+}
+
 func readStepID(config map[string]any) (string, error) {
 	if config == nil {
 		return "", fmt.Errorf("missing move_to_step config")
@@ -449,18 +493,29 @@ func ConfigRequiresApproval(config map[string]any) bool {
 // Expected shape:
 //
 //	{
-//	    "wait_for_quorum": {
-//	        "role":      "reviewer",
-//	        "threshold": "all_approve"
+//	    "if": {
+//	        "wait_for_quorum": {
+//	            "role":      "reviewer",
+//	            "threshold": "all_approve"
+//	        }
 //	    }
 //	}
+//
+// Legacy top-level `wait_for_quorum` is also accepted.
 func ConfigTransitionGuard(config map[string]any) *TransitionGuard {
 	if config == nil {
 		return nil
 	}
 	raw, ok := config["wait_for_quorum"].(map[string]any)
 	if !ok {
-		return nil
+		guard, ok := config["if"].(map[string]any)
+		if !ok {
+			return nil
+		}
+		raw, ok = guard["wait_for_quorum"].(map[string]any)
+		if !ok {
+			return nil
+		}
 	}
 	role, _ := raw["role"].(string)
 	threshold, _ := raw["threshold"].(string)

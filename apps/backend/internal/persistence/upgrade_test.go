@@ -162,6 +162,11 @@ func TestProvide_BackupFailureReturnsError(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("running as root; read-only dir check not reliable")
 	}
+	probePath := filepath.Join(backupDir, ".write-probe")
+	if err := os.WriteFile(probePath, []byte("probe"), 0o644); err == nil {
+		_ = os.Remove(probePath)
+		t.Skip("read-only backup dir is writable in this environment")
+	}
 
 	cfg := &config.Config{HomeDir: dir}
 	cfg.Database.Path = dbPath

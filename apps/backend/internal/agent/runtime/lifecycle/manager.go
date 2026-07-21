@@ -3,6 +3,7 @@
 package lifecycle
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,7 +14,9 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
@@ -86,12 +89,12 @@ type Manager struct {
 	remoteStatusMu           sync.RWMutex
 	remoteStatusBySession    map[string]*RemoteStatus
 	stopCh                   chan struct{}
+	stopOnce                 sync.Once
 	wg                       sync.WaitGroup
 	// shuttingDown is flipped true when graceful shutdown begins (see
 	// StopAllAgents) so handlers running in detached goroutines can
 	// short-circuit work that would otherwise race the teardown and log
-	// confusing errors against children that already died from the same
-	// terminal-wide SIGINT.
+	// confusing errors against children already being stopped.
 	shuttingDown atomic.Bool
 
 	// pollAggregator routes hub session-mode events to agentctl. See
@@ -116,6 +119,76 @@ type Manager struct {
 	// the agent process starts. Defaults to a no-op deployer; office wires
 	// its concrete implementation via SetSkillDeployer.
 	skillDeployer SkillDeployer
+
+	// remediateNpxCache is the hook fired when the routing classifier
+	// returns CodeNpxCacheCorrupted. NewManager wires routingerr.RemediateNpxCache;
+	// tests override it to avoid touching the real filesystem.
+	remediateNpxCache func(path string, log *zap.Logger) error
+
+	// standaloneHostPID is the OS process id of the standalone agentctl
+	// control-server this backend spawned on the local host. It is the
+	// host-local liveness handle recorded in executors_running.local_pid for
+	// local/standalone rows (see persistence.go / #1597 truthful executor rows).
+	// 0 when unset (tests, or before the launcher wires it). Never used for
+	// SSH/remote rows — their process lives on another host.
+	standaloneHostPID atomic.Int64
+
+	// managedGoCache provides the opt-in GOCACHE for host-local executions.
+	// System storage wiring installs it after settings persistence is ready.
+	managedGoCache ManagedGoCacheEnvironmentProvider
+
+	activityCoordinator *activity.Coordinator
+	activityMu          sync.Mutex
+	activityLeases      map[string]*activity.TaskLease
+	activityLeaseOwners map[string]uint64
+	activityPending     map[string]map[uint64]*executionActivityClaim
+	activityGeneration  uint64
+}
+
+// ManagedGoCacheEnvironmentProvider supplies the environment for one new
+// local execution. Implementations must return an absolute GOCACHE path.
+type ManagedGoCacheEnvironmentProvider interface {
+	ExecutionEnvironment(ctx context.Context) (map[string]string, error)
+}
+
+// SetManagedGoCacheEnvironmentProvider wires install-wide managed cache settings.
+func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEnvironmentProvider) {
+	m.managedGoCache = provider
+}
+
+// SetActivityCoordinator wires the install-wide host-resource activity gate.
+// It is optional so embedded and test configurations retain legacy behavior.
+func (m *Manager) SetActivityCoordinator(coordinator *activity.Coordinator) {
+	m.activityMu.Lock()
+	m.activityCoordinator = coordinator
+	if m.activityLeases == nil {
+		m.activityLeases = make(map[string]*activity.TaskLease)
+	}
+	if m.activityLeaseOwners == nil {
+		m.activityLeaseOwners = make(map[string]uint64)
+	}
+	if m.activityPending == nil {
+		m.activityPending = make(map[string]map[uint64]*executionActivityClaim)
+	}
+	m.activityMu.Unlock()
+	if m.executorRegistry == nil {
+		return
+	}
+	backend, err := m.executorRegistry.GetBackend(executor.NameDocker)
+	if err != nil {
+		return
+	}
+	if dockerExecutor, ok := backend.(*DockerExecutor); ok {
+		dockerExecutor.SetActivityCoordinator(coordinator)
+	}
+}
+
+// SetStandaloneHostPID records the local agentctl control-server PID so
+// local/standalone executor rows can carry a real host-local liveness handle.
+// Wired during DI from the agentctl launcher (see backendapp). Safe to leave
+// unset in tests that don't exercise the persistence path.
+func (m *Manager) SetStandaloneHostPID(pid int) {
+	m.standaloneHostPID.Store(int64(pid))
 }
 
 // NewManager creates a new lifecycle manager.
@@ -174,10 +247,11 @@ func NewManager(
 		remoteStatusBySession:    make(map[string]*RemoteStatus),
 		stopCh:                   stopCh,
 		skillDeployer:            NoopSkillDeployer(),
+		remediateNpxCache:        routingerr.RemediateNpxCache,
 	}
-
 	// Initialize stream manager with callbacks that delegate to manager methods
-	// mcpHandler will be set later via SetMCPHandler
+	// mcpHandler will be set later via SetMCPHandler.
+	// stopCh is shared with the manager so workspace-stream backoff drains on Stop.
 	mgr.streamManager = NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent:       mgr.handleAgentEvent,
 		OnStreamDisconnect: mgr.handleStreamDisconnect,
@@ -190,10 +264,11 @@ func NewManager(
 		OnShellExit:        mgr.handleShellExit,
 		OnProcessOutput:    mgr.handleProcessOutput,
 		OnProcessStatus:    mgr.handleProcessStatus,
-	}, nil)
+	}, nil, stopCh)
 
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
+	sessionManager.SetPromptStarter(mgr.BeginPrompt)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
 

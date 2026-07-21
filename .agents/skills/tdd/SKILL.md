@@ -22,6 +22,8 @@ Wrote code before a test? Delete it. Start over from a failing test.
 
 **Skip** for: pure UI components (we don't test React components), config files, generated code.
 
+For UI rendering bugs, prefer extracting or using a pure helper and testing that helper. Add Playwright only when the behavior is truly visual or integration-level. Avoid adding React component tests just to assert DOM output; that does not match this project's testing convention.
+
 ## Determine test scope
 
 - **Go unit** (`apps/backend/`): test file next to source as `*_test.go`. Run:
@@ -34,7 +36,25 @@ Wrote code before a test? Delete it. Start over from a failing test.
   ```
 - **Web E2E** (`apps/web/e2e/`): delegate to `/e2e` for Playwright tests.
 
-Choose the right level: unit tests for isolated logic, E2E for user-facing flows.
+Choose the right level:
+- **Unit:** pure logic or isolated service behavior.
+- **Integration:** handler/service/repository boundaries, SQLite-backed flows, filesystem behavior, or process boundaries.
+- **E2E:** critical user-facing browser flows; keep these focused and use `/e2e`.
+
+Prefer state/output assertions over interaction assertions. Mock only slow, nondeterministic, or external boundaries; use real implementations or fakes when they keep the test deterministic.
+
+### Concurrent and event-driven behavior
+
+Test ordering-sensitive behavior with channels, barriers, or controllable fakes;
+do not use sleeps to create a race, except for a bounded, named delay that
+models a known poll-loop schedule when synchronization would alter that
+relationship. Pause at the ownership boundary, start the
+competing operation, then release. Exercise the real delivery path where
+practical, and prove the old interleaving fails before the fix. Assert both the
+winner state and the untouched replacement state, including relevant buffers,
+signals, or queue ownership. Cover stale events acting after a replacement
+operation begins, cancellation/retry ownership, and at-most-once delivery when
+they apply. Run affected Go packages with `-race`.
 
 ## Steps
 
@@ -44,6 +64,8 @@ Choose the right level: unit tests for isolated logic, E2E for user-facing flows
 2. Write the **smallest test** that asserts the expected behavior — one assertion, clear name
 3. Run the test and confirm it **fails with the expected assertion error** (not a compile/import error)
 4. If it passes immediately, the test is not testing new behavior — revise it
+
+For bug fixes, use the Prove-It Pattern: reproduce the bug with a failing test before changing production code. A fix without a regression test is not complete unless the change is explicitly untestable and you say why.
 
 ### 2. GREEN — Minimal code to pass
 
@@ -58,6 +80,8 @@ Choose the right level: unit tests for isolated logic, E2E for user-facing flows
 2. Improve tests: table-driven tests (Go) or `describe`/`it` blocks (TS), remove duplication
 3. Run the test after each change to confirm still green
 
+In tests, prefer DAMP over DRY: each test should read like a small specification. Shared helpers are fine when they remove noise, but not when they hide the scenario.
+
 ### 4. Repeat
 
 Return to step 1 for the next behavior or edge case. Continue until the feature or fix is complete.
@@ -67,6 +91,9 @@ Return to step 1 for the next behavior or edge case. Continue until the feature 
 Run `/verify` to ensure all formatters, linters, typechecks, and tests pass across the monorepo.
 
 ## Testing anti-patterns
+
+**Don't test implementation details:**
+- Assert behavior, state, API response, DB row, emitted event, or UI outcome. Avoid assertions that only prove a helper was called or an internal query string happened to be built a certain way.
 
 **Don't test mock behavior:**
 - If your assertion checks a mock element (`*-mock` test ID, mock return value), you're testing the mock, not the code. Test real behavior or don't mock it.
@@ -85,6 +112,9 @@ Run `/verify` to ensure all formatters, linters, typechecks, and tests pass acro
 **Never swallow errors in tests:**
 - `try/catch` that silently ignores failures in test helpers or setup — these hide real failures.
 
+**Don't repeat unchanged passing commands for reassurance:**
+- After a clean targeted run, re-run only after code or test inputs change. Move to the next required verification step instead.
+
 ## Red flags
 
 - Writing production code before a failing test exists — delete and start over
@@ -94,3 +124,4 @@ Run `/verify` to ensure all formatters, linters, typechecks, and tests pass acro
 - Skipping the refactor step
 - Mock setup longer than test logic — consider integration test
 - Asserting on mock elements instead of real behavior
+- "All tests pass" but no relevant test was actually run

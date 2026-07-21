@@ -18,6 +18,10 @@ import {
 } from "@/app/actions/agents";
 import type { Agent, AgentProfile, AvailableAgent, CLIFlag } from "@/lib/types/http";
 import { seedDefaultCLIFlags } from "@/lib/cli-flags";
+import {
+  buildDefaultPermissions,
+  PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
+} from "@/lib/agent-permissions";
 
 export type CliProfileEditorMode = "create" | "edit";
 
@@ -50,6 +54,7 @@ type FormState = {
   cliFlags: CLIFlag[];
   cliPassthrough: boolean;
   allowIndexing: boolean;
+  autoApprove: boolean;
 };
 
 function pickDefaultAgent(available: AvailableAgent[]): AvailableAgent | undefined {
@@ -65,6 +70,7 @@ function fromExistingProfile(profile: AgentProfile): FormState {
     cliFlags: profile.cliFlags ?? [],
     cliPassthrough: profile.cliPassthrough ?? false,
     allowIndexing: profile.allowIndexing ?? false,
+    autoApprove: profile.autoApprove ?? false,
   };
 }
 
@@ -73,15 +79,16 @@ function fromDefaultAgent(
   defaultAgent: AvailableAgent | undefined,
 ): FormState {
   const cfg = defaultAgent?.model_config;
-  const allowIndex = defaultAgent?.permission_settings?.allow_indexing?.default ?? false;
+  const permissionSettings = defaultAgent?.permission_settings ?? {};
+  const defaults = buildDefaultPermissions(permissionSettings);
   return {
     agentName: defaultAgent?.name ?? "",
     profileName: defaultName,
     model: cfg?.default_model ?? "",
     mode: cfg?.current_mode_id ?? "",
-    cliFlags: seedDefaultCLIFlags(defaultAgent?.permission_settings ?? {}),
+    cliFlags: seedDefaultCLIFlags(permissionSettings),
     cliPassthrough: false,
-    allowIndexing: allowIndex,
+    ...defaults,
   };
 }
 
@@ -183,12 +190,14 @@ export function CliProfileEditor({
         onToggle={() => setAdvancedOpen((o) => !o)}
         cliPassthrough={form.cliPassthrough}
         allowIndexing={form.allowIndexing}
+        autoApprove={form.autoApprove}
         cliFlags={form.cliFlags}
         permissionSettings={permissionSettings ?? {}}
         allowCliPassthrough={allowCliPassthrough}
         showAllowIndexing={Boolean(permissionSettings?.allow_indexing?.supported)}
         onCliPassthroughChange={(v) => patch({ cliPassthrough: v })}
         onAllowIndexingChange={(v) => patch({ allowIndexing: v })}
+        onAutoApproveChange={(v) => patch({ autoApprove: v })}
         onCliFlagsChange={(v) => patch({ cliFlags: v })}
       />
 
@@ -333,12 +342,14 @@ type AdvancedTogglesProps = {
   onToggle: () => void;
   cliPassthrough: boolean;
   allowIndexing: boolean;
+  autoApprove: boolean;
   cliFlags: CLIFlag[];
   permissionSettings: AvailableAgent["permission_settings"];
   allowCliPassthrough: boolean;
   showAllowIndexing: boolean;
   onCliPassthroughChange: (v: boolean) => void;
   onAllowIndexingChange: (v: boolean) => void;
+  onAutoApproveChange: (v: boolean) => void;
   onCliFlagsChange: (v: CLIFlag[]) => void;
 };
 
@@ -347,14 +358,21 @@ function AdvancedToggles({
   onToggle,
   cliPassthrough,
   allowIndexing,
+  autoApprove,
   cliFlags,
   permissionSettings,
   allowCliPassthrough,
   showAllowIndexing,
   onCliPassthroughChange,
   onAllowIndexingChange,
+  onAutoApproveChange,
   onCliFlagsChange,
 }: AdvancedTogglesProps) {
+  const autoSetting = permissionSettings?.auto_approve;
+  const showAgentctlAutoApprove = Boolean(
+    autoSetting?.supported && autoSetting.apply_method === PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
+  );
+
   return (
     <div className="border-t pt-3">
       <button
@@ -373,6 +391,14 @@ function AdvancedToggles({
               description="Forward stdin/stdout straight to the CLI subprocess. Disables ACP."
               checked={cliPassthrough}
               onChange={onCliPassthroughChange}
+            />
+          )}
+          {showAgentctlAutoApprove && autoSetting && (
+            <AgentctlAutoApproveRow
+              id="cli-auto-approve"
+              setting={autoSetting}
+              checked={autoApprove}
+              onChange={onAutoApproveChange}
             />
           )}
           {showAllowIndexing && (
@@ -422,12 +448,45 @@ function ToggleRow({
   );
 }
 
+function AgentctlAutoApproveRow({
+  id,
+  setting,
+  checked,
+  onChange,
+}: {
+  id: string;
+  setting: NonNullable<AvailableAgent["permission_settings"]>["auto_approve"];
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
+      <div className="space-y-0.5">
+        <Label htmlFor={id} className="text-sm text-destructive">
+          {setting?.label ?? "Auto-approve all permissions"}
+        </Label>
+        <p className="text-xs text-muted-foreground">
+          {setting?.description ??
+            "Kandev allows every agent permission request without prompting you."}
+        </p>
+      </div>
+      <Switch
+        id={id}
+        checked={checked}
+        onCheckedChange={onChange}
+        className="cursor-pointer data-[state=checked]:bg-destructive"
+      />
+    </div>
+  );
+}
+
 async function saveExistingProfile(id: string, form: FormState): Promise<AgentProfile> {
   return updateAgentProfileAction(id, {
     name: form.profileName.trim(),
     model: form.model,
     mode: form.mode || undefined,
     allow_indexing: form.allowIndexing,
+    auto_approve: form.autoApprove,
     cli_flags: form.cliFlags,
     cli_passthrough: form.cliPassthrough,
   });
@@ -440,6 +499,7 @@ async function saveNewProfile(form: FormState, settingsAgents: Agent[]): Promise
     model: form.model,
     mode: form.mode || undefined,
     allow_indexing: form.allowIndexing,
+    auto_approve: form.autoApprove,
     cli_passthrough: form.cliPassthrough,
     cli_flags: form.cliFlags,
   };
@@ -457,5 +517,9 @@ async function saveNewProfile(form: FormState, settingsAgents: Agent[]): Promise
       `Created agent ${form.agentName} but the response did not include the new profile.`,
     );
   }
-  return newProfile;
+  return {
+    ...newProfile,
+    agentId: newProfile.agentId || created.id,
+    agentDisplayName: newProfile.agentDisplayName || created.name,
+  };
 }

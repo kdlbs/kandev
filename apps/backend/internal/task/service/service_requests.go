@@ -13,10 +13,25 @@ type TaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch,omitempty"`
+	PRNumber       int    `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
 	LocalPath      string `json:"local_path,omitempty"`
 	Name           string `json:"name,omitempty"`
 	DefaultBranch  string `json:"default_branch,omitempty"`
 	GitHubURL      string `json:"github_url,omitempty"`
+	RemoteURL      string `json:"remote_url,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	ProviderRepoID string `json:"provider_repo_id,omitempty"`
+	ProviderOwner  string `json:"provider_owner,omitempty"`
+	ProviderName   string `json:"provider_name,omitempty"`
+
+	// ResolveProviderDefaults opts the GitHub-URL resolution path into a
+	// synchronous default-branch probe (git ls-remote --symref) when neither
+	// the input nor the existing workspace repo carries one. Set only by
+	// callers that have no downstream backfill (e.g. add_branch_to_task on a
+	// live worktree-executor task — no executor relaunch will run
+	// backfillRepoDefaultBranch). Left zero by create_task so the pinned
+	// "empty default_branch is filled at clone time" contract stays intact.
+	ResolveProviderDefaults bool `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task
@@ -46,13 +61,14 @@ type CreateTaskRequest struct {
 
 // UpdateTaskRequest contains the data for updating a task
 type UpdateTaskRequest struct {
-	Title        *string                `json:"title,omitempty"`
-	Description  *string                `json:"description,omitempty"`
-	Priority     *string                `json:"priority,omitempty"`
-	State        *v1.TaskState          `json:"state,omitempty"`
-	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
-	Position     *int                   `json:"position,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Title          *string                `json:"title,omitempty"`
+	Description    *string                `json:"description,omitempty"`
+	Priority       *string                `json:"priority,omitempty"`
+	State          *v1.TaskState          `json:"state,omitempty"`
+	WorkflowStepID *string                `json:"workflow_step_id,omitempty"`
+	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
+	Position       *int                   `json:"position,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	// ParentID nests the task under another task ("subtask"). A nil pointer
 	// leaves the relationship untouched; a pointer to "" clears it (un-nests
 	// back to a root task); a non-empty value nests it under that parent.
@@ -99,47 +115,54 @@ type UpdateWorkspaceRequest struct {
 
 // FindOrCreateRepositoryRequest contains the data for finding or creating a repository by provider info.
 type FindOrCreateRepositoryRequest struct {
-	WorkspaceID   string `json:"workspace_id"`
-	Provider      string `json:"provider"`
-	ProviderOwner string `json:"provider_owner"`
-	ProviderName  string `json:"provider_name"`
-	DefaultBranch string `json:"default_branch"`
-	LocalPath     string `json:"local_path"`
+	WorkspaceID    string `json:"workspace_id"`
+	Provider       string `json:"provider"`
+	ProviderOwner  string `json:"provider_owner"`
+	ProviderName   string `json:"provider_name"`
+	ProviderRepoID string `json:"provider_repo_id"`
+	RemoteURL      string `json:"remote_url"`
+	DefaultBranch  string `json:"default_branch"`
+	LocalPath      string `json:"local_path"`
 }
 
 // CreateRepositoryRequest contains the data for creating a new repository
 type CreateRepositoryRequest struct {
-	WorkspaceID          string `json:"workspace_id"`
-	Name                 string `json:"name"`
-	SourceType           string `json:"source_type"`
-	LocalPath            string `json:"local_path"`
-	Provider             string `json:"provider"`
-	ProviderRepoID       string `json:"provider_repo_id"`
-	ProviderOwner        string `json:"provider_owner"`
-	ProviderName         string `json:"provider_name"`
-	DefaultBranch        string `json:"default_branch"`
-	WorktreeBranchPrefix string `json:"worktree_branch_prefix"`
-	PullBeforeWorktree   *bool  `json:"pull_before_worktree"`
-	SetupScript          string `json:"setup_script"`
-	CleanupScript        string `json:"cleanup_script"`
-	DevScript            string `json:"dev_script"`
+	WorkspaceID            string `json:"workspace_id"`
+	Name                   string `json:"name"`
+	SourceType             string `json:"source_type"`
+	LocalPath              string `json:"local_path"`
+	Provider               string `json:"provider"`
+	ProviderRepoID         string `json:"provider_repo_id"`
+	ProviderOwner          string `json:"provider_owner"`
+	ProviderName           string `json:"provider_name"`
+	RemoteURL              string `json:"remote_url"`
+	DefaultBranch          string `json:"default_branch"`
+	WorktreeBranchPrefix   string `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string `json:"worktree_branch_template"`
+	PullBeforeWorktree     *bool  `json:"pull_before_worktree"`
+	SetupScript            string `json:"setup_script"`
+	CleanupScript          string `json:"cleanup_script"`
+	DevScript              string `json:"dev_script"`
+	CopyFiles              string `json:"copy_files"`
 }
 
 // UpdateRepositoryRequest contains the data for updating a repository
 type UpdateRepositoryRequest struct {
-	Name                 *string `json:"name,omitempty"`
-	SourceType           *string `json:"source_type,omitempty"`
-	LocalPath            *string `json:"local_path,omitempty"`
-	Provider             *string `json:"provider,omitempty"`
-	ProviderRepoID       *string `json:"provider_repo_id,omitempty"`
-	ProviderOwner        *string `json:"provider_owner,omitempty"`
-	ProviderName         *string `json:"provider_name,omitempty"`
-	DefaultBranch        *string `json:"default_branch,omitempty"`
-	WorktreeBranchPrefix *string `json:"worktree_branch_prefix,omitempty"`
-	PullBeforeWorktree   *bool   `json:"pull_before_worktree,omitempty"`
-	SetupScript          *string `json:"setup_script,omitempty"`
-	CleanupScript        *string `json:"cleanup_script,omitempty"`
-	DevScript            *string `json:"dev_script,omitempty"`
+	Name                   *string `json:"name,omitempty"`
+	SourceType             *string `json:"source_type,omitempty"`
+	LocalPath              *string `json:"local_path,omitempty"`
+	Provider               *string `json:"provider,omitempty"`
+	ProviderRepoID         *string `json:"provider_repo_id,omitempty"`
+	ProviderOwner          *string `json:"provider_owner,omitempty"`
+	ProviderName           *string `json:"provider_name,omitempty"`
+	DefaultBranch          *string `json:"default_branch,omitempty"`
+	WorktreeBranchPrefix   *string `json:"worktree_branch_prefix,omitempty"`
+	WorktreeBranchTemplate *string `json:"worktree_branch_template,omitempty"`
+	PullBeforeWorktree     *bool   `json:"pull_before_worktree,omitempty"`
+	SetupScript            *string `json:"setup_script,omitempty"`
+	CleanupScript          *string `json:"cleanup_script,omitempty"`
+	DevScript              *string `json:"dev_script,omitempty"`
+	CopyFiles              *string `json:"copy_files,omitempty"`
 }
 
 // CreateExecutorRequest contains the data for creating an executor

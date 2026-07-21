@@ -68,16 +68,16 @@ func extractTerminalAuth(meta map[string]any) *streams.TerminalAuth {
 	return ta
 }
 
-// convertSessionModels converts ACP model info to stream types,
+// convertSessionModels converts kandev-local model info to stream types,
 // normalizing known _meta patterns (copilotUsage) while preserving raw _meta.
-func convertSessionModels(models []acp.ModelInfo) []streams.SessionModelInfo {
+func convertSessionModels(models []modelInfo) []streams.SessionModelInfo {
 	if len(models) == 0 {
 		return nil
 	}
 	result := make([]streams.SessionModelInfo, 0, len(models))
 	for _, m := range models {
 		info := streams.SessionModelInfo{
-			ModelID:     string(m.ModelId),
+			ModelID:     m.ModelId,
 			Name:        m.Name,
 			Description: derefStr(m.Description),
 			Meta:        toStringMap(m.Meta),
@@ -128,6 +128,7 @@ func convertACPConfigOptions(opts []acp.SessionConfigOption) []streams.ConfigOpt
 			Type:         s.Type,
 			ID:           string(s.Id),
 			Name:         s.Name,
+			Description:  derefStr(s.Description),
 			CurrentValue: string(s.CurrentValue),
 		}
 		if s.Category != nil {
@@ -137,8 +138,9 @@ func convertACPConfigOptions(opts []acp.SessionConfigOption) []streams.ConfigOpt
 		if s.Options.Ungrouped != nil {
 			for _, o := range *s.Options.Ungrouped {
 				co.Options = append(co.Options, streams.ConfigOptionValue{
-					Value: string(o.Value),
-					Name:  o.Name,
+					Value:       string(o.Value),
+					Name:        o.Name,
+					Description: derefStr(o.Description),
 				})
 			}
 		}
@@ -172,6 +174,7 @@ func extractConfigOptions(meta any) []streams.ConfigOption {
 			Type:         getString(opt, "type"),
 			ID:           getString(opt, "id"),
 			Name:         getString(opt, "name"),
+			Description:  getString(opt, "description"),
 			CurrentValue: getString(opt, "currentValue"),
 			Category:     getString(opt, "category"),
 		}
@@ -179,8 +182,9 @@ func extractConfigOptions(meta any) []streams.ConfigOption {
 			for _, o := range options {
 				if om, ok := o.(map[string]any); ok {
 					co.Options = append(co.Options, streams.ConfigOptionValue{
-						Value: getString(om, "value"),
-						Name:  getString(om, "name"),
+						Value:       getString(om, "value"),
+						Name:        getString(om, "name"),
+						Description: getString(om, "description"),
 					})
 				}
 			}

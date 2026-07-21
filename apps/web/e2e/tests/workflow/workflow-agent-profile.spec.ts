@@ -1,9 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import { KanbanPage } from "../../pages/kanban-page";
 
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
+
 test.describe("Workflow agent profile", () => {
-  test("set workflow-level agent profile in settings and persist after save", async ({
+  test("saves the workflow-level agent profile explicitly", async ({
     testPage,
     seedData,
     apiClient,
@@ -29,9 +33,12 @@ test.describe("Workflow agent profile", () => {
     await profileSelect.click();
     await testPage.getByRole("option", { name: profileLabel }).click();
 
-    // Save the workflow
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
+    expect(
+      (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+        (workflow) => workflow.id === seedData.workflowId,
+      )?.agent_profile_id,
+    ).not.toBe(agentProfile.id);
+    await page.saveChanges();
 
     // Reload and verify the selection persists
     await page.goto(seedData.workspaceId);
@@ -70,15 +77,16 @@ test.describe("Workflow agent profile", () => {
     const profileLabel = `${agentProfile.agent_display_name} \u2022 ${agentProfile.name}`;
 
     // Select an agent profile for this step
+    await testPage.addStyleTag({
+      content: '[data-slot="tooltip-content"] { display: none !important; }',
+    });
     await stepProfileSelect.click();
     await testPage.getByRole("option", { name: profileLabel }).click();
 
-    // Wait for debounced update to propagate
-    await testPage.waitForTimeout(600);
-
-    // Save the workflow
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
+    expect(
+      (await apiClient.listWorkflowSteps(seedData.workflowId)).steps[0]?.agent_profile_id,
+    ).not.toBe(agentProfile.id);
+    await page.saveChanges();
 
     // Reload and verify - the step should now show the agent profile icon (IconUserCog)
     await page.goto(seedData.workspaceId);

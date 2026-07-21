@@ -1,12 +1,12 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
+import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
@@ -17,6 +17,8 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
 import {
   McpPolicyCard,
@@ -42,39 +44,11 @@ import {
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import type { Executor, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 
+import { EXECUTOR_TYPE_MAP } from "./executor-types";
+import { SSHCreatePage } from "./ssh-create-page";
+
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
-
-const EXECUTOR_TYPE_MAP: Record<
-  string,
-  { executorId: string; label: string; description: string }
-> = {
-  local: {
-    executorId: "exec-local",
-    label: "Local",
-    description: "Runs agents directly in the repository folder.",
-  },
-  worktree: {
-    executorId: "exec-worktree",
-    label: "Worktree",
-    description: "Creates git worktrees for isolated agent sessions.",
-  },
-  local_docker: {
-    executorId: "exec-local-docker",
-    label: "Docker",
-    description: "Runs Docker containers on this machine.",
-  },
-  remote_docker: {
-    executorId: "exec-remote-docker",
-    label: "Remote Docker",
-    description: "Connects to a remote Docker host.",
-  },
-  sprites: {
-    executorId: "exec-sprites",
-    label: "Sprites.dev",
-    description: "Runs agents in Sprites.dev cloud sandboxes.",
-  },
-};
 
 const DefaultIcon = EXECUTOR_ICON_MAP.local;
 
@@ -89,6 +63,10 @@ export default function CreateProfilePage({ params }: { params: Promise<{ type: 
 
   if (!typeInfo) {
     return <InvalidTypeFallback />;
+  }
+
+  if (type === "ssh") {
+    return <SSHCreatePage />;
   }
 
   return <CreateProfileForm executorType={type as ExecutorType} typeInfo={typeInfo} />;
@@ -142,48 +120,6 @@ function CreateProfileHeader({
       </div>
       <Separator />
     </>
-  );
-}
-
-function CreateFormActions({
-  saving,
-  saveDisabled,
-  disabledReason,
-  onSave,
-}: {
-  saving: boolean;
-  saveDisabled: boolean;
-  disabledReason: string | null;
-  onSave: () => void;
-}) {
-  const router = useRouter();
-  const createButton = (
-    <Button onClick={onSave} disabled={saveDisabled} className="cursor-pointer">
-      {saving ? "Creating..." : "Create Profile"}
-    </Button>
-  );
-  return (
-    <div className="flex items-center justify-end gap-2">
-      <Button
-        variant="outline"
-        onClick={() => router.push(EXECUTORS_ROUTE)}
-        className="cursor-pointer"
-      >
-        Cancel
-      </Button>
-      {disabledReason ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex" data-testid="create-profile-disabled-tooltip">
-              {createButton}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{disabledReason}</TooltipContent>
-        </Tooltip>
-      ) : (
-        createButton
-      )}
-    </div>
   );
 }
 
@@ -437,61 +373,34 @@ function useCreateProfileFormState(executorType: ExecutorType) {
   };
 }
 
-function useCreateProfileSave(
-  form: ReturnType<typeof useCreateProfileFormState>,
-  executorId: string,
-) {
+function useCreateProfileSave(executorId: string) {
   const router = useRouter();
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSave = useCallback(async () => {
-    if (!form.name.trim() || form.mcpPolicyError) return;
-    if (form.isDocker && !form.dockerImageBuilt) {
-      setError("Build this Docker image before creating the profile.");
-      return;
-    }
-    if (form.isSprites && !form.spritesSecretId) {
-      setError("Sprites API key is required.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const profile = await createExecutorProfile(executorId, {
-        name: form.name.trim(),
-        mcp_policy: form.mcpPolicy || undefined,
-        config: buildProfileConfig({
-          isRemote: form.isRemote,
-          isSprites: form.isSprites,
-          isDocker: form.isDocker,
-          networkPolicyRules: form.networkPolicyRules,
-          remoteCredentials: form.remoteCredentials,
-          agentEnvVars: form.agentEnvVars,
-          gitIdentityMode: form.gitIdentityMode,
-          localGitIdentity: form.localGitIdentity,
-          gitUserName: form.gitUserName,
-          gitUserEmail: form.gitUserEmail,
-          dockerfile: form.dockerfile,
-          imageTag: form.imageTag,
-        }),
-        prepare_script: form.prepareScript,
-        cleanup_script: form.cleanupScript,
-        env_vars: form.buildEnvVars(),
-      });
-      setExecutors(
-        executors.map((e: Executor) =>
-          e.id === executorId ? { ...e, profiles: [...(e.profiles ?? []), profile] } : e,
-        ),
-      );
-      router.push(`/settings/executors/${profile.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create profile");
-      setSaving(false);
-    }
-  }, [form, executorId, executors, setExecutors, router]);
+  const handleSave = useCallback(
+    async (payload: ReturnType<typeof buildCreateProfilePayload>) => {
+      setSaving(true);
+      setError(null);
+      try {
+        const profile = await createExecutorProfile(executorId, payload);
+        setExecutors(
+          executors.map((e: Executor) =>
+            e.id === executorId ? { ...e, profiles: [...(e.profiles ?? []), profile] } : e,
+          ),
+        );
+        runWithNavigationBlockerBypassed(() => router.push(`/settings/executors/${profile.id}`));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to create profile");
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [executorId, executors, setExecutors, router],
+  );
 
   return { saving, error, handleSave };
 }
@@ -507,10 +416,11 @@ function CreateProfileSections({
 }) {
   return (
     <>
-      <ProfileDetailsCard name={form.name} onNameChange={form.setName} />
+      <ProfileDetailsCard name={form.name} baselineName="" onNameChange={form.setName} />
       {form.isSprites && (
         <SpritesApiKeyCard
           secretId={form.spritesSecretId}
+          baselineSecretId={null}
           onSecretIdChange={form.setSpritesSecretId}
           secrets={secrets}
         />
@@ -518,8 +428,10 @@ function CreateProfileSections({
       {form.isDocker && (
         <DockerfileBuildCard
           dockerfile={form.dockerfile}
+          baselineDockerfile=""
           onDockerfileChange={form.setDockerfile}
           imageTag={form.imageTag}
+          baselineImageTag=""
           onImageTagChange={form.setImageTag}
           onBuildSuccess={form.recordDockerBuildSuccess}
         />
@@ -528,14 +440,19 @@ function CreateProfileSections({
         <RemoteCredentialsCard
           isRemote={form.isRemote}
           selectedIds={form.remoteCredentials}
+          baselineSelectedIds={[]}
           onChange={form.setRemoteCredentials}
           agentEnvVars={form.agentEnvVars}
+          baselineAgentEnvVars={{}}
           onAgentEnvVarChange={form.handleAgentEnvVarChange}
           secrets={secrets}
           gitIdentityMode={form.gitIdentityMode}
+          baselineGitIdentityMode="override"
           onGitIdentityModeChange={form.setGitIdentityMode}
           gitUserName={form.gitUserName}
           gitUserEmail={form.gitUserEmail}
+          baselineGitUserName=""
+          baselineGitUserEmail=""
           onGitUserNameChange={form.setGitUserName}
           onGitUserEmailChange={form.setGitUserEmail}
           localGitIdentity={form.localGitIdentity}
@@ -544,11 +461,13 @@ function CreateProfileSections({
       {form.isSprites && (
         <NetworkPoliciesCard
           rules={form.networkPolicyRules}
+          baselineRules={[]}
           onRulesChange={form.setNetworkPolicyRules}
         />
       )}
       <EnvVarsCard
         rows={form.envVarRows}
+        baselineRows={[]}
         secrets={secrets}
         onAdd={form.addEnvVar}
         onUpdate={form.updateEnvVar}
@@ -558,6 +477,7 @@ function CreateProfileSections({
         title="Prepare Script"
         description={form.prepareDesc}
         value={form.prepareScript}
+        baselineValue=""
         onChange={form.setPrepareScript}
         height="300px"
         placeholders={form.placeholders}
@@ -568,6 +488,7 @@ function CreateProfileSections({
           title="Cleanup Script"
           description="Runs after the agent session ends for cleanup tasks."
           value={form.cleanupScript}
+          baselineValue=""
           onChange={form.setCleanupScript}
           height="200px"
           placeholders={form.placeholders}
@@ -576,6 +497,7 @@ function CreateProfileSections({
       )}
       <McpPolicyCard
         mcpPolicy={form.mcpPolicy}
+        baselinePolicy=""
         mcpPolicyError={form.mcpPolicyError}
         onPolicyChange={form.setMcpPolicy}
       />
@@ -600,6 +522,30 @@ function getCreateDisabledReason(
   return null;
 }
 
+function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormState>) {
+  return {
+    name: form.name.trim(),
+    mcp_policy: form.mcpPolicy || undefined,
+    config: buildProfileConfig({
+      isRemote: form.isRemote,
+      isSprites: form.isSprites,
+      isDocker: form.isDocker,
+      networkPolicyRules: form.networkPolicyRules,
+      remoteCredentials: form.remoteCredentials,
+      agentEnvVars: form.agentEnvVars,
+      gitIdentityMode: form.gitIdentityMode,
+      localGitIdentity: form.localGitIdentity,
+      gitUserName: form.gitUserName,
+      gitUserEmail: form.gitUserEmail,
+      dockerfile: form.dockerfile,
+      imageTag: form.imageTag,
+    }),
+    prepare_script: form.prepareScript,
+    cleanup_script: form.cleanupScript,
+    env_vars: form.buildEnvVars(),
+  };
+}
+
 function CreateProfileForm({
   executorType,
   typeInfo,
@@ -609,9 +555,20 @@ function CreateProfileForm({
 }) {
   const { items: secrets } = useSecrets();
   const form = useCreateProfileFormState(executorType);
-  const { saving, error, handleSave } = useCreateProfileSave(form, typeInfo.executorId);
+  const { saving, error, handleSave } = useCreateProfileSave(typeInfo.executorId);
   const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
   const disabledReason = getCreateDisabledReason(form, spritesTokenMissing, saving);
+  const savePayload = buildCreateProfilePayload(form);
+  const saveRevision = serializeSettingsRevision(savePayload);
+  useSettingsSaveContributor({
+    id: `executor-profile:new:${typeInfo.executorId}`,
+    revision: saveRevision,
+    isDirty: true,
+    canSave: !disabledReason,
+    invalidReason: disabledReason ?? undefined,
+    save: () => handleSave(savePayload),
+    discard: () => undefined,
+  });
 
   return (
     <div className="space-y-8">
@@ -620,17 +577,13 @@ function CreateProfileForm({
         label={typeInfo.label}
         description={typeInfo.description}
       />
-      <CreateProfileSections executorType={executorType} form={form} secrets={secrets} />
+      <fieldset disabled={saving} className="contents">
+        <CreateProfileSections executorType={executorType} form={form} secrets={secrets} />
+      </fieldset>
       {spritesTokenMissing && (
         <p className="text-sm text-destructive">Sprites API key is required.</p>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
-      <CreateFormActions
-        saving={saving}
-        saveDisabled={Boolean(disabledReason)}
-        disabledReason={disabledReason}
-        onSave={handleSave}
-      />
     </div>
   );
 }

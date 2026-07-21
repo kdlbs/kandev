@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,6 +42,7 @@ type Config struct {
 	RepoClone           RepoCloneConfig           `mapstructure:"repoClone"`
 	Debug               DebugConfig               `mapstructure:"debug"`
 	Office              OfficeConfig              `mapstructure:"office"`
+	Voice               VoiceConfig               `mapstructure:"voice"`
 	Features            FeaturesConfig            `mapstructure:"features"`
 }
 
@@ -81,13 +83,175 @@ func (c *Config) ResolvedDataDir() string {
 	return filepath.Join(c.ResolvedHomeDir(), "data")
 }
 
+// defaultServerHost is the wildcard host the server binds to when no host is
+// configured — every interface.
+const defaultServerHost = "0.0.0.0"
+
 // ServerConfig holds HTTP server configuration.
 type ServerConfig struct {
-	Host           string `mapstructure:"host"`
-	Port           int    `mapstructure:"port"`
-	ReadTimeout    int    `mapstructure:"readTimeout"`  // in seconds
-	WriteTimeout   int    `mapstructure:"writeTimeout"` // in seconds
-	WebInternalURL string `mapstructure:"webInternalUrl"`
+	// Host is the bind address. A single value (e.g. "127.0.0.1") behaves as
+	// it always has; a comma-separated list (e.g. "127.0.0.1,100.64.0.1")
+	// binds one listener per address. Empty means the wildcard default.
+	//
+	// Host carries the KANDEV_SERVER_HOST env override, so when it is set it
+	// wins over Hosts to preserve env-over-file precedence (see ResolvedBinds).
+	Host string `mapstructure:"host"`
+	// Hosts is the YAML-array form of Host, for config files that prefer an
+	// array to a comma-separated string. It is used only when Host is unset.
+	Hosts          []string `mapstructure:"hosts"`
+	Port           int      `mapstructure:"port"`
+	ReadTimeout    int      `mapstructure:"readTimeout"`  // in seconds
+	WriteTimeout   int      `mapstructure:"writeTimeout"` // in seconds
+	WebInternalURL string   `mapstructure:"webInternalUrl"`
+}
+
+// splitHosts splits a comma-separated host string, trimming whitespace and
+// dropping empty entries.
+func splitHosts(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// normalizeHost validates h and returns its canonical form plus whether it is a
+// wildcard (binds every interface). IP addresses are canonicalized via
+// net.ParseIP so equivalent forms dedupe (e.g. 0:0:0:0:0:0:0:1 and ::1); any
+// unspecified IP (0.0.0.0, ::, or a longhand form) is treated as a wildcard.
+// Hostnames are returned as-is. An invalid entry returns an error.
+func normalizeHost(h string) (canonical string, wildcard bool, err error) {
+	if ip := net.ParseIP(h); ip != nil {
+		if ip.IsUnspecified() {
+			return ip.String(), true, nil
+		}
+		return ip.String(), false, nil
+	}
+	if isValidHostname(h) {
+		return h, false, nil
+	}
+	return "", false, fmt.Errorf("server bind host %q is not a valid IP address or hostname", h)
+}
+
+// isValidHostname reports whether h is a syntactically valid RFC 1123 hostname.
+func isValidHostname(h string) bool {
+	if len(h) == 0 || len(h) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(strings.TrimSuffix(h, "."), ".") {
+		if !isValidHostnameLabel(label) {
+			return false
+		}
+	}
+	return true
+}
+
+// isValidHostnameLabel reports whether label is a valid single hostname label
+// (letters, digits, and interior hyphens, 1–63 chars).
+func isValidHostnameLabel(label string) bool {
+	if len(label) == 0 || len(label) > 63 {
+		return false
+	}
+	if label[0] == '-' || label[len(label)-1] == '-' {
+		return false
+	}
+	for i := 0; i < len(label); i++ {
+		c := label[i]
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') &&
+			(c < '0' || c > '9') && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// IsLoopbackHost reports whether h refers only to the local loopback
+// interface. A wildcard (empty/0.0.0.0/::) is NOT loopback because it also
+// binds routable interfaces. Unresolvable hostnames are treated as
+// non-loopback (fail-closed) so callers gating on "any non-loopback bind"
+// don't under-report exposure.
+func IsLoopbackHost(h string) bool {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return false
+	}
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// ResolvedBinds returns the de-duplicated, validated list of hosts the HTTP
+// server should bind to. server.host (comma-separated string) takes precedence
+// over server.hosts (YAML array) when set, because Host carries the
+// KANDEV_SERVER_HOST env override and env must beat a config-file server.hosts
+// (env-over-file precedence, and the desktop loopback contract). server.hosts
+// is used only when host is unset. Whitespace is trimmed and empty/duplicate
+// entries dropped, and IP addresses are canonicalized so equivalent forms
+// dedupe. Every entry is validated before the set is collapsed, so an invalid
+// host is rejected regardless of its position relative to a wildcard. If any
+// entry is a wildcard (empty/0.0.0.0/:: or an unspecified IP) the whole set
+// collapses to that single wildcard, since it already binds every interface. An
+// empty result falls back to the wildcard default.
+func (c *ServerConfig) ResolvedBinds() ([]string, error) {
+	raw := splitHosts(c.Host)
+	if len(raw) == 0 {
+		for _, h := range c.Hosts {
+			raw = append(raw, splitHosts(h)...)
+		}
+	}
+
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]string, 0, len(raw))
+	wildcard := ""
+	for _, h := range raw {
+		norm, isWild, err := normalizeHost(h)
+		if err != nil {
+			return nil, err
+		}
+		if isWild {
+			if wildcard == "" {
+				wildcard = norm
+			}
+			continue
+		}
+		if _, dup := seen[norm]; dup {
+			continue
+		}
+		seen[norm] = struct{}{}
+		out = append(out, norm)
+	}
+	if wildcard != "" {
+		return []string{wildcard}, nil
+	}
+	if len(out) == 0 {
+		return []string{defaultServerHost}, nil
+	}
+	return out, nil
+}
+
+// NonLoopbackBinds returns the resolved bind hosts that are not loopback-only.
+// The sibling app-auth work uses this to decide whether to require auth (fail
+// closed when the server is reachable off-box). A wildcard bind counts as
+// non-loopback.
+func (c *ServerConfig) NonLoopbackBinds() ([]string, error) {
+	binds, err := c.ResolvedBinds()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(binds))
+	for _, h := range binds {
+		if !IsLoopbackHost(h) {
+			out = append(out, h)
+		}
+	}
+	return out, nil
 }
 
 // DatabaseConfig holds database connection configuration.
@@ -147,6 +311,20 @@ type OfficeConfig struct {
 	JWTSigningKey string `mapstructure:"jwtSigningKey"`
 }
 
+// VoiceConfig holds configuration for the chat voice-input transcription
+// fallback. The primary voice-input engine runs entirely in the browser
+// (Web Speech API); this server-side fallback is only used when the browser
+// has no SpeechRecognition support (e.g. Firefox).
+//
+// When OpenAIAPIKey is empty the /api/v1/transcribe endpoint returns 503
+// and the frontend hides the fallback path, so the feature is safe to
+// ship un-configured.
+type VoiceConfig struct {
+	// OpenAIAPIKey is the API key used to call OpenAI's Whisper transcription
+	// endpoint. Set via KANDEV_VOICE_OPENAI_API_KEY.
+	OpenAIAPIKey string `mapstructure:"openAIApiKey"`
+}
+
 // FeaturesConfig is the central registry of runtime feature flags. Every flag
 // defaults to false so production binaries ship with new work hidden until a
 // deployment explicitly opts in (env var, e.g. KANDEV_FEATURES_OFFICE=true).
@@ -160,6 +338,11 @@ type FeaturesConfig struct {
 	// Office gates the autonomous-agent feature: backend service construction,
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`
+
+	// Plugins gates the extensible plugin system: backend service
+	// construction, HTTP/WS route registration, and frontend nav/route
+	// visibility.
+	Plugins bool `mapstructure:"plugins" json:"plugins"`
 }
 
 // LoggingConfig holds logging configuration.
@@ -225,6 +408,12 @@ type AgentConfig struct {
 	// StandaloneAuthToken is the per-launch auth token retrieved via handshake.
 	// Set at runtime after agentctl starts; not persisted in config files.
 	StandaloneAuthToken string `mapstructure:"-"`
+
+	// StandalonePID is the OS process id of the standalone agentctl control-server
+	// this backend spawned. Set at runtime after agentctl starts (from the
+	// launcher); not persisted in config files. Used as the host-local liveness
+	// handle recorded in executors_running.local_pid for local/standalone rows.
+	StandalonePID int `mapstructure:"-"`
 }
 
 // ReadTimeoutDuration returns the read timeout as a time.Duration.
@@ -262,8 +451,12 @@ func detectDefaultLogFormat() string {
 
 // setDefaults configures default values for all configuration options.
 func setDefaults(v *viper.Viper) {
-	// Server defaults
-	v.SetDefault("server.host", "0.0.0.0")
+	// Server defaults. Host defaults to empty (not the wildcard) so an unset
+	// host is distinguishable from an explicit one: ResolvedBinds falls back to
+	// server.hosts only when host is unset, and empty resolves to the wildcard
+	// default. This keeps KANDEV_SERVER_HOST winning over a config-file
+	// server.hosts.
+	v.SetDefault("server.host", "")
 	v.SetDefault("server.port", ports.Backend)
 	v.SetDefault("server.readTimeout", 30)
 	v.SetDefault("server.writeTimeout", 30)
@@ -311,6 +504,9 @@ func setDefaults(v *viper.Viper) {
 
 	// Office defaults
 	v.SetDefault("office.jwtSigningKey", "")
+
+	// Voice defaults
+	v.SetDefault("voice.openAIApiKey", "")
 
 	// Feature-flag defaults live in ./features.yaml (symlinked to
 	// apps/backend/internal/features/features.yaml). LoadWithPath applies
@@ -428,6 +624,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
 	_ = v.BindEnv("debug.devMode", "KANDEV_DEBUG_DEV_MODE")
 	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
+	_ = v.BindEnv("voice.openAIApiKey", "KANDEV_VOICE_OPENAI_API_KEY")
 
 	// Configure config file
 	v.SetConfigName("config")
@@ -466,6 +663,9 @@ func validate(cfg *Config) error {
 	// Server validation - always required
 	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
 		errs = append(errs, "server.port must be between 1 and 65535")
+	}
+	if _, err := cfg.Server.ResolvedBinds(); err != nil {
+		errs = append(errs, err.Error())
 	}
 
 	// Database validation. Normalize the driver in place so downstream

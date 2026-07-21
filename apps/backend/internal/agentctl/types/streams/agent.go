@@ -55,6 +55,9 @@ const (
 	// EventTypeSessionModels indicates available models from ACP session/new.
 	EventTypeSessionModels = "session_models"
 
+	// EventTypeSessionInfo indicates ACP session metadata such as title changed.
+	EventTypeSessionInfo = "session_info"
+
 	// EventTypeAuthRequired indicates the agent rejected session/new with an
 	// authentication-required error. The event carries the available auth
 	// methods (from ACP initialize); the client picks one and replays the
@@ -85,6 +88,11 @@ type AgentEvent struct {
 	// Used to target specific operations for cancellation or status updates.
 	// For Codex this is the turn ID, for other protocols it may be empty.
 	OperationID string `json:"operation_id,omitempty"`
+
+	// PromptGeneration is the lifecycle-owned identity assigned when this
+	// prompt was accepted. Terminal events echo it so delayed completions
+	// cannot be attributed to a newer prompt on the same execution.
+	PromptGeneration uint64 `json:"prompt_generation,omitempty"`
 
 	// --- Message fields (for "message_chunk" type) ---
 
@@ -242,6 +250,21 @@ type AgentEvent struct {
 	// ConfigOptions lists session configuration options from ACP _meta.
 	ConfigOptions []ConfigOption `json:"config_options,omitempty"`
 
+	// ConfigBaselineCandidate carries an authoritative response snapshot for
+	// lifecycle settlement without replacing the event's newer live options.
+	ConfigBaselineCandidate []ConfigOption `json:"config_baseline_candidate,omitempty"`
+
+	// --- Session info fields ---
+
+	// SessionTitle is the agent-provided human-readable ACP session title.
+	SessionTitle string `json:"session_title,omitempty"`
+
+	// SessionUpdatedAt is the provider-reported ISO 8601 last activity timestamp.
+	SessionUpdatedAt string `json:"session_updated_at,omitempty"`
+
+	// SessionMeta contains opaque ACP _meta from session_info_update.
+	SessionMeta map[string]any `json:"session_meta,omitempty"`
+
 	// --- Usage fields (attached to "complete" event) ---
 
 	// Usage contains token usage stats from the prompt response.
@@ -374,6 +397,9 @@ type ConfigOption struct {
 	// Name is a human-readable name.
 	Name string `json:"name"`
 
+	// Description is optional provider-supplied guidance for the option.
+	Description string `json:"description,omitempty"`
+
 	// CurrentValue is the currently selected value.
 	CurrentValue string `json:"current_value"`
 
@@ -391,6 +417,9 @@ type ConfigOptionValue struct {
 
 	// Name is a human-readable label.
 	Name string `json:"name"`
+
+	// Description is optional provider-supplied guidance for the value.
+	Description string `json:"description,omitempty"`
 }
 
 // PromptUsage contains token usage info from an ACP prompt response.

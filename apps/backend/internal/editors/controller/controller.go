@@ -63,6 +63,7 @@ func (c *Controller) OpenSessionEditor(ctx context.Context, sessionID string, re
 		FilePath:   req.FilePath,
 		Line:       req.Line,
 		Column:     req.Column,
+		WorktreeID: req.WorktreeID,
 	})
 	if err != nil {
 		return dto.OpenEditorResponse{}, err
@@ -70,8 +71,8 @@ func (c *Controller) OpenSessionEditor(ctx context.Context, sessionID string, re
 	return dto.OpenEditorResponse{URL: url}, nil
 }
 
-func (c *Controller) OpenFolder(ctx context.Context, sessionID string) (dto.OpenFolderResponse, error) {
-	if err := c.service.OpenFolder(ctx, sessionID); err != nil {
+func (c *Controller) OpenFolder(ctx context.Context, sessionID string, req dto.OpenFolderRequest) (dto.OpenFolderResponse, error) {
+	if err := c.service.OpenFolder(ctx, sessionID, req.WorktreeID); err != nil {
 		return dto.OpenFolderResponse{Success: false}, err
 	}
 	return dto.OpenFolderResponse{Success: true}, nil

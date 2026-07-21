@@ -118,17 +118,19 @@ function buildCommentGutter(
   return gutter({
     class: "cm-comment-gutter",
     lineMarker: (view, line) => {
-      const lineNum = view.state.doc.lineAt(line.from).number;
-      const lineComments = commentsByLine.get(lineNum);
+      const docLine = view.state.doc.lineAt(line.from);
+      if (line.from !== docLine.from) return null;
+      const lineComments = commentsByLine.get(docLine.number);
       if (lineComments && lineComments.length > 0) {
-        return new CommentGutterMarker(lineComments, firstLines.has(lineNum));
+        return new CommentGutterMarker(lineComments, firstLines.has(docLine.number));
       }
       return null;
     },
     domEventHandlers: {
       click: (view, line, event) => {
-        const lineNum = view.state.doc.lineAt(line.from).number;
-        const lineComments = commentsByLine.get(lineNum);
+        const docLine = view.state.doc.lineAt(line.from);
+        if (line.from !== docLine.from) return false;
+        const lineComments = commentsByLine.get(docLine.number);
         if (lineComments && lineComments.length > 0) {
           event.preventDefault();
           event.stopPropagation();
@@ -224,6 +226,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
 
   const addComment = useCommentsStore((state) => state.addComment);
   const removeComment = useCommentsStore((state) => state.removeComment);
+  const updateComment = useCommentsStore((state) => state.updateComment);
   const comments = useDiffFileComments(sessionId ?? "", path);
   const langExt = getCodeMirrorExtensionFromPath(path);
 
@@ -504,17 +507,31 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     (commentId: string) => {
       if (!sessionId) return;
       removeComment(commentId);
-      if (commentView && commentView.comments.length <= 1) {
-        setCommentView(null);
-      } else if (commentView) {
-        setCommentView({
-          ...commentView,
-          comments: commentView.comments.filter((c) => c.id !== commentId),
-        });
-      }
+      setCommentView((view) => {
+        if (!view) return view;
+        const nextComments = view.comments.filter((comment) => comment.id !== commentId);
+        return nextComments.length > 0 ? { ...view, comments: nextComments } : null;
+      });
       toast({ title: "Comment deleted" });
     },
-    [sessionId, removeComment, commentView, toast],
+    [sessionId, removeComment, toast],
+  );
+
+  const handleUpdateComment = useCallback(
+    (commentId: string, text: string) => {
+      updateComment(commentId, { text });
+      setCommentView((view) => {
+        if (!view) return view;
+        return {
+          ...view,
+          comments: view.comments.map((comment) =>
+            comment.id === commentId ? { ...comment, text } : comment,
+          ),
+        };
+      });
+      toast({ title: "Comment updated" });
+    },
+    [toast, updateComment],
   );
 
   const handleCommentViewClose = useCallback(() => {
@@ -536,6 +553,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     handleCommentSubmitAndRun,
     handlePopoverClose,
     handleDeleteComment,
+    handleUpdateComment,
     handleCommentViewClose,
   };
 }

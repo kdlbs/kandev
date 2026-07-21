@@ -374,6 +374,50 @@ func TestCreateTaskEnvironment_AllowsNonWorktreeWithEmptyWorkspace(t *testing.T)
 	}
 }
 
+func TestCreateTaskEnvironment_AllowsSameRepoMultiBranchRows(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	insertTask(t, repo.db, "task-H2")
+
+	err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID:            "env-H2",
+		TaskID:        "task-H2",
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		WorktreePath:  "/workspace/main",
+		WorkspacePath: "/workspace",
+		Repos: []*models.TaskEnvironmentRepo{
+			{
+				RepositoryID:   "repo-shared",
+				WorktreeID:     "wt-main",
+				WorktreePath:   "/workspace/repo",
+				WorktreeBranch: "feature/main",
+				Position:       0,
+			},
+			{
+				RepositoryID:   "repo-shared",
+				BranchSlug:     "branch-5hn",
+				WorktreeID:     "wt-branch",
+				WorktreePath:   "/workspace/repo/branch-5hn",
+				WorktreeBranch: "feature/branch",
+				Position:       1,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rows, err := repo.ListTaskEnvironmentRepos(context.Background(), "env-H2")
+	if err != nil {
+		t.Fatalf("list repos: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 environment repo rows, got %d", len(rows))
+	}
+	if rows[0].BranchSlug != "" || rows[1].BranchSlug != "branch-5hn" {
+		t.Fatalf("unexpected branch slugs: %+v", rows)
+	}
+}
+
 // TestUpdateTaskEnvironment_RejectsClearingWorkspaceForWorktree — symmetric
 // guard: a writer must not be able to clear a previously-populated
 // workspace_path on a worktree env.
@@ -566,3 +610,40 @@ func TestHealSessionTaskEnvironmentIDs_Idempotent(t *testing.T) {
 
 // silences "imported and not used" if some future refactor drops a use.
 var _ = sql.ErrNoRows
+
+// TestBackfillSingleTask_DefaultsExecutorTypeOnMissingRow — when the
+// referenced executor row is genuinely absent (legacy session whose executor
+// was deleted), backfillSingleTask must default executor_type to "local_pc"
+// and continue. Locks in the narrowed error-handling: only sql.ErrNoRows
+// triggers the default; any other scan error must propagate so operators see
+// the real cause instead of every backfilled env silently getting the wrong
+// type.
+func TestBackfillSingleTask_DefaultsExecutorTypeOnMissingRow(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	insertTask(t, repo.db, "task-bf")
+	// Session references an executor id that does NOT exist in `executors`.
+	// backfillTaskEnvironments queries task_sessions for orphans (no env)
+	// and calls backfillSingleTask for each — exercising the executor
+	// lookup path with sql.ErrNoRows.
+	insertSessionWithEnvID(t, repo.db, "sess-bf", "task-bf", "")
+	if _, err := repo.db.Exec(
+		`UPDATE task_sessions SET executor_id = 'exec-deleted', started_at = ? WHERE id = 'sess-bf'`,
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("seed executor_id: %v", err)
+	}
+
+	if err := repo.backfillTaskEnvironments(); err != nil {
+		t.Fatalf("backfillTaskEnvironments: %v", err)
+	}
+
+	var executorType string
+	if err := repo.db.QueryRow(
+		`SELECT executor_type FROM task_environments WHERE task_id = 'task-bf'`,
+	).Scan(&executorType); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if executorType != "local_pc" {
+		t.Errorf("executor_type = %q, want default 'local_pc' when executor row absent", executorType)
+	}
+}

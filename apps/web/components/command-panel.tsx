@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { useCommands, useCommandPanelOpen } from "@/lib/commands/command-registry";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
+import { findFirstMatchingCommand, selectCommandSearchResult } from "@/lib/commands/search";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -295,17 +296,35 @@ function useCommandPanelEffects(
   });
 }
 
-function useFirstResultSelection(open: boolean, state: ReturnType<typeof useCommandPanelState>) {
+function useFirstResultSelection(
+  open: boolean,
+  state: ReturnType<typeof useCommandPanelState>,
+  commands: CommandItemType[],
+) {
   const { mode, search, taskResults, fileResults, setSelectedValue } = state;
+  const previousCommandsRef = useRef(commands);
 
   // `search` intentionally re-applies the first result while debounced results are loading.
   useEffect(() => {
+    const commandsChanged = previousCommandsRef.current !== commands;
+    previousCommandsRef.current = commands;
     if (!open) return;
 
     if (mode === MODE_COMMANDS) {
       const firstTask = taskResults[0];
+      if (commandsChanged) {
+        const taskValues = taskResults.map(getTaskResultValue);
+        setSelectedValue((current) =>
+          selectCommandSearchResult(commands, search, taskValues, current),
+        );
+        return;
+      }
       if (firstTask) {
         setSelectedValue(getTaskResultValue(firstTask));
+        return;
+      }
+      if (search.trim()) {
+        setSelectedValue(findFirstMatchingCommand(commands, search)?.id ?? "");
         return;
       }
       setSelectedValue((current) => (current.startsWith("__task:") ? "" : current));
@@ -319,7 +338,7 @@ function useFirstResultSelection(open: boolean, state: ReturnType<typeof useComm
     }
 
     setSelectedValue("");
-  }, [fileResults, mode, open, search, setSelectedValue, taskResults]);
+  }, [commands, fileResults, mode, open, search, setSelectedValue, taskResults]);
 }
 
 function useCommandPanelHandlers(
@@ -449,7 +468,7 @@ export function CommandPanel() {
   } = state;
 
   useCommandPanelEffects(open, state, workspaceId, activeSessionId, kanbanSteps);
-  useFirstResultSelection(open, state);
+  useFirstResultSelection(open, state, commands);
 
   const openRef = useRef(open);
   useEffect(() => {

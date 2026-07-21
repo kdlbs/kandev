@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/kandev/kandev/internal/workflow/models"
@@ -55,7 +56,8 @@ type ListStepsResponse struct {
 }
 
 type GetStepResponse struct {
-	Step *models.WorkflowStep `json:"step"`
+	Step              *models.WorkflowStep   `json:"step"`
+	DemotedStartSteps []*models.WorkflowStep `json:"demoted_start_steps,omitempty"`
 }
 
 type CreateStepsFromTemplateRequest struct {
@@ -89,24 +91,33 @@ func (c *Controller) GetStep(ctx context.Context, id string) (*GetStepResponse, 
 }
 
 func (c *Controller) CreateStepsFromTemplate(ctx context.Context, req CreateStepsFromTemplateRequest) error {
+	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
+		return err
+	}
 	return c.svc.CreateStepsFromTemplate(ctx, req.WorkflowID, req.TemplateID)
 }
 
 // CreateStepRequest is the request for creating a single workflow step.
 type CreateStepRequest struct {
-	WorkflowID         string             `json:"workflow_id"`
-	Name               string             `json:"name"`
-	Position           int                `json:"position"`
-	Color              string             `json:"color"`
-	Prompt             string             `json:"prompt,omitempty"`
-	Events             *models.StepEvents `json:"events,omitempty"`
-	AllowManualMove    bool               `json:"allow_manual_move"`
-	IsStartStep        *bool              `json:"is_start_step,omitempty"`
-	ShowInCommandPanel *bool              `json:"show_in_command_panel,omitempty"`
+	WorkflowID                string             `json:"workflow_id"`
+	Name                      string             `json:"name"`
+	Position                  int                `json:"position"`
+	Color                     string             `json:"color"`
+	Prompt                    string             `json:"prompt,omitempty"`
+	Events                    *models.StepEvents `json:"events,omitempty"`
+	AllowManualMove           bool               `json:"allow_manual_move"`
+	IsStartStep               *bool              `json:"is_start_step,omitempty"`
+	ShowInCommandPanel        *bool              `json:"show_in_command_panel,omitempty"`
+	AutoAdvanceRequiresSignal *bool              `json:"auto_advance_requires_signal,omitempty"`
+	WIPLimit                  *int               `json:"wip_limit,omitempty"`
+	PullFromStepID            *string            `json:"pull_from_step_id,omitempty"`
 }
 
 // CreateStep creates a new workflow step.
 func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*GetStepResponse, error) {
+	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
+		return nil, err
+	}
 	step := &models.WorkflowStep{
 		WorkflowID:      req.WorkflowID,
 		Name:            req.Name,
@@ -126,31 +137,53 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	} else {
 		step.ShowInCommandPanel = true // default to visible
 	}
-	if err := c.svc.CreateStep(ctx, step); err != nil {
+	if req.AutoAdvanceRequiresSignal != nil {
+		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
+	}
+	if req.WIPLimit != nil {
+		if *req.WIPLimit < 0 {
+			return nil, fmt.Errorf("wip_limit must be non-negative")
+		}
+		step.WIPLimit = *req.WIPLimit
+	}
+	if req.PullFromStepID != nil {
+		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
+	}
+	if err := c.validatePullFromStep(ctx, step); err != nil {
 		return nil, err
 	}
-	return &GetStepResponse{Step: step}, nil
+	demotedStartSteps, err := c.svc.CreateStepWithStartStepUpdates(ctx, step)
+	if err != nil {
+		return nil, err
+	}
+	return &GetStepResponse{Step: step, DemotedStartSteps: demotedStartSteps}, nil
 }
 
 // UpdateStepRequest is the request for updating a workflow step.
 type UpdateStepRequest struct {
-	ID                    string             `json:"id"`
-	Name                  *string            `json:"name,omitempty"`
-	Position              *int               `json:"position,omitempty"`
-	Color                 *string            `json:"color,omitempty"`
-	Prompt                *string            `json:"prompt,omitempty"`
-	Events                *models.StepEvents `json:"events,omitempty"`
-	AllowManualMove       *bool              `json:"allow_manual_move,omitempty"`
-	IsStartStep           *bool              `json:"is_start_step,omitempty"`
-	ShowInCommandPanel    *bool              `json:"show_in_command_panel,omitempty"`
-	AutoArchiveAfterHours *int               `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID        *string            `json:"agent_profile_id,omitempty"`
+	ID                        string             `json:"id"`
+	Name                      *string            `json:"name,omitempty"`
+	Position                  *int               `json:"position,omitempty"`
+	Color                     *string            `json:"color,omitempty"`
+	Prompt                    *string            `json:"prompt,omitempty"`
+	Events                    *models.StepEvents `json:"events,omitempty"`
+	AllowManualMove           *bool              `json:"allow_manual_move,omitempty"`
+	IsStartStep               *bool              `json:"is_start_step,omitempty"`
+	ShowInCommandPanel        *bool              `json:"show_in_command_panel,omitempty"`
+	AutoArchiveAfterHours     *int               `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID            *string            `json:"agent_profile_id,omitempty"`
+	AutoAdvanceRequiresSignal *bool              `json:"auto_advance_requires_signal,omitempty"`
+	WIPLimit                  *int               `json:"wip_limit,omitempty"`
+	PullFromStepID            *string            `json:"pull_from_step_id,omitempty"`
 }
 
 // UpdateStep updates an existing workflow step.
 func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*GetStepResponse, error) {
 	step, err := c.svc.GetStep(ctx, req.ID)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.svc.EnsureWorkflowMutable(ctx, step.WorkflowID); err != nil {
 		return nil, err
 	}
 	if req.Name != nil {
@@ -183,14 +216,82 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if req.AgentProfileID != nil {
 		step.AgentProfileID = strings.TrimSpace(*req.AgentProfileID)
 	}
-	if err := c.svc.UpdateStep(ctx, step); err != nil {
+	if req.AutoAdvanceRequiresSignal != nil {
+		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
+	}
+	if req.WIPLimit != nil {
+		if *req.WIPLimit < 0 {
+			return nil, fmt.Errorf("wip_limit must be non-negative")
+		}
+		step.WIPLimit = *req.WIPLimit
+	}
+	if req.PullFromStepID != nil {
+		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
+	}
+	if err := c.validatePullFromStep(ctx, step); err != nil {
 		return nil, err
 	}
-	return &GetStepResponse{Step: step}, nil
+	demotedStartSteps, err := c.svc.UpdateStepWithStartStepUpdates(ctx, step)
+	if err != nil {
+		return nil, err
+	}
+	return &GetStepResponse{Step: step, DemotedStartSteps: demotedStartSteps}, nil
+}
+
+func (c *Controller) validatePullFromStep(ctx context.Context, step *models.WorkflowStep) error {
+	if step.PullFromStepID == "" {
+		return nil
+	}
+	if step.ID != "" && step.PullFromStepID == step.ID {
+		return fmt.Errorf("pull_from_step_id cannot reference the same step")
+	}
+	source, err := c.svc.GetStep(ctx, step.PullFromStepID)
+	if err != nil {
+		return fmt.Errorf("pull_from_step_id is invalid: %w", err)
+	}
+	if source.WorkflowID != step.WorkflowID {
+		return fmt.Errorf("pull_from_step_id must reference a step in the same workflow")
+	}
+	if err := c.validatePullFromStepAcyclic(ctx, step.ID, source); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Controller) validatePullFromStepAcyclic(ctx context.Context, stepID string, source *models.WorkflowStep) error {
+	if stepID == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for current := source; current != nil && current.PullFromStepID != ""; {
+		if current.PullFromStepID == stepID {
+			return fmt.Errorf("pull_from_step_id cannot create a pull cycle")
+		}
+		if _, ok := seen[current.ID]; ok {
+			return fmt.Errorf("pull_from_step_id cannot create a pull cycle")
+		}
+		seen[current.ID] = struct{}{}
+		next, err := c.svc.GetStep(ctx, current.PullFromStepID)
+		if err != nil {
+			return fmt.Errorf("pull_from_step_id is invalid: %w", err)
+		}
+		if next.WorkflowID != source.WorkflowID {
+			return fmt.Errorf("pull_from_step_id must reference a step in the same workflow")
+		}
+		current = next
+	}
+	return nil
 }
 
 // DeleteStep deletes a workflow step.
 func (c *Controller) DeleteStep(ctx context.Context, id string) error {
+	step, err := c.svc.GetStep(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := c.svc.EnsureWorkflowMutable(ctx, step.WorkflowID); err != nil {
+		return err
+	}
 	return c.svc.DeleteStep(ctx, id)
 }
 
@@ -202,6 +303,9 @@ type ReorderStepsRequest struct {
 
 // ReorderSteps reorders workflow steps for a workflow.
 func (c *Controller) ReorderSteps(ctx context.Context, req ReorderStepsRequest) error {
+	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
+		return err
+	}
 	return c.svc.ReorderSteps(ctx, req.WorkflowID, req.StepIDs)
 }
 
@@ -236,9 +340,10 @@ func (c *Controller) ExportWorkflow(ctx context.Context, workflowID string) (*mo
 	return c.svc.ExportWorkflow(ctx, workflowID)
 }
 
-// ExportWorkflows exports all workflows for a workspace.
-func (c *Controller) ExportWorkflows(ctx context.Context, workspaceID string) (*models.WorkflowExport, error) {
-	return c.svc.ExportWorkflows(ctx, workspaceID)
+// ExportWorkflows exports workflows for a workspace. A nil workflowIDs exports
+// every workflow; a non-nil slice restricts the export to that set of IDs.
+func (c *Controller) ExportWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) (*models.WorkflowExport, error) {
+	return c.svc.ExportWorkflows(ctx, workspaceID, workflowIDs)
 }
 
 // ImportWorkflows imports workflows into a workspace.

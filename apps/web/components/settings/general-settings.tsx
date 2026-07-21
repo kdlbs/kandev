@@ -1,52 +1,51 @@
 "use client";
 
-import { useState } from "react";
-import { useTheme } from "next-themes";
+import { useCallback, useRef, useState } from "react";
+import Link from "@/components/routing/app-link";
+import { useTheme } from "@/components/theme/app-theme";
 import {
+  IconActivity,
   IconCommand,
   IconPalette,
-  IconServer,
   IconKeyboard,
-  IconTerminal2,
+  IconGitBranch,
+  IconArchive,
 } from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
-import { Input } from "@kandev/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
-import { getBackendConfig } from "@/lib/config";
+import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
+import { GENERAL_NAV_ITEMS } from "@/components/settings/general-nav";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
-import { TERMINAL_FONT_PRESETS } from "@/lib/terminal/terminal-font";
-import type { FontCategory } from "@/lib/terminal/terminal-font";
 import type { Theme } from "@/lib/settings/types";
+import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
+import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 
-function ThemeSettingsCard() {
-  const { theme: currentTheme, setTheme } = useTheme();
-  const themeValue = currentTheme ?? "system";
-
+function ThemeSettingsCard({
+  theme,
+  isDirty,
+  onChange,
+}: {
+  theme: Theme;
+  isDirty: boolean;
+  onChange: (theme: Theme) => void;
+}) {
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="theme-settings-card">
       <CardHeader>
         <CardTitle className="text-base">Color Theme</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Select value={themeValue} onValueChange={(value) => setTheme(value as Theme)}>
-            <SelectTrigger id="theme">
+          <Select value={theme} onValueChange={(value) => onChange(value as Theme)}>
+            <SelectTrigger id="theme" data-settings-dirty={isDirty}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -57,47 +56,29 @@ function ThemeSettingsCard() {
           </Select>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
-function ChatSubmitKeyCard() {
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const [isSavingSubmitKey, setIsSavingSubmitKey] = useState(false);
-
-  const handleChatSubmitKeyChange = async (value: "enter" | "cmd_enter") => {
-    if (isSavingSubmitKey) return;
-    setIsSavingSubmitKey(true);
-    const previousValue = userSettings.chatSubmitKey;
-    try {
-      setUserSettings({ ...userSettings, chatSubmitKey: value });
-      await updateUserSettings({
-        workspace_id: userSettings.workspaceId || "",
-        repository_ids: userSettings.repositoryIds || [],
-        chat_submit_key: value,
-      });
-    } catch {
-      setUserSettings({ ...userSettings, chatSubmitKey: previousValue });
-    } finally {
-      setIsSavingSubmitKey(false);
-    }
-  };
-
+function ChatSubmitKeyCard({
+  value,
+  isDirty,
+  onChange,
+}: {
+  value: "enter" | "cmd_enter";
+  isDirty: boolean;
+  onChange: (value: "enter" | "cmd_enter") => void;
+}) {
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="chat-submit-key-card">
       <CardHeader>
         <CardTitle className="text-base">Submit Shortcut</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
           <Label htmlFor="chat-submit-key">Message Submit Key</Label>
-          <Select
-            value={userSettings.chatSubmitKey}
-            onValueChange={(value) => handleChatSubmitKeyChange(value as "enter" | "cmd_enter")}
-            disabled={isSavingSubmitKey}
-          >
-            <SelectTrigger id="chat-submit-key">
+          <Select value={value} onValueChange={(next) => onChange(next as "enter" | "cmd_enter")}>
+            <SelectTrigger id="chat-submit-key" data-settings-dirty={isDirty}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -106,346 +87,239 @@ function ChatSubmitKeyCard() {
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            {userSettings.chatSubmitKey === "cmd_enter"
+            {value === "cmd_enter"
               ? "Press Cmd/Ctrl+Enter to send messages. Press Enter for newlines."
               : "Press Enter to send messages. Press Shift+Enter for newlines."}
           </p>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
-function TerminalLinksCard() {
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
-  const [isSaving, setIsSaving] = useState(false);
-
-  const handleChange = async (value: "new_tab" | "browser_panel") => {
-    if (isSaving) return;
-    setIsSaving(true);
-    const current = storeApi.getState().userSettings;
-    const previous = current.terminalLinkBehavior;
-    try {
-      setUserSettings({ ...current, terminalLinkBehavior: value });
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        terminal_link_behavior: value,
-      });
-    } catch {
-      setUserSettings({
-        ...storeApi.getState().userSettings,
-        terminalLinkBehavior: previous,
-      });
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
+function ChangesPanelLayoutCard({
+  value,
+  isDirty,
+  onChange,
+}: {
+  value: "flat" | "tree";
+  isDirty: boolean;
+  onChange: (value: "flat" | "tree") => void;
+}) {
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="changes-panel-layout-card">
       <CardHeader>
-        <CardTitle className="text-base">Terminal Links</CardTitle>
+        <CardTitle className="text-base">Changes Panel Layout</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Label htmlFor="terminal-link-behavior">Open links in</Label>
-          <Select
-            value={userSettings.terminalLinkBehavior}
-            onValueChange={(v) => handleChange(v as "new_tab" | "browser_panel")}
-            disabled={isSaving}
-          >
-            <SelectTrigger id="terminal-link-behavior">
+          <Label htmlFor="changes-panel-layout">File list view</Label>
+          <Select value={value} onValueChange={(next) => onChange(next as "flat" | "tree")}>
+            <SelectTrigger
+              id="changes-panel-layout"
+              data-testid="changes-panel-layout-select"
+              data-settings-dirty={isDirty}
+              className="cursor-pointer"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="new_tab">New browser tab</SelectItem>
-              <SelectItem value="browser_panel">Built-in browser panel</SelectItem>
+              <SelectItem value="flat">Flat list</SelectItem>
+              <SelectItem value="tree">Tree</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">Click a URL in the terminal to open it.</p>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-const CUSTOM_VALUE = "__custom__";
-const CATEGORY_LABELS: Record<FontCategory, string> = {
-  icons: "Nerd Fonts",
-  ligatures: "Programming",
-  system: "System",
-};
-const CATEGORY_BADGES: Partial<Record<FontCategory, string>> = {
-  icons: "Icons",
-  ligatures: "Ligatures",
-};
-const FONT_GROUPS: Record<string, typeof TERMINAL_FONT_PRESETS> = TERMINAL_FONT_PRESETS.reduce(
-  (acc, p) => {
-    (acc[p.category] ??= []).push(p);
-    return acc;
-  },
-  {} as Record<string, typeof TERMINAL_FONT_PRESETS>,
-);
-const FONT_CATEGORIES: FontCategory[] = ["icons", "ligatures", "system"];
-
-function FontGroupOptions() {
-  return FONT_CATEGORIES.map((category) => (
-    <SelectGroup key={category}>
-      <SelectLabel className="flex items-center gap-2">
-        {CATEGORY_LABELS[category]}
-        {CATEGORY_BADGES[category] && (
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-            {CATEGORY_BADGES[category]}
-          </Badge>
-        )}
-      </SelectLabel>
-      {(FONT_GROUPS[category] ?? []).map((preset) => (
-        <SelectItem key={preset.value} value={preset.value}>
-          {preset.label}
-        </SelectItem>
-      ))}
-    </SelectGroup>
-  ));
-}
-
-function TerminalFontSizeCard() {
-  const storeApi = useAppStoreApi();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const [isSaving, setIsSaving] = useState(false);
-  const [fontSize, setFontSize] = useState(() => userSettings.terminalFontSize ?? 13);
-
-  const saveFontSize = async (value: number) => {
-    if (isSaving) return;
-    if (value < 8 || value > 24) return;
-    setIsSaving(true);
-    const current = storeApi.getState().userSettings;
-    const previous = current.terminalFontSize;
-    try {
-      setUserSettings({ ...current, terminalFontSize: value });
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        terminal_font_size: value,
-      });
-    } catch {
-      setUserSettings({ ...storeApi.getState().userSettings, terminalFontSize: previous });
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleFontSizeBlur = () => {
-    const v = Math.min(24, Math.max(8, fontSize));
-    setFontSize(v);
-    saveFontSize(v);
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Terminal Font Size</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="terminal-font-size">Font Size</Label>
-          <div className="flex items-center gap-3">
-            <Input
-              id="terminal-font-size"
-              type="number"
-              min={8}
-              max={24}
-              value={fontSize}
-              onChange={(e) => setFontSize(Number(e.target.value))}
-              onBlur={handleFontSizeBlur}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleFontSizeBlur();
-              }}
-              className="w-20"
-              disabled={isSaving}
-              data-testid="terminal-font-size-input"
-            />
-            <span className="text-xs text-muted-foreground">px (8-24)</span>
-          </div>
           <p className="text-xs text-muted-foreground">
-            Set the font size for the terminal. Default is 13px.
+            Display changed files as a flat list with full paths, or as a folder tree.
           </p>
         </div>
       </CardContent>
-    </Card>
-  );
-}
-
-function TerminalFontCard() {
-  const storeApi = useAppStoreApi();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isCustom, setIsCustom] = useState(() => {
-    const current = userSettings.terminalFontFamily;
-    if (!current) return false;
-    return !TERMINAL_FONT_PRESETS.some((p) => p.value === current);
-  });
-  const [customValue, setCustomValue] = useState(
-    () => (isCustom ? userSettings.terminalFontFamily : "") ?? "",
-  );
-
-  const saveFontFamily = async (value: string) => {
-    if (isSaving) return;
-    setIsSaving(true);
-    const current = storeApi.getState().userSettings;
-    const previous = current.terminalFontFamily;
-    try {
-      setUserSettings({ ...current, terminalFontFamily: value || null });
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        terminal_font_family: value,
-      });
-    } catch {
-      setUserSettings({
-        ...storeApi.getState().userSettings,
-        terminalFontFamily: previous,
-      });
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleSelectChange = (value: string) => {
-    if (value === CUSTOM_VALUE) {
-      setIsCustom(true);
-      return;
-    }
-    setIsCustom(false);
-    setCustomValue("");
-    saveFontFamily(value === "default" ? "" : value);
-  };
-
-  const handleCustomBlur = () => {
-    const trimmed = customValue.trim();
-    if (trimmed) saveFontFamily(trimmed);
-  };
-
-  const selectValue = isCustom ? CUSTOM_VALUE : userSettings.terminalFontFamily || "default";
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Terminal Font</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          <Label htmlFor="terminal-font">Font Family</Label>
-          <Select value={selectValue} onValueChange={handleSelectChange} disabled={isSaving}>
-            <SelectTrigger id="terminal-font" data-testid="terminal-font-select">
-              <SelectValue placeholder="Default" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="default">Default (Menlo / Monaco)</SelectItem>
-              <FontGroupOptions />
-              <SelectSeparator />
-              <SelectItem value={CUSTOM_VALUE}>Custom...</SelectItem>
-            </SelectContent>
-          </Select>
-          {isCustom && (
-            <Input
-              placeholder='e.g. "My Custom Font"'
-              value={customValue}
-              onChange={(e) => setCustomValue(e.target.value)}
-              onBlur={handleCustomBlur}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCustomBlur();
-              }}
-              data-testid="terminal-font-custom-input"
-            />
-          )}
-          <p className="text-xs text-muted-foreground">
-            Choose a monospace font for the terminal. Nerd Fonts include icons for CLI tools.
-          </p>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function BackendConnectionCard() {
-  const [backendUrl] = useState<string>(() => getBackendConfig().apiBaseUrl);
-  const displayBackendUrl = backendUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Backend Server URL</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="backend-url">Server URL</Label>
-          <Input
-            id="backend-url"
-            type="url"
-            value={displayBackendUrl}
-            readOnly
-            disabled
-            placeholder="http://localhost:38429"
-            className="cursor-default"
-          />
-          <p className="text-xs text-muted-foreground">
-            Backend URL is provided at runtime for SSR and WebSocket connections.
-          </p>
-        </div>
-      </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
 export function GeneralSettings() {
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">General Settings</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Manage your application preferences and notifications
-        </p>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {GENERAL_NAV_ITEMS.map(({ href, label, description, icon: Icon }) => (
+          <Link key={href} href={href} className="cursor-pointer">
+            <Card className="h-full transition-colors hover:bg-muted/40">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Icon className="h-4 w-4 text-muted-foreground" />
+                  {label}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">{description}</p>
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
       </div>
+    </div>
+  );
+}
 
-      <Separator />
+export function TaskActionsSettings() {
+  return (
+    <div className="space-y-8">
+      <SettingsSection
+        icon={<IconArchive className="h-5 w-5" />}
+        title="Task Actions"
+        description="Configure archive safeguards and defaults for tasks created by agents"
+      >
+        <div className="space-y-4">
+          <MCPTaskAgentProfileDefaultSettings />
+          <ArchiveConfirmationSettings />
+        </div>
+      </SettingsSection>
+    </div>
+  );
+}
 
+export function AppearanceSettings() {
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const storeApi = useAppStoreApi();
+  const { savedTheme, previewTheme, commitTheme, restoreTheme } = useTheme();
+  const [saved, setSaved] = useState(() => ({
+    theme: savedTheme,
+    changesPanelLayout: userSettings.changesPanelLayout,
+    showMetrics: userSettings.systemMetricsDisplay.showInTopbar,
+  }));
+  const [draft, setDraft] = useState(saved);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const revision = JSON.stringify(draft);
+  const isDirty = revision !== JSON.stringify(saved);
+
+  useSettingsSaveContributor({
+    id: "general-appearance",
+    order: 10,
+    revision,
+    isDirty,
+    save: async () => {
+      const submitted = draft;
+      const current = storeApi.getState().userSettings;
+      await updateUserSettings({
+        workspace_id: current.workspaceId || "",
+        repository_ids: current.repositoryIds || [],
+        changes_panel_layout: submitted.changesPanelLayout,
+        system_metrics_display: { show_in_topbar: submitted.showMetrics },
+      });
+      commitTheme(submitted.theme);
+      if (draftRef.current.theme !== submitted.theme) {
+        previewTheme(draftRef.current.theme);
+      }
+      setSaved(submitted);
+      setUserSettings({
+        ...storeApi.getState().userSettings,
+        changesPanelLayout: submitted.changesPanelLayout,
+        systemMetricsDisplay: { showInTopbar: submitted.showMetrics },
+      });
+    },
+    discard: () => {
+      setDraft(saved);
+      restoreTheme();
+    },
+  });
+
+  const updateDraft = useCallback(
+    (patch: Partial<typeof draft>) => setDraft((current) => ({ ...current, ...patch })),
+    [],
+  );
+
+  return (
+    <div className="space-y-8">
       <SettingsSection
         icon={<IconPalette className="h-5 w-5" />}
         title="Appearance"
         description="Customize how the application looks"
       >
-        <ThemeSettingsCard />
+        <ThemeSettingsCard
+          theme={draft.theme}
+          isDirty={draft.theme !== saved.theme}
+          onChange={(theme) => {
+            updateDraft({ theme });
+            previewTheme(theme);
+          }}
+        />
       </SettingsSection>
-
-      <Separator />
-
-      <ShellSettingsCard />
 
       <Separator />
 
       <SettingsSection
-        icon={<IconTerminal2 className="h-5 w-5" />}
-        title="Terminal"
-        description="Configure terminal appearance and behavior"
+        icon={<IconGitBranch className="h-5 w-5" />}
+        title="Changes Panel"
+        description="Customize how changed files are displayed"
       >
-        <TerminalFontCard />
-        <TerminalFontSizeCard />
-        <TerminalLinksCard />
+        <ChangesPanelLayoutCard
+          value={draft.changesPanelLayout}
+          isDirty={draft.changesPanelLayout !== saved.changesPanelLayout}
+          onChange={(changesPanelLayout) => updateDraft({ changesPanelLayout })}
+        />
       </SettingsSection>
 
       <Separator />
 
+      <SettingsSection
+        icon={<IconActivity className="h-5 w-5" />}
+        title="Resource Metrics"
+        description="Configure backend and execution resource sampling"
+      >
+        <SystemMetricsSettingsCard
+          showInTopbar={draft.showMetrics}
+          isShowInTopbarDirty={draft.showMetrics !== saved.showMetrics}
+          onShowInTopbarChange={(showMetrics) => updateDraft({ showMetrics })}
+        />
+      </SettingsSection>
+    </div>
+  );
+}
+
+export function KeyboardShortcutsSettings() {
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const storeApi = useAppStoreApi();
+  const [saved, setSaved] = useState(() => ({
+    chatSubmitKey: userSettings.chatSubmitKey,
+    keyboardShortcuts: userSettings.keyboardShortcuts as StoredShortcutOverrides,
+  }));
+  const [draft, setDraft] = useState(saved);
+  const revision = JSON.stringify(draft);
+
+  useSettingsSaveContributor({
+    id: "general-keyboard-shortcuts",
+    revision,
+    isDirty: revision !== JSON.stringify(saved),
+    save: async () => {
+      const submitted = draft;
+      const current = storeApi.getState().userSettings;
+      await updateUserSettings({
+        workspace_id: current.workspaceId || "",
+        repository_ids: current.repositoryIds || [],
+        chat_submit_key: submitted.chatSubmitKey,
+        keyboard_shortcuts: submitted.keyboardShortcuts,
+      });
+      setSaved(submitted);
+      setUserSettings({ ...storeApi.getState().userSettings, ...submitted });
+    },
+    discard: () => setDraft(saved),
+  });
+
+  return (
+    <div className="space-y-8">
       <SettingsSection
         icon={<IconKeyboard className="h-5 w-5" />}
         title="Chat Input"
         description="Configure chat input behavior"
       >
-        <ChatSubmitKeyCard />
+        <ChatSubmitKeyCard
+          value={draft.chatSubmitKey}
+          isDirty={draft.chatSubmitKey !== saved.chatSubmitKey}
+          onChange={(chatSubmitKey) => setDraft((current) => ({ ...current, chatSubmitKey }))}
+        />
       </SettingsSection>
 
       <Separator />
@@ -455,17 +329,13 @@ export function GeneralSettings() {
         title="Keyboard Shortcuts"
         description="Customize keyboard shortcuts for the command panel"
       >
-        <KeyboardShortcutsCard />
-      </SettingsSection>
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconServer className="h-5 w-5" />}
-        title="Backend Connection"
-        description="Configure the backend server URL"
-      >
-        <BackendConnectionCard />
+        <KeyboardShortcutsCard
+          overrides={draft.keyboardShortcuts}
+          baselineOverrides={saved.keyboardShortcuts}
+          onChange={(keyboardShortcuts) =>
+            setDraft((current) => ({ ...current, keyboardShortcuts }))
+          }
+        />
       </SettingsSection>
     </div>
   );

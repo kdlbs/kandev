@@ -7,6 +7,20 @@ import type {
 } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
+export type ShellCommandOutput = {
+  exit_code?: number;
+  stdout?: string;
+  stderr?: string;
+  truncated?: boolean;
+};
+
+export type ShellCommandOutputSnapshot = {
+  message_id: string;
+  status: string;
+  updated_at: string;
+  output: ShellCommandOutput;
+};
+
 export type MessageSearchHit = {
   id: string;
   turn_id?: string;
@@ -36,6 +50,17 @@ export async function searchSessionMessages(
   );
 }
 
+/**
+ * Rename a session's tab label. Pass an empty string to clear the custom
+ * name and revert to the derived agent/model title. The backend broadcasts
+ * a session.state_changed event so every client picks up the new label.
+ */
+export async function renameSession(sessionId: string, name: string): Promise<void> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error("WebSocket unavailable");
+  await client.request("session.rename", { session_id: sessionId, name });
+}
+
 // Session operations
 export async function listTaskSessions(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskSessionsResponse>(`/api/v1/tasks/${taskId}/sessions`, options);
@@ -43,6 +68,20 @@ export async function listTaskSessions(taskId: string, options?: ApiRequestOptio
 
 export async function fetchTaskSession(taskSessionId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, options);
+}
+
+export async function dismissLastAgentError(
+  taskSessionId: string,
+  stamp: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskSessionResponse>(
+    `/api/v1/task-sessions/${taskSessionId}/last-agent-error/dismiss`,
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ stamp }) },
+    },
+  );
 }
 
 export async function listTaskSessionMessages(
@@ -60,6 +99,17 @@ export async function listTaskSessionMessages(
   return fetchJson<ListMessagesResponse>(url, options);
 }
 
+export async function fetchShellCommandOutput(
+  taskSessionId: string,
+  messageId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<ShellCommandOutputSnapshot>(
+    `/api/v1/task-sessions/${taskSessionId}/messages/${messageId}/shell-output`,
+    options,
+  );
+}
+
 export async function listSessionTurns(taskSessionId: string, options?: ApiRequestOptions) {
   return fetchJson<ListTurnsResponse>(`/api/v1/task-sessions/${taskSessionId}/turns`, options);
 }
@@ -72,6 +122,7 @@ export async function openSessionInEditor(
     file_path: string;
     line: number;
     column: number;
+    worktree_id: string;
   }>,
   options?: ApiRequestOptions,
 ) {
@@ -97,6 +148,12 @@ export async function setSessionMode(sessionId: string, modeId: string) {
 export async function setSessionModel(sessionId: string, modelId: string) {
   return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-model`, {
     init: { method: "POST", body: JSON.stringify({ model_id: modelId }) },
+  });
+}
+
+export async function setSessionConfigOption(sessionId: string, configId: string, value: string) {
+  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-config-option`, {
+    init: { method: "POST", body: JSON.stringify({ config_id: configId, value }) },
   });
 }
 

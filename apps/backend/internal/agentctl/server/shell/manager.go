@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -14,6 +15,15 @@ type Manager struct {
 	logger    *logger.Logger
 	terminals map[string]*Session
 	mu        sync.RWMutex
+	stopping  bool
+}
+
+// BeginStop closes terminal admission after any start already holding the
+// manager lock has either committed or failed.
+func (m *Manager) BeginStop() {
+	m.mu.Lock()
+	m.stopping = true
+	m.mu.Unlock()
 }
 
 // NewManager creates a new shell session manager.
@@ -30,6 +40,9 @@ func NewManager(workDir string, log *logger.Logger) *Manager {
 func (m *Manager) Start(terminalID string, cfg Config) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.stopping {
+		return nil, fmt.Errorf("shell manager is stopping")
+	}
 
 	if s, ok := m.terminals[terminalID]; ok {
 		return s, nil
@@ -59,17 +72,23 @@ func (m *Manager) Get(terminalID string) (*Session, bool) {
 
 // Stop stops and removes the shell session for the given terminal ID.
 func (m *Manager) Stop(terminalID string) error {
-	m.mu.Lock()
+	m.mu.RLock()
 	s, ok := m.terminals[terminalID]
+	m.mu.RUnlock()
 	if !ok {
-		m.mu.Unlock()
 		return nil
 	}
-	delete(m.terminals, terminalID)
-	m.mu.Unlock()
 
 	m.logger.Info("stopping terminal shell", zap.String("terminal_id", terminalID))
-	return s.Stop()
+	if err := s.Stop(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	if m.terminals[terminalID] == s {
+		delete(m.terminals, terminalID)
+	}
+	m.mu.Unlock()
+	return nil
 }
 
 // Buffer returns the buffered output for the given terminal ID.
@@ -85,17 +104,26 @@ func (m *Manager) Buffer(terminalID string) ([]byte, error) {
 }
 
 // StopAll stops all terminal shell sessions.
-func (m *Manager) StopAll() {
+func (m *Manager) StopAll() error {
 	m.mu.Lock()
 	terminals := make(map[string]*Session, len(m.terminals))
 	for id, s := range m.terminals {
 		terminals[id] = s
 	}
-	m.terminals = make(map[string]*Session)
 	m.mu.Unlock()
 
+	var errs []error
 	for id, s := range terminals {
 		m.logger.Info("stopping terminal shell (shutdown)", zap.String("terminal_id", id))
-		_ = s.Stop()
+		if err := s.Stop(); err != nil {
+			errs = append(errs, fmt.Errorf("stop terminal %s: %w", id, err))
+			continue
+		}
+		m.mu.Lock()
+		if m.terminals[id] == s {
+			delete(m.terminals, id)
+		}
+		m.mu.Unlock()
 	}
+	return errors.Join(errs...)
 }

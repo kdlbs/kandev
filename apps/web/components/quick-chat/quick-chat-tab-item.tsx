@@ -1,12 +1,14 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { IconX } from "@tabler/icons-react";
+import { IconSparkles, IconX } from "@tabler/icons-react";
+import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 
 type QuickChatTabItemProps = {
   name: string;
   isActive: boolean;
   isRenameable: boolean;
+  kind?: QuickChatSessionKind;
   onActivate: () => void;
   onClose: () => void;
   onRename: (name: string) => void;
@@ -17,6 +19,7 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
   name,
   isActive,
   isRenameable,
+  kind = "chat",
   onActivate,
   onClose,
   onRename,
@@ -62,6 +65,7 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
 
   return (
     <div
+      data-testid="quick-chat-tab"
       className={`flex items-center gap-1 rounded transition-colors whitespace-nowrap ${
         isActive
           ? "bg-background text-foreground shadow-sm"
@@ -100,6 +104,11 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
           title={isRenameable ? "Double-click to rename" : undefined}
           className="flex items-center px-2.5 py-1 text-xs cursor-pointer"
         >
+          {kind === "config" && (
+            <span role="img" aria-label="Configuration chat" className="mr-1.5 shrink-0">
+              <IconSparkles className="h-3 w-3" aria-hidden />
+            </span>
+          )}
           <span className="truncate max-w-[160px]">{name}</span>
         </button>
       )}

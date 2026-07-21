@@ -59,7 +59,12 @@ test.describe("Workspace deletion", () => {
     await expect(confirmButton).toBeEnabled();
     await confirmButton.click();
 
-    await expect(testPage).toHaveURL(/\/office$/, { timeout: 10_000 });
+    await expect(testPage).toHaveURL(
+      (url) =>
+        url.pathname === "/office" &&
+        url.searchParams.get("workspaceId") === officeSeed.workspaceId,
+      { timeout: 10_000 },
+    );
     await expect(testPage).not.toHaveURL(/\/office\/setup/);
 
     const { workspaces } = await apiClient.listWorkspaces();

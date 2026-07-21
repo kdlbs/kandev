@@ -34,8 +34,27 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"clarification-multi":     scenarioClarificationMulti,
 	"clarification-timeout":   scenarioClarificationTimeout,
 	"multi-permission":        scenarioMultiPermission,
+	"kandev-mcp-permission":   scenarioKandevMCPPermission,
 	"review-cumulative-setup": scenarioReviewCumulativeSetup,
+	"walkthrough-setup":       scenarioWalkthroughSetup,
+	"walkthrough-basic":       scenarioWalkthroughBasic,
+	"walkthrough-reemit":      scenarioWalkthroughReemit,
 	"symlink-file-setup":      scenarioSymlinkFileSetup,
+	"markdown-table":          scenarioMarkdownTable,
+	"empty-turn":              scenarioEmptyTurn,
+}
+
+// scenarioEmptyTurn emits no content and no tool calls, so the turn ends
+// cleanly with no agent output. Reproduces the case where an agent treats a
+// prompt (e.g. an unsupported slash command) as a no-op and returns an empty
+// end_turn. Drives the frontend "empty turn" notice.
+func scenarioEmptyTurn(e *emitter) {
+	_ = e
+	// Stay "running" for a few seconds rather than returning instantly. The
+	// empty-turn notice is driven by the live turn.completed event, so the turn
+	// must outlast the client's initial WS subscribe (especially on mobile,
+	// where a fast auto-start turn can finish before the chat subscribes).
+	fixedDelay(3000)
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.
@@ -129,6 +148,33 @@ func scenarioMultiPermission(e *emitter) {
 	e.text("Multi-permission scenario complete.")
 }
 
+// scenarioKandevMCPPermission emits a tool_call with a Kandev MCP tool title and
+// blocks on a permission request, exercising the kandev renderer's approval UI.
+func scenarioKandevMCPPermission(e *emitter) {
+	fixedDelay(50)
+	e.text("Calling a Kandev MCP tool that needs approval.")
+
+	fixedDelay(50)
+	id := nextToolID()
+	toolName := "mcp__kandev__list_workspaces_kandev"
+	input := map[string]any{}
+	e.startTool(id, toolName, acp.ToolKindOther, input)
+	allowed := e.requestPermission(id, toolName, acp.ToolKindOther, input)
+
+	fixedDelay(50)
+	if allowed {
+		e.completeTool(id, map[string]any{
+			"workspaces": []map[string]any{{"id": "w1", "name": "Main"}},
+			"total":      1,
+		})
+	} else {
+		e.completeTool(id, map[string]any{"error": "denied"})
+	}
+
+	fixedDelay(50)
+	e.text("Kandev MCP permission scenario complete.")
+}
+
 // scenarioPermissionFlow: tool requiring permission with fixed delays.
 func scenarioPermissionFlow(e *emitter) {
 	fixedDelay(50)
@@ -161,22 +207,38 @@ func scenarioError(e *emitter) {
 	e.text("E2E test error: simulated failure")
 }
 
-// scenarioSubagent: subagent with child messages and fixed delays.
+// scenarioSubagent: a claude-style subagent (Task) tool call carrying the
+// `_meta.claudeCode` Agent marker and a toolResponse with full result metrics,
+// so the kandev adapter normalizes it to a subagent_task payload and the UI
+// renders the subagent card with metadata chips.
 func scenarioSubagent(e *emitter) {
 	taskToolID := nextToolID()
 	fixedDelay(50)
 
-	e.startTool(taskToolID, "E2E subagent test", acp.ToolKindOther,
-		map[string]any{
-			"description": "E2E subagent test",
-			"prompt":      "Run e2e subagent scenario",
-		})
+	e.startSubagentTool(taskToolID,
+		"Explore the codebase",
+		"Find all files and summarize the project structure",
+		"general-purpose")
 
 	fixedDelay(50)
 	e.text("Subagent working on the task...")
 
+	// A tool call the subagent runs internally, attributed to the Task via
+	// `_meta.claudeCode.parentToolUseId` so it nests under the subagent card.
+	childToolID := nextToolID()
+	e.startChildTool(childToolID, taskToolID, "sleep 30", acp.ToolKindExecute,
+		map[string]any{"command": "sleep 30"})
 	fixedDelay(50)
-	e.completeTool(taskToolID, map[string]any{"result": "E2E subagent completed"})
+	e.completeChildTool(childToolID, taskToolID, map[string]any{"output": ""})
+
+	fixedDelay(50)
+	e.completeSubagentTool(taskToolID, "E2E subagent completed", subagentResult{
+		agentID:      "agent_e2e_0001",
+		subagentType: "general-purpose",
+		durationMs:   2200,
+		totalTokens:  9987,
+		toolUseCount: 3,
+	})
 
 	fixedDelay(50)
 	e.text("Subagent scenario complete.")
@@ -716,6 +778,188 @@ func scenarioReviewCumulativeSetup(e *emitter) {
 	e.text("review-cumulative-setup complete: " + filePath + " has COMMITTED_CHANGE and UNCOMMITTED_CHANGE")
 }
 
+// walkthroughDemoArgs is the show_walkthrough_kandev payload used by
+// scenarioWalkthroughBasic. task_id is resolved server-side from the session's
+// env (KANDEV_TASK_ID), mirroring the clarification path, so it is omitted here.
+// Walkthrough step JSON keys, hoisted to constants to satisfy goconst.
+const (
+	wtKeyTitle   = "title"
+	wtKeyFile    = "file"
+	wtKeyLine    = "line"
+	wtKeyLineEnd = "line_end"
+	wtKeyText    = "text"
+	wtKeySteps   = "steps"
+)
+
+// wtStep builds one show_walkthrough step map. Keeping the JSON keys in one
+// place avoids repeating string literals (goconst).
+func wtStep(title, file, text string, line, lineEnd int) map[string]interface{} {
+	m := map[string]interface{}{wtKeyTitle: title, wtKeyFile: file, wtKeyLine: line, wtKeyText: text}
+	if lineEnd > 0 {
+		m[wtKeyLineEnd] = lineEnd
+	}
+	return m
+}
+
+// wtArgs assembles show_walkthrough_kandev args from a title and steps.
+func wtArgs(title string, steps ...map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{wtKeyTitle: title, wtKeySteps: steps}
+}
+
+// scenarioWalkthroughReemit emits one walkthrough, waits, then emits a second
+// (different) one — exercising the live `task.walkthrough.updated` path so the
+// UI must reflect the re-emit without a page reload.
+func scenarioWalkthroughReemit(e *emitter) {
+	fixedDelay(50)
+	wd, err := os.Getwd()
+	if err != nil {
+		e.text("walkthrough-reemit: getwd failed: " + err.Error())
+		return
+	}
+	runGitCmd := makeGitRunner(wd)
+	if !writeWalkthroughFile(e, runGitCmd, "walkthrough-reemit", "reemit.txt", "line 1\nline 2\n", "line 1\nREEMIT_CHANGE\n") {
+		return
+	}
+
+	e.text("First tour incoming.")
+	if _, err := callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("First",
+		wtStep("First step", "reemit.txt", "REEMIT_FIRST step one.", 1, 0),
+		wtStep("First step 2", "reemit.txt", "REEMIT_FIRST step two.", 2, 0),
+	)); err != nil {
+		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))
+		return
+	}
+	e.text("reemit-first-done")
+
+	fixedDelay(200)
+
+	if _, err := callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
+		wtStep("Second step", "reemit.txt", "REEMIT_SECOND step one.", 1, 0),
+		wtStep("Second step 2", "reemit.txt", "REEMIT_SECOND step two.", 2, 0),
+		wtStep("Second step 3", "reemit.txt", "REEMIT_SECOND step three.", 1, 0),
+	)); err != nil {
+		e.text(fmt.Sprintf("show_walkthrough re-emit failed: %s", err))
+		return
+	}
+	e.text("reemit-second-done")
+}
+
+// walkthroughDemoArgs builds a 5-step tour spanning three changed files plus
+// one clean committed file (exercising both the diff-anchored card and the
+// full-file / editor-mode floating window).
+func walkthroughDemoArgs() map[string]interface{} {
+	return map[string]interface{}{
+		wtKeyTitle: "Tour of the change",
+		wtKeySteps: []map[string]interface{}{
+			wtStep("Overview", "walkthrough_a.txt",
+				"Big picture: this tour explains how the sample changes connect across the touched files.\n\nELI5: first we show the map, then we explain each changed line.", 1, 0),
+			wtStep("The change in A", "walkthrough_a.txt",
+				"Step 2: this is WALKTHROUGH_CHANGE_A the tour narrates.", 2, 3),
+			wtStep("File B", "walkthrough_b.txt",
+				"Step 3: WALKTHROUGH_CHANGE_B lives in file B.", 4, 5),
+			wtStep("File C", "walkthrough_c.txt",
+				"Step 4: WALKTHROUGH_CHANGE_C lives in file C.", 2, 0),
+			wtStep("Unchanged file", "walkthrough_base.txt",
+				"Step 5: WALKTHROUGH_UNCHANGED — this base file did not change; shown from its current state.", 1, 0),
+		},
+	}
+}
+
+// writeWalkthroughFile writes content and commits it, then (when changed is
+// non-empty) leaves an uncommitted modification so the file appears in review.
+func writeWalkthroughFile(e *emitter, runGitCmd func(args ...string) error, prefix, path, base, changed string) bool {
+	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
+		e.text(prefix + ": write base failed: " + err.Error())
+		return false
+	}
+	if err := runGitCmd("add", path); err != nil {
+		e.text(prefix + ": git add failed: " + err.Error())
+		return false
+	}
+	if err := runGitCmd("commit", "-m", "add "+path); err != nil {
+		e.text(prefix + ": git commit failed: " + err.Error())
+		return false
+	}
+	if changed == "" {
+		return true
+	}
+	if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
+		e.text(prefix + ": write change failed: " + err.Error())
+		return false
+	}
+	return true
+}
+
+func setupWalkthroughFiles(e *emitter, prefix string) bool {
+	wd, err := os.Getwd()
+	if err != nil {
+		e.text(prefix + ": getwd failed: " + err.Error())
+		return false
+	}
+	runGitCmd := makeGitRunner(wd)
+
+	fixtures := []string{"walkthrough_a.txt", "walkthrough_b.txt", "walkthrough_c.txt", "walkthrough_base.txt"}
+	_ = runGitCmd(append([]string{"rm", "--force"}, fixtures...)...)
+	_ = runGitCmd("commit", "-m", "cleanup walkthrough fixtures")
+
+	// Three changed files (diff-anchored steps) + one clean committed file (editor-mode step).
+	ok := writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_a.txt",
+		"line 1: ENTRY\nline 2: BASE\nline 3: BASE\n",
+		"line 1: ENTRY\nline 2: WALKTHROUGH_CHANGE_A\nline 3: WALKTHROUGH_CHANGE_A\n")
+	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_b.txt",
+		"line 1: B\nline 2: BASE\nline 3: BASE\nline 4: BASE\nline 5: BASE\n",
+		"line 1: B\nline 2: BASE\nline 3: BASE\nline 4: WALKTHROUGH_CHANGE_B\nline 5: WALKTHROUGH_CHANGE_B\n")
+	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_c.txt",
+		"line 1: C\nline 2: BASE\n", "line 1: C\nline 2: WALKTHROUGH_CHANGE_C\n")
+	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_base.txt",
+		"line 1: WALKTHROUGH_UNCHANGED\nline 2: supporting context\n", "")
+	return ok
+}
+
+func emitWalkthroughTour(e *emitter, doneText string) {
+	fixedDelay(100)
+	e.text("Let me walk you through the change.")
+	toolID := nextToolID()
+	toolName := "show_walkthrough_kandev"
+	args := walkthroughDemoArgs()
+	e.startTool(toolID, toolName, acp.ToolKindOther, args)
+	result, err := callMCPTool("kandev", toolName, args)
+	if err != nil {
+		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
+		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))
+		return
+	}
+	e.completeTool(toolID, map[string]any{"result": result})
+	fixedDelay(50)
+	e.text(doneText)
+}
+
+// scenarioWalkthroughSetup creates changed files without emitting a walkthrough.
+// It lets E2E tests click the actual Changes-panel Walkthrough request button.
+func scenarioWalkthroughSetup(e *emitter) {
+	fixedDelay(50)
+	if !setupWalkthroughFiles(e, "walkthrough-setup") {
+		return
+	}
+	e.text("walkthrough-setup complete: changes ready")
+}
+
+// scenarioWalkthroughRequested is the mock-agent response to the prompt generated
+// by the Changes-panel Walkthrough button.
+func scenarioWalkthroughRequested(e *emitter) {
+	emitWalkthroughTour(e, "walkthrough-request complete: 5-step tour emitted")
+}
+
+// scenarioWalkthroughBasic creates changed files, then emits a 5-step code
+// walkthrough over them via the show_walkthrough_kandev MCP tool.
+func scenarioWalkthroughBasic(e *emitter) {
+	fixedDelay(50)
+	if !setupWalkthroughFiles(e, "walkthrough-basic") {
+		return
+	}
+	emitWalkthroughTour(e, "walkthrough-basic complete: 5-step tour emitted")
+}
+
 // scenarioSymlinkFileSetup creates a file and a symlink to it, commits both,
 // then modifies the target file leaving an uncommitted diff.
 func scenarioSymlinkFileSetup(e *emitter) {
@@ -784,4 +1028,22 @@ func makeGitRunner(wd string) func(args ...string) error {
 // contextWithTimeout creates a context with timeout in seconds.
 func contextWithTimeout(seconds int) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
+}
+
+// scenarioMarkdownTable: emits a dense label/value markdown table modeled on a
+// real agent bug-report summary. The table has narrow header labels in column 1
+// and long inline-code identifiers in column 2 — the shape that previously
+// caused header words to wrap character-by-character ("Failin g test") because
+// the value column starved the label column.
+func scenarioMarkdownTable(e *emitter) {
+	fixedDelay(100)
+	e.text("Pushed.\n\n" +
+		"## Summary\n\n" +
+		"| | |\n" +
+		"|---|---|\n" +
+		"| **Failing test** | `TestHandleAgentBootReady_DrainsOrphanedQueuedMessage/already_WAITING_FOR_INPUT_(boot_raced_persistResumeState)` |\n" +
+		"| **Symptom** | `session.State = \"RUNNING\", want WAITING_FOR_INPUT` |\n" +
+		"| **Root cause** | Pre-existing race, not introduced by this PR. `handleAgentBootReady` synchronously flips state to `WAITING_FOR_INPUT` then spawns a goroutine that calls `PromptTask` → flips state to `RUNNING`. The test asserted on `WAITING_FOR_INPUT` immediately after the handler returned — on faster CI scheduling the goroutine wins the race. The kandev-ci container apparently schedules tighter than the github-hosted ubuntu, so it loses where the previous env got lucky. |\n" +
+		"| **Fix** | Cherry-picked `b8d06ea8 test(backend): fix race in TestHandleAgentBootReady_DrainsOrphanedQueuedMessage` from `feature/subtask-with-repo-se-vhz` (a parallel branch that already addressed this). The test now accepts either `WAITING_FOR_INPUT` or `RUNNING` — both prove the boot-ready flip landed and rule out the original `STARTING + queue still full` regression. |\n" +
+		"| **Local verification** | `go test -race -count=5` → 5/5 PASS. |\n")
 }

@@ -31,21 +31,13 @@ func NewEventPublisher(eventBus bus.EventBus, log *logger.Logger) *EventPublishe
 
 // PublishAgentEvent publishes an agent lifecycle event (started, stopped, ready, completed, failed).
 func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string, execution *AgentExecution) {
+	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayload(execution))
+}
+
+// publishAgentEventPayload publishes an immutable agent lifecycle snapshot.
+func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType string, payload AgentEventPayload) {
 	if p.eventBus == nil {
 		return
-	}
-
-	payload := AgentEventPayload{
-		AgentExecutionID: execution.ID,
-		TaskID:           execution.TaskID,
-		SessionID:        execution.SessionID,
-		AgentProfileID:   execution.AgentProfileID,
-		ContainerID:      execution.ContainerID,
-		Status:           string(execution.Status),
-		StartedAt:        execution.StartedAt,
-		FinishedAt:       execution.FinishedAt,
-		ErrorMessage:     execution.ErrorMessage,
-		ExitCode:         execution.ExitCode,
 	}
 
 	event := bus.NewEvent(eventType, "agent-manager", payload)
@@ -53,12 +45,29 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 	if err := p.eventBus.Publish(ctx, eventType, event); err != nil {
 		p.logger.Error("failed to publish event",
 			zap.String("event_type", eventType),
-			zap.String("instance_id", execution.ID),
+			zap.String("instance_id", payload.AgentExecutionID),
 			zap.Error(err))
 	} else {
 		p.logger.Debug("published agent event",
 			zap.String("event_type", eventType),
-			zap.String("instance_id", execution.ID))
+			zap.String("instance_id", payload.AgentExecutionID))
+	}
+}
+
+func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
+	return AgentEventPayload{
+		AgentExecutionID:   execution.ID,
+		TaskID:             execution.TaskID,
+		SessionID:          execution.SessionID,
+		AgentProfileID:     execution.officeProfileID(),
+		ExecutionProfileID: execution.AgentProfileID,
+		ContainerID:        execution.ContainerID,
+		Status:             string(execution.Status),
+		StartedAt:          execution.StartedAt,
+		FinishedAt:         execution.FinishedAt,
+		ErrorMessage:       execution.ErrorMessage,
+		ExitCode:           execution.ExitCode,
+		PromptGeneration:   execution.promptGeneration,
 	}
 }
 
@@ -158,6 +167,10 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		CurrentModelID:          event.CurrentModelID,
 		SessionModels:           event.SessionModels,
 		ConfigOptions:           event.ConfigOptions,
+		ConfigBaselineCandidate: event.ConfigBaselineCandidate,
+		SessionTitle:            event.SessionTitle,
+		SessionUpdatedAt:        event.SessionUpdatedAt,
+		SessionMeta:             event.SessionMeta,
 		Usage:                   event.Usage,
 		PlanEntries:             event.PlanEntries,
 		PlanContent:             event.PlanContent,

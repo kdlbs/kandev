@@ -84,9 +84,10 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
 
           {/* Answer - indented below question */}
           {isAnswered && (
-            <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-foreground/80">
+            <div className="mt-1 ml-3 flex items-start gap-1.5 text-xs text-foreground/80">
               {getStatusIndicator()}
-              {getAnswerSummary()}
+              {/* pre-wrap preserves newlines from multiline custom answers. */}
+              <span className="whitespace-pre-wrap">{getAnswerSummary()}</span>
               {metadata.agent_disconnected && (
                 <span className="text-muted-foreground">· sent as new message</span>
               )}

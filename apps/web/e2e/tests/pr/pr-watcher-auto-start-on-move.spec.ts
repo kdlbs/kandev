@@ -119,6 +119,6 @@ test.describe("PR watcher auto-start on move", () => {
     await sessionAfter.waitForLoad();
 
     // The agent should have completed — idle input visible
-    await expect(sessionAfter.idleInput()).toBeVisible({ timeout: 30_000 });
+    await sessionAfter.waitForChatIdle({ timeout: 30_000 });
   });
 });

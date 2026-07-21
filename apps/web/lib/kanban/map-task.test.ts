@@ -96,6 +96,28 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(wsPayload()).repositoryId).toBe("repo-a");
   });
 
+  it("maps primary session pending action from HTTP and WS shapes", () => {
+    const pendingAction = {
+      primary_session_pending_action: "clarification",
+    } as Record<string, unknown> as Partial<TaskLike>;
+    const http = toKanbanTask(httpDTO(pendingAction));
+    const ws = toKanbanTask(wsPayload(pendingAction));
+
+    expect(http).toEqual(ws);
+    expect((http as Record<string, unknown>).primarySessionPendingAction).toBe("clarification");
+  });
+
+  it("drops unrecognized primary session pending action values", () => {
+    const invalidPendingAction = {
+      primary_session_pending_action: "unknown",
+    } as Record<string, unknown> as Partial<TaskLike>;
+
+    expect(toKanbanTask(httpDTO(invalidPendingAction)).primarySessionPendingAction).toBeUndefined();
+    expect(
+      toKanbanTask(wsPayload(invalidPendingAction)).primarySessionPendingAction,
+    ).toBeUndefined();
+  });
+
   it("missing repository on either shape: repositoryId is undefined", () => {
     const http = httpDTO({ repositories: undefined });
     const ws = wsPayload({ repository_id: undefined, repositories: undefined });
@@ -132,5 +154,17 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     const ws = wsPayload({ is_remote_executor: undefined });
     expect(toKanbanTask(http).isRemoteExecutor).toBe(false);
     expect(toKanbanTask(ws).isRemoteExecutor).toBe(false);
+  });
+
+  it("clears the parent and retains shared workspace mode from a detach update", () => {
+    const detached = toKanbanTask(
+      wsPayload({
+        parent_id: null,
+        metadata: { workspace: { mode: "shared_group" } },
+      }),
+    );
+
+    expect(detached.parentTaskId).toBeUndefined();
+    expect(detached.workspaceMode).toBe("shared_group");
   });
 });

@@ -31,7 +31,7 @@ Inbox is not a table. It is a read-side aggregation over:
 - **Pending approvals**: hire requests, budget increase requests, board approval requests.
 - **Budget alerts**: agents approaching or exceeding limits.
 - **Agent errors**: sessions that failed with unrecoverable errors.
-- **Review requests**: tasks in `in_review` status.
+- **Review requests**: tasks with pending reviewer/approver decisions.
 - **Clarification requests**: agents waiting on a question response.
 
 Items ordered by recency, unresolved first.
@@ -200,7 +200,7 @@ The inbox listing itself is a **computed view** — `office_inbox` does not exis
 - **Budget alerts** and **agent errors** surfaced in the inbox are activity rows with `action ∈ {budget.alert, agent.error}` — the inbox re-reads up to 20 most-recent entries per type on every fetch. They do not have a separate "resolved" state; the rows persist forever in the log.
 - **Failed-run and auto-paused-agent rows** come from `FailureInboxSource` (failed `office_runs` rows + `office_agents.status = paused`). They persist across restart and disappear from the inbox only when the user "Mark fixed"-dismisses them, when the run is re-queued, or when the agent is un-paused.
 - **Inbox dismissals** persist in `office_inbox_dismissals` keyed by `(user_id, item_kind, item_id)`. Single-user kandev writes `user_id = "default"`. The inbox filters dismissed rows out on every fetch; the underlying activity/run rows are NOT deleted.
-- **Reviewer/approver participants** for task `execution_policy` stages persist in `workflow_step_participants`; their decisions persist in `workflow_step_decisions`. Decisions are superseded (never deleted) when re-recorded, so the "viewer needs decision" check is deterministic across restarts.
+- **Reviewer/approver participants** for task `execution_policy` stages persist in `workflow_step_participants`; only rows with `decision_required = true` produce `task_review_request` inbox items. Runner/assignee rows never produce review inbox items. Decisions persist in `workflow_step_decisions` and are superseded (never deleted) when re-recorded, so the "viewer needs decision" check is deterministic across restarts.
 - **Approval `task_blockers`** rows (in `task_blockers`) persist; blocker resolution on completion triggers a `task_blockers_resolved` wakeup queued in the office scheduler queue, which itself persists in `office_run_requests`.
 - **Notification subscriptions** persist in `notification_subscriptions` (event type `office.inbox_item`). User preference about which providers receive inbox notifications survives restart.
 

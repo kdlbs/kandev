@@ -1,0 +1,335 @@
+{
+  "version": 1,
+  "areas": [
+    {
+      "id": "install-and-launch",
+      "audiences": ["user", "operator"],
+      "stability": "stable",
+      "docs": ["index", "use-kandev", "cli", "desktop-app", "run-as-a-service"],
+      "sources": ["apps/cli/bin/native-shim.js", "apps/cli/src/cli.ts", "apps/desktop/src-tauri/src/lib.rs"],
+      "tests": ["apps/cli/bin/native-shim.test.mjs", "apps/desktop/e2e/desktop-launch-smoke.test.mjs"]
+    },
+    {
+      "id": "backend-configuration",
+      "audiences": ["operator", "contributor"],
+      "stability": "stable",
+      "docs": ["configuration", "operations", "cli"],
+      "sources": ["apps/backend/internal/common/config/config.go", "apps/backend/internal/agentctl/server/config/config.go", "apps/backend/internal/profiles/profiles.go"],
+      "tests": ["apps/backend/internal/common/config/config_test.go", "apps/backend/internal/agentctl/server/config/config_test.go", "apps/backend/internal/profiles/profiles_test.go"]
+    },
+    {
+      "id": "workspaces-and-repositories",
+      "audiences": ["user"],
+      "stability": "stable",
+      "docs": ["use-kandev", "tasks-and-workflows", "configuration"],
+      "sources": ["apps/backend/internal/task/handlers/workspace_handlers.go", "apps/web/components/app-sidebar/app-sidebar-workspace-picker.tsx"],
+      "tests": ["apps/backend/internal/task/handlers/workspace_handlers_test.go", "apps/web/components/app-sidebar/app-sidebar-workspace-picker.test.tsx"],
+      "settingsRoutes": ["/settings/workspace"],
+      "mcpTools": ["list_repositories_kandev", "list_workspaces_kandev"]
+    },
+    {
+      "id": "tasks-and-workflows",
+      "audiences": ["user"],
+      "stability": "stable",
+      "docs": ["tasks-and-workflows", "workflow-tips", "workflow-import-export", "workflow-sync"],
+      "sources": ["apps/backend/internal/orchestrator/workflow_store.go", "apps/web/components/kanban-with-preview.tsx"],
+      "tests": ["apps/backend/internal/orchestrator/workflow_store_test.go", "apps/web/components/kanban-with-preview.test.ts"],
+      "mcpTools": [
+        "create_workflow_kandev",
+        "create_workflow_step_kandev",
+        "delete_workflow_kandev",
+        "delete_workflow_step_kandev",
+        "import_workflow_kandev",
+        "list_workflow_steps_kandev",
+        "list_workflows_kandev",
+        "reorder_workflow_steps_kandev",
+        "update_workflow_kandev",
+        "update_workflow_step_kandev"
+      ]
+    },
+    {
+      "id": "task-lifecycle",
+      "audiences": ["user"],
+      "stability": "stable",
+      "docs": ["tasks-and-workflows", "coordination", "git-operations"],
+      "sources": [
+        "apps/backend/internal/orchestrator/task_operations.go",
+        "apps/backend/internal/mcp/handlers/config_task_handlers.go",
+        "apps/backend/internal/mcp/handlers/stop_task.go",
+        "apps/backend/internal/mcp/server/handlers.go",
+        "apps/backend/internal/mcp/server/server.go",
+        "apps/backend/internal/gateway/websocket/client.go"
+      ],
+      "tests": [
+        "apps/backend/internal/orchestrator/task_operations_test.go",
+        "apps/backend/internal/orchestrator/coordinator_stop_test.go",
+        "apps/backend/internal/mcp/handlers/handlers_test.go",
+        "apps/backend/internal/mcp/handlers/stop_task_test.go",
+        "apps/backend/internal/mcp/server/handlers_test.go",
+        "apps/backend/internal/mcp/server/server_test.go",
+        "apps/backend/internal/mcp/server/sysprompt_sync_test.go",
+        "apps/backend/internal/backendapp/mcp_stop_composition_test.go",
+        "apps/backend/internal/integration/mcp_stop_task_test.go",
+        "apps/backend/internal/gateway/websocket/client_mcp_actions_test.go"
+      ],
+      "mcpTools": [
+        "add_branch_to_task_kandev",
+        "archive_task_kandev",
+        "create_task_kandev",
+        "delete_task_kandev",
+        "list_tasks_kandev",
+        "move_task_kandev",
+        "step_complete_kandev",
+        "stop_task_kandev",
+        "update_repository_base_branch_kandev",
+        "update_task_kandev",
+        "update_task_state_kandev"
+      ]
+    },
+    {
+      "id": "sessions-and-coordination",
+      "audiences": ["user"],
+      "stability": "stable",
+      "docs": ["sessions-and-review", "coordination", "automation-and-mcp", "agent-communication"],
+      "sources": ["apps/backend/internal/mcp/handlers/spawn_session.go", "apps/web/components/task/dockview-session-tabs.ts"],
+      "tests": ["apps/backend/internal/mcp/handlers/spawn_session_test.go", "apps/web/components/task/dockview-session-tabs.test.ts"],
+      "mcpTools": [
+        "ask_user_question_kandev",
+        "get_task_conversation_kandev",
+        "get_task_document_kandev",
+        "list_related_tasks_kandev",
+        "list_task_documents_kandev",
+        "message_task_kandev",
+        "spawn_session_kandev",
+        "write_task_document_kandev"
+      ]
+    },
+    {
+      "id": "plans-walkthroughs-and-review",
+      "audiences": ["user"],
+      "stability": "stable",
+      "docs": ["sessions-and-review", "developer-tools", "automation-and-mcp"],
+      "sources": ["apps/web/components/review/review-dialog.tsx", "apps/web/components/review/walkthrough-overlay.tsx"],
+      "tests": ["apps/web/components/review/review-dialog.build-files.test.ts", "apps/web/components/review/walkthrough-overlay.test.tsx"],
+      "mcpTools": [
+        "create_task_plan_kandev",
+        "delete_task_plan_kandev",
+        "delete_walkthrough_kandev",
+        "get_task_plan_kandev",
+        "get_walkthrough_kandev",
+        "show_walkthrough_kandev",
+        "update_task_plan_kandev"
+      ]
+    },
+    {
+      "id": "developer-workbench-and-git",
+      "audiences": ["user"],
+      "stability": "stable",
+      "docs": ["developer-tools", "git-operations", "sessions-and-review"],
+      "sources": [
+        "apps/web/components/session-commands.tsx",
+        "apps/web/components/task/chat/messages/shell-output-disclosure.tsx",
+        "apps/web/components/task/chat/token-usage-display.tsx",
+        "apps/web/components/task/editors-menu.tsx",
+        "apps/backend/internal/agentctl/server/process/workspace_git_status.go"
+      ],
+      "tests": [
+        "apps/web/e2e/tests/command-panel.spec.ts",
+        "apps/web/e2e/tests/task/editors-menu-worktree-picker.spec.ts",
+        "apps/web/hooks/domains/session/use-shell-command-output.test.ts",
+        "apps/web/components/task/chat/token-usage-display.test.tsx",
+        "apps/backend/internal/agentctl/server/process/workspace_git_status_test.go"
+      ]
+    },
+    {
+      "id": "agents-profiles-and-prompts",
+      "audiences": ["user"],
+      "stability": "stable",
+      "docs": ["agents-and-profiles", "configuration", "add-agent-cli"],
+      "sources": [
+        "apps/backend/internal/profiles/profiles.go",
+        "apps/web/app/settings/agents/page.tsx",
+        "apps/web/components/settings/agent-usage-section.tsx",
+        "apps/web/hooks/domains/settings/use-dynamic-models.ts"
+      ],
+      "tests": [
+        "apps/backend/internal/profiles/profiles_test.go",
+        "apps/web/components/settings/agent-profile-page.test.tsx",
+        "apps/web/components/settings/agent-usage-section.test.tsx",
+        "apps/web/hooks/domains/settings/use-dynamic-models.test.ts"
+      ],
+      "settingsRoutes": ["/settings/agents", "/settings/prompts", "/settings/utility-agents"],
+      "mcpTools": [
+        "create_agent_profile_kandev",
+        "delete_agent_profile_kandev",
+        "list_agent_profiles_kandev",
+        "list_agents_kandev",
+        "update_agent_kandev",
+        "update_agent_profile_kandev"
+      ]
+    },
+    {
+      "id": "executors-and-environments",
+      "audiences": ["user", "operator"],
+      "stability": "stable",
+      "docs": ["executors", "remote-cloud-environment", "docker", "k8s"],
+      "sources": ["apps/backend/internal/agent/executor/executor.go", "apps/web/app/settings/executors/page.tsx"],
+      "tests": ["apps/web/e2e/tests/docker/docker-launch.spec.ts", "apps/web/e2e/tests/ssh/executor-crud.spec.ts"],
+      "settingsRoutes": ["/settings/executor/new", "/settings/executors"],
+      "mcpTools": [
+        "create_executor_profile_kandev",
+        "delete_executor_profile_kandev",
+        "list_executor_profiles_kandev",
+        "list_executors_kandev",
+        "update_executor_profile_kandev"
+      ]
+    },
+    {
+      "id": "provider-integrations",
+      "audiences": ["user", "operator"],
+      "stability": "stable",
+      "docs": ["integrations", "configuration"],
+      "sources": ["apps/web/components/app-sidebar/sections/integrations-section.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope.go", "apps/backend/internal/azuredevops/service.go", "apps/web/app/azure-devops/azure-devops-page-client.tsx"],
+      "tests": ["apps/web/components/app-sidebar/sections/integrations-section.test.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope_test.go", "apps/backend/internal/azuredevops/service_test.go", "apps/web/e2e/tests/integrations/azure-devops.spec.ts"],
+      "settingsRoutes": [
+        "/settings/integrations",
+        "/settings/integrations/azure-devops",
+        "/settings/integrations/github",
+        "/settings/integrations/gitlab",
+        "/settings/integrations/jira",
+        "/settings/integrations/linear",
+        "/settings/integrations/sentry",
+        "/settings/integrations/slack"
+      ]
+    },
+    {
+      "id": "automations-and-external-mcp",
+      "audiences": ["user", "operator"],
+      "stability": "stable",
+      "docs": ["automation-and-mcp", "integrations", "workflow-tips"],
+      "sources": ["apps/backend/internal/automation/service.go", "apps/backend/internal/mcp/server/server.go"],
+      "tests": ["apps/backend/internal/automation/service_test.go", "apps/backend/internal/mcp/server/server_test.go"],
+      "settingsRoutes": ["/settings/automations", "/settings/external-mcp"],
+      "mcpTools": ["get_mcp_config_kandev", "update_mcp_config_kandev"]
+    },
+    {
+      "id": "personal-settings-and-secrets",
+      "audiences": ["user"],
+      "stability": "stable",
+      "docs": ["security", "configuration", "developer-tools", "operations", "sessions-and-review"],
+      "sources": ["apps/web/src/settings-routes.tsx", "apps/web/components/settings/general-settings.tsx", "apps/web/components/settings/layouts/layout-settings.tsx"],
+      "tests": ["apps/web/src/settings-routes.test.ts", "apps/web/components/settings/terminal-settings.test.ts", "apps/web/lib/layout/layout-profiles.test.ts"],
+      "settingsRoutes": [
+        "/settings/general",
+        "/settings/general/appearance",
+        "/settings/general/editors",
+        "/settings/general/keyboard-shortcuts",
+        "/settings/general/layouts",
+        "/settings/general/notifications",
+        "/settings/general/secrets",
+        "/settings/general/sprites",
+        "/settings/general/task-actions",
+        "/settings/general/terminal",
+        "/settings/voice-mode"
+      ]
+    },
+    {
+      "id": "security-and-trust",
+      "audiences": ["user", "operator"],
+      "stability": "stable",
+      "docs": ["security", "configuration", "executors", "automation-and-mcp", "operations"],
+      "sources": ["apps/backend/internal/backendapp/middleware.go", "apps/backend/internal/gateway/websocket/origin.go", "apps/backend/internal/secrets/crypto.go"],
+      "tests": ["apps/backend/internal/backendapp/middleware_test.go", "apps/backend/internal/gateway/websocket/origin_test.go"]
+    },
+    {
+      "id": "system-health-and-maintenance",
+      "audiences": ["operator"],
+      "stability": "stable",
+      "docs": ["operations", "configuration", "feature-status"],
+      "sources": [
+        "apps/backend/internal/system/settings/store.go",
+        "apps/backend/internal/system/storage/handler.go",
+        "apps/web/components/settings/system/feature-toggles-settings.tsx",
+        "apps/web/components/settings/system/storage/storage-maintenance-settings.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/system/settings/store_test.go",
+        "apps/backend/internal/system/storage/handler_test.go",
+        "apps/web/components/settings/system/feature-toggles-settings.test.tsx",
+        "apps/web/components/settings/system/storage/storage-maintenance-settings.test.tsx"
+      ],
+      "settingsRoutes": [
+        "/settings/system/about",
+        "/settings/system/backups",
+        "/settings/system/database",
+        "/settings/system/feature-toggles",
+        "/settings/system/licenses",
+        "/settings/system/logs",
+        "/settings/system/status",
+        "/settings/system/storage",
+        "/settings/system/updates"
+      ]
+    },
+    {
+      "id": "deployment-and-platforms",
+      "audiences": ["operator"],
+      "stability": "stable",
+      "docs": ["docker", "k8s", "run-as-a-service", "windows-support", "operations"],
+      "sources": ["Dockerfile", "apps/cli/src/service/index.ts"],
+      "tests": ["apps/web/e2e/tests/docker/docker-launch.spec.ts", "apps/cli/src/service/install_helpers.test.ts"]
+    },
+    {
+      "id": "office-mode",
+      "audiences": ["user", "operator"],
+      "stability": "experimental",
+      "docs": ["coordination", "feature-status", "office-provider-routing"],
+      "sources": ["apps/backend/internal/office/routes.go", "apps/web/src/office-routes.tsx"],
+      "tests": ["apps/backend/internal/office/onboarding/service_test.go", "apps/web/src/office-routes.test.ts"]
+    },
+    {
+      "id": "plugin-system",
+      "audiences": ["operator", "contributor"],
+      "stability": "experimental",
+      "docs": ["plugins", "plugins-authoring", "plugins-manifest"],
+      "sources": ["apps/backend/internal/plugins/handlers.go", "apps/backend/pkg/pluginsdk/host.go", "apps/web/lib/plugins/host-api.ts"],
+      "tests": ["apps/backend/internal/plugins/service_test.go", "apps/backend/internal/plugins/manifest/manifest_test.go", "apps/web/lib/plugins/host-api.test.ts"]
+    },
+    {
+      "id": "plugin-marketplace",
+      "audiences": ["operator", "contributor"],
+      "stability": "experimental",
+      "docs": ["plugins-marketplace"],
+      "sources": ["apps/backend/internal/plugins/marketplace/catalog.go", "apps/backend/internal/plugins/marketplace/sourcestore.go", "apps/web/lib/api/domains/marketplace-api.ts"],
+      "tests": ["apps/backend/internal/plugins/marketplace/catalog_test.go", "apps/backend/internal/plugins/marketplace/sourcestore_test.go", "apps/web/hooks/domains/plugins/use-marketplace.test.ts"]
+    },
+    {
+      "id": "websocket-protocol",
+      "audiences": ["contributor", "integrator"],
+      "stability": "stable",
+      "docs": ["websocket-api", "architecture", "extending-kandev"],
+      "sources": ["apps/backend/pkg/websocket/actions.go", "apps/backend/pkg/websocket/handler.go"],
+      "tests": ["apps/backend/pkg/websocket/handler_test.go", "apps/backend/pkg/websocket/handler_race_test.go"]
+    },
+    {
+      "id": "contributor-workflow",
+      "audiences": ["contributor"],
+      "stability": "stable",
+      "docs": ["contributing", "architecture", "backend-development", "web-development", "testing", "remote-cloud-environment", "extending-kandev", "release-process"],
+      "sources": ["CONTRIBUTING.md", "Makefile"],
+      "tests": ["scripts/lint-harness-files.test.py", ".github/scripts/lint-action-pinning_test.py"]
+    }
+  ],
+  "exclusions": {
+    "settingsRoutes": [
+      { "route": "/settings", "reason": "Alias for General settings." },
+      { "route": "/settings/changelog", "reason": "Redirect to System updates." },
+      { "route": "/settings/general/changes-panel", "reason": "Legacy redirect to Appearance." },
+      { "route": "/settings/general/chat-input", "reason": "Legacy redirect to Keyboard Shortcuts." },
+      { "route": "/settings/general/resource-metrics", "reason": "Legacy redirect to Appearance." },
+      { "route": "/settings/general/shell", "reason": "Legacy redirect to Terminal." },
+      { "route": "/settings/plugins", "reason": "Experimental feature intentionally omitted until its public contract stabilizes." },
+      { "route": "/settings/system", "reason": "Redirect to System status." }
+    ],
+    "mcpTools": []
+  }
+}

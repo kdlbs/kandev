@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/remoteauth"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // FileUploader abstracts writing files to a remote environment. Used by
@@ -21,6 +22,8 @@ import (
 type FileUploader interface {
 	WriteFile(ctx context.Context, path string, data []byte, mode os.FileMode) error
 }
+
+const credentialFileMode os.FileMode = 0o600
 
 // UploadCredentialFiles reads local credential files and uploads them to the remote environment.
 func UploadCredentialFiles(
@@ -55,7 +58,7 @@ func UploadCredentialFiles(
 			}
 
 			targetPath := filepath.Join(targetHomeDir, method.TargetRelDir, filepath.Base(relPath))
-			if err := uploader.WriteFile(ctx, targetPath, data, 0o644); err != nil {
+			if err := uploader.WriteFile(ctx, targetPath, data, credentialFileMode); err != nil {
 				return fmt.Errorf("failed to upload %s: %w", targetPath, err)
 			}
 			log.Debug("uploaded credential file",
@@ -68,10 +71,22 @@ func UploadCredentialFiles(
 }
 
 // DetectGHToken runs `gh auth token` locally and returns the GitHub OAuth token.
+//
+// Splits the throttle wait (30s) from the exec budget (5s) so a busy gh pool
+// can't silently disable token injection. Critically the exec context is
+// built AFTER Acquire returns — otherwise its 5s deadline would already be
+// ticking down while we waited in the throttle queue.
 func DetectGHToken() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", "auth", "token")
+	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelAcquire()
+	release, err := subproc.GH().Acquire(acquireCtx)
+	if err != nil {
+		return "", fmt.Errorf("gh throttle acquire: %w", err)
+	}
+	defer release()
+	execCtx, cancelExec := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelExec()
+	cmd := exec.CommandContext(execCtx, "gh", "auth", "token")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("gh auth token failed: %w", err)

@@ -39,10 +39,11 @@ const MinPollIntervalSeconds = 5
 // session shows up in the auth-status banner promptly.
 const MaxPollIntervalSeconds = 600
 
-// SlackConfig is the install-wide Slack integration configuration. The xoxc
-// token and the d cookie live in the encrypted secret store under SecretKeyToken
-// and SecretKeyCookie respectively.
+// SlackConfig is the workspace-scoped Slack integration configuration. The xoxc
+// token and the d cookie live in the encrypted secret store under workspace
+// secret keys.
 type SlackConfig struct {
+	WorkspaceID   string `json:"workspaceId,omitempty" db:"workspace_id"`
 	AuthMethod    string `json:"authMethod" db:"auth_method"`
 	CommandPrefix string `json:"commandPrefix" db:"command_prefix"`
 	// UtilityAgentID points at a row in `utility_agents`. The agent is
@@ -111,22 +112,32 @@ type ThreadContext struct {
 	Messages []SlackMessage `json:"messages"`
 }
 
-// SecretKeyToken is the secret-store key for the install-wide xoxc- token.
+// SecretKeyToken is the legacy secret-store key for the old install-wide xoxc-
+// token.
 const SecretKeyToken = "slack:singleton:token"
 
-// SecretKeyCookie is the secret-store key for the install-wide `d` cookie.
+// SecretKeyCookie is the legacy secret-store key for the old install-wide `d`
+// cookie.
 // Stored separately from the token so each can be rotated/replaced
 // independently — Slack rotates the d cookie much more often than the token.
 const SecretKeyCookie = "slack:singleton:cookie"
 
-// LegacySecretKeyForToken returns the pre-singleton per-workspace token key,
-// kept so the provider can promote an existing per-workspace token onto
-// SecretKeyToken during the schema migration.
-func LegacySecretKeyForToken(workspaceID string) string {
+// SecretKeyForToken returns the workspace-scoped token key.
+func SecretKeyForToken(workspaceID string) string {
 	return "slack:" + workspaceID + ":token"
 }
 
-// LegacySecretKeyForCookie returns the pre-singleton per-workspace cookie key.
-func LegacySecretKeyForCookie(workspaceID string) string {
+// SecretKeyForCookie returns the workspace-scoped cookie key.
+func SecretKeyForCookie(workspaceID string) string {
 	return "slack:" + workspaceID + ":cookie"
+}
+
+// LegacySecretKeyForToken is kept for older tests/callers.
+func LegacySecretKeyForToken(workspaceID string) string {
+	return SecretKeyForToken(workspaceID)
+}
+
+// LegacySecretKeyForCookie is kept for older tests/callers.
+func LegacySecretKeyForCookie(workspaceID string) string {
+	return SecretKeyForCookie(workspaceID)
 }

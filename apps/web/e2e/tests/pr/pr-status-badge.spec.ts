@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
+import type { Page } from "@playwright/test";
 
 async function seedBadgeTest(
   apiClient: ApiClient,
@@ -40,6 +41,56 @@ async function seedBadgeTest(
   });
 
   return { workflow, inboxStep, workingStep, doneStep, task };
+}
+
+type TaskPR = NonNullable<Awaited<ReturnType<ApiClient["getTaskPR"]>>>;
+
+async function waitForTaskPRFields(
+  apiClient: ApiClient,
+  taskId: string,
+  expected: Partial<Pick<TaskPR, "state" | "review_state" | "checks_state" | "mergeable_state">> & {
+    pending_review_count?: number;
+  },
+) {
+  await expect
+    .poll(
+      async () => {
+        const pr = await apiClient.getTaskPR(taskId);
+        if (!pr) return false;
+        return Object.entries(expected).every(([key, value]) => pr[key as keyof TaskPR] === value);
+      },
+      {
+        timeout: 15_000,
+        message: "Expected backend TaskPR fields to match seeded mock state",
+      },
+    )
+    .toBe(true);
+}
+
+async function expectTopbarReadyState(
+  page: Page,
+  session: SessionPage,
+  expected: "true" | "false",
+) {
+  const button = session.prTopbarButton();
+  await button.waitFor({ state: "visible", timeout: 15_000 });
+
+  await button
+    .waitFor({ state: "attached", timeout: 1_000 })
+    .then(() =>
+      expect(button).toHaveAttribute("data-pr-ready-to-merge", expected, { timeout: 5_000 }),
+    )
+    .catch(async () => {
+      // The topbar PR button hydrates from task-pr state that can arrive via a
+      // github.task_pr.updated WS event. If the event was missed during task
+      // navigation, a reload rehydrates from the backend state asserted above.
+      await page.reload();
+      await session.waitForLoad();
+    });
+
+  await expect(session.prTopbarButton()).toHaveAttribute("data-pr-ready-to-merge", expected, {
+    timeout: 15_000,
+  });
 }
 
 test.describe("PR status badge", () => {
@@ -87,12 +138,15 @@ test.describe("PR status badge", () => {
       state: "open",
       checks_state: "success",
     });
+    await waitForTaskPRFields(apiClient, task.id, { state: "open", checks_state: "success" });
 
     await expect(kanban.taskCardInColumn("CI Skipped Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
     });
 
-    const icon = testPage.getByTestId(`pr-task-icon-${task.id}`);
+    // The global AppSidebar also renders a PRTaskIcon per task, so scope to the
+    // kanban board to target the card icon this test asserts on.
+    const icon = kanban.board.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
 
     // No reviews, so ready-to-merge must be false; badge should not be yellow.
@@ -104,8 +158,7 @@ test.describe("PR status badge", () => {
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
-    await expect(session.prTopbarButton()).toHaveAttribute("data-pr-ready-to-merge", "false");
+    await expectTopbarReadyState(testPage, session, "false");
   });
 
   /**
@@ -147,12 +200,20 @@ test.describe("PR status badge", () => {
       checks_state: "success",
       mergeable_state: "clean",
     });
+    await waitForTaskPRFields(apiClient, task.id, {
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
 
     await expect(kanban.taskCardInColumn("Ready To Merge Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
     });
 
-    const icon = testPage.getByTestId(`pr-task-icon-${task.id}`);
+    // The global AppSidebar also renders a PRTaskIcon per task, so scope to the
+    // kanban board to target the card icon this test asserts on.
+    const icon = kanban.board.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
     await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "true");
 
@@ -160,8 +221,7 @@ test.describe("PR status badge", () => {
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
-    await expect(session.prTopbarButton()).toHaveAttribute("data-pr-ready-to-merge", "true");
+    await expectTopbarReadyState(testPage, session, "true");
   });
 
   /**
@@ -203,12 +263,20 @@ test.describe("PR status badge", () => {
       checks_state: "success",
       mergeable_state: "blocked",
     });
+    await waitForTaskPRFields(apiClient, task.id, {
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "blocked",
+    });
 
     await expect(kanban.taskCardInColumn("Blocked Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
     });
 
-    const icon = testPage.getByTestId(`pr-task-icon-${task.id}`);
+    // The global AppSidebar also renders a PRTaskIcon per task, so scope to the
+    // kanban board to target the card icon this test asserts on.
+    const icon = kanban.board.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
     await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "false");
     // Plain-green approved state, not the ready-to-merge emerald.
@@ -257,12 +325,21 @@ test.describe("PR status badge", () => {
       mergeable_state: "blocked",
       pending_review_count: 1,
     });
+    await waitForTaskPRFields(apiClient, task.id, {
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "blocked",
+      pending_review_count: 1,
+    });
 
     await expect(kanban.taskCardInColumn("Awaiting Review Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
     });
 
-    const icon = testPage.getByTestId(`pr-task-icon-${task.id}`);
+    // The global AppSidebar also renders a PRTaskIcon per task, so scope to the
+    // kanban board to target the card icon this test asserts on.
+    const icon = kanban.board.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
     await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "false");
     await expect(icon).toHaveClass(/text-sky-400/);

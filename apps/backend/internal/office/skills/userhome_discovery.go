@@ -163,13 +163,6 @@ func userHomeSourceLocator(provider, key string) string {
 	return strings.TrimSpace(provider) + ":" + strings.Trim(strings.TrimSpace(key), "/")
 }
 
-// DiscoverUserSkillsAt scans an already resolved provider user skill root.
-func DiscoverUserSkillsAt(
-	ctx context.Context, provider, root string,
-) ([]DiscoveredUserSkill, error) {
-	return discoverUserSkillsAt(ctx, provider, root, root)
-}
-
 func discoverUserSkillsAt(
 	ctx context.Context, provider, root, allowedBase string,
 ) ([]DiscoveredUserSkill, error) {

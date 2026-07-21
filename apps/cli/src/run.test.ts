@@ -13,7 +13,10 @@ vi.mock("./constants", () => ({
   get CACHE_DIR() {
     return mockCacheDir.value;
   },
+  resolveCacheDir: () => mockCacheDir.value,
   DATA_DIR: "/tmp/kandev-test-data",
+  resolveDataDir: () => "/tmp/kandev-test-data",
+  resolveDatabasePath: () => "/tmp/kandev-test-data/kandev.db",
   DEFAULT_BACKEND_PORT: 38429,
   DEFAULT_WEB_PORT: 37429,
   DEFAULT_AGENTCTL_PORT: 39429,

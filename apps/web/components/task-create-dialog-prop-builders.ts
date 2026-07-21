@@ -16,7 +16,10 @@ import type { DialogFormBodyProps, DialogFormState } from "@/components/task-cre
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
   if (fs.noRepository) return true;
-  if (fs.useGitHubUrl) return !!fs.githubBranch;
+  if (fs.useRemote) {
+    const rows = fs.remoteRepos.filter((r) => r.url.trim() !== "");
+    return rows.length > 0 && rows.every((r) => !!r.branch);
+  }
   return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
 }
 
@@ -34,9 +37,7 @@ export function buildDialogFormBodyProps(
     onTaskNameChange: handlers.handleTaskNameChange,
     onRowRepositoryChange: handlers.handleRowRepositoryChange,
     onRowBranchChange: handlers.handleRowBranchChange,
-    isPassthroughProfile: computed.isPassthroughProfile,
     initialDescription: fs.currentDefaults.description,
-    hasDescription: fs.hasDescription,
     workspaceId: props.workspaceId,
     onJiraImport: setup.handleJiraImport,
     onLinearImport: setup.handleLinearImport,
@@ -54,14 +55,15 @@ export function buildDialogFormBodyProps(
     onAgentProfileChange: handlers.handleAgentProfileChange,
     onExecutorProfileChange: handlers.handleExecutorProfileChange,
     onWorkflowChange: handlers.handleWorkflowChange,
-    onToggleGitHubUrl: repoLocked ? undefined : handlers.handleToggleGitHubUrl,
-    onGitHubUrlChange: handlers.handleGitHubUrlChange,
+    onToggleRemote: repoLocked ? undefined : handlers.handleToggleRemote,
     onToggleFreshBranch: handlers.handleToggleFreshBranch,
     onToggleNoRepository: repoLocked ? undefined : handlers.handleToggleNoRepository,
     onWorkspacePathChange: handlers.handleWorkspacePathChange,
     enhance: setup.enhance,
     workflowAgentLocked: computed.workflowAgentLocked,
     repositories: setup.repositories,
+    lastUsedBranch: setup.taskCreateLastUsed.branch,
+    userSettingsLoaded: setup.userSettingsLoaded,
     freshBranchAvailable: setup.freshBranchAvailable,
     isLocalExecutor: computed.isLocalExecutor,
     noCompatibleAgent: computed.noCompatibleAgent,
@@ -84,7 +86,6 @@ export function buildDialogFooterProps(
     isCreateMode: setup.isCreateMode,
     isEditMode: setup.isEditMode,
     isTaskStarted: setup.isTaskStarted,
-    isPassthroughProfile: computed.isPassthroughProfile,
     isCreatingSession: fs.isCreatingSession,
     isCreatingTask: fs.isCreatingTask,
     hasTitle: fs.hasTitle,

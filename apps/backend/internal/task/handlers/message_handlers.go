@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -26,8 +28,9 @@ import (
 type OrchestratorService interface {
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
-	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) error
+	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment) error
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
+	StepRequiresCompletionSignal(ctx context.Context, taskID string) bool
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -57,6 +60,32 @@ func (h *MessageHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/agent-sessions/:id/messages", h.httpListMessages)
 	api.GET("/task-sessions/:id/messages", h.httpListMessages) // Alias for SSR compatibility
+	api.GET("/task-sessions/:id/messages/:message_id/shell-output", h.httpGetShellOutput)
+}
+
+func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
+	message, err := h.service.GetMessage(c.Request.Context(), c.Param("message_id"))
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			h.logger.Error("failed to get shell output message", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get shell output"})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+		return
+	}
+	output, ok := models.ExtractShellExecOutput(message.Metadata)
+	if !ok || message.TaskSessionID != c.Param("id") {
+		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+		return
+	}
+	status, _ := message.Metadata["status"].(string)
+	c.JSON(http.StatusOK, dto.ShellOutputSnapshotResponse{
+		MessageID: message.ID,
+		Status:    status,
+		UpdatedAt: message.UpdatedAt,
+		Output:    output,
+	})
 }
 
 func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
@@ -202,13 +231,42 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if wsErr != nil {
 		return wsErr, nil
 	}
-	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
 
 	// Transition task from REVIEW → IN_PROGRESS if needed
 	if err := h.ensureTaskInProgress(ctx, req.TaskID); err != nil {
 		h.logger.Error("failed to get task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
 	}
+
+	// Run on_turn_start synchronously BEFORE wrapping the prompt with the
+	// Kandev MCP system block. A workflow step transition fired by
+	// on_turn_start changes which step's `auto_advance_requires_signal`
+	// applies — running the wrap first would bake in the previous step's
+	// flag and either hide or expose `step_complete_kandev` on the wrong
+	// first turn. dispatchPromptAsync no longer calls ProcessOnTurnStart;
+	// it forwards the (now correctly-wrapped) prompt to the agent.
+	if h.orchestrator != nil {
+		if err := h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID); err != nil {
+			h.logger.Warn("failed to process on_turn_start",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(err))
+		}
+		var err error
+		sessionResp, err = h.resolveSessionAfterTurnStart(ctx, req.TaskID, req.TaskSessionID, sessionResp)
+		if err != nil {
+			h.logger.Warn("failed to resolve prompt session after on_turn_start",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to resolve prompt session", nil)
+		}
+		req.TaskSessionID = sessionResp.Session.ID
+	}
+	if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session.State); wsErr != nil {
+		return wsErr, nil
+	}
+	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
 
 	// Build metadata with attachments, plan mode, review comments, and context files
 	meta := orchestrator.NewUserMessageMeta().
@@ -229,9 +287,22 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// block and bypass server-side injection of the canonical task/session/
 	// tool context. Wrap unconditionally; the orchestrator's own guard sees
 	// our wrap downstream and skips its second pass.
+	// Passthrough sessions skip the wrap: the prompt is typed straight into
+	// the agent CLI's TTY and the user sees it verbatim — they don't want a
+	// wall of MCP-tool boilerplate prepended to "hello".
 	storedContent := req.Content
-	if isCreatedSession && (req.Content != "" || len(req.Attachments) > 0) {
-		storedContent = sysprompt.InjectKandevContext(req.TaskID, req.TaskSessionID, req.Content)
+	if isCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
+		task, err := h.service.GetTask(ctx, req.TaskID)
+		if err != nil {
+			h.logger.Error("failed to resolve first-turn MCP capabilities", zap.String("task_id", req.TaskID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
+		}
+		configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
+		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
+		storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, req.Content, sysprompt.KandevContextOptions{
+			RequiresCompletionSignal:       requiresSignal,
+			IncludeCoordinatorTaskControls: task.AssigneeAgentProfileID == "" && !configMode,
+		})
 		req.Content = storedContent
 	}
 
@@ -264,6 +335,54 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	return response, nil
 }
 
+func (h *MessageHandlers) resolveSessionAfterTurnStart(
+	ctx context.Context,
+	taskID, submittedSessionID string,
+	current *dto.GetTaskSessionResponse,
+) (*dto.GetTaskSessionResponse, error) {
+	if current.Session.ID == "" {
+		return nil, errors.New("submitted session response missing session id")
+	}
+	reloaded, err := h.service.GetTaskSession(ctx, submittedSessionID)
+	if err != nil {
+		h.logger.Warn("failed to reload session after on_turn_start",
+			zap.String("task_id", taskID),
+			zap.String("session_id", submittedSessionID),
+			zap.Error(err))
+		return nil, errors.New("failed to reload submitted session after on_turn_start")
+	}
+	if reloaded.State != models.TaskSessionStateCompleted {
+		return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(reloaded)}, nil
+	}
+	primary, err := h.service.GetPrimarySession(ctx, taskID)
+	if err != nil || primary == nil {
+		if err != nil {
+			h.logger.Warn("failed to load primary session after on_turn_start switch",
+				zap.String("task_id", taskID),
+				zap.String("session_id", submittedSessionID),
+				zap.Error(err))
+		}
+		return nil, errors.New("submitted session completed during on_turn_start without replacement primary session")
+	}
+	if primary.ID == submittedSessionID {
+		return nil, errors.New("submitted session completed during on_turn_start but remains primary")
+	}
+	return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(primary)}, nil
+}
+
+func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, state models.TaskSessionState) *ws.Message {
+	switch state {
+	case models.TaskSessionStateRunning:
+		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
+		return wsErr
+	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
+		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Session has ended. Please create a new session to continue.", nil)
+		return wsErr
+	default:
+		return nil
+	}
+}
+
 // validateAddMessageRequest returns a non-empty error string if the request is invalid.
 func validateAddMessageRequest(req wsAddMessageRequest) string {
 	if req.TaskSessionID == "" {
@@ -275,6 +394,9 @@ func validateAddMessageRequest(req wsAddMessageRequest) string {
 	// Content can be empty if there are attachments (image-only messages)
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return "content or attachments are required"
+	}
+	if err := validateAttachments(req.Attachments); err != nil {
+		return err.Error()
 	}
 	return ""
 }
@@ -290,18 +412,19 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 	}
 	sessionDTO := dto.FromTaskSession(session)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
-	switch sessionDTO.State {
-	case models.TaskSessionStateRunning:
-		h.logger.Warn("rejected message submission while agent is busy",
-			zap.String("session_id", sessionID),
-			zap.String("session_state", string(sessionDTO.State)))
-		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
-		return nil, wsErr
-	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
-		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Session has ended. Please create a new session to continue.", nil)
+	if wsErr := h.errorForBlockedMessageSession(msg, sessionDTO.State); wsErr != nil {
+		if sessionDTO.State == models.TaskSessionStateRunning {
+			h.logBlockedRunningSession(sessionID, sessionDTO.State)
+		}
 		return nil, wsErr
 	}
 	return resp, nil
+}
+
+func (h *MessageHandlers) logBlockedRunningSession(sessionID string, state models.TaskSessionState) {
+	h.logger.Warn("rejected message submission while agent is busy",
+		zap.String("session_id", sessionID),
+		zap.String("session_state", string(state)))
 }
 
 // ensureTaskInProgress fetches the task and transitions it from REVIEW → IN_PROGRESS if needed.
@@ -325,20 +448,11 @@ func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID strin
 	return nil
 }
 
-// dispatchPromptAsync runs on_turn_start handling and then forwards the message to the
-// agent as a prompt in a background goroutine.
+// dispatchPromptAsync forwards the message to the agent as a prompt in a
+// background goroutine. The caller (wsAddMessage) is responsible for running
+// on_turn_start synchronously BEFORE wrapping the prompt, so this function
+// only handles the agent-facing dispatch.
 func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMessageRequest, agentProfileID string, isCreatedSession bool) {
-	// Process on_turn_start events synchronously BEFORE sending the prompt.
-	// This transitions the task to the right step (e.g., Todo → In Progress
-	// or Review → In Progress) before the agent receives the message.
-	// This applies to all sessions, including CREATED sessions from plan mode
-	// where the user sends the first message to start the agent.
-	if err := h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID); err != nil {
-		h.logger.Warn("failed to process on_turn_start",
-			zap.String("task_id", req.TaskID),
-			zap.String("session_id", req.TaskSessionID),
-			zap.Error(err))
-	}
 	taskID := req.TaskID
 	sessionID := req.TaskSessionID
 	content := req.Content
@@ -363,7 +477,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 ) {
 	// For CREATED sessions, start the agent with this message as the initial prompt
 	if startCreated {
-		if err := h.orchestrator.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, content, true, planMode, attachments); err != nil {
+		if err := h.orchestrator.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, content, true, planMode, false, attachments); err != nil {
 			h.logger.Warn("failed to start created session from message",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -404,9 +518,31 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 }
 
 // isAgentReportedError returns true when the error originated from the agent's
-// own error event (surfaced via waitForPromptDone as "agent error: ...").
+// own error event (surfaced via waitForPromptDone with the ErrAgentReported
+// sentinel wrapped in).
 func isAgentReportedError(err error) bool {
-	return strings.Contains(err.Error(), "agent error: ")
+	return errors.Is(err, lifecycle.ErrAgentReported)
+}
+
+// isTimeoutError reports whether err looks like a timeout. Used by
+// createPromptErrorMessage to render the "Request timed out…" UX hint.
+//
+// Several upstream producers along the prompt path (waitForSessionReady,
+// agent-stream connect waits, agentctl health waits) return
+// fmt.Errorf("timeout …") rather than wrapping a typed timeout, so a strict
+// errors.As(net.Error) check would silently downgrade their user message to
+// the generic "Failed to send message to agent". The substring fallback
+// preserves the pre-refactor UX for those cases; classifying upstream errors
+// properly is tracked separately.
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr interface{ Timeout() bool }
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "timeout")
 }
 
 // handlePromptWithResume attempts to resume a session and retry a prompt when the
@@ -450,7 +586,10 @@ func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, 
 		zap.Error(promptErr))
 
 	errorMsg := "Failed to send message to agent"
-	if strings.Contains(promptErr.Error(), "context deadline exceeded") || strings.Contains(promptErr.Error(), "timeout") {
+	if isTimeoutError(promptErr) {
+		// isTimeoutError already covers context.DeadlineExceeded (which
+		// implements Timeout()==true) and the substring fallback for plain
+		// "timeout …" producers — no separate errors.Is needed here.
 		errorMsg = "Request timed out. The agent may be processing a complex task. Please try again."
 	} else if errors.Is(promptErr, executor.ErrExecutionNotFound) {
 		errorMsg = "Agent is not running. Please restart the session."

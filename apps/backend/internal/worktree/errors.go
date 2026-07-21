@@ -57,6 +57,17 @@ var (
 	// characters that survive sanitization (e.g. "!@#$%"), so it cannot be
 	// used as a directory segment.
 	ErrInvalidRepoName = errors.New("repo name has no usable characters after sanitization")
+
+	// ErrBranchUnrecoverable is returned by recreate when the worktree's
+	// branch no longer exists locally (archive deletes it via `git branch
+	// -D`) and could not be fetched from origin either. Callers can treat
+	// this as "prior work is gone" and fall back to a fresh worktree.
+	ErrBranchUnrecoverable = errors.New("worktree branch no longer exists locally or on origin")
+
+	// ErrInvalidBranchSlug is returned when BranchSlug is set but contains no
+	// usable characters after sanitization. Callers that pass an explicit slug
+	// must populate something the filesystem can accept.
+	ErrInvalidBranchSlug = errors.New("branch slug has no usable characters after sanitization")
 )
 
 // containsAuthFailure checks if git output indicates an authentication failure.
@@ -82,6 +93,20 @@ func isBranchCheckedOutError(output string) bool {
 // ref that is currently checked out.
 func isFetchRefusedCheckedOut(output string) bool {
 	return strings.Contains(strings.ToLower(output), "refusing to fetch into branch")
+}
+
+// isRemoteRefMissingError reports whether a fetch error indicates the
+// requested ref genuinely does not exist on the remote (or there is no
+// usable remote at all), as opposed to a transient network/auth failure
+// where the branch may still exist and a retry could succeed.
+func isRemoteRefMissingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "couldn't find remote ref") ||
+		strings.Contains(msg, "does not appear to be a git repository") ||
+		strings.Contains(msg, "no such remote")
 }
 
 // ClassifyGitError wraps a raw git error with a user-friendly sentinel error

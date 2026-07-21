@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IconX, IconMessageQuestion, IconInfoCircle } from "@tabler/icons-react";
+import { IconX, IconMessageQuestion, IconInfoCircle, IconCheck } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import type {
@@ -21,6 +22,7 @@ import {
 type ClarificationInputOverlayProps = {
   messages: readonly Message[] | null | undefined;
   onResolved: () => void;
+  keyboardShortcutsEnabled?: boolean;
 };
 
 type SingleQuestionMeta = {
@@ -50,6 +52,17 @@ function sortMessagesByQuestionIndex(messages: Message[]): Message[] {
     const bi = (b.metadata as ClarificationRequestMetadata | undefined)?.question_index ?? 0;
     return ai - bi;
   });
+}
+
+function isQuestionAnsweredAt(
+  messages: readonly Message[],
+  answers: Record<string, ClarificationAnswer>,
+  index: number,
+): boolean {
+  const message = messages[index];
+  if (!message) return false;
+  const questionId = readSingleQuestionMeta(message)?.questionId;
+  return questionId ? Boolean(answers[questionId]) : false;
 }
 
 type CardProps = {
@@ -122,7 +135,7 @@ function ClarificationCard(props: CardProps) {
       {showAgentDisconnected && (
         <div
           data-testid="clarification-deferred-notice"
-          className="mt-2 text-xs text-amber-500/90 flex items-center gap-1.5"
+          className="mt-2 flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400"
         >
           <IconInfoCircle className="h-3.5 w-3.5 flex-shrink-0" />
           The agent has moved on. Your response will be sent as a new message.
@@ -155,6 +168,7 @@ function useResolveCallback(
 }
 
 type CarouselShortcutArgs = {
+  enabled: boolean;
   meta: SingleQuestionMeta;
   activeIndex: number;
   total: number;
@@ -197,10 +211,12 @@ function tryHandleMetaEnter(e: KeyboardEvent, canSubmit: boolean, onSubmit: () =
 }
 
 function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
+  const { enabled } = args;
   const optionsCount = args.meta.question.options.length;
   const isLast = args.activeIndex === args.total - 1;
   const { canSubmit, onPick, onPrev, onNext, onSkip, onSubmit } = args;
   useEffect(() => {
+    if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (tryHandleMetaEnter(e, canSubmit, onSubmit)) return;
       if (shouldIgnoreShortcut(e)) return;
@@ -228,7 +244,7 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [optionsCount, isLast, canSubmit, onPick, onPrev, onNext, onSkip, onSubmit]);
+  }, [enabled, optionsCount, isLast, canSubmit, onPick, onPrev, onNext, onSkip, onSubmit]);
   return null;
 }
 
@@ -239,6 +255,10 @@ type CarouselBodyProps = {
   setActiveIndex: (idx: number) => void;
   customDrafts: Record<string, string>;
   setCustomDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  allAnswered: boolean;
+  isSubmitting: boolean;
+  keyboardShortcutsEnabled: boolean;
+  onSubmit: () => void;
 };
 
 type QuestionHandlerCtx = {
@@ -340,6 +360,10 @@ function ClarificationCarouselBody({
   setActiveIndex,
   customDrafts,
   setCustomDrafts,
+  allAnswered,
+  isSubmitting,
+  keyboardShortcutsEnabled,
+  onSubmit,
 }: CarouselBodyProps) {
   const total = sortedMessages.length;
   const activeMessage = sortedMessages[Math.min(activeIndex, total - 1)] ?? null;
@@ -347,21 +371,7 @@ function ClarificationCarouselBody({
   const showAgentDisconnectedAtTop = sortedMessages.some(
     (m) => (m.metadata as ClarificationRequestMetadata | undefined)?.agent_disconnected === true,
   );
-  const isSubmitting = group.submitState === "submitting";
   const isSingleQuestion = total === 1;
-
-  const allAnswered = sortedMessages.every((m) => {
-    const id = readSingleQuestionMeta(m)?.questionId;
-    return id ? Boolean(group.answers[id]) : false;
-  });
-
-  // group is a fresh object every render, but its submitCollected callback is
-  // memoised by the hook — depend on the function only so this useCallback
-  // doesn't churn on every keystroke (via the live-record path).
-  const submitCollected = group.submitCollected;
-  const handleSubmit = useCallback(() => {
-    if (allAnswered) void submitCollected();
-  }, [allAnswered, submitCollected]);
 
   if (!meta) return null;
 
@@ -396,7 +406,7 @@ function ClarificationCarouselBody({
         onSelectOption={onSelectOption}
         onCustomDraftChange={onCustomDraftChange}
         onSubmitCustom={onSubmitCustom}
-        onRequestFinalSubmit={handleSubmit}
+        onRequestFinalSubmit={onSubmit}
       />
       {!isSingleQuestion && (
         <ClarificationCarouselNav
@@ -405,11 +415,10 @@ function ClarificationCarouselBody({
           isSubmitting={isSubmitting}
           onPrev={() => setActiveIndex(Math.max(0, activeIndex - 1))}
           onNext={() => setActiveIndex(Math.min(total - 1, activeIndex + 1))}
-          onSubmit={handleSubmit}
-          canSubmit={allAnswered}
         />
       )}
       <CarouselKeyboardShortcuts
+        enabled={keyboardShortcutsEnabled}
         meta={meta}
         activeIndex={activeIndex}
         total={total}
@@ -418,7 +427,7 @@ function ClarificationCarouselBody({
         onPrev={() => setActiveIndex(Math.max(0, activeIndex - 1))}
         onNext={() => setActiveIndex(Math.min(total - 1, activeIndex + 1))}
         onSkip={() => void group.skipAll("User skipped")}
-        onSubmit={handleSubmit}
+        onSubmit={onSubmit}
       />
     </>
   );
@@ -427,6 +436,7 @@ function ClarificationCarouselBody({
 export function ClarificationInputOverlay({
   messages,
   onResolved,
+  keyboardShortcutsEnabled = true,
 }: ClarificationInputOverlayProps) {
   const sortedMessages = useMemo(
     () => sortMessagesByQuestionIndex(resolveQuestionMessages(messages)),
@@ -442,15 +452,22 @@ export function ClarificationInputOverlay({
 
   useResolveCallback(group.submitState, onResolved);
 
+  // group is a fresh object every render, but its submitCollected callback is
+  // memoised by the hook — depend on the function only so this useCallback
+  // doesn't churn on every keystroke (via the live-record path).
+  const submitCollected = group.submitCollected;
+  const allAnswered =
+    sortedMessages.length > 0 &&
+    sortedMessages.every((m) => {
+      const id = readSingleQuestionMeta(m)?.questionId;
+      return id ? Boolean(group.answers[id]) : false;
+    });
+  const handleSubmit = useCallback(() => {
+    if (allAnswered) void submitCollected();
+  }, [allAnswered, submitCollected]);
+
   if (sortedMessages.length === 0) return null;
   const isSubmitting = group.submitState === "submitting";
-
-  const isAnsweredAt = (index: number) => {
-    const m = sortedMessages[index];
-    if (!m) return false;
-    const id = readSingleQuestionMeta(m)?.questionId;
-    return id ? Boolean(group.answers[id]) : false;
-  };
 
   return (
     <div className="relative" data-testid="clarification-overlay">
@@ -461,7 +478,7 @@ export function ClarificationInputOverlay({
             <ClarificationStepper
               total={total}
               activeIndex={activeIndex}
-              isAnswered={isAnsweredAt}
+              isAnswered={(index) => isQuestionAnsweredAt(sortedMessages, group.answers, index)}
               onJump={setActiveIndex}
               isSubmitting={isSubmitting}
             />
@@ -475,16 +492,35 @@ export function ClarificationInputOverlay({
             </span>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => void group.skipAll("User skipped")}
-          disabled={isSubmitting}
-          className="text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
-          data-testid="clarification-skip"
-          aria-label="Skip all questions"
-        >
-          <IconX className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          {total > 1 && (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!allAnswered || isSubmitting}
+              data-testid="clarification-submit"
+              className={cn(
+                "inline-flex items-center gap-1 text-xs px-3 py-1 rounded font-medium transition-colors",
+                allAnswered && !isSubmitting
+                  ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
+                  : "bg-muted text-muted-foreground cursor-not-allowed",
+              )}
+            >
+              {isSubmitting ? "Submitting…" : "Submit"}
+              <IconCheck className="h-3 w-3" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void group.skipAll("User skipped")}
+            disabled={isSubmitting}
+            className="text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
+            data-testid="clarification-skip"
+            aria-label="Skip all questions"
+          >
+            <IconX className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       <ClarificationCarouselBody
         sortedMessages={sortedMessages}
@@ -493,6 +529,10 @@ export function ClarificationInputOverlay({
         setActiveIndex={setActiveIndex}
         customDrafts={customDrafts}
         setCustomDrafts={setCustomDrafts}
+        allAnswered={allAnswered}
+        isSubmitting={isSubmitting}
+        keyboardShortcutsEnabled={keyboardShortcutsEnabled}
+        onSubmit={handleSubmit}
       />
     </div>
   );

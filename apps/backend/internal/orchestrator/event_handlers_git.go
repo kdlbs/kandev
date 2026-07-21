@@ -338,11 +338,17 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 		return
 	}
 
+	size, remaining, efficiency, source, ok := s.resolveContextWindowValues(ctx, data)
+	if !ok {
+		return
+	}
+
 	contextWindowData := map[string]interface{}{
-		"size":       data.ContextWindowSize,
+		"size":       size,
 		"used":       data.ContextWindowUsed,
-		"remaining":  data.ContextWindowRemaining,
-		"efficiency": data.ContextEfficiency,
+		"remaining":  remaining,
+		"efficiency": efficiency,
+		"source":     source,
 	}
 
 	// Persist to database asynchronously using json_set to atomically set one
@@ -375,6 +381,51 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 			},
 		))
 	}
+}
+
+func (s *Service) resolveContextWindowValues(ctx context.Context, data watcher.ContextWindowData) (int64, int64, float64, string, bool) {
+	if data.ContextWindowSize > 0 {
+		return data.ContextWindowSize, data.ContextWindowRemaining, data.ContextEfficiency, "acp", true
+	}
+	lookup := s.currentModelInfoLookup()
+	if lookup == nil {
+		return 0, 0, 0, "", false
+	}
+	modelID := s.currentRuntimeModel(ctx, data.TaskSessionID)
+	if modelID == "" {
+		return 0, 0, 0, "", false
+	}
+	info, ok := lookup.LookupModelInfo(ctx, modelID)
+	if !ok || info.ContextWindow <= 0 {
+		return 0, 0, 0, "", false
+	}
+	remaining := info.ContextWindow - data.ContextWindowUsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	efficiency := float64(data.ContextWindowUsed) / float64(info.ContextWindow) * 100
+	return info.ContextWindow, remaining, efficiency, "api", true
+}
+
+func (s *Service) currentRuntimeModel(ctx context.Context, sessionID string) string {
+	if model, ok := s.runtimeModelBySession.Load(sessionID); ok {
+		if modelID, _ := model.(string); modelID != "" {
+			return modelID
+		}
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return ""
+	}
+	if cfg, ok := models.LoadSessionRuntimeConfig(session.Metadata); ok && cfg.Model != "" {
+		return cfg.Model
+	}
+	if session.AgentProfileSnapshot != nil {
+		if model, ok := session.AgentProfileSnapshot["model"].(string); ok {
+			return model
+		}
+	}
+	return ""
 }
 
 // handlePermissionRequest handles permission request events and saves as message
@@ -417,6 +468,57 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 				zap.String("pending_id", data.PendingID))
 		}
 	}
+
+	// Run-mode automation tasks are hidden from the kanban, so there is no UI
+	// for the user to answer a permission prompt. Auto-reject and mark the run
+	// failed so the failure shows up in the automation's Recent Runs.
+	s.failAutomationRunOnPermission(ctx, data)
+}
+
+// failAutomationRunOnPermission checks whether the permission request belongs
+// to a run-mode automation task and, if so, rejects the prompt and marks the
+// corresponding automation_run row as failed.
+func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watcher.PermissionRequestData) {
+	if s.automationService == nil || data.TaskID == "" {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, data.TaskID)
+	if err != nil || task == nil {
+		return
+	}
+	if !task.IsEphemeral || task.Origin != models.TaskOriginAutomationRun {
+		return
+	}
+
+	// Use rejected=true so the backend persists "rejected" status. cancelled is
+	// also true here because the session is going to be marked failed anyway.
+	optionID := pickRejectOption(data.Options)
+	if err := s.RespondToPermission(ctx, data.TaskSessionID, data.PendingID, optionID, true, true); err != nil {
+		s.logger.Warn("failed to auto-reject permission for run-mode automation",
+			zap.String("task_id", data.TaskID),
+			zap.String("pending_id", data.PendingID),
+			zap.Error(err))
+	}
+
+	errMsg := fmt.Sprintf("Permission required: %s — run-mode automations cannot answer prompts", data.Title)
+	if err := s.automationService.MarkRunFailedByTaskID(ctx, data.TaskID, errMsg); err != nil {
+		s.logger.Warn("failed to mark automation run failed after permission prompt",
+			zap.String("task_id", data.TaskID), zap.Error(err))
+	}
+}
+
+// pickRejectOption returns the first option_id with a reject-kind, or "" if
+// none was offered.
+func pickRejectOption(options []map[string]interface{}) string {
+	for _, opt := range options {
+		kind, _ := opt["kind"].(string)
+		if strings.HasPrefix(kind, "reject") {
+			if id, ok := opt["option_id"].(string); ok {
+				return id
+			}
+		}
+	}
+	return ""
 }
 
 // handleGitCommitCreated handles git commit events by forwarding them to the frontend.

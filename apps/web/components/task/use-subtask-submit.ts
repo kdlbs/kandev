@@ -66,10 +66,9 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
         workspaceMode === "inherit_parent"
           ? undefined
           : buildRepositoriesPayload({
-              useGitHubUrl: fs.useGitHubUrl,
-              githubUrl: fs.githubUrl,
-              githubBranch: fs.githubBranch,
-              githubPrHeadBranch: fs.githubPrHeadBranch,
+              useRemote: fs.useRemote,
+              remoteRepos: fs.remoteRepos,
+              prInfoByUrl: fs.prInfoByUrl,
               repositories: fs.repositories,
               discoveredRepositories: fs.discoveredRepositories,
               workspaceRepositories: availableRepositories,
@@ -82,7 +81,10 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
         repositories,
         start_agent: true,
         agent_profile_id: fs.agentProfileId || defaultProfileId || undefined,
-        executor_profile_id: fs.executorProfileId || undefined,
+        // inherit_parent reuses the parent's materialized environment, so the
+        // executor is inherited too — never send a chosen executor profile.
+        executor_profile_id:
+          workspaceMode === "inherit_parent" ? undefined : fs.executorProfileId || undefined,
         parent_id: parentTaskId,
         attachments: toMessageAttachments(attachments),
         workspace_mode: workspaceMode,

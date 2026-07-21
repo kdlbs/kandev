@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconLockExclamation } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 

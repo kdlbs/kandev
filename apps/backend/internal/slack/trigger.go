@@ -38,15 +38,11 @@ type Trigger struct {
 	wg      sync.WaitGroup
 	started bool
 
-	// matchHook fires after each successfully-handled match. Tests use it
-	// to synchronise on processing without sleep-polling.
-	matchHook func(msg SlackMessage, reply string)
-
-	// lastScannedAt tracks when we last ran a scan so the configured
-	// PollIntervalSeconds is honoured exactly. In-memory by design — backend
-	// restart triggers an immediate scan, which is fine.
+	// lastScannedAt tracks when each workspace last ran a scan so its
+	// PollIntervalSeconds is honoured independently. In-memory by design —
+	// backend restart triggers an immediate scan, which is fine.
 	scannedMu     sync.Mutex
-	lastScannedAt time.Time
+	lastScannedAt map[string]time.Time
 }
 
 // NewTrigger returns a Trigger using the default base ticker.
@@ -55,21 +51,6 @@ func NewTrigger(svc *Service, log *logger.Logger) *Trigger {
 		return nil
 	}
 	return &Trigger{svc: svc, log: log, interval: DefaultBaseInterval}
-}
-
-// SetInterval overrides the base-ticker cadence. Must be called before Start.
-func (t *Trigger) SetInterval(d time.Duration) {
-	t.mu.Lock()
-	t.interval = d
-	t.mu.Unlock()
-}
-
-// SetMatchHook installs a callback fired after each successfully-handled
-// match.
-func (t *Trigger) SetMatchHook(fn func(msg SlackMessage, reply string)) {
-	t.mu.Lock()
-	t.matchHook = fn
-	t.mu.Unlock()
 }
 
 // Start launches the loop.
@@ -131,28 +112,34 @@ func (t *Trigger) tick(ctx context.Context) {
 	if t.svc.Runner() == nil {
 		return
 	}
-	cfg, err := t.svc.Store().GetConfig(ctx)
-	if err != nil || cfg == nil {
+	configs, err := t.svc.Store().ListConfigs(ctx)
+	if err != nil || len(configs) == 0 {
 		return
 	}
+	for _, cfg := range configs {
+		if !t.dueForScan(cfg.WorkspaceID, cfg.PollIntervalSeconds) {
+			continue
+		}
+		t.markScanned(cfg.WorkspaceID)
+		t.scanWorkspace(ctx, cfg)
+	}
+}
+
+func (t *Trigger) scanWorkspace(ctx context.Context, cfg *SlackConfig) {
 	if !cfg.LastOk || cfg.SlackUserID == "" {
 		return
 	}
 	if cfg.UtilityAgentID == "" {
 		return
 	}
-	if !t.dueForScan(cfg.PollIntervalSeconds) {
-		return
-	}
 	prefix := cfg.CommandPrefix
 	if prefix == "" {
 		prefix = DefaultCommandPrefix
 	}
-	client, err := t.svc.Client(ctx)
+	client, err := t.svc.ClientForWorkspace(ctx, cfg.WorkspaceID)
 	if err != nil {
 		return
 	}
-	t.markScanned()
 	query := fmt.Sprintf("from:<@%s> %q", cfg.SlackUserID, prefix)
 	matches, err := client.SearchMessages(ctx, query)
 	if err != nil {
@@ -172,7 +159,7 @@ func (t *Trigger) processMatches(ctx context.Context, cfg *SlackConfig, prefix s
 		if ctx.Err() != nil {
 			return
 		}
-		reply, err := t.handleOne(ctx, cfg, prefix, m, client)
+		_, err := t.handleOne(ctx, cfg, prefix, m, client)
 		if err != nil {
 			t.log.Warn("slack trigger: handle match failed",
 				zap.String("ts", m.TS), zap.Error(err))
@@ -191,10 +178,9 @@ func (t *Trigger) processMatches(ctx context.Context, cfg *SlackConfig, prefix s
 		if compareTS(m.TS, highest) > 0 {
 			highest = m.TS
 		}
-		t.fireHook(m, reply)
 	}
 	if highest != cfg.LastSeenTS {
-		if err := t.svc.Store().UpdateLastSeenTS(ctx, highest); err != nil {
+		if err := t.svc.Store().UpdateLastSeenTSForWorkspace(ctx, cfg.WorkspaceID, highest); err != nil {
 			t.log.Warn("slack trigger: advance watermark failed", zap.Error(err))
 		}
 	}
@@ -241,33 +227,38 @@ func (t *Trigger) replyInThread(ctx context.Context, client Client, msg SlackMes
 	}
 }
 
-func (t *Trigger) fireHook(msg SlackMessage, reply string) {
-	t.mu.Lock()
-	hook := t.matchHook
-	t.mu.Unlock()
-	if hook != nil {
-		hook(msg, reply)
-	}
-}
-
 // dueForScan reports whether the configured interval has elapsed since the
 // last scan. A zero/never timestamp counts as due.
-func (t *Trigger) dueForScan(intervalSeconds int) bool {
+func (t *Trigger) dueForScan(workspaceID string, intervalSeconds int) bool {
 	if intervalSeconds < MinPollIntervalSeconds {
 		intervalSeconds = DefaultPollIntervalSeconds
 	}
 	t.scannedMu.Lock()
 	defer t.scannedMu.Unlock()
-	if t.lastScannedAt.IsZero() {
+	if t.lastScannedAt == nil {
 		return true
 	}
-	return time.Since(t.lastScannedAt) >= time.Duration(intervalSeconds)*time.Second
+	last := t.lastScannedAt[normalizeWorkspaceID(workspaceID)]
+	if last.IsZero() {
+		return true
+	}
+	return time.Since(last) >= time.Duration(intervalSeconds)*time.Second
 }
 
-func (t *Trigger) markScanned() {
+func (t *Trigger) markScanned(workspaceID string) {
 	t.scannedMu.Lock()
-	t.lastScannedAt = time.Now()
+	if t.lastScannedAt == nil {
+		t.lastScannedAt = make(map[string]time.Time)
+	}
+	t.lastScannedAt[normalizeWorkspaceID(workspaceID)] = time.Now()
 	t.scannedMu.Unlock()
+}
+
+func normalizeWorkspaceID(workspaceID string) string {
+	if workspaceID == "" {
+		return "default"
+	}
+	return workspaceID
 }
 
 func newMatchesAfter(matches []SlackMessage, watermark, prefix string) []SlackMessage {

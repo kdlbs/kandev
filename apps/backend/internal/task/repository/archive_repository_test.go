@@ -47,6 +47,50 @@ func TestSQLiteRepository_ArchiveTask(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_CascadeArchiveRoundTripPreservesOwner(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "cascade-ws", Name: "Cascade"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "cascade-wf", WorkspaceID: "cascade-ws", Name: "Cascade",
+	}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "cascade-task", WorkspaceID: "cascade-ws", WorkflowID: "cascade-wf", Title: "Cascade",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	archived, err := repo.ArchiveTaskIfActive(ctx, "cascade-task", "cascade-owner")
+	if err != nil || !archived {
+		t.Fatalf("ArchiveTaskIfActive: archived=%v err=%v", archived, err)
+	}
+	loaded, err := repo.GetTask(ctx, "cascade-task")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if loaded.ArchivedByCascadeID != "cascade-owner" {
+		t.Fatalf("ArchivedByCascadeID = %q, want cascade-owner", loaded.ArchivedByCascadeID)
+	}
+
+	unarchived, err := repo.UnarchiveTaskByCascade(ctx, loaded.ID, loaded.ArchivedByCascadeID)
+	if err != nil || !unarchived {
+		t.Fatalf("UnarchiveTaskByCascade: unarchived=%v err=%v", unarchived, err)
+	}
+	loaded, err = repo.GetTask(ctx, "cascade-task")
+	if err != nil {
+		t.Fatalf("GetTask after unarchive: %v", err)
+	}
+	if loaded.ArchivedAt != nil || loaded.ArchivedByCascadeID != "" {
+		t.Fatalf("unarchived task = archived_at:%v cascade:%q", loaded.ArchivedAt, loaded.ArchivedByCascadeID)
+	}
+}
+
 func TestSQLiteRepository_ArchiveTask_ExcludesFromListTasks(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
@@ -114,7 +158,7 @@ func TestSQLiteRepository_ListTasksByWorkspace_IncludeArchived(t *testing.T) {
 	_ = repo.ArchiveTask(ctx, "task-2")
 
 	// Without includeArchived: should return only active task
-	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "", 1, 10, false, false, false, false)
+	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "", 1, 10, "", false, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to list tasks: %v", err)
 	}
@@ -126,7 +170,7 @@ func TestSQLiteRepository_ListTasksByWorkspace_IncludeArchived(t *testing.T) {
 	}
 
 	// With includeArchived: should return both tasks
-	tasks, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "", 1, 10, true, false, false, false)
+	tasks, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "", 1, 10, "", true, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to list tasks with archived: %v", err)
 	}
@@ -138,7 +182,7 @@ func TestSQLiteRepository_ListTasksByWorkspace_IncludeArchived(t *testing.T) {
 	}
 
 	// Search with includeArchived=false should filter archived
-	_, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "Task", 1, 10, false, false, false, false)
+	_, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "Task", 1, 10, "", false, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks: %v", err)
 	}
@@ -147,7 +191,7 @@ func TestSQLiteRepository_ListTasksByWorkspace_IncludeArchived(t *testing.T) {
 	}
 
 	// Search with includeArchived=true should include archived
-	_, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "Task", 1, 10, true, false, false, false)
+	_, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "Task", 1, 10, "", true, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks with archived: %v", err)
 	}

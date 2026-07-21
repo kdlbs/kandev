@@ -1,6 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
 
 test.describe("Workflow start step placement", () => {
   test.describe("without explicit start step (Todo -> In Progress -> Done)", () => {
@@ -236,7 +240,7 @@ test.describe("Workflow start step placement", () => {
     });
 
     // Session transitions to idle
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 15_000 });
   });
 
   /**

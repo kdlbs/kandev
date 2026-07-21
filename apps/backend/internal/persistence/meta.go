@@ -4,8 +4,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/jmoiron/sqlx"
+)
+
+const (
+	metaKeyLatestVersion          = "latest_version"
+	metaKeyLatestVersionURL       = "latest_version_url"
+	metaKeyLatestVersionCheckedAt = "latest_version_checked_at"
 )
 
 const metaTableDDL = `
@@ -25,7 +33,7 @@ func ensureMetaTable(db *sqlx.DB) error {
 // readKey returns the value for key, or "" when the key is absent.
 func readKey(db *sqlx.DB, key string) (string, error) {
 	var value string
-	err := db.QueryRow(`SELECT value FROM kandev_meta WHERE key = ?`, key).Scan(&value)
+	err := db.QueryRow(db.Rebind(`SELECT value FROM kandev_meta WHERE key = ?`), key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -38,8 +46,8 @@ func readKey(db *sqlx.DB, key string) (string, error) {
 // writeKey upserts key=value into kandev_meta.
 func writeKey(db *sqlx.DB, key, value string) error {
 	_, err := db.Exec(
-		`INSERT INTO kandev_meta (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		db.Rebind(`INSERT INTO kandev_meta (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`),
 		key, value,
 	)
 	if err != nil {
@@ -56,6 +64,50 @@ func WriteVersion(db *sqlx.DB, version string) error {
 		return err
 	}
 	return nil
+}
+
+// WriteLatestVersion persists the highest semver tag from the GitHub Releases
+// poll, its release URL, and the timestamp of the successful poll. The three
+// values are written under separate keys (latest_version,
+// latest_version_url, latest_version_checked_at) on the existing key/value
+// kandev_meta table.
+func WriteLatestVersion(db *sqlx.DB, version, url string, checkedAt time.Time) error {
+	if err := writeKey(db, metaKeyLatestVersion, version); err != nil {
+		return err
+	}
+	if err := writeKey(db, metaKeyLatestVersionURL, url); err != nil {
+		return err
+	}
+	ts := strconv.FormatInt(checkedAt.UTC().Unix(), 10)
+	return writeKey(db, metaKeyLatestVersionCheckedAt, ts)
+}
+
+// ReadLatestVersion returns the last-known latest release tag, its URL, and
+// the timestamp of the last successful GitHub poll. Returns zero values when
+// the keys are absent (e.g. on a fresh install before the first poll
+// completes) and tolerates a subset of the three keys being missing.
+func ReadLatestVersion(db *sqlx.DB) (string, string, time.Time, error) {
+	version, err := readKey(db, metaKeyLatestVersion)
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	url, err := readKey(db, metaKeyLatestVersionURL)
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	tsRaw, err := readKey(db, metaKeyLatestVersionCheckedAt)
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	var checkedAt time.Time
+	if tsRaw != "" {
+		secs, perr := strconv.ParseInt(tsRaw, 10, 64)
+		if perr != nil {
+			return "", "", time.Time{}, fmt.Errorf("parse latest_version_checked_at %q: %w", tsRaw, perr)
+		}
+		checkedAt = time.Unix(secs, 0).UTC()
+	}
+	return version, url, checkedAt, nil
 }
 
 // hasUserTables returns true when the DB contains at least one table that is

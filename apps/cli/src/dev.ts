@@ -1,18 +1,13 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import { backupProductionDb, isProductionDb } from "./backup";
 import { devKandevHome, HEALTH_TIMEOUT_MS_DEV } from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
 import { isInsideKandevTask } from "./kandev-env";
 import { createProcessSupervisor } from "./process";
-import {
-  attachBackendExitHandler,
-  buildBackendEnv,
-  buildWebEnv,
-  logStartupInfo,
-  pickPorts,
-} from "./shared";
+import { buildBackendEnv, buildWebEnv, logStartupInfo, pickPorts } from "./shared";
+import { launchRestartableBackend } from "./supervisor/backend";
 import { launchWebApp, openBrowser } from "./web";
 
 export type DevOptions = {
@@ -24,16 +19,33 @@ export type DevOptions = {
 export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Promise<void> {
   const ports = await pickPorts(backendPort, webPort);
   const { dbPath, extra } = resolveDevBackendEnv(repoRoot);
+
+  if (isProductionDb(dbPath)) {
+    try {
+      const backupPath = backupProductionDb(dbPath);
+      if (backupPath) {
+        const name = path.basename(backupPath);
+        console.log(`[kandev] backed up production db → ${name}`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Abort rather than continue: the backup exists precisely to protect the
+      // production db before dev mode touches it. Proceeding on failure would
+      // remove the safety guarantee that justified introducing this guard.
+      throw new Error(`failed to back up production db (${message}); aborting dev startup`);
+    }
+  }
+
   const backendEnv = buildBackendEnv({ ports, extra });
   const webEnv = buildWebEnv({ ports, debug: true });
   const logLevel =
     process.env.KANDEV_LOGGING_LEVEL?.trim() || process.env.KANDEV_LOG_LEVEL?.trim() || "info";
   const webUrl = `http://localhost:${ports.webPort}`;
+  const appUrl = ports.backendUrl;
 
   logStartupInfo({
     header: "dev mode: using local repo",
     ports,
-    primary: "web",
     dbPath,
     logLevel,
   });
@@ -46,18 +58,21 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
     path.join("apps", "backend"),
     "dev",
   ]);
-  const backendProc = spawn(backendCmd, backendArgs, {
+  const backend = await launchRestartableBackend({
+    command: backendCmd,
+    args: backendArgs,
     cwd: repoRoot,
     env: backendEnv,
+    homeDir: backendEnv.KANDEV_HOME_DIR ?? devKandevHome(repoRoot),
+    ports,
+    mode: "dev",
     stdio: "inherit",
+    supervisor,
   });
-  supervisor.children.push(backendProc);
-
-  attachBackendExitHandler(backendProc, supervisor);
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_DEV);
   console.log("[kandev] starting backend...");
-  await waitForHealth(ports.backendUrl, backendProc, healthTimeoutMs);
+  await waitForHealth(ports.backendUrl, backend.proc, healthTimeoutMs);
   console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
   console.log("[kandev] starting web...");
@@ -70,8 +85,8 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
     label: "web",
   });
   await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
-  console.log(`[kandev] open: ${webUrl}`);
-  openBrowser(webUrl);
+  console.log(`[kandev] open: ${appUrl}`);
+  openBrowser(appUrl);
 }
 
 type DevBackendEnv = {

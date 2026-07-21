@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirect } from "@/lib/routing/server-navigation";
 
 /**
  * Compatibility alias for `/tasks/:id`.

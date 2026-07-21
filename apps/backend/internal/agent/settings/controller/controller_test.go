@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -51,7 +53,7 @@ func (a *testAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, e
 }
 
 // BuildCommand builds a command using runtime config and permission flags.
-// Model/mode are applied via ACP session/set_model at session start, not via CLI.
+// Model/mode are applied through ACP session configuration at session start, not via CLI.
 func (a *testAgent) BuildCommand(opts agents.CommandOptions) agents.Command {
 	rt := a.Runtime()
 	if rt == nil {
@@ -149,7 +151,7 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 		t.Error("PreviewAgentCommand() Supported = false, want true")
 	}
 
-	// --model is no longer emitted: model is applied via ACP session/set_model.
+	// --model is no longer emitted: model is applied through ACP session configuration.
 	expectedParts := []string{"test-cli", "--verbose", "--yes"}
 	for _, part := range expectedParts {
 		found := false
@@ -606,5 +608,39 @@ func TestDetectAgents_E2EMockPropagatesSupportsMCP(t *testing.T) {
 	}
 	if got := byID["mock-no-mcp"]; got.supportsMCP {
 		t.Error("mock-no-mcp: SupportsMCP = true, want false (IsInstalled said no)")
+	}
+}
+
+// TestController_PreviewAgentCommand_CopilotPrefersNativeBinary verifies the
+// command preview reflects the local copilot CLI when it is on PATH — the
+// preview assumes the default standalone host — and falls back to npx when it
+// is absent. Regresses the report that the preview always showed npx.
+func TestController_PreviewAgentCommand_CopilotPrefersNativeBinary(t *testing.T) {
+	controller := newTestController(map[string]agents.Agent{
+		"copilot-acp": agents.NewCopilotACP(),
+	})
+
+	// copilot on PATH → preview shows the native binary.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "copilot"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write fake copilot: %v", err)
+	}
+	t.Setenv("PATH", dir)
+	res, err := controller.PreviewAgentCommand(context.Background(), "copilot-acp", CommandPreviewRequest{})
+	if err != nil {
+		t.Fatalf("PreviewAgentCommand() error = %v", err)
+	}
+	if got := res.Command; len(got) == 0 || got[0] != "copilot" {
+		t.Errorf("preview with copilot on PATH should start with copilot, got %v", got)
+	}
+
+	// copilot absent → preview falls back to npx.
+	t.Setenv("PATH", t.TempDir())
+	res, err = controller.PreviewAgentCommand(context.Background(), "copilot-acp", CommandPreviewRequest{})
+	if err != nil {
+		t.Fatalf("PreviewAgentCommand() error = %v", err)
+	}
+	if got := res.Command; len(got) == 0 || got[0] != "npx" {
+		t.Errorf("preview without copilot on PATH should start with npx, got %v", got)
 	}
 }

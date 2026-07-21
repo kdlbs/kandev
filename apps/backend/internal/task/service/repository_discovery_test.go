@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -64,11 +65,21 @@ func TestValidateLocalRepositoryPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidateLocalRepositoryPath outside error: %v", err)
 	}
-	if outside.Allowed {
-		t.Fatalf("expected outside path to be disallowed")
+	if !outside.Allowed || !outside.Exists || !outside.IsGitRepo {
+		t.Fatalf("expected explicit outside repository to validate, got %+v", outside)
 	}
-	if outside.Message != "Path is outside the allowed roots" {
-		t.Fatalf("expected outside message, got %q", outside.Message)
+	if outside.Message != "" {
+		t.Fatalf("expected no outside-root validation message, got %q", outside.Message)
+	}
+
+	discovered, err := svc.DiscoverLocalRepositories(context.Background(), "")
+	if err != nil {
+		t.Fatalf("DiscoverLocalRepositories error: %v", err)
+	}
+	for _, repo := range discovered.Repositories {
+		if repo.Path == outside.Path {
+			t.Fatalf("explicit validation widened automatic discovery to %q", repo.Path)
+		}
 	}
 
 	missingPath := filepath.Join(root, "missing")
@@ -147,11 +158,11 @@ func seedBareGitDir(t *testing.T, repoPath, headContent string) string {
 	return gitDir
 }
 
-// TestReadGitDefaultBranch_PrefersOriginHEAD — the upstream's declared
-// default beats every other heuristic. Regression for the bug where the
-// repo's stored default_branch latched onto whatever feature branch the user
-// happened to be on at task-creation time.
-func TestReadGitDefaultBranch_PrefersOriginHEAD(t *testing.T) {
+// TestReadGitDefaultBranch_UsesOriginHEADWhenMainRefAbsent — origin/HEAD still
+// beats the checked-out branch when no main ref exists. Regression for the bug
+// where the repo's stored default_branch latched onto whatever feature branch
+// the user happened to be on at task-creation time.
+func TestReadGitDefaultBranch_UsesOriginHEADWhenMainRefAbsent(t *testing.T) {
 	repoPath := t.TempDir()
 	gitDir := seedBareGitDir(t, repoPath, "ref: refs/heads/feature/x\n")
 	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin"), 0o755); err != nil {
@@ -692,6 +703,158 @@ func TestListBranches_RoutesProviderRepoToRemoteLister(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].Name != "main" || got[1].Name != "develop" {
 		t.Fatalf("unexpected branches: %+v", got)
+	}
+}
+
+func TestListBranches_SavedRepositoryOutsideDiscoveryRoots(t *testing.T) {
+	isolateGitEnvForTest(t)
+	discoveryRoot := t.TempDir()
+	repoPath := filepath.Join(t.TempDir(), "explicit-repo")
+	initRealGitRepo(t, repoPath)
+
+	svc := newDiscoveryService(t, discoveryRoot)
+	ctx := context.Background()
+	if err := svc.workspaces.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := svc.repoEntities.CreateRepository(ctx, &models.Repository{
+		ID: "outside-repo", WorkspaceID: "ws-1", Name: "outside", SourceType: sourceTypeLocal, LocalPath: repoPath,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	result, err := svc.ListBranchesWithCurrent(ctx, "outside-repo", "")
+	if err != nil {
+		t.Fatalf("ListBranchesWithCurrent by repository ID: %v", err)
+	}
+	if len(result.Branches) != 1 || result.Branches[0].Name != "main" {
+		t.Fatalf("branches = %+v, want main", result.Branches)
+	}
+	if result.CurrentBranch != "main" {
+		t.Fatalf("CurrentBranch = %q, want main", result.CurrentBranch)
+	}
+}
+
+func TestSavedRepositoryRejectsRetargetedCanonicalPath(t *testing.T) {
+	isolateGitEnvForTest(t)
+	originalPath := filepath.Join(t.TempDir(), "saved-repo")
+	initRealGitRepo(t, originalPath)
+
+	svc := newDiscoveryService(t, t.TempDir())
+	ctx := context.Background()
+	if err := svc.workspaces.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1", Name: "saved", SourceType: sourceTypeLocal, LocalPath: originalPath,
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	movedPath := originalPath + "-moved"
+	if err := os.Rename(originalPath, movedPath); err != nil {
+		t.Fatalf("Rename saved repository: %v", err)
+	}
+	victimPath := filepath.Join(t.TempDir(), "victim-repo")
+	initRealGitRepo(t, victimPath)
+	if err := os.Symlink(victimPath, originalPath); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+
+	t.Run("identity-bound read", func(t *testing.T) {
+		if _, err := svc.ListBranchesWithCurrent(ctx, created.ID, ""); err == nil {
+			t.Fatal("expected saved repository read to reject a retargeted canonical path")
+		}
+	})
+	t.Run("identity-bound mutation", func(t *testing.T) {
+		err := svc.PerformFreshBranch(ctx, FreshBranchRequest{
+			RepositoryID: created.ID,
+			BaseBranch:   "main",
+			NewBranch:    "feature/retargeted",
+		})
+		if err == nil {
+			t.Fatal("expected fresh branch to reject a retargeted canonical path")
+		}
+		cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/feature/retargeted")
+		cmd.Dir = victimPath
+		cmd.Env = isolatedGitEnv()
+		if err := cmd.Run(); err == nil {
+			t.Fatal("fresh branch mutated the retargeted repository")
+		}
+	})
+}
+
+func TestListBranches_RawExplicitPathOutsideDiscoveryRoots(t *testing.T) {
+	isolateGitEnvForTest(t)
+	discoveryRoot := t.TempDir()
+	repoPath := filepath.Join(t.TempDir(), "explicit-repo")
+	initRealGitRepo(t, repoPath)
+
+	svc := newDiscoveryService(t, discoveryRoot)
+	branches, err := svc.ListBranches(context.Background(), "", repoPath)
+	if err != nil {
+		t.Fatalf("ListBranches by explicit path: %v", err)
+	}
+	if len(branches) != 1 || branches[0].Name != "main" {
+		t.Fatalf("branches = %+v, want main", branches)
+	}
+}
+
+func TestListBranches_SavedLinkedWorktreeOutsideDiscoveryRoots(t *testing.T) {
+	isolateGitEnvForTest(t)
+	primaryPath := filepath.Join(t.TempDir(), "primary")
+	linkedPath := filepath.Join(t.TempDir(), "linked")
+	initRealGitRepo(t, primaryPath)
+	cmd := exec.Command("git", "worktree", "add", "-b", "linked", linkedPath, "main")
+	cmd.Dir = primaryPath
+	cmd.Env = isolatedGitEnv()
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v: %s", err, output)
+	}
+
+	svc := newDiscoveryService(t, t.TempDir())
+	ctx := context.Background()
+	if err := svc.workspaces.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := svc.repoEntities.CreateRepository(ctx, &models.Repository{
+		ID: "linked-repo", WorkspaceID: "ws-1", Name: "linked", SourceType: sourceTypeLocal, LocalPath: linkedPath,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	result, err := svc.ListBranchesWithCurrent(ctx, "linked-repo", "")
+	if err != nil {
+		t.Fatalf("ListBranchesWithCurrent: %v", err)
+	}
+	if result.CurrentBranch != "linked" {
+		t.Fatalf("CurrentBranch = %q, want linked", result.CurrentBranch)
+	}
+}
+
+func TestValidateLinkedWorktreeMetadataRejectsSelfReferentialCommonDir(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "linked")
+	gitDir := filepath.Join(t.TempDir(), "metadata")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll repo: %v", err)
+	}
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll metadata: %v", err)
+	}
+	gitPath := filepath.Join(repoPath, ".git")
+	if err := os.WriteFile(gitPath, []byte("gitdir: "+gitDir+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "gitdir"), []byte(gitPath+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile gitdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "commondir"), []byte(".\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile commondir: %v", err)
+	}
+
+	if err := validateLinkedWorktreeMetadata(repoPath, gitPath); err == nil {
+		t.Fatal("expected self-referential common directory to be rejected")
 	}
 }
 

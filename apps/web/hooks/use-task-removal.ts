@@ -6,6 +6,7 @@ import type { TaskSession } from "@/lib/types/http";
 import { replaceTaskUrl } from "@/lib/links";
 import { listTaskSessions } from "@/lib/api";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
+import { getRecentTasks } from "@/lib/recent-tasks";
 
 type TaskRemovalOptions = {
   store: StoreApi<AppState>;
@@ -15,13 +16,22 @@ type TaskRemovalOptions = {
 
 type RemoveFromBoardOptions = {
   /**
-   * The active task ID captured **before** the async delete API call.
-   * Avoids a race with the WS "task.deleted" handler that may clear
-   * activeTaskId before removeTaskFromBoard runs.
+   * The active task ID captured **before** the async delete/archive API call.
+   * Only honored when the current `activeTaskId` has been cleared to `null`
+   * by the WS "task.deleted" / "task.updated(archived_at)" handler racing
+   * ahead of this function. If the user has manually navigated to a different
+   * task during the in-flight API call, the current store value wins and
+   * this captured value is ignored.
    */
   wasActiveTaskId?: string | null;
   /** The active session ID captured before the async delete API call. */
   wasActiveSessionId?: string | null;
+  /** Switch away from the task without removing it from board state yet. */
+  switchOnly?: boolean;
+};
+
+type RemoveFromBoardResult = {
+  switchedTaskId: string | null;
 };
 
 function cachedSessionsHaveEnvIds(sessions: TaskSession[]): boolean {
@@ -89,6 +99,20 @@ function collectRemainingTasks(store: StoreApi<AppState>): KanbanState["tasks"] 
   return allRemainingTasks;
 }
 
+function selectNextTaskAfterRemoval(
+  remainingTasks: KanbanState["tasks"],
+  removedTaskId: string,
+): KanbanState["tasks"][number] | null {
+  const remainingById = new Map(
+    remainingTasks.filter((task) => task.id !== removedTaskId).map((task) => [task.id, task]),
+  );
+  for (const recent of getRecentTasks()) {
+    const task = remainingById.get(recent.taskId);
+    if (task) return task;
+  }
+  return remainingTasks.find((task) => task.id !== removedTaskId) ?? null;
+}
+
 function switchToSessionForTask(params: {
   store: StoreApi<AppState>;
   nextTask: KanbanState["tasks"][number];
@@ -99,8 +123,12 @@ function switchToSessionForTask(params: {
   const { store, nextTask, sessionId, oldEnvId, useLayoutSwitch } = params;
   store.getState().setActiveSession(nextTask.id, sessionId);
   if (!useLayoutSwitch) return;
-  const newEnvId = store.getState().environmentIdBySessionId[sessionId] ?? null;
-  if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId);
+  const state = store.getState();
+  const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
+  const sessionIds = (state.taskSessionsByTask.itemsByTaskId[nextTask.id] ?? []).map(
+    (session) => session.id,
+  );
+  if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId, sessionIds);
 }
 
 async function switchToNextTask(params: {
@@ -144,13 +172,27 @@ function resolveOldEnvId(store: StoreApi<AppState>, opts?: RemoveFromBoardOption
   return oldSessionId ? (store.getState().environmentIdBySessionId[oldSessionId] ?? null) : null;
 }
 
-function resolveActiveTaskId(
+/**
+ * Decide whether the removed task is the one the user is currently viewing.
+ *
+ * Two cases count as "still on the removed task":
+ *   1. `stillOnRemoved` — the store's current `activeTaskId` matches `taskId`.
+ *   2. `wsCleared` — the store's `activeTaskId` has been cleared to `null`
+ *      (the WS `task.deleted` / `task.updated(archived_at)` handler raced
+ *      ahead of us) AND the caller-captured `wasActiveTaskId` matches `taskId`.
+ *
+ * Any other state means the user manually moved to a different task during
+ * the in-flight API call — leave them on their chosen task.
+ */
+function shouldSwitchAfterRemoval(
   store: StoreApi<AppState>,
+  taskId: string,
   opts?: RemoveFromBoardOptions,
-): string | null {
-  return opts?.wasActiveTaskId !== undefined
-    ? opts.wasActiveTaskId
-    : store.getState().tasks.activeTaskId;
+): boolean {
+  const currentActiveTaskId = store.getState().tasks.activeTaskId;
+  const stillOnRemoved = currentActiveTaskId === taskId;
+  const wsCleared = currentActiveTaskId === null && opts?.wasActiveTaskId === taskId;
+  return stillOnRemoved || wsCleared;
 }
 
 /**
@@ -170,33 +212,36 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
    * and switch to the next available task if the removed task was active.
    *
    * Pass `opts.wasActiveTaskId` / `opts.wasActiveSessionId` when calling after
-   * an async API call (e.g. deleteTaskById) — the WS "task.deleted" handler may
-   * clear activeTaskId before this function runs.
+   * an async API call (e.g. deleteTaskById, archiveTask) — the WS handler may
+   * clear activeTaskId before this function runs. The captured value is only
+   * consulted as a fallback when the current store value has been cleared; if
+   * the user manually navigated to a different task mid-flight, the store
+   * wins and the captured value is ignored (no auto-switch).
    */
   const removeTaskFromBoard = useCallback(
-    async (taskId: string, opts?: RemoveFromBoardOptions) => {
-      removeTaskFromSnapshots(store, taskId);
+    async (taskId: string, opts?: RemoveFromBoardOptions): Promise<RemoveFromBoardResult> => {
+      if (!opts?.switchOnly) removeTaskFromSnapshots(store, taskId);
       const allRemainingTasks = collectRemainingTasks(store);
 
-      // Use the caller-provided active task ID (captured before the async API
-      // call) to avoid the race with the WS handler that may have already
-      // cleared it.  Fall back to the current store value for callers that
-      // don't provide it (e.g. archive, which doesn't go through the API).
-      const activeTaskId = resolveActiveTaskId(store, opts);
-      if (activeTaskId !== taskId) return;
+      if (!shouldSwitchAfterRemoval(store, taskId, opts)) {
+        return { switchedTaskId: null };
+      }
 
       const oldEnvId = resolveOldEnvId(store, opts);
-      if (allRemainingTasks.length > 0) {
+      const nextTask = selectNextTaskAfterRemoval(allRemainingTasks, taskId);
+      if (nextTask) {
         await switchToNextTask({
           store,
-          nextTask: allRemainingTasks[0],
+          nextTask,
           oldEnvId,
           useLayoutSwitch,
           loadTaskSessionsForTask,
         });
-      } else {
-        window.location.href = "/";
+        return { switchedTaskId: nextTask.id };
       }
+
+      window.location.href = "/";
+      return { switchedTaskId: null };
     },
     [store, useLayoutSwitch, loadTaskSessionsForTask],
   );

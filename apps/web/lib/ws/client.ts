@@ -1,6 +1,21 @@
 import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { dispatchToPluginWsHandlers } from "@/lib/ws/plugin-bridge";
+
+const debugDispatch = createDebugLogger("ws:dispatch");
+
+// High-frequency notification types we skip in the dispatch log to avoid
+// drowning the console during agent streams. Filter [ws:dispatch] to see
+// everything else; if you need the streaming traffic, comment this out.
+const DISPATCH_LOG_DENYLIST = new Set<string>([
+  "session.message.added",
+  "session.message.updated",
+  "session.message.deleted",
+  "session.shell.output",
+  "session.process.output",
+]);
 
 type MessageHandler<T extends BackendMessageType> = (message: BackendMessageMap[T]) => void;
 
@@ -51,6 +66,7 @@ export class WebSocketClient {
   private sessionFocusCounts = new Map<string, number>();
   private userSubscriptionCount = 0;
   private runSubscriptions = new Map<string, number>();
+  private systemMetricsSubscriptionCount = 0;
 
   constructor(
     private url: string,
@@ -115,6 +131,20 @@ export class WebSocketClient {
 
   send(payload: unknown) {
     const data = JSON.stringify(payload);
+    if (isDebug()) {
+      const p = payload as { action?: string; id?: string; type?: string } | null;
+      const action = p?.action ?? "?";
+      if (!DISPATCH_LOG_DENYLIST.has(action)) {
+        const sessionId = (p as { payload?: { session_id?: string } } | null)?.payload?.session_id;
+        debugDispatch("send", {
+          action,
+          id: p?.id ?? null,
+          type: p?.type ?? null,
+          sessionId: sessionId ?? null,
+          queued: this.status !== "connected" || !this.socket,
+        });
+      }
+    }
     if (this.status !== "connected" || !this.socket) {
       this.pendingQueue.push(data);
       return;
@@ -181,6 +211,34 @@ export class WebSocketClient {
       });
     }
     return () => this.unfocusSession(sessionId);
+  }
+
+  /**
+   * Re-send a `session.focus` frame for an already-focused session WITHOUT
+   * touching the focus ref-count. The backend's focus handler pushes a fresh
+   * live git-status snapshot as a side effect (see `handleSessionFocus` →
+   * `sendSessionData` → `appendLiveGitStatusMessage`, which forces a
+   * `GetGitStatusMultiFresh` query that bypasses the workspace poll cache).
+   *
+   * This is the deterministic recovery for the focus-gated polling race: the
+   * agent edits a file, but if the workspace is still in slow poll mode (the
+   * focus→fast push lost a race with agentctl startup) the next
+   * `session.git.event` may be up to 30s away. Components that become visible
+   * and need fresh diff data (the diff panel becoming the active tab) call
+   * this to pull the latest git status immediately.
+   *
+   * No-op when the session isn't currently focused (the regular focus frame,
+   * sent on 0→1, already pushed fresh data).
+   */
+  refreshSessionData(sessionId: string) {
+    if (this.status !== "connected") return;
+    if (!this.sessionFocusCounts.get(sessionId)) return;
+    this.send({
+      id: generateUUID(),
+      type: "request",
+      action: "session.focus",
+      payload: { session_id: sessionId },
+    });
   }
 
   unfocusSession(sessionId: string) {
@@ -277,6 +335,31 @@ export class WebSocketClient {
     return () => this.unsubscribeRun(runId);
   }
 
+  subscribeSystemMetrics() {
+    this.systemMetricsSubscriptionCount += 1;
+    if (this.status === "connected" && this.systemMetricsSubscriptionCount === 1) {
+      this.send({
+        id: generateUUID(),
+        type: "request",
+        action: "system.metrics.subscribe",
+        payload: {},
+      });
+    }
+    return () => this.unsubscribeSystemMetrics();
+  }
+
+  unsubscribeSystemMetrics() {
+    this.systemMetricsSubscriptionCount = Math.max(0, this.systemMetricsSubscriptionCount - 1);
+    if (this.status === "connected" && this.systemMetricsSubscriptionCount === 0) {
+      this.send({
+        id: generateUUID(),
+        type: "request",
+        action: "system.metrics.unsubscribe",
+        payload: {},
+      });
+    }
+  }
+
   unsubscribeRun(runId: string) {
     const currentCount = this.runSubscriptions.get(runId);
     if (!currentCount) return;
@@ -324,14 +407,26 @@ export class WebSocketClient {
     }
   }
 
+  private debugNotification(action: BackendMessageType, payload: unknown, handlerCount: number) {
+    if (!isDebug() || DISPATCH_LOG_DENYLIST.has(action)) return;
+    const payloadSessionId = (payload as { session_id?: string } | undefined)?.session_id;
+    debugDispatch("notification", {
+      action,
+      sessionId: payloadSessionId ?? null,
+      handlers: handlerCount,
+    });
+  }
+
   private handleParsedMessage(message: BackendMessageMap[BackendMessageType]) {
     const msgWithId = message as { id?: string; type: string };
 
     if (msgWithId.type === "response" && msgWithId.id) {
+      if (isDebug()) debugDispatch("response", { id: msgWithId.id });
       this.resolvePendingRequest(msgWithId.id, message.payload);
       return;
     }
     if (msgWithId.type === "error" && msgWithId.id) {
+      if (isDebug()) debugDispatch("error-response", { id: msgWithId.id });
       this.rejectPendingRequest(msgWithId.id, message.payload);
       return;
     }
@@ -340,9 +435,13 @@ export class WebSocketClient {
     const action = (message as { action?: string })?.action as BackendMessageType | undefined;
     if (!action) return;
     const handlers = this.handlers.get(action);
+    this.debugNotification(action, message.payload, handlers?.size ?? 0);
     if (handlers) {
       handlers.forEach((handler) => handler(message));
     }
+    // Plugin bridge: forward the same notification to any handlers a loaded
+    // plugin registered for this action (registry.registerWsHandler).
+    dispatchToPluginWsHandlers(action, message.payload);
   }
 
   private resolvePendingRequest(msgId: string, payload: unknown) {
@@ -463,6 +562,14 @@ export class WebSocketClient {
         id: generateUUID(),
         type: "request",
         action: "user.subscribe",
+        payload: {},
+      });
+    }
+    if (this.systemMetricsSubscriptionCount > 0) {
+      this.send({
+        id: generateUUID(),
+        type: "request",
+        action: "system.metrics.subscribe",
         payload: {},
       });
     }

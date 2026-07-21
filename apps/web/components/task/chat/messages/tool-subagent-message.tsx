@@ -5,7 +5,21 @@ import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
-import type { ToolCallMetadata } from "@/components/task/chat/types";
+import type { SubagentTaskPayload, ToolCallMetadata } from "@/components/task/chat/types";
+import { SubagentMetaRow } from "@/components/task/chat/messages/subagent-meta-row";
+
+// deriveSubagentBody picks which secondary block (result text or prompt) the
+// card should render below the header. Result text wins because it carries the
+// silent-subagent summary that prompt placeholders cannot substitute for.
+function deriveSubagentBody(
+  childCount: number,
+  payload: SubagentTaskPayload | undefined,
+): { resultText?: string; prompt?: string } {
+  if (childCount > 0) return {};
+  if (payload?.result_text) return { resultText: payload.result_text };
+  if (payload?.prompt) return { prompt: payload.prompt };
+  return {};
+}
 
 type ToolSubagentMessageProps = {
   comment: Message;
@@ -59,15 +73,25 @@ function SubagentHeader({
       ) : (
         <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
       )}
-      <span className="bg-muted text-muted-foreground text-[10px] px-1.5 rounded font-medium uppercase tracking-wide">
+      <span
+        data-testid="subagent-type"
+        className="bg-muted text-muted-foreground text-[10px] px-1.5 rounded font-medium uppercase tracking-wide whitespace-nowrap flex-shrink-0"
+      >
         {subagentType}
       </span>
-      <span className="font-mono text-xs truncate text-muted-foreground inline-flex items-center gap-1.5">
+      <span
+        data-testid="subagent-description"
+        title={description}
+        className="font-mono text-xs truncate text-muted-foreground inline-flex items-center gap-1.5 min-w-0"
+      >
         {description}
         {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
       </span>
       {childCount > 0 && (
-        <span className="text-muted-foreground/60 text-xs px-1.5 rounded min-w-[20px] text-center font-mono">
+        <span
+          data-testid="subagent-child-count"
+          className="text-muted-foreground/60 text-xs px-1.5 rounded min-w-[20px] text-center font-mono"
+        >
           {childCount} tool call{childCount !== 1 ? "s" : ""}
         </span>
       )}
@@ -75,10 +99,14 @@ function SubagentHeader({
   );
 }
 
+const NESTED_BORDER = "ml-2 pl-4 border-l-2 border-border/30 mt-1";
+
 type SubagentContentProps = {
   isExpanded: boolean;
   childMessages: Message[];
   isActive: boolean;
+  prompt?: string;
+  resultText?: string;
   renderChild: (message: Message) => React.ReactNode;
 };
 
@@ -86,12 +114,14 @@ function SubagentContent({
   isExpanded,
   childMessages,
   isActive,
+  prompt,
+  resultText,
   renderChild,
 }: SubagentContentProps) {
   if (!isExpanded) return null;
   if (childMessages.length > 0) {
     return (
-      <div className="ml-2 pl-4 border-l-2 border-border/30 mt-1 space-y-2">
+      <div className={cn(NESTED_BORDER, "space-y-2")}>
         {childMessages.map((child) => (
           <div key={child.id}>{renderChild(child)}</div>
         ))}
@@ -100,8 +130,27 @@ function SubagentContent({
   }
   if (isActive) {
     return (
-      <div className="ml-2 pl-4 border-l-2 border-border/30 mt-1">
+      <div className={NESTED_BORDER}>
         <span className="text-xs text-muted-foreground italic">Subagent working...</span>
+      </div>
+    );
+  }
+  if (resultText) {
+    return (
+      <div className={NESTED_BORDER}>
+        <p
+          data-testid="subagent-result-text"
+          className="text-xs text-foreground/80 whitespace-pre-wrap break-words"
+        >
+          {resultText}
+        </p>
+      </div>
+    );
+  }
+  if (prompt) {
+    return (
+      <div className={NESTED_BORDER}>
+        <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words">{prompt}</p>
       </div>
     );
   }
@@ -127,12 +176,29 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
   const childCount = childMessages.length;
 
   const isActive = status === "running";
+  const showMeta = !isActive;
+  const { resultText, prompt } = deriveSubagentBody(childCount, subagentTask);
 
   // Track manual override state - null means "use auto behavior"
   const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);
 
-  // Auto behavior: expand if active, collapse otherwise
-  const autoExpanded = isActive;
+  // Auto behavior: expand if active or if we have a result text to surface
+  // (silent Auggie-style subagents have no child messages, so we want the
+  // final summary visible without an extra click).
+  const autoExpanded = isActive || Boolean(resultText);
+
+  // Reset the manual override the first time a result_text arrives so a card
+  // the user collapsed while the subagent was running auto-opens to show the
+  // summary. "Adjust state during render" pattern (preferred over useEffect):
+  // https://react.dev/learn/you-might-not-need-an-effect — only fires on the
+  // empty -> non-empty transition; later user collapses persist.
+  const [prevResultText, setPrevResultText] = useState(resultText);
+  if (resultText !== prevResultText) {
+    setPrevResultText(resultText);
+    if (resultText && !prevResultText) {
+      setManualExpandState(null);
+    }
+  }
 
   // Derive expanded state: manual override takes precedence, otherwise use auto
   const isExpanded = manualExpandState ?? autoExpanded;
@@ -142,7 +208,7 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
   }, [autoExpanded]);
 
   return (
-    <div className="w-full">
+    <div className="w-full" data-testid="subagent-card">
       <SubagentHeader
         isExpanded={isExpanded}
         subagentType={subagentType}
@@ -151,10 +217,13 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
         childCount={childCount}
         onToggle={handleToggle}
       />
+      {showMeta && <SubagentMetaRow subagentTask={subagentTask} />}
       <SubagentContent
         isExpanded={isExpanded}
         childMessages={childMessages}
         isActive={isActive}
+        prompt={prompt}
+        resultText={resultText}
         renderChild={renderChild}
       />
     </div>

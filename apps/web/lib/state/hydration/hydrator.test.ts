@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { produce } from "immer";
 import type { Draft } from "immer";
-import { hydrateUI } from "./hydrator";
+import { hydrateState, hydrateUI } from "./hydrator";
 import { defaultUIState } from "@/lib/state/slices/ui/ui-slice";
+import { defaultState, mergeInitialState } from "@/lib/state/default-state";
 import type { AppState } from "@/lib/state/store";
 
 function makeDraft(): AppState {
   // hydrateUI only touches UI-slice fields; an empty object cast satisfies
   // the rest without dragging the full AppState shape into this test.
   return { ...defaultUIState } as unknown as AppState;
+}
+
+function makeAppDraft(): AppState {
+  return structuredClone(defaultState) as AppState;
 }
 
 describe("hydrateUI — quick chat name overlay", () => {
@@ -27,7 +32,9 @@ describe("hydrateUI — quick chat name overlay", () => {
         quickChat: {
           isOpen: false,
           activeSessionId: null,
-          sessions: [{ sessionId: "sess-1", workspaceId: "ws-1", name: "Agent A - Chat 1" }],
+          sessions: [
+            { sessionId: "sess-1", workspaceId: "ws-1", name: "Agent A - Chat 1", kind: "chat" },
+          ],
         },
       });
     });
@@ -41,12 +48,59 @@ describe("hydrateUI — quick chat name overlay", () => {
         quickChat: {
           isOpen: false,
           activeSessionId: null,
-          sessions: [{ sessionId: "sess-2", workspaceId: "ws-1", name: "Agent A - Chat 1" }],
+          sessions: [
+            { sessionId: "sess-2", workspaceId: "ws-1", name: "Agent A - Chat 1", kind: "chat" },
+          ],
         },
       });
     });
 
     expect(result.quickChat.sessions[0].name).toBe("Agent A - Chat 1");
+  });
+});
+
+describe("hydrateUI — typed quick chat sessions", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("normalizes a legacy session without kind to an ordinary chat", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [
+            {
+              sessionId: "legacy",
+              workspaceId: "ws-1",
+            } as unknown as (typeof draft.quickChat.sessions)[number],
+          ],
+        },
+      });
+    });
+
+    expect((result.quickChat.sessions[0] as { kind?: string }).kind).toBe("chat");
+  });
+
+  it("preserves a restored configuration session kind", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [
+            {
+              sessionId: "config-session",
+              workspaceId: "ws-1",
+              kind: "config",
+            } as (typeof draft.quickChat.sessions)[number],
+          ],
+        },
+      });
+    });
+
+    expect((result.quickChat.sessions[0] as { kind?: string }).kind).toBe("config");
   });
 
   it("only overlays sessions that have a stored rename, leaving siblings untouched", () => {
@@ -61,13 +115,234 @@ describe("hydrateUI — quick chat name overlay", () => {
           isOpen: false,
           activeSessionId: null,
           sessions: [
-            { sessionId: "sess-a", workspaceId: "ws-1", name: "Original A" },
-            { sessionId: "sess-b", workspaceId: "ws-1", name: "Original B" },
+            { sessionId: "sess-a", workspaceId: "ws-1", name: "Original A", kind: "chat" },
+            { sessionId: "sess-b", workspaceId: "ws-1", name: "Original B", kind: "chat" },
           ],
         },
       });
     });
 
     expect(result.quickChat.sessions.map((s) => s.name)).toEqual(["Renamed A", "Original B"]);
+  });
+
+  it("clears stale quick chat sessions when the backend returns none", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      draft.quickChat = {
+        isOpen: true,
+        activeSessionId: "stale-session",
+        sessions: [
+          { sessionId: "stale-session", workspaceId: "ws-1", name: "Stale", kind: "chat" },
+        ],
+      };
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [],
+        },
+      });
+    });
+
+    expect(result.quickChat.sessions).toEqual([]);
+    expect(result.quickChat.isOpen).toBe(false);
+    expect(result.quickChat.activeSessionId).toBeNull();
+  });
+});
+
+describe("mergeInitialState — quick chat name overlay", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("overlays locally-renamed names during boot payload merge", () => {
+    window.localStorage.setItem(
+      "kandev.quickChat.names",
+      JSON.stringify({ "sess-boot": "Local boot name" }),
+    );
+
+    const result = mergeInitialState({
+      quickChat: {
+        isOpen: false,
+        activeSessionId: null,
+        sessions: [
+          {
+            sessionId: "sess-boot",
+            workspaceId: "ws-1",
+            name: "Backend task title",
+            kind: "chat",
+          },
+          {
+            sessionId: "sess-other",
+            workspaceId: "ws-1",
+            name: "Other title",
+            kind: "chat",
+          },
+        ],
+      },
+    });
+
+    expect(result.quickChat.sessions.map((s) => s.name)).toEqual([
+      "Local boot name",
+      "Other title",
+    ]);
+  });
+});
+
+describe("mergeInitialState — sidebar views from boot settings", () => {
+  it("bridges backend sidebar settings into the UI slice before the store is created", () => {
+    const result = mergeInitialState({
+      userSettings: {
+        sidebarViews: [
+          {
+            id: "server",
+            name: "Server",
+            filters: [],
+            sort: { key: "state", direction: "asc" },
+            group: "none",
+            collapsedGroups: [],
+          },
+        ],
+        sidebarActiveViewId: "server",
+        sidebarDraft: {
+          baseViewId: "server",
+          filters: [],
+          sort: { key: "updatedAt", direction: "desc" },
+          group: "workflow",
+        },
+        loaded: true,
+      },
+    } as unknown as Partial<AppState>);
+
+    expect(result.sidebarViews).toMatchObject({
+      views: [{ id: "server", name: "Server" }],
+      activeViewId: "server",
+      draft: { baseViewId: "server", group: "workflow" },
+    });
+  });
+
+  it("bridges backend task preferences into the UI slice before the store is created", () => {
+    const result = mergeInitialState({
+      userSettings: {
+        sidebarTaskPrefs: {
+          pinnedTaskIds: ["task-1"],
+          orderedTaskIds: ["task-2", "task-1"],
+          subtaskOrderByParentId: { "task-1": ["subtask-1"] },
+        },
+        loaded: true,
+      },
+    } as unknown as Partial<AppState>);
+
+    expect(result.sidebarTaskPrefs).toMatchObject({
+      pinnedTaskIds: ["task-1"],
+      orderedTaskIds: ["task-2", "task-1"],
+      subtaskOrderByParentId: { "task-1": ["subtask-1"] },
+    });
+  });
+});
+
+describe("hydrateState — sidebar views from user settings", () => {
+  it("hydrates active view and draft from backend user settings", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sidebarViews.activeViewId = "local";
+      hydrateState(draft, {
+        userSettings: {
+          sidebarViews: [
+            {
+              id: "server",
+              name: "Server",
+              filters: [],
+              sort: { key: "state", direction: "asc" },
+              group: "none",
+              collapsedGroups: [],
+            },
+          ],
+          sidebarActiveViewId: "server",
+          sidebarDraft: {
+            baseViewId: "server",
+            filters: [],
+            sort: { key: "updatedAt", direction: "desc" },
+            group: "workflow",
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sidebarViews.activeViewId).toBe("server");
+    expect(result.sidebarViews.draft).toEqual({
+      baseViewId: "server",
+      filters: [],
+      sort: { key: "updatedAt", direction: "desc" },
+      group: "workflow",
+    });
+  });
+
+  it("clears stale local draft when backend draft is null", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sidebarViews.draft = {
+        baseViewId: "local",
+        filters: [],
+        sort: { key: "state", direction: "asc" },
+        group: "state",
+      };
+      hydrateState(draft, {
+        userSettings: {
+          sidebarDraft: null,
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sidebarViews.draft).toBeNull();
+  });
+
+  it("hydrates sidebar task prefs from backend, including explicit clears", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sidebarTaskPrefs = {
+        pinnedTaskIds: ["local-pin"],
+        orderedTaskIds: ["local-order"],
+        subtaskOrderByParentId: { parent: ["child"] },
+      };
+      hydrateState(draft, {
+        userSettings: {
+          sidebarTaskPrefs: {
+            pinnedTaskIds: [],
+            orderedTaskIds: [],
+            subtaskOrderByParentId: {},
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sidebarTaskPrefs).toEqual({
+      pinnedTaskIds: [],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: {},
+    });
+  });
+
+  it("uses backend sidebar task prefs as the authoritative hydrated value", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sidebarTaskPrefs = {
+        pinnedTaskIds: ["local-pin"],
+        orderedTaskIds: ["local-order"],
+        subtaskOrderByParentId: { shared: ["local-child"], localOnly: ["child"] },
+        syncError: "retry",
+      };
+      hydrateState(draft, {
+        userSettings: {
+          sidebarTaskPrefs: {
+            pinnedTaskIds: ["server-pin"],
+            orderedTaskIds: ["server-order"],
+            subtaskOrderByParentId: { shared: ["server-child"], serverOnly: ["child"] },
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sidebarTaskPrefs).toEqual({
+      pinnedTaskIds: ["server-pin"],
+      orderedTaskIds: ["server-order"],
+      subtaskOrderByParentId: { shared: ["server-child"], serverOnly: ["child"] },
+      syncError: "retry",
+    });
   });
 });

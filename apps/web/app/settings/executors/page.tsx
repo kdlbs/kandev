@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -56,6 +56,11 @@ const EXECUTOR_TYPES = [
     type: "sprites",
     label: "Sprites.dev",
     description: "Run agents in Sprites.dev cloud sandboxes.",
+  },
+  {
+    type: "ssh",
+    label: "SSH",
+    description: "Connect to a remote host over SSH and run agentctl there.",
   },
 ] as const;
 

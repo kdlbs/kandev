@@ -2,7 +2,7 @@
 
 import { memo, useState, useCallback, useEffect, useRef } from "react";
 import { IconBrandVscode, IconLoader2, IconAlertCircle } from "@tabler/icons-react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import { Button } from "@kandev/ui/button";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore } from "@/components/state-provider";

@@ -27,10 +27,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 import {
+  hasUserPromptInActiveTurn,
   hasUserOrAgentMessage,
+  isTurnSettleTransition,
+  shouldRunMessageBackfill,
+  shouldRetryUnknownSessionSubscription,
   runBackfillRound,
   autoBackfillUntilUserMessage,
+  nextFetchSeq,
+  commitFetchSeq,
+  MAX_AUTO_BACKFILL_PAGES,
 } from "./use-session-messages";
+import type { TaskSessionState } from "@/lib/types/http";
 
 function makeMessage(overrides: Partial<Message>): Message {
   return {
@@ -111,6 +119,151 @@ describe("hasUserOrAgentMessage", () => {
   });
 });
 
+describe("isTurnSettleTransition", () => {
+  const settled: TaskSessionState[] = [
+    "IDLE",
+    "WAITING_FOR_INPUT",
+    "COMPLETED",
+    "FAILED",
+    "CANCELLED",
+  ];
+
+  it("is true when leaving RUNNING for a settled state (resume turn ends)", () => {
+    for (const next of settled) {
+      expect(isTurnSettleTransition("RUNNING", next)).toBe(true);
+    }
+  });
+
+  it("is true when leaving STARTING for a settled state (resume boots with no turn)", () => {
+    expect(isTurnSettleTransition("STARTING", "WAITING_FOR_INPUT")).toBe(true);
+  });
+
+  it("is false for the active-phase transition STARTING -> RUNNING", () => {
+    expect(isTurnSettleTransition("STARTING", "RUNNING")).toBe(false);
+  });
+
+  it("is false when staying in a settled state (no churn on WAITING -> WAITING)", () => {
+    expect(isTurnSettleTransition("WAITING_FOR_INPUT", "WAITING_FOR_INPUT")).toBe(false);
+  });
+
+  it("is false when entering an active state", () => {
+    expect(isTurnSettleTransition("WAITING_FOR_INPUT", "RUNNING")).toBe(false);
+    expect(isTurnSettleTransition("IDLE", "STARTING")).toBe(false);
+  });
+
+  it("is false when there is no previous state (initial render)", () => {
+    expect(isTurnSettleTransition(null, "WAITING_FOR_INPUT")).toBe(false);
+  });
+
+  it("is false when the next state is unknown", () => {
+    expect(isTurnSettleTransition("RUNNING", null)).toBe(false);
+  });
+});
+
+describe("running message backfill guards", () => {
+  it("detects a user prompt in the active turn", () => {
+    expect(
+      hasUserPromptInActiveTurn(
+        [makeMessage({ id: "u1", turn_id: "turn-1", author_type: "user" })],
+        "turn-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores script output and old-turn prompts", () => {
+    expect(
+      hasUserPromptInActiveTurn(
+        [makeMessage({ id: "s1", turn_id: "turn-1", type: "script_execution" })],
+        "turn-1",
+      ),
+    ).toBe(false);
+    expect(
+      hasUserPromptInActiveTurn(
+        [makeMessage({ id: "u1", turn_id: "old-turn", author_type: "user" })],
+        "turn-1",
+      ),
+    ).toBe(false);
+  });
+
+  it("runs for a connected RUNNING session with an active turn", () => {
+    const messages = [makeMessage({ id: "u1", turn_id: "turn-1", author_type: "user" })];
+    expect(
+      shouldRunMessageBackfill({
+        taskSessionState: "RUNNING",
+        connectionStatus: "connected",
+        activeTurnId: "turn-1",
+        messages,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRunMessageBackfill({
+        taskSessionState: "RUNNING",
+        connectionStatus: "connected",
+        activeTurnId: "turn-1",
+        messages: [],
+      }),
+    ).toBe(true);
+    expect(
+      shouldRunMessageBackfill({
+        taskSessionState: "WAITING_FOR_INPUT",
+        connectionStatus: "connected",
+        activeTurnId: "turn-1",
+        messages,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRunMessageBackfill({
+        taskSessionState: "RUNNING",
+        connectionStatus: "connecting",
+        activeTurnId: "turn-1",
+        messages,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRunMessageBackfill({
+        taskSessionState: "RUNNING",
+        connectionStatus: "connected",
+        activeTurnId: null,
+        messages,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("unknown session subscription retry guard", () => {
+  it("retries only while a connected session id has no session state", () => {
+    expect(
+      shouldRetryUnknownSessionSubscription({
+        taskSessionId: "sess-1",
+        taskSessionState: null,
+        connectionStatus: "connected",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldRetryUnknownSessionSubscription({
+        taskSessionId: "sess-1",
+        taskSessionState: "STARTING",
+        connectionStatus: "connected",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetryUnknownSessionSubscription({
+        taskSessionId: null,
+        taskSessionState: null,
+        connectionStatus: "connected",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetryUnknownSessionSubscription({
+        taskSessionId: "sess-1",
+        taskSessionState: null,
+        connectionStatus: "connecting",
+      }),
+    ).toBe(false);
+  });
+});
+
 describe("runBackfillRound", () => {
   it("returns 'stop' when a user/agent message already exists in the store", async () => {
     const store = makeStore({
@@ -161,15 +314,70 @@ describe("runBackfillRound", () => {
   });
 });
 
+describe("stale concurrent fetch guard", () => {
+  it("rejects an older fetch that completes after a newer one merged", () => {
+    const sid = "guard-sess-a";
+    const older = nextFetchSeq();
+    const newer = nextFetchSeq();
+    // The newer fetch finishes first and merges.
+    expect(commitFetchSeq(sid, newer)).toBe(true);
+    // The older fetch finishing late must be skipped.
+    expect(commitFetchSeq(sid, older)).toBe(false);
+  });
+
+  it("applies fetches that complete in order", () => {
+    const sid = "guard-sess-b";
+    expect(commitFetchSeq(sid, nextFetchSeq())).toBe(true);
+    expect(commitFetchSeq(sid, nextFetchSeq())).toBe(true);
+  });
+
+  it("tracks the applied sequence independently per session", () => {
+    const older = nextFetchSeq();
+    const newer = nextFetchSeq();
+    expect(commitFetchSeq("guard-sess-c", newer)).toBe(true);
+    // A different session is unaffected by another session's higher applied seq.
+    expect(commitFetchSeq("guard-sess-d", older)).toBe(true);
+  });
+});
+
 describe("autoBackfillUntilUserMessage", () => {
-  it("stops after MAX_BACKFILL_ROUNDS (3) without finding a user/agent message", async () => {
+  it("continues past three pages until a user/agent message is found", async () => {
+    mockListTaskSessionMessages
+      .mockResolvedValueOnce({
+        messages: [makeMessage({ id: "tool-1", type: "tool_call", author_type: "agent" })],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [makeMessage({ id: "tool-2", type: "tool_call", author_type: "agent" })],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [makeMessage({ id: "tool-3", type: "tool_call", author_type: "agent" })],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [makeMessage({ id: "tool-4", type: "tool_call", author_type: "agent" })],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [makeMessage({ id: "user-1", type: "message", author_type: "user" })],
+        has_more: true,
+      });
+    const store = makeStore({ messages: [], hasMore: true, oldestCursor: "cursor-0" });
+
+    await autoBackfillUntilUserMessage("sess-1", store as never);
+
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(5);
+  });
+
+  it("stops after the auto-backfill page budget without finding a user/agent message", async () => {
     mockListTaskSessionMessages.mockResolvedValue({
       messages: [makeMessage({ id: "t1", type: "tool_call", author_type: "agent" })],
       has_more: true,
     });
     const store = makeStore({ messages: [], hasMore: true, oldestCursor: "cursor-0" });
     await autoBackfillUntilUserMessage("sess-1", store as never);
-    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(3);
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(MAX_AUTO_BACKFILL_PAGES);
   });
 
   it("stops after round 1 once a user message is prepended", async () => {

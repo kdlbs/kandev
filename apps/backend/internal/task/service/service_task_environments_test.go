@@ -53,18 +53,22 @@ func (s *stubEnvRepo) DeleteTaskEnvironment(context.Context, string) error {
 func (s *stubEnvRepo) DeleteTaskEnvironmentsByTask(context.Context, string) error { return nil }
 
 type stubDestroyer struct {
-	containerCalls []string
-	sandboxCalls   []string
-	worktreeCalls  []string
-	pushCalls      int
-	containerErr   error
-	sandboxErr     error
-	worktreeErr    error
-	pushErr        error
+	containerCalls       []string
+	sandboxCalls         []string
+	worktreeCalls        []string
+	cancelAfterContainer context.CancelFunc
+	pushCalls            int
+	containerErr         error
+	sandboxErr           error
+	worktreeErr          error
+	pushErr              error
 }
 
 func (s *stubDestroyer) DestroyContainer(_ context.Context, id string) error {
 	s.containerCalls = append(s.containerCalls, id)
+	if s.cancelAfterContainer != nil {
+		s.cancelAfterContainer()
+	}
 	return s.containerErr
 }
 func (s *stubDestroyer) DestroySandbox(_ context.Context, id, _ string) error {
@@ -178,6 +182,43 @@ func TestResetTaskEnvironment_DestroysEachResourceTypeAndDeletesRow(t *testing.T
 	}
 }
 
+func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	ctx, cancel := context.WithCancel(context.Background())
+	destroyer := &stubDestroyer{cancelAfterContainer: cancel}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(ctx, &models.TaskEnvironment{
+		ContainerID: "container-1", SandboxID: "sandbox-1", WorktreeID: "worktree-1",
+	})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("teardown error = %v, want context cancellation", err)
+	}
+	if len(destroyer.sandboxCalls) != 0 || len(destroyer.worktreeCalls) != 0 {
+		t.Fatalf("resources destroyed after cancellation: sandboxes=%v worktrees=%v",
+			destroyer.sandboxCalls, destroyer.worktreeCalls)
+	}
+}
+
+func TestCleanupTaskEnvironment_CancellationPreservesEnvironmentRow(t *testing.T) {
+	repo := &stubEnvRepo{}
+	svc := newResetTestService(t, repo)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	errs := svc.cleanupTaskEnvironment(ctx, "task-1", taskEnvironmentCleanup{
+		env: &models.TaskEnvironment{ID: "environment-1", TaskID: "task-1"}, deleteRow: true,
+	})
+
+	if !errors.Is(errors.Join(errs...), context.Canceled) {
+		t.Fatalf("cleanup errors = %v, want context cancellation", errs)
+	}
+	if repo.deleted {
+		t.Fatal("environment row deleted after cancellation")
+	}
+}
+
 func TestResetTaskEnvironment_ContainerDestroyFailurePreservesRow(t *testing.T) {
 	repo := &stubEnvRepo{env: &models.TaskEnvironment{
 		ID:          "env-1",
@@ -286,10 +327,10 @@ func TestPerformTaskCleanup_TearsDownTaskEnvironmentAndDeletesRow(t *testing.T) 
 	svc := newResetTestService(t, repo)
 	svc.SetEnvironmentDestroyer(destroyer)
 
-	errs := svc.performTaskCleanup(context.Background(), "task-1", nil, nil, taskEnvironmentCleanup{
+	errs := svc.performTaskCleanup(context.Background(), "task-1", nil, nil, nil, taskEnvironmentCleanup{
 		env:       env,
 		deleteRow: true,
-	}, false)
+	}, nil)
 
 	if len(errs) != 0 {
 		t.Fatalf("unexpected cleanup errors: %v", errs)
@@ -299,5 +340,72 @@ func TestPerformTaskCleanup_TearsDownTaskEnvironmentAndDeletesRow(t *testing.T) 
 	}
 	if !repo.deleted {
 		t.Fatal("expected task environment row to be deleted")
+	}
+}
+
+// TestBuildSSHLiveStatus_StringsAndStringEncodedInts pins the projection
+// from ExecutorRunning.Metadata into the popover-shaped SSHLiveStatus. The
+// SSH executor writes its numeric metadata as strings (strconv.Itoa) so
+// the projection must accept both "41001" and 41001 — every JSON
+// round-trip through SQLite blob storage gives us strings, but direct
+// in-memory writes give us ints.
+func TestBuildSSHLiveStatus_StringsAndStringEncodedInts(t *testing.T) {
+	got := buildSSHLiveStatus(map[string]interface{}{
+		"ssh_host":                 "koi.zeval.local",
+		"ssh_port":                 "2222",
+		"ssh_user":                 "zeval",
+		"ssh_remote_task_dir":      "/home/zeval/.kandev/tasks/task-1",
+		"ssh_remote_agentctl_pid":  "4732",
+		"ssh_remote_agentctl_port": "41001",
+		"ssh_local_forward_port":   "59123",
+		"ssh_host_fingerprint":     "SHA256:abc",
+	})
+	if got.Host != "koi.zeval.local" || got.Port != 2222 || got.User != "zeval" {
+		t.Errorf("connection fields = %+v, want host/port/user", got)
+	}
+	if got.RemoteTaskDir != "/home/zeval/.kandev/tasks/task-1" {
+		t.Errorf("RemoteTaskDir = %q", got.RemoteTaskDir)
+	}
+	if got.RemoteAgentctlPID != 4732 || got.RemoteAgentctlPort != 41001 || got.LocalForwardPort != 59123 {
+		t.Errorf("agentctl fields = %+v", got)
+	}
+	if got.Fingerprint != "SHA256:abc" {
+		t.Errorf("Fingerprint = %q", got.Fingerprint)
+	}
+}
+
+func TestBuildSSHLiveStatus_NativeIntsAlsoAccepted(t *testing.T) {
+	got := buildSSHLiveStatus(map[string]interface{}{
+		"ssh_host":                 "h",
+		"ssh_port":                 22,
+		"ssh_remote_agentctl_pid":  int64(99),
+		"ssh_remote_agentctl_port": float64(41001),
+	})
+	if got.Port != 22 || got.RemoteAgentctlPID != 99 || got.RemoteAgentctlPort != 41001 {
+		t.Errorf("native int projection failed: %+v", got)
+	}
+}
+
+func TestBuildSSHLiveStatus_EmptyMetadataReturnsZeroValueStruct(t *testing.T) {
+	got := buildSSHLiveStatus(map[string]interface{}{})
+	if got == nil {
+		t.Fatal("expected non-nil status (zero value), got nil")
+	}
+	if got.Host != "" || got.Port != 0 || got.RemoteAgentctlPID != 0 {
+		t.Errorf("expected zero-value fields, got %+v", got)
+	}
+}
+
+func TestBuildSSHLiveStatus_InvalidPortString_NoCrash(t *testing.T) {
+	// SSH executor only emits Itoa'd ports, but be defensive in case
+	// something else writes the metadata (e.g. a future migration or
+	// import path). Don't want a stray non-numeric value to panic the
+	// popover endpoint for every other field too.
+	got := buildSSHLiveStatus(map[string]interface{}{
+		"ssh_host": "h",
+		"ssh_port": "not-a-port",
+	})
+	if got.Host != "h" || got.Port != 0 {
+		t.Errorf("expected host preserved, port=0 on bad input, got %+v", got)
 	}
 }

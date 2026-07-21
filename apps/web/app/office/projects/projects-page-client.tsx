@@ -37,13 +37,15 @@ export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps)
     if (!activeWorkspaceId) return;
     try {
       const res = await listProjects(activeWorkspaceId);
-      if (res?.projects) {
-        setProjects(res.projects);
-      }
+      setProjects(res?.projects ?? []);
     } catch {
       // Silently handle fetch errors
     }
   }, [activeWorkspaceId, setProjects]);
+
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
 
   useOfficeRefetch("projects", loadProjects);
 

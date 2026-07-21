@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from "react";
-import type { DiffComment } from "./types";
+import type { DiffComment, DiffCommentUpdate } from "./types";
 
 /** Build a DiffComment object from common parameters */
 export function buildDiffComment(params: {
@@ -43,19 +43,31 @@ export function useCommentedLines(comments: DiffComment[]): Set<number> {
  */
 export function useCommentActions(params: {
   removeComment: (commentId: string) => void;
-  updateComment: (commentId: string, updates: Partial<DiffComment>) => void;
+  updateComment: (commentId: string, updates: DiffCommentUpdate) => void;
   setEditingComment: (id: string | null) => void;
   onCommentDelete?: (commentId: string) => void;
-  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   externalComments?: DiffComment[];
 }) {
-  const { removeComment, updateComment, setEditingComment, onCommentDelete, externalComments } =
-    params;
+  const {
+    removeComment,
+    updateComment,
+    setEditingComment,
+    onCommentDelete,
+    onCommentUpdate,
+    externalComments,
+  } = params;
 
   const handleCommentDelete = useCallback(
     (commentId: string) => {
-      if (onCommentDelete && externalComments !== undefined) {
-        onCommentDelete(commentId);
+      if (externalComments !== undefined) {
+        if (onCommentDelete) {
+          onCommentDelete(commentId);
+        } else if (isDevelopmentMode()) {
+          console.warn(
+            "[DiffViewer] `comments` is set without `onCommentDelete`; deleted comments must be handled by the controlled owner.",
+          );
+        }
       } else {
         removeComment(commentId);
       }
@@ -65,11 +77,35 @@ export function useCommentActions(params: {
 
   const handleCommentUpdate = useCallback(
     (commentId: string, content: string) => {
-      updateComment(commentId, { text: content });
-      setEditingComment(null);
+      const updates = { text: content };
+      if (externalComments !== undefined) {
+        if (onCommentUpdate) {
+          onCommentUpdate(commentId, updates);
+          setEditingComment(null);
+        } else if (isDevelopmentMode()) {
+          console.warn(
+            "[DiffViewer] `comments` is set without `onCommentUpdate`; edited comments must be handled by the controlled owner.",
+          );
+        }
+      } else {
+        updateComment(commentId, updates);
+        setEditingComment(null);
+      }
     },
-    [updateComment, setEditingComment],
+    [updateComment, onCommentUpdate, externalComments, setEditingComment],
   );
 
   return { handleCommentDelete, handleCommentUpdate };
+}
+
+function isDevelopmentMode(): boolean {
+  const viteEnv = (
+    import.meta as unknown as {
+      env?: { DEV?: boolean };
+    }
+  ).env;
+  return (
+    viteEnv?.DEV === true ||
+    (typeof process !== "undefined" && process.env.NODE_ENV !== "production")
+  );
 }

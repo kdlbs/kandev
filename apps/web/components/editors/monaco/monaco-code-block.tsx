@@ -1,6 +1,6 @@
 "use client";
 
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import Editor from "@monaco-editor/react";
 import { IconCheck, IconCopy } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";

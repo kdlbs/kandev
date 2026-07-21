@@ -170,6 +170,7 @@ function normalizeAgent(raw: unknown): AgentProfile {
     model: stringField(agent, "model", "model"),
     mode: (rawField(agent, "mode", "mode") as string | undefined) ?? undefined,
     allowIndexing: boolField(agent, "allowIndexing", "allow_indexing"),
+    autoApprove: boolField(agent, "autoApprove", "auto_approve"),
     cliFlags: parseJSONField<CLIFlag[]>(rawField(agent, "cliFlags", "cli_flags"), []),
     cliPassthrough: boolField(agent, "cliPassthrough", "cli_passthrough"),
     userModified: rawField(agent, "userModified", "user_modified") as boolean | undefined,
@@ -185,7 +186,7 @@ function stringifyJSONField(value: unknown): string | undefined {
 }
 
 function agentPayload(data: Partial<AgentProfile>): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     name: data.name,
     agent_profile_id: data.agentProfileId,
     role: data.role,
@@ -198,6 +199,16 @@ function agentPayload(data: Partial<AgentProfile>): Record<string, unknown> {
     executor_preference: stringifyJSONField(data.executorPreference),
     skill_ids: stringifyJSONField(data.skillIds),
   };
+  if (data.autoApprove !== undefined) {
+    payload.auto_approve = data.autoApprove;
+  }
+  if (data.allowIndexing !== undefined) {
+    payload.allow_indexing = data.allowIndexing;
+  }
+  if (data.cliPassthrough !== undefined) {
+    payload.cli_passthrough = data.cliPassthrough;
+  }
+  return payload;
 }
 
 // --- Agent Instances ---

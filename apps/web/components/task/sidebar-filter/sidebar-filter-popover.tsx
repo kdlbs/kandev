@@ -22,6 +22,8 @@ type Props = {
   trigger: React.ReactNode;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  renameRequestedViewId?: string | null;
+  onRenameRequestHandled?: (viewId: string) => void;
 };
 
 function makeClauseId(): string {
@@ -43,7 +45,13 @@ function resolveCurrent(
   return { filters: activeView.filters, sort: activeView.sort, group: activeView.group };
 }
 
-export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
+export function SidebarFilterPopover({
+  trigger,
+  open,
+  onOpenChange,
+  renameRequestedViewId,
+  onRenameRequestHandled,
+}: Props) {
   const views = useAppStore((s) => s.sidebarViews.views);
   const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
   const storedDraft = useAppStore((s) => s.sidebarViews.draft);
@@ -85,7 +93,11 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent className="w-[22rem] p-0" align="end" data-testid="sidebar-filter-popover">
+      <PopoverContent
+        className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[22rem] overflow-y-auto p-0"
+        align="end"
+        data-testid="sidebar-filter-popover"
+      >
         <div className="border-b p-2">
           <ViewHeaderRow
             activeView={activeView}
@@ -96,6 +108,8 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
             onRename={renameView}
             onDiscard={discard}
             onDelete={() => activeView && deleteView(activeView.id)}
+            renameRequestedViewId={renameRequestedViewId}
+            onRenameRequestHandled={onRenameRequestHandled}
           />
         </div>
 

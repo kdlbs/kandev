@@ -16,4 +16,5 @@ type Repository interface {
 	GetAgentUsage(ctx context.Context, workspaceID string, limit int, start *time.Time) ([]*models.AgentUsage, error)
 	GetRepositoryStats(ctx context.Context, workspaceID string, start *time.Time) ([]*models.RepositoryStats, error)
 	GetGitStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GitStats, error)
+	ListSessionCodeStats(ctx context.Context, filter models.SessionCodeStatsFilter) ([]*models.SessionCodeStats, error)
 }

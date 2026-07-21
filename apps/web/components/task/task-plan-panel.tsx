@@ -1,9 +1,9 @@
 "use client";
 
 import { memo, useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { PanelRoot, PanelBody, PanelHeaderBarSplit } from "./panel-primitives";
-import { TaskPlanRevisions } from "./task-plan-revisions";
-import dynamic from "next/dynamic";
+import { PanelRoot, PanelBody } from "./panel-primitives";
+import { PlanPanelHeader } from "./task-plan-panel-header";
+import dynamic from "@/lib/routing/client-dynamic";
 import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
@@ -16,7 +16,6 @@ import type {
   TextSelection,
   CommentForEditor,
 } from "@/components/editors/tiptap/tiptap-plan-editor";
-import type { TaskPlanRevision } from "@/lib/types/http";
 import type { Editor } from "@tiptap/core";
 import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { usePlanFindShortcut } from "./use-plan-find-shortcut";
@@ -192,9 +191,15 @@ function PlanPanelContent({
     <PanelRoot data-testid="plan-panel">
       <PlanPanelHeader
         taskId={taskId}
+        plan={state.plan}
+        draftContent={state.draftContent}
+        hasUnsavedChanges={state.hasUnsavedChanges}
+        activeSessionId={state.activeSessionId ?? null}
         revisions={state.revisions}
         isLoadingRevisions={state.isLoadingRevisions}
         isSaving={state.isSaving}
+        isAgentBusy={state.isAgentBusy}
+        savePlan={state.savePlan}
         onOpenRevisions={state.loadRevisions}
         onRevert={state.revertTo}
         loadRevisionContent={state.loadRevisionContent}
@@ -550,60 +555,5 @@ function PlanEmptyState({
         </div>
       </div>
     </div>
-  );
-}
-
-type PlanPanelHeaderProps = {
-  taskId: string;
-  revisions: TaskPlanRevision[];
-  isLoadingRevisions: boolean;
-  isSaving: boolean;
-  onOpenRevisions: () => void;
-  onRevert: (id: string) => Promise<TaskPlanRevision | null>;
-  loadRevisionContent: (revisionId: string) => Promise<string>;
-  previewRevisionId: string | null;
-  setPreviewRevision: (revisionId: string | null) => void;
-  comparePair: [string | null, string | null];
-  toggleCompareSelection: (revisionId: string) => void;
-  clearComparePair: () => void;
-};
-
-// Header bar lives only to host the rewind button. The plan's title (default
-// "Plan") is already shown by the dockview/mobile tab above the panel, so we
-// don't repeat it here.
-function PlanPanelHeader({
-  taskId,
-  revisions,
-  isLoadingRevisions,
-  isSaving,
-  onOpenRevisions,
-  onRevert,
-  loadRevisionContent,
-  previewRevisionId,
-  setPreviewRevision,
-  comparePair,
-  toggleCompareSelection,
-  clearComparePair,
-}: PlanPanelHeaderProps) {
-  return (
-    <PanelHeaderBarSplit
-      left={null}
-      right={
-        <TaskPlanRevisions
-          taskId={taskId}
-          revisions={revisions}
-          isLoading={isLoadingRevisions}
-          isSaving={isSaving}
-          onOpen={onOpenRevisions}
-          onRevert={onRevert}
-          loadRevisionContent={loadRevisionContent}
-          previewRevisionId={previewRevisionId}
-          setPreviewRevision={setPreviewRevision}
-          comparePair={comparePair}
-          toggleCompareSelection={toggleCompareSelection}
-          clearComparePair={clearComparePair}
-        />
-      }
-    />
   );
 }

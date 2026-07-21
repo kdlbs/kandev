@@ -4,7 +4,7 @@ import {
   issueFieldsFromMetadata,
 } from "@/lib/metadata-utils";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
-import type { TaskState, TaskSessionState } from "@/lib/types/http";
+import type { TaskPendingAction, TaskState, TaskSessionState } from "@/lib/types/http";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -35,6 +35,7 @@ export type TaskLike = {
   repository_id?: string;
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | string | null;
+  primary_session_pending_action?: TaskPendingAction | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -47,12 +48,33 @@ export type TaskLike = {
   metadata?: Record<string, unknown> | null;
 };
 
+export type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";
+
+export function workspaceModeFromMetadata(
+  metadata: TaskLike["metadata"],
+): WorkspaceMode | undefined {
+  const workspace = metadata?.workspace;
+  if (!workspace || typeof workspace !== "object") return undefined;
+  const mode = (workspace as Record<string, unknown>).mode;
+  if (mode === "inherit_parent" || mode === "new_workspace" || mode === "shared_group") {
+    return mode;
+  }
+  return undefined;
+}
+
 function pickRepositoryId(source: TaskLike): string | undefined {
   return source.repository_id ?? source.repositories?.[0]?.repository_id ?? undefined;
 }
 
 function pickId(source: TaskLike): string {
   return (source.id ?? source.task_id ?? "") as string;
+}
+
+export function pickPendingAction(action: unknown): TaskPendingAction | undefined {
+  if (action === "clarification" || action === "permission") {
+    return action;
+  }
+  return undefined;
 }
 
 type KanbanTaskRepository = NonNullable<KanbanTask["repositories"]>[number];
@@ -86,6 +108,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     repositories: pickRepositories(source),
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
+    primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,
     primaryExecutorId: source.primary_executor_id ?? undefined,
@@ -93,6 +116,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primaryExecutorName: source.primary_executor_name ?? undefined,
     isRemoteExecutor: source.is_remote_executor ?? false,
     parentTaskId: source.parent_id ?? undefined,
+    workspaceMode: workspaceModeFromMetadata(source.metadata),
     updatedAt: source.updated_at,
     createdAt: source.created_at,
     isPRReview: isPRReviewFromMetadata(source.metadata),

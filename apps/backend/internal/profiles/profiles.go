@@ -33,12 +33,23 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
 //go:embed profiles.yaml
 var profilesYAML []byte
+
+var appliedEnvVars = struct {
+	sync.RWMutex
+	names map[string]bool
+}{names: map[string]bool{}}
+
+var derivedAppliedEnvVars = map[string]bool{
+	"KANDEV_DEBUG_AGENT_MESSAGES": true,
+	"KANDEV_DEBUG_PPROF_ENABLED":  true,
+}
 
 // Environment identifies the active runtime profile.
 type Environment string
@@ -103,10 +114,35 @@ func ApplyProfile() (count int, env Environment, err error) {
 			if err := os.Setenv(name, value); err != nil {
 				return count, env, fmt.Errorf("setenv %q: %w", name, err)
 			}
+			appliedEnvVars.Lock()
+			appliedEnvVars.names[name] = true
+			appliedEnvVars.Unlock()
 			count++
 		}
 	}
 	return count, env, nil
+}
+
+// WasApplied reports whether ApplyProfile wrote name into the process
+// environment. Callers use this to distinguish a profile-supplied default from
+// a true launcher/shell env var, because DB-backed runtime overrides should
+// beat the former but never the latter.
+func WasApplied(name string) bool {
+	appliedEnvVars.RLock()
+	defer appliedEnvVars.RUnlock()
+	return appliedEnvVars.names[name]
+}
+
+// MarkApplied records a process env var as runtime/profile-applied rather than
+// launcher-explicit. This is for startup code that derives secondary env vars
+// from a profile-backed setting after ApplyProfile has already run.
+func MarkApplied(name string) {
+	if !derivedAppliedEnvVars[name] {
+		return
+	}
+	appliedEnvVars.Lock()
+	defer appliedEnvVars.Unlock()
+	appliedEnvVars.names[name] = true
 }
 
 // parse decodes profiles.yaml into the typed shape. A parse error

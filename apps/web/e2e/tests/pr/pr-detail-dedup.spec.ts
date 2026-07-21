@@ -93,7 +93,7 @@ test.describe("PR detail panel dedup", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // PR auto-panel is open before any click on the topbar button.
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });

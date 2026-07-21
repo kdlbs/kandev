@@ -121,4 +121,38 @@ test.describe("Permission approval persistence", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(sidebarItem.getByTestId("task-state-pending-permission")).toHaveCount(0);
   });
+
+  test("Kandev custom MCP tools render permission approval UI", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Kandev MCP permission",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:kandev-mcp-permission",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await testPage.goto(`/t/${task.id}`);
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // Scope strictly to the Kandev-MCP approval row. A backend race may also
+    // render a duplicate generic ToolCallMessage approve button for the same
+    // pending_id; clicking that would prove nothing about the Kandev custom UI.
+    const approveButton = session.kandevPermissionApproveButtons();
+    await expect(approveButton).toHaveCount(1, { timeout: 30_000 });
+    await approveButton.click();
+
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
 });

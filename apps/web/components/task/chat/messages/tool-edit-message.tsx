@@ -16,6 +16,7 @@ import { DiffViewBlock } from "./diff-view-block";
 import { ExpandableRow } from "./expandable-row";
 import { transformFileMutation, type FileMutation } from "@/lib/diff";
 import { useExpandState } from "./use-expand-state";
+import { useOpenFileAtLine } from "@/hooks/use-file-editors";
 
 type ModifyFilePayload = {
   file_path?: string;
@@ -34,6 +35,7 @@ type ToolEditMessageProps = {
   onOpenFile?: (path: string) => void;
 };
 
+// EditStatusIcon renders the status glyph (complete/error/running) for an edit card.
 function EditStatusIcon({ status }: { status: string | undefined }) {
   if (status === "complete") return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
   if (status === "error") return <IconX className="h-3.5 w-3.5 text-red-500" />;
@@ -41,6 +43,7 @@ function EditStatusIcon({ status }: { status: string | undefined }) {
   return null;
 }
 
+// getEditSummary returns the short header label for an edit/write card.
 function getEditSummary(
   content: string,
   worktreePath: string | undefined,
@@ -62,6 +65,7 @@ type FileActionButtonProps = {
   onCopyPath: (e: React.MouseEvent) => void;
 };
 
+// FileActionButton renders the file path with an optional open-in-editor action.
 function FileActionButton({
   filePath,
   worktreePath,
@@ -109,6 +113,7 @@ type EditExpandedContentProps = {
   writeContent: string | undefined;
 };
 
+// EditExpandedContent renders the expanded body of an edit card: a diff or write content.
 function EditExpandedContent({ diffData, writeContent }: EditExpandedContentProps) {
   if (diffData?.diff) return <DiffViewBlock data={diffData} className="mt-0 border-0 px-0" />;
   if (writeContent) {
@@ -123,6 +128,8 @@ function EditExpandedContent({ diffData, writeContent }: EditExpandedContentProp
   return null;
 }
 
+// parseEditMetadata pulls the edit status, file path, first-changed line,
+// diff/write content, and expandability out of a tool_edit message's metadata.
 function parseEditMetadata(comment: Message) {
   const metadata = comment.metadata as ToolEditMetadata | undefined;
   const status = metadata?.status;
@@ -138,6 +145,7 @@ function parseEditMetadata(comment: Message) {
   return {
     status,
     filePath,
+    startLine: mutation?.start_line,
     writeContent,
     isWriteOperation,
     diffData,
@@ -147,6 +155,7 @@ function parseEditMetadata(comment: Message) {
   };
 }
 
+// ToolEditMessage renders an edit/write tool call: the file link and expandable diff.
 export const ToolEditMessage = memo(function ToolEditMessage({
   comment,
   worktreePath,
@@ -155,6 +164,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({
   const {
     status,
     filePath,
+    startLine,
     writeContent,
     isWriteOperation,
     diffData,
@@ -177,6 +187,8 @@ export const ToolEditMessage = memo(function ToolEditMessage({
     }
   };
 
+  const handleOpenFile = useOpenFileAtLine(onOpenFile, startLine, worktreePath);
+
   return (
     <ExpandableRow
       icon={<Icon className="h-4 w-4 text-muted-foreground" />}
@@ -190,7 +202,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({
             <FileActionButton
               filePath={filePath}
               worktreePath={worktreePath}
-              onOpenFile={onOpenFile}
+              onOpenFile={onOpenFile ? handleOpenFile : undefined}
               copied={copied}
               onCopyPath={handleCopyPath}
             />

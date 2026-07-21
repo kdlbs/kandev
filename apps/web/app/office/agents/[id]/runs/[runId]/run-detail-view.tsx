@@ -21,13 +21,13 @@ type Props = {
 };
 
 /**
- * Run detail client shell. The Server Component delivers `initial`
- * (the run aggregate) and `recent` (the sidebar window) in one
- * round-trip; this component owns interactivity (collapsibles,
- * action buttons, the embedded conversation). While the run is
- * `claimed`, `useRunLiveSync` subscribes to `run.subscribe` over the
- * WS and feeds appended events into the EventsLog plus updates the
- * status badge on terminal events — no whole-snapshot refetch.
+ * Run detail client shell. The route loader delivers `initial` (the run
+ * aggregate) and `recent` (the sidebar window) in one round-trip; this
+ * component owns interactivity (collapsibles, action buttons, the embedded
+ * conversation). While the run is `claimed`, `useRunLiveSync` subscribes to
+ * `run.subscribe` over the WS and feeds appended events into the EventsLog
+ * plus updates the status badge on terminal events, with no whole-snapshot
+ * refetch.
  */
 export function RunDetailView({ agentId, initial, recent }: Props) {
   const taskId = initial.task_id ?? "";

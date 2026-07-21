@@ -115,6 +115,9 @@ func TestResolveNonExistentPath(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(restrictedDir, 0o755) })
 
+		if _, probeErr := filepath.EvalSymlinks(innerDir); probeErr == nil {
+			t.Skip("chmod 0o000 did not block path resolution in this environment")
+		}
 		path := filepath.Join(innerDir, "file.txt")
 		_, err := resolveNonExistentPath(path)
 		if err == nil {

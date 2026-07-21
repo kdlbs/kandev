@@ -3,10 +3,13 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
@@ -169,6 +172,70 @@ func TestRelayComment_TelegramPayload(t *testing.T) {
 	}
 	if receivedBody["text"] != "Hello from agent!" {
 		t.Errorf("text = %q, want %q", receivedBody["text"], "Hello from agent!")
+	}
+}
+
+// TestRelayComment_CancelDuringBackoff verifies that cancelling the
+// caller's context while sendWithRetry is sleeping between attempts
+// causes the function to return promptly with ctx.Err(), without
+// waiting for the backoff timer to fire.
+//
+// Scope note: this is a regression test for the cancellation contract,
+// not a direct probe of the timer.Stop() change in the same commit.
+// The pre-fix time.After path also returned promptly on cancel; what
+// it leaked was a runtime timer-heap slot, which is not observable
+// from user code without synctest or runtime instrumentation. The
+// timer.Stop() change rests on the canonical Go pattern, verified by
+// inspection.
+func TestRelayComment_CancelDuringBackoff(t *testing.T) {
+	svc := newTestService(t)
+
+	// Signal once when the first HTTP attempt lands; the test then cancels
+	// the context so we deterministically land inside the backoff sleep
+	// between attempt 1 and attempt 2 rather than relying on a wall-clock
+	// delay (which can flake under loaded CI).
+	firstAttemptDone := make(chan struct{})
+	var once sync.Once
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		once.Do(func() { close(firstAttemptDone) })
+	}))
+	defer ts.Close()
+
+	config := `{"webhook_url":"` + ts.URL + `"}`
+	channel, _ := setupChannelForRelay(t, svc, "webhook", config)
+
+	relay := service.NewChannelRelayWithClient(svc, ts.Client())
+
+	comment := &models.TaskComment{
+		ID:             "c-cancel",
+		TaskID:         channel.TaskID,
+		AuthorType:     "agent",
+		AuthorID:       "some-agent",
+		Body:           "Cancel me",
+		ReplyChannelID: channel.ID,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-firstAttemptDone
+		cancel()
+	}()
+
+	start := time.Now()
+	err := relay.RelayComment(ctx, comment)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error after context cancel, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	// Allow generous slack for slow CI; the key signal is that we did not
+	// sit through the full 1s backoff.
+	if elapsed > 800*time.Millisecond {
+		t.Errorf("expected prompt return after cancel, elapsed=%v", elapsed)
 	}
 }
 

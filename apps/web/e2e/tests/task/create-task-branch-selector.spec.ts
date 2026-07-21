@@ -2,12 +2,16 @@ import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { makeGitEnv } from "../../helpers/git-helper";
 
 function escapeRe(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
 
 test.describe("Branch selector behavior with executor types", () => {
   test.describe.configure({ retries: 1 });
@@ -154,19 +158,21 @@ test.describe("Branch selector behavior with executor types", () => {
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
 
-      // Toggle to GitHub URL mode
-      await testPage.getByTestId("toggle-github-url").click();
-      await testPage
-        .getByTestId("github-url-input")
-        .fill("https://github.com/branch-test-owner/branch-test-repo");
+      // Switch to Remote tab and paste via the chip popover.
+      await testPage.getByTestId("source-mode-remote").click();
+      await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+      const pasteInput = testPage.getByTestId("remote-repo-input");
+      await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
+      await pasteInput.press("Enter");
 
       // Select local executor profile
       const executorSelector = testPage.getByTestId("executor-profile-selector");
       await executorSelector.click();
       await testPage.getByRole("option", { name: /E2E Local GitHub URL/i }).click();
 
-      // Branch selector should NOT be disabled (GitHub URL mode overrides)
-      const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
+      // Branch selector should NOT be disabled (Remote mode overrides).
+      // The per-chip branch pill uses `remote-branch-chip-trigger`.
+      const branchSelector = testPage.getByTestId("remote-branch-chip-trigger").first();
       await expect(branchSelector).toBeEnabled({ timeout: 10_000 });
     } finally {
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
@@ -424,14 +430,16 @@ test.describe("Fresh-branch flow", () => {
       await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
       await testPage.getByTestId("task-title-input").fill("Hide toggle");
       await testPage.getByTestId("task-description-input").fill("github url");
-      await testPage.getByTestId("toggle-github-url").click();
-      await testPage
-        .getByTestId("github-url-input")
-        .fill("https://github.com/branch-test-owner/branch-test-repo");
+      // Switch to Remote tab and paste via the chip popover.
+      await testPage.getByTestId("source-mode-remote").click();
+      await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+      const pasteInput = testPage.getByTestId("remote-repo-input");
+      await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
+      await pasteInput.press("Enter");
       await testPage.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: /E2E Fresh Branch GH/i }).click();
 
-      // Toggle is gated behind isLocalExecutor && !useGitHubUrl, so it must not render.
+      // Toggle is gated behind isLocalExecutor && !useRemote, so it must not render.
       await expect(testPage.getByTestId("fresh-branch-toggle")).toHaveCount(0);
     } finally {
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
@@ -598,14 +606,33 @@ test.describe("Branch refresh + filter", () => {
     // disabled when we click it.
     await expect(refreshButton).toBeEnabled({ timeout: 10_000 });
 
-    const refreshRequest = testPage.waitForRequest(
-      (req) =>
-        req.url().includes(`/repositories/${seedData.repositoryId}/branches`) &&
-        req.url().includes("refresh=true") &&
-        req.method() === "GET",
-    );
-    await refreshButton.click();
-    await refreshRequest;
+    // Also wait for the branch list inside the popover to render at least one
+    // option. `toBeEnabled` only checks the button itself; there's a small
+    // window where `refreshing` flips to false while the popover is still
+    // hydrating its CommandList, and a click during that window is swallowed
+    // before the refresh handler is wired, so the ?refresh=true request never
+    // fires and `waitForRequest` hangs the full test timeout.
+    await expect(testPage.getByRole("option").first()).toBeVisible({ timeout: 10_000 });
+
+    // Retry the click until the ?refresh=true request actually fires. Even
+    // with the button enabled and an option visible, there's a brief
+    // hydration window (documented above) where a click is swallowed before
+    // the refresh handler is wired — so a single click can never produce the
+    // request and the listener hangs the full test timeout. `toPass` re-runs
+    // the whole block: a swallowed click just clicks again next attempt, and
+    // once the handler is wired the request fires and the block passes. The
+    // refresh is idempotent, so an extra click is harmless.
+    await expect(async () => {
+      const requestPromise = testPage.waitForRequest(
+        (req) =>
+          req.url().includes(`/repositories/${seedData.repositoryId}/branches`) &&
+          req.url().includes("refresh=true") &&
+          req.method() === "GET",
+        { timeout: 4_000 },
+      );
+      await refreshButton.click();
+      await requestPromise;
+    }).toPass({ timeout: 30_000 });
   });
 
   test("branch filter ranks exact match above substring matches", async ({

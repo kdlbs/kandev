@@ -14,24 +14,19 @@ export default function globalSetup() {
     }
   }
 
-  const standaloneServer = path.join(WEB_DIR, ".next/standalone/web/server.js");
-  if (!fs.existsSync(standaloneServer)) {
+  const spaIndex = path.join(WEB_DIR, "dist", "index.html");
+  if (!fs.existsSync(spaIndex)) {
+    throw new Error(`Vite web build not found: ${spaIndex}\nRun "make build-web" first.`);
+  }
+
+  // tests/plugins/plugins.spec.ts installs this package through the real
+  // upload UI. Like the binaries above, this only checks existence — not
+  // freshness — so rebuild after touching cmd/plugin-fixture (see
+  // apps/backend/Makefile's e2e-plugin-package target).
+  const pluginPackage = path.join(BACKEND_DIR, ".build", "kandev-plugin-e2e-1.0.0.tar.gz");
+  if (!fs.existsSync(pluginPackage)) {
     throw new Error(
-      `Next.js standalone build not found: ${standaloneServer}\nRun "make build-web" first.`,
+      `E2E fixture plugin package not found: ${pluginPackage}\nRun "make -C apps/backend e2e-plugin-package" first.`,
     );
-  }
-
-  // Standalone builds don't include static assets or public dir.
-  // Symlink them so the standalone server can serve them.
-  const staticSource = path.join(WEB_DIR, ".next/static");
-  const staticTarget = path.join(WEB_DIR, ".next/standalone/web/.next/static");
-  if (fs.existsSync(staticSource) && !fs.existsSync(staticTarget)) {
-    fs.symlinkSync(staticSource, staticTarget, "dir");
-  }
-
-  const publicSource = path.join(WEB_DIR, "public");
-  const publicTarget = path.join(WEB_DIR, ".next/standalone/web/public");
-  if (fs.existsSync(publicSource) && !fs.existsSync(publicTarget)) {
-    fs.symlinkSync(publicSource, publicTarget, "dir");
   }
 }

@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   isTerminalSessionState,
+  isStaleSessionStateEvent,
   pickReplacementSessionId,
   shouldAdoptNewSession,
+  shouldPreservePinnedSessionForTask,
 } from "./agent-session";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSessionState } from "@/lib/types/http";
@@ -33,6 +35,36 @@ describe("isTerminalSessionState", () => {
     [undefined, false],
   ])("returns %o → %s", (input, expected) => {
     expect(isTerminalSessionState(input)).toBe(expected);
+  });
+});
+
+describe("isStaleSessionStateEvent", () => {
+  it("returns false when payload has no updated_at", () => {
+    expect(isStaleSessionStateEvent({ updated_at: "2026-01-02T00:00:00.000Z" }, undefined)).toBe(
+      false,
+    );
+  });
+
+  it("returns false when existing session has no updated_at", () => {
+    expect(isStaleSessionStateEvent({}, "2026-01-01T00:00:00.000Z")).toBe(false);
+  });
+
+  it("returns true when payload updated_at is older than store", () => {
+    expect(
+      isStaleSessionStateEvent(
+        { updated_at: "2026-01-02T00:00:00.000Z" },
+        "2026-01-01T00:00:00.000Z",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false when payload updated_at is newer than store", () => {
+    expect(
+      isStaleSessionStateEvent(
+        { updated_at: "2026-01-01T00:00:00.000Z" },
+        "2026-01-02T00:00:00.000Z",
+      ),
+    ).toBe(false);
   });
 });
 
@@ -74,6 +106,21 @@ describe("shouldAdoptNewSession", () => {
       },
       taskSessions: {
         items: { "s-old": { id: "s-old", task_id: "t-1", state: "COMPLETED" } },
+      } as unknown as AppState["taskSessions"],
+    });
+    expect(shouldAdoptNewSession(state, "t-1", "STARTING")).toBe(true);
+  });
+
+  it("adopts when the active session is parked idle", () => {
+    const state = makeAppState({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-old",
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "IDLE" } },
       } as unknown as AppState["taskSessions"],
     });
     expect(shouldAdoptNewSession(state, "t-1", "STARTING")).toBe(true);
@@ -151,5 +198,82 @@ describe("pickReplacementSessionId", () => {
 
   it("returns null when the task has no sessions tracked", () => {
     expect(pickReplacementSessionId(makeAppState({}), "t-missing")).toBeNull();
+  });
+});
+
+describe("shouldPreservePinnedSessionForTask", () => {
+  it("preserves a pinned idle session for the active task", () => {
+    const state = makeAppState({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-pinned",
+        pinnedSessionId: "s-pinned",
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: { "s-pinned": { id: "s-pinned", task_id: "t-1", state: "IDLE" } },
+      } as unknown as AppState["taskSessions"],
+    });
+
+    expect(shouldPreservePinnedSessionForTask(state, "t-1")).toBe(true);
+  });
+
+  it("preserves a missing pinned session while the per-task list is hydrating", () => {
+    const state = makeAppState({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-drifted",
+        pinnedSessionId: "s-pinned",
+        lastSessionByTaskId: {},
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: { "t-1": [] },
+        loadedByTaskId: {},
+        loadingByTaskId: { "t-1": true },
+      } as unknown as AppState["taskSessionsByTask"],
+    });
+
+    expect(shouldPreservePinnedSessionForTask(state, "t-1")).toBe(true);
+  });
+
+  it("does not preserve a missing pinned session once the per-task list is loaded", () => {
+    const state = makeAppState({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-drifted",
+        pinnedSessionId: "s-pinned",
+        lastSessionByTaskId: {},
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: { "t-1": [] },
+        loadedByTaskId: { "t-1": true },
+        loadingByTaskId: {},
+      } as unknown as AppState["taskSessionsByTask"],
+    });
+
+    expect(shouldPreservePinnedSessionForTask(state, "t-1")).toBe(false);
+  });
+
+  it("does not preserve a stale by-id row when a loaded per-task list omits the pin", () => {
+    const state = makeAppState({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-drifted",
+        pinnedSessionId: "s-pinned",
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: {
+          "s-pinned": { id: "s-pinned", task_id: "t-1", state: "RUNNING" },
+        },
+      } as unknown as AppState["taskSessions"],
+      taskSessionsByTask: {
+        itemsByTaskId: { "t-1": [] },
+        loadedByTaskId: { "t-1": true },
+        loadingByTaskId: {},
+      } as unknown as AppState["taskSessionsByTask"],
+    });
+
+    expect(shouldPreservePinnedSessionForTask(state, "t-1")).toBe(false);
   });
 });

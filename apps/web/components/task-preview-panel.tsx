@@ -2,6 +2,7 @@
 
 import { IconArrowsMaximize, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { Task } from "./kanban-card";
 import { PreviewSessionTabs } from "./task/preview-session-tabs";
@@ -23,6 +24,7 @@ export function TaskPreviewPanel({
   onMaximize,
   onSessionChange,
 }: TaskPreviewPanelProps) {
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   return (
     <div
       data-testid="task-preview-panel"
@@ -58,6 +60,7 @@ export function TaskPreviewPanel({
             taskId={task.id}
             sessionId={sessionId}
             ensureSession={ensureSession}
+            workspaceId={activeWorkspaceId ?? null}
             onSessionChange={onSessionChange}
           />
         ) : (

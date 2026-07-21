@@ -1,7 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
 
-import { resolveWebServerPath } from "./bundle";
 import { getBinaryName, getPlatformDir, type PlatformDir } from "./platform";
 
 const PLATFORM_TO_NPM_PACKAGE: Record<PlatformDir, string> = {
@@ -75,9 +74,5 @@ export function validateBundle(bundleDir: string): void {
   const agentctlBin = path.join(bundleDir, "bin", getBinaryName("agentctl"));
   if (!fs.existsSync(agentctlBin)) {
     throw new Error(`agentctl binary not found in bundle at ${bundleDir}`);
-  }
-  const webServerPath = resolveWebServerPath(bundleDir);
-  if (!webServerPath) {
-    throw new Error(`Web server (server.js) not found in bundle at ${bundleDir}`);
   }
 }

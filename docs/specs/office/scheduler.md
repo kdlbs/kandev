@@ -32,7 +32,7 @@ A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event
 | `agent_error` | A sub-agent's session failed (escalation to coordinator) | `{agent_profile_id, run_id, error}` |
 | `self` | Agent self-wake via tool call | `{reason, payload?}` |
 | `user` | User mention / explicit wake from the UI | `{user_id, context?}` |
-| `task_assigned` | Task's `assignee_agent_instance_id` is set or changed | `{task_id}` |
+| `task_assigned` | Task's `assignee_agent_instance_id` is set or changed, including a newly-created task/subtask that already has a runner | `{task_id}` |
 | `task_blockers_resolved` | All blocking tasks of an assigned task reach `done` | `{task_id, resolved_blocker_ids}` |
 | `task_children_completed` | All child tasks of an assigned task reach terminal state | `{task_id}` |
 | `approval_resolved` | An approval requested by this agent is approved/rejected | `{approval_id, status, decision_note}` |
@@ -58,7 +58,7 @@ Coalescing happens entirely at the wakeup-request layer; the runs table is the e
 1. **Source-level dedup via `idempotency_key`** (UNIQUE column). Format:
    - `routine:<routine_id>:<trigger_id>:<unix_minute>` for cron routines.
    - `comment:<comment_id>` for comments.
-   - `task_assigned:<task_id>:<timestamp>` for assignment events.
+   - `task_assigned:<task_id>:<agent_instance_id>` for task creation/assignment events.
    Duplicate inserts in the same window are rejected silently. Handles webhook re-delivery, event-bus replay, and restart recovery.
 
 2. **Claim-time merge.** When the dispatcher processes a wakeup-request, it looks for an in-flight run for the same agent (`queued` -> `scheduled-retry` -> `running`, in that order). If one exists: insert the new request with `status="coalesced"`, `run_id=<existing>`, merge the new request's payload into the existing run's `context_snapshot`, and increment `coalesced_count` on the in-flight wakeup-request. The agent sees the merged context when it actually runs. If none exists: insert the wakeup-request with `status="queued"` and create the corresponding `runs` row.
@@ -177,6 +177,10 @@ WHERE assignee_agent_instance_id = $agentID
   AND state IN ('TODO', 'IN_PROGRESS')
   AND archived_at IS NULL
 ```
+
+### Executor resolution at launch
+
+When the scheduler claims a run, it resolves the executor using the agent preference first. If the agent has no executor preference and the run payload carries `task_id`, the scheduler resolves the task's project and allows that project executor config to satisfy the launch. This prevents assigned task runs from retrying indefinitely solely because the worker's agent row has an empty executor preference.
 
 ### Staleness check (before claim)
 

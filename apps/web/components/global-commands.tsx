@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import { useTheme } from "next-themes";
+import { useMemo } from "react";
+import { useRouter } from "@/lib/routing/client-router";
+import { useTheme } from "@/components/theme/app-theme";
 import {
   IconHome,
   IconList,
@@ -12,7 +12,6 @@ import {
   IconMoon,
   IconRobot,
   IconCpu,
-  IconServer,
   IconFolder,
   IconMessageCircle,
   IconSparkles,
@@ -20,7 +19,9 @@ import {
 } from "@tabler/icons-react";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
+import { useAppShortcuts } from "@/hooks/use-app-shortcuts";
 import { useAppStore } from "@/components/state-provider";
+import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { CommandItem } from "@/lib/commands/types";
 
@@ -49,7 +50,7 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Go to Settings",
       group: "Navigation",
       icon: <IconSettings className="size-3.5" />,
-      keywords: ["settings", "preferences", "config"],
+      keywords: ["settings", "preferences", "config", "general settings"],
       action: () => push("/settings/general"),
     },
     {
@@ -57,7 +58,7 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Go to Stats",
       group: "Navigation",
       icon: <IconChartBar className="size-3.5" />,
-      keywords: ["stats", "analytics", "metrics"],
+      keywords: ["stats", "statistics", "analytics", "metrics"],
       action: () => push("/stats"),
     },
     {
@@ -65,7 +66,7 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Go to GitHub Dashboard",
       group: "Navigation",
       icon: <IconBrandGithub className="size-3.5" />,
-      keywords: ["github", "dashboard", "pr", "pull request", "review"],
+      keywords: ["github", "dashboard", "pr", "pull request", "code review", "issues", "review"],
       action: () => push("/github"),
     },
     {
@@ -73,7 +74,7 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Agents Settings",
       group: "Settings",
       icon: <IconRobot className="size-3.5" />,
-      keywords: ["agents", "ai", "claude"],
+      keywords: ["agents", "agent settings", "agent profiles", "installed agents", "claude"],
       action: () => push("/settings/agents"),
     },
     {
@@ -81,23 +82,22 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Executors Settings",
       group: "Settings",
       icon: <IconCpu className="size-3.5" />,
-      keywords: ["executors", "compute", "run"],
+      keywords: [
+        "executors",
+        "executor profiles",
+        "execution environment",
+        "environment variables",
+        "runtime",
+        "compute",
+      ],
       action: () => push("/settings/executors"),
-    },
-    {
-      id: "settings-environments",
-      label: "Environments Settings",
-      group: "Settings",
-      icon: <IconServer className="size-3.5" />,
-      keywords: ["environments", "env", "variables"],
-      action: () => push("/settings/environments"),
     },
     {
       id: "settings-workspace",
       label: "Workspace Settings",
       group: "Settings",
       icon: <IconFolder className="size-3.5" />,
-      keywords: ["workspace", "project"],
+      keywords: ["workspace", "workspaces"],
       action: () => push("/settings/workspace"),
     },
     {
@@ -105,7 +105,13 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Prompts Settings",
       group: "Settings",
       icon: <IconMessageCircle className="size-3.5" />,
-      keywords: ["prompts", "templates", "message"],
+      keywords: [
+        "prompts",
+        "prompt settings",
+        "custom prompts",
+        "prompt snippets",
+        "prompt templates",
+      ],
       action: () => push("/settings/prompts"),
     },
   ];
@@ -116,13 +122,14 @@ function buildThemeCommand(
   setTheme: (theme: string) => void,
 ): CommandItem {
   const isDark = resolvedTheme === "dark";
+  const destinationTheme = isDark ? "light" : "dark";
   return {
     id: "pref-theme",
     label: isDark ? "Switch to Light Mode" : "Switch to Dark Mode",
     group: "Preferences",
     icon: isDark ? <IconSun className="size-3.5" /> : <IconMoon className="size-3.5" />,
-    keywords: ["theme", "dark", "light", "mode"],
-    action: () => setTheme(isDark ? "light" : "dark"),
+    keywords: ["theme", "color theme", "appearance"],
+    action: () => setTheme(destinationTheme),
   };
 }
 
@@ -130,51 +137,8 @@ export function GlobalCommands() {
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const quickChatSessions = useAppStore((s) => s.quickChat.sessions);
-  const openQuickChat = useAppStore((s) => s.openQuickChat);
-  const startNewConfigChat = useAppStore((s) => s.startNewConfigChat);
-  const openConfigChat = useAppStore((s) => s.openConfigChat);
-  const configChatSessions = useAppStore((s) => s.configChat.sessions);
-  const configChatActiveSessionId = useAppStore((s) => s.configChat.activeSessionId);
-  const configChatWorkspaceId = useAppStore((s) => s.configChat.workspaceId);
-
-  const handleOpenQuickChat = useCallback(() => {
-    if (!activeWorkspaceId) {
-      return;
-    }
-
-    // If there's an existing session for this workspace, open it
-    const existingSession = quickChatSessions.find((s) => s.workspaceId === activeWorkspaceId);
-    if (existingSession) {
-      openQuickChat(existingSession.sessionId, activeWorkspaceId);
-    } else {
-      // Open modal without a session - will show agent picker
-      openQuickChat("", activeWorkspaceId);
-    }
-  }, [activeWorkspaceId, quickChatSessions, openQuickChat]);
-
-  const handleOpenConfigChat = useCallback(() => {
-    if (!activeWorkspaceId) return;
-    // Reuse existing session if one is active for this workspace
-    if (configChatActiveSessionId && configChatWorkspaceId === activeWorkspaceId) {
-      openConfigChat(configChatActiveSessionId, activeWorkspaceId);
-      return;
-    }
-    // Check for a persisted session for this workspace
-    const existingSession = configChatSessions.find((s) => s.workspaceId === activeWorkspaceId);
-    if (existingSession) {
-      openConfigChat(existingSession.sessionId, activeWorkspaceId);
-      return;
-    }
-    startNewConfigChat(activeWorkspaceId);
-  }, [
-    activeWorkspaceId,
-    configChatSessions,
-    configChatActiveSessionId,
-    configChatWorkspaceId,
-    openConfigChat,
-    startNewConfigChat,
-  ]);
+  const handleOpenQuickChat = useQuickChatLauncher(activeWorkspaceId);
+  const handleOpenConfigChat = useQuickChatLauncher(activeWorkspaceId, "config");
 
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const quickChatShortcut = getShortcut("QUICK_CHAT", keyboardShortcuts);
@@ -185,7 +149,7 @@ export function GlobalCommands() {
       label: "Quick Chat",
       group: "Actions",
       icon: <IconMessageCircle className="size-3.5" />,
-      keywords: ["quick", "chat", "ai", "agent"],
+      keywords: ["quick chat", "new quick chat", "quick question", "ask agent"],
       shortcut: quickChatShortcut,
       action: handleOpenQuickChat,
     }),
@@ -198,7 +162,13 @@ export function GlobalCommands() {
       label: "Configuration Chat",
       group: "Actions",
       icon: <IconSparkles className="size-3.5" />,
-      keywords: ["config", "configure", "settings", "chat", "ai"],
+      keywords: [
+        "config chat",
+        "config mode",
+        "configure kandev",
+        "workflow configuration",
+        "mcp configuration",
+      ],
       action: handleOpenConfigChat,
     }),
     [handleOpenConfigChat],
@@ -216,6 +186,7 @@ export function GlobalCommands() {
 
   useRegisterCommands(commands);
   useKeyboardShortcut(quickChatShortcut, handleOpenQuickChat);
+  useAppShortcuts();
 
   return null;
 }

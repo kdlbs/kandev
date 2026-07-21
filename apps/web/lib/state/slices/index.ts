@@ -9,10 +9,15 @@ export {
 } from "./session-runtime/session-runtime-slice";
 export { createUISlice, defaultUIState } from "./ui/ui-slice";
 export { createGitHubSlice, defaultGitHubState } from "./github/github-slice";
+export { createGitLabSlice, defaultGitLabState } from "./gitlab/gitlab-slice";
+export { createAzureDevOpsSlice, defaultAzureDevOpsState } from "./azure-devops/azure-devops-slice";
 export { createJiraSlice, defaultJiraState } from "./jira/jira-slice";
 export { createLinearSlice, defaultLinearState } from "./linear/linear-slice";
 export { createOfficeSlice, defaultOfficeState } from "./office/office-slice";
 export { createFeaturesSlice, defaultFeaturesState } from "./features/features-slice";
+export { createAutomationsSlice, defaultAutomationsState } from "./automations/automations-slice";
+export { createSystemSlice, defaultSystemState } from "./system/system-slice";
+export { createPluginsSlice, defaultPluginsState } from "./plugins/plugins-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -25,7 +30,24 @@ export type {
   SessionRuntimeSliceActions,
 } from "./session-runtime/types";
 export type { UISlice, UISliceState, UISliceActions } from "./ui/types";
-export type { GitHubSlice, GitHubSliceState, GitHubSliceActions } from "./github/types";
+export type {
+  GitHubSlice,
+  GitHubSliceState,
+  GitHubSliceActions,
+  TaskCIAutomationOptionsState,
+} from "./github/types";
+export type {
+  GitLabSlice,
+  GitLabSliceState,
+  GitLabSliceActions,
+  TaskMRsState,
+} from "./gitlab/types";
+export type {
+  AzureDevOpsSlice,
+  AzureDevOpsSliceState,
+  AzureDevOpsSliceActions,
+  AzureDevOpsTaskPullRequestsState,
+} from "./azure-devops/types";
 export type {
   JiraSlice,
   JiraSliceState,
@@ -46,6 +68,27 @@ export type {
   FeatureFlags,
   FeatureName,
 } from "./features/types";
+export type {
+  AutomationsSlice,
+  AutomationsSliceState,
+  AutomationsSliceActions,
+  AutomationsState,
+  AutomationRunsState,
+} from "./automations/types";
+export type {
+  SystemSlice,
+  SystemSliceState,
+  SystemSliceActions,
+  SystemBackupsState,
+  SystemLogsState,
+  SystemJobsMap,
+} from "./system/types";
+export type {
+  PluginsSlice,
+  PluginsSliceState,
+  PluginsSliceActions,
+  PluginsState,
+} from "./plugins/types";
 
 // Re-export commonly used types from each domain
 export type {
@@ -109,6 +152,9 @@ export type {
   AvailableCommand,
   AvailableCommandsState,
   UserShellInfo,
+  UserShellKind,
+  UserShellState,
+  UserShellPTYStatus,
   UserShellsState,
   PrepareStepInfo,
   SessionPrepareState,

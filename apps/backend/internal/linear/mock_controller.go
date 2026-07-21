@@ -57,7 +57,14 @@ func (c *MockController) setAuthHealth(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if err := c.store.UpdateAuthHealth(ctx.Request.Context(), req.OK, req.Error, req.OrgSlug, time.Now().UTC()); err != nil {
+	workspaceID := ctx.Query("workspace_id")
+	var err error
+	if workspaceID == "" {
+		err = c.store.UpdateAuthHealth(ctx.Request.Context(), req.OK, req.Error, req.OrgSlug, time.Now().UTC())
+	} else {
+		err = c.store.UpdateAuthHealthForWorkspace(ctx.Request.Context(), workspaceID, req.OK, req.Error, req.OrgSlug, time.Now().UTC())
+	}
+	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

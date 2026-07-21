@@ -544,7 +544,7 @@ func (s *DashboardService) runSoftQueries(
 			return nil
 		}
 		if skills, sErr := s.skillLister.ListSkills(gctx, wsID); sErr == nil {
-			b.skillCount = len(skills)
+			b.skillCount = countUserSkills(skills)
 		}
 		return nil
 	})
@@ -564,6 +564,17 @@ func (s *DashboardService) runSoftQueries(
 	g.Go(func() error { b.runActivity = s.getRunActivity(gctx, wsID); return nil })
 	g.Go(func() error { b.taskBreakdown = s.getTaskBreakdown(gctx, wsID); return nil })
 	g.Go(func() error { b.recentTasks = s.getRecentTasks(gctx, wsID); return nil })
+}
+
+func countUserSkills(skills []*models.Skill) int {
+	count := 0
+	for _, skill := range skills {
+		if skill == nil || skill.IsSystem {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 // GetDashboardData returns aggregated dashboard data for a workspace.

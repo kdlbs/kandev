@@ -5,6 +5,18 @@ import (
 	"time"
 )
 
+const (
+	MCPTaskAgentProfileDefaultCurrentTask      = "current_task"
+	MCPTaskAgentProfileDefaultWorkspaceDefault = "workspace_default"
+)
+
+func NormalizeMCPTaskAgentProfileDefault(value string) string {
+	if value == MCPTaskAgentProfileDefaultWorkspaceDefault {
+		return value
+	}
+	return MCPTaskAgentProfileDefaultCurrentTask
+}
+
 type User struct {
 	ID        string    `json:"id"`
 	Email     string    `json:"email"`
@@ -18,12 +30,16 @@ type UserSettings struct {
 	KanbanViewMode              string                            `json:"kanban_view_mode"`
 	WorkflowFilterID            string                            `json:"workflow_filter_id"`
 	RepositoryIDs               []string                          `json:"repository_ids"`
+	TasksListSort               string                            `json:"tasks_list_sort"`
+	TasksListGroup              string                            `json:"tasks_list_group"`
 	InitialSetupComplete        bool                              `json:"initial_setup_complete"`
 	PreferredShell              string                            `json:"preferred_shell"`
 	DefaultEditorID             string                            `json:"default_editor_id"`
 	EnablePreviewOnClick        bool                              `json:"enable_preview_on_click"`
 	ChatSubmitKey               string                            `json:"chat_submit_key"` // "enter" | "cmd_enter"
 	ReviewAutoMarkOnScroll      bool                              `json:"review_auto_mark_on_scroll"`
+	ConfirmTaskArchive          bool                              `json:"confirm_task_archive"`
+	MCPTaskAgentProfileDefault  string                            `json:"mcp_task_agent_profile_default"`
 	ShowReleaseNotification     bool                              `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion string                            `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages       []string                          `json:"lsp_auto_start_languages"`
@@ -31,14 +47,55 @@ type UserSettings struct {
 	LspServerConfigs            map[string]map[string]interface{} `json:"lsp_server_configs"`
 	SavedLayouts                []SavedLayout                     `json:"saved_layouts"`
 	SidebarViews                []SidebarView                     `json:"sidebar_views"`
+	SidebarActiveViewID         string                            `json:"sidebar_active_view_id"`
+	SidebarDraft                *SidebarViewDraft                 `json:"sidebar_draft"`
+	SidebarTaskPrefs            SidebarTaskPrefs                  `json:"sidebar_task_prefs"`
+	TaskCreateLastUsed          TaskCreateLastUsed                `json:"task_create_last_used"`
+	JiraSavedViews              json.RawMessage                   `json:"jira_saved_views"`
+	JiraTaskPresets             json.RawMessage                   `json:"jira_task_presets"`
+	GitHubSavedPresets          json.RawMessage                   `json:"github_saved_presets"`
+	GitHubDefaultQueryPresets   json.RawMessage                   `json:"github_default_query_presets"`
+	GitLabSavedPresets          json.RawMessage                   `json:"gitlab_saved_presets"`
 	DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
 	DefaultUtilityModel         string                            `json:"default_utility_model"`    // Default model for utility agents
 	KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts"`       // User-configured keyboard shortcut overrides
 	TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`   // "new_tab" | "browser_panel"
 	TerminalFontFamily          string                            `json:"terminal_font_family"`
 	TerminalFontSize            int                               `json:"terminal_font_size"`
+	ChangesPanelLayout          string                            `json:"changes_panel_layout"` // "flat" | "tree"
+	SystemMetricsDisplay        SystemMetricsDisplaySettings      `json:"system_metrics_display"`
+	VoiceMode                   VoiceModeSettings                 `json:"voice_mode"`
 	CreatedAt                   time.Time                         `json:"created_at"`
 	UpdatedAt                   time.Time                         `json:"updated_at"`
+}
+
+type SystemMetricsDisplaySettings struct {
+	ShowInTopbar bool `json:"show_in_topbar"`
+}
+
+// VoiceModeSettings is the per-user configuration surface for the chat
+// voice-input feature. Stored as a nested JSON object inside the `users.settings`
+// blob — adding fields here does not require a schema migration.
+type VoiceModeSettings struct {
+	// Enabled gates the whole feature. When false, the mic button is hidden
+	// entirely and no voice-related hooks run on the chat input. Defaults to
+	// true for new users; pre-existing user rows that have no `enabled` field
+	// in their stored JSON are also treated as enabled (see store layer).
+	Enabled bool `json:"enabled"`
+	// Engine is the user's preferred transcription engine.
+	// "auto" | "webSpeech" | "whisperWeb" | "whisperServer". Default "auto".
+	Engine string `json:"engine"`
+	// Language is the BCP-47 tag or "auto" to use the browser's language.
+	// Examples: "en-US", "pt-PT", "ja-JP". Default "auto".
+	Language string `json:"language"`
+	// Mode controls how the mic button is activated: "toggle" (click to start/stop)
+	// or "hold" (push-to-talk). Default "toggle".
+	Mode string `json:"mode"`
+	// AutoSend submits the chat message immediately after the transcript is inserted.
+	AutoSend bool `json:"auto_send"`
+	// WhisperWebModel selects the in-browser Whisper model when engine = whisperWeb.
+	// "tiny" | "base" | "small". Default "base".
+	WhisperWebModel string `json:"whisper_web_model"`
 }
 
 // SavedLayout represents a user-saved dockview layout configuration.
@@ -72,4 +129,24 @@ type SidebarViewClause struct {
 type SidebarViewSort struct {
 	Key       string `json:"key"`
 	Direction string `json:"direction"`
+}
+
+type SidebarViewDraft struct {
+	BaseViewID string              `json:"base_view_id"`
+	Filters    []SidebarViewClause `json:"filters"`
+	Sort       SidebarViewSort     `json:"sort"`
+	Group      string              `json:"group"`
+}
+
+type SidebarTaskPrefs struct {
+	PinnedTaskIDs          []string            `json:"pinned_task_ids"`
+	OrderedTaskIDs         []string            `json:"ordered_task_ids"`
+	SubtaskOrderByParentID map[string][]string `json:"subtask_order_by_parent_id"`
+}
+
+type TaskCreateLastUsed struct {
+	RepositoryID      string `json:"repository_id"`
+	Branch            string `json:"branch"`
+	AgentProfileID    string `json:"agent_profile_id"`
+	ExecutorProfileID string `json:"executor_profile_id"`
 }

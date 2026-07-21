@@ -4,36 +4,46 @@ import { useCallback } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
+import { SettingsCard } from "@/components/settings/settings-card";
 
 function PolicyRuleRow({
   rule,
+  baselineRule,
   index,
   onUpdate,
   onRemove,
 }: {
   rule: NetworkPolicyRule;
+  baselineRule?: NetworkPolicyRule;
   index: number;
   onUpdate: (index: number, field: keyof NetworkPolicyRule, val: string) => void;
   onRemove: (index: number) => void;
 }) {
   return (
-    <TableRow>
+    <TableRow
+      data-settings-dirty={!baselineRule || JSON.stringify(rule) !== JSON.stringify(baselineRule)}
+      data-settings-dirty-level="container"
+    >
       <TableCell>
         <Input
           value={rule.domain}
           onChange={(e) => onUpdate(index, "domain", e.target.value)}
           placeholder="*.example.com"
           className="text-sm"
+          data-settings-dirty={!baselineRule || rule.domain !== baselineRule.domain}
         />
       </TableCell>
       <TableCell>
         <Select value={rule.action} onValueChange={(v) => onUpdate(index, "action", v)}>
-          <SelectTrigger className="text-xs">
+          <SelectTrigger
+            className="text-xs"
+            data-settings-dirty={!baselineRule || rule.action !== baselineRule.action}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -54,6 +64,7 @@ function PolicyRuleRow({
           onChange={(e) => onUpdate(index, "include", e.target.value)}
           placeholder="Optional pattern"
           className="text-sm"
+          data-settings-dirty={!baselineRule || rule.include !== baselineRule.include}
         />
       </TableCell>
       <TableCell>
@@ -72,10 +83,12 @@ function PolicyRuleRow({
 
 function PolicyRulesTable({
   rules,
+  baselineRules,
   onUpdate,
   onRemove,
 }: {
   rules: NetworkPolicyRule[];
+  baselineRules?: NetworkPolicyRule[];
   onUpdate: (index: number, field: keyof NetworkPolicyRule, val: string) => void;
   onRemove: (index: number) => void;
 }) {
@@ -94,6 +107,7 @@ function PolicyRulesTable({
           <PolicyRuleRow
             key={idx}
             rule={rule}
+            baselineRule={baselineRules?.[idx]}
             index={idx}
             onUpdate={onUpdate}
             onRemove={onRemove}
@@ -106,10 +120,15 @@ function PolicyRulesTable({
 
 type NetworkPoliciesCardProps = {
   rules: NetworkPolicyRule[];
+  baselineRules?: NetworkPolicyRule[];
   onRulesChange: (rules: NetworkPolicyRule[]) => void;
 };
 
-export function NetworkPoliciesCard({ rules, onRulesChange }: NetworkPoliciesCardProps) {
+export function NetworkPoliciesCard({
+  rules,
+  baselineRules,
+  onRulesChange,
+}: NetworkPoliciesCardProps) {
   const addRule = useCallback(() => {
     onRulesChange([...rules, { domain: "", action: "allow" }]);
   }, [rules, onRulesChange]);
@@ -128,8 +147,10 @@ export function NetworkPoliciesCard({ rules, onRulesChange }: NetworkPoliciesCar
     [rules, onRulesChange],
   );
 
+  const isDirty =
+    baselineRules !== undefined && JSON.stringify(rules) !== JSON.stringify(baselineRules);
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
@@ -154,9 +175,14 @@ export function NetworkPoliciesCard({ rules, onRulesChange }: NetworkPoliciesCar
         {rules.length === 0 ? (
           <p className="text-sm text-muted-foreground">No network policy rules configured.</p>
         ) : (
-          <PolicyRulesTable rules={rules} onUpdate={updateRule} onRemove={removeRule} />
+          <PolicyRulesTable
+            rules={rules}
+            baselineRules={baselineRules}
+            onUpdate={updateRule}
+            onRemove={removeRule}
+          />
         )}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }

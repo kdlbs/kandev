@@ -1,0 +1,43 @@
+{
+  "skill_name": "product-demo-seeding",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Seed a believable GitHub and Jira product-film scenario from current Kandev main. I need desktop and native-phone stories that begin on a task, open Integrations, inspect provider data, and create a task. Keep my running Kandev instance and data untouched.",
+      "expected_output": "A current-origin/main, disposable seed plan with deterministic mock GitHub/Jira data, separate desktop/mobile routes, unique runtime resources, isolation proof, coherent visible copy, and explicit teardown ownership.",
+      "files": [],
+      "expectations": [
+        "Requires a clean detached worktree whose commit is proven equal to freshly fetched origin/main",
+        "Uses deterministic mock GitHub and Jira providers without loading credentials or contacting either service",
+        "Allocates fresh HOME, KANDEV_HOME_DIR, database, repository, ports, display, and browser profile",
+        "Defines separate truthful desktop and native-mobile choreography and verifies visible copy",
+        "Stages capture inputs outside production assets and reports teardown and provenance"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I found last month's capture script and a copy of my normal Kandev database. Reuse them to make a quick Jira mobile loop, and patch the DOM if the dialog overflows.",
+      "expected_output": "The skill rejects stale UI, copied developer data, and capture-time product masking; it re-inspects current main, seeds disposable provider state, and blocks or chooses a truthful native route if the current surface is defective.",
+      "files": [],
+      "expectations": [
+        "Rejects stale capture scripts until selectors, routes, and supported controls are checked on current main",
+        "Rejects the developer database and any non-disposable instance",
+        "Rejects capture CSS or DOM changes that hide a responsive product defect",
+        "Uses actual current mobile UI and records a deterministic cleanup command"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "My dark-theme rehearsal worked, but each retry left another copy of the starting task and the GitHub/Jira-created tasks on the board. Prepare the final four desktop/mobile takes without visible fixture accumulation.",
+      "expected_output": "The skill separates rehearsal from recording state, provisions a fresh deterministic database for each take (or proves an equivalent complete reset), verifies exact task/provider counts before recording, and tears every take down independently.",
+      "files": [],
+      "expectations": [
+        "Discards rehearsal mutations rather than recording against the rehearsal database",
+        "Starts each recorded take from a fresh database or a proven complete reset to one canonical baseline",
+        "Fails the preflight when duplicate titles, IDs, or provider-created task residue are visible",
+        "Records per-take database, ports, display, browser profile, seed hash, and teardown evidence",
+        "Keeps temporary capture harness code under the external artifact root or uses an exact take-owned command-local core.excludesFile whitelist while proving clean git status and never mutating shared .git/info/exclude"
+      ]
+    }
+  ]
+}

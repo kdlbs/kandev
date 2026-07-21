@@ -7,7 +7,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useAppStore } from "@/components/state-provider";
 import { FileRow, BulkActionBar } from "./changes-panel-file-row";
+import { ChangesTree, RepoTreeGroup } from "./changes-panel-tree";
+import type { ChangedFile } from "./changes-panel-helpers";
 import { type CommitItem } from "./commit-row";
 import { groupByRepositoryName, isSingleRepoGroup } from "@/lib/group-by-repo";
 import {
@@ -20,17 +23,6 @@ import { PRFilesGroupedList } from "./changes-panel-pr-files";
 import type { OpenDiffOptions } from "./changes-diff-target";
 
 // --- Timeline visual components ---
-
-type ChangedFile = {
-  path: string;
-  status: FileInfo["status"];
-  staged: boolean;
-  plus: number | undefined;
-  minus: number | undefined;
-  oldPath: string | undefined;
-  /** Repository this file belongs to in multi-repo workspaces; empty for single-repo. */
-  repositoryName?: string;
-};
 
 // Per-repo grouping is shared with the Review dialog — see @/lib/group-by-repo.
 
@@ -51,7 +43,6 @@ function TimelineSection({
   label,
   count,
   action,
-  isLast,
   children,
   collapsible = true,
   defaultCollapsed = false,
@@ -61,13 +52,25 @@ function TimelineSection({
   label?: string;
   count?: number;
   action?: React.ReactNode;
-  isLast?: boolean;
   children?: React.ReactNode;
   collapsible?: boolean;
   defaultCollapsed?: boolean;
   "data-testid"?: string;
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  // Git data arrives in separate async store updates, so `defaultCollapsed`
+  // (derived from which section is first-visible) can flip after mount. Re-sync
+  // to it whenever it changes — but stop once the user has manually toggled, so
+  // their choice is never clobbered by a later data update. Adjusting state
+  // during render (storing the previous prop in state) is the React-recommended
+  // pattern and avoids both the setState-in-effect and ref-during-render lint
+  // rules.
+  const [userToggled, setUserToggled] = useState(false);
+  const [prevDefaultCollapsed, setPrevDefaultCollapsed] = useState(defaultCollapsed);
+  if (prevDefaultCollapsed !== defaultCollapsed) {
+    setPrevDefaultCollapsed(defaultCollapsed);
+    if (!userToggled) setCollapsed(defaultCollapsed);
+  }
   const canCollapse = collapsible && !!label;
 
   return (
@@ -75,7 +78,6 @@ function TimelineSection({
       {/* Vertical line + dot */}
       <div className="flex flex-col items-center">
         <TimelineDot color={dotColor} />
-        {!isLast && <div className="w-px flex-1 bg-border/60" />}
       </div>
 
       {/* Content */}
@@ -87,7 +89,10 @@ function TimelineSection({
               <button
                 type="button"
                 className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90"
-                onClick={() => setCollapsed((c) => !c)}
+                onClick={() => {
+                  setUserToggled(true);
+                  setCollapsed((c) => !c);
+                }}
                 aria-expanded={!collapsed}
                 data-testid={`${testId ?? label.toLowerCase()}-collapse-toggle`}
               >
@@ -124,7 +129,6 @@ function TimelineSection({
 
 type CommitsSectionProps = {
   commits: CommitItem[];
-  isLast: boolean;
   onOpenCommitDetail?: (sha: string, repo?: string) => void;
   // Handlers receive the commit's repository_name so amend/revert/reset land
   // in the right git repo. The empty string routes to the workspace root for
@@ -144,13 +148,14 @@ type CommitsSectionProps = {
   perRepoStatus?: Array<{ repository_name: string; ahead: number }>;
   /** Existing PR URL keyed by repository_name; "" key for single-repo. */
   prByRepo?: Record<string, string | undefined>;
+  /** Initial collapse state. Defaults to collapsed; the panel expands it when it is the first visible section. */
+  defaultCollapsed?: boolean;
 };
 
 // Commits grouping shares the helper above with files — see @/lib/group-by-repo.
 
 export function CommitsSection({
   commits,
-  isLast,
   onOpenCommitDetail,
   onRevertCommit,
   onAmendCommit,
@@ -161,6 +166,7 @@ export function CommitsSection({
   repoBaseBranch,
   perRepoStatus,
   prByRepo,
+  defaultCollapsed = true,
 }: CommitsSectionProps) {
   const groups = groupByRepositoryName(commits, (c) => c.repository_name);
   const aheadByRepo = new Map((perRepoStatus ?? []).map((s) => [s.repository_name, s.ahead]));
@@ -171,7 +177,6 @@ export function CommitsSection({
   const sectionAction = isSingleRepo ? (
     <CommitsGroupActions
       repositoryName=""
-      unpushedCount={groups[0].items.filter((c) => !c.pushed).length}
       aheadCount={aheadByRepo.get("") ?? 0}
       prExists={!!prByRepo?.[""]}
       canCreatePR={!!onRepoCreatePR && !prByRepo?.[""]}
@@ -186,8 +191,7 @@ export function CommitsSection({
       dotColor={DOT_COLORS.commits}
       label="Commits"
       count={commits.length}
-      isLast={isLast}
-      defaultCollapsed
+      defaultCollapsed={defaultCollapsed}
       data-testid="commits-section"
       action={sectionAction}
     >
@@ -221,7 +225,6 @@ type FileListSectionProps = {
   variant: "unstaged" | "staged";
   files: ChangedFile[];
   pendingStageFiles: Set<string>;
-  isLast: boolean;
   actionLabel: string;
   isActionLoading?: boolean;
   onAction: () => void;
@@ -229,7 +232,7 @@ type FileListSectionProps = {
   isSecondaryActionLoading?: boolean;
   onSecondaryAction?: () => void;
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
   // Multi-repo: handlers receive the file's repositoryName so each per-file op
   // hits the right git repo. Same-named files across repos collide by path.
   onStage: (path: string, repo?: string) => void;
@@ -260,7 +263,7 @@ type FileListBodyProps = {
   multiSelect: ReturnType<typeof useMultiSelect>;
   onKeyDown: (e: React.KeyboardEvent) => void;
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
   onDiscard: (path: string, repo?: string) => void;
@@ -274,11 +277,12 @@ type FileListBodyProps = {
 };
 
 function FileListBody(props: FileListBodyProps) {
-  const { variant, files, pendingStageFiles, multiSelect } = props;
+  const { files, pendingStageFiles, multiSelect } = props;
   // Multi-repo nuance: activeFilePath carries the path but not repo; same path
   // in two repos will light up both rows. Matches existing routing limit noted
   // in FileRowProps comments.
   const activeFilePath = useDockviewStore((s) => s.activeFilePath);
+  const layout = useAppStore((s) => s.userSettings.changesPanelLayout);
   const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repositoryName), [files]);
   // Per-repo collapsed state: keyed by repositoryName. Default expanded;
   // setting an entry to true collapses that group. Persists across re-renders
@@ -313,6 +317,92 @@ function FileListBody(props: FileListBodyProps) {
   // / Commit / Unstage all) move up to the section header — see FileListSection.
   const isSingleRepo = isSingleRepoGroup(groups);
 
+  if (layout === "tree") {
+    return (
+      <TreeFileListBody
+        {...props}
+        groups={groups}
+        isSingleRepo={isSingleRepo}
+        collapsedRepos={collapsedRepos}
+        toggleRepo={toggleRepo}
+      />
+    );
+  }
+
+  return (
+    <FlatFileListBody
+      {...props}
+      groups={groups}
+      isSingleRepo={isSingleRepo}
+      collapsedRepos={collapsedRepos}
+      toggleRepo={toggleRepo}
+      renderRow={renderRow}
+    />
+  );
+}
+
+type FileListBranchProps = FileListBodyProps & {
+  groups: ReturnType<typeof groupByRepositoryName<ChangedFile>>;
+  isSingleRepo: boolean;
+  collapsedRepos: Set<string>;
+  toggleRepo: (name: string) => void;
+};
+function TreeFileListBody(props: FileListBranchProps) {
+  const {
+    variant,
+    groups,
+    isSingleRepo,
+    collapsedRepos,
+    toggleRepo,
+    pendingStageFiles,
+    multiSelect,
+  } = props;
+  return (
+    <div tabIndex={-1} onKeyDown={props.onKeyDown}>
+      {isSingleRepo ? (
+        <ChangesTree
+          files={groups[0].items}
+          pendingStageFiles={pendingStageFiles}
+          onOpenDiff={props.onOpenDiff}
+          onEditFile={props.onEditFile}
+          onStage={props.onStage}
+          onUnstage={props.onUnstage}
+          onDiscard={props.onDiscard}
+          variant={variant}
+          multiSelect={multiSelect}
+        />
+      ) : (
+        groups.map((group) => (
+          <RepoTreeGroup
+            key={group.repositoryName || "__no_repo__"}
+            variant={variant}
+            repositoryName={group.repositoryName}
+            displayName={props.repoDisplayName?.(group.repositoryName)}
+            files={group.items}
+            pendingStageFiles={pendingStageFiles}
+            collapsed={collapsedRepos.has(group.repositoryName)}
+            onToggle={() => toggleRepo(group.repositoryName)}
+            onOpenDiff={props.onOpenDiff}
+            onEditFile={props.onEditFile}
+            onStage={props.onStage}
+            onUnstage={props.onUnstage}
+            onDiscard={props.onDiscard}
+            primaryLabel={props.primaryLabel}
+            secondaryLabel={props.secondaryLabel}
+            onRepoAction={props.onRepoAction}
+            onRepoSecondaryAction={props.onRepoSecondaryAction}
+            multiSelect={multiSelect}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+function FlatFileListBody(
+  props: FileListBranchProps & { renderRow: (file: ChangedFile) => React.ReactNode },
+) {
+  const { variant, groups, isSingleRepo, collapsedRepos, toggleRepo, renderRow } = props;
   return (
     <div>
       <ul
@@ -347,7 +437,6 @@ export function FileListSection(props: FileListSectionProps) {
     variant,
     files,
     pendingStageFiles,
-    isLast,
     onOpenDiff,
     onEditFile,
     onStage,
@@ -379,7 +468,6 @@ export function FileListSection(props: FileListSectionProps) {
       dotColor={dotColor}
       label={label}
       count={files.length}
-      isLast={isLast}
       data-testid={`${variant}-files-section`}
       action={
         isSingleRepo ? (
@@ -446,25 +534,25 @@ export type PRChangedFile = {
 
 type PRFilesSectionProps = {
   files: PRChangedFile[];
-  isLast: boolean;
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
   /** Maps a repository_name to a human-readable label (used for the per-repo header). */
   repoDisplayName?: (repositoryName: string) => string | undefined;
+  /** Initial collapse state. Defaults to collapsed; the panel expands it when it is the first visible section. */
+  defaultCollapsed?: boolean;
 };
 
 export function PRFilesSection({
   files,
-  isLast,
   onOpenDiff,
   repoDisplayName,
+  defaultCollapsed = true,
 }: PRFilesSectionProps) {
   return (
     <TimelineSection
       dotColor={DOT_COLORS.pr}
       label="PR Changes"
       count={files.length}
-      isLast={isLast}
-      defaultCollapsed
+      defaultCollapsed={defaultCollapsed}
       data-testid="pr-changes-section"
     >
       {files.length > 0 && (

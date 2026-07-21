@@ -3,13 +3,149 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/stretchr/testify/require"
 )
+
+type nilTaskSessionRepo struct {
+	repository.SessionRepository
+}
+
+func TestStartTurnPersistsImmutableEffectiveRuntimeConfigSnapshot(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	options := []streams.ConfigOption{
+		{
+			Type: "select", ID: "collaboration_mode", Name: "Collaboration mode", CurrentValue: "default",
+			Options: []streams.ConfigOptionValue{{Value: "default", Name: "Default"}},
+		},
+		{
+			Type: "select", ID: "reasoning_effort", Name: "Reasoning effort", CurrentValue: "medium",
+			Options: []streams.ConfigOptionValue{
+				{Value: "medium", Name: "Medium"},
+				{Value: "high", Name: "High"},
+				{Value: "low", Name: "Low"},
+			},
+		},
+	}
+	session := &models.TaskSession{
+		ID:        "session-turn-config",
+		TaskID:    "task-123",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now,
+		UpdatedAt: now,
+		AgentProfileSnapshot: map[string]interface{}{
+			"model": "profile-model",
+			"mode":  "default",
+		},
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{
+				Model: "gpt-5.6-sol", Mode: "agent",
+				ConfigOptions: map[string]string{
+					"collaboration_mode": "default",
+					"reasoning_effort":   "medium",
+				},
+			},
+			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{
+				ConfigOptions: map[string]string{"reasoning_effort": "high"},
+			},
+			models.SessionMetaKeyACPConfigBaseline: map[string]string{
+				"collaboration_mode": "default",
+				"reasoning_effort":   "medium",
+			},
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModelID: "gpt-5.6-sol",
+				ConfigOptions:  options,
+			},
+		},
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	first, err := svc.StartTurn(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("StartTurn first: %v", err)
+	}
+	if err := svc.CompleteTurn(ctx, first.ID); err != nil {
+		t.Fatalf("CompleteTurn first: %v", err)
+	}
+	if err := svc.PersistSessionRuntimeConfigOption(ctx, session.ID, "reasoning_effort", "low"); err != nil {
+		t.Fatalf("PersistSessionRuntimeConfigOption: %v", err)
+	}
+	second, err := svc.StartTurn(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("StartTurn second: %v", err)
+	}
+
+	storedFirst, err := repo.GetTurn(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("GetTurn first: %v", err)
+	}
+	storedSecond, err := repo.GetTurn(ctx, second.ID)
+	if err != nil {
+		t.Fatalf("GetTurn second: %v", err)
+	}
+	firstSnapshot, ok := models.LoadTurnRuntimeConfigSnapshot(storedFirst.Metadata)
+	if !ok {
+		t.Fatal("first turn metadata does not contain a runtime config snapshot")
+	}
+	secondSnapshot, ok := models.LoadTurnRuntimeConfigSnapshot(storedSecond.Metadata)
+	if !ok {
+		t.Fatal("second turn metadata does not contain a runtime config snapshot")
+	}
+
+	if firstSnapshot.Model != "gpt-5.6-sol" || firstSnapshot.Mode != "agent" {
+		t.Fatalf("first model/mode = %q/%q", firstSnapshot.Model, firstSnapshot.Mode)
+	}
+	wantFirstOptions := []models.TurnRuntimeConfigOption{
+		{ID: "collaboration_mode", Name: "Collaboration mode", Value: "default", ValueName: "Default"},
+		{ID: "reasoning_effort", Name: "Reasoning effort", Value: "high", ValueName: "High"},
+	}
+	require.Equal(t, wantFirstOptions, firstSnapshot.ConfigOptions, "first turn config options")
+	if firstSnapshot.ConfigBaseline["reasoning_effort"] != "medium" {
+		t.Fatalf("first baseline = %#v", firstSnapshot.ConfigBaseline)
+	}
+	if secondSnapshot.ConfigOptions[1].Value != "low" || secondSnapshot.ConfigOptions[1].ValueName != "Low" {
+		t.Fatalf("second reasoning option = %#v", secondSnapshot.ConfigOptions[1])
+	}
+	if firstSnapshot.ConfigOptions[1].Value != "high" {
+		t.Fatalf("first turn was relabeled after later override: %#v", firstSnapshot.ConfigOptions[1])
+	}
+}
+
+func TestBuildTurnRuntimeConfigSnapshotFallsBackToSelectorModel(t *testing.T) {
+	snapshot := buildTurnRuntimeConfigSnapshot(&models.TaskSession{
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModelID: "selector-model",
+			},
+		},
+	})
+
+	if snapshot.Model != "selector-model" {
+		t.Fatalf("snapshot model = %q, want selector-model", snapshot.Model)
+	}
+}
+
+func (nilTaskSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	return nil, nil
+}
+
+func (nilTaskSessionRepo) SetSessionMetadataKey(context.Context, string, string, interface{}) error {
+	panic("SetSessionMetadataKey should not be called for a nil session")
+}
 
 func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	svc, _, repo := createTestService(t)
@@ -19,11 +155,12 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	now := time.Now().UTC()
 
 	session := &models.TaskSession{
-		ID:                "session-1",
-		TaskID:            "task-123",
-		TaskEnvironmentID: "env-123",
-		AgentProfileID:    "profile-1",
-		State:             models.TaskSessionStateCompleted,
+		ID:                 "session-1",
+		TaskID:             "task-123",
+		TaskEnvironmentID:  "env-123",
+		AgentProfileID:     "profile-1",
+		ExecutionProfileID: "claude-opus",
+		State:              models.TaskSessionStateCompleted,
 		AgentProfileSnapshot: map[string]interface{}{
 			"agent_name": "auggie",
 		},
@@ -70,11 +207,193 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	if info.AgentProfileID != "profile-1" {
 		t.Errorf("expected AgentProfileID 'profile-1', got %q", info.AgentProfileID)
 	}
+	if info.ExecutionProfileID != "claude-opus" {
+		t.Errorf("expected ExecutionProfileID 'claude-opus', got %q", info.ExecutionProfileID)
+	}
 	if info.AgentID != "auggie" {
 		t.Errorf("expected AgentID 'auggie', got %q", info.AgentID)
 	}
 	if info.ACPSessionID != "acp-123" {
 		t.Errorf("expected ACPSessionID 'acp-123', got %q", info.ACPSessionID)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_RuntimeConfigOptionsSetOnlyWhenOptionsPresent(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	modelOnly := &models.TaskSession{
+		ID:        "session-model-only",
+		TaskID:    "task-123",
+		State:     models.TaskSessionStateCompleted,
+		StartedAt: now,
+		UpdatedAt: now,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{Model: "gpt-5.3-codex-spark"},
+		},
+	}
+	if err := repo.CreateTaskSession(ctx, modelOnly); err != nil {
+		t.Fatalf("failed to create model-only session: %v", err)
+	}
+	modelOnlyInfo, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-model-only")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession model-only: %v", err)
+	}
+	if modelOnlyInfo.RuntimeConfigOptionsSet {
+		t.Fatal("model-only runtime config should not mark config options as set")
+	}
+
+	withOptions := &models.TaskSession{
+		ID:        "session-with-options",
+		TaskID:    "task-123",
+		State:     models.TaskSessionStateCompleted,
+		StartedAt: now,
+		UpdatedAt: now,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{
+				Model:         "gpt-5.3-codex-spark",
+				ConfigOptions: map[string]string{"reasoning_effort": "medium"},
+			},
+			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{
+				Model:         "gpt-5.4",
+				Mode:          "acceptEdits",
+				ConfigOptions: map[string]string{"reasoning_effort": "low"},
+			},
+		},
+	}
+	if err := repo.CreateTaskSession(ctx, withOptions); err != nil {
+		t.Fatalf("failed to create options session: %v", err)
+	}
+	optionsInfo, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-with-options")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession with options: %v", err)
+	}
+	if !optionsInfo.RuntimeConfigOptionsSet {
+		t.Fatal("runtime config with options should mark config options as set")
+	}
+	if optionsInfo.RuntimeModel != "gpt-5.4" || optionsInfo.RuntimeConfigOptions["reasoning_effort"] != "low" {
+		t.Fatalf("explicit overrides not applied last: %#v", optionsInfo)
+	}
+	if optionsInfo.SessionMode != "acceptEdits" {
+		t.Fatalf("explicit mode override not applied: %#v", optionsInfo)
+	}
+}
+
+func TestPersistSessionRuntimeConfigOptionWritesExplicitOverride(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID: "session-override", TaskID: "task-123",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := svc.PersistSessionRuntimeConfigOption(ctx, session.ID, "reasoning_effort", "low"); err != nil {
+		t.Fatalf("PersistSessionRuntimeConfigOption: %v", err)
+	}
+
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(stored.Metadata)
+	if !ok || overrides.ConfigOptions["reasoning_effort"] != "low" {
+		t.Fatalf("runtime overrides = %#v, %v", overrides, ok)
+	}
+	if _, ok := models.LoadSessionRuntimeConfig(stored.Metadata); ok {
+		t.Fatal("explicit selection should not synthesize a provider snapshot")
+	}
+}
+
+func TestPersistSessionRuntimeOverridesMergeConcurrentSelections(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID: "session-concurrent-overrides", TaskID: "task-123",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		errs <- svc.PersistSessionRuntimeModel(ctx, session.ID, "mock-smart")
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		errs <- svc.PersistSessionRuntimeConfigOption(ctx, session.ID, "effort", "low")
+	}()
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("persist override: %v", err)
+		}
+	}
+
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(stored.Metadata)
+	if !ok || overrides.Model != "mock-smart" || overrides.ConfigOptions["effort"] != "low" {
+		t.Fatalf("merged overrides = %#v, %v", overrides, ok)
+	}
+}
+
+func TestPersistSessionRuntimeModelMissingSessionDoesNotPanic(t *testing.T) {
+	svc := &Service{sessions: nilTaskSessionRepo{}}
+
+	err := svc.PersistSessionRuntimeModel(context.Background(), "missing-session", "gpt-5.3-codex-spark")
+
+	if err == nil {
+		t.Fatal("expected missing session error")
+	}
+}
+
+// TestGetWorkspaceInfoForSession_IncludesSessionMode verifies the persisted
+// session permission mode is surfaced on WorkspaceInfo so the lifecycle can apply
+// it as a mode override on a fresh launch. See issue #1183.
+func TestGetWorkspaceInfoForSession_IncludesSessionMode(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	session := &models.TaskSession{
+		ID:        "session-1",
+		TaskID:    "task-123",
+		State:     models.TaskSessionStateRunning,
+		Metadata:  map[string]interface{}{models.SessionMetaKeySessionMode: "acceptEdits"},
+		StartedAt: now,
+		UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession returned error: %v", err)
+	}
+	if info.SessionMode != "acceptEdits" {
+		t.Errorf("expected SessionMode 'acceptEdits', got %q", info.SessionMode)
 	}
 }
 
@@ -671,5 +990,150 @@ func TestAbandonOpenTurns_IterationCap(t *testing.T) {
 		if turn.CompletedAt == nil {
 			t.Fatalf("expected all turns closed after second sweep, %s still open", turn.ID)
 		}
+	}
+}
+
+func TestMergeExecutorConfigMetadata(t *testing.T) {
+	// Fixture values — arbitrary test inputs, not real host config.
+	const (
+		execHost   = "ssh.example.com"
+		execUser   = "agent"
+		execFP     = "SHA256:test-fingerprint"
+		liveHost   = "live-host-from-running-record"
+		staleHost  = "stale-host-from-executor"
+		droppedKey = "not_a_persistent_key"
+	)
+
+	// SSH connection keys from the executor record must be projected when absent.
+	info := &lifecycle.WorkspaceInfo{}
+	mergeExecutorConfigMetadata(info, map[string]string{
+		lifecycle.MetadataKeySSHHost:            execHost,
+		lifecycle.MetadataKeySSHUser:            execUser,
+		lifecycle.MetadataKeySSHHostFingerprint: execFP,
+		droppedKey:                              "dropme",
+	})
+	if got := info.Metadata[lifecycle.MetadataKeySSHHost]; got != execHost {
+		t.Fatalf("ssh_host = %v, want %q", got, execHost)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeySSHHostFingerprint]; got != execFP {
+		t.Fatalf("ssh_host_fingerprint = %v, want %q", got, execFP)
+	}
+	if _, ok := info.Metadata[droppedKey]; ok {
+		t.Fatal("non-persistent key should be filtered out")
+	}
+
+	// Existing (live running-record) values must win over executor config.
+	info2 := &lifecycle.WorkspaceInfo{Metadata: map[string]interface{}{
+		lifecycle.MetadataKeySSHHost: liveHost,
+	}}
+	mergeExecutorConfigMetadata(info2, map[string]string{
+		lifecycle.MetadataKeySSHHost: staleHost,
+		lifecycle.MetadataKeySSHUser: execUser,
+	})
+	if got := info2.Metadata[lifecycle.MetadataKeySSHHost]; got != liveHost {
+		t.Fatalf("ssh_host = %v, want %q (existing must win)", got, liveHost)
+	}
+	if got := info2.Metadata[lifecycle.MetadataKeySSHUser]; got != execUser {
+		t.Fatalf("ssh_user = %v, want %q (absent key should be filled)", got, execUser)
+	}
+
+	// Empty config is a no-op.
+	info3 := &lifecycle.WorkspaceInfo{}
+	mergeExecutorConfigMetadata(info3, nil)
+	if len(info3.Metadata) != 0 {
+		t.Fatalf("empty config should not create metadata, got %v", info3.Metadata)
+	}
+
+	// Alias-only executors (host read from ~/.ssh/config) must have their alias
+	// projected — otherwise targetFromMetadata still throws "host (or host_alias)
+	// is required". Regression guard for the FilterPersistentMetadata gap.
+	const execAlias = "my-remote-box"
+	info4 := &lifecycle.WorkspaceInfo{}
+	mergeExecutorConfigMetadata(info4, map[string]string{
+		lifecycle.MetadataKeySSHHostAlias: execAlias,
+		lifecycle.MetadataKeySSHShell:     "zsh",
+	})
+	if got := info4.Metadata[lifecycle.MetadataKeySSHHostAlias]; got != execAlias {
+		t.Fatalf("ssh_host_alias = %v, want %q (alias-only executor must survive)", got, execAlias)
+	}
+	if got := info4.Metadata[lifecycle.MetadataKeySSHShell]; got != "zsh" {
+		t.Fatalf("ssh_shell = %v, want zsh (per-profile key should project)", got)
+	}
+
+	// Session-scoped runtime keys must NEVER be projected from executor config —
+	// projecting a stale one would make restore reattach to a dead remote
+	// agentctl instance instead of creating a fresh one.
+	info5 := &lifecycle.WorkspaceInfo{}
+	mergeExecutorConfigMetadata(info5, map[string]string{
+		lifecycle.MetadataKeySSHHost:               execHost,
+		lifecycle.MetadataKeySSHRemoteAgentctlPort: "40123",
+		lifecycle.MetadataKeySSHRemoteAgentctlPID:  "9999",
+		lifecycle.MetadataKeySSHRemoteSessionDir:   "/home/agent/.kandev/sessions/old",
+	})
+	for _, k := range []string{
+		lifecycle.MetadataKeySSHRemoteAgentctlPort,
+		lifecycle.MetadataKeySSHRemoteAgentctlPID,
+		lifecycle.MetadataKeySSHRemoteSessionDir,
+	} {
+		if _, ok := info5.Metadata[k]; ok {
+			t.Errorf("session-scoped key %q must NOT be projected from executor config", k)
+		}
+	}
+	if got := info5.Metadata[lifecycle.MetadataKeySSHHost]; got != execHost {
+		t.Fatalf("ssh_host = %v, want %q (connection key should still project)", got, execHost)
+	}
+}
+
+// TestGetWorkspaceInfoForSession_SSHConfigProjectedWhenNoRunningRecord exercises
+// the end-to-end fallback: a completed SSH session with no ExecutorRunning
+// record must still surface the executor's ssh_host so a terminal / restore
+// does not fail with "host (or host_alias) is required in executor config".
+func TestGetWorkspaceInfoForSession_SSHConfigProjectedWhenNoRunningRecord(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	const execHost = "ssh.example.com"
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID:   "ssh-exec-1",
+		Name: "my-ssh-host",
+		Type: models.ExecutorTypeSSH,
+		Config: map[string]string{
+			lifecycle.MetadataKeySSHHost:            execHost,
+			lifecycle.MetadataKeySSHUser:            "agent",
+			lifecycle.MetadataKeySSHHostFingerprint: "SHA256:test-fingerprint",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to create ssh executor: %v", err)
+	}
+
+	// Completed session pointing at the SSH executor, with NO ExecutorRunning record.
+	session := &models.TaskSession{
+		ID:                "session-ssh-1",
+		TaskID:            "task-123",
+		TaskEnvironmentID: "env-123",
+		AgentProfileID:    "profile-1",
+		ExecutorID:        "ssh-exec-1",
+		State:             models.TaskSessionStateCompleted,
+		StartedAt:         now,
+		UpdatedAt:         now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-ssh-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession returned error: %v", err)
+	}
+	if info.ExecutorType != string(models.ExecutorTypeSSH) {
+		t.Fatalf("ExecutorType = %q, want ssh", info.ExecutorType)
+	}
+	if got, _ := info.Metadata[lifecycle.MetadataKeySSHHost].(string); got != execHost {
+		t.Fatalf("ssh_host = %v, want %q (executor config must be projected as fallback)", info.Metadata[lifecycle.MetadataKeySSHHost], execHost)
 	}
 }

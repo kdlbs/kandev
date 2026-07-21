@@ -2,7 +2,13 @@
 // review queue management, and CI/check status tracking.
 package github
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
+
+// TaskCIAutoFixMaxRounds is the server-enforced CI auto-fix loop guard.
+const TaskCIAutoFixMaxRounds = 10
 
 // PR represents a GitHub Pull Request.
 type PR struct {
@@ -191,6 +197,80 @@ type TaskPR struct {
 	UpdatedAt               time.Time  `json:"updated_at" db:"updated_at"`
 }
 
+// TaskCIOptions stores task-level PR automation preferences.
+type TaskCIOptions struct {
+	TaskID                string    `json:"task_id" db:"task_id"`
+	AutoFixEnabled        bool      `json:"auto_fix_enabled" db:"auto_fix_enabled"`
+	AutoMergeEnabled      bool      `json:"auto_merge_enabled" db:"auto_merge_enabled"`
+	AutoFixPromptOverride *string   `json:"auto_fix_prompt_override,omitempty" db:"auto_fix_prompt_override"`
+	CreatedAt             time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// TaskCIOptionsPatch is a partial update for task CI automation options.
+type TaskCIOptionsPatch struct {
+	AutoFixEnabled        *bool
+	AutoMergeEnabled      *bool
+	AutoFixPromptOverride *string
+}
+
+// HasAny reports whether the patch contains at least one requested field change.
+func (p TaskCIOptionsPatch) HasAny() bool {
+	return p.AutoFixEnabled != nil || p.AutoMergeEnabled != nil || p.AutoFixPromptOverride != nil
+}
+
+// TaskCIOptionsResponse is the HTTP shape for task CI automation options.
+type TaskCIOptionsResponse struct {
+	TaskID                 string                     `json:"task_id"`
+	AutoFixEnabled         bool                       `json:"auto_fix_enabled"`
+	AutoMergeEnabled       bool                       `json:"auto_merge_enabled"`
+	AutoFixPromptOverride  *string                    `json:"auto_fix_prompt_override"`
+	AutoFixMaxRounds       int                        `json:"auto_fix_max_rounds"`
+	EffectiveAutoFixPrompt string                     `json:"effective_auto_fix_prompt"`
+	UsingDefaultPrompt     bool                       `json:"using_default_prompt"`
+	UpdatedAt              time.Time                  `json:"updated_at"`
+	PRStates               []*TaskCIPRAutomationState `json:"pr_states"`
+}
+
+// TaskCIPRAutomationState stores per-PR dedupe and error state for CI automation.
+type TaskCIPRAutomationState struct {
+	TaskID                string     `json:"task_id" db:"task_id"`
+	RepositoryID          string     `json:"repository_id" db:"repository_id"`
+	PRNumber              int        `json:"pr_number" db:"pr_number"`
+	LastFixSignature      string     `json:"last_fix_signature" db:"last_fix_signature"`
+	LastFixCheckpointJSON string     `json:"last_fix_checkpoint_json" db:"last_fix_checkpoint_json"`
+	LastFixEnqueuedAt     *time.Time `json:"last_fix_enqueued_at,omitempty" db:"last_fix_enqueued_at"`
+	LastFixSessionID      *string    `json:"last_fix_session_id,omitempty" db:"last_fix_session_id"`
+	AutoFixRoundCount     int        `json:"auto_fix_round_count" db:"auto_fix_round_count"`
+	AutoFixExhaustedAt    *time.Time `json:"auto_fix_exhausted_at" db:"auto_fix_exhausted_at"`
+	LastMergeSignature    string     `json:"last_merge_signature" db:"last_merge_signature"`
+	LastMergeAttemptAt    *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
+	LastError             *string    `json:"last_error,omitempty" db:"last_error"`
+	CreatedAt             time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// TaskCIFixAttempt records an auto-fix prompt attempt for a task PR.
+type TaskCIFixAttempt struct {
+	TaskID         string
+	RepositoryID   string
+	PRNumber       int
+	Signature      string
+	CheckpointJSON string
+	SessionID      string
+	EnqueuedAt     time.Time
+	IncrementRound bool
+}
+
+// TaskCIMergeAttempt records an auto-merge attempt for a task PR.
+type TaskCIMergeAttempt struct {
+	TaskID       string
+	RepositoryID string
+	PRNumber     int
+	Signature    string
+	AttemptedAt  time.Time
+}
+
 // RepoFilter identifies a GitHub repository for review watch filtering.
 type RepoFilter struct {
 	Owner string `json:"owner"`
@@ -206,6 +286,42 @@ const (
 	// (review-requested:@me). This is the default for backwards compatibility.
 	ReviewScopeUserAndTeams = "user_and_teams"
 )
+
+// CleanupPolicy controls how a review or issue watch handles its auto-created
+// tasks once the underlying PR / issue reaches a terminal state.
+const (
+	// CleanupPolicyAuto deletes the task once the PR/issue is merged or closed
+	// UNLESS the user authored at least one message in the task (the agent's
+	// auto-start prompt does not count).
+	CleanupPolicyAuto = "auto"
+	// CleanupPolicyAlways deletes the task on terminal state regardless of
+	// user interaction. Use when the watch is purely informational and the
+	// user never expects a banner / history for merged PRs.
+	CleanupPolicyAlways = "always"
+	// CleanupPolicyNever disables automatic cleanup. Tasks pile up until the
+	// user invokes manual cleanup or deletes them by hand.
+	CleanupPolicyNever = "never"
+)
+
+// IsValidCleanupPolicy reports whether s is one of the recognized policies.
+// Empty string is treated as valid so legacy rows (pre-migration) and zero
+// values default to "auto" downstream.
+func IsValidCleanupPolicy(s string) bool {
+	switch s {
+	case "", CleanupPolicyAuto, CleanupPolicyAlways, CleanupPolicyNever:
+		return true
+	}
+	return false
+}
+
+// NormalizeCleanupPolicy maps the empty string to CleanupPolicyAuto. Unknown
+// values are returned unchanged so the caller can surface a validation error.
+func NormalizeCleanupPolicy(s string) string {
+	if s == "" {
+		return CleanupPolicyAuto
+	}
+	return s
+}
 
 // ReviewWatch configures periodic polling for PRs needing the user's review.
 // Repos holds the list of repositories to monitor. An empty list means all repos.
@@ -223,9 +339,14 @@ type ReviewWatch struct {
 	CustomQuery         string       `json:"custom_query" db:"custom_query"`
 	Enabled             bool         `json:"enabled" db:"enabled"`
 	PollIntervalSeconds int          `json:"poll_interval_seconds" db:"poll_interval_seconds"`
+	CleanupPolicy       string       `json:"cleanup_policy" db:"cleanup_policy"`
 	LastPolledAt        *time.Time   `json:"last_polled_at,omitempty" db:"last_polled_at"`
-	CreatedAt           time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at" db:"updated_at"`
+	// LastError / LastErrorAt are stamped when the dispatch pipeline self-
+	// heals the watcher (e.g. the bound agent profile was soft-deleted).
+	LastError   string     `json:"last_error,omitempty" db:"last_error"`
+	LastErrorAt *time.Time `json:"last_error_at,omitempty" db:"last_error_at"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // ReviewPRTask records which PRs have already had tasks created (deduplication).
@@ -247,16 +368,51 @@ type GitHubOrg struct {
 }
 
 // GitHubRepo represents a GitHub repository (lightweight, for autocomplete).
+// PushedAt is the timestamp of the latest push, used to sort the
+// list-accessible-repos result (most-recently-active first). It is a pointer
+// so `omitempty` actually drops it from JSON when unset — a zero `time.Time`
+// struct would otherwise serialize as `"0001-01-01T00:00:00Z"`.
+//
+// DefaultBranch lets the Remote picker pre-fill the row's branch immediately
+// on selection (skips the branch-list round-trip for the common case). The
+// GitHub API returns it on every repo, so it is required. Description is
+// omitempty because GitHub may return null/empty.
 type GitHubRepo struct {
-	FullName string `json:"full_name"`
-	Owner    string `json:"owner"`
-	Name     string `json:"name"`
-	Private  bool   `json:"private"`
+	FullName      string     `json:"full_name"`
+	Owner         string     `json:"owner"`
+	Name          string     `json:"name"`
+	Private       bool       `json:"private"`
+	DefaultBranch string     `json:"default_branch"`
+	Description   string     `json:"description,omitempty"`
+	PushedAt      *time.Time `json:"pushed_at,omitempty"`
 }
 
 // RepoBranch represents a branch in a GitHub repository.
 type RepoBranch struct {
 	Name string `json:"name"`
+}
+
+// Repo content entry types, as reported by the GitHub contents API's "type" field.
+const (
+	RepoContentTypeFile = "file"
+	RepoContentTypeDir  = "dir"
+)
+
+// RepoContentEntry describes one entry returned when listing a repository directory.
+type RepoContentEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Type string `json:"type"` // "file" or "dir"
+	SHA  string `json:"sha"`
+	Size int    `json:"size"`
+}
+
+// RepoMergeMethods reports which merge methods a repository allows. Mirrors
+// the allow_*_merge booleans from GET /repos/{owner}/{repo}.
+type RepoMergeMethods struct {
+	Merge  bool `json:"merge"`
+	Squash bool `json:"squash"`
+	Rebase bool `json:"rebase"`
 }
 
 // GitHubStatus represents GitHub connection status.
@@ -303,6 +459,7 @@ type CreateReviewWatchRequest struct {
 	ReviewScope         string       `json:"review_scope"`
 	CustomQuery         string       `json:"custom_query"`
 	PollIntervalSeconds int          `json:"poll_interval_seconds"`
+	CleanupPolicy       string       `json:"cleanup_policy"`
 }
 
 // UpdateReviewWatchRequest is the request body for updating a review watch.
@@ -317,6 +474,7 @@ type UpdateReviewWatchRequest struct {
 	CustomQuery         *string       `json:"custom_query,omitempty"`
 	Enabled             *bool         `json:"enabled,omitempty"`
 	PollIntervalSeconds *int          `json:"poll_interval_seconds,omitempty"`
+	CleanupPolicy       *string       `json:"cleanup_policy,omitempty"`
 }
 
 // PRFeedbackEvent is published to the event bus when a PR has new feedback.
@@ -424,9 +582,14 @@ type IssueWatch struct {
 	CustomQuery         string       `json:"custom_query" db:"custom_query"`
 	Enabled             bool         `json:"enabled" db:"enabled"`
 	PollIntervalSeconds int          `json:"poll_interval_seconds" db:"poll_interval_seconds"`
+	CleanupPolicy       string       `json:"cleanup_policy" db:"cleanup_policy"`
 	LastPolledAt        *time.Time   `json:"last_polled_at,omitempty" db:"last_polled_at"`
-	CreatedAt           time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at" db:"updated_at"`
+	// LastError / LastErrorAt are stamped when the dispatch pipeline self-
+	// heals the watcher (e.g. the bound agent profile was soft-deleted).
+	LastError   string     `json:"last_error,omitempty" db:"last_error"`
+	LastErrorAt *time.Time `json:"last_error_at,omitempty" db:"last_error_at"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // IssueWatchTask records which issues have already had tasks created (deduplication).
@@ -465,6 +628,7 @@ type CreateIssueWatchRequest struct {
 	Labels              []string     `json:"labels"`
 	CustomQuery         string       `json:"custom_query"`
 	PollIntervalSeconds int          `json:"poll_interval_seconds"`
+	CleanupPolicy       string       `json:"cleanup_policy"`
 }
 
 // UpdateIssueWatchRequest is the request body for updating an issue watch.
@@ -479,6 +643,77 @@ type UpdateIssueWatchRequest struct {
 	CustomQuery         *string       `json:"custom_query,omitempty"`
 	Enabled             *bool         `json:"enabled,omitempty"`
 	PollIntervalSeconds *int          `json:"poll_interval_seconds,omitempty"`
+	CleanupPolicy       *string       `json:"cleanup_policy,omitempty"`
+}
+
+// --- Workspace GitHub scope/settings ---
+
+const (
+	RepoScopeModeAll   = "all"
+	RepoScopeModeOrgs  = "orgs"
+	RepoScopeModeRepos = "repos"
+)
+
+// WorkspaceSettings stores per-workspace GitHub operational settings.
+// Authentication remains install-wide; these settings scope GitHub UI/search
+// surfaces to the workspace's intended repositories.
+type WorkspaceSettings struct {
+	WorkspaceID         string          `json:"workspace_id" db:"workspace_id"`
+	RepoScopeMode       string          `json:"repo_scope_mode" db:"repo_scope_mode"`
+	RepoScopeOrgs       []string        `json:"repo_scope_orgs" db:"-"`
+	RepoScopeRepos      []RepoFilter    `json:"repo_scope_repos" db:"-"`
+	RepoScopeOrgsJSON   string          `json:"-" db:"repo_scope_orgs"`
+	RepoScopeReposJSON  string          `json:"-" db:"repo_scope_repos"`
+	SavedPresets        json.RawMessage `json:"saved_presets,omitempty" db:"saved_presets"`
+	DefaultQueryPresets json.RawMessage `json:"default_query_presets,omitempty" db:"default_query_presets"`
+	CreatedAt           time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at" db:"updated_at"`
+}
+
+// UpdateWorkspaceSettingsRequest replaces the workspace GitHub scope and/or
+// preference blobs. Nil blobs leave values unchanged; explicit JSON null clears
+// default query presets back to built-ins.
+type UpdateWorkspaceSettingsRequest struct {
+	WorkspaceID         string           `json:"workspace_id"`
+	RepoScopeMode       *string          `json:"repo_scope_mode,omitempty"`
+	RepoScopeOrgs       *[]string        `json:"repo_scope_orgs,omitempty"`
+	RepoScopeRepos      *[]RepoFilter    `json:"repo_scope_repos,omitempty"`
+	SavedPresets        *json.RawMessage `json:"saved_presets,omitempty"`
+	DefaultQueryPresets *json.RawMessage `json:"default_query_presets,omitempty"`
+	SavedPresetsSet     bool             `json:"-"`
+	DefaultQueriesSet   bool             `json:"-"`
+}
+
+func (r *UpdateWorkspaceSettingsRequest) UnmarshalJSON(data []byte) error {
+	type alias UpdateWorkspaceSettingsRequest
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = UpdateWorkspaceSettingsRequest(decoded)
+	if value, ok := raw["saved_presets"]; ok {
+		r.SavedPresetsSet = true
+		if string(value) == jsonNullLiteral {
+			r.SavedPresets = nil
+		} else {
+			next := cloneRawMessage(value)
+			r.SavedPresets = &next
+		}
+	}
+	if value, ok := raw["default_query_presets"]; ok {
+		r.DefaultQueriesSet = true
+		if string(value) == jsonNullLiteral {
+			r.DefaultQueryPresets = nil
+		} else {
+			next := cloneRawMessage(value)
+			r.DefaultQueryPresets = &next
+		}
+	}
+	return nil
 }
 
 // --- Action presets (quick-launch prompts on the /github page) ---

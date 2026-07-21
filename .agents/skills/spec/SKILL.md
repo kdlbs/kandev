@@ -7,6 +7,8 @@ description: Write a feature spec — the "what & why" of a kandev product featu
 
 A spec captures **what** a feature does and **why**, before deciding **how**.
 
+If the user intent is still vague, run `/interview-me` first. A spec records confirmed intent; it should not be the place where the agent guesses what the user meant.
+
 ## Bar
 
 The bar a spec must clear: **a fresh agent given only this spec (no source code) should be able to either reimplement the feature OR test the system for conformance.**
@@ -47,6 +49,10 @@ A spec **is not**:
 - A retrospective of work already done
 - A record of a bug, incident, or postmortem (those are ADRs and regression tests)
 
+Implementation plans are separate committed artifacts under
+`docs/plans/<feature>/`. A spec may link to the active plan, but requirements
+must remain useful even when the plan changes.
+
 ## Where it lives
 
 ```
@@ -62,7 +68,7 @@ docs/specs/<feature-slug>/spec.md             # standalone feature folder
 
 Required sections: `Why`, `What`, `Scenarios`, `Out of scope`.
 
-Optional sections: include only when the feature has the corresponding concern. A small UI feature may need none of them; a stateful subsystem will need most.
+Optional sections: include only when the feature has the corresponding concern. A small UI feature may need none of them; a stateful subsystem will need most. A spec may include an `Implementation plan` link to `docs/plans/<feature>/plan.md`, but requirements must not depend on plan-only context.
 
 ```markdown
 ---
@@ -178,6 +184,17 @@ List explicit non-goals. Highest-value section for killing feature creep. Leave 
 ### Open questions
 Park unresolved decisions here while drafting. Each one blocks the spec from being approved. Delete the section once empty.
 
+### Success criteria
+When the request is vague ("faster", "better", "robust"), reframe it into measurable or observable success criteria before approving the spec.
+
+Good:
+- "The dashboard first content appears within 2.5s on the seeded E2E dataset."
+- "A failed Jira auth refresh surfaces a settings banner and does not delete existing links."
+
+Bad:
+- "The dashboard should feel fast."
+- "The integration should be robust."
+
 ## Right-sizing
 
 The spec should be proportional to the feature. A small UI feature gets a 30-line spec with only Why/What/Scenarios/Out of scope. A stateful subsystem with persistence and a contract surface needs Data model + API surface + State machine + Failure modes + Persistence guarantees — and that's fine, because each of those is required to implement or test the feature correctly.
@@ -192,7 +209,9 @@ A padded spec is worse than a short one — it hides the requirements behind cer
 ## Style notes
 
 - **Symbols in code font.** File paths, packages, types, table names: `internal/agent/lifecycle`, `TaskSession`, `task_session_worktrees`.
-- **Cross-link, don't duplicate.** Reference ADRs (`../../decisions/NNNN-...md`) and other specs rather than restating their content.
+- **Cross-link, don't duplicate.** Reference ADRs (`../../decisions/<adr-id>.md`) and other specs rather than restating their content.
 - **Specs rarely need diagrams.** A user-flow mermaid is acceptable when it clarifies a multi-step interaction. Architectural diagrams do not belong here — those go in ADRs.
 - **Present tense, active voice.** "The agent resumes the turn" — not "the turn will be resumed by the agent".
 - **Concrete over abstract.** "Wakeups fire at most once per 60s per agent" is testable; "wakeups are rate-limited appropriately" is not.
+- **Assumptions visible.** If you infer behavior from current code, name the assumption and keep it in Open questions until confirmed.
+- **Approval gate.** Do not proceed to `/plan` or implementation until the user has approved the spec or explicitly asked to continue with named open questions.

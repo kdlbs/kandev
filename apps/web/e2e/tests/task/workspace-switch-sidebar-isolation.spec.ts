@@ -2,9 +2,39 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
+
+async function activeWorkspaceCookie(page: Page): Promise<string | null> {
+  return page.evaluate((name) => {
+    const prefix = `${name}=`;
+    const match = document.cookie
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(prefix));
+    return match ? decodeURIComponent(match.slice(prefix.length)) : null;
+  }, ACTIVE_WORKSPACE_COOKIE);
+}
+
+async function gotoTaskList(page: Page): Promise<void> {
+  await page.goto("/tasks");
+  await page.getByTestId("display-button").waitFor();
+}
+
+function taskInList(page: Page, title: string): Locator {
+  return page.getByTestId("tasks-list").getByText(title);
+}
+
+// Office off: the picker routes a workspace switch to `/office` only when the
+// office feature is on, and `/office` requires onboarding this regular fixture
+// doesn't perform (it errors). With office off the switch happens in place on
+// the board, exercising the same cross-workspace isolation.
+useRegularMode();
 
 test.describe("Sidebar — cross-workspace isolation", () => {
   test("tasks from the previous workspace do not leak into the sidebar after switching", async ({
@@ -55,14 +85,22 @@ test.describe("Sidebar — cross-workspace isolation", () => {
     await expect(kanban.taskCard(taskA.id)).toBeVisible({ timeout: 10_000 });
     await expect(kanban.taskCard(taskB.id)).not.toBeVisible();
 
-    // --- Switch to workspace B via the display dropdown (SPA, no full reload) ---
-    await testPage.getByTestId("display-button").click();
-    await testPage.getByTestId("workspace-select-trigger").click();
-    await testPage.getByTestId(`workspace-select-item-${workspaceB.id}`).click();
+    // --- Switch to workspace B via the sidebar workspace picker ---
+    // The picker (top of the sidebar) is now the only workspace switcher. With
+    // office off it switches in place (no /office redirect, no full reload), so
+    // the board re-renders from the in-memory store with workspace B's tasks and
+    // none of workspace A's.
+    await testPage.getByTestId("sidebar-workspace-trigger").click();
+    await testPage.getByTestId(`sidebar-workspace-item-${workspaceB.id}`).click();
 
-    // Close the dropdown so task cards are interactable.
-    await testPage.keyboard.press("Escape");
+    await expect(kanban.taskCard(taskB.id)).toBeVisible({ timeout: 10_000 });
+    await expect(kanban.taskCard(taskA.id)).not.toBeVisible();
+    await expect.poll(() => activeWorkspaceCookie(testPage)).toBe(workspaceB.id);
 
+    // A hard reload must bootstrap the same active workspace from the cookie,
+    // before client-side effects have a chance to switch from the default seed workspace.
+    await testPage.reload();
+    await kanban.board.waitFor({ state: "visible" });
     await expect(kanban.taskCard(taskB.id)).toBeVisible({ timeout: 10_000 });
     await expect(kanban.taskCard(taskA.id)).not.toBeVisible();
 
@@ -78,5 +116,10 @@ test.describe("Sidebar — cross-workspace isolation", () => {
 
     await expect(session.sidebar.getByText("Workspace A Task", { exact: true })).toHaveCount(0);
     await expect(session.sidebar.getByTestId("sidebar-repo-group-Unassigned")).toHaveCount(0);
+
+    // Direct route bootstrapping should use the same cookie-backed workspace.
+    await gotoTaskList(testPage);
+    await expect(taskInList(testPage, "Workspace B Task")).toBeVisible({ timeout: 10_000 });
+    await expect(taskInList(testPage, "Workspace A Task")).not.toBeVisible();
   });
 });

@@ -29,7 +29,10 @@ async function seedAndNavigate(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  // waitForChatIdle (not a raw idleInput wait) rides out the WS-subscribe race:
+  // the mock agent can settle RUNNING->WAITING_FOR_INPUT before the client's WS
+  // subscription registers, so the idle placeholder never renders without a reload.
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return session;
 }
@@ -95,8 +98,10 @@ test.describe("Toolbar overflow menu", () => {
     // Context badge should be hidden when collapsed to avoid clipping
     await expect(contextBadge).not.toBeVisible();
 
-    // Submit button should remain visible (always-visible item)
-    const submitBtn = toolbar.locator("button.rounded-full");
+    // Submit button should remain visible (always-visible item). Target the
+    // submit testid specifically — the voice input button is also round, so a
+    // bare `button.rounded-full` locator now matches both and fails strict mode.
+    const submitBtn = toolbar.getByTestId("submit-message-button");
     await expect(submitBtn).toBeVisible();
 
     // Click expand toggle — items appear inline (scrollable)

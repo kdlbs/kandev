@@ -30,7 +30,9 @@ export function buildGitFileSignature(file: FileInfo | undefined): string {
 export type SyncOpenFileArgs = {
   client: ReturnType<typeof getWebSocketClient>;
   sessionId: string;
+  fileKey: string;
   path: string;
+  repo?: string;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
 };
 
@@ -47,19 +49,25 @@ export type SyncOpenFileArgs = {
 export async function syncOpenFileFromWorkspace({
   client,
   sessionId,
+  fileKey,
   path,
+  repo,
   updateFileState,
 }: SyncOpenFileArgs): Promise<void> {
   if (!client) return;
   try {
-    const response = await requestFileContent(client, sessionId, path);
-    const latest = useDockviewStore.getState().openFiles.get(path);
+    const response = await requestFileContent(client, sessionId, path, repo);
+    const latest = useDockviewStore.getState().openFiles.get(fileKey);
     if (!latest) return;
+    // The tab may have been swapped to a different repo's file at the same path
+    // key while the fetch was in flight; the response is then for the old repo.
+    // Drop it rather than writing stale content into the new buffer.
+    if (latest.repo !== repo) return;
     const remoteHash = await calculateHash(response.content);
 
     if (latest.isDirty) {
       if (response.content === latest.content) {
-        updateFileState(path, {
+        updateFileState(fileKey, {
           originalContent: response.content,
           originalHash: remoteHash,
           isDirty: false,
@@ -67,11 +75,11 @@ export async function syncOpenFileFromWorkspace({
           remoteContent: undefined,
           remoteOriginalHash: undefined,
         });
-        updatePanelAfterSave(path, latest.name);
+        updatePanelAfterSave(path, latest.name, latest.repo);
         return;
       }
       if (latest.hasRemoteUpdate && latest.remoteContent === response.content) return;
-      updateFileState(path, {
+      updateFileState(fileKey, {
         hasRemoteUpdate: true,
         remoteContent: response.content,
         remoteOriginalHash: remoteHash,
@@ -87,7 +95,7 @@ export async function syncOpenFileFromWorkspace({
       return;
     }
 
-    updateFileState(path, {
+    updateFileState(fileKey, {
       content: response.content,
       originalContent: response.content,
       originalHash: remoteHash,
@@ -137,20 +145,28 @@ export function useOpenFileWorkspaceSync({
 
     const gitFiles = gitStatus?.files ?? {};
     const sigMap = gitFileSignaturesRef.current;
-    for (const [path, file] of openFiles.entries()) {
+    for (const [fileKey, file] of openFiles.entries()) {
+      if ((gitStatus?.repository_name ?? "") !== (file.repo ?? "")) continue;
       // For symlinks, also check the resolved target path in git status
-      const gitFileInfo = (gitFiles[path] ??
+      const gitFileInfo = (gitFiles[file.path] ??
         (file.resolvedPath ? gitFiles[file.resolvedPath] : undefined)) as FileInfo | undefined;
       const nextSignature = buildGitFileSignature(gitFileInfo);
-      const prevSignature = sigMap.get(path);
+      const prevSignature = sigMap.get(fileKey);
       if (prevSignature === undefined) {
-        sigMap.set(path, nextSignature);
+        sigMap.set(fileKey, nextSignature);
         continue;
       }
       if (prevSignature === nextSignature) continue;
 
-      sigMap.set(path, nextSignature);
-      void syncOpenFileFromWorkspace({ client, sessionId, path, updateFileState });
+      sigMap.set(fileKey, nextSignature);
+      void syncOpenFileFromWorkspace({
+        client,
+        sessionId,
+        fileKey,
+        path: file.path,
+        repo: file.repo,
+        updateFileState,
+      });
     }
   }, [gitStatus, openFiles, updateFileState, activeSessionIdRef, gitFileSignaturesRef]);
 }

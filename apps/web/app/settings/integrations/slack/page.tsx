@@ -1,5 +1,9 @@
 import { SlackIntegrationPage } from "@/components/slack/slack-settings";
 
-export default function IntegrationsSlackPage() {
-  return <SlackIntegrationPage />;
+type IntegrationsSlackPageProps = {
+  workspaceId?: string;
+};
+
+export default function IntegrationsSlackPage({ workspaceId }: IntegrationsSlackPageProps = {}) {
+  return <SlackIntegrationPage workspaceId={workspaceId} />;
 }

@@ -1,6 +1,6 @@
 ---
 name: kandev-escalation
-description: How to create a human-actionable decision task when you are blocked
+description: Escalate to a human when required information, access, credentials, or a product decision blocks completion and no reasonable default is available.
 kandev:
   system: true
   version: "0.42.0"
@@ -57,7 +57,7 @@ $KANDEV_CLI kandev task update --id "$KANDEV_TASK_ID" \
 ### Step 3: Post a comment and set blocked status
 
 ```bash
-$KANDEV_CLI kandev comment add --body "Escalated to human: created task $HUMAN_TASK_ID. Waiting for decision on: <question>"
+$KANDEV_CLI kandev tasks message --prompt "Escalated to human: created task $HUMAN_TASK_ID. Waiting for decision on: <question>"
 
 $KANDEV_CLI kandev task update --status blocked
 ```
@@ -70,9 +70,10 @@ Your session ends. The orchestrator will wake you with reason
 ## On wakeup after resolution
 
 When you wake with `KANDEV_WAKE_REASON=task_blockers_resolved`, parse
-`$KANDEV_WAKE_PAYLOAD_JSON` for the resolved blocker titles, then continue
-your work incorporating the human's decision (visible in the resolved task's
-comments or description).
+`$KANDEV_WAKE_PAYLOAD_JSON` for the resolved blocker titles. If it is absent,
+read the JSON file at `$KANDEV_WAKE_PAYLOAD_PATH` instead. Then continue your
+work incorporating the human's decision (visible in the resolved task's comments
+or description).
 
 ## Rules
 

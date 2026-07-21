@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -91,6 +92,81 @@ func TestHasUserTables_BeforeAndAfter(t *testing.T) {
 	}
 	if !has2 {
 		t.Error("expected hasUserTables=true after creating a user table")
+	}
+}
+
+// TestWriteAndReadLatestVersion_RoundtripAndUpsert verifies that we can
+// store the GitHub-polled latest release and read it back, including overwrites.
+func TestWriteAndReadLatestVersion_RoundtripAndUpsert(t *testing.T) {
+	db := memSQLiteDB(t)
+	if err := ensureMetaTable(db); err != nil {
+		t.Fatalf("ensureMetaTable: %v", err)
+	}
+
+	// On a fresh DB, all three reads should return zero values.
+	v, url, when, err := ReadLatestVersion(db)
+	if err != nil {
+		t.Fatalf("ReadLatestVersion fresh: %v", err)
+	}
+	if v != "" || url != "" || !when.IsZero() {
+		t.Errorf("expected zero values on fresh DB, got v=%q url=%q when=%v", v, url, when)
+	}
+
+	t1 := time.Unix(1_700_000_000, 0).UTC()
+	if err := WriteLatestVersion(db, "v1.2.3", "https://example/r/v1.2.3", t1); err != nil {
+		t.Fatalf("WriteLatestVersion: %v", err)
+	}
+	v, url, when, err = ReadLatestVersion(db)
+	if err != nil {
+		t.Fatalf("ReadLatestVersion after write: %v", err)
+	}
+	if v != "v1.2.3" {
+		t.Errorf("version = %q, want %q", v, "v1.2.3")
+	}
+	if url != "https://example/r/v1.2.3" {
+		t.Errorf("url = %q", url)
+	}
+	if !when.Equal(t1) {
+		t.Errorf("checkedAt = %v, want %v", when, t1)
+	}
+
+	// Upsert.
+	t2 := time.Unix(1_700_000_100, 0).UTC()
+	if err := WriteLatestVersion(db, "v1.2.4", "https://example/r/v1.2.4", t2); err != nil {
+		t.Fatalf("WriteLatestVersion overwrite: %v", err)
+	}
+	v, url, when, err = ReadLatestVersion(db)
+	if err != nil {
+		t.Fatalf("ReadLatestVersion after overwrite: %v", err)
+	}
+	if v != "v1.2.4" || url != "https://example/r/v1.2.4" || !when.Equal(t2) {
+		t.Errorf("after overwrite got v=%q url=%q when=%v", v, url, when)
+	}
+}
+
+// TestReadLatestVersion_PartialPersistedState verifies the read tolerates
+// only a subset of the three keys being present (which can happen if a
+// previous write was interrupted).
+func TestReadLatestVersion_PartialPersistedState(t *testing.T) {
+	db := memSQLiteDB(t)
+	if err := ensureMetaTable(db); err != nil {
+		t.Fatalf("ensureMetaTable: %v", err)
+	}
+	if err := writeKey(db, "latest_version", "v9.9.9"); err != nil {
+		t.Fatalf("writeKey: %v", err)
+	}
+	v, url, when, err := ReadLatestVersion(db)
+	if err != nil {
+		t.Fatalf("ReadLatestVersion: %v", err)
+	}
+	if v != "v9.9.9" {
+		t.Errorf("version = %q", v)
+	}
+	if url != "" {
+		t.Errorf("url should be empty, got %q", url)
+	}
+	if !when.IsZero() {
+		t.Errorf("checkedAt should be zero, got %v", when)
 	}
 }
 

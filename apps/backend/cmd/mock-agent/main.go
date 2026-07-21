@@ -34,7 +34,9 @@ type mockAgent struct {
 	conn            *acp.AgentSideConnection
 	model           string
 	sessions        map[acp.SessionId]bool
+	sessionConfig   map[acp.SessionId][]acp.SessionConfigOption
 	commandsEmitted map[acp.SessionId]bool
+	nextSessionID   uint64
 	mu              sync.Mutex
 }
 
@@ -64,6 +66,7 @@ func main() {
 	ag := &mockAgent{
 		model:           model,
 		sessions:        make(map[acp.SessionId]bool),
+		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
 		commandsEmitted: make(map[acp.SessionId]bool),
 	}
 	asc := acp.NewAgentSideConnection(ag, os.Stdout, os.Stdin)
@@ -85,14 +88,21 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 
 // NewSession creates a new conversation session.
 // MCP servers from the ACP request are registered so callMCPTool can use them.
-// The Models and Modes fields advertise available capabilities so the host
-// utility capability probe can populate them in the cache — this is what makes
-// the utility-agents settings page show model and mode options for mock-agent
-// in E2E, and lets profile-mode tests select a non-default mode.
+// The Modes field and the model-shaped entry in ConfigOptions advertise
+// available capabilities so the host utility capability probe can populate
+// them in the cache — this is what makes the utility-agents settings page
+// show model and mode options for mock-agent in E2E, and lets profile-mode
+// tests select a non-default mode.
 func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
-	sid := acp.SessionId(fmt.Sprintf("mock-session-%d", os.Getpid()))
+	configOptions := mockSessionConfigOptions()
 	a.mu.Lock()
+	a.nextSessionID++
+	sid := acp.SessionId(fmt.Sprintf("mock-session-%d-%d", os.Getpid(), a.nextSessionID))
 	a.sessions[sid] = true
+	if a.sessionConfig == nil {
+		a.sessionConfig = make(map[acp.SessionId][]acp.SessionConfigOption)
+	}
+	a.sessionConfig[sid] = configOptions
 	a.mu.Unlock()
 
 	// Register MCP servers from the ACP session request (SSE servers).
@@ -102,28 +112,21 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 	// Emit available commands asynchronously after the session/new response
 	// flushes. Real ACP agents (OpenCode, Claude) emit available_commands_update
 	// here, which lets clients populate slash menus before the first prompt.
-	go a.emitAvailableCommandsAfterDelay(sid)
+	if a.conn != nil {
+		go a.emitAvailableCommandsAfterDelay(sid)
+	}
 
 	return acp.NewSessionResponse{
-		SessionId: sid,
-		Models:    mockSessionModels(),
-		Modes:     mockSessionModes(),
+		SessionId:     sid,
+		Modes:         mockSessionModes(),
+		ConfigOptions: cloneSessionConfigOptions(configOptions),
 	}, nil
 }
 
-// mockSessionModels returns the mock agent's advertised model list for ACP
-// session responses. Two models are exposed so tests can verify both
-// selection and default behavior (mock-fast is the default).
-func mockSessionModels() *acp.SessionModelState {
-	fastDesc := "Fast mock model for testing"
-	smartDesc := "Smart mock model for testing"
-	return &acp.SessionModelState{
-		CurrentModelId: "mock-fast",
-		AvailableModels: []acp.ModelInfo{
-			{ModelId: "mock-fast", Name: "Mock Fast", Description: &fastDesc},
-			{ModelId: "mock-smart", Name: "Mock Smart", Description: &smartDesc},
-		},
-	}
+// Logout terminates the current authenticated session. The mock agent has no
+// persistent auth state so this is a no-op.
+func (a *mockAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
+	return acp.LogoutResponse{}, nil
 }
 
 // mockSessionModes returns the mock agent's advertised session-mode list for
@@ -142,6 +145,66 @@ func mockSessionModes() *acp.SessionModeState {
 	}
 }
 
+func mockSessionConfigOptions() []acp.SessionConfigOption {
+	modelCat := acp.SessionConfigOptionCategoryModel
+	modeCat := acp.SessionConfigOptionCategoryMode
+	thoughtCat := acp.SessionConfigOptionCategoryThoughtLevel
+	return []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{
+			Category:     &modelCat,
+			CurrentValue: "mock-fast",
+			Id:           "model",
+			Name:         "Model",
+			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+				{Value: "mock-fast", Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
+				{Value: "mock-smart", Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+			}},
+			Type: "select",
+		}},
+		{Select: &acp.SessionConfigOptionSelect{
+			Category:     &modeCat,
+			CurrentValue: "default",
+			Id:           "mode",
+			Name:         "Mode",
+			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+				{Value: "default", Name: "Default", Description: ptr("Default mock mode")},
+				{Value: "plan-mock", Name: "Plan Mock", Description: ptr("Plan-style mock mode for testing")},
+			}},
+			Type: "select",
+		}},
+		{Select: &acp.SessionConfigOptionSelect{
+			Category:     &thoughtCat,
+			CurrentValue: "medium",
+			Id:           "effort",
+			Name:         "Effort",
+			Description:  ptr("Controls how much reasoning the mock model uses"),
+			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+				{Value: "low", Name: "Low", Description: ptr("Faster responses with less reasoning")},
+				{Value: "medium", Name: "Medium", Description: ptr("Balanced speed and reasoning")},
+				{Value: "high", Name: "High", Description: ptr("More reasoning for complex tasks")},
+			}},
+			Type: "select",
+		}},
+	}
+}
+
+func cloneSessionConfigOptions(options []acp.SessionConfigOption) []acp.SessionConfigOption {
+	cloned := make([]acp.SessionConfigOption, len(options))
+	copy(cloned, options)
+	for i := range cloned {
+		if options[i].Select == nil {
+			continue
+		}
+		selectOption := *options[i].Select
+		cloned[i].Select = &selectOption
+	}
+	return cloned
+}
+
+func ptr(s string) *string {
+	return &s
+}
+
 // LoadSession restores a previous session for resume.
 // When --fail-on-resume is set, exit before completing the load — LoadSession
 // is only reached on resume, so no resumed-guard is needed here (unlike TUI).
@@ -152,6 +215,12 @@ func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (
 	}
 	a.mu.Lock()
 	a.sessions[req.SessionId] = true
+	if a.sessionConfig == nil {
+		a.sessionConfig = make(map[acp.SessionId][]acp.SessionConfigOption)
+	}
+	if _, ok := a.sessionConfig[req.SessionId]; !ok {
+		a.sessionConfig[req.SessionId] = mockSessionConfigOptions()
+	}
 	// Reset emit state so the resume re-advertises commands (matches real
 	// agents which re-emit on session/load).
 	delete(a.commandsEmitted, req.SessionId)
@@ -168,6 +237,12 @@ func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	a.emitAvailableCommandsOnce(ctx, req.SessionId)
 	prompt := extractPromptText(req.Prompt)
+	// The /overloaded scenario must surface a real prompt-time ACP *error*
+	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
+	// so intercept it here and return the error from Prompt directly.
+	if resp, err, handled := a.handleOverloaded(ctx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	e := &emitter{ctx: ctx, conn: a.conn, sid: req.SessionId}
 	handlePrompt(e, prompt, a.model)
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
@@ -186,16 +261,67 @@ func (a *mockAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeReques
 	return acp.SetSessionModeResponse{}, nil
 }
 
-func (a *mockAgent) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	return acp.SetSessionConfigOptionResponse{}, nil
+func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	if req.ValueId == nil {
+		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("mock agent supports select config options only")
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	options, ok := a.sessionConfig[req.ValueId.SessionId]
+	if !ok {
+		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("unknown mock session %q", req.ValueId.SessionId)
+	}
+	options = cloneSessionConfigOptions(options)
+	found := false
+	for i := range options {
+		if options[i].Select == nil || options[i].Select.Id != req.ValueId.ConfigId {
+			continue
+		}
+		if !mockConfigOptionContainsValue(options[i].Select.Options, req.ValueId.Value) {
+			return acp.SetSessionConfigOptionResponse{}, fmt.Errorf(
+				"unknown value %q for mock config option %q", req.ValueId.Value, req.ValueId.ConfigId,
+			)
+		}
+		options[i].Select.CurrentValue = req.ValueId.Value
+		found = true
+		break
+	}
+	if !found {
+		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("unknown mock config option %q", req.ValueId.ConfigId)
+	}
+	a.sessionConfig[req.ValueId.SessionId] = options
+	return acp.SetSessionConfigOptionResponse{ConfigOptions: cloneSessionConfigOptions(options)}, nil
+}
+
+func mockConfigOptionContainsValue(options acp.SessionConfigSelectOptions, value acp.SessionConfigValueId) bool {
+	if options.Ungrouped != nil {
+		for _, option := range *options.Ungrouped {
+			if option.Value == value {
+				return true
+			}
+		}
+	}
+	if options.Grouped != nil {
+		for _, group := range *options.Grouped {
+			for _, option := range group.Options {
+				if option.Value == value {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // CloseSession releases any state for a session (no-op for mock).
 func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
 	a.mu.Lock()
 	delete(a.sessions, req.SessionId)
+	delete(a.sessionConfig, req.SessionId)
 	delete(a.commandsEmitted, req.SessionId)
 	a.mu.Unlock()
+	_ = os.Remove(overloadedCounterPath(req.SessionId))
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -254,12 +380,14 @@ func mockAvailableCommands() []acp.AvailableCommand {
 	return []acp.AvailableCommand{
 		{Name: "slow", Description: "Run a slow response (default 5s)", Input: hint("duration (e.g. 10s)")},
 		{Name: "error", Description: "Simulate an error"},
+		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
 		{Name: "crash", Description: "Simulate agent crash"},
 		{Name: "all", Description: "Demonstrate all message types"},
 		{Name: "todo", Description: "Emit a todo list"},
 		{Name: "mermaid", Description: "Emit a mermaid diagram"},
 		{Name: "subagent", Description: "Emit a subagent sequence"},
+		{Name: "subtask", Description: "Create a subtask of the current task via MCP", Input: hint("subtask title (optional)")},
 		{Name: "tool:read", Description: "Emit a read file tool call"},
 		{Name: "tool:edit", Description: "Emit an edit file tool call"},
 		{Name: "tool:exec", Description: "Emit a shell exec tool call"},

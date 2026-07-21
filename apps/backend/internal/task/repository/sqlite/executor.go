@@ -49,7 +49,7 @@ func (r *Repository) GetExecutor(ctx context.Context, id string) (*models.Execut
 		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("executor not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", models.ErrExecutorNotFound, id)
 	}
 	if err != nil {
 		return nil, err
@@ -163,14 +163,15 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
-			id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+			id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			id = excluded.id,
 			task_id = excluded.task_id,
+			execution_profile_id = excluded.execution_profile_id,
 			executor_id = excluded.executor_id,
 			runtime = excluded.runtime,
 			status = excluded.status,
@@ -182,6 +183,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 			agentctl_url = excluded.agentctl_url,
 			agentctl_port = excluded.agentctl_port,
 			pid = excluded.pid,
+			local_pid = excluded.local_pid,
 			worktree_id = excluded.worktree_id,
 			worktree_path = excluded.worktree_path,
 			worktree_branch = excluded.worktree_branch,
@@ -193,6 +195,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		running.ID,
 		running.SessionID,
 		running.TaskID,
+		running.ExecutionProfileID,
 		running.ExecutorID,
 		running.Runtime,
 		running.Status,
@@ -204,6 +207,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		running.AgentctlURL,
 		running.AgentctlPort,
 		running.PID,
+		running.LocalPID,
 		running.WorktreeID,
 		running.WorktreePath,
 		running.WorktreeBranch,
@@ -218,9 +222,10 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 
 func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port,
-			worktree_id, worktree_path, worktree_branch, metadata, created_at, updated_at
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
+			created_at, updated_at
 		FROM executors_running
 		ORDER BY updated_at DESC
 	`)
@@ -229,44 +234,28 @@ func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.Execut
 	}
 	defer func() { _ = rows.Close() }()
 
-	var results []*models.ExecutorRunning
-	for rows.Next() {
-		running := &models.ExecutorRunning{}
-		var metadataJSON string
-		if scanErr := rows.Scan(
-			&running.ID,
-			&running.SessionID,
-			&running.TaskID,
-			&running.ExecutorID,
-			&running.Runtime,
-			&running.Status,
-			&running.Resumable,
-			&running.ResumeToken,
-			&running.LastMessageUUID,
-			&running.AgentExecutionID,
-			&running.ContainerID,
-			&running.AgentctlURL,
-			&running.AgentctlPort,
-			&running.WorktreeID,
-			&running.WorktreePath,
-			&running.WorktreeBranch,
-			&metadataJSON,
-			&running.CreatedAt,
-			&running.UpdatedAt,
-		); scanErr != nil {
-			return nil, scanErr
-		}
-		if metadataJSON != "" && metadataJSON != "{}" {
-			if jsonErr := json.Unmarshal([]byte(metadataJSON), &running.Metadata); jsonErr != nil {
-				return nil, fmt.Errorf("failed to deserialize executor running metadata: %w", jsonErr)
-			}
-		}
-		results = append(results, running)
+	return scanExecutorRunningRows(rows)
+}
+
+func (r *Repository) ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error) {
+	if taskID == "" {
+		return nil, fmt.Errorf("task_id is required")
 	}
-	if err := rows.Err(); err != nil {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
+			created_at, updated_at
+		FROM executors_running
+		WHERE task_id = ?
+		ORDER BY updated_at DESC
+	`), taskID)
+	if err != nil {
 		return nil, err
 	}
-	return results, nil
+	defer func() { _ = rows.Close() }()
+
+	return scanExecutorRunningRows(rows)
 }
 
 func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
@@ -279,8 +268,8 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 	var metadataJSON string
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-		       last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
+		       last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 		       worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 		       created_at, updated_at
 		FROM executors_running
@@ -289,6 +278,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 		&running.ID,
 		&running.SessionID,
 		&running.TaskID,
+		&running.ExecutionProfileID,
 		&running.ExecutorID,
 		&running.Runtime,
 		&running.Status,
@@ -300,6 +290,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 		&running.AgentctlURL,
 		&running.AgentctlPort,
 		&running.PID,
+		&running.LocalPID,
 		&running.WorktreeID,
 		&running.WorktreePath,
 		&running.WorktreeBranch,
@@ -325,6 +316,60 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 		}
 	}
 	return running, nil
+}
+
+func scanExecutorRunningRows(rows *sql.Rows) ([]*models.ExecutorRunning, error) {
+	var results []*models.ExecutorRunning
+	for rows.Next() {
+		running := &models.ExecutorRunning{}
+		var (
+			resumable    int
+			lastSeen     sql.NullTime
+			metadataJSON string
+		)
+		if scanErr := rows.Scan(
+			&running.ID,
+			&running.SessionID,
+			&running.TaskID,
+			&running.ExecutionProfileID,
+			&running.ExecutorID,
+			&running.Runtime,
+			&running.Status,
+			&resumable,
+			&running.ResumeToken,
+			&running.LastMessageUUID,
+			&running.AgentExecutionID,
+			&running.ContainerID,
+			&running.AgentctlURL,
+			&running.AgentctlPort,
+			&running.PID,
+			&running.LocalPID,
+			&running.WorktreeID,
+			&running.WorktreePath,
+			&running.WorktreeBranch,
+			&lastSeen,
+			&running.ErrorMessage,
+			&metadataJSON,
+			&running.CreatedAt,
+			&running.UpdatedAt,
+		); scanErr != nil {
+			return nil, scanErr
+		}
+		running.Resumable = resumable == 1
+		if lastSeen.Valid {
+			running.LastSeenAt = &lastSeen.Time
+		}
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if jsonErr := json.Unmarshal([]byte(metadataJSON), &running.Metadata); jsonErr != nil {
+				return nil, fmt.Errorf("failed to deserialize executor running metadata: %w", jsonErr)
+			}
+		}
+		results = append(results, running)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
@@ -407,6 +452,58 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 			return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 		}
 		return models.ErrExecutionRotated
+	}
+	return nil
+}
+
+// RepairExecutorRunningDead repairs a row in place to reflect that its backing
+// process is gone, WITHOUT deleting it. The resume-safety invariant requires a
+// resumable / non-terminal row be repaired rather than pruned
+// (#1597 resume-safety invariant): flip status to "stopped", clear the local
+// liveness handle (local_pid = 0) so the row no longer claims a live process,
+// and re-stamp last_seen_at as a fresh liveness observation. resume_token,
+// worktree, and endpoint columns are intentionally preserved so the session
+// stays resumable.
+//
+// Returns ErrExecutorRunningNotFound when no row exists for the session.
+func (r *Repository) RepairExecutorRunningDead(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE executors_running
+		   SET status = ?, local_pid = 0, last_seen_at = ?, updated_at = ?
+		 WHERE session_id = ?
+	`), models.ExecutorRunningStatusStopped, now, now, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+	}
+	return nil
+}
+
+// UpdateExecutorRunningStatus narrowly updates the status column.
+// Returns ErrExecutorRunningNotFound when no row exists for the session.
+func (r *Repository) UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE executors_running
+		   SET status = ?, updated_at = ?
+		 WHERE session_id = ?
+	`), status, now, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 	}
 	return nil
 }

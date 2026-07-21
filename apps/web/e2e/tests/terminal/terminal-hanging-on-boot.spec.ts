@@ -147,8 +147,8 @@ test.describe("Terminal hangs on Connecting", () => {
   /**
    * Reproduces: switching between tasks via the in-task sidebar (no full
    * navigation) leaves the next task's terminal stuck on "Connecting
-   * terminal...". Sidebar navigation uses Next.js client-side routing so
-   * the same React tree mounts a different task — the env+agentctl gate
+   * terminal...". Sidebar navigation uses SPA client-side routing so
+   * the same React tree mounts a different task; the env+agentctl gate
    * has to recompute reactively. PR #755/#758 introduced new state
    * dependencies (`environmentIdBySessionId`, `useEnvironmentId`) that
    * occasionally read `null` for the just-clicked session.

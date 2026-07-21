@@ -1,6 +1,7 @@
 export type LinearAuthMethod = "api_key";
 
 export interface LinearConfig {
+  workspaceId?: string;
   authMethod: LinearAuthMethod;
   defaultTeamKey: string;
   hasSecret: boolean;
@@ -75,13 +76,46 @@ export interface LinearTeam {
   name: string;
 }
 
+export interface LinearLabel {
+  id: string;
+  name: string;
+  color?: string;
+}
+
+export interface LinearUser {
+  id: string;
+  name: string;
+  displayName?: string;
+  email?: string;
+  avatarUrl?: string;
+}
+
 export interface LinearSearchFilter {
   query?: string;
   teamKey?: string;
   stateIds?: string[];
   /** "me" | "unassigned" | "" (any) */
   assigned?: string;
+  /** Priorities to include (OR). 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. */
+  priorities?: (0 | 1 | 2 | 3 | 4)[];
+  /** Issue labels (OR semantics — match any). */
+  labelIds?: string[];
+  /** Filter by issue creator UUID. */
+  creatorId?: string;
+  /** Inclusive lower bound on point estimate. */
+  estimateMin?: number;
+  /** Inclusive upper bound on point estimate. */
+  estimateMax?: number;
 }
+
+export type LinearIssueSortBy =
+  | ""
+  | "priority"
+  | "priority_asc"
+  | "created_desc"
+  | "created_asc"
+  | "updated_desc"
+  | "updated_asc";
 
 export interface LinearSearchResult {
   issues: LinearIssue[];
@@ -100,12 +134,28 @@ export interface LinearIssueWatch {
   workspaceId: string;
   workflowId: string;
   workflowStepId: string;
+  /**
+   * Optional repository binding. Empty string = unbound: watcher-created tasks
+   * launch in a blank scratch checkout (historical behaviour). When set, tasks
+   * launch in an isolated worktree of this repository cut from `baseBranch`.
+   */
+  repositoryId: string;
+  /** Branch the per-task worktree is cut from; empty = the repo's default. */
+  baseBranch: string;
   filter: LinearSearchFilter;
   agentProfileId: string;
   executorProfileId: string;
   prompt: string;
   enabled: boolean;
   pollIntervalSeconds: number;
+  /**
+   * Cap on concurrent open watcher-created tasks for this watch.
+   * `null`/omitted means uncapped. Positive integers are accepted; the backend
+   * rejects values ≤ 0.
+   */
+  maxInflightTasks?: number | null;
+  /** Dispatch order for matched issues under the in-flight cap; empty = Linear default order. */
+  sortBy?: LinearIssueSortBy;
   /** Last poll timestamp, or null when the watch has never run. */
   lastPolledAt?: string | null;
   createdAt: string;
@@ -116,11 +166,19 @@ export interface CreateLinearIssueWatchInput {
   workspaceId: string;
   workflowId: string;
   workflowStepId: string;
+  /** Optional repository binding; empty/omitted = unbound (repo-less task). */
+  repositoryId?: string;
+  /** Base branch for the worktree; empty defaults to the repo's default branch. */
+  baseBranch?: string;
   filter: LinearSearchFilter;
   agentProfileId?: string;
   executorProfileId?: string;
   prompt?: string;
   pollIntervalSeconds?: number;
+  /** Per-watch throttle cap; null = uncapped, positive int = cap. */
+  maxInflightTasks?: number | null;
+  /** Dispatch order for matched issues under the in-flight cap; empty = Linear default order. */
+  sortBy?: LinearIssueSortBy;
   enabled?: boolean;
 }
 
@@ -128,10 +186,16 @@ export interface CreateLinearIssueWatchInput {
 export interface UpdateLinearIssueWatchInput {
   workflowId?: string;
   workflowStepId?: string;
+  repositoryId?: string;
+  baseBranch?: string;
   filter?: LinearSearchFilter;
   agentProfileId?: string;
   executorProfileId?: string;
   prompt?: string;
   enabled?: boolean;
   pollIntervalSeconds?: number;
+  /** Per-watch throttle cap; null = uncapped, positive int = cap. */
+  maxInflightTasks?: number | null;
+  /** Dispatch order for matched issues under the in-flight cap; empty = Linear default order. */
+  sortBy?: LinearIssueSortBy;
 }

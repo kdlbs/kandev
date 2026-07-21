@@ -12,6 +12,7 @@ import {
   MessageListStatus,
   MessageItem,
   getItemKey,
+  getConversationLoadingState,
   getSessionRunningState,
   getLastTurnGroupId,
 } from "./message-list-shared";
@@ -181,16 +182,17 @@ export const NativeMessageList = memo(function NativeMessageList({
   messagesLoading,
   isWorking,
   sessionState,
-  taskState,
   worktreePath,
   onOpenFile,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const isInitialLoading = messagesLoading && messages.length === 0;
-  const isNonLoadableSession =
-    !sessionState || ["CREATED", "FAILED", "COMPLETED", "CANCELLED"].includes(sessionState);
-  const showLoadingState = isInitialLoading && !isWorking && !isNonLoadableSession;
+  const { isInitialLoading, showLoadingState } = getConversationLoadingState({
+    messagesLoading,
+    messagesCount: messages.length,
+    isWorking,
+    sessionState,
+  });
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
   const isRunning = getSessionRunningState(sessionState);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
@@ -228,6 +230,7 @@ export const NativeMessageList = memo(function NativeMessageList({
         messagesLoading={messagesLoading}
         isInitialLoading={isInitialLoading}
         messagesCount={messages.length}
+        onLoadMore={loadMore}
       />
 
       {items.map((item) => {
@@ -244,9 +247,6 @@ export const NativeMessageList = memo(function NativeMessageList({
               onOpenFile={onOpenFile}
               isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
               isTurnActive={isRunning}
-              messages={messages}
-              sessionState={sessionState}
-              taskState={taskState}
               onScrollToMessage={handleScrollToMessage}
             />
           </div>
@@ -255,12 +255,7 @@ export const NativeMessageList = memo(function NativeMessageList({
 
       <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
       {(footerActionMessages ?? []).map((msg: Message) => (
-        <MessageRenderer
-          key={msg.id}
-          comment={msg}
-          isTaskDescription={false}
-          sessionState={sessionState}
-        />
+        <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
       ))}
 
       {/* Bottom anchor — browser keeps scroll pinned here when new content appends */}

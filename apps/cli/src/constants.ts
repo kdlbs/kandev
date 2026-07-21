@@ -28,6 +28,22 @@ export const KANDEV_TASKS_DIR = path.join(KANDEV_HOME_DIR, "tasks");
 export const CACHE_DIR = path.join(KANDEV_HOME_DIR, "bin");
 export const DATA_DIR = path.join(KANDEV_HOME_DIR, "data");
 
+export function resolveKandevHomeDir(env: NodeJS.ProcessEnv = process.env): string {
+  return env.KANDEV_HOME_DIR?.trim() || KANDEV_HOME_DIR;
+}
+
+export function resolveDataDir(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(resolveKandevHomeDir(env), "data");
+}
+
+export function resolveCacheDir(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(resolveKandevHomeDir(env), "bin");
+}
+
+export function resolveDatabasePath(env: NodeJS.ProcessEnv = process.env): string {
+  return env.KANDEV_DATABASE_PATH?.trim() || path.join(resolveDataDir(env), "kandev.db");
+}
+
 // Dev-mode root: an isolated kandev home inside the repo so that running
 // `make dev` from inside a kandev-spawned task workspace does not touch the
 // user's production state.

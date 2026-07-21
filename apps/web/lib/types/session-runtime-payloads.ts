@@ -33,9 +33,10 @@ export type ConfigOptionPayload = {
   type: string;
   id: string;
   name: string;
+  description?: string;
   current_value: string;
   category?: string;
-  options?: { value: string; name: string }[];
+  options?: { value: string; name: string; description?: string }[];
 };
 
 export type SessionModelsPayload = {
@@ -45,6 +46,18 @@ export type SessionModelsPayload = {
   current_model_id: string;
   models: SessionModelInfoPayload[];
   config_options: ConfigOptionPayload[];
+  config_baseline?: Record<string, string>;
+  timestamp: string;
+};
+
+export type SessionInfoPayload = {
+  task_id: string;
+  session_id: string;
+  agent_id: string;
+  acp_session_id?: string;
+  session_title?: string;
+  session_updated_at?: string;
+  session_meta?: Record<string, unknown>;
   timestamp: string;
 };
 

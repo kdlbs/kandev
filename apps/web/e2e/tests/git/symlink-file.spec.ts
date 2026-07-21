@@ -31,7 +31,7 @@ async function seedSimpleTask(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return { session, sessionId: task.session_id ?? task.id };
 }
@@ -162,9 +162,8 @@ test.describe("Symlink file handling", () => {
 
     // Click real-file.txt in the changes list (has uncommitted diff)
     const fileRow = testPage
-      .locator("button, [role='button'], [class*='file']")
-      .filter({ hasText: "real-file.txt" })
-      .first();
+      .getByTestId("unstaged-file-tree")
+      .getByTestId("file-row-real-file.txt");
     await expect(fileRow).toBeVisible({ timeout: 10_000 });
     await fileRow.click();
 

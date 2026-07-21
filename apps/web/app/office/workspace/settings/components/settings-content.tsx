@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Image from "next/image";
+import Image from "@/components/routing/app-image";
 import { IconUpload, IconDeviceFloppy } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { Input } from "@kandev/ui/input";

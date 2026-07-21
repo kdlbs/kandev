@@ -8,6 +8,7 @@ import {
   IconPhoto,
   IconAt,
   IconGitPullRequest,
+  IconRoute,
   IconX,
   IconPinFilled,
 } from "@tabler/icons-react";
@@ -20,6 +21,7 @@ const ICON_BY_KIND: Record<ContextItemKind, TablerIcon> = {
   file: IconFile,
   comment: IconMessageDots,
   "plan-comment": IconMessageDots,
+  "walkthrough-comment": IconRoute,
   image: IconPhoto,
   "file-attachment": IconFile,
   prompt: IconAt,
@@ -33,6 +35,7 @@ type ContextChipProps = {
   preview?: ReactNode;
   /** Data URL to render as a tiny thumbnail instead of the default icon */
   thumbnail?: string;
+  leadingIcon?: ReactNode;
   onClick?: () => void;
   onUnpin?: () => void;
   onRemove?: () => void;
@@ -44,23 +47,27 @@ export const ContextChip = memo(function ContextChip({
   pinned,
   preview,
   thumbnail,
+  leadingIcon,
   onClick,
   onUnpin,
   onRemove,
 }: ContextChipProps) {
   const Icon = ICON_BY_KIND[kind];
+  let iconNode: ReactNode;
+  if (leadingIcon) {
+    iconNode = leadingIcon;
+  } else if (thumbnail) {
+    iconNode = <img src={thumbnail} alt="" className="h-3 w-3 shrink-0 rounded-sm object-cover" />;
+  } else {
+    iconNode = <Icon className="h-3 w-3 shrink-0" />;
+  }
 
   const chip = (
     <div
       className={`group flex items-center gap-1 px-2 py-0.5 text-xs text-muted-foreground bg-muted/50 rounded border border-border/50 ${onClick ? "cursor-pointer hover:bg-muted/80" : ""}`}
       onClick={onClick}
     >
-      {thumbnail ? (
-        // eslint-disable-next-line @next/next/no-img-element -- base64 thumbnail
-        <img src={thumbnail} alt="" className="h-3 w-3 shrink-0 rounded-sm object-cover" />
-      ) : (
-        <Icon className="h-3 w-3 shrink-0" />
-      )}
+      {iconNode}
       <span className="truncate max-w-[120px]">{label}</span>
       {pinned && onUnpin && (
         <button

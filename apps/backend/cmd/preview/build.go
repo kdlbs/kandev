@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 )
 
 // appsDir is the apps/ workspace root relative to the working directory (apps/backend/).
 const appsDir = ".."
+const repoRootDir = "../.."
 
 // goDockerImage is used to cross-compile CGO binaries on non-linux/amd64 hosts.
 const goDockerImage = "golang:1.26-bookworm"
@@ -113,7 +115,7 @@ func copyFile(src, dst string, mode fs.FileMode) error {
 	return nil
 }
 
-// buildWeb runs the Next.js production build. When skipInstall is true the
+// buildWeb runs the Vite production build. When skipInstall is true the
 // pnpm install step is skipped (CI already runs it before invoking the CLI).
 func buildWeb(ctx context.Context, skipInstall bool) error {
 	steps := []struct {
@@ -142,9 +144,8 @@ func buildWeb(ctx context.Context, skipInstall bool) error {
 // packageBundle creates a tar.gz matching the Docker container layout:
 //
 //	app/apps/backend/bin/{kandev,agentctl,mock-agent}
-//	app/apps/web/.next/standalone/           (Next.js server + node_modules)
-//	app/apps/web/.next/standalone/web/.next/static/  (static assets inside standalone)
-//	app/apps/web/.next/standalone/web/public/        (public assets inside standalone)
+//	app/apps/web/dist/                       (Vite SPA assets)
+//	usr/local/bin/kandev                     (native launcher symlink)
 func packageBundle(binDir, tarPath string) error {
 	f, err := os.Create(tarPath)
 	if err != nil {
@@ -168,24 +169,18 @@ func packageBundle(binDir, tarPath string) error {
 		}
 	}
 
-	// Add Next.js standalone output.
-	standaloneDir := filepath.Join(appsDir, "web", ".next", "standalone")
-	if err := addDirToTar(tw, standaloneDir, filepath.Join("app", "apps", "web", ".next", "standalone")); err != nil {
-		return fmt.Errorf("add standalone: %w", err)
+	// Add Vite SPA assets. `kandev start` resolves these from /app/apps/web/dist
+	// and passes KANDEV_WEB_DIST_DIR to the backend.
+	webDistDir := filepath.Join(appsDir, "web", "dist")
+	if err := validateViteWebDist(webDistDir); err != nil {
+		return err
+	}
+	if err := addDirToTar(tw, webDistDir, filepath.Join("app", "apps", "web", "dist")); err != nil {
+		return fmt.Errorf("add web dist: %w", err)
 	}
 
-	// Add static assets into the standalone web dir (mirrors the Dockerfile COPY).
-	staticDir := filepath.Join(appsDir, "web", ".next", "static")
-	staticDst := filepath.Join("app", "apps", "web", ".next", "standalone", "web", ".next", "static")
-	if err := addDirToTar(tw, staticDir, staticDst); err != nil {
-		return fmt.Errorf("add static: %w", err)
-	}
-
-	// Add public directory into the standalone web dir.
-	publicDir := filepath.Join(appsDir, "web", "public")
-	publicDst := filepath.Join("app", "apps", "web", ".next", "standalone", "web", "public")
-	if err := addDirToTar(tw, publicDir, publicDst); err != nil {
-		return fmt.Errorf("add public: %w", err)
+	if err := addSymlinkToTar(tw, filepath.Join("usr", "local", "bin", "kandev"), filepath.Join("/", "app", "apps", "backend", "bin", "kandev")); err != nil {
+		return fmt.Errorf("add kandev symlink: %w", err)
 	}
 
 	// Close in order: tar → gzip → file (flush compressed data).
@@ -193,6 +188,42 @@ func packageBundle(binDir, tarPath string) error {
 		return fmt.Errorf("close tar: %w", err)
 	}
 	return gz.Close()
+}
+
+func validateViteWebDist(webDistDir string) error {
+	indexPath := filepath.Join(webDistDir, "index.html")
+	indexHTML, err := os.ReadFile(indexPath)
+	if err != nil {
+		return fmt.Errorf("read web dist index: %w", err)
+	}
+	if !viteIndexHasEntrypoint(string(indexHTML)) {
+		return fmt.Errorf("web dist index %s is missing Vite module entrypoint", indexPath)
+	}
+	return nil
+}
+
+var (
+	scriptTagPattern      = regexp.MustCompile(`(?is)<script\b[^>]*>`)
+	moduleTypeAttrPattern = regexp.MustCompile(`(?is)\btype\s*=\s*["']module["']`)
+	assetSrcAttrPattern   = regexp.MustCompile(`(?is)\bsrc\s*=\s*["']/assets/`)
+)
+
+func viteIndexHasEntrypoint(indexHTML string) bool {
+	for _, tag := range scriptTagPattern.FindAllString(indexHTML, -1) {
+		if moduleTypeAttrPattern.MatchString(tag) && assetSrcAttrPattern.MatchString(tag) {
+			return true
+		}
+	}
+	return false
+}
+
+func addSymlinkToTar(tw *tar.Writer, name, target string) error {
+	return tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeSymlink,
+		Name:     name,
+		Linkname: target,
+		Mode:     0o755,
+	})
 }
 
 func addFileToTar(tw *tar.Writer, src, dst string, mode fs.FileMode) error {
@@ -228,7 +259,7 @@ func addDirToTar(tw *tar.Writer, srcDir, dstPrefix string) error {
 			return err
 		}
 
-		// Preserve symlinks as-is (Next.js standalone relies on them for node_modules).
+		// Preserve symlinks as-is.
 		if info.Mode()&fs.ModeSymlink != 0 {
 			target, err := os.Readlink(path)
 			if err != nil {

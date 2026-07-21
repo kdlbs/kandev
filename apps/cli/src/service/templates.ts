@@ -1,3 +1,6 @@
+import os from "node:os";
+import path from "node:path";
+
 import type { LauncherInfo } from "./paths";
 
 export type UnitInputs = {
@@ -14,11 +17,41 @@ export type UnitInputs = {
   systemUser?: string;
   /** Mode controls WantedBy and User= directives. */
   mode: "user" | "system";
+  /** Absolute path to service install metadata, baked into managed units. */
+  serviceMetadataPath?: string;
 };
 
-const SYSTEMD_PATH =
+// Service PATH includes common per-user agent install dirs so user-installed
+// CLIs (npm user prefix, pipx, fnm, Bun globals like oh-my-pi/omp, OpenCode's
+// installer, etc.) are discoverable. System-mode units still run as the
+// configured User=, so %h resolves to that user's home directory.
+const SYSTEMD_SYSTEM_PATH =
   "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin";
-const LAUNCHD_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
+const SYSTEMD_AGENT_BIN_PATH = `%h/.local/bin:%h/.bun/bin:%h/.opencode/bin`;
+const SYSTEMD_SERVICE_PATH = `${SYSTEMD_AGENT_BIN_PATH}:${SYSTEMD_SYSTEM_PATH}`;
+const LAUNCHD_SYSTEM_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
+const launchdUserPath = (): string =>
+  `${os.homedir()}/.local/bin:${os.homedir()}/.bun/bin:${LAUNCHD_SYSTEM_PATH}`;
+
+// Prepend the launcher node's bin dir so `npm`/`npx` resolve under per-user
+// node managers (fnm, nvm, asdf, volta, mise), where node lives in a versioned
+// subdirectory not covered by the system PATH. ExecStart already points at this
+// node, so its parent dir is exactly where the matching npm/npx live — without
+// this, npx-based ACP agents (claude, codex, opencode) fail to spawn.
+//
+// The isAbsolute guard exists because `path.dirname` on POSIX returns `'.'`
+// for a path with no `/` separator (e.g. a Windows-style `C:\…\node.exe`
+// passed through). Prepending `.` would put CWD ahead of system dirs in the
+// daemon's PATH — a privilege-escalation footgun. Production callers always
+// pass `process.execPath` (absolute on Linux/macOS), so the guard only kicks
+// in for non-POSIX or relative inputs from future callers / tests.
+function pathWithNodeBinDir(basePath: string, nodePath: string): string {
+  const nodeBinDir = path.dirname(nodePath);
+  if (!path.isAbsolute(nodeBinDir)) return basePath;
+  const parts = basePath.split(":");
+  if (parts.includes(nodeBinDir)) return basePath;
+  return `${nodeBinDir}:${basePath}`;
+}
 
 /**
  * Marker substring baked into every unit/plist kandev writes. Used to safely
@@ -37,30 +70,46 @@ export function looksLikeManagedUnit(content: string): boolean {
  * Render a systemd unit file for kandev.
  *
  * The unit hard-codes absolute paths so it works without a user PATH. We pass
- * `--headless` so the daemon doesn't try to open a browser. KANDEV_BUNDLE_DIR /
- * KANDEV_VERSION are surfaced only when present (Homebrew installs only) so
- * `npm i -g` installs don't get spurious env vars.
+ * `--headless` so the daemon doesn't try to open a browser.
+ *
+ * For Homebrew installs the launcher carries a resolved `shimPath` — the
+ * floating `<prefix>/bin/kandev` shim that survives `brew upgrade`. When set we
+ * exec that shim and omit KANDEV_BUNDLE_DIR / KANDEV_VERSION and the
+ * version-pinned node bin dir from PATH, because the shim supplies all three
+ * itself. Otherwise (npm / unknown installs) we fall back to the version-pinned
+ * node + cli.js and surface KANDEV_BUNDLE_DIR / KANDEV_VERSION only when present.
  */
 export function renderSystemdUnit(input: UnitInputs): string {
+  const shimPath = input.launcher.shimPath;
+  const basePath = SYSTEMD_SERVICE_PATH;
+  // For the shim, prepend its own bin dir (the Homebrew prefix's `bin`, where
+  // node/npm/npx live) so npx-based agents resolve even when the prefix isn't
+  // one of the hardcoded defaults. pathWithNodeBinDir dedupes when it already is.
+  const pathValue = pathWithNodeBinDir(basePath, shimPath ?? input.launcher.nodePath);
   const env: string[] = [
     envLine("KANDEV_HOME_DIR", input.homeDir),
     envLine("KANDEV_LOG_LEVEL", "info"),
-    envLine("PATH", SYSTEMD_PATH),
+    envLine("PATH", pathValue),
   ];
   if (input.port !== undefined) {
     env.push(envLine("KANDEV_SERVER_PORT", String(input.port)));
   }
-  if (input.launcher.bundleDir) {
+  if (!shimPath && input.launcher.bundleDir) {
     env.push(envLine("KANDEV_BUNDLE_DIR", input.launcher.bundleDir));
   }
-  if (input.launcher.version) {
+  if (!shimPath && input.launcher.version) {
     env.push(envLine("KANDEV_VERSION", input.launcher.version));
+  }
+  if (input.serviceMetadataPath) {
+    env.push(...serviceEnvLines(input, "systemd"));
   }
 
   const wantedBy = input.mode === "system" ? "multi-user.target" : "default.target";
   const userLine = input.mode === "system" && input.systemUser ? `User=${input.systemUser}\n` : "";
 
-  const exec = `${quoteForUnit(input.launcher.nodePath)} ${quoteForUnit(input.launcher.cliEntry)} --headless`;
+  const exec = shimPath
+    ? `${quoteForUnit(shimPath)} --headless`
+    : `${quoteForUnit(input.launcher.nodePath)} ${quoteForUnit(input.launcher.cliEntry)} --headless`;
 
   return `${SYSTEMD_MARKER}
 [Unit]
@@ -91,26 +140,35 @@ WantedBy=${wantedBy}
  * get a LaunchDaemon that runs at boot regardless of login.
  */
 export function renderLaunchdPlist(input: UnitInputs): string {
+  const shimPath = input.launcher.shimPath;
+  const basePath = input.mode === "system" ? LAUNCHD_SYSTEM_PATH : launchdUserPath();
+  // See renderSystemdUnit: prepend the shim's own bin dir so npm/npx resolve.
+  const pathValue = pathWithNodeBinDir(basePath, shimPath ?? input.launcher.nodePath);
   const envEntries: Array<[string, string]> = [
     ["KANDEV_HOME_DIR", input.homeDir],
     ["KANDEV_LOG_LEVEL", "info"],
-    ["PATH", LAUNCHD_PATH],
+    ["PATH", pathValue],
   ];
   if (input.port !== undefined) {
     envEntries.push(["KANDEV_SERVER_PORT", String(input.port)]);
   }
-  if (input.launcher.bundleDir) {
+  if (!shimPath && input.launcher.bundleDir) {
     envEntries.push(["KANDEV_BUNDLE_DIR", input.launcher.bundleDir]);
   }
-  if (input.launcher.version) {
+  if (!shimPath && input.launcher.version) {
     envEntries.push(["KANDEV_VERSION", input.launcher.version]);
+  }
+  if (input.serviceMetadataPath) {
+    envEntries.push(...serviceEnvEntries(input, "launchd"));
   }
 
   const envXml = envEntries
     .map(([k, v]) => `      <key>${escapeXml(k)}</key>\n      <string>${escapeXml(v)}</string>`)
     .join("\n");
 
-  const args = [input.launcher.nodePath, input.launcher.cliEntry, "--headless"];
+  const args = shimPath
+    ? [shimPath, "--headless"]
+    : [input.launcher.nodePath, input.launcher.cliEntry, "--headless"];
   const argsXml = args.map((a) => `    <string>${escapeXml(a)}</string>`).join("\n");
 
   // For system-mode LaunchDaemons, run as a specific user instead of root.
@@ -180,4 +238,22 @@ function envLine(key: string, value: string): string {
   if (!/[\s"\\]/.test(value)) return `Environment=${key}=${value}`;
   const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   return `Environment="${key}=${escaped}"`;
+}
+
+function serviceEnvLines(input: UnitInputs, manager: "systemd" | "launchd"): string[] {
+  return serviceEnvEntries(input, manager).map(([key, value]) => envLine(key, value));
+}
+
+function serviceEnvEntries(
+  input: UnitInputs,
+  manager: "systemd" | "launchd",
+): Array<[string, string]> {
+  if (!input.serviceMetadataPath) return [];
+  return [
+    ["KANDEV_RUNNING_AS_SERVICE", "true"],
+    ["KANDEV_SERVICE_MODE", input.mode],
+    ["KANDEV_SERVICE_MANAGER", manager],
+    ["KANDEV_INSTALL_KIND", input.launcher.kind],
+    ["KANDEV_SERVICE_METADATA", input.serviceMetadataPath],
+  ];
 }

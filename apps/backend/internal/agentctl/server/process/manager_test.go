@@ -2,13 +2,20 @@ package process
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,13 +23,24 @@ import (
 
 // stubAdapter is a minimal AgentAdapter for testing the startup sequence.
 type stubAdapter struct {
-	connectCalled bool
-	updatesCh     chan adapter.AgentEvent
+	connectCalled       bool
+	requiresProcessKill bool
+	updatesCh           chan adapter.AgentEvent
 }
 
 func newStubAdapter() *stubAdapter {
 	return &stubAdapter{updatesCh: make(chan adapter.AgentEvent, 10)}
 }
+
+type oneShotStubAdapter struct {
+	*stubAdapter
+}
+
+func newOneShotStubAdapter() *oneShotStubAdapter {
+	return &oneShotStubAdapter{stubAdapter: newStubAdapter()}
+}
+
+func (s *oneShotStubAdapter) IsOneShot() bool { return true }
 
 func (s *stubAdapter) PrepareEnvironment() (map[string]string, error) { return nil, nil }
 func (s *stubAdapter) PrepareCommandArgs() []string                   { return nil }
@@ -36,17 +54,19 @@ func (s *stubAdapter) NewSession(_ context.Context, _ []types.McpServer) (string
 	return "", nil
 }
 func (s *stubAdapter) LoadSession(context.Context, string, []types.McpServer) error { return nil }
-func (s *stubAdapter) Prompt(context.Context, string, []v1.MessageAttachment) error { return nil }
-func (s *stubAdapter) Cancel(context.Context) error                                 { return nil }
-func (s *stubAdapter) Updates() <-chan adapter.AgentEvent                           { return s.updatesCh }
-func (s *stubAdapter) GetSessionID() string                                         { return "" }
-func (s *stubAdapter) GetOperationID() string                                       { return "" }
-func (s *stubAdapter) SetPermissionHandler(adapter.PermissionHandler)               {}
+func (s *stubAdapter) Prompt(context.Context, string, []v1.MessageAttachment, uint64) error {
+	return nil
+}
+func (s *stubAdapter) Cancel(context.Context) error                   { return nil }
+func (s *stubAdapter) Updates() <-chan adapter.AgentEvent             { return s.updatesCh }
+func (s *stubAdapter) GetSessionID() string                           { return "" }
+func (s *stubAdapter) GetOperationID() string                         { return "" }
+func (s *stubAdapter) SetPermissionHandler(adapter.PermissionHandler) {}
 func (s *stubAdapter) Close() error {
 	close(s.updatesCh)
 	return nil
 }
-func (s *stubAdapter) RequiresProcessKill() bool { return false }
+func (s *stubAdapter) RequiresProcessKill() bool { return s.requiresProcessKill }
 
 func TestStartProcessPipes_CreatesAllPipes(t *testing.T) {
 	m := &Manager{
@@ -130,7 +150,20 @@ func TestManager_Start_PipesCreatedBeforeProcessStart(t *testing.T) {
 	// Now start the process — this is the fix: Start() happens after pipes.
 	err = m.cmd.Start()
 	require.NoError(t, err)
+	waited := false
+	t.Cleanup(func() {
+		if waited || m.cmd == nil || m.cmd.Process == nil {
+			return
+		}
+		_ = killProcessGroup(m.cmd.Process.Pid)
+		_ = m.cmd.Process.Kill()
+		_ = m.cmd.Wait()
+	})
 	assert.NotNil(t, m.cmd.Process, "process should be running")
+
+	processLifecycle, err := installProcessLifecycle(m.cmd)
+	require.NoError(t, err)
+	defer releaseProcessLifecycle(processLifecycle)
 
 	// Adapter connects after process starts.
 	err = stub.Connect(m.stdin, m.stdout)
@@ -140,4 +173,99 @@ func TestManager_Start_PipesCreatedBeforeProcessStart(t *testing.T) {
 	// Clean up: close stdin so cat exits, then wait.
 	_ = m.stdin.Close()
 	_ = m.cmd.Wait()
+	waited = true
+}
+
+func TestFormatAgentStartError_E2BIGIncludesEnvDiagnostics(t *testing.T) {
+	err := formatAgentStartError(&os.PathError{Op: "fork/exec", Path: "npx", Err: syscall.E2BIG}, []string{
+		"SMALL=1",
+		"KANDEV_WAKE_PAYLOAD_JSON=" + strings.Repeat("x", 100),
+		"PATH=/usr/bin",
+	})
+
+	msg := err.Error()
+	if !strings.Contains(msg, "environment/arguments too large") {
+		t.Fatalf("missing actionable E2BIG message: %s", msg)
+	}
+	if !strings.Contains(msg, "env_bytes=") {
+		t.Fatalf("missing env byte diagnostics: %s", msg)
+	}
+	if !strings.Contains(msg, "KANDEV_WAKE_PAYLOAD_JSON") {
+		t.Fatalf("missing largest env key diagnostics: %s", msg)
+	}
+	if !errors.Is(err, syscall.E2BIG) {
+		t.Fatalf("formatted error must preserve E2BIG wrapping: %v", err)
+	}
+}
+
+func TestBuildAdapterConfig_StripEnvRemovesDeclaredVars(t *testing.T) {
+	log := newTestLogger(t)
+
+	m := &Manager{
+		cfg: &config.InstanceConfig{
+			AgentArgs: []string{"cat"},
+			WorkDir:   t.TempDir(),
+			AgentEnv: []string{
+				"ACP_BACKEND=windsurf",
+				"PATH=/usr/bin",
+				"HOME=/root",
+			},
+			StripEnv: []string{"ACP_BACKEND"},
+			Protocol: agent.ProtocolACP,
+		},
+		logger: log,
+	}
+
+	require.NoError(t, m.buildAdapterConfig())
+	t.Cleanup(func() { _ = m.adapter.Close() })
+
+	for _, e := range m.cfg.AgentEnv {
+		if strings.HasPrefix(e, "ACP_BACKEND=") {
+			t.Errorf("ACP_BACKEND not stripped from AgentEnv: %q", e)
+		}
+	}
+	if !slices.Contains(m.cfg.AgentEnv, "PATH=/usr/bin") {
+		t.Errorf("PATH was stripped but should have been kept")
+	}
+	if !slices.Contains(m.cfg.AgentEnv, "HOME=/root") {
+		t.Errorf("HOME was stripped but should have been kept")
+	}
+}
+
+func TestStartOneShotRestoresTempEnvAfterStrip(t *testing.T) {
+	log := newTestLogger(t)
+	workDir := t.TempDir()
+
+	m := &Manager{
+		cfg: &config.InstanceConfig{
+			SessionID: "session-1",
+			WorkDir:   workDir,
+			AgentEnv:  []string{"PATH=/usr/bin"},
+		},
+		logger:  log,
+		adapter: newOneShotStubAdapter(),
+		adapterCfg: &adapter.Config{
+			OneShotConfig: &adapter.OneShotConfig{
+				Env:     []string{"PATH=/usr/bin"},
+				WorkDir: workDir,
+			},
+		},
+		updatesCh:          make(chan adapter.AgentEvent, 100),
+		pendingPermissions: make(map[string]*PendingPermission),
+		workspaceTracker:   NewWorkspaceTracker(workDir, log),
+	}
+
+	require.NoError(t, m.startOneShot())
+	t.Cleanup(func() {
+		close(m.stopCh)
+		m.wg.Wait()
+		m.workspaceTracker.Stop()
+	})
+
+	wantDir := filepath.Join(os.TempDir(), agentTempDirRoot, agentTempDirName("session-1", "", 0))
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		if got := lookupEnvValue(m.adapterCfg.OneShotConfig.Env, key); got != wantDir {
+			t.Fatalf("OneShotConfig.Env %s = %q, want %q", key, got, wantDir)
+		}
+	}
 }

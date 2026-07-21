@@ -8,6 +8,9 @@ vi.mock("@/lib/local-storage", () => ({
   getEnvMaximizeState: vi.fn(() => null),
   setEnvMaximizeState: vi.fn(),
   removeEnvMaximizeState: vi.fn(),
+  getGlobalSidebarWidth: vi.fn(() => null),
+  setGlobalSidebarWidth: vi.fn(),
+  clearGlobalSidebarWidth: vi.fn(),
 }));
 
 vi.mock("@/lib/layout/panel-portal-manager", () => ({
@@ -35,6 +38,90 @@ function makeMockApi(): DockviewApi {
     addPanel: vi.fn(),
     hasMaximizedGroup: vi.fn(() => false),
   } as unknown as DockviewApi;
+}
+
+function testNormalizesStaleSessionPanelsOnSavedMaximize(): void {
+  const savedMaximizedJson = {
+    grid: {
+      root: {
+        type: "branch",
+        size: 600,
+        data: [{ type: "leaf", size: 600, data: { id: "g-center", views: ["chat"] } }],
+      },
+      height: 600,
+      width: 800,
+      orientation: "HORIZONTAL",
+    },
+    panels: {
+      chat: { id: "chat", contentComponent: "chat" },
+    },
+    activeGroup: "g-center",
+  };
+  vi.mocked(getEnvMaximizeState).mockImplementation((envId) =>
+    envId === "env-a"
+      ? { preMaximizeLayout: { columns: [] }, maximizedDockviewJson: savedMaximizedJson }
+      : null,
+  );
+
+  type TestPanel = {
+    id: string;
+    api: { component: string; close: () => void };
+    group: { id: string; panels: TestPanel[] };
+  };
+
+  const group = { id: "g-center", panels: [] as TestPanel[] };
+  const panels: TestPanel[] = [];
+  const removePanel = (id: string) => {
+    const panelIndex = panels.findIndex((p) => p.id === id);
+    if (panelIndex >= 0) panels.splice(panelIndex, 1);
+    const groupIndex = group.panels.findIndex((p) => p.id === id);
+    if (groupIndex >= 0) group.panels.splice(groupIndex, 1);
+  };
+  const closeStale = vi.fn(() => removePanel("session:stale"));
+  const stalePanel: TestPanel = {
+    id: "session:stale",
+    api: { component: "chat", close: closeStale },
+    group,
+  };
+  panels.push(stalePanel);
+  group.panels.push(stalePanel);
+
+  const api = {
+    ...makeMockApi(),
+    panels,
+    groups: [group],
+    getPanel: vi.fn((id: string) => panels.find((p) => p.id === id) ?? null),
+    addPanel: vi.fn((opts: { id: string; component: string }) => {
+      const panel: TestPanel = {
+        id: opts.id,
+        api: { component: opts.component, close: () => removePanel(opts.id) },
+        group,
+      };
+      panels.push(panel);
+      group.panels.push(panel);
+    }),
+  } as unknown as DockviewApi;
+
+  useDockviewStore.setState({ api, currentLayoutEnvId: "env-b" });
+  useDockviewStore
+    .getState()
+    .switchEnvLayout("env-b", "env-a", "session-a", ["session-a", "session-sibling"]);
+
+  expect(api.addPanel).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: "session:session-a",
+      position: { referenceGroup: group.id, index: 0 },
+    }),
+  );
+  expect(api.addPanel).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: "session:session-sibling",
+      params: { sessionId: "session-sibling" },
+      position: { referenceGroup: group.id, index: 1 },
+      inactive: true,
+    }),
+  );
+  expect(closeStale).toHaveBeenCalledOnce();
 }
 
 describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
@@ -73,16 +160,21 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
     expect(useDockviewStore.getState().currentLayoutEnvId).toBe("env-new");
   });
 
-  it("first adoption (no previous env) just records the new env", () => {
+  it("first adoption applies the env's layout without overwriting it or releasing portals", () => {
     const api = makeMockApi();
     useDockviewStore.setState({ api, currentLayoutEnvId: null });
 
     useDockviewStore.getState().switchEnvLayout(null, "env-first", "session-Y");
 
-    // First adoption keeps existing layout, no portal release on the
-    // (empty) outgoing env.
+    // No outgoing env to save/release.
     expect(panelPortalManager.releaseByEnv).not.toHaveBeenCalled();
     expect(useDockviewStore.getState().currentLayoutEnvId).toBe("env-first");
+    // Regression: the old "just adopt onReady's layout" shortcut persisted the
+    // stale global-fallback layout into the new env via setEnvLayout(newEnvId,
+    // toJSON()), overwriting any real saved layout and giving fresh tasks the
+    // previous env's proportions. First adoption must apply the env's layout
+    // (defaults here, since getEnvLayout is mocked null), never persist over it.
+    expect(setEnvLayout).not.toHaveBeenCalledWith("env-first", expect.anything());
   });
 
   it("does nothing when api is unset", () => {
@@ -181,5 +273,9 @@ describe("switchEnvLayout — maximize+sidebar-switch regression", () => {
     const state = useDockviewStore.getState();
     expect(state.preMaximizeLayout).not.toBeNull();
     expect(state.maximizedGroupId).toBeTruthy();
+  });
+
+  it("normalizes stale session panels when restoring a saved maximize layout", () => {
+    testNormalizesStaleSessionPanelsOnSavedMaximize();
   });
 });

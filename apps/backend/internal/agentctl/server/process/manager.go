@@ -4,20 +4,25 @@ package process
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
+	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -67,19 +72,32 @@ const defaultStderrBufferSize = 50
 
 const agentTempDirRoot = "kandev-agent"
 
+const processKillRequiredExitGrace = 250 * time.Millisecond
+
+// processDefaultExitGrace is the no-deadline upper bound for graceful adapters
+// after adapter/stdin close. It is intentionally longer than the kill-required
+// fast path so ACP-style agents can flush state, while still bounding callers
+// that pass context.Background().
+const processDefaultExitGrace = 5 * time.Second
+
+const processGroupTerminateGrace = 2 * time.Second
+const processGroupPollInterval = 50 * time.Millisecond
+
 // Manager manages the agent subprocess
 type Manager struct {
 	cfg    *config.InstanceConfig
 	logger *logger.Logger
 
 	// Process state
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	stdout   io.ReadCloser
-	stderr   io.ReadCloser
-	status   atomic.Value // Status
-	exitCode atomic.Int32
-	exitErr  atomic.Value // error
+	cmd                *exec.Cmd
+	processLifecycle   processLifecycleHandle
+	processLifecycleMu sync.Mutex
+	stdin              io.WriteCloser
+	stdout             io.ReadCloser
+	stderr             io.ReadCloser
+	status             atomic.Value // Status
+	exitCode           atomic.Int32
+	exitErr            atomic.Value // error
 
 	// Stderr buffering for error context
 	stderrBuffer []string
@@ -91,12 +109,44 @@ type Manager struct {
 	// Each tracker stamps RepositoryName onto its emitted events and shares
 	// subscriber channels with the root via the Manager fan-out.
 	// Empty for single-repo workspaces.
-	repoTrackers []*WorkspaceTracker
+	//
+	// Mutated post-launch by RescanRepositories (multi-branch add) while other
+	// goroutines (gateway subscribe/unsubscribe, poll-mode updates) iterate
+	// the slice — every read and write must go through repoTrackersMu.
+	// workspaceTracker is also guarded by the same lock because rescan can
+	// swap it when transitioning single→multi mode.
+	repoTrackers   []*WorkspaceTracker
+	repoTrackersMu sync.RWMutex
+	// rescanMu serializes RescanRepositories calls so two concurrent
+	// rescans can't both observe an empty tracker set and double-bootstrap
+	// (or both append duplicate trackers for the same new child). The
+	// per-field repoTrackersMu still allows concurrent subscribe/unsubscribe
+	// readers while a rescan is in flight.
+	rescanMu sync.Mutex
 	// workspaceTrackersBySubpath caches per-subpath trackers for multi-repo
 	// task roots. Key is the cleaned subpath (relative to cfg.WorkDir). The
 	// root tracker lives in workspaceTracker above.
 	workspaceTrackersBySubpath map[string]*WorkspaceTracker
 	workspaceTrackersMu        sync.Mutex
+
+	// baseBranchesMu guards mutations to cfg.BaseBranches so the
+	// UpdateBaseBranches writer doesn't race with the rescan-path and
+	// lazy-subpath readers that look up per-repo overrides via
+	// lookupBaseBranch. Two existing mutexes already cover the trackers
+	// themselves (repoTrackersMu, workspaceTrackersMu) but each guards a
+	// different field — without this dedicated lock the writer could
+	// publish a new map under repoTrackersMu while a reader walked the
+	// same map under workspaceTrackersMu.
+	baseBranchesMu sync.RWMutex
+
+	// streamSubscribers tracks every workspace-stream subscriber attached
+	// via SubscribeWorkspaceStream so RescanRepositories can wire new
+	// per-repo trackers into the same channels without re-subscription. The
+	// gateway only subscribes once per session; without this list, trackers
+	// added post-launch (multi-branch transition) would emit events that
+	// never reach the UI.
+	streamSubscribers   map[types.WorkspaceStreamSubscriber]struct{}
+	streamSubscribersMu sync.Mutex
 
 	// Script/process runner (dev server, setup, cleanup, custom)
 	processRunner *ProcessRunner
@@ -133,12 +183,95 @@ type Manager struct {
 	// Final command string (full command with all adapter args)
 	finalCommand string
 
+	// agentTempRoot and agentTempDir record the exact temporary directory
+	// created for this manager. The retained Root keeps cleanup anchored to the
+	// directory opened at creation even if its pathname is later replaced.
+	agentTempRoot       string
+	agentTempDir        string
+	agentTempChild      string
+	agentTempRootHandle *os.Root
+	agentTempMu         sync.Mutex
+
 	// Synchronization
-	mu      sync.RWMutex
-	wg      sync.WaitGroup
-	stopCh  chan struct{}
-	doneCh  chan struct{}
-	startMu sync.Mutex
+	mu               sync.RWMutex
+	wg               sync.WaitGroup
+	stopCh           chan struct{}
+	doneCh           chan struct{}
+	startMu          sync.Mutex
+	admissionMu      sync.Mutex
+	admissionCount   int
+	admissionDrained chan struct{}
+	stopping         bool
+	mainReapPending  atomic.Bool
+	groupAliveFn     func(int) bool
+	terminateGroupFn func(int) error
+	killGroupFn      func(int) error
+	waitGroupExitFn  func(context.Context, int) bool
+	managerWaitFn    func(context.Context, <-chan struct{}, time.Duration) bool
+}
+
+// ErrManagerStopping indicates that process admission is closed for teardown.
+var ErrManagerStopping = errors.New("process manager is stopping")
+
+func (m *Manager) admitStart() (func(), error) {
+	m.admissionMu.Lock()
+	if m.stopping {
+		m.admissionMu.Unlock()
+		return nil, ErrManagerStopping
+	}
+	if m.admissionCount == 0 {
+		m.admissionDrained = make(chan struct{})
+	}
+	m.admissionCount++
+	m.admissionMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			m.admissionMu.Lock()
+			m.admissionCount--
+			if m.admissionCount == 0 {
+				close(m.admissionDrained)
+			}
+			m.admissionMu.Unlock()
+		})
+	}, nil
+}
+
+// CloseAdmission rejects new process owners without waiting for in-flight
+// handlers. Instance teardown calls it before shutting down HTTP.
+func (m *Manager) CloseAdmission() {
+	m.admissionMu.Lock()
+	m.stopping = true
+	m.admissionMu.Unlock()
+	if m.processRunner != nil {
+		m.processRunner.BeginStop()
+	}
+	if m.shellMgr != nil {
+		m.shellMgr.BeginStop()
+	}
+}
+
+// WaitForAdmission waits for starts admitted before CloseAdmission to finish.
+func (m *Manager) WaitForAdmission(ctx context.Context) error {
+	m.admissionMu.Lock()
+	if m.admissionCount == 0 {
+		m.admissionMu.Unlock()
+		return nil
+	}
+	drained := m.admissionDrained
+	m.admissionMu.Unlock()
+	select {
+	case <-drained:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// BeginStop closes process admission and drains starts already in flight.
+func (m *Manager) BeginStop() {
+	m.CloseAdmission()
+	_ = m.WaitForAdmission(context.Background())
 }
 
 // NewManager creates a new process manager
@@ -161,18 +294,77 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		// Multi-repo: root tracker bound to the bare task root (no fallback,
 		// no events), plus one tracker per repo subdir.
 		m.workspaceTracker = NewWorkspaceTrackerForRepo(cfg.WorkDir, "", log)
+		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
 		for _, child := range repoChildren {
-			m.repoTrackers = append(m.repoTrackers,
-				NewWorkspaceTrackerForRepo(child.path, child.name, log))
+			tr := NewWorkspaceTrackerForRepo(child.path, child.name, log)
+			tr.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, child.name))
+			m.repoTrackers = append(m.repoTrackers, tr)
 		}
 	} else {
 		m.workspaceTracker = NewWorkspaceTracker(cfg.WorkDir, log)
+		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
 	}
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	return m
+}
+
+// getBaseBranches returns a snapshot of cfg.BaseBranches under the
+// dedicated baseBranchesMu so callers (rescan, lazy-subpath, the
+// UpdateBaseBranches re-stamp loop) read a consistent map even when a
+// concurrent UpdateBaseBranches writer is publishing a replacement.
+func (m *Manager) getBaseBranches() map[string]string {
+	m.baseBranchesMu.RLock()
+	defer m.baseBranchesMu.RUnlock()
+	if m.cfg == nil || m.cfg.BaseBranches == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m.cfg.BaseBranches))
+	for k, v := range m.cfg.BaseBranches {
+		out[k] = v
+	}
+	return out
+}
+
+// setBaseBranches replaces cfg.BaseBranches under baseBranchesMu so the
+// write is serialized with every getBaseBranches reader. UpdateBaseBranches
+// uses this to publish the new map after sanitizing it at the HTTP edge.
+func (m *Manager) setBaseBranches(branches map[string]string) {
+	m.baseBranchesMu.Lock()
+	defer m.baseBranchesMu.Unlock()
+	if m.cfg == nil {
+		return
+	}
+	m.cfg.BaseBranches = branches
+}
+
+// lookupBaseBranch reads the task's recorded base branch for a given
+// repository name from the per-instance map. The empty key "" addresses the
+// single-repo / root tracker. Falls back to the empty-key entry when the
+// per-repo entry is missing — preserves single-repo behavior for tasks
+// that record only one base branch under the legacy unkeyed slot.
+//
+// Each value is re-sanitised through SanitizeGitRef before it leaves the
+// function. The map was sanitised at the HTTP boundary and again on
+// SetBaseBranch, but static analysis (CodeQL `go/command-injection`)
+// loses the sanitised state across map writes and field stores —
+// transforming the value at every read point keeps the source→sink path
+// covered no matter which entry point the analyser walks.
+func lookupBaseBranch(branches map[string]string, repoName string) string {
+	if len(branches) == 0 {
+		return ""
+	}
+	if v, ok := branches[repoName]; ok && v != "" {
+		return SanitizeGitRef(v)
+	}
+	if repoName != "" {
+		if v, ok := branches[""]; ok && v != "" {
+			return SanitizeGitRef(v)
+		}
+	}
+	return ""
 }
 
 // repositorySubdir is one git-repo child of a multi-repo task root.
@@ -229,7 +421,42 @@ func (m *Manager) ExitError() error {
 
 // GetWorkspaceTracker returns the workspace tracker for git status and file monitoring
 func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
 	return m.workspaceTracker
+}
+
+// snapshotTrackers returns the current root + per-repo trackers under
+// repoTrackersMu so callers can iterate without holding the lock. Concurrent
+// rescan writes can't observably mutate either while a snapshot is in flight.
+func (m *Manager) snapshotTrackers() (*WorkspaceTracker, []*WorkspaceTracker) {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	repos := make([]*WorkspaceTracker, len(m.repoTrackers))
+	copy(repos, m.repoTrackers)
+	return m.workspaceTracker, repos
+}
+
+// StartAllWorkspaceTrackers starts root + per-repo trackers (idempotent) so file-change events fire in passthrough mode.
+func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.Start(ctx)
+	}
+	for _, t := range trackers {
+		t.Start(ctx)
+	}
+}
+
+// stopWorkspaceTrackers stops root + per-repo trackers (idempotent via sync.Once).
+func (m *Manager) stopWorkspaceTrackers() {
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.Stop()
+	}
+	for _, t := range trackers {
+		t.Stop()
+	}
 }
 
 // SubscribeWorkspaceStream creates a single workspace stream subscriber and
@@ -242,8 +469,15 @@ func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
 // empty and only the root tracker fires events.
 func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 	sub := make(types.WorkspaceStreamSubscriber, 100)
-	m.workspaceTracker.AttachWorkspaceStreamSubscriber(sub)
-	for _, t := range m.repoTrackers {
+	m.streamSubscribersMu.Lock()
+	if m.streamSubscribers == nil {
+		m.streamSubscribers = make(map[types.WorkspaceStreamSubscriber]struct{})
+	}
+	m.streamSubscribers[sub] = struct{}{}
+	m.streamSubscribersMu.Unlock()
+	root, trackers := m.snapshotTrackers()
+	root.AttachWorkspaceStreamSubscriber(sub)
+	for _, t := range trackers {
 		t.AttachWorkspaceStreamSubscriber(sub)
 	}
 	return sub
@@ -252,8 +486,12 @@ func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 // UnsubscribeWorkspaceStream detaches the subscriber from every tracker and
 // closes the channel exactly once.
 func (m *Manager) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber) {
-	m.workspaceTracker.DetachWorkspaceStreamSubscriber(sub)
-	for _, t := range m.repoTrackers {
+	m.streamSubscribersMu.Lock()
+	delete(m.streamSubscribers, sub)
+	m.streamSubscribersMu.Unlock()
+	root, trackers := m.snapshotTrackers()
+	root.DetachWorkspaceStreamSubscriber(sub)
+	for _, t := range trackers {
 		t.DetachWorkspaceStreamSubscriber(sub)
 	}
 	close(sub)
@@ -287,15 +525,87 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 		return t, nil
 	}
 	t := NewWorkspaceTracker(full, m.logger)
+	t.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), cleaned))
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }
 
+// UpdateBaseBranches replaces the per-repo base-branch map and re-stamps every
+// active tracker with the new value for its repositoryName, then triggers a
+// non-blocking RefreshGitStatus on each so the UI sees the new
+// BaseCommit/Ahead/Behind without waiting for the next poll tick. Idempotent
+// for unchanged values (RefreshGitStatus is cheap — it's the same call the
+// frontend already makes after stage/unstage).
+//
+// Newly-spawned trackers (rescan path, lazy subpath lookup) read the updated
+// map via lookupBaseBranch — no second push needed for them.
+func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]string) {
+	m.setBaseBranches(branches)
+
+	m.repoTrackersMu.RLock()
+	root := m.workspaceTracker
+	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
+	copy(trackers, m.repoTrackers)
+	m.repoTrackersMu.RUnlock()
+
+	m.workspaceTrackersMu.Lock()
+	bySubpath := make(map[string]*WorkspaceTracker, len(m.workspaceTrackersBySubpath))
+	for k, v := range m.workspaceTrackersBySubpath {
+		bySubpath[k] = v
+	}
+	m.workspaceTrackersMu.Unlock()
+
+	// Stamp the new baseBranch on each tracker synchronously so the field is
+	// visible to the next poll, but kick the RefreshGitStatus probes
+	// (which can each spawn 3–5 git subprocesses) onto a background
+	// goroutine. The HTTP handler that called us doesn't need to block on
+	// per-tracker git work; the picker UI re-fetches via the existing WS
+	// stream once Refresh emits a new GitStatusUpdate. Detach from the
+	// caller's ctx so an HTTP request cancel after the field stores
+	// can't strand half the trackers without their refresh.
+	if root != nil {
+		root.SetBaseBranch(lookupBaseBranch(branches, root.RepositoryName()))
+	}
+	for _, t := range trackers {
+		t.SetBaseBranch(lookupBaseBranch(branches, t.RepositoryName()))
+	}
+	for subpath, t := range bySubpath {
+		t.SetBaseBranch(lookupBaseBranch(branches, subpath))
+	}
+	go m.refreshTrackersDetached(root, trackers, bySubpath)
+}
+
+// refreshTrackersDetached runs RefreshGitStatus on every supplied tracker
+// using a background context. Spawned as a goroutine by UpdateBaseBranches
+// so the per-tracker git subprocesses don't block the HTTP handler that
+// drove the picker-save.
+func (m *Manager) refreshTrackersDetached(root *WorkspaceTracker, trackers []*WorkspaceTracker, bySubpath map[string]*WorkspaceTracker) {
+	ctx := context.Background()
+	if root != nil {
+		root.RefreshGitStatus(ctx)
+	}
+	for _, t := range trackers {
+		t.RefreshGitStatus(ctx)
+	}
+	for _, t := range bySubpath {
+		t.RefreshGitStatus(ctx)
+	}
+}
+
 // StartProcess runs a script/process with isolated stdout/stderr.
 func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*ProcessInfo, error) {
+	release, err := m.admitStart()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if m.processRunner == nil {
 		return nil, fmt.Errorf("process runner not available")
 	}
+	if err := m.ensureAgentTempEnv(); err != nil {
+		return nil, err
+	}
+	req.Env = m.ownedProcessEnv(req.Env)
 	return m.processRunner.Start(ctx, req)
 }
 
@@ -327,8 +637,9 @@ func (m *Manager) ListProcesses(sessionID string) []ProcessInfo {
 // per-repo tracker discovered at construction time. Empty for single-repo
 // workspaces. Used by callers that want to fan an op out across repos.
 func (m *Manager) RepoSubpaths() []string {
-	out := make([]string, 0, len(m.repoTrackers))
-	for _, t := range m.repoTrackers {
+	_, trackers := m.snapshotTrackers()
+	out := make([]string, 0, len(trackers))
+	for _, t := range trackers {
 		if t.repositoryName != "" {
 			out = append(out, t.repositoryName)
 		}
@@ -344,21 +655,16 @@ func (m *Manager) RepoSubpaths() []string {
 // after a focus event, since the agent's initial pushes happen at boot and
 // no replay path exists for clients that subscribe later.
 func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
-	m.workspaceTracker.SetPollMode(mode)
-	for _, t := range m.repoTrackers {
+	root, trackers := m.snapshotTrackers()
+	root.SetPollMode(mode)
+	for _, t := range trackers {
 		t.SetPollMode(mode)
 	}
 	if mode == PollModePaused {
 		return
 	}
-	// Snapshot the tracker slice before launching the goroutine so a
-	// concurrent Stop()/teardown that mutates m.repoTrackers can't race or
-	// nil-deref the iteration. Refresh in background — RefreshGitStatus
-	// blocks on git commands which can take seconds on large repos; the
-	// HTTP caller shouldn't wait.
-	root := m.workspaceTracker
-	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
-	copy(trackers, m.repoTrackers)
+	// Refresh in background — RefreshGitStatus blocks on git commands which
+	// can take seconds on large repos; the HTTP caller shouldn't wait.
 	go func() {
 		root.RefreshGitStatus(ctx)
 		for _, t := range trackers {
@@ -444,6 +750,22 @@ func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
 	return cleaned, full, nil
 }
 
+// WorkDir returns the absolute workspace root for this agentctl instance.
+// Handlers that bypass WorkspaceTracker (e.g. the batched copy-files endpoint
+// that writes into a per-repo subdir directly) need the resolved root.
+func (m *Manager) WorkDir() string {
+	return m.cfg.WorkDir
+}
+
+// ResolveRepoSubdir returns the absolute filesystem directory for an
+// optional repo subpath under the workspace. Same validation as the
+// internal resolveSubpath helper (rejects traversal, requires existence).
+// Empty subpath returns the workspace root.
+func (m *Manager) ResolveRepoSubdir(subpath string) (string, error) {
+	_, full, err := m.resolveSubpath(subpath)
+	return full, err
+}
+
 // JoinRepoPath validates a repo subpath and returns the workspace-relative
 // path obtained by joining `subpath` and `path`. Empty `subpath` returns
 // `path` unchanged (single-repo workspaces). Used by file content / update
@@ -464,6 +786,11 @@ func (m *Manager) JoinRepoPath(subpath, path string) (string, error) {
 func (m *Manager) Start(ctx context.Context) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
+	release, err := m.admitStart()
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
 		return fmt.Errorf("agent is already running")
@@ -516,16 +843,33 @@ func (m *Manager) Start(ctx context.Context) error {
 	// Start the subprocess now that pipes are connected
 	if err := m.cmd.Start(); err != nil {
 		m.status.Store(StatusError)
-		return fmt.Errorf("failed to start agent: %w", err)
+		return formatAgentStartError(err, m.cfg.AgentEnv)
 	}
+	processLifecycle, err := installProcessLifecycle(m.cmd)
+	if err != nil {
+		reapErr := killAndWaitStartedCommand(m.cmd)
+		m.status.Store(StatusError)
+		return errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
+	}
+	m.processLifecycle = processLifecycle
 
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
 
 	// Connect adapter to the process stdin/stdout pipes
 	if err := m.adapter.Connect(m.stdin, m.stdout); err != nil {
+		reapErr, owned := m.reapMainProcessLifecycle()
+		switch {
+		case !owned:
+			reapErr = killAndWaitStartedCommand(m.cmd)
+		case reapErr != nil:
+			fallbackErr := killAndWaitStartedCommand(m.cmd)
+			reapErr = errors.Join(reapErr, fallbackErr)
+		default:
+			reapErr = killAndWaitStartedCommand(m.cmd)
+		}
 		m.status.Store(StatusError)
-		return fmt.Errorf("failed to connect adapter: %w", err)
+		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
 	// Start stderr reader and exit waiter
@@ -538,8 +882,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	go m.forwardUpdates()
 
 	// Start workspace tracker with background context (not tied to HTTP request)
-	m.workspaceTracker.Start(context.Background())
-	for _, t := range m.repoTrackers {
+	root, trackers := m.snapshotTrackers()
+	root.Start(context.Background())
+	for _, t := range trackers {
 		t.Start(context.Background())
 	}
 
@@ -555,6 +900,15 @@ func (m *Manager) Start(ctx context.Context) error {
 // startOneShot initialises a one-shot adapter without spawning a long-lived subprocess.
 // The adapter manages its own per-prompt subprocess lifecycle internally.
 func (m *Manager) startOneShot() error {
+	// One-shot adapters bypass buildFinalCommand, so restore temp env vars
+	// after StripEnv before their per-prompt subprocesses inherit Env.
+	if err := m.ensureAgentTempEnv(); err != nil {
+		return err
+	}
+	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
+		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
+	}
+
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
 
@@ -563,8 +917,9 @@ func (m *Manager) startOneShot() error {
 	go m.forwardUpdates()
 
 	// Start workspace tracker with background context (not tied to HTTP request)
-	m.workspaceTracker.Start(context.Background())
-	for _, t := range m.repoTrackers {
+	root, trackers := m.snapshotTrackers()
+	root.Start(context.Background())
+	for _, t := range trackers {
 		t.Start(context.Background())
 	}
 
@@ -592,12 +947,14 @@ func (m *Manager) buildAdapterConfig() error {
 		}
 	}
 	m.adapterCfg = &adapter.Config{
-		WorkDir:        m.cfg.WorkDir,
-		AutoApprove:    m.cfg.AutoApprovePermissions,
-		ApprovalPolicy: m.cfg.ApprovalPolicy,
-		McpServers:     mcpServers,
-		AgentID:        m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
-		AssumeMcpSse:   m.cfg.AssumeMcpSse,
+		WorkDir:             m.cfg.WorkDir,
+		AutoApprove:         m.cfg.AutoApprovePermissions,
+		ApprovalPolicy:      m.cfg.ApprovalPolicy,
+		McpServers:          mcpServers,
+		AgentID:             m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
+		AssumeMcpSse:        m.cfg.AssumeMcpSse,
+		AssumeMcpHttp:       m.cfg.AssumeMcpHttp,
+		RequiresProcessKill: m.cfg.RequiresProcessKill,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -632,6 +989,17 @@ func (m *Manager) buildAdapterConfig() error {
 	for k, v := range adapterEnv {
 		m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
 	}
+
+	// Strip agent-declared environment variables from the final child process
+	// environment entirely (not just set to empty). Applied after adapter env
+	// merge so that adapter-injected values are also stripped. Some programs
+	// distinguish unset from empty string — see RuntimeConfig.StripEnv docs.
+	for _, key := range m.cfg.StripEnv {
+		m.cfg.AgentEnv = utility.RemoveEnvEntry(m.cfg.AgentEnv, key)
+	}
+	if m.adapterCfg.OneShotConfig != nil {
+		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
+	}
 	return nil
 }
 
@@ -663,35 +1031,210 @@ func (m *Manager) buildFinalCommand() error {
 	// Create a new process group so we can kill all child processes together.
 	// This is important for adapters like OpenCode that spawn child processes
 	// (npx -> sh -> node -> opencode binary).
-	setProcGroup(m.cmd)
+	setAgentProcGroup(m.cmd)
 
+	envBytes, largestEnv := summarizeEnvBytes(m.cfg.AgentEnv, 3)
 	m.logger.Info("agent command prepared",
 		zap.Strings("args", m.cfg.AgentArgs),
 		zap.Strings("extra_args", extraArgs),
 		zap.String("workdir", m.cfg.WorkDir),
-		zap.Int("env_count", len(m.cfg.AgentEnv)))
+		zap.Int("env_count", len(m.cfg.AgentEnv)),
+		zap.Int("env_bytes", envBytes),
+		zap.String("largest_env_keys", formatEnvEntrySizes(largestEnv)))
 
 	return nil
 }
 
+type envEntrySize struct {
+	key   string
+	bytes int
+}
+
+func formatAgentStartError(err error, env []string) error {
+	if isArgumentListTooLong(err) {
+		total, largest := summarizeEnvBytes(env, 3)
+		return fmt.Errorf(
+			"failed to start agent: environment/arguments too large; env_bytes=%d largest_env_keys=%s: %w",
+			total, formatEnvEntrySizes(largest), err,
+		)
+	}
+	return fmt.Errorf("failed to start agent: %w", err)
+}
+
+func isArgumentListTooLong(err error) bool {
+	if errors.Is(err, syscall.E2BIG) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "argument list too long")
+}
+
+func summarizeEnvBytes(env []string, limit int) (int, []envEntrySize) {
+	entries := make([]envEntrySize, 0, len(env))
+	total := 0
+	for _, item := range env {
+		size := len(item) + 1
+		total += size
+		key := item
+		if idx := strings.IndexByte(item, '='); idx >= 0 {
+			key = item[:idx]
+		}
+		entries = append(entries, envEntrySize{key: key, bytes: size})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].bytes == entries[j].bytes {
+			return entries[i].key < entries[j].key
+		}
+		return entries[i].bytes > entries[j].bytes
+	})
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+	return total, entries
+}
+
+func formatEnvEntrySizes(entries []envEntrySize) string {
+	if len(entries) == 0 {
+		return "[]"
+	}
+	parts := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		parts = append(parts, fmt.Sprintf("%s:%d", entry.key, entry.bytes))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
 func (m *Manager) ensureAgentTempEnv() error {
-	dir := filepath.Join(os.TempDir(), agentTempDirRoot, agentTempDirName(m.cfg.SessionID, m.cfg.Port))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	m.agentTempMu.Lock()
+	defer m.agentTempMu.Unlock()
+
+	root := filepath.Join(os.TempDir(), agentTempDirRoot)
+	child := agentTempDirName(m.cfg.SessionID, m.cfg.InstanceID, m.cfg.Port)
+	dir := filepath.Join(root, child)
+	if m.agentTempRootHandle != nil {
+		if m.agentTempRoot == root && m.agentTempDir == dir && m.agentTempChild == child {
+			for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+				m.cfg.AgentEnv = upsertEnvValue(m.cfg.AgentEnv, key, dir)
+			}
+			return nil
+		}
+		return fmt.Errorf("agent temp ownership already initialized for %q", m.agentTempDir)
+	}
+	rootHandle, err := openOwnedTempRoot(root)
+	if err != nil {
+		return err
+	}
+	if err := ensureOwnedTempChild(rootHandle, child); err != nil {
+		_ = rootHandle.Close()
 		return fmt.Errorf("failed to create agent temp dir: %w", err)
 	}
+	m.agentTempRoot = root
+	m.agentTempDir = dir
+	m.agentTempChild = child
+	m.agentTempRootHandle = rootHandle
 	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
 		m.cfg.AgentEnv = upsertEnvValue(m.cfg.AgentEnv, key, dir)
 	}
 	return nil
 }
 
-func agentTempDirName(sessionID string, port int) string {
+func (m *Manager) ownedProcessEnv(env map[string]string) map[string]string {
+	m.agentTempMu.Lock()
+	defer m.agentTempMu.Unlock()
+
+	managed := make(map[string]string, len(env)+3)
+	for key, value := range env {
+		managed[key] = value
+	}
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		managed[key] = m.agentTempDir
+	}
+	return managed
+}
+
+func openOwnedTempRoot(path string) (*os.Root, error) {
+	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return nil, fmt.Errorf("failed to create agent temp root %q: %w", path, err)
+	}
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect agent temp root %q: %w", path, err)
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 || !pathInfo.IsDir() {
+		return nil, fmt.Errorf("unsafe agent temp root %q: expected a directory, not a symlink", path)
+	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open agent temp root %q: %w", path, err)
+	}
+	openedInfo, err := root.Stat(".")
+	if err != nil || !os.SameFile(pathInfo, openedInfo) {
+		_ = root.Close()
+		return nil, fmt.Errorf("unsafe agent temp root %q: path changed while opening", path)
+	}
+	if err := root.Chmod(".", 0o700); err != nil {
+		_ = root.Close()
+		return nil, fmt.Errorf("failed to secure agent temp root %q: %w", path, err)
+	}
+	return root, nil
+}
+
+func ensureOwnedTempChild(root *os.Root, name string) error {
+	if err := root.Mkdir(name, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	info, err := root.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("unsafe agent temp child %q: expected a directory, not a symlink", name)
+	}
+	return root.Chmod(name, 0o700)
+}
+
+func (m *Manager) cleanupAgentTempDir() error {
+	m.agentTempMu.Lock()
+	defer m.agentTempMu.Unlock()
+
+	root := filepath.Clean(m.agentTempRoot)
+	target := filepath.Clean(m.agentTempDir)
+	if m.agentTempRoot == "" && m.agentTempDir == "" {
+		return nil
+	}
+	if m.agentTempRoot == "" || m.agentTempDir == "" || target == root {
+		return fmt.Errorf("refusing to clean invalid agent temp dir %q under root %q", m.agentTempDir, m.agentTempRoot)
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to clean agent temp dir outside root: target %q root %q", m.agentTempDir, m.agentTempRoot)
+	}
+	if rel != m.agentTempChild || strings.ContainsRune(rel, filepath.Separator) || m.agentTempRootHandle == nil {
+		return fmt.Errorf("refusing to clean unowned agent temp dir %q under root %q", m.agentTempDir, m.agentTempRoot)
+	}
+	if err := m.agentTempRootHandle.RemoveAll(rel); err != nil {
+		return fmt.Errorf("failed to remove agent temp dir %q: %w", target, err)
+	}
+	closeErr := m.agentTempRootHandle.Close()
+	m.agentTempRoot = ""
+	m.agentTempDir = ""
+	m.agentTempChild = ""
+	m.agentTempRootHandle = nil
+	if closeErr != nil {
+		return fmt.Errorf("failed to close agent temp root %q: %w", root, closeErr)
+	}
+	return nil
+}
+
+func agentTempDirName(sessionID, instanceID string, port int) string {
 	name := strings.TrimSpace(sessionID)
+	if name == "" {
+		name = strings.TrimSpace(instanceID)
+	}
 	if name == "" && port > 0 {
 		name = fmt.Sprintf("port-%d", port)
 	}
 	if name == "" {
-		return "default"
+		name = "default"
 	}
 
 	var b strings.Builder
@@ -704,9 +1247,14 @@ func agentTempDirName(sessionID string, port int) string {
 	}
 	cleaned := strings.Trim(b.String(), "._-")
 	if cleaned == "" {
-		return "default"
+		cleaned = "default"
 	}
-	return cleaned
+	if len(cleaned) > 40 {
+		cleaned = cleaned[:40]
+	}
+	identity := fmt.Sprintf("%d:%s|%d:%s|%d", len(sessionID), sessionID, len(instanceID), instanceID, port)
+	digest := sha256.Sum256([]byte(identity))
+	return fmt.Sprintf("%s-%x", cleaned, digest[:12])
 }
 
 func isAgentTempDirRune(r rune) bool {
@@ -766,6 +1314,7 @@ func (m *Manager) startAgentShell() {
 	}
 	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
 	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
+	shellCfg.Env = m.ownedProcessEnv(nil)
 	shellSession, err := shell.NewSession(shellCfg, m.logger)
 	if err != nil {
 		m.logger.Warn("failed to create shell session", zap.Error(err))
@@ -898,11 +1447,12 @@ func (m *Manager) GetUpdates() <-chan adapter.AgentEvent {
 
 // SendErrorEvent sends an error event on the updates channel so the
 // lifecycle manager (and ultimately the UI) learns about the failure.
-func (m *Manager) SendErrorEvent(errorMessage string) {
+func (m *Manager) SendErrorEvent(errorMessage string, promptGeneration uint64) {
 	select {
 	case m.updatesCh <- adapter.AgentEvent{
-		Type:  adapter.EventTypeError,
-		Error: errorMessage,
+		Type:             adapter.EventTypeError,
+		Error:            errorMessage,
+		PromptGeneration: promptGeneration,
 	}:
 	default:
 		m.logger.Warn("updates channel full, could not send error event")
@@ -931,34 +1481,119 @@ func (m *Manager) GetSessionID() string {
 
 // Stop stops the agent process
 func (m *Manager) Stop(ctx context.Context) error {
+	return m.stop(ctx, false)
+}
+
+// StopForTeardown permanently closes process admission, drains prior owners,
+// and removes the manager's temp directory after every owned process is reaped.
+func (m *Manager) StopForTeardown(ctx context.Context) error {
+	m.CloseAdmission()
+	if err := m.WaitForAdmission(ctx); err != nil {
+		return fmt.Errorf("wait for process admission to drain: %w", err)
+	}
+	return m.stop(ctx, true)
+}
+
+func (m *Manager) stop(ctx context.Context, terminalStop bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Stop intentionally serializes the full teardown under m.mu. The shutdown
+	// path closes adapters, stdin, shell sessions, and process groups as one
+	// lifecycle transition; concurrent readers may briefly block while process
+	// group reaping finishes.
+
+	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
+	m.stopWorkspaceTrackers()
+
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
-		m.logger.Info("Stop called but already stopped/stopping", zap.String("status", string(status)))
+		m.logger.Info("Stop called but already stopped/stopping",
+			zap.String("status", string(status)),
+			zap.Int("pid", m.agentPID()))
+		if status == StatusStopped {
+			if err := m.stopShellAndProcesses(ctx); err != nil {
+				return err
+			}
+			if m.mainReapPending.Load() {
+				if err := m.waitForProcessExit(ctx); err != nil {
+					return err
+				}
+				m.mainReapPending.Store(false)
+			}
+			if terminalStop {
+				return classifyTempCleanupError(m.cleanupAgentTempDir())
+			}
+			return nil
+		}
 		return nil
 	}
 
-	m.logger.Info("stopping agent process - START")
+	m.logger.Info("stopping agent process - START",
+		zap.Int("pid", m.agentPID()),
+		zap.String("protocol", m.agentProtocol()))
+	m.logger.Debug("agent process stop requested",
+		zap.Int("pid", m.agentPID()),
+		zap.String("protocol", m.agentProtocol()))
 	m.status.Store(StatusStopping)
 
-	m.stopShellAndProcesses(ctx)
+	auxiliaryStopErr := m.stopShellAndProcesses(ctx)
 	m.closeAdapterAndStdin()
 	m.killProcessGroupIfRequired()
-	m.waitForProcessExit(ctx)
+	mainStopErr := m.waitForProcessExit(ctx)
 
 	m.status.Store(StatusStopped)
 	m.logger.Info("stopping agent process - COMPLETE")
+	if stopErr := errors.Join(auxiliaryStopErr, mainStopErr); stopErr != nil {
+		m.mainReapPending.Store(mainStopErr != nil)
+		return stopErr
+	}
+	m.mainReapPending.Store(false)
+	if terminalStop {
+		return classifyTempCleanupError(m.cleanupAgentTempDir())
+	}
 	return nil
 }
 
-// stopShellAndProcesses stops the shell session, VS Code, workspace processes, and workspace tracker.
-func (m *Manager) stopShellAndProcesses(ctx context.Context) {
+type tempCleanupError struct {
+	err error
+}
+
+func (e tempCleanupError) Error() string { return e.err.Error() }
+func (e tempCleanupError) Unwrap() error { return e.err }
+func (e tempCleanupError) CanReleaseInstanceResources() bool {
+	return true
+}
+
+func classifyTempCleanupError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return tempCleanupError{err: err}
+}
+
+func (m *Manager) agentPID() int {
+	if m.cmd == nil || m.cmd.Process == nil {
+		return 0
+	}
+	return m.cmd.Process.Pid
+}
+
+func (m *Manager) agentProtocol() string {
+	if m.cfg == nil {
+		return ""
+	}
+	return string(m.cfg.Protocol)
+}
+
+// stopShellAndProcesses stops the shell session, VS Code, and workspace processes.
+func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
+	var errs []error
 	// Stop VS Code server if running
 	m.logger.Debug("stopping vscode server")
 	if err := m.StopVscode(ctx); err != nil {
 		m.logger.Debug("failed to stop vscode server", zap.Error(err))
+		errs = append(errs, err)
 	}
 	m.logger.Debug("vscode server stopped")
 
@@ -966,32 +1601,32 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 	if m.shell != nil {
 		if err := m.shell.Stop(); err != nil {
 			m.logger.Debug("failed to stop shell session", zap.Error(err))
+			errs = append(errs, err)
+		} else {
+			m.shell = nil
 		}
-		m.shell = nil
 	}
 	m.logger.Debug("shell session stopped")
 
 	m.logger.Debug("stopping terminal shells")
-	m.shellMgr.StopAll()
+	if m.shellMgr != nil {
+		if err := m.shellMgr.StopAll(); err != nil {
+			m.logger.Debug("failed to stop terminal shells", zap.Error(err))
+			errs = append(errs, err)
+		}
+	}
 	m.logger.Debug("terminal shells stopped")
 
 	// Stop all running workspace processes (dev server, setup, cleanup, custom).
 	m.logger.Debug("stopping workspace processes")
 	if m.processRunner != nil {
-		if err := m.processRunner.StopAll(ctx); err != nil {
+		if err := m.processRunner.StopAllAndWait(ctx); err != nil {
 			m.logger.Debug("failed to stop workspace processes", zap.Error(err))
+			errs = append(errs, err)
 		}
 	}
 	m.logger.Debug("workspace processes stopped")
-
-	m.logger.Debug("stopping workspace tracker")
-	if m.workspaceTracker != nil {
-		m.workspaceTracker.Stop()
-	}
-	for _, t := range m.repoTrackers {
-		t.Stop()
-	}
-	m.logger.Debug("workspace tracker stopped")
+	return errors.Join(errs...)
 }
 
 // closeAdapterAndStdin closes the protocol adapter, the stop channel, and stdin.
@@ -1020,8 +1655,10 @@ func (m *Manager) closeAdapterAndStdin() {
 	m.logger.Debug("stdin closed")
 }
 
-// killProcessGroupIfRequired kills the entire process group for adapters (such as
-// OpenCode) that run as HTTP servers and do not exit when stdin is closed.
+// killProcessGroupIfRequired immediately kills the entire process group for
+// adapters (such as OpenCode) that are known not to exit when stdin is closed.
+// Other adapters still get process-group cleanup in waitForProcessExit after
+// their graceful stdin-close path has had a chance to finish.
 func (m *Manager) killProcessGroupIfRequired() {
 	if m.adapter == nil || !m.adapter.RequiresProcessKill() {
 		return
@@ -1032,9 +1669,14 @@ func (m *Manager) killProcessGroupIfRequired() {
 	// We kill the process group to ensure all child processes are killed too.
 	// This is important because OpenCode spawns: npx -> sh -> node -> opencode binary
 	pid := m.cmd.Process.Pid
-	m.logger.Debug("killing process group", zap.Int("pgid", pid))
-	if err := killProcessGroup(pid); err != nil {
+	m.logger.Debug("agent process group SIGKILL requested",
+		zap.Int("pgid", pid),
+		zap.String("reason", "adapter_requires_process_kill"))
+	if err := m.killProcessGroup(pid); err != nil {
 		m.logger.Debug("failed to kill process group, trying single process", zap.Error(err))
+		m.logger.Debug("agent process SIGKILL requested",
+			zap.Int("pid", pid),
+			zap.String("reason", "process_group_kill_failed"))
 		if err := m.cmd.Process.Kill(); err != nil {
 			m.logger.Warn("failed to kill process", zap.Error(err))
 		}
@@ -1042,7 +1684,15 @@ func (m *Manager) killProcessGroupIfRequired() {
 }
 
 // waitForProcessExit waits for all goroutines to finish, force-killing on context timeout.
-func (m *Manager) waitForProcessExit(ctx context.Context) {
+//
+// On timeout the entire process group is killed (not just the leader) so that
+// child processes — most importantly MCP servers spawned by the agent — don't
+// re-parent to init and leak. setAgentProcGroup at command-build time puts the
+// agent in its own pgid; here we deliver SIGKILL to that pgid. If the command
+// leader exits before its descendants do, we still terminate the remaining
+// process group before reporting shutdown complete. Falls back to a
+// single-process kill only if the process-group call fails.
+func (m *Manager) waitForProcessExit(ctx context.Context) error {
 	m.logger.Debug("waiting for process to exit")
 	done := make(chan struct{})
 	go func() {
@@ -1050,14 +1700,251 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 		close(done)
 	}()
 
+	pid := 0
+	if m.cmd != nil && m.cmd.Process != nil {
+		pid = m.cmd.Process.Pid
+	}
+
+	exitGrace := m.processExitGrace(ctx)
+	if m.waitForManagerDone(ctx, done, exitGrace) {
+		m.logger.Info("agent process stopped gracefully")
+		return m.reapRemainingProcessGroup(ctx, pid)
+	}
+	if pid == 0 {
+		return fmt.Errorf("agent process goroutines were not reaped")
+	}
+	if ctx.Err() != nil {
+		m.logger.Warn("force killing agent process group", zap.Int("pgid", pid))
+		return m.forceKillProcessGroupAndWait(done, pid)
+	}
+
+	m.logger.Warn("agent process did not exit after graceful wait; terminating process group",
+		zap.Int("pgid", pid),
+		zap.Duration("grace", exitGrace))
+	m.logger.Debug("agent process group SIGTERM requested",
+		zap.Int("pgid", pid),
+		zap.String("reason", "graceful_wait_expired"),
+		zap.Duration("grace", exitGrace))
+	if err := m.terminateProcessGroup(pid); err != nil {
+		if !isProcessGroupMissing(err) {
+			m.logger.Warn("failed to terminate agent process group, force killing",
+				zap.Int("pgid", pid),
+				zap.Error(err))
+			return m.forceKillProcessGroupAndWait(done, pid)
+		}
+		return m.verifyMainReaped(done, pid)
+	}
+	if m.waitForManagerDone(ctx, done, processGroupTerminateGrace) {
+		m.logger.Info("agent process stopped after process group termination",
+			zap.Int("pgid", pid))
+		return m.reapRemainingProcessGroup(ctx, pid)
+	}
+	m.logger.Warn("agent process did not stop after termination; force killing process group",
+		zap.Int("pgid", pid))
+	return m.forceKillProcessGroupAndWait(done, pid)
+}
+
+// processExitGrace returns the initial graceful wait before process-group
+// termination. Adapters that declare RequiresProcessKill are known not to exit
+// from stdin close, so they keep the short legacy wait. Normal adapters get the
+// caller's remaining deadline during backend shutdown, or processDefaultExitGrace
+// when the caller did not provide one.
+func (m *Manager) processExitGrace(ctx context.Context) time.Duration {
+	if m.adapter != nil && m.adapter.RequiresProcessKill() {
+		return processKillRequiredExitGrace
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 {
+			return remaining
+		}
+		return 0
+	}
+	return processDefaultExitGrace
+}
+
+func waitForManagerDone(ctx context.Context, done <-chan struct{}, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case <-done:
-		m.logger.Info("agent process stopped gracefully")
+		return true
 	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return false
+	}
+}
+
+func (m *Manager) reapRemainingProcessGroup(ctx context.Context, pid int) error {
+	if err, owned := m.reapMainProcessLifecycle(); owned {
+		return err
+	}
+	if pid == 0 || !m.processGroupAlive(pid) {
+		return nil
+	}
+
+	m.logger.Warn("agent process group still alive after leader exit; terminating",
+		zap.Int("pgid", pid))
+	m.logger.Debug("agent process group SIGTERM requested",
+		zap.Int("pgid", pid),
+		zap.String("reason", "leader_exited_with_live_descendants"))
+	if err := m.terminateProcessGroup(pid); err != nil {
+		if isProcessGroupMissing(err) {
+			return nil
+		}
+		m.logger.Warn("failed to terminate agent process group, force killing",
+			zap.Int("pgid", pid),
+			zap.Error(err))
+		return m.forceKillProcessGroupAndWait(nil, pid)
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, processGroupTerminateGrace)
+	defer cancel()
+	if m.waitForProcessGroupExit(waitCtx, pid) {
+		m.logger.Info("agent process group stopped after termination",
+			zap.Int("pgid", pid))
+		return nil
+	}
+
+	m.logger.Warn("agent process group did not stop after termination; force killing",
+		zap.Int("pgid", pid))
+	return m.forceKillProcessGroupAndWait(nil, pid)
+}
+
+func (m *Manager) reapMainProcessLifecycle() (error, bool) {
+	m.processLifecycleMu.Lock()
+	defer m.processLifecycleMu.Unlock()
+	if !ownsProcessLifecycle(m.processLifecycle) {
+		return nil, false
+	}
+	if err := reapProcessLifecycle(m.processLifecycle); err != nil {
+		return err, true
+	}
+	m.processLifecycle = processLifecycleHandle{}
+	return nil, true
+}
+
+func (m *Manager) forceKillProcessGroup(pid int) {
+	m.logger.Debug("agent process group SIGKILL requested",
+		zap.Int("pgid", pid),
+		zap.String("reason", "force_kill"))
+	if err := m.killProcessGroup(pid); err != nil {
+		if isProcessGroupMissing(err) {
+			return
+		}
 		if m.cmd != nil && m.cmd.Process != nil {
-			m.logger.Warn("force killing agent process")
+			m.logger.Warn("failed to kill agent process group, falling back to single-process kill",
+				zap.Error(err))
+			m.logger.Debug("agent process SIGKILL requested",
+				zap.Int("pid", m.cmd.Process.Pid),
+				zap.String("reason", "process_group_kill_failed"))
 			if err := m.cmd.Process.Kill(); err != nil {
 				m.logger.Warn("failed to kill agent process", zap.Error(err))
+			}
+			return
+		}
+		m.logger.Warn("failed to kill agent process group", zap.Error(err))
+	}
+}
+
+func (m *Manager) forceKillProcessGroupAndWait(done <-chan struct{}, pid int) error {
+	m.forceKillProcessGroup(pid)
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), processGroupTerminateGrace)
+	defer cancel()
+	managerDone := done == nil || m.waitForManagerDone(waitCtx, done, processGroupTerminateGrace)
+	groupDone := m.waitForProcessGroupExit(waitCtx, pid)
+	if managerDone && groupDone {
+		m.logger.Info("agent process stopped after force kill",
+			zap.Int("pgid", pid))
+		return nil
+	}
+	var errs []error
+	if !managerDone {
+		errs = append(errs, fmt.Errorf("agent process goroutines were not reaped after force kill"))
+	}
+	if !groupDone {
+		errs = append(errs, fmt.Errorf("agent process group %d remains alive after force kill", pid))
+	}
+	return errors.Join(errs...)
+}
+
+func (m *Manager) verifyMainReaped(done <-chan struct{}, pid int) error {
+	if done != nil {
+		select {
+		case <-done:
+		default:
+			return fmt.Errorf("agent process goroutines were not reaped")
+		}
+	}
+	if pid != 0 && m.processGroupAlive(pid) {
+		return fmt.Errorf("agent process group %d remains alive", pid)
+	}
+	return nil
+}
+
+func (m *Manager) processGroupAlive(pid int) bool {
+	if m.groupAliveFn != nil {
+		return m.groupAliveFn(pid)
+	}
+	return processGroupAlive(pid)
+}
+
+func (m *Manager) waitForManagerDone(ctx context.Context, done <-chan struct{}, timeout time.Duration) bool {
+	if m.managerWaitFn != nil {
+		return m.managerWaitFn(ctx, done, timeout)
+	}
+	return waitForManagerDone(ctx, done, timeout)
+}
+
+func (m *Manager) terminateProcessGroup(pid int) error {
+	if m.terminateGroupFn != nil {
+		return m.terminateGroupFn(pid)
+	}
+	return terminateProcessGroup(pid)
+}
+
+func (m *Manager) killProcessGroup(pid int) error {
+	if m.killGroupFn != nil {
+		return m.killGroupFn(pid)
+	}
+	return killProcessGroup(pid)
+}
+
+func (m *Manager) waitForProcessGroupExit(ctx context.Context, pid int) bool {
+	if m.waitGroupExitFn != nil {
+		return m.waitGroupExitFn(ctx, pid)
+	}
+	if !m.processGroupAlive(pid) {
+		return true
+	}
+	ticker := time.NewTicker(processGroupPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return !m.processGroupAlive(pid)
+		case <-ticker.C:
+			if !m.processGroupAlive(pid) {
+				return true
+			}
+		}
+	}
+}
+
+func waitForProcessGroupExit(ctx context.Context, pid int) bool {
+	if !processGroupAlive(pid) {
+		return true
+	}
+	ticker := time.NewTicker(processGroupPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return !processGroupAlive(pid)
+		case <-ticker.C:
+			if !processGroupAlive(pid) {
+				return true
 			}
 		}
 	}
@@ -1126,6 +2013,7 @@ func (m *Manager) waitForExit() {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
+	pid := m.agentPID()
 	err := m.cmd.Wait()
 
 	if err != nil {
@@ -1164,6 +2052,14 @@ func (m *Manager) waitForExit() {
 		m.logger.Info("agent process exited successfully")
 	}
 
+	if m.Status() != StatusStopping {
+		if err := m.reapRemainingProcessGroup(context.Background(), pid); err != nil {
+			m.mainReapPending.Store(true)
+			m.logger.Warn("agent process group reap remains pending", zap.Error(err))
+		} else {
+			m.mainReapPending.Store(false)
+		}
+	}
 	m.status.Store(StatusStopped)
 }
 
@@ -1417,6 +2313,11 @@ func (m *Manager) ShellManager() *shell.Manager {
 // but we still need shell access for the workspace.
 // Returns nil if shell is already started or if ShellEnabled is false.
 func (m *Manager) StartShell() error {
+	release, err := m.admitStart()
+	if err != nil {
+		return err
+	}
+	defer release()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1429,9 +2330,13 @@ func (m *Manager) StartShell() error {
 	if !m.cfg.ShellEnabled {
 		return nil
 	}
+	if err := m.ensureAgentTempEnv(); err != nil {
+		return err
+	}
 
 	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
 	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
+	shellCfg.Env = m.ownedProcessEnv(nil)
 	shellSession, err := shell.NewSession(shellCfg, m.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create shell session: %w", err)
@@ -1442,17 +2347,46 @@ func (m *Manager) StartShell() error {
 	return nil
 }
 
+// StartTerminalShell creates a managed per-terminal shell with the instance temp environment.
+func (m *Manager) StartTerminalShell(terminalID string, cfg shell.Config) (*shell.Session, error) {
+	release, err := m.admitStart()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if err := m.ensureAgentTempEnv(); err != nil {
+		return nil, err
+	}
+	cfg.Env = m.ownedProcessEnv(cfg.Env)
+	return m.shellMgr.Start(terminalID, cfg)
+}
+
 // StartVscode starts the code-server process on a random OS-assigned port.
 // The VS Code server runs independently of the agent process.
 // Start is non-blocking — the caller should poll VscodeInfo() for status updates.
-func (m *Manager) StartVscode(_ context.Context, theme string) {
+func (m *Manager) StartVscode(_ context.Context, theme string) error {
+	release, err := m.admitStart()
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := m.ensureAgentTempEnv(); err != nil {
+		return err
+	}
+	return m.startVscode(theme)
+}
+
+func (m *Manager) startVscode(theme string) error {
 	m.vscodeMu.Lock()
 	defer m.vscodeMu.Unlock()
 
 	if m.vscode != nil {
 		info := m.vscode.Info()
 		if info.Status == VscodeStatusRunning || info.Status == VscodeStatusStarting || info.Status == VscodeStatusInstalling {
-			return
+			return nil
+		}
+		if m.vscode.HasUnreapedOwnership() {
+			return fmt.Errorf("previous code-server process cleanup is incomplete")
 		}
 	}
 
@@ -1463,7 +2397,9 @@ func (m *Manager) StartVscode(_ context.Context, theme string) {
 
 	strategy := codeServerInstallStrategy(m.logger)
 	m.vscode = NewVscodeManager(command, m.cfg.WorkDir, theme, strategy, m.logger)
+	m.vscode.setEnv(m.ownedProcessEnv(nil))
 	m.vscode.Start()
+	return nil
 }
 
 // codeServerInstallStrategy returns a tarball strategy that auto-installs code-server.
@@ -1499,7 +2435,9 @@ func (m *Manager) StopVscode(ctx context.Context) error {
 	}
 
 	err := m.vscode.Stop(ctx)
-	m.vscode = nil
+	if err == nil {
+		m.vscode = nil
+	}
 	return err
 }
 
@@ -1521,6 +2459,11 @@ func (m *Manager) VscodeInfo() VscodeInfo {
 // another goroutine could stop vscode in between. WaitForRunning handles this
 // correctly by returning an error for stopped/error states.
 func (m *Manager) VscodeOpenFile(ctx context.Context, path string, line, col int) error {
+	release, err := m.admitStart()
+	if err != nil {
+		return err
+	}
+	defer release()
 	m.vscodeMu.Lock()
 	needsStart := m.vscode == nil
 	if !needsStart {
@@ -1531,7 +2474,9 @@ func (m *Manager) VscodeOpenFile(ctx context.Context, path string, line, col int
 
 	if needsStart {
 		m.logger.Info("auto-starting code-server for open-file request")
-		m.StartVscode(ctx, "")
+		if err := m.startVscode(""); err != nil {
+			return err
+		}
 	}
 
 	m.vscodeMu.Lock()

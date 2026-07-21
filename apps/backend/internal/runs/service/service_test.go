@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -11,7 +12,9 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
@@ -21,6 +24,14 @@ import (
 // office repo is created here, not the runs repo directly, so the
 // schema migrations run.
 func newTestService(t *testing.T) (*runsservice.Service, bus.EventBus) {
+	t.Helper()
+	svc, eb, _ := newTestServiceWithRepo(t)
+	return svc, eb
+}
+
+func newTestServiceWithRepo(t *testing.T) (
+	*runsservice.Service, bus.EventBus, *runssqlite.Repository,
+) {
 	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -37,7 +48,7 @@ func newTestService(t *testing.T) (*runsservice.Service, bus.EventBus) {
 	eb := bus.NewMemoryEventBus(log)
 
 	svc := runsservice.New(officeRepo.RunsRepository(), eb, log, nil)
-	return svc, eb
+	return svc, eb, officeRepo.RunsRepository()
 }
 
 // agentInPayload is the shape office.QueueRun packs into the runs
@@ -59,6 +70,300 @@ func TestQueueRun_InsertsRow(t *testing.T) {
 		Payload: agentInPayload("a1"),
 	}); err != nil {
 		t.Fatalf("queue: %v", err)
+	}
+}
+
+func TestQueueRun_UsesRequestAgentProfileIDAndAddsEnvelopePayload(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "task-1",
+		WorkflowStepID: "work",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:comment-1",
+		Payload: map[string]any{
+			"comment_id": "comment-1",
+			"author_id":  "user-1",
+		},
+	}); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"comment-1"})
+	if err != nil {
+		t.Fatalf("get comment runs: %v", err)
+	}
+	status, ok := statuses["comment-1"]
+	if !ok {
+		t.Fatalf("missing run status for comment-1: %+v", statuses)
+	}
+	run, err := repo.GetRunByID(ctx, status.RunID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.AgentProfileID != "agent-primary" {
+		t.Fatalf("agent_profile_id = %q, want agent-primary", run.AgentProfileID)
+	}
+	if run.IdempotencyKey == nil || *run.IdempotencyKey != "task_comment:comment-1" {
+		t.Fatalf("idempotency_key = %v, want task_comment:comment-1", run.IdempotencyKey)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(run.Payload), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	for k, want := range map[string]string{
+		"agent_profile_id": "agent-primary",
+		"task_id":          "task-1",
+		"workflow_step_id": "work",
+		"comment_id":       "comment-1",
+		"author_id":        "user-1",
+	} {
+		if got, _ := payload[k].(string); got != want {
+			t.Fatalf("payload[%s] = %q, want %q (payload=%v)", k, got, want, payload)
+		}
+	}
+}
+
+func TestQueueRun_DoesNotCoalesceDistinctTaskComments(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	for _, commentID := range []string{"comment-1", "comment-2"} {
+		if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+			AgentProfileID: "agent-primary",
+			TaskID:         "task-1",
+			WorkflowStepID: "work",
+			Reason:         "task_comment",
+			IdempotencyKey: "task_comment:" + commentID,
+			Payload: map[string]any{
+				"comment_id": commentID,
+			},
+		}); err != nil {
+			t.Fatalf("queue %s: %v", commentID, err)
+		}
+	}
+
+	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"comment-1", "comment-2"})
+	if err != nil {
+		t.Fatalf("get comment runs: %v", err)
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("statuses = %+v, want one run per distinct comment", statuses)
+	}
+	if statuses["comment-1"].RunID == statuses["comment-2"].RunID {
+		t.Fatalf("distinct comments must not point at the same coalesced run: %+v", statuses)
+	}
+}
+
+func TestQueueRun_DoesNotCoalesceTaskCommentPrefixWithCustomReason(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	commentIDs := []string{"comment-1", "comment-2"}
+	keys := []string{
+		"task_comment:comment-1:work:task-1:agent-primary:follow-up",
+		"task_comment:comment-2:work:task-1:agent-primary:follow-up",
+	}
+	for i, key := range keys {
+		commentID := commentIDs[i]
+		if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+			AgentProfileID: "agent-primary",
+			TaskID:         "task-1",
+			WorkflowStepID: "work",
+			Reason:         "follow_up",
+			IdempotencyKey: key,
+			Payload: map[string]any{
+				"comment_id": commentID,
+			},
+		}); err != nil {
+			t.Fatalf("queue %s: %v", commentID, err)
+		}
+	}
+
+	for _, key := range keys {
+		exists, err := repo.CheckIdempotencyKey(ctx, key, runsservice.IdempotencyWindowHours)
+		if err != nil {
+			t.Fatalf("check idempotency key %s: %v", key, err)
+		}
+		if !exists {
+			t.Fatalf("missing inserted run for idempotency key %s", key)
+		}
+	}
+}
+
+func TestQueueRun_LegacyCommentWakeDoesNotOverwriteCanonicalCommentRun(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "target-task",
+		WorkflowStepID: "work",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:comment-engine:work:target-task:agent-primary:abcd1234",
+		Payload: map[string]any{
+			"comment_id":     "comment-engine",
+			"source_task_id": "source-task",
+		},
+	}); err != nil {
+		t.Fatalf("queue engine run: %v", err)
+	}
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "source-task",
+		Reason:         "task_comment",
+		Payload: map[string]any{
+			"comment_id": "comment-legacy",
+		},
+	}); err != nil {
+		t.Fatalf("queue legacy run: %v", err)
+	}
+
+	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"comment-engine", "comment-legacy"})
+	if err != nil {
+		t.Fatalf("get comment runs: %v", err)
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("statuses = %+v, want both comment runs", statuses)
+	}
+	if statuses["comment-engine"].RunID == statuses["comment-legacy"].RunID {
+		t.Fatalf("legacy run coalesced into canonical comment run: %+v", statuses)
+	}
+	engineRun, err := repo.GetRunByID(ctx, statuses["comment-engine"].RunID)
+	if err != nil {
+		t.Fatalf("get engine run: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(engineRun.Payload), &payload); err != nil {
+		t.Fatalf("decode engine payload: %v", err)
+	}
+	if payload["task_id"] != "target-task" || payload["source_task_id"] != "source-task" {
+		t.Fatalf("engine payload was overwritten by legacy coalesce: %#v", payload)
+	}
+
+}
+
+func TestQueueRun_SaltedKeyUsesPayloadCommentID(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "task-1",
+		WorkflowStepID: "work",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:trigger-comment:work:task-1:agent-primary:abcd1234",
+		Payload: map[string]any{
+			"comment_id": "action-comment",
+		},
+	}); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"trigger-comment", "action-comment"})
+	if err != nil {
+		t.Fatalf("get comment runs: %v", err)
+	}
+	if _, ok := statuses["trigger-comment"]; ok {
+		t.Fatalf("salted run attached to trigger comment instead of payload comment: %+v", statuses)
+	}
+	if _, ok := statuses["action-comment"]; !ok {
+		t.Fatalf("missing payload comment status: %+v", statuses)
+	}
+}
+
+// TestQueueRun_CommentStatusIgnoresMentionRuns pins that
+// task_mentioned runs carrying the same payload comment_id do not
+// replace the task_comment run shown on the comment.
+func TestQueueRun_CommentStatusIgnoresMentionRuns(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "task-1",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:comment-1:work:task-1:agent-primary:abcd1234",
+		Payload: map[string]any{
+			"comment_id": "comment-1",
+		},
+	}); err != nil {
+		t.Fatalf("queue task_comment: %v", err)
+	}
+	if err := repo.CreateRun(ctx, &models.Run{
+		ID:             "mention-run",
+		AgentProfileID: "mentioned-agent",
+		Reason:         "task_mentioned",
+		Payload:        `{"comment_id":"comment-1","task_id":"task-1"}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+	}); err != nil {
+		t.Fatalf("create mention run: %v", err)
+	}
+	if err := repo.SetRunRequestedAtForTest(ctx, "mention-run", time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("move mention run later: %v", err)
+	}
+
+	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"comment-1"})
+	if err != nil {
+		t.Fatalf("get comment runs: %v", err)
+	}
+	status, ok := statuses["comment-1"]
+	if !ok {
+		t.Fatalf("missing comment status: %+v", statuses)
+	}
+	run, err := repo.GetRunByID(ctx, status.RunID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.Reason != "task_comment" {
+		t.Fatalf("comment status attached to reason %q, want task_comment", run.Reason)
+	}
+}
+
+func TestQueueRun_PublishesSourceTaskForCrossTaskComment(t *testing.T) {
+	svc, eb := newTestService(t)
+	ctx := context.Background()
+
+	eventsCh := make(chan map[string]interface{}, 1)
+	_, err := eb.Subscribe(events.OfficeRunQueued, func(_ context.Context, e *bus.Event) error {
+		if data, ok := e.Data.(map[string]interface{}); ok {
+			eventsCh <- data
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "target-task",
+		WorkflowStepID: "target-step",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:comment-1:work:target-task:agent-primary:abcd1234",
+		Payload: map[string]any{
+			"comment_id":     "comment-1",
+			"source_task_id": "source-task",
+		},
+	}); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	select {
+	case data := <-eventsCh:
+		if data["task_id"] != "source-task" {
+			t.Fatalf("event task_id = %v, want source-task", data["task_id"])
+		}
+		if data["comment_id"] != "comment-1" {
+			t.Fatalf("event comment_id = %v, want comment-1", data["comment_id"])
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for OfficeRunQueued event")
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 )
 
 // RunDetailRepo is the subset of repo functions GetRunDetail needs.
@@ -92,6 +93,15 @@ func taskIDFromPayload(payload string) string {
 	return p.TaskID
 }
 
+// runSummaryTaskIDFromPayload returns the task id used by the run list row.
+// Cross-task wakes execute on payload.task_id but UI links/status badges belong
+// to payload.source_task_id, so source_task_id wins when present. This is
+// intentionally the link identity, not a raw mirror of the executing task_id.
+func runSummaryTaskIDFromPayload(payload string) string {
+	taskID, _ := commentkeys.IdentityFromPayload(payload)
+	return taskID
+}
+
 // runLinkIDsFromPayload extracts comment_id and routine_id from the
 // run payload — both optional and present per wakeup source (comment
 // payloads carry the comment, routine payloads carry the routine).
@@ -137,7 +147,7 @@ func buildRunSummaryDTO(run *models.Run) AgentRunSummaryDTO {
 		Reason:       run.Reason,
 		Status:       string(run.Status),
 		ErrorMessage: run.ErrorMessage,
-		TaskID:       taskIDFromPayload(run.Payload),
+		TaskID:       runSummaryTaskIDFromPayload(run.Payload),
 		CommentID:    commentID,
 		RoutineID:    routineID,
 		RequestedAt:  run.RequestedAt.UTC().Format(time.RFC3339),
@@ -310,6 +320,9 @@ func buildRunRouting(
 	if run.RequestedTier != nil {
 		out.RequestedTier = *run.RequestedTier
 	}
+	if run.ResolvedExecutionProfileID != nil {
+		out.ResolvedExecutionProfileID = *run.ResolvedExecutionProfileID
+	}
 	if run.ResolvedProviderID != nil {
 		out.ResolvedProviderID = *run.ResolvedProviderID
 	}
@@ -331,6 +344,9 @@ func runHasRoutingSnapshot(run *models.Run) bool {
 		return false
 	}
 	if run.LogicalProviderOrder != nil && *run.LogicalProviderOrder != "" {
+		return true
+	}
+	if run.ResolvedExecutionProfileID != nil && *run.ResolvedExecutionProfileID != "" {
 		return true
 	}
 	if run.ResolvedProviderID != nil && *run.ResolvedProviderID != "" {

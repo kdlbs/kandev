@@ -9,6 +9,7 @@ vi.mock("@/components/diff", () => ({
   FileDiffViewer: ({ filePath }: { filePath: string }) => (
     <div data-testid="diff-stub">{filePath}</div>
   ),
+  DiffErrorBoundary: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("@/components/editors/file-actions-dropdown", () => ({
@@ -67,6 +68,20 @@ function withTooltips(node: ReactNode) {
   return <TooltipProvider>{node}</TooltipProvider>;
 }
 
+function renderSingleFile(reviewFile: ReviewFile, selected = true) {
+  const refs = new Map([[reviewFile.path, createRef<HTMLDivElement>()]]);
+  render(
+    withTooltips(
+      <ReviewDiffList
+        {...baseProps}
+        files={[reviewFile]}
+        selectedFile={selected ? reviewFile.path : null}
+        fileRefs={refs}
+      />,
+    ),
+  );
+}
+
 describe("ReviewDiffList — multi-repo grouping", () => {
   it("renders no repo header when all files lack a repository_name", () => {
     const refs = new Map([["a.ts", createRef<HTMLDivElement>()]]);
@@ -118,5 +133,70 @@ describe("ReviewDiffList — multi-repo grouping", () => {
     expect(xGroup?.textContent).not.toContain("b.ts");
     expect(yGroup?.textContent).toContain("b.ts");
     expect(yGroup?.textContent).not.toContain("a.ts");
+  });
+});
+
+describe("ReviewDiffList — file status rendering", () => {
+  it("shows moved status in the mobile header and honest copy for a patchless rename", () => {
+    const movedFile = {
+      ...file("new-name.ts"),
+      diff: "",
+      status: "renamed",
+      old_path: "old-name.ts",
+    } as ReviewFile;
+    renderSingleFile(movedFile);
+
+    const marker = screen.getByRole("img", { name: "Moved from old-name.ts" });
+    expect(marker.className).toContain("sm:hidden");
+    expect(screen.getByText("Moved from old-name.ts; no textual changes")).toBeTruthy();
+  });
+
+  it("treats a nonempty 100%-rename metadata diff as patchless", () => {
+    const movedFile = {
+      ...file("new-name.ts"),
+      diff: [
+        "diff --git a/old-name.ts b/new-name.ts",
+        "similarity index 100%",
+        "rename from old-name.ts",
+        "rename to new-name.ts",
+      ].join("\n"),
+      status: "renamed",
+      old_path: "old-name.ts",
+    } as ReviewFile;
+    renderSingleFile(movedFile);
+
+    expect(screen.getByText("Moved from old-name.ts; no textual changes")).toBeTruthy();
+    expect(screen.queryByTestId("diff-stub")).toBeNull();
+  });
+
+  it("treats a synthetic added-file hunk for a zero-stat rename as patchless", () => {
+    const movedFile = {
+      ...file("new-name.ts"),
+      diff: [
+        "diff --git a/new-name.ts b/new-name.ts",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/new-name.ts",
+        "@@ -0,0 +1,2 @@",
+        "+first line",
+        "+second line",
+      ].join("\n"),
+      status: "renamed",
+      additions: 0,
+      deletions: 0,
+      old_path: "old-name.ts",
+    } as ReviewFile;
+    renderSingleFile(movedFile);
+
+    expect(screen.getByText("Moved from old-name.ts; no textual changes")).toBeTruthy();
+    expect(screen.queryByTestId("diff-stub")).toBeNull();
+  });
+
+  it("keeps the loading state for a nonempty diff deferred by lazy rendering", () => {
+    const deferredFile = file("deferred.ts");
+    renderSingleFile(deferredFile, false);
+
+    expect(screen.getByText("Loading diff...")).toBeTruthy();
+    expect(screen.queryByText("No textual diff available")).toBeNull();
   });
 });

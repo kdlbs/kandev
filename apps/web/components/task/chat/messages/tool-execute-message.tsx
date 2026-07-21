@@ -1,31 +1,13 @@
 "use client";
 
 import { memo } from "react";
-import { IconCheck, IconX, IconTerminal } from "@tabler/icons-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { IconCheck, IconTerminal, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { transformPathsInText } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
-import { ExpandableRow } from "./expandable-row";
-import { useExpandState } from "./use-expand-state";
-
-type ShellExecOutput = {
-  exit_code?: number;
-  stdout?: string;
-  stderr?: string;
-};
-
-type ShellExecPayload = {
-  command?: string;
-  work_dir?: string;
-  output?: ShellExecOutput;
-};
-
-type ToolExecuteMetadata = {
-  tool_call_id?: string;
-  status?: "pending" | "running" | "complete" | "error";
-  normalized?: { shell_exec?: ShellExecPayload };
-};
+import { ShellOutputDisclosure } from "./shell-output-disclosure";
+import { normalizeToolCallStatus } from "./tool-status";
+import type { ToolCallMetadata } from "../types";
 
 type ToolExecuteMessageProps = {
   comment: Message;
@@ -39,152 +21,78 @@ function ExecuteStatusIcon({
   status: string | undefined;
   exitCode: number | undefined;
 }) {
-  if (status === "complete") {
-    return exitCode === 0 ? (
-      <IconCheck className="h-3.5 w-3.5 text-green-500" />
-    ) : (
-      <IconX className="h-3.5 w-3.5 text-red-500" />
+  if (status === "complete" && exitCode === 0) {
+    return (
+      <span className="shrink-0" aria-label="Command succeeded">
+        <IconCheck aria-hidden className="h-3.5 w-3.5 text-green-500" />
+      </span>
     );
   }
-  if (status === "error") return <IconX className="h-3.5 w-3.5 text-red-500" />;
-  if (status === "running") return <GridSpinner className="text-muted-foreground" />;
+  if (
+    status === "error" ||
+    (status === "complete" && typeof exitCode === "number" && exitCode !== 0)
+  ) {
+    return (
+      <span className="shrink-0" aria-label="Command failed">
+        <IconX aria-hidden className="h-3.5 w-3.5 text-red-500" />
+      </span>
+    );
+  }
+  if (status === "running") {
+    return (
+      <span className="shrink-0" aria-label="Command running">
+        <GridSpinner className="text-muted-foreground" />
+      </span>
+    );
+  }
   return null;
 }
 
-type ExecuteOutputProps = {
-  displayCommand: string;
-  isCommandLong: boolean;
-  displayWorkDir: string | null;
-  workDir: string | undefined;
-  output: ShellExecOutput | undefined;
-};
-
-function ExecuteOutputContent({
-  displayCommand,
-  isCommandLong,
-  displayWorkDir,
-  workDir,
-  output,
-}: ExecuteOutputProps) {
-  return (
-    <div className="pl-4 border-l-2 border-border/30 space-y-2">
-      {isCommandLong && (
-        <pre className="text-xs bg-muted/30 rounded p-2 whitespace-pre-wrap break-all font-mono">
-          {displayCommand}
-        </pre>
-      )}
-      {displayWorkDir && (
-        <div className="text-xs text-muted-foreground">
-          <span className="opacity-60">cwd:</span>{" "}
-          <span className="font-mono" title={workDir}>
-            {displayWorkDir}
-          </span>
-        </div>
-      )}
-      {output?.stdout && (
-        <pre className="text-xs bg-muted/30 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-[200px]">
-          {output.stdout}
-        </pre>
-      )}
-      {output?.stderr && (
-        <pre className="text-xs bg-red-500/10 text-red-600 dark:text-red-400 rounded max-h-[200px] p-2 overflow-x-auto whitespace-pre-wrap">
-          {output.stderr}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-// Threshold beyond which the command is considered "long" and worth surfacing
-// in the expanded view (the header always truncates via CSS regardless).
-const LONG_COMMAND_THRESHOLD = 60;
-
-function isExecuteSuccess(
-  status: ToolExecuteMetadata["status"],
-  output: ShellExecOutput | undefined,
-): boolean {
-  if (status !== "complete") return false;
-  return output?.exit_code === 0 || output?.exit_code === undefined;
-}
-
 function parseExecuteMetadata(comment: Message) {
-  const metadata = comment.metadata as ToolExecuteMetadata | undefined;
-  const status = metadata?.status;
+  const metadata = comment.metadata as ToolCallMetadata | undefined;
+  const status = normalizeToolCallStatus(metadata?.status);
   const shellExec = metadata?.normalized?.shell_exec;
-  const output = shellExec?.output;
-  const workDir = shellExec?.work_dir;
-  const hasOutput = !!(output?.stdout || output?.stderr);
-  const isSuccess = isExecuteSuccess(status, output);
-  return { status, output, workDir, hasOutput, isSuccess };
-}
-
-function CommandHeader({
-  displayCommand,
-  isCommandLong,
-}: {
-  displayCommand: string;
-  isCommandLong: boolean;
-}) {
-  const className = "font-mono text-xs text-muted-foreground truncate min-w-0 flex-1 text-left";
-  if (!isCommandLong) {
-    return <span className={className}>{displayCommand}</span>;
-  }
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button type="button" className={`${className} cursor-pointer bg-transparent border-0 p-0`}>
-          {displayCommand}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent
-        side="bottom"
-        align="start"
-        className="max-w-[min(90vw,640px)] whitespace-pre-wrap break-all font-mono text-xs"
-      >
-        {displayCommand}
-      </TooltipContent>
-    </Tooltip>
-  );
+  return { status, shellExec };
 }
 
 export const ToolExecuteMessage = memo(function ToolExecuteMessage({
   comment,
   worktreePath,
 }: ToolExecuteMessageProps) {
-  const { status, output, workDir, hasOutput, isSuccess } = parseExecuteMetadata(comment);
-  const autoExpanded = status === "running";
-  const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
-  const displayCommand = transformPathsInText(comment.content, worktreePath);
+  const { status, shellExec } = parseExecuteMetadata(comment);
+  const command = shellExec?.command || comment.content;
+  const displayCommand = transformPathsInText(command, worktreePath);
+  const workDir = shellExec?.work_dir;
   const displayWorkDir = workDir ? transformPathsInText(workDir, worktreePath) : null;
-  // Measure after path transform so a long absolute path that gets shortened
-  // to a relative one is correctly treated as short.
-  const isCommandLong = displayCommand.length > LONG_COMMAND_THRESHOLD;
-  const hasExpandableContent = hasOutput || !!workDir || isCommandLong;
 
   return (
-    <ExpandableRow
-      icon={<IconTerminal className="h-4 w-4 text-muted-foreground" />}
-      header={
-        <div className="flex items-center gap-2 text-xs min-w-0">
-          <CommandHeader displayCommand={displayCommand} isCommandLong={isCommandLong} />
-          {!isSuccess && (
-            <span className="shrink-0">
-              <ExecuteStatusIcon status={status} exitCode={output?.exit_code} />
-            </span>
-          )}
+    <div className="flex w-full min-w-0 items-start gap-3 px-2 py-1 -mx-2">
+      <IconTerminal className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex min-w-0 items-start gap-2">
+          <pre
+            className="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-left font-mono text-xs text-muted-foreground"
+            data-testid="tool-execute-command"
+          >
+            {displayCommand}
+          </pre>
+          <ExecuteStatusIcon status={status} exitCode={shellExec?.output?.exit_code} />
         </div>
-      }
-      hasExpandableContent={hasExpandableContent}
-      isExpanded={isExpanded}
-      onToggle={handleToggle}
-    >
-      <ExecuteOutputContent
-        displayCommand={displayCommand}
-        isCommandLong={isCommandLong}
-        displayWorkDir={displayWorkDir}
-        workDir={workDir}
-        output={output}
-      />
-    </ExpandableRow>
+        {displayWorkDir && (
+          <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-xs text-muted-foreground">
+            <span className="opacity-60">cwd:</span>{" "}
+            <span className="font-mono" title={workDir}>
+              {displayWorkDir}
+            </span>
+          </div>
+        )}
+        <ShellOutputDisclosure
+          sessionId={comment.session_id}
+          messageId={comment.id}
+          messageStatus={status}
+          summary={shellExec?.output}
+        />
+      </div>
+    </div>
   );
 });

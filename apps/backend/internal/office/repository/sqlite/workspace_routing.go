@@ -11,6 +11,14 @@ import (
 	"github.com/kandev/kandev/internal/office/routing"
 )
 
+// RoutingTierProfileReference identifies one workspace routing tier that was
+// authored from a source agent profile.
+type RoutingTierProfileReference struct {
+	WorkspaceID string
+	ProviderID  routing.ProviderID
+	Tier        routing.Tier
+}
+
 // GetWorkspaceRouting returns the workspace's routing config. When no
 // row exists yet, the returned config carries the spec defaults:
 // Enabled=false, DefaultTier=balanced, empty order and profile map.
@@ -116,6 +124,82 @@ func defaultWorkspaceRouting() *routing.WorkspaceConfig {
 		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{},
 		TierPerReason:    routing.TierPerReason{},
 	}
+}
+
+// ListRoutingTierReferencesByAgentProfile returns every workspace tier mapping
+// that records profileID as its source. Used by profile deletion to avoid
+// orphaning a tier/profile association.
+func (r *Repository) ListRoutingTierReferencesByAgentProfile(
+	ctx context.Context, profileID string,
+) ([]RoutingTierProfileReference, error) {
+	if profileID == "" {
+		return nil, nil
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT workspace_id, provider_order, provider_profiles
+		FROM office_workspace_routing
+		WHERE provider_profiles LIKE ?
+	`), "%"+profileID+"%")
+	if err != nil {
+		return nil, fmt.Errorf("routing: list tier profile refs: %w", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var refs []RoutingTierProfileReference
+	for rows.Next() {
+		var workspaceID, orderRaw, profsRaw string
+		if err := rows.Scan(&workspaceID, &orderRaw, &profsRaw); err != nil {
+			return nil, fmt.Errorf("routing: scan tier profile refs: %w", err)
+		}
+		var order []routing.ProviderID
+		if err := json.Unmarshal([]byte(orderRaw), &order); err != nil {
+			return nil, fmt.Errorf("routing: decode tier profile order refs: %w", err)
+		}
+		profiles := map[routing.ProviderID]routing.ProviderProfile{}
+		if err := json.Unmarshal([]byte(profsRaw), &profiles); err != nil {
+			return nil, fmt.Errorf("routing: decode tier profile refs: %w", err)
+		}
+		for _, providerID := range order {
+			profile, ok := profiles[providerID]
+			if !ok {
+				continue
+			}
+			for _, tier := range routing.AllTiers {
+				refs = appendTierProfileReference(
+					refs,
+					workspaceID,
+					providerID,
+					tier,
+					profile.ExecutionProfileID(tier),
+					profileID,
+				)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("routing: iterate tier profile refs: %w", err)
+	}
+	return refs, nil
+}
+
+func appendTierProfileReference(
+	refs []RoutingTierProfileReference,
+	workspaceID string,
+	providerID routing.ProviderID,
+	tier routing.Tier,
+	gotProfileID string,
+	wantProfileID string,
+) []RoutingTierProfileReference {
+	if gotProfileID != wantProfileID {
+		return refs
+	}
+	return append(refs, RoutingTierProfileReference{
+		WorkspaceID: workspaceID,
+		ProviderID:  providerID,
+		Tier:        tier,
+	})
 }
 
 // marshalTierPerReason marshals the wake-reason tier policy, normalising

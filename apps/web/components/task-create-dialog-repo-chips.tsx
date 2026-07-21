@@ -1,69 +1,15 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { IconPlus, IconX, IconCode, IconGitBranch, IconGitFork } from "@tabler/icons-react";
-import { cn, formatUserHomePath } from "@/lib/utils";
-import { Badge } from "@kandev/ui/badge";
+import { IconGitFork } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useBranches, type BranchSource } from "@/hooks/domains/workspace/use-repository-branches";
-import type { LocalRepository, Repository } from "@/lib/types/http";
-import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
-import { autoSelectBranch } from "@/components/task-create-dialog-helpers";
-import { scoreBranch } from "@/lib/utils/branch-filter";
-import { scoreRepo } from "@/lib/utils/repo-filter";
-import {
-  Pill,
-  sortBranches,
-  branchToOption,
-  computeBranchPlaceholder,
-  type PillOption,
-} from "@/components/task-create-dialog-pill";
-import { GitHubUrlSection } from "@/components/task-create-dialog-github-url";
+import type { Repository } from "@/lib/types/http";
+import type { DialogFormState } from "@/components/task-create-dialog-types";
+import { RemoteRepoChipsRow } from "@/components/task-create-dialog-remote-repo-chips";
 import { FolderPicker } from "@/components/folder-picker";
 import { SourceModeSwitch } from "@/components/task-create-dialog-source-mode";
-import {
-  computeBranchPrefix,
-  computeBranchTooltip,
-  computeBranchDisabledReason,
-} from "@/components/task-create-dialog-branch-utils";
+import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
 
-function runAutoselect({
-  branches,
-  preferredDefaultBranch,
-  preferredDefaultBranchLoading,
-  onBranchChange,
-}: {
-  branches: Array<{ name: string; type: "local" | "remote"; remote?: string }>;
-  preferredDefaultBranch: string | undefined;
-  preferredDefaultBranchLoading: boolean;
-  onBranchChange: (value: string) => void;
-}) {
-  if (preferredDefaultBranchLoading) return;
-  // Local-executor flow: preferredDefaultBranch is the workspace's current
-  // ref (branch name OR detached-HEAD short SHA). Seed row.branch with it
-  // unconditionally so the chip displays "current: <ref>". When the ref is a
-  // SHA (detached HEAD) it won't appear in the branches list, but falling
-  // through to autoSelectBranch would pick main/master and surface "will
-  // switch to: master", which contradicts what the user actually has checked
-  // out. Sending the SHA back on submit is a no-op because the backend's
-  // skip-when-equal check compares against the same SHA.
-  if (preferredDefaultBranch) {
-    onBranchChange(preferredDefaultBranch);
-    return;
-  }
-  autoSelectBranch(branches, onBranchChange);
-}
-
-/**
- * Chip row for the task-create dialog. Renders one chip per row in
- * `fs.repositories`, plus a trailing "+" to add another. Each chip is two
- * pills (repo, branch) and a remove (×). All chips are equivalent — there
- * is no "primary" — and any row can hold either a workspace repo or a
- * discovered on-machine path.
- *
- * In GitHub URL mode the chips are replaced by an inline URL input pill;
- * the trailing toggle flips between the two modes.
- */
 type RepoChipsRowProps = {
   fs: DialogFormState;
   repositories: Repository[];
@@ -78,9 +24,8 @@ type RepoChipsRowProps = {
    */
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
-  /** GitHub URL flow lives alongside the chips so users can switch in place. */
-  onToggleGitHubUrl?: () => void;
-  onGitHubUrlChange?: (value: string) => void;
+  /** Toggles the Remote tab on/off. Remote-mode rows live in `fs.remoteRepos`. */
+  onToggleRemote?: () => void;
   /**
    * Fresh-branch toggle props. When `freshBranchAvailable` is true the toggle
    * renders inline at the right edge of the chip row so it sits next to the
@@ -102,6 +47,8 @@ type RepoChipsRowProps = {
   /** "No repository" mode: replace the chip row with a folder picker. */
   onToggleNoRepository?: () => void;
   onWorkspacePathChange?: (value: string) => void;
+  lastUsedBranch?: string | null;
+  userSettingsLoaded?: boolean;
 };
 
 export function RepoChipsRow({
@@ -111,14 +58,15 @@ export function RepoChipsRow({
   workspaceId,
   onRowRepositoryChange,
   onRowBranchChange,
-  onToggleGitHubUrl,
-  onGitHubUrlChange,
+  onToggleRemote,
   freshBranchAvailable,
   freshBranchEnabled,
   onToggleFreshBranch,
   isLocalExecutor,
   onToggleNoRepository,
   onWorkspacePathChange,
+  lastUsedBranch,
+  userSettingsLoaded,
 }: RepoChipsRowProps) {
   // Local executor branch behavior:
   //   - chip is clickable (user can switch to any existing branch on disk)
@@ -133,14 +81,15 @@ export function RepoChipsRow({
   // Other executors: branch is fully editable (no special pre-fill).
   const branchLocked = false;
   // No early returns above hooks. URL mode and started-state checks happen below.
-  const usedIds = useMemo(() => collectUsedRepoIds(fs.repositories), [fs.repositories]);
   if (isTaskStarted) return null;
 
-  const remainingCount = repositories.filter((r) => !usedIds.has(r.id)).length;
-  // Add stays enabled when no workspace repos are left, since users can also
-  // pick from discovered on-machine paths.
+  // Multi-branch support: the same repo can appear multiple times on a task
+  // when each row picks a different branch. Uniqueness is enforced on the
+  // (repository_id, checkout_branch) pair at submit time by the backend, so
+  // the dropdown never filters repos out — picking "frontend" twice and
+  // assigning two different branches is a supported flow.
   const hasDiscovered = fs.discoveredRepositories.length > 0;
-  const canAddMore = remainingCount > 0 || hasDiscovered;
+  const canAddMore = repositories.length > 0 || hasDiscovered;
   const addHint = computeAddHint(canAddMore, repositories.length);
 
   return (
@@ -161,14 +110,15 @@ export function RepoChipsRow({
         freshBranchEnabled={freshBranchEnabled}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
-        onGitHubUrlChange={onGitHubUrlChange}
         onToggleFreshBranch={onToggleFreshBranch}
         onWorkspacePathChange={onWorkspacePathChange}
+        lastUsedBranch={lastUsedBranch}
+        userSettingsLoaded={userSettingsLoaded}
       />
       <SourceModeSwitch
-        useGitHubUrl={fs.useGitHubUrl}
+        useRemote={fs.useRemote}
         noRepository={fs.noRepository}
-        onToggleGitHubUrl={onToggleGitHubUrl}
+        onToggleRemote={onToggleRemote}
         onToggleNoRepository={onToggleNoRepository}
       />
     </div>
@@ -187,9 +137,10 @@ function ModeBody({
   freshBranchEnabled,
   onRowRepositoryChange,
   onRowBranchChange,
-  onGitHubUrlChange,
   onToggleFreshBranch,
   onWorkspacePathChange,
+  lastUsedBranch,
+  userSettingsLoaded,
 }: {
   fs: DialogFormState;
   repositories: Repository[];
@@ -202,9 +153,10 @@ function ModeBody({
   freshBranchEnabled?: boolean;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
-  onGitHubUrlChange?: (value: string) => void;
   onToggleFreshBranch?: (enabled: boolean) => void;
   onWorkspacePathChange?: (value: string) => void;
+  lastUsedBranch?: string | null;
+  userSettingsLoaded?: boolean;
 }) {
   if (fs.noRepository) {
     return (
@@ -215,30 +167,36 @@ function ModeBody({
       />
     );
   }
-  if (fs.useGitHubUrl) {
+  if (fs.useRemote) {
     return (
-      <GitHubUrlSection
-        githubUrl={fs.githubUrl}
-        githubUrlError={fs.githubUrlError}
-        githubBranch={fs.githubBranch}
-        githubBranches={fs.githubBranches}
-        githubBranchesLoading={fs.githubBranchesLoading}
-        onGitHubUrlChange={onGitHubUrlChange}
-        onGitHubBranchChange={fs.setGitHubBranch}
+      <RemoteRepoChipsRow
+        fs={fs}
+        onUpdateRow={fs.updateRemoteRepo}
+        onAddRow={fs.addRemoteRepo}
+        onRemoveRow={fs.removeRemoteRepo}
+        workspaceId={workspaceId ?? undefined}
       />
     );
   }
   return (
-    <ChipsList
-      fs={fs}
+    <WorkspaceRepoChips
+      rows={fs.repositories}
       repositories={repositories}
+      discoveredRepositories={fs.discoveredRepositories}
       workspaceId={workspaceId}
       branchLocked={branchLocked}
       isLocalExecutor={isLocalExecutor}
+      currentLocalBranch={fs.currentLocalBranch}
+      currentLocalBranchLoading={fs.currentLocalBranchLoading}
+      freshBranchEnabled={fs.freshBranchEnabled}
       canAddMore={canAddMore}
       addHint={addHint}
+      onAdd={fs.addRepository}
+      onRemove={fs.removeRepository}
       onRowRepositoryChange={onRowRepositoryChange}
       onRowBranchChange={onRowBranchChange}
+      lastUsedBranch={lastUsedBranch}
+      userSettingsLoaded={userSettingsLoaded}
       freshBranchToggle={
         // Multi-repo runs use worktrees, so the existing-vs-fork choice
         // is irrelevant — only surface the toggle for single-repo flows.
@@ -247,89 +205,6 @@ function ModeBody({
         ) : null
       }
     />
-  );
-}
-
-/**
- * Renders the list of repo chips plus the trailing "+ add repository"
- * button. Extracted from RepoChipsRow so the parent stays under the
- * function-length cap; logic is unchanged.
- */
-function ChipsList({
-  fs,
-  repositories,
-  workspaceId,
-  branchLocked,
-  isLocalExecutor,
-  canAddMore,
-  addHint,
-  freshBranchToggle,
-  onRowRepositoryChange,
-  onRowBranchChange,
-}: {
-  fs: DialogFormState;
-  repositories: Repository[];
-  workspaceId: string | null;
-  branchLocked: boolean;
-  isLocalExecutor: boolean;
-  canAddMore: boolean;
-  addHint?: string;
-  freshBranchToggle?: React.ReactNode;
-  onRowRepositoryChange: (key: string, value: string) => void;
-  onRowBranchChange: (key: string, value: string) => void;
-}) {
-  return (
-    <>
-      {fs.repositories.map((row) => (
-        <RepoChip
-          key={row.key}
-          row={row}
-          workspaceId={workspaceId}
-          repositories={repositories}
-          discoveredRepositories={fs.discoveredRepositories}
-          excludedRepoIds={collectUsedRepoIds(fs.repositories, row.key)}
-          branchLocked={branchLocked}
-          // For local-executor rows, seed row.branch with the workspace's
-          // current branch via this prop. Non-local rows leave it undefined
-          // and fall back to the existing last-used / preferred-default
-          // autoselect path.
-          preferredDefaultBranch={isLocalExecutor ? fs.currentLocalBranch : undefined}
-          preferredDefaultBranchLoading={isLocalExecutor ? fs.currentLocalBranchLoading : false}
-          branchPrefix={computeBranchPrefix({
-            isLocalExecutor,
-            rowBranch: row.branch,
-            currentLocalBranch: fs.currentLocalBranch,
-            freshBranchEnabled: !!fs.freshBranchEnabled,
-          })}
-          onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
-          onBranchChange={(value) => onRowBranchChange(row.key, value)}
-          onRemove={() => fs.removeRepository(row.key)}
-        />
-      ))}
-      {freshBranchToggle}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex">
-            <button
-              type="button"
-              onClick={fs.addRepository}
-              disabled={!canAddMore}
-              aria-label="Add repository"
-              data-testid="add-repository"
-              className={cn(
-                "h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground",
-                canAddMore
-                  ? "hover:bg-muted hover:text-foreground cursor-pointer"
-                  : "opacity-40 cursor-not-allowed",
-              )}
-            >
-              <IconPlus className="h-3.5 w-3.5" />
-            </button>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{addHint ?? "Add another repository"}</TooltipContent>
-      </Tooltip>
-    </>
   );
 }
 
@@ -376,331 +251,4 @@ function computeAddHint(canAddMore: boolean, workspaceRepoCount: number): string
   if (canAddMore) return undefined;
   if (workspaceRepoCount === 0) return "No repositories available in this workspace";
   return "All workspace repositories are already added";
-}
-
-/** Build the set of repo identifiers (workspace id or path) currently in use. */
-function collectUsedRepoIds(rows: TaskRepoRow[], exceptKey?: string): Set<string> {
-  const ids = new Set<string>();
-  for (const r of rows) {
-    if (r.key === exceptKey) continue;
-    if (r.repositoryId) ids.add(r.repositoryId);
-    if (r.localPath) ids.add(r.localPath);
-  }
-  return ids;
-}
-
-type RepoChipProps = {
-  row: TaskRepoRow;
-  /** Required for path-based branch loading on discovered rows. */
-  workspaceId: string | null;
-  repositories: Repository[];
-  discoveredRepositories: LocalRepository[];
-  /** Repo IDs/paths to filter out of the dropdown (already in use elsewhere). */
-  excludedRepoIds: Set<string>;
-  /**
-   * Lock the branch pill regardless of branch availability. Used for the
-   * local executor where the user's actual checkout dictates the branch
-   * (and changing it would mutate their working tree). Fresh-branch mode
-   * unlocks it because we're explicitly creating a new branch from a base.
-   */
-  branchLocked?: boolean;
-  /**
-   * When set, seed row.branch with this value (for an empty row). Used by
-   * the local-executor flow to surface the workspace's current ref — either
-   * a branch name like "main" or, on detached HEAD, the short commit SHA
-   * returned by the backend. The chip displays it verbatim ("current: main"
-   * or "current: 4fbc5d7"); on submit the backend's skip-when-equal check
-   * matches the same SHA so it's a no-op.
-   *
-   * When unset, the chip falls back to the existing last-used / preferred-
-   * default autoselect (main / master / develop, etc.).
-   */
-  preferredDefaultBranch?: string;
-  /**
-   * True while preferredDefaultBranch is being resolved. Renders a
-   * "Loading branch…" placeholder so the chip doesn't briefly show an empty
-   * state in the window between dialog open and local-status resolving.
-   */
-  preferredDefaultBranchLoading?: boolean;
-  /**
-   * Muted text shown before the branch value to qualify intent:
-   *   - "current: "        — local exec, picked branch == workspace current
-   *   - "will switch to: " — local exec, picked branch != workspace current
-   *   - "from: "           — worktree / non-local exec (picked branch is the base)
-   * Empty when there's no branch value yet (chip shows the "branch"
-   * placeholder unprefixed).
-   */
-  branchPrefix?: string;
-  onRepositoryChange: (value: string) => void;
-  onBranchChange: (value: string) => void;
-  onRemove: () => void;
-};
-
-function useRepoChipData({
-  row,
-  workspaceId,
-  repositories,
-  discoveredRepositories,
-  excludedRepoIds,
-  onBranchChange,
-  preferredDefaultBranch,
-  preferredDefaultBranchLoading,
-}: Pick<
-  RepoChipProps,
-  | "row"
-  | "workspaceId"
-  | "repositories"
-  | "discoveredRepositories"
-  | "excludedRepoIds"
-  | "onBranchChange"
-  | "preferredDefaultBranch"
-  | "preferredDefaultBranchLoading"
->) {
-  const filteredRepos = useMemo(
-    () => repositories.filter((r) => !excludedRepoIds.has(r.id) || r.id === row.repositoryId),
-    [repositories, excludedRepoIds, row.repositoryId],
-  );
-  // Discovered (on-machine) repos not yet imported into the workspace. Drop
-  // ones whose path is already a workspace repo so the dropdown doesn't show
-  // the same folder twice.
-  const filteredDiscovered = useMemo(() => {
-    const workspaceRepoPaths = new Set(
-      filteredRepos
-        .map((r) => r.local_path)
-        .filter(Boolean)
-        .map((path: string) => normalizeRepoPath(path)),
-    );
-    return discoveredRepositories.filter(
-      (r) =>
-        !workspaceRepoPaths.has(normalizeRepoPath(r.path)) &&
-        (!excludedRepoIds.has(r.path) || r.path === row.localPath),
-    );
-  }, [filteredRepos, discoveredRepositories, excludedRepoIds, row.localPath]);
-
-  // One hook for both row sources (workspace repo by id OR on-machine path).
-  // Backend resolves either to an absolute path; the Zustand cache keys
-  // path-based entries with a synthetic key so workspace + discovered share
-  // one slice (and the same fetch dedupe).
-  const branchSource = useMemo<BranchSource | null>(() => {
-    if (!workspaceId) return null;
-    if (row.repositoryId) {
-      return { kind: "id", workspaceId, repositoryId: row.repositoryId };
-    }
-    if (row.localPath) {
-      return { kind: "path", workspaceId, path: row.localPath };
-    }
-    return null;
-  }, [workspaceId, row.repositoryId, row.localPath]);
-  const {
-    branches,
-    isLoading: branchesLoading,
-    refresh: refreshBranches,
-  } = useBranches(branchSource, !!branchSource);
-
-  // Once branches load for this row, pre-fill the branch pill. For
-  // local-executor rows we prefer the workspace's actual current branch
-  // (preferredDefaultBranch) so the chip shows what's on disk and the
-  // submit always carries an explicit branch. Otherwise fall back to the
-  // user's last-used branch / main / master / develop. Skipped if the user
-  // already picked a branch on this row.
-  //
-  // The `preferredDefaultBranchLoading` gate closes a race: without it,
-  // autoSelectBranch's last-used localStorage pick (e.g. "origin/master")
-  // would land in row.branch before currentLocalBranch resolved, then the
-  // row.branch guard above would short-circuit forever and the chip would
-  // render "will switch to: origin/master" even though the user just opened
-  // the dialog. With the gate, autoselect waits until local-status finishes
-  // so the current-branch preference gets first crack at row.branch.
-  useEffect(() => {
-    if (!branchSource || branchesLoading || branches.length === 0 || row.branch) return;
-    runAutoselect({
-      branches,
-      preferredDefaultBranch,
-      preferredDefaultBranchLoading: !!preferredDefaultBranchLoading,
-      onBranchChange,
-    });
-  }, [
-    branchSource,
-    branchesLoading,
-    branches,
-    row.branch,
-    onBranchChange,
-    preferredDefaultBranch,
-    preferredDefaultBranchLoading,
-  ]);
-
-  const repoOptions: PillOption[] = useMemo(
-    () => [
-      ...filteredRepos.map((r) => ({
-        value: r.id,
-        label: r.name,
-        keywords: [r.name, r.local_path, formatUserHomePath(r.local_path)].filter(
-          (s): s is string => !!s,
-        ),
-        renderLabel: () => renderWorkspaceRepoOption(r),
-      })),
-      ...filteredDiscovered.map((r) => ({
-        value: r.path,
-        label: leafSegment(r.path),
-        keywords: [r.path, formatUserHomePath(r.path)],
-        renderLabel: () => renderDiscoveredRepoOption(r.path),
-      })),
-    ],
-    [filteredRepos, filteredDiscovered],
-  );
-  const branchOptions: PillOption[] = useMemo(
-    () => sortBranches(branches).map(branchToOption),
-    [branches],
-  );
-  return { repoOptions, branchOptions, branchesLoading, refreshBranches };
-}
-
-function computeRepoChipDisplay(
-  row: TaskRepoRow,
-  repositories: Repository[],
-  discoveredRepositories: LocalRepository[],
-) {
-  const workspaceRepo = repositories.find((r) => r.id === row.repositoryId);
-  const discoveredRepo = discoveredRepositories.find((r) => r.path === row.localPath);
-  const repoLabel = workspaceRepo?.name ?? discoveredRepo?.path?.split("/").pop() ?? "";
-  const repoPath = workspaceRepo?.local_path || discoveredRepo?.path || "";
-  const repoTooltip = repoPath ? `Repository · ${formatUserHomePath(repoPath)}` : "Repository";
-  return { repoLabel, repoTooltip };
-}
-
-function RepoChip({
-  row,
-  workspaceId,
-  repositories,
-  discoveredRepositories,
-  excludedRepoIds,
-  branchLocked,
-  preferredDefaultBranch,
-  preferredDefaultBranchLoading,
-  branchPrefix,
-  onRepositoryChange,
-  onBranchChange,
-  onRemove,
-}: RepoChipProps) {
-  const { repoOptions, branchOptions, branchesLoading, refreshBranches } = useRepoChipData({
-    row,
-    workspaceId,
-    repositories,
-    discoveredRepositories,
-    excludedRepoIds,
-    onBranchChange,
-    preferredDefaultBranch,
-    preferredDefaultBranchLoading,
-  });
-  const { repoLabel, repoTooltip } = computeRepoChipDisplay(
-    row,
-    repositories,
-    discoveredRepositories,
-  );
-  // Hide the value while the preferred-default-branch fetch is in flight to
-  // avoid the chip briefly rendering an empty placeholder before autoselect
-  // seeds row.branch with the workspace's current branch.
-  const branchValue = preferredDefaultBranchLoading ? "" : row.branch;
-  const hasRepo = !!(row.repositoryId || row.localPath);
-  const branchPlaceholder = computeBranchPlaceholder(
-    hasRepo,
-    branchesLoading || !!preferredDefaultBranchLoading,
-    branchOptions.length,
-  );
-
-  return (
-    <span
-      className="inline-flex items-center rounded-md border border-input bg-input/20 dark:bg-input/30 pr-0.5"
-      data-testid="repo-chip"
-      data-repository-id={row.repositoryId || row.localPath || ""}
-    >
-      <Pill
-        icon={<IconCode className="h-3 w-3 shrink-0 text-muted-foreground" />}
-        value={repoLabel}
-        placeholder="repository"
-        options={repoOptions}
-        onSelect={onRepositoryChange}
-        searchPlaceholder="Search repositories..."
-        emptyMessage="No repositories"
-        testId="repo-chip-trigger"
-        tooltip={repoTooltip}
-        filter={scoreRepo}
-        flat
-      />
-      <Pill
-        icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
-        value={branchValue}
-        placeholder={branchPlaceholder}
-        prefix={branchPrefix}
-        options={branchOptions}
-        onSelect={onBranchChange}
-        disabled={branchLocked || !hasRepo || branchesLoading || branchOptions.length === 0}
-        disabledReason={computeBranchDisabledReason({
-          branchLocked: !!branchLocked,
-          hasRepo,
-          branchesLoading,
-          optionCount: branchOptions.length,
-        })}
-        searchPlaceholder="Search branches..."
-        emptyMessage="No branches"
-        testId="branch-chip-trigger"
-        tooltip={computeBranchTooltip(branchPrefix)}
-        onRefresh={refreshBranches}
-        refreshing={branchesLoading}
-        filter={scoreBranch}
-        flat
-      />
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label="Remove repository"
-            className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-muted/60 cursor-pointer"
-            data-testid="remove-repo-chip"
-          >
-            <IconX className="h-3 w-3" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>Remove repository</TooltipContent>
-      </Tooltip>
-    </span>
-  );
-}
-
-function normalizeRepoPath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+$/g, "");
-}
-
-function renderWorkspaceRepoOption(repo: Repository) {
-  const display = repo.local_path ? formatUserHomePath(repo.local_path) : "";
-  return (
-    <span className="flex min-w-0 flex-1 flex-col overflow-hidden" title={display || repo.name}>
-      <span className="truncate">{repo.name}</span>
-      {display ? (
-        <span className="truncate text-[11px] text-muted-foreground">{display}</span>
-      ) : null}
-    </span>
-  );
-}
-
-function renderDiscoveredRepoOption(path: string) {
-  const display = formatUserHomePath(path);
-  return (
-    <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden" title={display}>
-      <span className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <span className="truncate">{leafSegment(path)}</span>
-        <span className="truncate text-[11px] text-muted-foreground">{display}</span>
-      </span>
-      <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
-        on disk
-      </Badge>
-    </span>
-  );
-}
-
-function leafSegment(path: string): string {
-  const cleaned = path.replace(/\\/g, "/").replace(/\/+$/g, "");
-  const idx = cleaned.lastIndexOf("/");
-  return idx >= 0 ? cleaned.slice(idx + 1) : cleaned;
 }

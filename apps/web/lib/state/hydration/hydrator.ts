@@ -88,11 +88,29 @@ function bridgeSidebarViewsFromUserSettings(
   userSettings: Partial<AppState["userSettings"]>,
 ): void {
   const serverViews = userSettings.sidebarViews;
-  if (!serverViews || serverViews.length === 0) return;
-  const normalized = serverViews.map(migrateView);
-  draft.sidebarViews.views = normalized;
-  if (!normalized.some((v) => v.id === draft.sidebarViews.activeViewId)) {
-    draft.sidebarViews.activeViewId = normalized[0].id;
+  const normalized = serverViews?.map(migrateView) ?? [];
+  if (normalized.length > 0) {
+    draft.sidebarViews.views = normalized;
+  }
+  if (
+    userSettings.sidebarActiveViewId &&
+    draft.sidebarViews.views.some((v) => v.id === userSettings.sidebarActiveViewId)
+  ) {
+    draft.sidebarViews.activeViewId = userSettings.sidebarActiveViewId;
+  } else if (
+    draft.sidebarViews.views.length > 0 &&
+    !draft.sidebarViews.views.some((v) => v.id === draft.sidebarViews.activeViewId)
+  ) {
+    draft.sidebarViews.activeViewId = draft.sidebarViews.views[0].id;
+  }
+  if (userSettings.sidebarDraft !== undefined) {
+    draft.sidebarViews.draft = userSettings.sidebarDraft;
+  }
+  if (userSettings.sidebarTaskPrefs) {
+    if (draft.sidebarTaskPrefs.syncPending) return;
+    const nextPrefs = { ...userSettings.sidebarTaskPrefs };
+    if (draft.sidebarTaskPrefs.syncError) nextPrefs.syncError = draft.sidebarTaskPrefs.syncError;
+    draft.sidebarTaskPrefs = nextPrefs;
   }
 }
 
@@ -219,7 +237,7 @@ export function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): voi
       const storedNames = getStoredQuickChatNames();
       draft.quickChat.sessions = state.quickChat.sessions.map((s) => {
         const local = storedNames[s.sessionId];
-        return local ? { ...s, name: local } : s;
+        return { ...s, kind: s.kind ?? "chat", ...(local ? { name: local } : {}) };
       });
       // Validate activeSessionId exists in sessions after merge
       if (
@@ -289,6 +307,9 @@ export function hydrateState(
 function hydrateGitHub(draft: Draft<AppState>, state: Partial<AppState>): void {
   if (state.githubStatus) mergeWithLoading(draft.githubStatus, state.githubStatus);
   if (state.taskPRs) deepMerge(draft.taskPRs, state.taskPRs);
+  if (state.azureDevOpsTaskPullRequests) {
+    deepMerge(draft.azureDevOpsTaskPullRequests, state.azureDevOpsTaskPullRequests);
+  }
   if (state.prWatches) mergeWithLoading(draft.prWatches, state.prWatches);
   if (state.reviewWatches) mergeWithLoading(draft.reviewWatches, state.reviewWatches);
 }

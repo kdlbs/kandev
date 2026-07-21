@@ -2,6 +2,7 @@
 package lifecycle
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -9,16 +10,18 @@ import (
 
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
 type AgentEventPayload struct {
-	AgentExecutionID string     `json:"agent_execution_id"`
-	TaskID           string     `json:"task_id"`
-	SessionID        string     `json:"session_id,omitempty"`
-	AgentProfileID   string     `json:"agent_profile_id"`
-	ContainerID      string     `json:"container_id,omitempty"`
-	Status           string     `json:"status"`
-	StartedAt        time.Time  `json:"started_at"`
-	FinishedAt       *time.Time `json:"finished_at,omitempty"`
-	ErrorMessage     string     `json:"error_message,omitempty"`
-	ExitCode         *int       `json:"exit_code,omitempty"`
+	AgentExecutionID   string     `json:"agent_execution_id"`
+	TaskID             string     `json:"task_id"`
+	SessionID          string     `json:"session_id,omitempty"`
+	AgentProfileID     string     `json:"agent_profile_id"`
+	ExecutionProfileID string     `json:"execution_profile_id,omitempty"`
+	ContainerID        string     `json:"container_id,omitempty"`
+	Status             string     `json:"status"`
+	StartedAt          time.Time  `json:"started_at"`
+	FinishedAt         *time.Time `json:"finished_at,omitempty"`
+	ErrorMessage       string     `json:"error_message,omitempty"`
+	ExitCode           *int       `json:"exit_code,omitempty"`
+	PromptGeneration   uint64     `json:"prompt_generation,omitempty"`
 }
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).
@@ -31,6 +34,12 @@ type AgentctlEventPayload struct {
 	WorktreeID        string `json:"worktree_id,omitempty"`
 	WorktreePath      string `json:"worktree_path,omitempty"`
 	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	// TaskWorkspacePath is the task root that contains every per-repo
+	// worktree as a sibling subdir, populated when the event signals a
+	// sibling worktree being added (multi-branch add_branch flow) rather
+	// than the initial session ready. The frontend uses this to repoint the
+	// file browser at the task root once the task becomes multi-branch.
+	TaskWorkspacePath string `json:"task_workspace_path,omitempty"`
 }
 
 // ACPSessionCreatedPayload is the payload when an ACP session is created.
@@ -155,6 +164,14 @@ type AgentStreamEventData struct {
 	CurrentModelID string                     `json:"current_model_id,omitempty"`
 	SessionModels  []streams.SessionModelInfo `json:"session_models,omitempty"`
 	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+	// ConfigBaselineCandidate is an authoritative startup response snapshot.
+	// ConfigOptions remains the latest live provider state.
+	ConfigBaselineCandidate []streams.ConfigOption `json:"config_baseline_candidate,omitempty"`
+
+	// Session info (from "session_info" event)
+	SessionTitle     string         `json:"session_title,omitempty"`
+	SessionUpdatedAt string         `json:"session_updated_at,omitempty"`
+	SessionMeta      map[string]any `json:"session_meta,omitempty"`
 
 	// Usage (attached to "complete" event)
 	Usage *streams.PromptUsage `json:"usage,omitempty"`
@@ -474,11 +491,58 @@ type SessionModelsEventPayload struct {
 	CurrentModelID string                     `json:"current_model_id"`
 	Models         []streams.SessionModelInfo `json:"models"`
 	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
-	Timestamp      string                     `json:"timestamp"`
+	// ConfigBaseline is the persisted ID/value projection used by clients to
+	// compare the current ConfigOptions without duplicating provider metadata.
+	ConfigBaseline map[string]string `json:"config_baseline,omitempty"`
+	Timestamp      string            `json:"timestamp"`
+}
+
+// SessionModelsSnapshot is the persisted provider-derived state needed to
+// hydrate the task model selector before live session events reconnect.
+type SessionModelsSnapshot struct {
+	CurrentModelID string                     `json:"current_model_id"`
+	Models         []streams.SessionModelInfo `json:"models"`
+	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+}
+
+// LoadSessionModelsSnapshot decodes typed and JSON-rehydrated metadata values.
+func LoadSessionModelsSnapshot(raw any) (SessionModelsSnapshot, bool) {
+	if raw == nil {
+		return SessionModelsSnapshot{}, false
+	}
+	if snapshot, ok := raw.(SessionModelsSnapshot); ok {
+		return snapshot, snapshot.CurrentModelID != "" || len(snapshot.Models) > 0 || len(snapshot.ConfigOptions) > 0
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return SessionModelsSnapshot{}, false
+	}
+	var snapshot SessionModelsSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return SessionModelsSnapshot{}, false
+	}
+	return snapshot, snapshot.CurrentModelID != "" || len(snapshot.Models) > 0 || len(snapshot.ConfigOptions) > 0
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).
 func (p SessionModelsEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// SessionInfoEventPayload is the payload for ACP session info updates.
+type SessionInfoEventPayload struct {
+	TaskID           string         `json:"task_id"`
+	SessionID        string         `json:"session_id"`
+	AgentID          string         `json:"agent_id"`
+	ACPSessionID     string         `json:"acp_session_id,omitempty"`
+	SessionTitle     string         `json:"session_title,omitempty"`
+	SessionUpdatedAt string         `json:"session_updated_at,omitempty"`
+	SessionMeta      map[string]any `json:"session_meta,omitempty"`
+	Timestamp        string         `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p SessionInfoEventPayload) GetSessionID() string {
 	return p.SessionID
 }
 

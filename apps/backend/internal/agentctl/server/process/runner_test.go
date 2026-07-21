@@ -2,11 +2,15 @@ package process
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func newTestLogger(t *testing.T) *logger.Logger {
@@ -18,6 +22,25 @@ func newTestLogger(t *testing.T) *logger.Logger {
 		t.Fatalf("failed to create logger: %v", err)
 	}
 	return log
+}
+
+func newObservedTestLogger(t *testing.T) (*logger.Logger, *observer.ObservedLogs) {
+	t.Helper()
+	core, observed := observer.New(zapcore.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("failed to create observed logger: %v", err)
+	}
+	return log, observed
+}
+
+func observedLogsContain(logs *observer.ObservedLogs, message string) bool {
+	for _, entry := range logs.All() {
+		if entry.Message == message {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRingBufferTrimsOldest(t *testing.T) {
@@ -77,6 +100,139 @@ func TestProcessRunnerCapturesOutput(t *testing.T) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatal("process output not captured in time")
+}
+
+func TestProcessRunnerStopLogsSignalAttempts(t *testing.T) {
+	log, observed := newObservedTestLogger(t)
+	runner := NewProcessRunner(nil, log, 2*1024*1024)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd, env := fixtureShellExec("sleep 30")
+	info, err := runner.Start(ctx, StartProcessRequest{
+		SessionID:  "session-1",
+		Kind:       "dev",
+		Command:    cmd,
+		Env:        env,
+		WorkingDir: "",
+	})
+	if err != nil {
+		t.Fatalf("failed to start process: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_ = runner.Stop(cleanupCtx, StopProcessRequest{ProcessID: info.ID})
+	})
+
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	stopCancel()
+	if err := runner.Stop(stopCtx, StopProcessRequest{ProcessID: info.ID}); err != nil {
+		t.Fatalf("failed to stop process: %v", err)
+	}
+
+	for _, message := range []string{
+		"workspace process stop requested",
+		"workspace process interrupt requested",
+		"workspace process group SIGKILL requested",
+	} {
+		if !observedLogsContain(observed, message) {
+			t.Fatalf("expected debug log %q, got %#v", message, observed.All())
+		}
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := runner.Get(info.ID, false); !ok {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("process was not removed after stop")
+}
+
+func TestProcessRunnerStopAllAndWaitBlocksUntilReaped(t *testing.T) {
+	runner := NewProcessRunner(nil, newTestLogger(t), 1024)
+	proc := &commandProcess{
+		info:       ProcessInfo{ID: "blocked-reap"},
+		stopSignal: make(chan struct{}),
+		done:       make(chan struct{}),
+	}
+	runner.processes[proc.info.ID] = proc
+
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- runner.StopAllAndWait(context.Background()) }()
+	<-proc.stopSignal
+	select {
+	case err := <-stopDone:
+		t.Fatalf("StopAllAndWait() returned before reap: %v", err)
+	default:
+	}
+
+	close(proc.done)
+	if err := <-stopDone; err != nil {
+		t.Fatalf("StopAllAndWait() error = %v", err)
+	}
+}
+
+func TestProcessRunnerStopAllAndWaitSkipsCompletedReap(t *testing.T) {
+	runner := NewProcessRunner(nil, newTestLogger(t), 1024)
+	done := make(chan struct{})
+	close(done)
+	proc := &commandProcess{
+		info:       ProcessInfo{ID: "completed-reap"},
+		stopSignal: make(chan struct{}),
+		done:       done,
+		pgid:       424243,
+	}
+	runner.processes[proc.info.ID] = proc
+	reapChecks := 0
+	runner.groupAliveFn = func(int) bool {
+		reapChecks++
+		return false
+	}
+
+	if err := runner.StopAllAndWait(context.Background()); err != nil {
+		t.Fatalf("StopAllAndWait() error = %v", err)
+	}
+	if reapChecks != 0 {
+		t.Fatalf("process group rechecked %d times after completed reap", reapChecks)
+	}
+}
+
+func TestProcessRunnerStopAllAndWaitRetainsLiveProcessGroupForRetry(t *testing.T) {
+	runner := NewProcessRunner(nil, newTestLogger(t), 1024)
+	done := make(chan struct{})
+	close(done)
+	proc := &commandProcess{
+		info:       ProcessInfo{ID: "live-process-group"},
+		stopSignal: make(chan struct{}),
+		done:       done,
+		pgid:       424244,
+		reapErr:    errors.New("initial reap failed"),
+	}
+	runner.processes[proc.info.ID] = proc
+	groupAlive := true
+	runner.groupAliveFn = func(int) bool { return groupAlive }
+	runner.terminateGroupFn = func(int) error { return nil }
+	runner.killGroupFn = func(int) error { return nil }
+	runner.waitGroupExitFn = func(context.Context, int) bool { return !groupAlive }
+
+	err := runner.StopAllAndWait(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "remains alive") {
+		t.Fatalf("StopAllAndWait() error = %v, want live-group error", err)
+	}
+	if _, ok := runner.Get(proc.info.ID, false); !ok {
+		t.Fatal("runner discarded process-group ownership after reap failure")
+	}
+
+	groupAlive = false
+	if err := runner.StopAllAndWait(context.Background()); err != nil {
+		t.Fatalf("StopAllAndWait() retry error = %v", err)
+	}
+	if _, ok := runner.Get(proc.info.ID, false); ok {
+		t.Fatal("runner retained process after group reap succeeded")
+	}
 }
 
 func TestStripANSI(t *testing.T) {
@@ -227,4 +383,35 @@ func TestMergeEnv_FiltersNpmVars(t *testing.T) {
 	if resultMap["CUSTOM_VAR"] != "custom_value" {
 		t.Error("CUSTOM_VAR should have been added")
 	}
+}
+
+func TestMergeEnvWithStrip_RemovesDeclaredParentAndCustomVars(t *testing.T) {
+	t.Setenv("ACP_BACKEND", "windsurf")
+	t.Setenv("TEST_KEEP_ME", "yes")
+
+	result := mergeEnvWithStrip(map[string]string{
+		"ACP_BACKEND": "custom",
+		"CUSTOM_VAR":  "custom_value",
+	}, []string{"ACP_BACKEND"})
+
+	resultMap := envSliceToMap(result)
+	if _, exists := resultMap["ACP_BACKEND"]; exists {
+		t.Fatalf("ACP_BACKEND should have been stripped, got %q", resultMap["ACP_BACKEND"])
+	}
+	if resultMap["TEST_KEEP_ME"] != "yes" {
+		t.Fatalf("TEST_KEEP_ME should have been kept, got %q", resultMap["TEST_KEEP_ME"])
+	}
+	if resultMap["CUSTOM_VAR"] != "custom_value" {
+		t.Fatalf("CUSTOM_VAR should have been added, got %q", resultMap["CUSTOM_VAR"])
+	}
+}
+
+func envSliceToMap(env []string) map[string]string {
+	out := make(map[string]string)
+	for _, entry := range env {
+		if eq := strings.IndexByte(entry, '='); eq >= 0 {
+			out[entry[:eq]] = entry[eq+1:]
+		}
+	}
+	return out
 }

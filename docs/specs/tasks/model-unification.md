@@ -365,6 +365,17 @@ preserved.
   binds to `task_sessions.current_execution_id` and shows live state.
   When the execution ends, the dockview renders dormant.
 
+- **GIVEN** advanced mode is showing an unpinned `IDLE` session,
+  **WHEN** a workflow transition starts a different session for the
+  same task, **THEN** the dockview selects the newly started session.
+  An explicitly selected live session remains selected.
+
+- **GIVEN** advanced mode is showing a parked `IDLE` session, **WHEN**
+  the user changes its model, mode, or dynamic runtime option before
+  sending the next message, **THEN** the selection is persisted and
+  applied when the agent process resumes. A running session applies the
+  same selection immediately and persists it for future recovery.
+
 ## Out of scope
 
 - Per-workspace strategy lock UI. The unified model serves mixed

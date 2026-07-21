@@ -2,7 +2,10 @@ import { useEffect, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { createDebugLogger } from "@/lib/debug/log";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+
+const debugSub = createDebugLogger("git-status:subscribe");
 
 /**
  * Hook to get the current git status for a session.
@@ -24,19 +27,29 @@ export function useSessionGitStatus(sessionId: string | null) {
   // Subscribe to session updates to receive git status via WebSocket
   // The workspace stream sends current git status immediately on subscription
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      debugSub("skip", { reason: "no-session-id", connectionStatus });
+      return;
+    }
 
     // Wait for WebSocket to be connected before subscribing
-    if (connectionStatus !== "connected") return;
+    if (connectionStatus !== "connected") {
+      debugSub("skip", { sessionId, reason: "not-connected", connectionStatus });
+      return;
+    }
 
     const client = getWebSocketClient();
-    if (client) {
-      const unsubscribe = client.subscribeSession(sessionId);
-      return () => {
-        unsubscribe();
-        // Don't clear git status on cleanup - keep it cached for when user switches back
-      };
+    if (!client) {
+      debugSub("skip", { sessionId, reason: "no-client", connectionStatus });
+      return;
     }
+    debugSub("subscribe", { sessionId, connectionStatus });
+    const unsubscribe = client.subscribeSession(sessionId);
+    return () => {
+      debugSub("unsubscribe", { sessionId });
+      unsubscribe();
+      // Don't clear git status on cleanup - keep it cached for when user switches back
+    };
   }, [sessionId, connectionStatus]);
 
   return gitStatus;

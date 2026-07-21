@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { toast } from "sonner";
 import {
   completeOnboarding,
@@ -10,14 +10,21 @@ import {
 } from "@/lib/api/domains/office-api";
 import { StepImport } from "./step-import";
 import { StepWorkspace, derivePrefix } from "./step-workspace";
+import { StepTierProfiles } from "./step-tier-profiles";
 import { StepAgent } from "./step-agent";
 import { StepTask } from "./step-task";
 import { StepReview } from "./step-review";
 import { WizardFooter } from "./wizard-footer";
 import { CloseButton } from "./close-button";
+import {
+  DEFAULT_ONBOARDING_TASK_DESCRIPTION,
+  DEFAULT_ONBOARDING_TASK_TITLE,
+} from "./setup-task-defaults";
+import { SETUP_WIZARD_STEP_COUNT, SETUP_WIZARD_STEPS } from "./setup-wizard-steps";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
-import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import type { Tier } from "@/lib/state/slices/office/types";
+
+export { DEFAULT_ONBOARDING_TASK_DESCRIPTION, DEFAULT_ONBOARDING_TASK_TITLE };
 
 type SetupWizardProps = {
   agentProfiles: AgentProfileOption[];
@@ -43,32 +50,47 @@ type WizardData = {
   taskPrefix: string;
   agentName: string;
   agentProfileId: string;
+  tierProfileIds: Partial<Record<Tier, string>>;
   executorPreference: string;
   defaultTier?: Tier;
   taskTitle: string;
   taskDescription: string;
 };
 
-function getInitialData(
+export function getInitialData(
   suggestedWorkspaceName: string,
   defaultAgentProfileId?: string,
 ): WizardData {
+  const initialTierProfileIds = defaultAgentProfileId
+    ? {
+        frontier: defaultAgentProfileId,
+        balanced: defaultAgentProfileId,
+        economy: defaultAgentProfileId,
+      }
+    : {};
   return {
     workspaceName: suggestedWorkspaceName,
     taskPrefix: derivePrefix(suggestedWorkspaceName),
     agentName: "CEO",
     agentProfileId: defaultAgentProfileId ?? "",
+    tierProfileIds: initialTierProfileIds,
     executorPreference: "local_pc",
-    taskTitle: "",
-    taskDescription: "",
+    defaultTier: "frontier",
+    taskTitle: DEFAULT_ONBOARDING_TASK_TITLE,
+    taskDescription: DEFAULT_ONBOARDING_TASK_DESCRIPTION,
   };
 }
 
-const STEP_COUNT = 4;
-
 function computeCanAdvance(step: number, data: WizardData): boolean {
-  if (step === 0) return data.workspaceName.trim() !== "";
-  if (step === 1) return data.agentName.trim() !== "" && data.agentProfileId !== "";
+  if (step === SETUP_WIZARD_STEPS.WORKSPACE) return data.workspaceName.trim() !== "";
+  if (step === SETUP_WIZARD_STEPS.TIER_PROFILES)
+    return (
+      Boolean(data.tierProfileIds.frontier) &&
+      Boolean(data.tierProfileIds.balanced) &&
+      Boolean(data.tierProfileIds.economy)
+    );
+  if (step === SETUP_WIZARD_STEPS.AGENT)
+    return data.agentName.trim() !== "" && data.agentProfileId !== "";
   return true;
 }
 
@@ -78,18 +100,22 @@ function dotColor(index: number, current: number): string {
   return "bg-muted";
 }
 
-async function submitOnboarding(data: WizardData) {
+export async function submitOnboarding(data: WizardData) {
   const result = await completeOnboarding({
     workspaceName: data.workspaceName.trim() || "default",
     taskPrefix: data.taskPrefix.trim() || "KAN",
     agentName: data.agentName.trim() || "CEO",
     agentProfileId: data.agentProfileId,
+    tier_profiles: {
+      frontier: data.tierProfileIds.frontier,
+      balanced: data.tierProfileIds.balanced,
+      economy: data.tierProfileIds.economy,
+    },
     executorPreference: data.executorPreference || "local_pc",
     taskTitle: data.taskTitle.trim() || undefined,
     taskDescription: data.taskDescription.trim() || undefined,
     default_tier: data.defaultTier,
   });
-  await updateUserSettings({ workspace_id: result.workspaceId });
   return result;
 }
 
@@ -106,7 +132,7 @@ function WizardStepContent({
   patch: (updates: Partial<WizardData>) => void;
   onAgentProfilesChange: (profiles: AgentProfileOption[]) => void;
 }) {
-  if (step === 0)
+  if (step === SETUP_WIZARD_STEPS.WORKSPACE)
     return (
       <StepWorkspace
         workspaceName={data.workspaceName}
@@ -114,7 +140,16 @@ function WizardStepContent({
         onChange={patch}
       />
     );
-  if (step === 1)
+  if (step === SETUP_WIZARD_STEPS.TIER_PROFILES)
+    return (
+      <StepTierProfiles
+        tierProfileIds={data.tierProfileIds}
+        agentProfiles={agentProfiles}
+        onChange={patch}
+        onAgentProfilesChange={onAgentProfilesChange}
+      />
+    );
+  if (step === SETUP_WIZARD_STEPS.AGENT)
     return (
       <StepAgent
         agentName={data.agentName}
@@ -126,7 +161,7 @@ function WizardStepContent({
         onAgentProfilesChange={onAgentProfilesChange}
       />
     );
-  if (step === 2)
+  if (step === SETUP_WIZARD_STEPS.TASK)
     return (
       <StepTask
         agentName={data.agentName}
@@ -169,14 +204,19 @@ export function SetupWizard({
     (updates: Partial<WizardData>) => setData((prev) => ({ ...prev, ...updates })),
     [],
   );
+  const skipInitialTask = useCallback(() => {
+    patch({ taskTitle: "", taskDescription: "" });
+    setStep((s) => s + 1);
+  }, [patch]);
   const canAdvance = computeCanAdvance(step, data);
 
   const handleSubmit = useCallback(async () => {
     setSubmitting(true);
     try {
-      await submitOnboarding(data);
+      const result = await submitOnboarding(data);
       toast.success("Workspace created successfully");
-      router.push("/office");
+      document.cookie = `office-active-workspace=${result.workspaceId}; path=/; max-age=86400; samesite=strict; secure`;
+      router.push(`/office?workspaceId=${result.workspaceId}`);
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to complete setup");
@@ -199,7 +239,7 @@ export function SetupWizard({
     }
   }, [router]);
 
-  const closeHref = mode === "new" ? "/office" : "/";
+  const closeHref = "/";
 
   if (!showWizard) {
     return (
@@ -216,7 +256,7 @@ export function SetupWizard({
     <div className="fixed inset-0 z-50 bg-background flex items-center justify-center">
       <div className="relative w-full max-w-2xl mx-auto px-6">
         <CloseButton href={closeHref} />
-        <StepIndicator current={step} total={STEP_COUNT} />
+        <StepIndicator current={step} total={SETUP_WIZARD_STEP_COUNT} />
         <div className="mt-8">
           <WizardStepContent
             step={step}
@@ -232,7 +272,7 @@ export function SetupWizard({
           submitting={submitting}
           onBack={() => setStep((s) => s - 1)}
           onNext={() => setStep((s) => s + 1)}
-          onSkip={() => setStep((s) => s + 1)}
+          onSkip={skipInitialTask}
           onSubmit={handleSubmit}
         />
       </div>

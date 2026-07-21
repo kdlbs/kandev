@@ -75,16 +75,78 @@ func HasKandevContext(text string) bool {
 // It instructs agents to collaborate on the plan without implementing changes.
 func PlanMode() string { return prompts.Get("plan-mode") }
 
-// KandevContext returns the system prompt template that provides Kandev-specific
-// instructions and session context to agents. Contains {task_id} and {session_id}
-// placeholders — use [FormatKandevContext] to inject values.
-func KandevContext() string { return prompts.Get("kandev-context") }
+// KandevContext returns the task-mode system prompt template that provides
+// Kandev-specific instructions and session context to agents. Contains
+// {task_id}, {session_id}, and {step_complete_section} placeholders — use
+// [FormatKandevContext] to inject values.
+func KandevContext() string {
+	return Resolve("kandev-context", map[string]string{
+		"coordinator_task_control_section": coordinatorTaskControlSection,
+	})
+}
+
+// stepCompleteSection is the description + instruction block for the
+// step_complete_kandev MCP tool. Only injected when the current workflow step
+// has `auto_advance_requires_signal = true` (ADR 0015). Agents on legacy
+// auto-advance steps never see the tool so they cannot fire false transitions.
+//
+// MUST end with "\n": the template inlines {step_complete_section}
+// immediately before the next bullet (`- create_task_plan_kandev:`), so the
+// trailing newline is what separates the two list items in the enabled case
+// without forcing the template to add its own. Dropping the "\n" silently
+// merges the two bullets onto one line; the omit path (empty string) is
+// unaffected since the next line in the template already starts the bullet.
+const stepCompleteSection = "- step_complete_kandev: Signal that every user-stated requirement for the CURRENT workflow step is satisfied. " +
+	"Call this as the LAST action of the step (after the final tool call / commit / answer). " +
+	"Idempotent — a second call within the same step is a no-op. " +
+	"Do NOT call when asking a question, mid-conversation, or on partial progress. " +
+	"Required params: summary (one-paragraph plain text). Optional: handoff, blockers.\n"
+
+// coordinatorTaskControlSection documents task-mode-only parent/child controls.
+// Restricted MCP modes omit the section because neither message_task_kandev nor
+// stop_task_kandev is registered there. The baseline message-tool sentence stays
+// in the template to avoid broadening this feature into a cleanup of older mode
+// mismatches.
+const coordinatorTaskControlSection = " Optional: session_id, delivery_mode. " +
+	"Use delivery_mode=\"queued\" or omit it for information that can wait. " +
+	"Use delivery_mode=\"interrupt\" for urgent replacement work on a running direct child; " +
+	"if immediate cancel-and-dispatch cannot be confirmed safely, the message remains queued. " +
+	"For halt-only work, use stop_task_kandev.\n" +
+	"- stop_task_kandev: Halt all live sessions observed for a direct child, with no prompt and no replacement turn. " +
+	"Only the target task's direct parent may call it. Required params: task_id."
+
+// KandevContextOptions controls capability-dependent sections in the first-turn
+// Kandev context.
+type KandevContextOptions struct {
+	RequiresCompletionSignal       bool
+	IncludeCoordinatorTaskControls bool
+}
 
 // FormatKandevContext returns the Kandev context prompt with task and session IDs injected.
-func FormatKandevContext(taskID, sessionID string) string {
+// When requiresCompletionSignal is true, the step_complete_kandev tool description is
+// included; otherwise the placeholder is collapsed to an empty string.
+func FormatKandevContext(taskID, sessionID string, requiresCompletionSignal bool) string {
+	return FormatKandevContextWithOptions(taskID, sessionID, KandevContextOptions{
+		RequiresCompletionSignal:       requiresCompletionSignal,
+		IncludeCoordinatorTaskControls: true,
+	})
+}
+
+// FormatKandevContextWithOptions returns capability-aware Kandev context.
+func FormatKandevContextWithOptions(taskID, sessionID string, options KandevContextOptions) string {
+	section := ""
+	if options.RequiresCompletionSignal {
+		section = stepCompleteSection
+	}
+	coordinatorControls := ""
+	if options.IncludeCoordinatorTaskControls {
+		coordinatorControls = coordinatorTaskControlSection
+	}
 	return Resolve("kandev-context", map[string]string{
-		"task_id":    taskID,
-		"session_id": sessionID,
+		"task_id":                          taskID,
+		"session_id":                       sessionID,
+		"step_complete_section":            section,
+		"coordinator_task_control_section": coordinatorControls,
 	})
 }
 
@@ -106,9 +168,16 @@ func InjectConfigContext(sessionID, prompt string) string {
 }
 
 // InjectKandevContext prepends the Kandev system prompt and session context to a user's prompt.
-// The system content is wrapped in <kandev-system> tags.
-func InjectKandevContext(taskID, sessionID, prompt string) string {
-	return Wrap(FormatKandevContext(taskID, sessionID)) + "\n\n" + prompt
+// The system content is wrapped in <kandev-system> tags. Pass requiresCompletionSignal=true
+// when the current workflow step has `auto_advance_requires_signal` enabled (ADR 0015) so the
+// step_complete_kandev tool description is exposed; otherwise the tool is hidden from the agent.
+func InjectKandevContext(taskID, sessionID, prompt string, requiresCompletionSignal bool) string {
+	return Wrap(FormatKandevContext(taskID, sessionID, requiresCompletionSignal)) + "\n\n" + prompt
+}
+
+// InjectKandevContextWithOptions prepends capability-aware Kandev context.
+func InjectKandevContextWithOptions(taskID, sessionID, prompt string, options KandevContextOptions) string {
+	return Wrap(FormatKandevContextWithOptions(taskID, sessionID, options)) + "\n\n" + prompt
 }
 
 // DefaultPlanPrefix returns the planning instruction prompt used when plan mode

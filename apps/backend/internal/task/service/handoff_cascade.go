@@ -149,6 +149,9 @@ type CascadeOutcome struct {
 // a single cascade ID. Already-archived descendants are skipped so the
 // later UnarchiveTaskTree restores exactly what this cascade owned.
 //
+// When cascade=false, only rootID is archived; descendants are left
+// alone (used when subtasks might still be in progress).
+//
 // Steps (in order):
 //  1. Collect the descendant set (BFS over parent_id).
 //  2. Cancel active sessions / runs for every task in the set before
@@ -158,19 +161,37 @@ type CascadeOutcome struct {
 //  4. Release workspace-group membership for the tasks this cascade
 //     archived, stamping the cascade ID on the released row.
 //  5. Evaluate cleanup once per affected group.
-func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string) (*CascadeOutcome, error) {
+func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error) {
 	if rootID == "" {
 		return nil, errors.New("rootID is required")
 	}
 	if s.tasks == nil {
 		return nil, errors.New("task repo not configured")
 	}
+	// Validate the root exists up front. The CAS archive below treats a
+	// zero-row update as "skipped" (idempotent re-archive), which would
+	// silently report success for a task ID that doesn't exist at all.
+	if root, err := s.tasks.GetTask(ctx, rootID); err != nil {
+		return nil, err
+	} else if root == nil {
+		return nil, fmt.Errorf("task %s not found", rootID)
+	}
 	cascadeID := uuid.New().String()
 	out := &CascadeOutcome{CascadeID: cascadeID}
 
-	all, err := s.collectTaskTree(ctx, rootID)
+	var all []string
+	if cascade {
+		descendants, err := s.collectTaskTree(ctx, rootID)
+		if err != nil {
+			return nil, err
+		}
+		all = descendants
+	} else {
+		all = []string{rootID}
+	}
+	cleanupOps, err := s.prepareCascadeResourceCleanup(ctx, all, cascadeID, models.TaskResourceCleanupTriggerCascadeArchive)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 
 	// Cancel active runs first. Failures are logged and skipped — a
@@ -184,6 +205,7 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string) (*C
 	for i := len(all) - 1; i >= 0; i-- {
 		ok, err := s.tasks.ArchiveTaskIfActive(ctx, all[i], cascadeID)
 		if err != nil {
+			s.cancelCascadeResourceCleanupRange(ctx, all[:i+1], cleanupOps)
 			return out, fmt.Errorf("archive %s: %w", all[i], err)
 		}
 		if ok {
@@ -198,10 +220,13 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string) (*C
 			// Tear down runtime resources (container/sandbox/worktree).
 			// Cancellation above stopped the agent but does not remove the
 			// container. Archive preserves the env row (deleteEnvRow=false).
-			if s.resourceCleaner != nil {
+			if operationID := cleanupOps[all[i]]; operationID != "" {
+				s.startCascadeResourceCleanup(ctx, operationID)
+			} else if s.resourceCleaner != nil {
 				s.resourceCleaner.CleanupTaskResources(ctx, all[i], false)
 			}
 		} else {
+			s.cancelCascadeResourceCleanup(ctx, cleanupOps[all[i]])
 			out.SkippedTaskIDs = append(out.SkippedTaskIDs, all[i])
 		}
 	}
@@ -227,13 +252,18 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string) (*C
 // memberships with reason=deleted, and removes every task row. Unlike
 // archive, delete is permanent — there is no Undelete cascade.
 //
+// When cascade=false, only rootID is deleted; its direct children are
+// reparented to root (parent_id="") before the row is removed so the
+// orphaned subtasks stay queryable instead of holding a dangling
+// pointer.
+//
 // Group memberships are released with reason=deleted so the cleanup
 // evaluation runs the same path archive does (last active member gone
 // → cleanup_pending → optionally cleaned). Tasks the user manually
 // archived but not deleted before this cascade are still removed
 // because deletion is unconditional; the cascade ID is stamped only
 // for symmetry with archive.
-func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string) (*CascadeOutcome, error) {
+func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error) {
 	if rootID == "" {
 		return nil, errors.New("rootID is required")
 	}
@@ -243,12 +273,13 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string) (*Ca
 	cascadeID := uuid.New().String()
 	out := &CascadeOutcome{CascadeID: cascadeID}
 
-	// Delete must walk archived descendants too: a parent with
-	// already-archived children must remove every row, not just the
-	// non-archived ones (post-review #4).
-	all, err := s.collectTaskTreeIncludingArchived(ctx, rootID)
+	all, err := s.resolveDeleteSet(ctx, rootID, cascade)
 	if err != nil {
 		return nil, err
+	}
+	cleanupOps, err := s.prepareCascadeResourceCleanup(ctx, all, cascadeID, models.TaskResourceCleanupTriggerCascadeDelete)
+	if err != nil {
+		return out, err
 	}
 
 	s.cancelActiveRuns(ctx, all, "task tree deleted")
@@ -259,6 +290,7 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string) (*Ca
 	// longer log who left.
 	groupIDs, err := s.releaseMembershipsForCascade(ctx, all, orchmodels.WorkspaceReleaseReasonDeleted, cascadeID)
 	if err != nil {
+		s.cancelCascadeResourceCleanupRange(ctx, all, cleanupOps)
 		return out, err
 	}
 	out.ReleasedGroupIDs = groupIDs
@@ -279,11 +311,14 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string) (*Ca
 		// Tear down runtime resources BEFORE the DB delete so the env / worktree
 		// rows are still queryable for the gather step. The actual destroy work
 		// runs async after this returns. Delete cascade removes the env row.
-		if s.resourceCleaner != nil {
-			s.resourceCleaner.CleanupTaskResources(ctx, all[i], true)
-		}
 		if err := s.tasks.DeleteTask(ctx, all[i]); err != nil {
+			s.cancelCascadeResourceCleanupRange(ctx, all[:i+1], cleanupOps)
 			return out, fmt.Errorf("delete %s: %w", all[i], err)
+		}
+		if operationID := cleanupOps[all[i]]; operationID != "" {
+			s.startCascadeResourceCleanup(ctx, operationID)
+		} else if s.resourceCleaner != nil {
+			s.resourceCleaner.CleanupTaskResources(ctx, all[i], true)
 		}
 		out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
 		if s.eventPublisher != nil && snapshot != nil {
@@ -298,6 +333,59 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string) (*Ca
 		}
 	}
 	return out, nil
+}
+
+func (s *HandoffService) prepareCascadeResourceCleanup(
+	ctx context.Context,
+	taskIDs []string,
+	cascadeID string,
+	trigger models.TaskResourceCleanupTrigger,
+) (map[string]string, error) {
+	coordinator, ok := s.resourceCleaner.(taskResourceCleanupCoordinator)
+	if !ok {
+		return nil, nil
+	}
+	operations := make(map[string]string, len(taskIDs))
+	for _, taskID := range taskIDs {
+		operationID := string(trigger) + ":" + cascadeID + ":" + taskID
+		deleteEnvironmentRow := trigger == models.TaskResourceCleanupTriggerCascadeDelete
+		if err := coordinator.PrepareTaskResourceCleanup(ctx, taskID, trigger, operationID, deleteEnvironmentRow); err != nil {
+			s.cancelCascadeResourceCleanupRange(ctx, taskIDs, operations)
+			return nil, fmt.Errorf("prepare cleanup %s: %w", taskID, err)
+		}
+		operations[taskID] = operationID
+	}
+	return operations, nil
+}
+
+func (s *HandoffService) cancelCascadeResourceCleanupRange(
+	ctx context.Context,
+	taskIDs []string,
+	operations map[string]string,
+) {
+	for _, taskID := range taskIDs {
+		s.cancelCascadeResourceCleanup(ctx, operations[taskID])
+	}
+}
+
+func (s *HandoffService) startCascadeResourceCleanup(ctx context.Context, operationID string) {
+	coordinator, ok := s.resourceCleaner.(taskResourceCleanupCoordinator)
+	if !ok || operationID == "" {
+		return
+	}
+	if err := coordinator.StartPreparedTaskResourceCleanup(ctx, operationID); err != nil {
+		s.logf().Error("start cascade resource cleanup", zap.String("operation_id", operationID), zap.Error(err))
+	}
+}
+
+func (s *HandoffService) cancelCascadeResourceCleanup(ctx context.Context, operationID string) {
+	coordinator, ok := s.resourceCleaner.(taskResourceCleanupCoordinator)
+	if !ok || operationID == "" {
+		return
+	}
+	if err := coordinator.CancelPreparedTaskResourceCleanup(ctx, operationID); err != nil {
+		s.logf().Error("cancel cascade resource cleanup", zap.String("operation_id", operationID), zap.Error(err))
+	}
 }
 
 // cancelActiveRuns invokes the configured RunCanceller for every task
@@ -334,7 +422,7 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 	}
 	cascadeID := root.ArchivedByCascadeID
 	if cascadeID == "" {
-		return nil, errors.New("root task was not archived by a cascade; nothing to restore")
+		return s.unarchiveManualRoot(ctx, root)
 	}
 	out := &CascadeOutcome{CascadeID: cascadeID}
 	// The descendant walk below uses metadata.parent_id only; archived
@@ -347,12 +435,19 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 	// Unarchive shallow→deep so the root's restored state is visible
 	// before children are queried by anyone watching the bus.
 	for _, id := range all {
+		if err := s.cancelArchiveResourceCleanup(ctx, id); err != nil {
+			return out, fmt.Errorf("cancel archive cleanup %s: %w", id, err)
+		}
 		ok, err := s.tasks.UnarchiveTaskByCascade(ctx, id, cascadeID)
 		if err != nil {
 			return out, fmt.Errorf("unarchive %s: %w", id, err)
 		}
 		if ok {
 			out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, id)
+			// Publish per restored task — the WS handler keys off
+			// archived_at=null to put the card back on the kanban, same
+			// as ArchiveTaskTree publishes per archived task.
+			s.publishUpdatedTask(ctx, id)
 		} else {
 			out.SkippedTaskIDs = append(out.SkippedTaskIDs, id)
 		}
@@ -381,6 +476,91 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 		s.restoreCleanedGroups(ctx, ids)
 	}
 	return out, nil
+}
+
+// unarchiveManualRoot restores a single task that was archived without a
+// cascade stamp (legacy Service.ArchiveTask path or rows predating the
+// cascade infrastructure). Only the root is restored — its descendants
+// were archived independently, so resurrecting them here would reintroduce
+// the resurrection bug the cascade scoping fixed.
+func (s *HandoffService) unarchiveManualRoot(ctx context.Context, root *models.Task) (*CascadeOutcome, error) {
+	if root.ArchivedAt == nil {
+		return nil, errors.New("task is not archived")
+	}
+	out := &CascadeOutcome{}
+	if err := s.cancelArchiveResourceCleanup(ctx, root.ID); err != nil {
+		return out, fmt.Errorf("cancel archive cleanup %s: %w", root.ID, err)
+	}
+	ok, err := s.tasks.UnarchiveTask(ctx, root.ID)
+	if err != nil {
+		return out, fmt.Errorf("unarchive %s: %w", root.ID, err)
+	}
+	if !ok {
+		out.SkippedTaskIDs = append(out.SkippedTaskIDs, root.ID)
+		return out, nil
+	}
+	out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, root.ID)
+	s.publishUpdatedTask(ctx, root.ID)
+	// Legacy archives never released group memberships, but the group may
+	// have been cleaned since (e.g. by a later cascade on another member).
+	// Restore the group's materialized workspace if it was cleaned. Best
+	// effort, like the cascade path: restoreCleanedGroups marks failures as
+	// restore_status=restore_failed so they surface via the context API.
+	if s.wsGroups != nil {
+		g, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, root.ID)
+		if err != nil {
+			s.logf().Error("lookup workspace group for unarchived task",
+				zap.String("task_id", root.ID), zap.Error(err))
+		} else if g != nil {
+			out.ReleasedGroupIDs = []string{g.ID}
+			s.restoreCleanedGroups(ctx, []string{g.ID})
+		}
+	}
+	return out, nil
+}
+
+func (s *HandoffService) cancelArchiveResourceCleanup(ctx context.Context, taskID string) error {
+	canceller, ok := s.resourceCleaner.(archiveTaskResourceCleanupCanceller)
+	if !ok {
+		return nil
+	}
+	return canceller.CancelArchiveTaskResourceCleanup(ctx, taskID)
+}
+
+// resolveDeleteSet returns the set of task IDs DeleteTaskTree should
+// remove. When cascade is true that's the full descendant tree
+// (including archived rows). When cascade is false it's just rootID,
+// and the helper first reparents direct children to root so the
+// soon-deleted parent_id pointer doesn't dangle, then publishes a
+// task.updated event for each reparented child so WS-driven clients
+// refresh their cached parent_id.
+func (s *HandoffService) resolveDeleteSet(ctx context.Context, rootID string, cascade bool) ([]string, error) {
+	if cascade {
+		// Delete must walk archived descendants too: a parent with
+		// already-archived children must remove every row, not just
+		// the non-archived ones (post-review #4).
+		return s.collectTaskTreeIncludingArchived(ctx, rootID)
+	}
+	// Capture the affected children BEFORE the update so we can
+	// publish task.updated for each one after the row change —
+	// clients (kanban, sidebar) cache parent_id and would otherwise
+	// keep displaying the children nested under the deleted parent
+	// until a full reload.
+	children, err := s.tasks.ListChildrenIncludingArchived(ctx, rootID)
+	if err != nil {
+		return nil, fmt.Errorf("list direct children of %s: %w", rootID, err)
+	}
+	// Reparent MUST succeed before we touch the parent row —
+	// continuing past a reparent error would leave children pointing
+	// at a row we're about to delete, exactly the dangling-pointer
+	// state the no-cascade path is designed to avoid.
+	if err := s.tasks.ReparentDirectChildren(ctx, rootID, ""); err != nil {
+		return nil, fmt.Errorf("reparent direct children of %s: %w", rootID, err)
+	}
+	for _, c := range children {
+		s.publishUpdatedTask(ctx, c.ID)
+	}
+	return []string{rootID}, nil
 }
 
 // collectTaskTree returns rootID followed by every NON-ARCHIVED
@@ -460,9 +640,8 @@ func (s *HandoffService) allChildrenIncludingArchived(ctx context.Context, paren
 
 // releaseMembershipsForCascade releases group membership for each task
 // in the input slice and returns the unique set of group IDs that had
-// at least one member released. Failures are logged and skipped — a
-// failed release does not abort the cascade since the row stays in the
-// audit log either way.
+// at least one member released. Inventory and release failures abort so the
+// caller can cancel prepared resource cleanup before task rows are mutated.
 func (s *HandoffService) releaseMembershipsForCascade(ctx context.Context, taskIDs []string, reason, cascadeID string) ([]string, error) {
 	if s.wsGroups == nil {
 		return nil, nil
@@ -472,16 +651,13 @@ func (s *HandoffService) releaseMembershipsForCascade(ctx context.Context, taskI
 	for _, id := range taskIDs {
 		g, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, id)
 		if err != nil {
-			s.logf().Error("lookup group for task", zap.String("task_id", id), zap.Error(err))
-			continue
+			return groups, fmt.Errorf("lookup group for task %s: %w", id, err)
 		}
 		if g == nil {
 			continue
 		}
 		if err := s.wsGroups.ReleaseWorkspaceGroupMember(ctx, g.ID, id, reason, cascadeID); err != nil {
-			s.logf().Error("release membership",
-				zap.String("group_id", g.ID), zap.String("task_id", id), zap.Error(err))
-			continue
+			return groups, fmt.Errorf("release membership for task %s from group %s: %w", id, g.ID, err)
 		}
 		if !seen[g.ID] {
 			seen[g.ID] = true

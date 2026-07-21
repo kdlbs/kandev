@@ -22,6 +22,7 @@ func TestStore_IssueWatch_CreateGet(t *testing.T) {
 	ctx := context.Background()
 
 	w := newTestIssueWatch("ws-1")
+	w.SortBy = SortByPriorityDesc
 	if err := store.CreateIssueWatch(ctx, w); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -48,6 +49,32 @@ func TestStore_IssueWatch_CreateGet(t *testing.T) {
 	// Filter survives the JSON round-trip.
 	if got.Filter.TeamKey != "ENG" || len(got.Filter.StateIDs) != 1 || got.Filter.StateIDs[0] != "state-started" {
 		t.Errorf("filter round-trip failed: %+v", got.Filter)
+	}
+	if got.SortBy != SortByPriorityDesc {
+		t.Errorf("sort_by round-trip failed: %q", got.SortBy)
+	}
+}
+
+func TestStore_IssueWatch_UpdateSortBy(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	w := newTestIssueWatch("ws-1")
+	w.SortBy = SortByPriorityDesc
+	if err := store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Change to a different value so UPDATE's SQL column order is pinned.
+	w.SortBy = SortByCreatedDesc
+	if err := store.UpdateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, err := store.GetIssueWatch(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.SortBy != SortByCreatedDesc {
+		t.Errorf("sort_by update did not persist: %q", got.SortBy)
 	}
 }
 
@@ -257,5 +284,67 @@ func TestStore_IssueWatchTask_Release(t *testing.T) {
 	}
 	if !again {
 		t.Error("expected reservation to succeed after release")
+	}
+}
+
+func TestStore_IssueWatchTask_ListTaskIDsAndReset(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	w := newTestIssueWatch("ws-1")
+	if err := store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.UpdateIssueWatchLastPolled(ctx, w.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("stamp last polled: %v", err)
+	}
+	// Three reservations; only two get task IDs assigned so the third row
+	// exercises the empty-ID inclusion the reset flow depends on.
+	for _, k := range []string{"ENG-1", "ENG-2", "ENG-3"} {
+		if _, err := store.ReserveIssueWatchTask(ctx, w.ID, k, "https://linear.app/x/issue/"+k); err != nil {
+			t.Fatalf("reserve %s: %v", k, err)
+		}
+	}
+	if err := store.AssignIssueWatchTaskID(ctx, w.ID, "ENG-1", "task-a"); err != nil {
+		t.Fatalf("assign 1: %v", err)
+	}
+	if err := store.AssignIssueWatchTaskID(ctx, w.ID, "ENG-2", "task-b"); err != nil {
+		t.Fatalf("assign 2: %v", err)
+	}
+
+	ids, err := store.ListIssueWatchTaskIDs(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("list ids: %v", err)
+	}
+	if len(ids) != 3 {
+		t.Fatalf("ListIssueWatchTaskIDs returned %d rows, want 3 (including empty reservation)", len(ids))
+	}
+	nonEmpty := 0
+	for _, id := range ids {
+		if id != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty != 2 {
+		t.Errorf("expected 2 non-empty task IDs, got %d", nonEmpty)
+	}
+
+	if err := store.ResetIssueWatchState(ctx, w.ID); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+
+	idsAfter, err := store.ListIssueWatchTaskIDs(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("list ids after reset: %v", err)
+	}
+	if len(idsAfter) != 0 {
+		t.Errorf("expected 0 dedup rows after reset, got %d", len(idsAfter))
+	}
+	got, err := store.GetIssueWatch(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("get watch: %v", err)
+	}
+	if got.LastPolledAt != nil {
+		t.Errorf("expected LastPolledAt to be nil after reset, got %v", got.LastPolledAt)
 	}
 }

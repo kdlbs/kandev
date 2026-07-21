@@ -1,6 +1,6 @@
 "use client";
 
-import { isValidElement, type ReactNode } from "react";
+import { createContext, isValidElement, useContext, type MouseEvent, type ReactNode } from "react";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkGemoji from "remark-gemoji";
@@ -8,74 +8,17 @@ import { InlineCode } from "@/components/task/chat/messages/inline-code";
 import { CodeBlock } from "@/components/task/chat/messages/code-block";
 import { MermaidBlock } from "@/components/shared/mermaid-block";
 import { isMermaidContent } from "@/components/editors/tiptap/tiptap-mermaid-extension";
+import { usePanelActions } from "@/hooks/use-panel-actions";
+import { useAppStore } from "@/components/state-provider";
 
 /** Shared remark plugins used by all markdown renderers */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const remarkPlugins: any[] = [remarkGfm, remarkBreaks, remarkGemoji];
 
-const FENCE_OPEN_RE = /^ {0,3}(`{3,})/;
-const TRAILING_FENCE_RE = /(`{3,})\s*$/;
-
-function pureCloseLength(line: string, openCount: number): number | null {
-  const match = /^ {0,3}(`{3,})\s*$/.exec(line);
-  if (!match || match[1].length < openCount) return null;
-  return match[1].length;
-}
-
-function gluedCloseLength(line: string, openCount: number): number | null {
-  const match = TRAILING_FENCE_RE.exec(line);
-  if (!match || match[1].length < openCount) return null;
-  // Reject pure-fence lines (already handled by pureCloseLength) and lines
-  // where everything before the trailing run is whitespace only.
-  const head = line.slice(0, line.length - match[0].length).trimEnd();
-  if (head.length === 0) return null;
-  return match[1].length;
-}
-
-/**
- * Pre-process a markdown string to repair fenced code blocks that have their
- * closing fence glued to the last code line (`...}\`\`\`\n`prose`). Without
- * this, CommonMark/GFM treats the glued backticks as code content, so the
- * fence never closes and following prose gets swallowed into one huge code
- * node. We split such lines into `<content>\n<backticks>` only when we're
- * inside an open fence whose opener run length is ≤ the trailing run length.
- *
- * Pure string preprocessing, intentionally not a remark plugin.
- */
-export function normalizeMarkdown(input: string): string {
-  if (!input || input.length === 0) return input;
-  const hadTrailingNewline = input.endsWith("\n");
-  const lines = input.split("\n");
-  const out: string[] = [];
-  let openCount: number | null = null;
-
-  for (const line of lines) {
-    if (openCount === null) {
-      const opener = FENCE_OPEN_RE.exec(line);
-      if (opener) openCount = opener[1].length;
-      out.push(line);
-      continue;
-    }
-    if (pureCloseLength(line, openCount) !== null) {
-      openCount = null;
-      out.push(line);
-      continue;
-    }
-    const glued = gluedCloseLength(line, openCount);
-    if (glued !== null) {
-      const trailingMatch = TRAILING_FENCE_RE.exec(line)!;
-      const head = line.slice(0, line.length - trailingMatch[0].length);
-      out.push(head);
-      out.push("`".repeat(glued));
-      openCount = null;
-      continue;
-    }
-    out.push(line);
-  }
-
-  const result = out.join("\n");
-  return hadTrailingNewline && !result.endsWith("\n") ? result + "\n" : result;
-}
+// `normalizeMarkdown` (pure string transform) and its cached variant live in
+// the React-free markdown cache module. Re-exported here so existing importers
+// keep working.
+export { normalizeMarkdown } from "@/lib/markdown/normalize-cache";
 
 /**
  * Recursively extracts text content from React children.
@@ -108,8 +51,159 @@ type MarkdownCodeProps = {
   children?: ReactNode;
 };
 
+export type MarkdownFileLinkContextValue = {
+  worktreePath?: string | null;
+  onOpenFile?: (path: string) => void;
+};
+
+export const MarkdownFileLinkContext = createContext<MarkdownFileLinkContextValue>({});
+
 function isBlockCode(rawContent: string, hasLanguage: boolean): boolean {
   return hasLanguage || rawContent.includes("\n");
+}
+
+const WEB_TLD_EXTENSIONS = new Set(["ai", "app", "cloud", "co", "com", "dev", "io", "net", "org"]);
+
+function looksLikeFilePath(path: string): boolean {
+  const lastSegment = path.split("/").pop() ?? "";
+  if (!lastSegment.includes(".") || path.endsWith("/")) return false;
+  const extension = lastSegment.split(".").pop() ?? "";
+  if (!/^[a-z0-9]{1,8}$/i.test(extension)) return false;
+  return !WEB_TLD_EXTENSIONS.has(extension.toLowerCase());
+}
+
+function isExternalHref(href: string): boolean {
+  return /^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith("//");
+}
+
+function stripHashAndQuery(href: string): string {
+  return href.split(/[?#]/, 1)[0] ?? "";
+}
+
+// Strip a trailing source-location / omp read selector so a file link resolves
+// to the bare path: ":42", ":42:5", and omp ranges like ":16-20", ":50+150",
+// ":5-16,960-973", ":2-4:raw", ":raw", ":conflicts".
+function stripSourceLocationSuffix(path: string): string {
+  const part = String.raw`\d+(?:[-+]\d+)?(?:,\d+(?:[-+]\d+)?)*|raw|conflicts`;
+  return path.replace(new RegExp(`:(?:${part})(?::(?:${part}))*$`), "");
+}
+
+function decodeHrefPath(href: string): string | null {
+  try {
+    return stripSourceLocationSuffix(decodeURIComponent(stripHashAndQuery(href)));
+  } catch {
+    return null;
+  }
+}
+
+function hasParentTraversal(path: string): boolean {
+  return path.split("/").includes("..");
+}
+
+function looksLikeHostAbsolutePath(path: string): boolean {
+  return /^\/(?:[A-Za-z]:|Users|home|root|tmp|var|etc|usr|opt|mnt|Volumes)\//i.test(path);
+}
+
+function firstAbsoluteSegment(path: string): string | null {
+  const first = path.replace(/^\/+/, "").split("/")[0];
+  return first || null;
+}
+
+function resolveAbsoluteMarkdownFileHref(path: string, worktreePath: string | null | undefined) {
+  const normalizedRoot = worktreePath?.replace(/\\/g, "/").replace(/\/$/, "");
+  const normalizedPath = path.replace(/\\/g, "/");
+  if (normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/`)) {
+    const relativePath = normalizedPath.slice(normalizedRoot.length + 1);
+    return looksLikeFilePath(relativePath) ? relativePath : null;
+  }
+  if (
+    normalizedRoot &&
+    firstAbsoluteSegment(normalizedPath) === firstAbsoluteSegment(normalizedRoot)
+  ) {
+    return null;
+  }
+  if (looksLikeHostAbsolutePath(normalizedPath)) return null;
+  const rootRelativePath = normalizedPath.replace(/^\/+/, "");
+  return looksLikeFilePath(rootRelativePath) ? rootRelativePath : null;
+}
+
+function resolveMarkdownFileHref(
+  href: string | undefined,
+  worktreePath: string | null | undefined,
+) {
+  if (!href || href.startsWith("#") || isExternalHref(href)) return null;
+
+  const path = decodeHrefPath(href);
+  if (!path || path.startsWith("~/") || hasParentTraversal(path)) return null;
+
+  if (path.startsWith("/")) {
+    return resolveAbsoluteMarkdownFileHref(path, worktreePath);
+  }
+
+  const normalizedPath = path.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (normalizedPath.startsWith("../")) return null;
+  return looksLikeFilePath(normalizedPath) ? normalizedPath : null;
+}
+
+type MarkdownLinkProps = {
+  href?: string;
+  children?: ReactNode;
+};
+
+function MarkdownFileAnchor({
+  href,
+  children,
+  worktreePath,
+  openFile,
+}: MarkdownLinkProps & {
+  worktreePath: string | null | undefined;
+  openFile: (path: string) => void;
+}) {
+  const filePath = resolveMarkdownFileHref(href, worktreePath);
+  const isInternal = !!filePath || href?.startsWith("/") || href?.startsWith("#");
+
+  const handleClick = filePath
+    ? (event: MouseEvent<HTMLAnchorElement>) => {
+        event.preventDefault();
+        openFile(filePath);
+      }
+    : undefined;
+
+  return (
+    <a
+      href={href}
+      target={isInternal ? "_self" : "_blank"}
+      rel={isInternal ? undefined : "noopener noreferrer"}
+      onClick={handleClick}
+    >
+      {children}
+    </a>
+  );
+}
+
+function MarkdownFallbackLink(props: MarkdownLinkProps) {
+  const { openFile } = usePanelActions();
+  const worktreePath = useAppStore((state) => {
+    const sessionId = state.tasks.activeSessionId;
+    if (!sessionId) return null;
+    return state.taskSessions.items[sessionId]?.worktree_path ?? null;
+  });
+
+  return <MarkdownFileAnchor {...props} worktreePath={worktreePath} openFile={openFile} />;
+}
+
+function MarkdownLink(props: MarkdownLinkProps) {
+  const linkContext = useContext(MarkdownFileLinkContext);
+  if (linkContext.onOpenFile) {
+    return (
+      <MarkdownFileAnchor
+        {...props}
+        worktreePath={linkContext.worktreePath}
+        openFile={linkContext.onOpenFile}
+      />
+    );
+  }
+  return <MarkdownFallbackLink {...props} />;
 }
 
 /**
@@ -133,18 +227,7 @@ export const markdownComponents = {
     }
     return <InlineCode>{content}</InlineCode>;
   },
-  a: ({ href, children }: { href?: string; children?: ReactNode }) => {
-    const isInternal = href?.startsWith("/") || href?.startsWith("#");
-    return (
-      <a
-        href={href}
-        target={isInternal ? "_self" : "_blank"}
-        rel={isInternal ? undefined : "noopener noreferrer"}
-      >
-        {children}
-      </a>
-    );
-  },
+  a: MarkdownLink,
   table: ({ children }: { children?: ReactNode }) => (
     <div className="overflow-x-auto">
       <table>{children}</table>

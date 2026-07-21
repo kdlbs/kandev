@@ -5,13 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"go.uber.org/zap"
 )
+
+// safeBranchRefPattern mirrors the one in workspace_git_status.go so the
+// HTTP handlers can perform an inline allowlist check at the request
+// boundary without the extra hop through a helper that would obscure the
+// barrier from CodeQL's `go/command-injection` taint tracker.
+var safeBranchRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
 
 // queryParamTrue is the string value used to indicate a true boolean in query parameters.
 const queryParamTrue = "true"
@@ -702,15 +711,41 @@ func (s *Server) runGitLogForRepo(
 	}
 
 	baseCommit := req.Since
+	// TargetBranch reaches this handler over HTTP and is interpolated into
+	// `git` arg lists below. Inline the securityutil.IsValidBranchName
+	// allowlist check at the sink call site so CodeQL's taint tracker
+	// sees the regex sanitiser barrier in the same function as the
+	// subprocess invocation. `origin/<name>` refs are split so the
+	// underlying validator (which disallows "/" as the first character)
+	// can validate the branch component.
+	check, hasOriginPrefix := strings.CutPrefix(req.TargetBranch, "origin/")
+	if !hasOriginPrefix {
+		check = req.TargetBranch
+	}
+	if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
+		req.TargetBranch = ""
+	}
 	if req.TargetBranch != "" {
 		mergeBase, err := s.computeMergeBase(c.Request.Context(), gitOp, req.TargetBranch)
-		if err != nil {
-			s.logger.Warn("failed to compute merge-base, falling back to since",
-				zap.String("target_branch", req.TargetBranch),
-				zap.String("repo", repo),
-				zap.Error(err))
-		} else if mergeBase != "" {
+		if err == nil && mergeBase != "" {
 			baseCommit = mergeBase
+		} else {
+			// merge-base failed (typically unrelated histories) — fall back
+			// to the branch tip so GetLog gets a real anchor and runs
+			// `git log <tip>..HEAD` instead of dropping into its open-ended
+			// "last N commits" path. Without this, picking a base that
+			// shares no history with HEAD silently turns the commits panel
+			// into the workspace's full HEAD history, mismatching the
+			// numstat-driven stats which fall through cleanly to per-file
+			// sums in the same scenario.
+			if tip, tipErr := gitOp.GetRevParse(c.Request.Context(), req.TargetBranch); tipErr == nil && tip != "" {
+				baseCommit = tip
+			} else if err != nil {
+				s.logger.Warn("failed to compute merge-base and branch tip, falling back to since",
+					zap.String("target_branch", req.TargetBranch),
+					zap.String("repo", repo),
+					zap.Error(err))
+			}
 		}
 	}
 
@@ -813,8 +848,8 @@ func (s *Server) handleGitLogMultiRepo(
 		// branch (e.g. "main"). Both can be wrong for sibling repos — running
 		// `git log <foreign-sha>..HEAD` in lvc fails outright and the repo's
 		// commits silently disappear from the merged response. Compute a
-		// per-repo base via merge-base against `origin/main` (with
-		// `origin/master` fallback) so each repo's commits show up.
+		// per-repo base through the workspace tracker so the task's configured
+		// base branch and normal integration-branch fallbacks both work.
 		perRepoReq := req
 		perRepoReq.Since = ""
 		perRepoReq.TargetBranch = ""
@@ -857,6 +892,18 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 			Error:   "invalid request: " + err.Error(),
 		})
 		return
+	}
+
+	// Same untrusted-ref guard as handleGitLog: inline the
+	// securityutil.IsValidBranchName check at the sink so static analysis
+	// sees the regex barrier in the same function as the downstream
+	// subprocess call paths.
+	check, hasOriginPrefix := strings.CutPrefix(req.TargetBranch, "origin/")
+	if !hasOriginPrefix {
+		check = req.TargetBranch
+	}
+	if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
+		req.TargetBranch = ""
 	}
 
 	if req.Repo == "" {
@@ -928,10 +975,10 @@ func (s *Server) runGitCumulativeDiffForRepo(
 }
 
 // handleGitCumulativeDiffMultiRepo fans cumulative diff out across every
-// per-repo tracker. Each repo's base commit is computed locally via
-// merge-base against the integration branch — the caller-supplied base only
-// makes sense for one repo at a time, since each repo has its own commit
-// graph. Files from each repo are merged into a single map, keyed by
+// per-repo tracker. Each repo's base commit is resolved from its configured
+// task base branch — the caller-supplied base only makes sense for one repo at
+// a time, since each repo has its own commit graph. Files from each repo are
+// merged into a single map, keyed by
 // `<repoSubpath>/<path>` so paths that exist in multiple repos don't clash,
 // and tagged with `repository_name` so the frontend can group them.
 func (s *Server) handleGitCumulativeDiffMultiRepo(
@@ -951,7 +998,7 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 				zap.String("repo", sub))
 			continue
 		}
-		// Multi-repo: base is already merge-base'd per-repo via resolvePerRepoBase,
+		// Multi-repo: base is already resolved per-repo via resolvePerRepoBase,
 		// so we pass empty target_branch to skip the second merge-base attempt.
 		result := s.runGitCumulativeDiffForRepo(c, base, "", sub)
 		if result == nil {
@@ -974,21 +1021,15 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 	c.JSON(http.StatusOK, merged)
 }
 
-// resolvePerRepoBase returns the merge-base of HEAD against the integration
-// branch (origin/main, with origin/master fallback). Multi-repo tasks share
-// no single base commit across repos, so each repo computes its own.
+// resolvePerRepoBase returns the comparison anchor owned by the repository's
+// workspace tracker. Multi-repo tasks share no single base commit across
+// repos, and each tracker carries that repository's configured task base.
 func (s *Server) resolvePerRepoBase(c *gin.Context, repo string) string {
-	gitOp, err := s.procMgr.GitOperatorFor(repo)
+	tracker, err := s.procMgr.GetWorkspaceTrackerFor(repo)
 	if err != nil {
 		return ""
 	}
-	for _, candidate := range []string{"origin/main", "origin/master"} {
-		base, mbErr := gitOp.GetMergeBase(c.Request.Context(), "HEAD", candidate)
-		if mbErr == nil && base != "" {
-			return base
-		}
-	}
-	return ""
+	return tracker.ResolveBaseCommit(c.Request.Context())
 }
 
 // mergeCumulativeFiles copies per-repo files into the merged map under a
@@ -1069,7 +1110,9 @@ type MultiRepoGitStatusResult struct {
 // session-subscribe handler in the main backend to seed per-repo state on
 // page reload — the legacy single GET /api/v1/git/status endpoint returns
 // only the workspace-root status, which is empty for multi-repo task roots
-// (the root isn't itself a git repo).
+// (the root isn't itself a git repo). Pass ?fresh=true to bypass the cached
+// status and run a fresh git query — used on WS subscribe so a new observer
+// always validates the cache against the live worktree.
 func (s *Server) handleGitStatusMulti(c *gin.Context) {
 	subpaths := s.procMgr.RepoSubpaths()
 	// Single-repo: fall back to the workspace-root status with an empty repo
@@ -1077,19 +1120,29 @@ func (s *Server) handleGitStatusMulti(c *gin.Context) {
 	if len(subpaths) == 0 {
 		subpaths = []string{""}
 	}
-	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, 0, len(subpaths))}
-	for _, sub := range subpaths {
-		entry := s.collectStatusForRepo(c, sub)
-		result.Repos = append(result.Repos, entry)
+	fresh := c.Query("fresh") == queryParamTrue
+	// Parallel fan-out: fresh=true skips the cache, so serial scales linearly and would blow the 2s subscribe timeout for multi-repo workspaces.
+	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, len(subpaths))}
+	ctx := c.Request.Context()
+	var wg sync.WaitGroup
+	for i, sub := range subpaths {
+		wg.Add(1)
+		go func(i int, sub string) {
+			defer wg.Done()
+			result.Repos[i] = s.collectStatusForRepo(ctx, sub, fresh)
+		}(i, sub)
 	}
+	wg.Wait()
 	c.JSON(http.StatusOK, result)
 }
 
 // collectStatusForRepo runs the status query for a single subpath and packs
-// it into a PerRepoGitStatus. Failures land in Status.Error / Status.Success
-// so the caller can render partial results instead of erroring out the whole
-// fan-out when one repo is misconfigured.
-func (s *Server) collectStatusForRepo(c *gin.Context, sub string) PerRepoGitStatus {
+// it into a PerRepoGitStatus. When fresh is true the workspace tracker
+// re-runs `git status --porcelain` against the worktree instead of returning
+// the cached snapshot. Failures land in Status.Error / Status.Success so the
+// caller can render partial results instead of erroring out the whole fan-out
+// when one repo is misconfigured.
+func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh bool) PerRepoGitStatus {
 	wt, wtErr := s.procMgr.GetWorkspaceTrackerFor(sub)
 	if wtErr != nil {
 		return PerRepoGitStatus{
@@ -1103,7 +1156,7 @@ func (s *Server) collectStatusForRepo(c *gin.Context, sub string) PerRepoGitStat
 			Status:         GitStatusResult{Success: false, Error: "workspace tracker not available"},
 		}
 	}
-	status, err := wt.GetCurrentGitStatus(c.Request.Context())
+	status, err := wt.GetGitStatus(ctx, fresh)
 	if err != nil {
 		return PerRepoGitStatus{
 			RepositoryName: sub,

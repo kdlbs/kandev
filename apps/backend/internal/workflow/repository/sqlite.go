@@ -71,6 +71,8 @@ func (r *Repository) initSchema() error {
 		is_start_step INTEGER DEFAULT 0,
 		show_in_command_panel INTEGER DEFAULT 1,
 		auto_archive_after_hours INTEGER DEFAULT 0,
+		wip_limit INTEGER NOT NULL DEFAULT 0,
+		pull_from_step_id TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
@@ -112,6 +114,16 @@ func (r *Repository) initSchema() error {
 	// frontend ("work" | "review" | "approval" | "custom"). Backend code
 	// MUST NOT branch on it. Idempotent ALTER; default keeps existing rows at "custom".
 	r.migrate.Apply("workflow_steps.stage_type", `ALTER TABLE workflow_steps ADD COLUMN stage_type TEXT NOT NULL DEFAULT 'custom'`)
+	// ADR 0015 — gate auto-advance on an explicit `step_complete_kandev`
+	// MCP signal. Idempotent ALTER; existing rows keep today's behaviour
+	// (immediate transition on turn-end) until the column is set to 1.
+	r.migrate.Apply("workflow_steps.auto_advance_requires_signal", `ALTER TABLE workflow_steps ADD COLUMN auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("workflow_steps.wip_limit", `ALTER TABLE workflow_steps ADD COLUMN wip_limit INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("workflow_steps.pull_from_step_id", `ALTER TABLE workflow_steps ADD COLUMN pull_from_step_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("idx_workflow_steps_pull_from", `
+		CREATE INDEX IF NOT EXISTS idx_workflow_steps_pull_from
+		ON workflow_steps(pull_from_step_id)
+	`)
 
 	// Phase 2 — multi-agent participation tables. Empty rows for a step
 	// preserve today's single-agent behaviour, so existing kanban
@@ -130,6 +142,15 @@ func (r *Repository) initSchema() error {
 		return fmt.Errorf("failed to seed default workflow steps: %w", err)
 	}
 
+	if err := r.normalizeDuplicateStartSteps(); err != nil {
+		return fmt.Errorf("failed to normalize duplicate start steps: %w", err)
+	}
+	r.migrate.Apply("idx_workflow_steps_single_start", `
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_steps_single_start
+		ON workflow_steps(workflow_id)
+		WHERE is_start_step = 1
+	`)
+
 	// Repair step_id references that were incorrectly saved as template aliases
 	// instead of UUIDs. This was caused by a frontend bug (fixed in PR #XXX).
 	if err := r.repairBrokenStepIDReferences(); err != nil {
@@ -137,6 +158,27 @@ func (r *Repository) initSchema() error {
 	}
 
 	return nil
+}
+
+func (r *Repository) normalizeDuplicateStartSteps() error {
+	_, err := r.db.Exec(`
+		WITH ranked AS (
+			SELECT
+				id,
+				ROW_NUMBER() OVER (
+					PARTITION BY workflow_id
+					-- Legacy repair follows last-writer-wins: keep the row
+					-- most recently marked/changed as the workflow start step.
+					ORDER BY updated_at DESC, position DESC, id DESC
+				) AS start_rank
+			FROM workflow_steps
+			WHERE is_start_step = 1
+		)
+		UPDATE workflow_steps
+		SET is_start_step = 0
+		WHERE id IN (SELECT id FROM ranked WHERE start_rank > 1)
+	`)
+	return err
 }
 
 // seedDefaultWorkflowSteps creates default workflow steps for workflows that don't have any.
@@ -189,12 +231,12 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 			if _, err := r.db.Exec(r.db.Rebind(`
 				INSERT INTO workflow_steps (
 					id, workflow_id, name, position, color,
-					prompt, events, allow_manual_move, is_start_step, show_in_command_panel, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					prompt, events, allow_manual_move, is_start_step, show_in_command_panel, wip_limit, pull_from_step_id, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`),
 				idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color,
 				stepDef.Prompt, string(eventsJSON), dialect.BoolToInt(stepDef.AllowManualMove),
-				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), now, now,
+				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), stepDef.WIPLimit, models.RemapStepID(stepDef.PullFromStepID, idMap), now, now,
 			); err != nil {
 				return err
 			}
@@ -543,6 +585,13 @@ func (r *Repository) GetSystemTemplates(ctx context.Context) ([]*models.Workflow
 
 // CreateStep creates a new workflow step.
 func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) error {
+	_, err := r.CreateStepWithDemotedStartSteps(ctx, step)
+	return err
+}
+
+// CreateStepWithDemotedStartSteps creates a new workflow step and returns any
+// previously-start steps demoted as part of the same transaction.
+func (r *Repository) CreateStepWithDemotedStartSteps(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
 	if step.ID == "" {
 		step.ID = uuid.New().String()
 	}
@@ -552,19 +601,39 @@ func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) 
 
 	eventsJSON, err := json.Marshal(step.Events)
 	if err != nil {
-		return fmt.Errorf("failed to marshal events: %w", err)
+		return nil, fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var demoted []*models.WorkflowStep
+	if step.IsStartStep {
+		demoted, err = r.demoteOtherStartSteps(ctx, tx, step.WorkflowID, step.ID, now)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color,
-			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, stage_type, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, stage_type, auto_advance_requires_signal, wip_limit, pull_from_step_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON), dialect.BoolToInt(step.AllowManualMove),
-		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), step.CreatedAt, step.UpdatedAt)
+		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), step.WIPLimit, step.PullFromStepID, step.CreatedAt, step.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
 
-	return err
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return demoted, nil
 }
 
 // normalizeStageType returns a string fit for the workflow_steps.stage_type
@@ -583,12 +652,12 @@ func (r *Repository) scanStep(row interface {
 	Scan(dest ...interface{}) error
 }) (*models.WorkflowStep, error) {
 	step := &models.WorkflowStep{}
-	var allowManualMove, isStartStep, showInCommandPanel int
+	var allowManualMove, isStartStep, showInCommandPanel, autoAdvanceRequiresSignal int
 	var autoArchiveAfterHours sql.NullInt64
-	var color, prompt, eventsJSON, agentProfileID, stageType sql.NullString
+	var color, prompt, eventsJSON, agentProfileID, stageType, pullFromStepID sql.NullString
 
 	err := row.Scan(&step.ID, &step.WorkflowID, &step.Name, &step.Position, &color,
-		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &agentProfileID, &stageType, &step.CreatedAt, &step.UpdatedAt)
+		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &agentProfileID, &stageType, &autoAdvanceRequiresSignal, &step.WIPLimit, &pullFromStepID, &step.CreatedAt, &step.UpdatedAt)
 
 	if err != nil {
 		return nil, err
@@ -597,6 +666,7 @@ func (r *Repository) scanStep(row interface {
 	step.AllowManualMove = allowManualMove == 1
 	step.IsStartStep = isStartStep == 1
 	step.ShowInCommandPanel = showInCommandPanel == 1
+	step.AutoAdvanceRequiresSignal = autoAdvanceRequiresSignal == 1
 	if autoArchiveAfterHours.Valid {
 		step.AutoArchiveAfterHours = int(autoArchiveAfterHours.Int64)
 	}
@@ -607,6 +677,9 @@ func (r *Repository) scanStep(row interface {
 		step.StageType = models.StageType(stageType.String)
 	} else {
 		step.StageType = models.StageTypeCustom
+	}
+	if pullFromStepID.Valid {
+		step.PullFromStepID = pullFromStepID.String
 	}
 	if color.Valid {
 		step.Color = color.String
@@ -623,7 +696,7 @@ func (r *Repository) scanStep(row interface {
 	return step, nil
 }
 
-const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, stage_type, created_at, updated_at`
+const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, stage_type, auto_advance_requires_signal, wip_limit, pull_from_step_id, created_at, updated_at`
 
 // GetStep retrieves a workflow step by ID.
 func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowStep, error) {
@@ -644,40 +717,94 @@ func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowSt
 
 // UpdateStep updates an existing workflow step.
 func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) error {
+	_, err := r.UpdateStepWithDemotedStartSteps(ctx, step)
+	return err
+}
+
+// UpdateStepWithDemotedStartSteps updates a workflow step and returns any
+// previously-start steps demoted as part of the same transaction.
+func (r *Repository) UpdateStepWithDemotedStartSteps(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
 	step.UpdatedAt = time.Now().UTC()
 
 	eventsJSON, err := json.Marshal(step.Events)
 	if err != nil {
-		return fmt.Errorf("failed to marshal events: %w", err)
+		return nil, fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var demoted []*models.WorkflowStep
+	if step.IsStartStep {
+		demoted, err = r.demoteOtherStartSteps(ctx, tx, step.WorkflowID, step.ID, step.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE workflow_steps SET
 			name = ?, position = ?, color = ?,
 			prompt = ?, events = ?,
-			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, stage_type = ?, updated_at = ?
+			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, stage_type = ?, auto_advance_requires_signal = ?, wip_limit = ?, pull_from_step_id = ?, updated_at = ?
 		WHERE id = ?
 	`), step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON),
-		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), step.UpdatedAt, step.ID)
+		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), step.WIPLimit, step.PullFromStepID, step.UpdatedAt, step.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("workflow step not found: %s", step.ID)
+		return nil, fmt.Errorf("workflow step not found: %s", step.ID)
 	}
-	return nil
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return demoted, nil
 }
 
 // ClearStartStepFlag clears the is_start_step flag for all steps in a workflow except the given step.
 func (r *Repository) ClearStartStepFlag(ctx context.Context, workflowID, exceptStepID string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE workflow_steps SET is_start_step = 0
-		WHERE workflow_id = ? AND id != ?
-	`), workflowID, exceptStepID)
+		UPDATE workflow_steps SET is_start_step = 0, updated_at = ?
+		WHERE workflow_id = ? AND id != ? AND is_start_step = 1
+	`), time.Now().UTC(), workflowID, exceptStepID)
 	return err
+}
+
+func (r *Repository) demoteOtherStartSteps(ctx context.Context, tx *sqlx.Tx, workflowID, exceptStepID string, updatedAt time.Time) ([]*models.WorkflowStep, error) {
+	rows, err := tx.QueryContext(ctx, tx.Rebind(`
+		SELECT `+stepSelectColumns+`
+		FROM workflow_steps
+		WHERE workflow_id = ? AND id != ? AND is_start_step = 1
+		ORDER BY position ASC, id ASC
+	`), workflowID, exceptStepID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	demoted, err := r.scanSteps(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE workflow_steps SET is_start_step = 0, updated_at = ?
+		WHERE workflow_id = ? AND id != ? AND is_start_step = 1
+	`), updatedAt, workflowID, exceptStepID); err != nil {
+		return nil, err
+	}
+
+	for _, step := range demoted {
+		step.IsStartStep = false
+		step.UpdatedAt = updatedAt
+	}
+	return demoted, nil
 }
 
 // GetStartStep returns the step marked as is_start_step for a workflow.
@@ -719,6 +846,10 @@ func (r *Repository) ClearStepReferences(ctx context.Context, workflowID, stepID
 					break
 				}
 			}
+		}
+		if step.PullFromStepID == stepID {
+			step.PullFromStepID = ""
+			modified = true
 		}
 		if modified {
 			if err := r.UpdateStep(ctx, step); err != nil {
@@ -762,7 +893,7 @@ func (r *Repository) ListStepsByWorkflow(ctx context.Context, workflowID string)
 func (r *Repository) ListStepsByWorkspaceID(ctx context.Context, workspaceID string) ([]*models.WorkflowStep, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT ws.id, ws.workflow_id, ws.name, ws.position, ws.color, ws.prompt, ws.events,
-			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.agent_profile_id, ws.stage_type, ws.created_at, ws.updated_at
+			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.agent_profile_id, ws.stage_type, ws.auto_advance_requires_signal, ws.wip_limit, ws.pull_from_step_id, ws.created_at, ws.updated_at
 		FROM workflow_steps ws
 		JOIN workflows w ON ws.workflow_id = w.id
 		WHERE w.workspace_id = ?

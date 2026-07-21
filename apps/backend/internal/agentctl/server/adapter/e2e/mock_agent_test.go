@@ -394,7 +394,7 @@ func collectPromptEvents(ctx context.Context, t *testing.T, setup *agentSetup, p
 		}
 	}()
 
-	if err := setup.adpt.Prompt(ctx, prompt, nil); err != nil {
+	if err := setup.adpt.Prompt(ctx, prompt, nil, 0); err != nil {
 		collectCancel()
 		t.Fatalf("prompt failed: %v", err)
 	}

@@ -66,6 +66,32 @@ func TestBuildWorkflowExport(t *testing.T) {
 		assert.Len(t, sp.Events.OnTurnStart, 1)
 		assert.Equal(t, OnTurnStartMoveToNext, sp.Events.OnTurnStart[0].Type)
 	})
+
+	t.Run("exports pull source as portable step position", func(t *testing.T) {
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "Pull Workflow"}
+		steps := []*WorkflowStep{
+			{ID: "queue", Name: "Queue", Position: 0, Color: "gray"},
+			{
+				ID:             "work",
+				Name:           "Work",
+				Position:       1,
+				Color:          "blue",
+				WIPLimit:       1,
+				PullFromStepID: "queue",
+			},
+		}
+
+		export := BuildWorkflowExport(
+			[]*taskmodels.Workflow{wf},
+			map[string][]*WorkflowStep{"wf-1": steps},
+			nil,
+		)
+
+		require.Len(t, export.Workflows[0].Steps, 2)
+		assert.Equal(t, 1, export.Workflows[0].Steps[1].WIPLimit)
+		require.NotNil(t, export.Workflows[0].Steps[1].PullFromStepPosition)
+		assert.Equal(t, 0, *export.Workflows[0].Steps[1].PullFromStepPosition)
+	})
 }
 
 func TestValidate(t *testing.T) {
@@ -137,6 +163,34 @@ func TestValidate(t *testing.T) {
 		assert.NoError(t, e.Validate())
 	})
 
+	t.Run("set_session_mode with mode passes", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnEnter: []OnEnterAction{
+				{Type: OnEnterSetSessionMode, Config: map[string]any{"mode": "acceptEdits"}},
+			},
+		}
+		assert.NoError(t, e.Validate())
+	})
+
+	t.Run("set_session_mode without mode fails", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnEnter: []OnEnterAction{{Type: OnEnterSetSessionMode}},
+		}
+		assert.ErrorContains(t, e.Validate(), "set_session_mode requires a non-empty string")
+	})
+
+	t.Run("set_session_mode with non-string mode fails", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnEnter: []OnEnterAction{
+				{Type: OnEnterSetSessionMode, Config: map[string]any{"mode": 3}},
+			},
+		}
+		assert.ErrorContains(t, e.Validate(), "set_session_mode requires a non-empty string")
+	})
+
 	t.Run("invalid move_to_step position ref fails", func(t *testing.T) {
 		e := validExport()
 		e.Workflows[0].Steps[0].Events = StepEvents{
@@ -185,6 +239,29 @@ func TestValidate(t *testing.T) {
 			},
 		}
 		assert.ErrorContains(t, e.Validate(), "unexpected type")
+	})
+
+	t.Run("invalid pull source position fails", func(t *testing.T) {
+		e := validExport()
+		pos := 99
+		e.Workflows[0].Steps[1].PullFromStepPosition = &pos
+		assert.ErrorContains(t, e.Validate(), "pull_from_step_position 99 does not match any step")
+	})
+
+	t.Run("self pull source position fails", func(t *testing.T) {
+		e := validExport()
+		pos := 1
+		e.Workflows[0].Steps[1].PullFromStepPosition = &pos
+		assert.ErrorContains(t, e.Validate(), "cannot reference itself")
+	})
+
+	t.Run("pull source cycle fails", func(t *testing.T) {
+		e := validExport()
+		firstPosition := 0
+		secondPosition := 1
+		e.Workflows[0].Steps[0].PullFromStepPosition = &secondPosition
+		e.Workflows[0].Steps[1].PullFromStepPosition = &firstPosition
+		assert.ErrorContains(t, e.Validate(), "cannot create a pull cycle")
 	})
 }
 
@@ -333,6 +410,38 @@ func TestRoundTrip(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestAutoAdvanceRequiresSignalExport(t *testing.T) {
+	t.Run("preserves auto_advance_requires_signal in export", func(t *testing.T) {
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "WF"}
+		steps := []*WorkflowStep{
+			{ID: "s1", Name: "Legacy", Position: 0, Color: "gray", AutoAdvanceRequiresSignal: false},
+			{ID: "s2", Name: "Gated", Position: 1, Color: "blue", AutoAdvanceRequiresSignal: true},
+		}
+		export := BuildWorkflowExport(
+			[]*taskmodels.Workflow{wf},
+			map[string][]*WorkflowStep{"wf-1": steps},
+			nil,
+		)
+
+		require.Len(t, export.Workflows[0].Steps, 2)
+		assert.False(t, export.Workflows[0].Steps[0].AutoAdvanceRequiresSignal)
+		assert.True(t, export.Workflows[0].Steps[1].AutoAdvanceRequiresSignal)
+	})
+}
+
+func TestPullFromStepPositionToID(t *testing.T) {
+	position := 0
+	step := StepPortable{
+		Name:                 "Work",
+		Position:             1,
+		WIPLimit:             1,
+		PullFromStepPosition: &position,
+	}
+	posToID := map[int]string{0: "queue-id", 1: "work-id"}
+
+	assert.Equal(t, "queue-id", step.PullFromStepID(posToID))
 }
 
 func TestShowInCommandPanelExport(t *testing.T) {

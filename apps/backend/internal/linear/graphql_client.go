@@ -9,6 +9,8 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -302,6 +304,7 @@ const issueFragment = `
 	description
 	url
 	updatedAt
+	createdAt
 	priority
 	priorityLabel
 	state { id name type color }
@@ -317,6 +320,7 @@ type issueNode struct {
 	Description string `json:"description"`
 	URL         string `json:"url"`
 	UpdatedAt   string `json:"updatedAt"`
+	CreatedAt   string `json:"createdAt"`
 	Priority    int    `json:"priority"`
 	PriorityLab string `json:"priorityLabel"`
 	State       struct {
@@ -355,6 +359,7 @@ func issueNodeToIssue(n *issueNode) LinearIssue {
 		Priority:      n.Priority,
 		PriorityLabel: n.PriorityLab,
 		Updated:       n.UpdatedAt,
+		Created:       n.CreatedAt,
 		URL:           n.URL,
 	}
 	if n.Assignee != nil {
@@ -504,15 +509,97 @@ func (c *GraphQLClient) SearchIssues(ctx context.Context, filter SearchFilter, p
 	return out, nil
 }
 
+// issueIdentifierRe matches a Linear-style ticket identifier like ENG-123.
+// Team keys per Linear are uppercase alphanumerics + underscore, starting with
+// a letter.
+var issueIdentifierRe = regexp.MustCompile(`^([A-Z][A-Z0-9_]*)-(\d+)$`)
+
+// parseIssueIdentifier returns the team key and issue number when q looks like
+// a Linear identifier (e.g. "ENG-123"). Input is trimmed and upper-cased so
+// "eng-123" works too. ok=false means q is not an identifier and callers
+// should treat it as a free-text query.
+func parseIssueIdentifier(q string) (string, int, bool) {
+	q = strings.ToUpper(strings.TrimSpace(q))
+	if q == "" {
+		return "", 0, false
+	}
+	m := issueIdentifierRe.FindStringSubmatch(q)
+	if m == nil {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(m[2])
+	if err != nil {
+		return "", 0, false
+	}
+	return m[1], n, true
+}
+
+// issueNumberRe matches a bare issue number like "2438" — what a user types
+// when searching for a ticket by its number without the team prefix.
+var issueNumberRe = regexp.MustCompile(`^\d+$`)
+
+// parseIssueNumber returns the issue number when q is a bare integer. ok=false
+// means q is not a plain number (an out-of-range value also fails and is then
+// treated as free text). This lets "2438" resolve to an exact number match in
+// addition to the free-text branch.
+func parseIssueNumber(q string) (int, bool) {
+	q = strings.TrimSpace(q)
+	if !issueNumberRe.MatchString(q) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(q)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// searchableContentComparator matches free text across an issue's title and
+// description. It returns Linear's ContentComparator value (the inner map) that
+// callers nest under the `searchableContent` key — not the full filter. Its one
+// text operator, `contains`, is already case-insensitive full-text; the
+// ContentComparator deliberately does NOT expose `containsIgnoreCase` (sending
+// that field makes Linear reject the whole query with BAD_USER_INPUT / 400).
+func searchableContentComparator(q string) map[string]interface{} {
+	return map[string]interface{}{"contains": q}
+}
+
+// applyQueryFilter translates the free-text portion of a search into Linear's
+// IssueFilter. `searchableContent` matches across title and description but
+// never indexes the issue identifier or number, so when the query looks like a
+// ticket reference (ENG-123, or a bare number like 2438) we OR in an exact
+// match — otherwise searching by ID/number returns zero hits for the target
+// ticket. The searchableContent branch stays in the OR so cross-references like
+// "duplicate of ENG-123" pasted into another issue's body still surface.
+func applyQueryFilter(out map[string]interface{}, q string) {
+	content := searchableContentComparator(q)
+	if teamKey, num, ok := parseIssueIdentifier(q); ok {
+		out["or"] = []map[string]interface{}{
+			{"searchableContent": content},
+			{
+				"team":   map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
+				"number": map[string]interface{}{"eq": num},
+			},
+		}
+		return
+	}
+	if num, ok := parseIssueNumber(q); ok {
+		out["or"] = []map[string]interface{}{
+			{"searchableContent": content},
+			{"number": map[string]interface{}{"eq": num}},
+		}
+		return
+	}
+	out["searchableContent"] = content
+}
+
 // buildIssueFilter translates our SearchFilter into Linear's IssueFilter input.
 // Empty fields are dropped so we don't send `{ "team": null }` and similar
 // (which Linear treats as a typed null and rejects).
 func buildIssueFilter(f SearchFilter) map[string]interface{} {
 	out := map[string]interface{}{}
 	if q := strings.TrimSpace(f.Query); q != "" {
-		// Linear has no top-level free-text field, but `searchableContent`
-		// matches across title and description.
-		out["searchableContent"] = map[string]interface{}{"contains": q}
+		applyQueryFilter(out, q)
 	}
 	if f.TeamKey != "" {
 		out["team"] = map[string]interface{}{"key": map[string]interface{}{"eq": f.TeamKey}}
@@ -528,8 +615,137 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 	case "unassigned":
 		out["assignee"] = map[string]interface{}{"null": true}
 	}
+	if len(f.Priorities) > 0 {
+		out["priority"] = map[string]interface{}{"in": f.Priorities}
+	}
+	if len(f.LabelIDs) > 0 {
+		// `labels.some` matches issues having at least one label whose id is
+		// in the provided list — Linear's OR semantics for multi-label filter.
+		out["labels"] = map[string]interface{}{
+			"some": map[string]interface{}{
+				"id": map[string]interface{}{"in": f.LabelIDs},
+			},
+		}
+	}
+	if f.CreatorID != "" {
+		out["creator"] = map[string]interface{}{"id": map[string]interface{}{"eq": f.CreatorID}}
+	}
+	if f.EstimateMin != nil || f.EstimateMax != nil {
+		bounds := map[string]interface{}{}
+		if f.EstimateMin != nil {
+			bounds["gte"] = *f.EstimateMin
+		}
+		if f.EstimateMax != nil {
+			bounds["lte"] = *f.EstimateMax
+		}
+		out["estimate"] = bounds
+	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+// --- labels ---
+
+// Linear's GraphQL API caps `first` at 250. We don't paginate labels/users
+// because the watcher dialog renders them as a single dropdown — a workspace
+// with >250 labels or members would have UX problems regardless of how the
+// data is fetched. If this limit is hit in practice, switch to cursor-based
+// pagination here and lazy-load in the UI.
+const linearMaxPageSize = 250
+
+const teamLabelsQuery = `
+query TeamLabels($filter: IssueLabelFilter!, $first: Int!) {
+	issueLabels(first: $first, filter: $filter) {
+		nodes { id name color }
+	}
+}`
+
+type labelsData struct {
+	IssueLabels struct {
+		Nodes []struct {
+			ID    string `json:"id"`
+			Name  string `json:"name"`
+			Color string `json:"color"`
+		} `json:"nodes"`
+	} `json:"issueLabels"`
+}
+
+// ListLabels returns the issue labels available for a team identified by its
+// key. Workspace-scoped labels (no team) are included by also fetching the
+// `team: null` set in a second pass when teamKey is empty.
+func (c *GraphQLClient) ListLabels(ctx context.Context, teamKey string) ([]LinearLabel, error) {
+	if teamKey == "" {
+		return nil, fmt.Errorf("teamKey required")
+	}
+	vars := map[string]interface{}{
+		"filter": map[string]interface{}{
+			"team": map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
+		},
+		"first": linearMaxPageSize,
+	}
+	var data labelsData
+	if err := c.do(ctx, teamLabelsQuery, vars, &data); err != nil {
+		return nil, err
+	}
+	out := make([]LinearLabel, 0, len(data.IssueLabels.Nodes))
+	for _, l := range data.IssueLabels.Nodes {
+		out = append(out, LinearLabel{ID: l.ID, Name: l.Name, Color: l.Color})
+	}
+	return out, nil
+}
+
+// --- users ---
+
+const teamMembersQuery = `
+query TeamMembers($filter: UserFilter!, $first: Int!) {
+	users(first: $first, filter: $filter, orderBy: updatedAt) {
+		nodes { id name displayName email avatarUrl }
+	}
+}`
+
+type usersData struct {
+	Users struct {
+		Nodes []struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			DisplayName string `json:"displayName"`
+			Email       string `json:"email"`
+			AvatarURL   string `json:"avatarUrl"`
+		} `json:"nodes"`
+	} `json:"users"`
+}
+
+// ListUsers returns members of the team identified by teamKey. The filter
+// uses Linear's `teamMemberships.some` to scope to that team.
+func (c *GraphQLClient) ListUsers(ctx context.Context, teamKey string) ([]LinearUser, error) {
+	if teamKey == "" {
+		return nil, fmt.Errorf("teamKey required")
+	}
+	vars := map[string]interface{}{
+		"filter": map[string]interface{}{
+			"teamMemberships": map[string]interface{}{
+				"some": map[string]interface{}{
+					"team": map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
+				},
+			},
+		},
+		"first": linearMaxPageSize,
+	}
+	var data usersData
+	if err := c.do(ctx, teamMembersQuery, vars, &data); err != nil {
+		return nil, err
+	}
+	out := make([]LinearUser, 0, len(data.Users.Nodes))
+	for _, u := range data.Users.Nodes {
+		out = append(out, LinearUser{
+			ID:          u.ID,
+			Name:        u.Name,
+			DisplayName: u.DisplayName,
+			Email:       u.Email,
+			AvatarURL:   u.AvatarURL,
+		})
+	}
+	return out, nil
 }

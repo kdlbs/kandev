@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 )
@@ -100,7 +101,7 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 
 	var permissionSettings map[string]dto.PermissionSettingDTO
-	if permSettings := ag.PermissionSettings(); permSettings != nil {
+	if permSettings := agents.CatalogPermissionSettings(ag); permSettings != nil {
 		permissionSettings = make(map[string]dto.PermissionSettingDTO, len(permSettings))
 		for key, setting := range permSettings {
 			permissionSettings[key] = dto.PermissionSettingDTO{
@@ -119,9 +120,14 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	if ptAgent, ok := ag.(agents.PassthroughAgent); ok {
 		pt := ptAgent.PassthroughConfig()
 		passthroughConfig = &dto.PassthroughConfigDTO{
-			Supported:   pt.Supported,
-			Label:       pt.Label,
-			Description: pt.Description,
+			Supported:        pt.Supported,
+			Label:            pt.Label,
+			Description:      pt.Description,
+			AutoInjectPrompt: pt.AutoInjectPrompt,
+			SubmitSequence:   pt.SubmitSequence,
+		}
+		if pt.MCPStrategy != nil {
+			passthroughConfig.MCPInjection = pt.MCPStrategy.Describe()
 		}
 	}
 
@@ -192,6 +198,7 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 	cfg.DefaultModel = caps.CurrentModelID
 	cfg.CurrentModelID = caps.CurrentModelID
 	cfg.CurrentModeID = caps.CurrentModeID
+	cfg.ConfigOptions = configOptionDTOs(caps.ConfigOptions)
 	for _, m := range caps.Models {
 		cfg.AvailableModels = append(cfg.AvailableModels, dto.ModelEntryDTO{
 			ID:          m.ID,
@@ -216,6 +223,30 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 		})
 	}
 	return cfg
+}
+
+func configOptionDTOs(options []hostutility.ConfigOption) []dto.ConfigOptionDTO {
+	out := make([]dto.ConfigOptionDTO, 0, len(options))
+	for _, opt := range options {
+		choices := make([]dto.ConfigOptionChoiceDTO, 0, len(opt.Options))
+		for _, choice := range opt.Options {
+			choices = append(choices, dto.ConfigOptionChoiceDTO{
+				Value:       choice.Value,
+				Name:        choice.Name,
+				Description: choice.Description,
+			})
+		}
+		out = append(out, dto.ConfigOptionDTO{
+			Type:         opt.Type,
+			ID:           opt.ID,
+			Name:         opt.Name,
+			Description:  opt.Description,
+			CurrentValue: opt.CurrentValue,
+			Category:     opt.Category,
+			Options:      choices,
+		})
+	}
+	return out
 }
 
 func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
@@ -320,6 +351,18 @@ func (c *Controller) syncAgentFromDiscovery(ctx context.Context, result discover
 	if len(profiles) > 0 {
 		return c.updateExistingProfiles(ctx, profiles, p)
 	}
+	// No live profiles. Only seed a default for an agent that has never been
+	// provisioned. If soft-deleted rows exist the user deliberately removed
+	// the profile(s); recreating one here would resurrect it on every restart.
+	// (A soft-deleted row implies a user deletion, not system orphan cleanup —
+	// see ProfileReconciler.reconcileAgent for the disjoint-enabled-set reasoning.)
+	hadProfiles, err := c.repo.HasDeletedAgentProfiles(ctx, agent.ID)
+	if err != nil {
+		return err
+	}
+	if hadProfiles {
+		return nil
+	}
 	return c.createDefaultProfile(ctx, agent.ID, p)
 }
 
@@ -343,7 +386,7 @@ func (c *Controller) buildProfileSyncParams(
 	_, displayName, defaultModel string,
 	isPassthroughOnly bool,
 ) profileSyncParams {
-	autoApprove, allowIndexing, skipPermissions := resolvePermissionDefaults(agentConfig.PermissionSettings())
+	autoApprove, allowIndexing, skipPermissions := resolvePermissionDefaults(agents.CatalogPermissionSettings(agentConfig))
 	return profileSyncParams{
 		displayName:     displayName,
 		defaultModel:    defaultModel,

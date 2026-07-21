@@ -26,6 +26,37 @@ func TestClone_PreservesNonDefaultRemoteBranches(t *testing.T) {
 	}
 }
 
+func TestRepoPathConfinesRepositoryToCloneBase(t *testing.T) {
+	t.Parallel()
+
+	basePath := t.TempDir()
+	cloner := NewCloner(Config{BasePath: basePath}, ProtocolHTTPS, "", logger.Default())
+
+	path, err := cloner.RepoPath("group/subgroup", "repository")
+	if err != nil {
+		t.Fatalf("RepoPath() unexpected error: %v", err)
+	}
+	want := filepath.Join(basePath, "group", "subgroup", "repository")
+	if path != want {
+		t.Fatalf("RepoPath() = %q, want %q", path, want)
+	}
+
+	for _, test := range []struct {
+		name  string
+		owner string
+		repo  string
+	}{
+		{name: "owner traversal", owner: "../../outside", repo: "repository"},
+		{name: "repository traversal", owner: "group", repo: "../../../outside"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, pathErr := cloner.RepoPath(test.owner, test.repo); pathErr == nil {
+				t.Fatal("RepoPath() accepted a path outside the clone base")
+			}
+		})
+	}
+}
+
 func initBareRepoWithReleaseBranch(t *testing.T) string {
 	t.Helper()
 

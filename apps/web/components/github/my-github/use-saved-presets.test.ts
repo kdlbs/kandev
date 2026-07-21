@@ -1,31 +1,29 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { readStorage, type SavedPreset } from "./use-saved-presets";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
+import {
+  fetchGitHubWorkspaceSettings,
+  updateGitHubWorkspaceSettings,
+} from "@/lib/api/domains/github-api";
+import { __resetSnapshotForTests, useSavedPresets, type SavedPreset } from "./use-saved-presets";
 
 const STORAGE_KEY = "kandev:github-presets:v1";
+const WORKSPACE_ID = "ws-1";
+const SETTINGS_TIMESTAMP = "2026-01-01T00:00:00Z";
 
-// Provide a simple in-memory localStorage mock so the tests are not sensitive
-// to how the test runner exposes window.localStorage (e.g. Node's
-// --localstorage-file flag without a valid path).
-function makeLocalStorageMock() {
-  const store = new Map<string, string>();
-  return {
-    getItem: (key: string) => store.get(key) ?? null,
-    setItem: (key: string, value: string) => store.set(key, value),
-    removeItem: (key: string) => store.delete(key),
-    clear: () => store.clear(),
-    get length() {
-      return store.size;
-    },
-    key: (index: number) => Array.from(store.keys())[index] ?? null,
-  };
-}
+vi.mock("@/lib/api/domains/settings-api", () => ({
+  fetchUserSettings: vi.fn(),
+  updateUserSettings: vi.fn(),
+}));
 
-const localStorageMock = makeLocalStorageMock();
-vi.stubGlobal("localStorage", localStorageMock);
+vi.mock("@/lib/api/domains/github-api", () => ({
+  fetchGitHubWorkspaceSettings: vi.fn(),
+  updateGitHubWorkspaceSettings: vi.fn(),
+}));
 
 function set(raw: string | null) {
-  if (raw === null) localStorageMock.removeItem(STORAGE_KEY);
-  else localStorageMock.setItem(STORAGE_KEY, raw);
+  if (raw === null) window.localStorage.removeItem(STORAGE_KEY);
+  else window.localStorage.setItem(STORAGE_KEY, raw);
 }
 
 const valid: SavedPreset = {
@@ -34,58 +32,211 @@ const valid: SavedPreset = {
   label: "My PRs",
   customQuery: "author:@me",
   repoFilter: "",
-  createdAt: "2026-01-01T00:00:00Z",
+  createdAt: SETTINGS_TIMESTAMP,
 };
 
-describe("readStorage", () => {
+function resetTestState() {
+  window.localStorage.clear();
+  __resetSnapshotForTests();
+  vi.mocked(fetchUserSettings).mockReset();
+  vi.mocked(updateUserSettings).mockReset();
+  vi.mocked(fetchGitHubWorkspaceSettings).mockReset();
+  vi.mocked(updateGitHubWorkspaceSettings).mockReset();
+}
+
+function workspaceSettings(
+  savedPresets: unknown = [],
+): Awaited<ReturnType<typeof fetchGitHubWorkspaceSettings>> {
+  return {
+    workspace_id: WORKSPACE_ID,
+    repo_scope_mode: "all",
+    repo_scope_orgs: [],
+    repo_scope_repos: [],
+    saved_presets: savedPresets,
+    default_query_presets: null,
+    created_at: SETTINGS_TIMESTAMP,
+    updated_at: SETTINGS_TIMESTAMP,
+  } as Awaited<ReturnType<typeof fetchGitHubWorkspaceSettings>>;
+}
+
+describe("useSavedPresets", () => {
   beforeEach(() => {
-    localStorageMock.clear();
+    resetTestState();
   });
 
-  it("returns empty array when no value is stored", () => {
-    expect(readStorage()).toEqual([]);
-  });
-
-  it("returns empty array for malformed JSON", () => {
-    set("not-json{");
-    expect(readStorage()).toEqual([]);
-  });
-
-  it("returns empty array when parsed value is not an array", () => {
-    set(JSON.stringify({ id: "p_1" }));
-    expect(readStorage()).toEqual([]);
-  });
-
-  it("keeps valid entries", () => {
+  it("ignores stale local presets when backend settings are empty", async () => {
     set(JSON.stringify([valid]));
-    expect(readStorage()).toEqual([valid]);
+    vi.mocked(fetchUserSettings).mockResolvedValue({
+      settings: { github_saved_presets: [] },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
+
+    const { result } = renderHook(() => useSavedPresets());
+
+    await waitFor(() => expect(result.current.presets).toEqual([]));
+    expect(updateUserSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSavedPresets workspace sync", () => {
+  beforeEach(() => {
+    resetTestState();
   });
 
-  it("drops entries missing an id", () => {
-    const missingId = { ...valid } as Partial<SavedPreset>;
-    delete missingId.id;
-    set(JSON.stringify([missingId, valid]));
-    expect(readStorage()).toEqual([valid]);
+  it("ignores stale local presets when workspace settings are empty", async () => {
+    set(JSON.stringify([valid]));
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings());
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.presets).toEqual([]));
+    expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
 
-  it("drops entries with invalid kind", () => {
-    set(JSON.stringify([{ ...valid, kind: "commit" }, valid]));
-    expect(readStorage()).toEqual([valid]);
+  it("does not migrate local presets over existing workspace presets", async () => {
+    const server = { ...valid, id: "p_server", label: "Server" };
+    set(JSON.stringify([valid]));
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings([server]));
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.presets).toEqual([server]));
+    expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
 
-  it("drops non-object entries", () => {
-    set(JSON.stringify(["string", 42, null, valid]));
-    expect(readStorage()).toEqual([valid]);
+  it("does not save while workspace presets are still loading", () => {
+    vi.mocked(fetchGitHubWorkspaceSettings).mockReturnValue(new Promise(() => {}));
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    let created: SavedPreset | null = null;
+    act(() => {
+      created = result.current.save({
+        kind: "pr",
+        label: "Loading",
+        customQuery: "is:open",
+        repoFilter: "",
+      });
+    });
+
+    expect(created).toBeNull();
+    expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
 
-  it("drops entries with non-string label", () => {
-    set(JSON.stringify([{ ...valid, label: 123 }, valid]));
-    expect(readStorage()).toEqual([valid]);
+  it("does not save after workspace presets fail to load", async () => {
+    vi.mocked(fetchGitHubWorkspaceSettings).mockRejectedValue(new Error("settings down"));
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    await waitFor(() => expect(fetchGitHubWorkspaceSettings).toHaveBeenCalled());
+
+    let created: SavedPreset | null = valid;
+    act(() => {
+      created = result.current.save({
+        kind: "pr",
+        label: "Failed load",
+        customQuery: "is:open",
+        repoFilter: "",
+      });
+    });
+
+    expect(created).toBeNull();
+    expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
 
-  it("accepts issue kind", () => {
-    const issue: SavedPreset = { ...valid, kind: "issue" };
-    set(JSON.stringify([issue]));
-    expect(readStorage()).toEqual([issue]);
+  it("does not remove while workspace presets are still loading", () => {
+    vi.mocked(fetchGitHubWorkspaceSettings).mockReturnValue(new Promise(() => {}));
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    act(() => {
+      result.current.remove("p_1");
+    });
+
+    expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
+  });
+
+  it("does not remove after workspace presets fail to load", async () => {
+    vi.mocked(fetchGitHubWorkspaceSettings).mockRejectedValue(new Error("settings down"));
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    await waitFor(() => expect(fetchGitHubWorkspaceSettings).toHaveBeenCalled());
+
+    act(() => {
+      result.current.remove("p_1");
+    });
+
+    expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSavedPresets repository defaults", () => {
+  beforeEach(() => {
+    resetTestState();
+  });
+
+  it("preserves the chosen repository in the workspace settings update", async () => {
+    const server = { ...valid, id: "p_server", label: "Server" };
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings([server]));
+    vi.mocked(updateGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings());
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.presets).toEqual([server]));
+    act(() => {
+      result.current.save({
+        kind: "pr",
+        label: "Kandev PRs",
+        customQuery: "is:open",
+        repoFilter: "kdlbs/kandev",
+      });
+    });
+
+    await waitFor(() =>
+      expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith({
+        workspace_id: WORKSPACE_ID,
+        saved_presets: [
+          server,
+          expect.objectContaining({
+            kind: "pr",
+            label: "Kandev PRs",
+            customQuery: "is:open",
+            repoFilter: "kdlbs/kandev",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it.each([
+    {
+      caseName: "missing",
+      serverPreset: {
+        id: "p_legacy_missing",
+        kind: "pr",
+        label: "Legacy missing repo",
+        customQuery: "author:@me",
+        createdAt: SETTINGS_TIMESTAMP,
+      },
+    },
+    {
+      caseName: "non-string",
+      serverPreset: {
+        id: "p_legacy_invalid",
+        kind: "pr",
+        label: "Legacy invalid repo",
+        customQuery: "author:@me",
+        repoFilter: 42,
+        createdAt: SETTINGS_TIMESTAMP,
+      },
+    },
+  ])("normalizes a $caseName server repoFilter to All repos", async ({ serverPreset }) => {
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings([serverPreset]));
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    await waitFor(() =>
+      expect(result.current.presets).toEqual([{ ...serverPreset, repoFilter: "" }]),
+    );
   });
 });

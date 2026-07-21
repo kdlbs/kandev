@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 	"sync"
@@ -46,7 +47,7 @@ func (r *SpritesExecutor) uploadAgentctl(ctx context.Context, sprite *sprites.Sp
 		return fmt.Errorf("failed to read agentctl binary: %w", err)
 	}
 
-	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+	stepCtx, cancel := context.WithTimeout(ctx, spriteUploadTimeout)
 	defer cancel()
 
 	r.logger.Debug("uploading agentctl binary", zap.Int("size_bytes", len(data)))
@@ -86,6 +87,10 @@ func (r *SpritesExecutor) uploadSkillFiles(
 		Skills []struct {
 			Slug    string `json:"Slug"`
 			Content string `json:"Content"`
+			Files   []struct {
+				Path    string `json:"Path"`
+				Content string `json:"Content"`
+			} `json:"Files"`
 		} `json:"Skills"`
 		Instructions []struct {
 			Filename string `json:"Filename"`
@@ -100,7 +105,7 @@ func (r *SpritesExecutor) uploadSkillFiles(
 		return fmt.Errorf("unmarshal skill manifest: %w", err)
 	}
 
-	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+	stepCtx, cancel := context.WithTimeout(ctx, spriteUploadTimeout)
 	defer cancel()
 
 	projectSkillDir := manifest.ProjectSkillDir
@@ -118,10 +123,23 @@ func (r *SpritesExecutor) uploadSkillFiles(
 		if !validSlugRe.MatchString(sk.Slug) {
 			continue
 		}
-		path := fmt.Sprintf("/workspace/%s/kandev-%s/SKILL.md", projectSkillDir, sk.Slug)
-		if err := r.writeFileWithRetry(stepCtx, sprite, path, []byte(sk.Content), 0o644); err != nil {
+		skillRoot := fmt.Sprintf("/workspace/%s/kandev-%s", projectSkillDir, sk.Slug)
+		skillPath := skillRoot + "/SKILL.md"
+		if err := r.writeFileWithRetry(stepCtx, sprite, skillPath, []byte(sk.Content), 0o644); err != nil {
 			r.logger.Warn("failed to upload skill file",
 				zap.String("slug", sk.Slug), zap.Error(err))
+		}
+		for _, file := range sk.Files {
+			rel, ok := cleanSpriteSkillFilePath(file.Path)
+			if !ok {
+				continue
+			}
+			if err := r.writeFileWithRetry(stepCtx, sprite, skillRoot+"/"+rel, []byte(file.Content), 0o644); err != nil {
+				r.logger.Warn("failed to upload skill support file",
+					zap.String("slug", sk.Slug),
+					zap.String("path", rel),
+					zap.Error(err))
+			}
 		}
 	}
 
@@ -142,6 +160,20 @@ func (r *SpritesExecutor) uploadSkillFiles(
 		zap.Int("instructions", len(manifest.Instructions)),
 		zap.String("project_skill_dir", projectSkillDir))
 	return nil
+}
+
+func cleanSpriteSkillFilePath(p string) (string, bool) {
+	p = strings.TrimSpace(p)
+	if p == "" || strings.Contains(p, "\\") {
+		return "", false
+	}
+	cleaned := path.Clean(p)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") ||
+		strings.HasPrefix(cleaned, "/") ||
+		cleaned == "SKILL.md" {
+		return "", false
+	}
+	return cleaned, true
 }
 
 // cleanSpriteKandevSkills removes any kandev-* directories left over from
@@ -192,7 +224,7 @@ func (r *SpritesExecutor) runPrepareScript(
 		return nil
 	}
 
-	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+	stepCtx, cancel := context.WithTimeout(ctx, spritePrepareTimeout)
 	defer cancel()
 
 	r.logger.Debug("running prepare script")
@@ -363,8 +395,15 @@ func (r *SpritesExecutor) createAgentInstance(
 		TaskID:        req.TaskID,
 		Protocol:      req.Protocol,
 		AgentType:     agentTypeFromReq(req),
-		McpServers:    req.McpServers,
-		McpMode:       req.McpMode,
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			req.AutoApprovePermissions,
+			req.AutoApprovePermissionsOverride,
+		),
+		McpServers:          req.McpServers,
+		McpMode:             req.McpMode,
+		RequiresProcessKill: requiresProcessKillFromReq(req),
+		StripEnv:            stripEnvFromReq(req),
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 	reqJSON, err := json.Marshal(instanceReq)
 	if err != nil {
@@ -467,6 +506,33 @@ func agentTypeFromReq(req *ExecutorCreateRequest) string {
 		return req.AgentConfig.ID()
 	}
 	return ""
+}
+
+// requiresProcessKillFromReq returns the agent's RequiresProcessKill setting
+// from its RuntimeConfig (false when unset).
+func requiresProcessKillFromReq(req *ExecutorCreateRequest) bool {
+	if req == nil || req.AgentConfig == nil {
+		return false
+	}
+	rt := req.AgentConfig.Runtime()
+	if rt == nil {
+		return false
+	}
+	return rt.RequiresProcessKill
+}
+
+// stripEnvFromReq returns the agent's StripEnv list from its RuntimeConfig
+// (nil when unset). Used by remote executors (SSH, Sprites) that serialize
+// the CreateInstanceRequest over the wire.
+func stripEnvFromReq(req *ExecutorCreateRequest) []string {
+	if req == nil || req.AgentConfig == nil {
+		return nil
+	}
+	rt := req.AgentConfig.Runtime()
+	if rt == nil {
+		return nil
+	}
+	return rt.StripEnv
 }
 
 func (r *SpritesExecutor) waitForHealth(ctx context.Context, sprite *sprites.Sprite) error {

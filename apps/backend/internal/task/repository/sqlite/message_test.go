@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // insertMsgWithType inserts a message row with a configurable type column,
@@ -17,6 +19,86 @@ func insertMsgWithType(t *testing.T, repo *Repository, id, sessionID, turnID, ms
 	`), id, sessionID, turnID, msgType, ts)
 	if err != nil {
 		t.Fatalf("insert message %s: %v", id, err)
+	}
+}
+
+func TestListMessagesByTurnID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	seedForMsgTest(t, repo, "task-T", "sess-T", "turn-1")
+	seedForMsgTest(t, repo, "task-T2", "sess-T", "turn-2")
+
+	// Two messages on turn-1 (out of insertion order to check created_at sort)
+	// and one on turn-2 in the same session.
+	insertMsgWithType(t, repo, "m-b", "sess-T", "turn-1", "message", now.Add(2*time.Second))
+	insertMsgWithType(t, repo, "m-a", "sess-T", "turn-1", "tool_call", now)
+	insertMsgWithType(t, repo, "m-other", "sess-T", "turn-2", "message", now.Add(time.Second))
+
+	got, err := repo.ListMessagesByTurnID(ctx, "turn-1")
+	if err != nil {
+		t.Fatalf("ListMessagesByTurnID: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 messages for turn-1, got %d", len(got))
+	}
+	if got[0].ID != "m-a" || got[1].ID != "m-b" {
+		t.Errorf("expected [m-a, m-b] ordered by created_at, got [%s, %s]", got[0].ID, got[1].ID)
+	}
+	for _, m := range got {
+		if m.TurnID != "turn-1" {
+			t.Errorf("message %s has turn_id %q, want turn-1", m.ID, m.TurnID)
+		}
+	}
+
+	empty, err := repo.ListMessagesByTurnID(ctx, "turn-missing")
+	if err != nil {
+		t.Fatalf("ListMessagesByTurnID(missing): %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("expected no messages for unknown turn, got %d", len(empty))
+	}
+}
+
+func TestUpdateMessageBumpsUpdatedAt(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-U", "sess-U", "turn-U")
+
+	created := time.Now().UTC().Add(-time.Hour)
+	msg := &models.Message{
+		ID:            "m-u",
+		TaskSessionID: "sess-U",
+		TurnID:        "turn-U",
+		AuthorType:    models.MessageAuthorAgent,
+		Content:       "hello",
+		Type:          models.MessageTypeMessage,
+		CreatedAt:     created,
+	}
+	if err := repo.CreateMessage(ctx, msg); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	// On insert, updated_at defaults to created_at.
+	got, err := repo.GetMessage(ctx, "m-u")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if !got.UpdatedAt.Equal(got.CreatedAt) {
+		t.Errorf("after create, updated_at = %v, want == created_at %v", got.UpdatedAt, got.CreatedAt)
+	}
+
+	// Update advances updated_at past created_at.
+	msg.Content = "hello world"
+	if err := repo.UpdateMessage(ctx, msg); err != nil {
+		t.Fatalf("UpdateMessage: %v", err)
+	}
+	got, err = repo.GetMessage(ctx, "m-u")
+	if err != nil {
+		t.Fatalf("GetMessage after update: %v", err)
+	}
+	if !got.UpdatedAt.After(got.CreatedAt) {
+		t.Errorf("after update, updated_at = %v, want after created_at %v", got.UpdatedAt, got.CreatedAt)
 	}
 }
 
@@ -75,5 +157,93 @@ func TestCountToolCallMessagesBySession_Multi(t *testing.T) {
 	}
 	if _, ok := got["s3"]; ok {
 		t.Errorf("s3 should be omitted (zero tool_call rows), got %d", got["s3"])
+	}
+}
+
+func createPendingActionMessage(
+	t *testing.T,
+	repo *Repository,
+	id string,
+	taskID string,
+	sessionID string,
+	turnID string,
+	msgType models.MessageType,
+	status string,
+	createdAt time.Time,
+) {
+	t.Helper()
+	metadata := map[string]interface{}{}
+	if status != "<missing>" {
+		metadata["status"] = status
+	}
+	if err := repo.CreateMessage(context.Background(), &models.Message{
+		ID:            id,
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		AuthorType:    models.MessageAuthorAgent,
+		Content:       id,
+		Type:          msgType,
+		Metadata:      metadata,
+		CreatedAt:     createdAt,
+	}); err != nil {
+		t.Fatalf("CreateMessage(%s): %v", id, err)
+	}
+}
+
+func TestGetPendingActionsBySessionIDs(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedForMsgTest(t, repo, "task-clar", "sess-clar", "turn-clar")
+	createPendingActionMessage(t, repo, "perm-clar", "task-clar", "sess-clar", "turn-clar", models.MessageTypePermissionRequest, "<missing>", now)
+	createPendingActionMessage(t, repo, "clar-clar", "task-clar", "sess-clar", "turn-clar", models.MessageTypeClarificationRequest, "pending", now.Add(time.Second))
+
+	seedForMsgTest(t, repo, "task-resolved", "sess-resolved", "turn-resolved")
+	createPendingActionMessage(t, repo, "perm-old", "task-resolved", "sess-resolved", "turn-resolved", models.MessageTypePermissionRequest, "pending", now)
+	createPendingActionMessage(t, repo, "perm-new", "task-resolved", "sess-resolved", "turn-resolved", models.MessageTypePermissionRequest, "approved", now.Add(time.Second))
+
+	seedForMsgTest(t, repo, "task-perm", "sess-perm", "turn-perm")
+	createPendingActionMessage(t, repo, "perm-pending", "task-perm", "sess-perm", "turn-perm", models.MessageTypePermissionRequest, "pending", now)
+
+	seedForMsgTest(t, repo, "task-perm-tie", "sess-perm-tie", "turn-perm-tie")
+	createPendingActionMessage(t, repo, "z-approved", "task-perm-tie", "sess-perm-tie", "turn-perm-tie", models.MessageTypePermissionRequest, "approved", now)
+	createPendingActionMessage(t, repo, "a-pending", "task-perm-tie", "sess-perm-tie", "turn-perm-tie", models.MessageTypePermissionRequest, "pending", now)
+
+	seedForMsgTest(t, repo, "task-stale", "sess-stale", "turn-stale")
+	createPendingActionMessage(t, repo, "perm-stale", "task-stale", "sess-stale", "turn-stale", models.MessageTypePermissionRequest, "pending", now)
+	createPendingActionMessage(t, repo, "clar-stale", "task-stale", "sess-stale", "turn-stale", models.MessageTypeClarificationRequest, "pending", now)
+	seedForMsgTest(t, repo, "task-stale", "sess-stale", "turn-current")
+	createPendingActionMessage(t, repo, "message-current", "task-stale", "sess-stale", "turn-current", models.MessageTypeMessage, "<missing>", now.Add(time.Second))
+
+	got, err := repo.GetPendingActionsBySessionIDs(ctx, []string{
+		"sess-clar",
+		"sess-resolved",
+		"sess-perm",
+		"sess-perm-tie",
+		"sess-stale",
+		"sess-missing",
+	})
+	if err != nil {
+		t.Fatalf("GetPendingActionsBySessionIDs: %v", err)
+	}
+	if got["sess-clar"] != models.TaskPendingActionClarification {
+		t.Fatalf("sess-clar action = %q, want clarification", got["sess-clar"])
+	}
+	if _, ok := got["sess-resolved"]; ok {
+		t.Fatalf("sess-resolved should not have a pending action: %#v", got["sess-resolved"])
+	}
+	if got["sess-perm"] != models.TaskPendingActionPermission {
+		t.Fatalf("sess-perm action = %q, want permission", got["sess-perm"])
+	}
+	if got["sess-perm-tie"] != models.TaskPendingActionPermission {
+		t.Fatalf("sess-perm-tie action = %q, want permission from last inserted row", got["sess-perm-tie"])
+	}
+	if _, ok := got["sess-stale"]; ok {
+		t.Fatalf("sess-stale should not inherit previous turn actions: %#v", got["sess-stale"])
+	}
+	if _, ok := got["sess-missing"]; ok {
+		t.Fatalf("sess-missing should not have a pending action: %#v", got["sess-missing"])
 	}
 }

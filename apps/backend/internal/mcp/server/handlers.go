@@ -4,12 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 )
+
+// askQuestionKeepAliveInterval is how often ask_user_question streams a progress
+// notification to the agent while waiting for the user's answer. The agent's MCP
+// client (auggie runs on Node, whose fetch/undici applies a 300s idle timeout to
+// the in-flight tool-call request) aborts the call with "fetch failed" if no bytes
+// arrive for that long. Emitting a progress notification well inside that window
+// keeps the streamed POST/SSE response alive so the call survives until the user
+// responds. Declared as a var so tests can shorten it.
+var askQuestionKeepAliveInterval = 20 * time.Second
 
 // Argument-name constants used across the ask_user_question_kandev handler.
 // Pulled out so goconst stays happy and renames stay safe.
@@ -25,6 +35,8 @@ const (
 	questionIDFieldKey = "question_id"
 	answeredFieldKey   = "answered"
 	rejectedFieldKey   = "rejected"
+	documentArg        = "document"
+	messageArg         = "message"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
@@ -138,28 +150,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"workspace_id":        workspaceID,
 			"workflow_id":         workflowID,
 			"workflow_step_id":    workflowStepID,
+			"workspace_mode":      req.GetString("workspace_mode", ""),
 			"title":               title,
 			"description":         req.GetString("description", ""),
 			"agent_profile_id":    req.GetString("agent_profile_id", ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
-		}
-
-		// Office task-handoffs phase 4: workspace policy. Empty values fall
-		// through; the WS handler resolves defaults (new_workspace, parent
-		// policy inheritance) on the server side.
-		if v := req.GetString("workspace_mode", ""); v != "" {
-			payload["workspace_mode"] = v
-		}
-		if v := req.GetString("workspace_group_id", ""); v != "" {
-			payload["workspace_group_id"] = v
-		}
-		if v := req.GetString("default_child_workspace", ""); v != "" {
-			payload["default_child_workspace"] = v
-		}
-		if v := req.GetString("default_child_ordering", ""); v != "" {
-			payload["default_child_ordering"] = v
 		}
 
 		// Add repository info. For subtasks an explicit repo overrides the
@@ -184,6 +181,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 				repo["base_branch"] = baseBranch
 			}
 			payload["repositories"] = []map[string]string{repo}
+		} else if baseBranch != "" {
+			// Forward base_branch at the top level only when the caller
+			// supplied no repo identifier — the backend uses it as a fallback
+			// applied to inherited subtask repos. When explicit repo entries
+			// are present, the per-repo base_branch above is authoritative
+			// and a top-level value here would be ignored.
+			payload["base_branch"] = baseBranch
 		}
 
 		var result map[string]interface{}
@@ -239,8 +243,61 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 			"sender_task_id":    s.taskID,
 			"sender_session_id": s.sessionID,
 		}
+		copyOptionalStringArg(payload, req, "delivery_mode")
+		copyOptionalStringArg(payload, req, "session_id")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPMessageTask, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString(mcpKeyTaskID)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		// Build a fresh payload so callers cannot override trusted sender
+		// attribution or supply runtime-level session, reason, or force controls.
+		payload := map[string]interface{}{
+			mcpKeyTaskID:     taskID,
+			"sender_task_id": s.taskID,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPStopTask, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// spawnSessionHandler spawns an additional agent session on an existing task.
+// task_id defaults to the server's own task; sender identity is injected so
+// the spawned session can identify and reply to its spawner.
+func (s *Server) spawnSessionHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		prompt, err := req.RequireString(promptArg)
+		if err != nil {
+			return mcp.NewToolResultError("prompt is required"), nil
+		}
+		taskID := req.GetString("task_id", s.taskID)
+		if taskID == "" {
+			return mcp.NewToolResultError("task_id is required (no current task in this context)"), nil
+		}
+		payload := map[string]interface{}{
+			"task_id":           taskID,
+			promptArg:           prompt,
+			"sender_task_id":    s.taskID,
+			"sender_session_id": s.sessionID,
+		}
+		copyOptionalStringArg(payload, req, "agent_profile_id")
+		copyOptionalStringArg(payload, req, "name")
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSpawnSession, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -328,6 +385,15 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			"context":    questionCtx,
 		}
 
+		// Waiting on a human answer routinely outlasts the agent MCP client's
+		// idle timeout on the in-flight tool call. Stream periodic progress
+		// notifications until the backend responds; mcp-go flushes them onto the
+		// POST/SSE response, resetting the client's idle timer so the call is not
+		// aborted mid-question.
+		stop := make(chan struct{})
+		defer close(stop)
+		go emitKeepAlivePings(ctx, stop, askQuestionKeepAliveInterval, s.clarificationKeepAlive(ctx, req))
+
 		// Use the MCP request context from the agent. This ensures that if the agent's
 		// MCP client times out, we'll detect it and not update the session state.
 		var result map[string]interface{}
@@ -342,6 +408,54 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 		}
 
 		return extractQuestionAnswers(result, questions), nil
+	}
+}
+
+// emitKeepAlivePings invokes send on every interval tick until stop is closed or
+// ctx is cancelled. It is the transport-agnostic core of the ask_user_question
+// keepalive, split out so the timing loop is unit-testable without a live MCP
+// session.
+func emitKeepAlivePings(ctx context.Context, stop <-chan struct{}, interval time.Duration, send func()) {
+	if interval <= 0 || send == nil {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			send()
+		}
+	}
+}
+
+// clarificationKeepAlive builds the keepalive callback that streams a
+// notifications/progress message to the agent. The progress token mirrors the one
+// the client attached to the tool call when present, so spec-compliant clients
+// associate the updates with the in-flight request; clients that omitted a token
+// ignore the unknown one. Returns a no-op when no MCP server is bound to the
+// context (e.g. direct unit-test invocation of the handler).
+func (s *Server) clarificationKeepAlive(ctx context.Context, req mcp.CallToolRequest) func() {
+	srv := server.ServerFromContext(ctx)
+	if srv == nil {
+		return func() {}
+	}
+	var token mcp.ProgressToken = fmt.Sprintf("ask_user_question:%s", s.sessionID)
+	if req.Params.Meta != nil && req.Params.Meta.ProgressToken != nil {
+		token = req.Params.Meta.ProgressToken
+	}
+	var progress float64
+	return func() {
+		progress++
+		_ = srv.SendNotificationToClient(ctx, "notifications/progress", map[string]any{
+			"progressToken": token,
+			"progress":      progress,
+			messageArg:      "Waiting for your response in Kandev",
+		})
 	}
 }
 
@@ -665,5 +779,65 @@ func (s *Server) deleteTaskPlanHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return mcp.NewToolResultText("Plan deleted successfully."), nil
+	}
+}
+
+func (s *Server) showWalkthroughHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		args := req.GetArguments()
+		stepsRaw, ok := args["steps"]
+		if !ok {
+			return mcp.NewToolResultError("steps is required (array of {file, line, text} objects)"), nil
+		}
+
+		payload := map[string]interface{}{
+			"task_id": taskID,
+			"title":   req.GetString("title", "Walkthrough"),
+			"steps":   stepsRaw,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPShowWalkthrough, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(fmt.Sprintf("Walkthrough saved:\n%s", string(data))), nil
+	}
+}
+
+func (s *Server) getWalkthroughHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		payload := map[string]string{"task_id": taskID}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetWalkthrough, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if len(result) == 0 {
+			return mcp.NewToolResultText("No walkthrough exists for this task yet."), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) deleteWalkthroughHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		payload := map[string]string{"task_id": taskID}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPDeleteWalkthrough, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText("Walkthrough deleted successfully."), nil
 	}
 }

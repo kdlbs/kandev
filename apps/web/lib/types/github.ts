@@ -55,6 +55,9 @@ export type GitHubPR = {
   repo_name: string;
   draft: boolean;
   mergeable: boolean;
+  /** Rich merge state (clean | blocked | behind | dirty | ...). Optional because
+   *  legacy payloads predate it; falls back to TaskPR.mergeable_state. */
+  mergeable_state?: MergeableState;
   additions: number;
   deletions: number;
   requested_reviewers: RequestedReviewer[];
@@ -123,6 +126,14 @@ export type GitHubPRStatus = {
   checks_passing: number;
 };
 
+export type MergeMethod = "merge" | "squash" | "rebase";
+
+export type RepoMergeMethods = {
+  merge: boolean;
+  squash: boolean;
+  rebase: boolean;
+};
+
 export type MergeableState =
   | "clean"
   | "blocked"
@@ -173,6 +184,41 @@ export type TaskPR = {
   updated_at: string;
 };
 
+export type TaskCIPRAutomationState = {
+  task_id: string;
+  repository_id: string;
+  pr_number: number;
+  last_fix_signature: string;
+  last_fix_checkpoint_json: string;
+  last_fix_enqueued_at: string | null;
+  last_fix_session_id: string | null;
+  auto_fix_round_count: number;
+  auto_fix_exhausted_at: string | null;
+  last_merge_signature: string;
+  last_merge_attempt_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskCIAutomationOptions = {
+  task_id: string;
+  auto_fix_enabled: boolean;
+  auto_merge_enabled: boolean;
+  auto_fix_prompt_override: string | null;
+  auto_fix_max_rounds?: number;
+  effective_auto_fix_prompt: string;
+  using_default_prompt: boolean;
+  updated_at: string;
+  pr_states: TaskCIPRAutomationState[];
+};
+
+export type TaskCIAutomationPatch = {
+  auto_fix_enabled?: boolean;
+  auto_merge_enabled?: boolean;
+  auto_fix_prompt_override?: string | null;
+};
+
 export type PRWatch = {
   id: string;
   session_id: string;
@@ -193,6 +239,28 @@ export type RepoFilter = {
   name: string;
 };
 
+export type GitHubRepoScopeMode = "all" | "orgs" | "repos";
+
+export type GitHubWorkspaceSettings = {
+  workspace_id: string;
+  repo_scope_mode: GitHubRepoScopeMode;
+  repo_scope_orgs: string[];
+  repo_scope_repos: RepoFilter[];
+  saved_presets?: unknown;
+  default_query_presets?: unknown | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UpdateGitHubWorkspaceSettingsRequest = {
+  workspace_id: string;
+  repo_scope_mode?: GitHubRepoScopeMode;
+  repo_scope_orgs?: string[];
+  repo_scope_repos?: RepoFilter[];
+  saved_presets?: unknown;
+  default_query_presets?: unknown | null;
+};
+
 export type GitHubOrg = {
   login: string;
   avatar_url: string;
@@ -207,6 +275,17 @@ export type GitHubRepoInfo = {
 
 export type ReviewScope = "user" | "user_and_teams";
 
+/**
+ * CleanupPolicy controls how a review or issue watch handles its
+ * auto-created tasks once the underlying PR / issue is merged or closed.
+ *
+ * - "auto":   delete only when the user hasn't authored any messages on the
+ *             task (the agent's auto-start prompt does not count).
+ * - "always": delete on terminal state regardless of user interaction.
+ * - "never":  never auto-delete; rely on the manual cleanup button.
+ */
+export type CleanupPolicy = "auto" | "always" | "never";
+
 export type ReviewWatch = {
   id: string;
   workspace_id: string;
@@ -220,6 +299,7 @@ export type ReviewWatch = {
   custom_query: string;
   enabled: boolean;
   poll_interval_seconds: number;
+  cleanup_policy: CleanupPolicy;
   last_polled_at: string | null;
   created_at: string;
   updated_at: string;
@@ -275,9 +355,14 @@ export type CreateReviewWatchRequest = {
   custom_query?: string;
   enabled?: boolean;
   poll_interval_seconds?: number;
+  cleanup_policy?: CleanupPolicy;
 };
 
 export type UpdateReviewWatchRequest = Partial<Omit<CreateReviewWatchRequest, "workspace_id">>;
+
+export type CleanupTasksResponse = {
+  deleted: number;
+};
 
 // Issue watch types
 
@@ -294,6 +379,7 @@ export type IssueWatch = {
   custom_query: string;
   enabled: boolean;
   poll_interval_seconds: number;
+  cleanup_policy: CleanupPolicy;
   last_polled_at: string | null;
   created_at: string;
   updated_at: string;
@@ -318,6 +404,7 @@ export type CreateIssueWatchRequest = {
   labels?: string[];
   custom_query?: string;
   poll_interval_seconds?: number;
+  cleanup_policy?: CleanupPolicy;
 };
 
 export type UpdateIssueWatchRequest = Partial<Omit<CreateIssueWatchRequest, "workspace_id">> & {
@@ -361,6 +448,20 @@ export type GitHubIssue = {
   created_at: string;
   updated_at: string;
   closed_at: string | null;
+};
+
+export type TaskIssueLink = {
+  task_id: string;
+  task_title: string;
+  owner: string;
+  repo: string;
+  issue_number: number;
+  issue_url: string;
+  issue_title: string;
+};
+
+export type TaskIssueLinksResponse = {
+  task_issues: Record<string, TaskIssueLink>;
 };
 
 export type SearchPRsResponse = {

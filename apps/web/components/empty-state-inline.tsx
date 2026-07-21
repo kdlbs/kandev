@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 
 interface EmptyStateInlineProps {
   message: string;

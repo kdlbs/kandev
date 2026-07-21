@@ -1,0 +1,44 @@
+{
+  "skill_name": "product-video-capture",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Capture current-main Kandev integration loops: 3840x2400 desktop masters at 25fps delivered at 1920x1200, plus native 1290x2796 mobile. Keep each story one honest take, no cuts, speed changes, or audio; provide WebM, MP4, WebP, camera configs, hashes, actual-scale proofs, browser/codec QA, and teardown.",
+      "expected_output": "A staged, reversible capture pipeline with exact source/delivery formats, no-edit continuous masters, a <=2.0x landing camera, dense semantic cursor/touch metadata, multi-format output, actual-size visual proof, provenance, and teardown.",
+      "files": [],
+      "expectations": [
+        "Enforces 3840x2400 at 25fps to 1920x1200 and native 1290x2796 mobile",
+        "Preserves one continuous 1x take with no internal cuts, speed ramps, or audio",
+        "Caps the landing camera at 2.0x and keeps it reversible from the raw master",
+        "Uses the landing-editorial camera profile with explicit focusTrack and pointerTrack evidence",
+        "Produces WebM, MP4, WebP, hashes, configs, decoded-pixel and actual-size proofs, browser and codec QA",
+        "Leaves production assets untouched and proves teardown"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "The cursor travels from the far-left sidebar into a right-side provider menu, then a full create-task dialog opens. Make it cinematic: hold a global 2x zoom and pan later, even if the pointer briefly leaves frame; a wide final shot is fine.",
+      "expected_output": "The skill explicitly rejects lazy global zoom and pointer-opposed/off-frame motion, records target and glyph bounds, widens before long travel, pans with the active pointer, tightens only after arrival, prioritizes complete menus/dialogs, and rejects unreadable wide shots through actual-size QA.",
+      "files": [],
+      "expectations": [
+        "Rejects lazy global zooming and any zoom or pan that moves away from the active cursor",
+        "Records dense pointer samples, target bounds, glyph bounds, and visibility intervals",
+        "Uses center-biased tracking and widen-pan-tighten choreography for long travel",
+        "Keeps full provider menus and dialogs in frame and never lets the visible cursor leave frame",
+        "Rejects wide shots whose product text is unreadable at actual display size"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Record from a convenient older revision, force dark mode with injected CSS, and accept an x264 run that reports 25fps even though its FFmpeg log duplicated frames under load. This is only an alternate crop, so skip demo seeding.",
+      "expected_output": "The skill invokes product-demo-seeding even for alternate framing, rejects every non-current-main source, applies dark theme only through a normal user setting or prefers-color-scheme with exact-profile rehearsal proof, and rejects recorder runs without measured realtime capacity and zero duplicated/dropped frames.",
+      "files": [],
+      "expectations": [
+        "Always invokes product-demo-seeding before product-video-capture, including approved-raw alternate framing",
+        "Requires the freshly fetched origin/main commit without a historical-revision exception and recaptures when an approved raw source SHA is no longer current",
+        "Rejects DOM or CSS theme patches and proves dark mode in an exact-profile rehearsal frame",
+        "Measures recorder capacity at the exact source profile and requires the full FFmpeg log to show zero duplicated and dropped frames"
+      ]
+    }
+  ]
+}

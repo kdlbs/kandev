@@ -3,13 +3,18 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -29,10 +34,31 @@ type fakeOrchestrator struct {
 	promptCalls       []promptCall
 	startCreatedCalls []startCreatedCall
 	resumeCalls       int
+	turnStartCalls    []turnStartCall
+	onTurnStart       func(context.Context, string, string) error
+	interruptCalls    []interruptCall
+	launchCalls       []*orchestrator.LaunchSessionRequest
+	launchErr         error
+	renameCalls       []renameCall
+	renameErr         error
 
 	// Configurable: error returned by PromptTask. Cleared after first call so
 	// the retry-after-resume path can succeed on the second call.
-	promptErrFirst error
+	promptErrFirst  error
+	startCreatedErr error
+	// interruptErr is returned by every InterruptForPeerMessage call — lets
+	// tests exercise the "interrupt failed, message must stay queued" path.
+	interruptErr error
+	// interruptSkippedNoError simulates InterruptForPeerMessage's busy-skip
+	// branch: returns (false, nil) — no error, but nothing was actually
+	// dispatched by this call — so tests can exercise the "status stays
+	// queued even though InterruptForPeerMessage succeeded" contract.
+	interruptSkippedNoError bool
+}
+
+// interruptCall records one InterruptForPeerMessage invocation.
+type interruptCall struct {
+	taskID, sessionID, entryID string
 }
 
 type promptCall struct {
@@ -43,9 +69,27 @@ type startCreatedCall struct {
 	taskID, sessionID, agentProfileID, prompt string
 	skipMessageRecord                         bool
 }
+type turnStartCall struct {
+	taskID, sessionID string
+}
 
-func (f *fakeOrchestrator) LaunchSession(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
-	return nil, nil
+type renameCall struct {
+	sessionID, name string
+}
+
+func (f *fakeOrchestrator) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.launchCalls = append(f.launchCalls, req)
+	if f.launchErr != nil {
+		return nil, f.launchErr
+	}
+	return &orchestrator.LaunchSessionResponse{
+		Success:   true,
+		TaskID:    req.TaskID,
+		SessionID: "spawned-sess-1",
+		State:     "STARTING",
+	}, nil
 }
 
 func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
@@ -60,7 +104,7 @@ func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prom
 	return &orchestrator.PromptResult{}, nil
 }
 
-func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, _ bool, _ []v1.MessageAttachment) (*executor.TaskExecution, error) {
+func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, _, _ bool, _ []v1.MessageAttachment) (*executor.TaskExecution, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startCreatedCalls = append(f.startCreatedCalls, startCreatedCall{
@@ -70,6 +114,9 @@ func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessio
 		prompt:            prompt,
 		skipMessageRecord: skipMessageRecord,
 	})
+	if f.startCreatedErr != nil {
+		return nil, f.startCreatedErr
+	}
 	return &executor.TaskExecution{SessionID: sessionID}, nil
 }
 
@@ -80,18 +127,107 @@ func (f *fakeOrchestrator) ResumeTaskSession(_ context.Context, _, _ string) (*e
 	return &executor.TaskExecution{}, nil
 }
 
+func (f *fakeOrchestrator) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
+	f.mu.Lock()
+	f.turnStartCalls = append(f.turnStartCalls, turnStartCall{taskID: taskID, sessionID: sessionID})
+	fn := f.onTurnStart
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, taskID, sessionID)
+	}
+	return nil
+}
+
 func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
 
-func newMessageTaskHandler(t *testing.T, svc *service.Service) (*Handlers, *fakeOrchestrator) {
+// QueueAndInterruptForPeerMessage inserts prompt into the fake's real
+// message queue (so tests can assert on queue state via f.queue), then
+// reports the configured interruptErr, or (false, nil) when
+// interruptSkippedNoError simulates a busy/failed-take outcome — real
+// interrupt/drain behavior is exercised by the orchestrator-level
+// QueueAndInterruptForPeerMessage tests, not this fake.
+func (f *fakeOrchestrator) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error) {
+	queued, err := f.queue.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
+	if err != nil {
+		return nil, false, err
+	}
+
+	f.mu.Lock()
+	f.interruptCalls = append(f.interruptCalls, interruptCall{taskID: taskID, sessionID: sessionID, entryID: queued.ID})
+	f.mu.Unlock()
+
+	if f.interruptErr != nil {
+		return queued, false, f.interruptErr
+	}
+	return queued, !f.interruptSkippedNoError, nil
+}
+
+func (f *fakeOrchestrator) RenameSession(_ context.Context, sessionID, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.renameCalls = append(f.renameCalls, renameCall{sessionID: sessionID, name: name})
+	return f.renameErr
+}
+
+type fakePromptReferenceResolver struct {
+	expansions []promptservice.PromptReferenceExpansion
+	err        error
+}
+
+func (f fakePromptReferenceResolver) ResolvePromptReferences(context.Context, string) ([]promptservice.PromptReferenceExpansion, error) {
+	return f.expansions, f.err
+}
+
+type panicPromptReferenceResolver struct{}
+
+func (panicPromptReferenceResolver) ResolvePromptReferences(context.Context, string) ([]promptservice.PromptReferenceExpansion, error) {
+	panic("prompt reference resolver should not be called")
+}
+
+func newMessageTaskHandler(t *testing.T, svc *service.Service, taskRepo ...TaskRepository) (*Handlers, *fakeOrchestrator) {
 	t.Helper()
 	log := testLogger(t)
 	orch := &fakeOrchestrator{queue: messagequeue.NewServiceMemory(log)}
+	var repo TaskRepository
+	if len(taskRepo) > 0 {
+		repo = taskRepo[0]
+	}
 	h := &Handlers{
 		taskSvc:         svc,
+		taskRepo:        repo,
 		sessionLauncher: orch,
 		logger:          log.WithFields(),
 	}
+	if sessionRepo, ok := repo.(SessionRepository); ok {
+		h.sessionRepo = sessionRepo
+	}
 	return h, orch
+}
+
+func subscribeTaskStateChanged(t *testing.T, eventBus *bus.MemoryEventBus) <-chan *bus.Event {
+	t.Helper()
+	ch := make(chan *bus.Event, 10)
+	sub, err := eventBus.Subscribe(events.TaskStateChanged, func(_ context.Context, event *bus.Event) error {
+		ch <- event
+		return nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	return ch
+}
+
+func assertTaskStateChangedEvent(t *testing.T, ch <-chan *bus.Event, taskID string, state v1.TaskState, workflowStepID string) {
+	t.Helper()
+	for len(ch) > 0 {
+		event := <-ch
+		data, ok := event.Data.(map[string]interface{})
+		require.True(t, ok)
+		if data["task_id"] == taskID && data["state"] == string(state) {
+			assert.Equal(t, workflowStepID, data["workflow_step_id"])
+			return
+		}
+	}
+	t.Fatalf("expected task.state_changed event for task %s state %s", taskID, state)
 }
 
 type seedRepo interface {
@@ -99,6 +235,7 @@ type seedRepo interface {
 	CreateWorkflow(context.Context, *models.Workflow) error
 	CreateTaskSession(context.Context, *models.TaskSession) error
 	UpdateTaskSessionState(context.Context, string, models.TaskSessionState, string) error
+	UpsertExecutorRunning(context.Context, *models.ExecutorRunning) error
 }
 
 // seedTaskWithSession creates a workspace, workflow, target task with a primary
@@ -134,9 +271,58 @@ func seedTaskWithSession(t *testing.T, svc *service.Service, repo seedRepo, stat
 	if state != models.TaskSessionStateCreated {
 		require.NoError(t, repo.UpdateTaskSessionState(ctx, sess.ID, state, ""))
 	}
+	if state == models.TaskSessionStateWaitingForInput {
+		require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "exec-row-" + sess.ID,
+			SessionID:        sess.ID,
+			TaskID:           target.ID,
+			Status:           "running",
+			Resumable:        true,
+			AgentExecutionID: "exec-" + sess.ID,
+		}))
+	}
 	loaded, err := svc.GetTaskSession(ctx, sess.ID)
 	require.NoError(t, err)
 	return sender, target, loaded
+}
+
+// seedChildTaskWithSession is like seedTaskWithSession, but the target task
+// is created as a child of the sender task (ParentID = sender.ID) so callers
+// can exercise the parent -> child interrupt-on-message path. Returns
+// (parent/sender, child/target, target session).
+func seedChildTaskWithSession(t *testing.T, svc *service.Service, repo seedRepo, state models.TaskSessionState) (*models.Task, *models.Task, *models.TaskSession) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	parent, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Parent task",
+	})
+	require.NoError(t, err)
+	child, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Child task",
+		ParentID:    parent.ID,
+	})
+	require.NoError(t, err)
+
+	sess := &models.TaskSession{
+		ID:             "sess-1",
+		TaskID:         child.ID,
+		AgentProfileID: "agent-profile-1",
+		IsPrimary:      true,
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, sess))
+	if state != models.TaskSessionStateCreated {
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, sess.ID, state, ""))
+	}
+	loaded, err := svc.GetTaskSession(ctx, sess.ID)
+	require.NoError(t, err)
+	return parent, child, loaded
 }
 
 // senderPayload returns the standard payload shape sent by the MCP server
@@ -149,6 +335,167 @@ func senderPayload(targetTaskID, prompt, senderTaskID string) map[string]interfa
 		"sender_task_id":    senderTaskID,
 		"sender_session_id": "sender-sess-1",
 	}
+}
+
+// senderPayloadWithMode is senderPayload plus an explicit delivery_mode —
+// used by tests that must opt into (or explicitly stay on) a specific
+// message_task_kandev delivery_mode rather than relying on the default.
+func senderPayloadWithMode(targetTaskID, prompt, senderTaskID, deliveryMode string) map[string]interface{} {
+	payload := senderPayload(targetTaskID, prompt, senderTaskID)
+	payload["delivery_mode"] = deliveryMode
+	return payload
+}
+
+// TestHandleMessageTask_SameTaskWithoutSessionID_Rejected pins the self-message
+// guard: a task can only message itself when it names a specific sibling
+// session — without session_id the old "cannot message itself" rejection holds.
+func TestHandleMessageTask_SameTaskWithoutSessionID_Rejected(t *testing.T) {
+	h := &Handlers{}
+	payload := senderPayload("task-1", "hello", "task-1")
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestHandleMessageTask_SessionCannotMessageItself(t *testing.T) {
+	h := &Handlers{}
+	payload := senderPayload("task-1", "hello", "task-2")
+	payload["session_id"] = "sender-sess-1" // == sender_session_id in senderPayload
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+// TestHandleMessageTask_SiblingSession_Queues covers the spawn-session loop: a
+// session messages a RUNNING sibling session on its OWN task via session_id.
+// The message queues to that exact session (not the primary), and the
+// attribution wrapper names the sender session and includes a session-targeted
+// reply hint.
+func TestHandleMessageTask_SiblingSession_Queues(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	// Second (non-primary) session on the same task — the message target.
+	sibling := &models.TaskSession{
+		ID:             "sess-sibling",
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSession(context.Background(), sibling))
+	require.NoError(t, repo.UpdateTaskSessionState(context.Background(), sibling.ID, models.TaskSessionStateRunning, ""))
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	payload := map[string]interface{}{
+		"task_id":           target.ID,
+		"session_id":        sibling.ID,
+		"prompt":            "status update please",
+		"sender_task_id":    target.ID,
+		"sender_session_id": primary.ID,
+	}
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, "queued", out["status"])
+	assert.Equal(t, sibling.ID, out["session_id"])
+
+	// Queued to the sibling, not the primary session.
+	require.Equal(t, 1, orch.queue.GetStatus(context.Background(), sibling.ID).Count)
+	assert.Equal(t, 0, orch.queue.GetStatus(context.Background(), primary.ID).Count)
+
+	entry := orch.queue.GetStatus(context.Background(), sibling.ID).Entries[0]
+	assert.Contains(t, entry.Content, "status update please")
+	assert.Contains(t, entry.Content, "sibling agent session")
+	assert.Contains(t, entry.Content, primary.ID) // reply hint targets the sender session
+	assert.Equal(t, primary.ID, entry.Metadata["sender_session_id"])
+}
+
+// TestHandleMessageTask_IdleSiblingSession_PinsTargetSession is the regression
+// test for the sibling-message misroute found in live testing: when the
+// explicitly-targeted sibling session is IDLE (waiting for input), the dispatch
+// path's resolveSessionAfterTaskMessageTurnStart used to prefer the task's
+// PRIMARY session — which for a sibling message is typically the SENDER — so
+// the message boomeranged back to the sender's own conversation. An explicit
+// session_id must pin delivery to that exact session.
+func TestHandleMessageTask_IdleSiblingSession_PinsTargetSession(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	// primary = the spawner/sender session (waiting state irrelevant for it).
+	_, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	// Non-primary sibling session, idle (waiting for input) with a resumable
+	// executor row, mirroring a spawned session that finished its turn.
+	ctx := context.Background()
+	sibling := &models.TaskSession{
+		ID:             "sess-sibling-idle",
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, sibling))
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sibling.ID, models.TaskSessionStateWaitingForInput, ""))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "exec-row-" + sibling.ID,
+		SessionID:        sibling.ID,
+		TaskID:           target.ID,
+		Status:           "running",
+		Resumable:        true,
+		AgentExecutionID: "exec-" + sibling.ID,
+	}))
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	payload := map[string]interface{}{
+		"task_id":           target.ID,
+		"session_id":        sibling.ID,
+		"prompt":            "reply back when done",
+		"sender_task_id":    target.ID,
+		"sender_session_id": primary.ID,
+	}
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, "sent", out["status"])
+	assert.Equal(t, sibling.ID, out["session_id"], "dispatch must stay on the explicitly-targeted sibling")
+
+	// The prompt went to the sibling, NOT rerouted to the primary (the sender).
+	require.Len(t, orch.promptCalls, 1)
+	assert.Equal(t, sibling.ID, orch.promptCalls[0].sessionID)
+
+	// And the message row landed in the sibling's conversation.
+	messages, err := svc.ListMessages(ctx, sibling.ID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	senderMessages, err := svc.ListMessages(ctx, primary.ID)
+	require.NoError(t, err)
+	assert.Empty(t, senderMessages, "sender's own session must not receive the message")
+}
+
+func TestHandleMessageTask_SessionIDWrongTask_Rejected(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, _ := newMessageTaskHandler(t, svc)
+
+	// sess belongs to target — sending to sender's task with that session must fail.
+	payload := senderPayload(sender.ID, "hello", target.ID)
+	payload["session_id"] = sess.ID
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
 func TestHandleMessageTask_MissingTaskID(t *testing.T) {
@@ -215,6 +562,294 @@ func TestHandleMessageTask_RunningSession_Queues(t *testing.T) {
 	assert.Equal(t, "sender-sess-1", entry.Metadata["sender_session_id"])
 	assert.Empty(t, orch.promptCalls)
 	assert.Empty(t, orch.startCreatedCalls)
+	// Unrelated senders (not the target's parent) must never trigger an
+	// interrupt — the default "queue and deliver at turn end" contract
+	// documented on message_task_kandev stays unchanged for them.
+	assert.Empty(t, orch.interruptCalls)
+}
+
+// TestHandleMessageTask_ParentToChildRunningSession_Interrupts pins the
+// steering contract: when the sender is the target's parent task AND
+// explicitly requests delivery_mode="interrupt", a running/starting target
+// is interrupted right after the message is queued, so the message is
+// delivered without waiting for the child's current turn to finish
+// naturally. Being the parent is necessary but not sufficient - the caller
+// must opt in; see TestHandleMessageTask_ParentToChildRunningSession_OmittedDeliveryMode_DoesNotInterrupt
+// for the (default) queued-and-wait behavior parents get otherwise. The
+// reported status is "sent" (not "queued") because the interrupt actually
+// dispatched it immediately - see queueThenInterruptTaskMessage's doc
+// comment. See InterruptForPeerMessage's doc comment for why this matters
+// for long-running children.
+func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop and pivot to X", parent.ID, "interrupt"))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "sent", payload["status"])
+
+	// The message was queued first exactly like any other message_task
+	// call...
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Contains(t, status.Entries[0].Content, "stop and pivot to X")
+
+	// ...but because the sender is the target's parent, the child's current
+	// turn is interrupted immediately instead of waiting for it to finish,
+	// targeting the exact entry id that was just queued (not just "whatever
+	// is at the FIFO head") — see InterruptForPeerMessage's doc comment.
+	require.Len(t, orch.interruptCalls, 1)
+	assert.Equal(t, child.ID, orch.interruptCalls[0].taskID)
+	assert.Equal(t, sess.ID, orch.interruptCalls[0].sessionID)
+	assert.Equal(t, status.Entries[0].ID, orch.interruptCalls[0].entryID)
+}
+
+// TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMessageQueued
+// pins the failure contract: an interrupt failure must NOT surface as an MCP
+// error. The message was already safely persisted by queueTaskMessage and is
+// still delivered later by the normal turn-completion drain, so the
+// interrupt is only a latency optimization on top of that always-safe
+// default — surfacing a hard error here would just invite the calling agent
+// to retry message_task_kandev, which would enqueue a second copy of the
+// same message since queuing is not idempotent. The response instead reports
+// the accurate "queued" status (identical to the non-interrupt path), and
+// the queued message is left in place.
+func TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMessageQueued(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.interruptErr = errors.New("cancel agent: agent manager unreachable")
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop now", parent.ID, "interrupt"))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count, "message must remain queued even though the interrupt failed")
+}
+
+// TestHandleMessageTask_ParentToChildRunningSession_InterruptSkipped_KeepsQueuedStatus
+// pins the busy-skip status contract: InterruptForPeerMessage returning
+// (false, nil) — no error, but nothing actually dispatched by this call,
+// e.g. because a concurrent cancel already owned the session — must still
+// report "queued" (not "sent"). Reporting "sent" here would tell the parent
+// its message was delivered immediately when it is still parked for a later
+// explicit drain or another valid delivery trigger.
+func TestHandleMessageTask_ParentToChildRunningSession_InterruptSkipped_KeepsQueuedStatus(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.interruptSkippedNoError = true
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop now", parent.ID, "interrupt"))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count, "message must remain queued when the interrupt was skipped")
+
+	// Confirm the interrupt path was actually entered, even though it
+	// reported the busy-skip outcome — otherwise this test would pass
+	// identically if the handler never called InterruptForPeerMessage at
+	// all, since the queued message and "queued" status look the same
+	// either way.
+	require.Len(t, orch.interruptCalls, 1)
+	assert.Equal(t, child.ID, orch.interruptCalls[0].taskID)
+	assert.Equal(t, sess.ID, orch.interruptCalls[0].sessionID)
+}
+
+// TestHandleMessageTask_ParentToChildRunningSession_OmittedDeliveryMode_DoesNotInterrupt
+// pins the new default: since delivery_mode now defaults to "queued", a
+// parent messaging a busy child *without* specifying delivery_mode no
+// longer interrupts — this is the behavior change from the previous round,
+// where any parent-to-child message always interrupted. The message is
+// still queued and delivered normally once the child's current turn ends.
+func TestHandleMessageTask_ParentToChildRunningSession_OmittedDeliveryMode_DoesNotInterrupt(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(child.ID, "fyi, no rush", parent.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Contains(t, status.Entries[0].Content, "fyi, no rush")
+	assert.Empty(t, orch.interruptCalls, "omitted delivery_mode must default to queued, not interrupt, even from a parent sender")
+}
+
+// TestHandleMessageTask_ParentToChildRunningSession_ExplicitQueued_DoesNotInterrupt
+// is the explicit-value twin of the omitted-default case above: a parent
+// sender that explicitly passes delivery_mode="queued" gets exactly the
+// same queue-and-wait behavior as omitting it.
+func TestHandleMessageTask_ParentToChildRunningSession_ExplicitQueued_DoesNotInterrupt(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "fyi, no rush", parent.ID, "queued"))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Empty(t, orch.interruptCalls, `explicit delivery_mode="queued" from a parent sender must not interrupt`)
+}
+
+// TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected pins
+// the authorization contract: delivery_mode="interrupt" is only ever
+// honored when the sender is the target's direct parent. A non-parent
+// (sibling/unrelated) sender explicitly requesting "interrupt" must get a
+// hard rejection — not a silent downgrade to "queued" — and the rejection
+// must have no side effect: nothing is queued, dispatched, or interrupted.
+// A silent downgrade would misreport what happened and hide caller misuse
+// instead of telling the caller its request was rejected.
+func TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(target.ID, "stop now", sender.ID, "interrupt"))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeForbidden)
+
+	var errPayload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &errPayload))
+	assert.Contains(t, errPayload.Message, "direct parent")
+
+	// No side effect from the rejected request: the target's queue stays
+	// empty and neither the interrupt nor any other dispatch path ran.
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	assert.Equal(t, 0, status.Count, "a rejected interrupt request must not be queued as a side effect")
+	assert.Empty(t, orch.interruptCalls)
+	assert.Empty(t, orch.promptCalls)
+	assert.Empty(t, orch.startCreatedCalls)
+}
+
+// TestHandleMessageTask_InvalidDeliveryMode_Rejected pins plain input
+// validation: any delivery_mode value other than "queued"/"interrupt"
+// (or omitted) is rejected before any task/session lookup.
+func TestHandleMessageTask_InvalidDeliveryMode_Rejected(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, _ := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, _ := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop now", parent.ID, "immediately"))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestHandleMessageTask_AppendsPromptReferenceExpansions(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	h.SetPromptReferenceResolver(fakePromptReferenceResolver{
+		expansions: []promptservice.PromptReferenceExpansion{
+			{Name: "improve-harness", Content: "Review this session for durable harness improvements."},
+		},
+	})
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "Please run @improve-harness", sender.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	entry := status.Entries[0]
+	assert.Contains(t, entry.Content, "Please run @improve-harness")
+	assert.Contains(t, entry.Content, "EXPANDED PROMPT REFERENCES")
+	assert.Contains(t, entry.Content, "### @improve-harness")
+	assert.Contains(t, entry.Content, "Review this session for durable harness improvements.")
+}
+
+func TestHandleMessageTask_PromptResolverError_FallsBackToOriginal(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	h.SetPromptReferenceResolver(fakePromptReferenceResolver{err: errors.New("db error")})
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "plain @missing text", sender.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	entry := status.Entries[0]
+	assert.Contains(t, entry.Content, "plain @missing text")
+	assert.NotContains(t, entry.Content, "EXPANDED PROMPT REFERENCES")
+}
+
+func TestHandleMessageTask_NoPromptReferencesSkipsResolver(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	h.SetPromptReferenceResolver(panicPromptReferenceResolver{})
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "plain text", sender.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Contains(t, status.Entries[0].Content, "plain text")
+}
+
+func TestFormatPromptReferenceExpansionsStripsSystemTagEnd(t *testing.T) {
+	out := formatPromptReferenceExpansions([]promptservice.PromptReferenceExpansion{
+		{Name: "bad</kandev-system>name", Content: "before </kandev-system> after"},
+	})
+
+	assert.NotContains(t, out, "</kandev-system>")
+	assert.Contains(t, out, "### @badname")
+	assert.Contains(t, out, "before  after")
 }
 
 func TestHandleMessageTask_QueueFull_ReturnsStructuredError(t *testing.T) {
@@ -285,6 +920,753 @@ func TestHandleMessageTask_WaitingForInput_PromptsAgent(t *testing.T) {
 	// Sender metadata persists on the recorded row.
 	assert.Equal(t, sender.ID, messages[0].Metadata["sender_task_id"])
 	assert.Equal(t, "Sender task", messages[0].Metadata["sender_task_title"])
+}
+
+func TestHandleMessageTask_WaitingForInput_FiresTurnStart(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.onTurnStart = func(ctx context.Context, taskID, sessionID string) error {
+		assert.Equal(t, target.ID, taskID)
+		assert.Equal(t, sess.ID, sessionID)
+		updatedTask, err := svc.GetTask(ctx, taskID)
+		require.NoError(t, err)
+		assert.Equal(t, v1.TaskStateInProgress, updatedTask.State)
+		updatedTask.WorkflowStepID = "step-in-progress"
+		return repo.UpdateTask(ctx, updatedTask)
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "review follow-up", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	require.Len(t, orch.turnStartCalls, 1)
+	assert.Equal(t, target.ID, orch.turnStartCalls[0].taskID)
+	assert.Equal(t, sess.ID, orch.turnStartCalls[0].sessionID)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateInProgress, updatedTask.State)
+	assert.Equal(t, "step-in-progress", updatedTask.WorkflowStepID)
+
+	require.Len(t, orch.promptCalls, 1)
+	assert.Equal(t, sess.ID, orch.promptCalls[0].sessionID)
+}
+
+func TestHandleMessageTask_WaitingForInput_UsesSessionSelectedByTurnStart(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	replacement := &models.TaskSession{
+		ID:             "sess-2",
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      false,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.State = models.TaskSessionStateCompleted
+		oldSession.IsPrimary = false
+		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
+		require.NoError(t, repo.SetSessionPrimary(ctx, replacement.ID))
+		return nil
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "handoff after switch", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, replacement.ID, payload["session_id"])
+
+	require.Len(t, orch.startCreatedCalls, 1)
+	assert.Equal(t, replacement.ID, orch.startCreatedCalls[0].sessionID)
+	assert.Empty(t, orch.promptCalls)
+
+	oldMessages, err := svc.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, oldMessages)
+	newMessages, err := svc.ListMessages(ctx, replacement.ID)
+	require.NoError(t, err)
+	require.Len(t, newMessages, 1)
+	assert.Contains(t, newMessages[0].Content, "handoff after switch")
+}
+
+func TestHandleMessageTask_WaitingForInput_UsesPrimarySwitchWithoutCompletion(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	replacement := &models.TaskSession{
+		ID:             "sess-2",
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      false,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.IsPrimary = false
+		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
+		require.NoError(t, repo.SetSessionPrimary(ctx, replacement.ID))
+		return nil
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "primary moved", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, replacement.ID, payload["session_id"])
+	require.Len(t, orch.startCreatedCalls, 1)
+	assert.Equal(t, replacement.ID, orch.startCreatedCalls[0].sessionID)
+}
+
+func TestHandleMessageTask_CompletedSessionWithoutSwitch_PromptsSameSession(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCompleted)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "follow up completed", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, sess.ID, payload["session_id"])
+
+	require.Len(t, orch.promptCalls, 1)
+	assert.Equal(t, sess.ID, orch.promptCalls[0].sessionID)
+
+	messages, err := svc.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Content, "follow up completed")
+	assert.Equal(t, sender.ID, messages[0].Metadata["sender_task_id"])
+}
+
+func TestHandleMessageTask_CompletedSession_UsesSessionSelectedByTurnStart(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCompleted)
+
+	replacement := &models.TaskSession{
+		ID:             "sess-2",
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      false,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.IsPrimary = false
+		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
+		require.NoError(t, repo.SetSessionPrimary(ctx, replacement.ID))
+		return nil
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "handoff from completed", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, replacement.ID, payload["session_id"])
+
+	require.Len(t, orch.startCreatedCalls, 1)
+	assert.Equal(t, replacement.ID, orch.startCreatedCalls[0].sessionID)
+	assert.Empty(t, orch.promptCalls)
+
+	oldMessages, err := svc.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, oldMessages)
+	newMessages, err := svc.ListMessages(ctx, replacement.ID)
+	require.NoError(t, err)
+	require.Len(t, newMessages, 1)
+	assert.Contains(t, newMessages[0].Content, "handoff from completed")
+	assert.Equal(t, sender.ID, newMessages[0].Metadata["sender_task_id"])
+}
+
+func TestHandleMessageTask_WaitingForInputCompletedWithoutPrimarySwitchRejects(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.State = models.TaskSessionStateCompleted
+		oldSession.IsPrimary = true
+		return repo.UpdateTaskSession(ctx, oldSession)
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "no handoff", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assert.Contains(t, string(resp.Payload), "marked completed")
+
+	assert.Empty(t, orch.promptCalls)
+	messages, err := svc.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, messages)
+	activeTurn, err := svc.GetActiveTurn(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Nil(t, activeTurn)
+}
+
+func TestHandleMessageTask_CreatedSessionStartsAfterTurnStartChangesState(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.onTurnStart = func(ctx context.Context, _, sessionID string) error {
+		require.Equal(t, sess.ID, sessionID)
+		return repo.UpdateTaskSessionState(ctx, sess.ID, models.TaskSessionStateWaitingForInput, "")
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "start after trigger", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, sess.ID, payload["session_id"])
+
+	require.Len(t, orch.startCreatedCalls, 1)
+	assert.Equal(t, sess.ID, orch.startCreatedCalls[0].sessionID)
+	assert.Empty(t, orch.promptCalls)
+}
+
+func TestHandleMessageTask_PreparedWaitingSessionStartsAgent(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sess.ID, models.TaskSessionStateWaitingForInput, ""))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "exec-row-" + sess.ID,
+		SessionID:        sess.ID,
+		TaskID:           target.ID,
+		Status:           models.ExecutorRunningStatusPrepared,
+		Resumable:        true,
+		AgentExecutionID: "exec-" + sess.ID,
+	}))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "start prepared", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, sess.ID, payload["session_id"])
+	require.Len(t, orch.startCreatedCalls, 1)
+	assert.Empty(t, orch.promptCalls)
+}
+
+func TestHandleMessageTask_TurnStartErrorRejectsAndRestoresReview(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	stateEvents := subscribeTaskStateChanged(t, eventBus)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
+		updatedTask, err := svc.GetTask(ctx, taskID)
+		require.NoError(t, err)
+		updatedTask.WorkflowStepID = "step-in-progress"
+		require.NoError(t, repo.UpdateTask(ctx, updatedTask))
+		return errors.New("turn start failed")
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "cannot send", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
+	assertTaskStateChangedEvent(t, stateEvents, target.ID, v1.TaskStateReview, "step-review")
+	assert.Empty(t, orch.promptCalls)
+	messages, err := svc.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, messages)
+}
+
+func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	stateEvents := subscribeTaskStateChanged(t, eventBus)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
+		updatedTask, err := svc.GetTask(ctx, taskID)
+		require.NoError(t, err)
+		updatedTask.State = v1.TaskStateFailed
+		updatedTask.WorkflowStepID = "step-in-progress"
+		return repo.UpdateTask(ctx, updatedTask)
+	}
+	orch.promptErrFirst = errors.New("send failed")
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "fails during dispatch", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
+	assertTaskStateChangedEvent(t, stateEvents, target.ID, v1.TaskStateReview, "step-review")
+	require.Len(t, orch.promptCalls, 1)
+	messages, err := svc.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, messages)
+}
+
+func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	stateEvents := subscribeTaskStateChanged(t, eventBus)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	pendingSignal := models.PendingStepCompletionSignal{
+		StepID:     "step-review",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "ready",
+		SignaledAt: time.Now().UTC(),
+	}
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, models.SessionMetaKeyPendingStepCompletion, pendingSignal))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, "plan_mode", true))
+	require.NoError(t, repo.UpdateTaskSession(ctx, &models.TaskSession{
+		ID:                   sess.ID,
+		TaskID:               target.ID,
+		AgentProfileID:       "agent-profile-1",
+		ExecutorProfileID:    "executor-profile-1",
+		AgentProfileSnapshot: map[string]interface{}{"id": "agent-profile-1", "name": "Agent One"},
+		State:                models.TaskSessionStateWaitingForInput,
+		IsPrimary:            true,
+	}))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queuedBeforeSwitch, err := orch.queue.QueueMessageWithMetadata(ctx, sess.ID, target.ID, "queued before switch", "", "agent", false, nil, nil)
+	require.NoError(t, err)
+	orch.queue.SetPendingMove(ctx, sess.ID, &messagequeue.PendingMove{
+		TaskID:         target.ID,
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "step-review",
+		Position:       2,
+	})
+	replacementID := "sess-2"
+	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
+		updatedTask, err := svc.GetTask(ctx, taskID)
+		require.NoError(t, err)
+		updatedTask.WorkflowStepID = "step-in-progress"
+		require.NoError(t, repo.UpdateTask(ctx, updatedTask))
+
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.State = models.TaskSessionStateCompleted
+		oldSession.IsPrimary = false
+		oldSession.AgentProfileID = "agent-profile-mutated"
+		oldSession.ExecutorProfileID = "executor-profile-mutated"
+		oldSession.AgentProfileSnapshot = map[string]interface{}{"id": "agent-profile-mutated", "name": "Mutated"}
+		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
+		replacement := &models.TaskSession{
+			ID:             replacementID,
+			TaskID:         target.ID,
+			AgentProfileID: "agent-profile-2",
+			State:          models.TaskSessionStateWaitingForInput,
+			IsPrimary:      false,
+		}
+		require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+		require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, models.SessionMetaKeyPendingStepCompletion, nil))
+		require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, "plan_mode", nil))
+		require.NoError(t, orch.queue.TransferSession(ctx, sess.ID, replacementID))
+		require.NoError(t, repo.SetSessionPrimary(ctx, replacementID))
+		return nil
+	}
+	orch.startCreatedErr = errors.New("start failed")
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "fails after switch", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
+	assertTaskStateChangedEvent(t, stateEvents, target.ID, v1.TaskStateReview, "step-review")
+
+	primary, err := svc.GetPrimarySession(ctx, target.ID)
+	require.NoError(t, err)
+	require.NotNil(t, primary)
+	assert.Equal(t, sess.ID, primary.ID)
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, primary.State)
+	assert.True(t, primary.IsPrimary)
+	assert.Equal(t, "agent-profile-1", primary.AgentProfileID)
+	assert.Equal(t, "executor-profile-1", primary.ExecutorProfileID)
+	assert.Equal(t, "Agent One", primary.AgentProfileSnapshot["name"])
+	_, ok := models.LoadPendingStepSignal(primary.Metadata)
+	require.True(t, ok)
+	assert.Equal(t, true, primary.Metadata["plan_mode"])
+
+	_, err = svc.GetTaskSession(ctx, replacementID)
+	assert.ErrorIs(t, err, models.ErrTaskSessionNotFound)
+
+	assert.Empty(t, orch.promptCalls)
+	require.Len(t, orch.startCreatedCalls, 1)
+	messages, err := svc.ListMessages(ctx, replacementID)
+	require.NoError(t, err)
+	assert.Empty(t, messages)
+	status := orch.queue.GetStatus(ctx, sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Equal(t, "queued before switch", status.Entries[0].Content)
+	assert.Equal(t, queuedBeforeSwitch.ID, status.Entries[0].ID)
+	assert.Equal(t, queuedBeforeSwitch.Position, status.Entries[0].Position)
+	assert.Equal(t, queuedBeforeSwitch.QueuedAt, status.Entries[0].QueuedAt)
+	move, ok := orch.queue.TakePendingMove(ctx, sess.ID)
+	require.True(t, ok)
+	assert.Equal(t, "step-review", move.WorkflowStepID)
+	assert.Equal(t, 2, move.Position)
+	replacementStatus := orch.queue.GetStatus(ctx, replacementID)
+	assert.Zero(t, replacementStatus.Count)
+	_, ok = orch.queue.TakePendingMove(ctx, replacementID)
+	assert.False(t, ok)
+}
+
+func TestHandleMessageTask_DispatchErrorAfterExistingSessionSwitchRestoresQueues(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _ := newTestTaskServiceWithEventBus(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	replacementID := "sess-2"
+	replacement := &models.TaskSession{
+		ID:             replacementID,
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      false,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	_, err = orch.queue.QueueMessageWithMetadata(ctx, sess.ID, target.ID, "original queued", "", "agent", false, nil, nil)
+	require.NoError(t, err)
+	_, err = orch.queue.QueueMessageWithMetadata(ctx, replacementID, target.ID, "replacement queued", "", "user", false, nil, nil)
+	require.NoError(t, err)
+	orch.queue.SetPendingMove(ctx, replacementID, &messagequeue.PendingMove{
+		TaskID:         target.ID,
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "replacement-step",
+		Position:       5,
+	})
+
+	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.State = models.TaskSessionStateCompleted
+		oldSession.IsPrimary = false
+		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
+		require.NoError(t, orch.queue.TransferSession(ctx, sess.ID, replacementID))
+		require.NoError(t, repo.SetSessionPrimary(ctx, replacementID))
+		return nil
+	}
+	orch.startCreatedErr = errors.New("start failed")
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "fails after switch", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	primaryStatus := orch.queue.GetStatus(ctx, sess.ID)
+	require.Equal(t, 1, primaryStatus.Count)
+	assert.Equal(t, "original queued", primaryStatus.Entries[0].Content)
+
+	replacementStatus := orch.queue.GetStatus(ctx, replacementID)
+	require.Equal(t, 1, replacementStatus.Count)
+	assert.Equal(t, "replacement queued", replacementStatus.Entries[0].Content)
+	move, ok := orch.queue.TakePendingMove(ctx, replacementID)
+	require.True(t, ok)
+	assert.Equal(t, "replacement-step", move.WorkflowStepID)
+}
+
+func TestHandleMessageTask_DispatchErrorRollsBackTurnStartOutsideReview(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _ := newTestTaskServiceWithEventBus(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateInProgress
+	task.WorkflowStepID = "step-in-progress"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	_, err = orch.queue.QueueMessageWithMetadata(ctx, sess.ID, target.ID, "original queued", "", "agent", false, nil, nil)
+	require.NoError(t, err)
+	replacementID := "sess-2"
+	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
+		updatedTask, err := svc.GetTask(ctx, taskID)
+		require.NoError(t, err)
+		updatedTask.WorkflowStepID = "step-next"
+		require.NoError(t, repo.UpdateTask(ctx, updatedTask))
+
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.State = models.TaskSessionStateCompleted
+		oldSession.IsPrimary = false
+		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
+		replacement := &models.TaskSession{
+			ID:             replacementID,
+			TaskID:         target.ID,
+			AgentProfileID: "agent-profile-2",
+			State:          models.TaskSessionStateWaitingForInput,
+		}
+		require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+		require.NoError(t, orch.queue.TransferSession(ctx, sess.ID, replacementID))
+		require.NoError(t, repo.SetSessionPrimary(ctx, replacementID))
+		return nil
+	}
+	orch.startCreatedErr = errors.New("start failed")
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "fails after non-review switch", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateInProgress, updatedTask.State)
+	assert.Equal(t, "step-in-progress", updatedTask.WorkflowStepID)
+
+	primary, err := svc.GetPrimarySession(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sess.ID, primary.ID)
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, primary.State)
+	_, err = svc.GetTaskSession(ctx, replacementID)
+	assert.ErrorIs(t, err, models.ErrTaskSessionNotFound)
+	status := orch.queue.GetStatus(ctx, sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Equal(t, "original queued", status.Entries[0].Content)
+}
+
+func TestHandleMessageTask_DispatchRollbackDoesNotOverwriteCoordinatorStop(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _ := newTestTaskServiceWithEventBus(t)
+	sender, target, session := seedTaskWithSession(
+		t,
+		svc,
+		repo,
+		models.TaskSessionStateWaitingForInput,
+	)
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-before-message"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	_, err = orch.queue.QueueMessageWithMetadata(
+		ctx,
+		session.ID,
+		target.ID,
+		"queued before dispatch",
+		"",
+		"agent",
+		false,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	orch.onTurnStart = func(ctx context.Context, taskID, sessionID string) error {
+		// The rollback snapshot is already captured when this callback runs.
+		// Model a complete coordinator stop before dispatch reports failure.
+		changed, _, cancelErr := repo.CancelActiveTaskSession(
+			ctx,
+			sessionID,
+			"stopped by parent task via MCP",
+		)
+		require.NoError(t, cancelErr)
+		require.True(t, changed)
+		stoppedTask, loadErr := svc.GetTask(ctx, taskID)
+		require.NoError(t, loadErr)
+		stoppedTask.State = v1.TaskStateReview
+		stoppedTask.WorkflowStepID = "step-owned-by-stop"
+		require.NoError(t, repo.UpdateTask(ctx, stoppedTask))
+		_, queueErr := orch.queue.QueueMessageWithMetadata(
+			ctx,
+			sessionID,
+			taskID,
+			"queued after stop",
+			"",
+			"agent",
+			false,
+			nil,
+			nil,
+		)
+		return queueErr
+	}
+
+	msg := makeWSMessage(
+		t,
+		ws.ActionMCPMessageTask,
+		senderPayload(target.ID, "dispatch races stop", sender.ID),
+	)
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	stoppedSession, err := svc.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateCancelled, stoppedSession.State)
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-owned-by-stop", updatedTask.WorkflowStepID)
+	queueStatus := orch.queue.GetStatus(ctx, session.ID)
+	require.Equal(t, 2, queueStatus.Count)
+	assert.Equal(t, "queued before dispatch", queueStatus.Entries[0].Content)
+	assert.Equal(t, "queued after stop", queueStatus.Entries[1].Content)
+}
+
+func TestHandleMessageTask_OfficeReviewDoesNotTransitionTaskState(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	task.AssigneeAgentProfileID = "agent-profile-1"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "office review follow-up", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
+
+	require.Len(t, orch.promptCalls, 1)
+	assert.Equal(t, sess.ID, orch.promptCalls[0].sessionID)
+}
+
+func TestHandleMessageTask_OfficeDispatchErrorRestoresWorkflowStep(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	task.AssigneeAgentProfileID = "agent-profile-1"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
+		updatedTask, err := svc.GetTask(ctx, taskID)
+		require.NoError(t, err)
+		updatedTask.State = v1.TaskStateFailed
+		updatedTask.WorkflowStepID = "step-in-progress"
+		return repo.UpdateTask(ctx, updatedTask)
+	}
+	orch.promptErrFirst = errors.New("send failed")
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "office failure", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
 }
 
 func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testing.T) {
@@ -393,6 +1775,40 @@ func TestHandleMessageTask_NoPrimarySession_Rejects(t *testing.T) {
 	resp, err := h.handleMessageTask(ctx, msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeNotFound)
+
+	// The task exists but has no session — must report "no active session", not
+	// the generic "task not found" from the task-existence check.
+	payload := string(resp.Payload)
+	assert.Contains(t, payload, "no active session")
+	assert.NotContains(t, payload, "task not found")
+}
+
+func TestHandleMessageTask_NonexistentTask_ReportsTaskNotFound(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	// Only the sender exists; the target task_id below was never created (mimics
+	// passing a truncated UUID prefix).
+	sender, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Sender task",
+	})
+	require.NoError(t, err)
+
+	h, _ := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
+		senderPayload("00000000-0000-0000-0000-000000000000", "hello", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeNotFound)
+
+	// Must surface the task-not-found error, NOT the misleading no-session error.
+	payload := string(resp.Payload)
+	assert.Contains(t, payload, "target task not found")
+	assert.NotContains(t, payload, "no session")
 }
 
 // --- sender attribution validation ---

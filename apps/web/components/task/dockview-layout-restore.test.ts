@@ -52,6 +52,21 @@ function buildLayout(opts?: { centerSize?: number; sidebarSize?: number; rightSi
   };
 }
 
+function makeFakeRestoreApi() {
+  return {
+    fromJSON: vi.fn(),
+    layout: vi.fn(),
+    width: 1600,
+    height: 600,
+    groups: [],
+    panels: [],
+    activeGroup: { id: "g-center" },
+    getPanel: vi.fn(() => null),
+    onDidActiveGroupChange: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidLayoutChange: vi.fn(() => ({ dispose: vi.fn() })),
+  } as unknown as Parameters<typeof tryRestoreLayout>[0];
+}
+
 describe("sanitizeLayout - size validation", () => {
   it("returns the layout unchanged when all sizes are positive", () => {
     const layout = buildLayout();
@@ -274,21 +289,6 @@ describe("tryRestoreLayout - phantom session panel filtering", () => {
     vi.restoreAllMocks();
   });
 
-  function makeFakeApi() {
-    return {
-      fromJSON: vi.fn(),
-      layout: vi.fn(),
-      width: 1600,
-      height: 600,
-      groups: [],
-      panels: [],
-      activeGroup: { id: "g-center" },
-      getPanel: vi.fn(() => null),
-      onDidActiveGroupChange: vi.fn(() => ({ dispose: vi.fn() })),
-      onDidLayoutChange: vi.fn(() => ({ dispose: vi.fn() })),
-    } as unknown as Parameters<typeof tryRestoreLayout>[0];
-  }
-
   it("restores the (stripped) layout when every session in the saved env-layout is a phantom", () => {
     // Saved layout had a single session panel — a phantom from a previously-
     // deleted task. After stripping, no session panels remain. We still
@@ -303,7 +303,7 @@ describe("tryRestoreLayout - phantom session panel filtering", () => {
     vi.spyOn(localStorage, "getEnvLayout").mockReturnValue(layout);
     vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
 
-    const api = makeFakeApi();
+    const api = makeFakeRestoreApi();
     const restored = tryRestoreLayout(api, "env-new", VALID_COMPONENTS, new Set(["phantom"]));
     expect(restored).toBe(true);
     expect(api.fromJSON).toHaveBeenCalledOnce();
@@ -323,7 +323,7 @@ describe("tryRestoreLayout - phantom session panel filtering", () => {
     vi.spyOn(localStorage, "getEnvLayout").mockReturnValue(layout);
     vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
 
-    const api = makeFakeApi();
+    const api = makeFakeRestoreApi();
     const restored = tryRestoreLayout(api, "env-X", VALID_COMPONENTS, new Set(["phantom"]));
     expect(restored).toBe(true);
     expect(api.fromJSON).toHaveBeenCalledOnce();
@@ -336,10 +336,31 @@ describe("tryRestoreLayout - phantom session panel filtering", () => {
     vi.spyOn(localStorage, "getEnvLayout").mockReturnValue(layout);
     vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
 
-    const api = makeFakeApi();
+    const api = makeFakeRestoreApi();
     const restored = tryRestoreLayout(api, "env-X", VALID_COMPONENTS, new Set());
     expect(restored).toBe(true);
     expect(api.fromJSON).toHaveBeenCalledOnce();
+  });
+});
+
+describe("tryRestoreLayout - no env (task preparing)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("returns false and restores nothing when no env is known yet", () => {
+    // Regression: a null env (task preparing / session→env mapping not yet
+    // hydrated) must NOT restore the cross-env global layout — that flashed the
+    // previous task's proportions on a fresh task. onReady builds the default
+    // layout instead; the env's own layout is applied later by switchEnvLayout.
+    window.localStorage.setItem("dockview-layout-v2", JSON.stringify(buildLayout()));
+    const api = makeFakeRestoreApi();
+
+    const restored = tryRestoreLayout(api, null, VALID_COMPONENTS);
+
+    expect(restored).toBe(false);
+    expect(api.fromJSON).not.toHaveBeenCalled();
   });
 });
 

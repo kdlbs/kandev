@@ -1,6 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { resolveGroupIds } from "./applier";
+import { applyLayout, resolveGroupIds } from "./applier";
+import { getPinnedTarget, clearAllPinnedTargets } from "./pinned-targets";
+import type { LayoutState } from "./types";
 import { SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP } from "./constants";
 
 type MockGroup = { id: string };
@@ -58,6 +60,22 @@ describe("resolveGroupIds", () => {
     expect(ids.centerGroupId).toBe(sessionGroupId);
   });
 
+  it("does not classify a right-column session panel as the center group", () => {
+    // Regression: a corrupted task layout restored only Files/Changes in
+    // group-right-top, then auto-added the session tab into that same group.
+    // Treating that session panel as the center poisoned centerGroupId and
+    // caused future center panels to land in the right tools column.
+    const api = makeApi(
+      [{ id: SIDEBAR_GROUP }, { id: RIGHT_TOP_GROUP }, { id: RIGHT_BOTTOM_GROUP }],
+      [{ id: "session:abc123", group: { id: RIGHT_TOP_GROUP } }],
+    );
+
+    const ids = resolveGroupIds(api);
+
+    expect(ids.centerGroupId).toBe(CENTER_GROUP);
+    expect(ids.centerGroupId).not.toBe(RIGHT_TOP_GROUP);
+  });
+
   it("returns the CENTER_GROUP constant as last-resort when nothing matches", () => {
     // Last-resort fallback: returns the well-known constant even when no live
     // group carries that ID. The caller (focusOrAddPanel) detects the stale ID
@@ -67,5 +85,79 @@ describe("resolveGroupIds", () => {
     const ids = resolveGroupIds(api);
 
     expect(ids.centerGroupId).toBe(CENTER_GROUP);
+  });
+});
+
+describe("applyLayout — pinned target capture with no override", () => {
+  beforeEach(() => {
+    clearAllPinnedTargets();
+  });
+
+  it("targets the computed default, not a transient post-fromJSON live size", () => {
+    // Regression: with no pinnedWidths override (e.g. toggling plan mode off,
+    // where the right width was dropped), applyLayout must pin each column to
+    // its DEFAULT width — not whatever transient (narrower) size the splitview
+    // reports right after fromJSON. Reading the transient left the column stuck
+    // too narrow and persisted it.
+    const resizeView = vi.fn();
+    const splitview = {
+      length: 3,
+      // Transient: ~0.7x the intended widths, as seen right after fromJSON.
+      getViewSize: (idx: number) => [245, 1097, 258][idx],
+      resizeView,
+    };
+    const setConstraints = vi.fn();
+    const sidebarGroup = { locked: undefined, header: { hidden: true }, api: { setConstraints } };
+    const rightGroup = { id: RIGHT_TOP_GROUP, api: { setConstraints } };
+    const api = {
+      width: 1600,
+      height: 800,
+      fromJSON: vi.fn(),
+      groups: [{ id: SIDEBAR_GROUP }, { id: CENTER_GROUP }, rightGroup],
+      getPanel: (id: string) => {
+        if (id === "sidebar") return { group: sidebarGroup };
+        if (id === "files") return { group: rightGroup };
+        return null;
+      },
+      component: { gridview: { root: { splitview } } },
+    } as unknown as DockviewApi;
+
+    const state: LayoutState = {
+      columns: [
+        {
+          id: "sidebar",
+          pinned: true,
+          groups: [
+            {
+              id: SIDEBAR_GROUP,
+              panels: [{ id: "sidebar", component: "sidebar", title: "Sidebar" }],
+            },
+          ],
+        },
+        {
+          id: "center",
+          groups: [
+            { id: CENTER_GROUP, panels: [{ id: "chat", component: "chat", title: "Agent" }] },
+          ],
+        },
+        {
+          id: "right",
+          pinned: true,
+          groups: [
+            { id: RIGHT_TOP_GROUP, panels: [{ id: "files", component: "files", title: "Files" }] },
+          ],
+        },
+      ],
+    };
+
+    // Empty overrides → each pinned column should fall back to its default.
+    applyLayout(api, state, new Map(), 1600, 800);
+
+    // Defaults at totalWidth 1600: sidebar ratio clamps to 350; right ratio
+    // clamps to its legacy 450 cap. NOT the transient 245 / 258.
+    expect(getPinnedTarget("sidebar")).toBe(350);
+    expect(getPinnedTarget("right")).toBe(450);
+    expect(resizeView).toHaveBeenCalledWith(0, 350);
+    expect(resizeView).toHaveBeenCalledWith(2, 450);
   });
 });

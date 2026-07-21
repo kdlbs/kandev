@@ -1,29 +1,30 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { type ReactNode, type RefObject, useRef } from "react";
+import { useRouter } from "@/lib/routing/client-router";
+import Link from "@/components/routing/app-link";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import {
   IconAlertTriangle,
-  IconChartBar,
   IconLayoutKanban,
   IconList,
   IconSettings,
-  IconSparkles,
   IconTimeline,
 } from "@tabler/icons-react";
+import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 import { TaskSearchInput } from "./task-search-input";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
+import { cn } from "@/lib/utils";
 import type { Repository } from "@/lib/types/http";
-import type { WorkflowsState, WorkspaceState } from "@/lib/state/slices";
-
-type WorkspaceItem = WorkspaceState["items"][number];
+import type { WorkflowsState } from "@/lib/state/slices";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type MobileMenuSheetProps = {
   open: boolean;
@@ -33,11 +34,16 @@ type MobileMenuSheetProps = {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
-  showReleaseNotesButton: boolean;
-  onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 };
+
+const mobileSectionClass = "space-y-2";
+const mobileSectionTitleClass = "text-sm font-medium";
+const mobileFieldClass = "space-y-1.5";
+const mobileFieldLabelClass = "text-xs font-medium text-muted-foreground";
+const mobileControlClass = "h-10 w-full px-3 text-sm";
+const mobileControlIconClass = "h-4 w-4 shrink-0";
 
 function getRepositoryPlaceholder(loading: boolean, empty: boolean): string {
   if (loading) return "Loading repositories...";
@@ -45,16 +51,17 @@ function getRepositoryPlaceholder(loading: boolean, empty: boolean): string {
   return "Select repository";
 }
 
-function getMobileViewValue(currentPage: string, kanbanViewMode: string | null): string {
+function getMobileViewValue(
+  currentPage: string,
+  kanbanViewMode: string | null,
+  isMobile: boolean,
+): string {
   if (currentPage === "tasks") return "list";
-  if (kanbanViewMode === "graph2") return "pipeline";
+  if (!isMobile && kanbanViewMode === "graph2") return "pipeline";
   return "kanban";
 }
 
 type MobileDisplayOptionsProps = {
-  activeWorkspaceId: string | null;
-  workspaces: WorkspaceItem[];
-  onWorkspaceChange: (id: string | null) => void;
   activeWorkflowId: string | null;
   workflows: WorkflowsState["items"];
   onWorkflowChange: (id: string | null) => void;
@@ -64,12 +71,10 @@ type MobileDisplayOptionsProps = {
   onRepositoryChange: (value: string | "all") => void;
   enablePreviewOnClick: boolean | undefined;
   onTogglePreviewOnClick: ((checked: boolean) => void) | undefined;
+  showWorkflow: boolean;
 };
 
 function MobileDisplaySelects({
-  activeWorkspaceId,
-  workspaces,
-  onWorkspaceChange,
   activeWorkflowId,
   workflows,
   onWorkflowChange,
@@ -77,55 +82,40 @@ function MobileDisplaySelects({
   repositories,
   repositoriesLoading,
   onRepositoryChange,
+  showWorkflow,
 }: Omit<MobileDisplayOptionsProps, "enablePreviewOnClick" | "onTogglePreviewOnClick">) {
   return (
     <>
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground">Workspace</label>
-        <Select
-          value={activeWorkspaceId ?? ""}
-          onValueChange={(value) => onWorkspaceChange(value || null)}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select workspace" />
-          </SelectTrigger>
-          <SelectContent>
-            {workspaces.map((workspace) => (
-              <SelectItem key={workspace.id} value={workspace.id}>
-                {workspace.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {showWorkflow && (
+        <div className={mobileFieldClass}>
+          <label className={mobileFieldLabelClass}>Workflow</label>
+          <Select
+            value={activeWorkflowId ?? "all"}
+            onValueChange={(value) => onWorkflowChange(value === "all" ? null : value)}
+          >
+            <SelectTrigger className={mobileControlClass}>
+              <SelectValue placeholder="All workflows" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All workflows</SelectItem>
+              {workflows.map((workflow: WorkflowsState["items"][number]) => (
+                <SelectItem key={workflow.id} value={workflow.id}>
+                  {workflow.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground">Workflow</label>
-        <Select
-          value={activeWorkflowId ?? ""}
-          onValueChange={(value) => onWorkflowChange(value || null)}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select workflow" />
-          </SelectTrigger>
-          <SelectContent>
-            {workflows.map((workflow: WorkflowsState["items"][number]) => (
-              <SelectItem key={workflow.id} value={workflow.id}>
-                {workflow.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground">Repository</label>
+      <div className={mobileFieldClass}>
+        <label className={mobileFieldLabelClass}>Repository</label>
         <Select
           value={repositoryValue}
           onValueChange={(value) => onRepositoryChange(value as string | "all")}
           disabled={repositories.length === 0}
         >
-          <SelectTrigger className="w-full">
+          <SelectTrigger className={mobileControlClass}>
             <SelectValue
               placeholder={getRepositoryPlaceholder(repositoriesLoading, repositories.length === 0)}
             />
@@ -148,11 +138,11 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
   const { enablePreviewOnClick, onTogglePreviewOnClick, ...selectProps } = props;
   return (
     <div className="space-y-4">
-      <label className="text-sm font-medium">Display Options</label>
+      <label className={mobileSectionTitleClass}>Display Options</label>
       <MobileDisplaySelects {...selectProps} />
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground">Preview Panel</label>
-        <label className="flex items-center gap-2 cursor-pointer">
+      <div className={mobileFieldClass}>
+        <label className={mobileFieldLabelClass}>Preview Panel</label>
+        <label className="flex h-10 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
           <Checkbox
             checked={enablePreviewOnClick ?? false}
             onCheckedChange={(checked) => {
@@ -178,14 +168,31 @@ function MobileSearchSection({
   if (!onSearchChange) return null;
 
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium">Search</label>
+    <div className={mobileSectionClass}>
+      <label className={mobileSectionTitleClass}>Search</label>
       <TaskSearchInput
         value={searchQuery}
         onChange={onSearchChange}
         placeholder="Search tasks..."
         isLoading={isSearchLoading}
-        className="w-full"
+        className="w-full [&_[data-slot=input]]:h-10 [&_[data-slot=input]]:pl-9 [&_[data-slot=input]]:pr-9 [&_[data-slot=input]]:text-sm"
+      />
+    </div>
+  );
+}
+
+function MobileWorkspaceSection({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+  return (
+    <div className={mobileSectionClass}>
+      <label className={mobileSectionTitleClass}>Workspace</label>
+      <AppSidebarWorkspacePicker
+        modal={false}
+        onActionComplete={() => onOpenChange(false)}
+        triggerClassName={cn("flex-none", mobileControlClass)}
+        triggerTestId="mobile-workspace-trigger"
+        chevronTestId="mobile-workspace-trigger-chevron"
+        itemTestIdPrefix="mobile-workspace-item"
+        contentClassName="w-80 max-w-[calc(100vw-2rem)]"
       />
     </div>
   );
@@ -194,13 +201,15 @@ function MobileSearchSection({
 function MobileViewSection({
   viewValue,
   onViewChange,
+  showPipeline,
 }: {
   viewValue: string;
   onViewChange: (value: string) => void;
+  showPipeline: boolean;
 }) {
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium">View</label>
+    <div className={mobileSectionClass}>
+      <label className={mobileSectionTitleClass}>View</label>
       <ToggleGroup
         type="single"
         value={viewValue}
@@ -210,23 +219,25 @@ function MobileViewSection({
       >
         <ToggleGroupItem
           value="kanban"
-          className="cursor-pointer flex-1 data-[state=on]:bg-muted data-[state=on]:text-foreground"
+          className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
         >
-          <IconLayoutKanban className="h-4 w-4 mr-2" />
+          <IconLayoutKanban className={mobileControlIconClass} />
           Kanban
         </ToggleGroupItem>
-        <ToggleGroupItem
-          value="pipeline"
-          className="cursor-pointer flex-1 data-[state=on]:bg-muted data-[state=on]:text-foreground"
-        >
-          <IconTimeline className="h-4 w-4 mr-2" />
-          Pipeline
-        </ToggleGroupItem>
+        {showPipeline && (
+          <ToggleGroupItem
+            value="pipeline"
+            className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
+          >
+            <IconTimeline className={mobileControlIconClass} />
+            Pipeline
+          </ToggleGroupItem>
+        )}
         <ToggleGroupItem
           value="list"
-          className="cursor-pointer flex-1 data-[state=on]:bg-muted data-[state=on]:text-foreground"
+          className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
         >
-          <IconList className="h-4 w-4 mr-2" />
+          <IconList className={mobileControlIconClass} />
           List
         </ToggleGroupItem>
       </ToggleGroup>
@@ -235,23 +246,15 @@ function MobileViewSection({
 }
 
 function MobileUtilityActions({
-  showReleaseNotesButton,
-  onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
   onOpenChange,
 }: {
-  showReleaseNotesButton: boolean;
-  onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const closeSheet = () => onOpenChange(false);
-  const openReleaseNotes = () => {
-    closeSheet();
-    onOpenReleaseNotes();
-  };
   const openHealth = () => {
     closeSheet();
     onOpenHealthDialog();
@@ -259,42 +262,87 @@ function MobileUtilityActions({
 
   return (
     <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-border">
-      <div className="text-sm font-medium">Utilities</div>
-      {showReleaseNotesButton && (
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full cursor-pointer justify-start gap-2"
-          onClick={openReleaseNotes}
-        >
-          <IconSparkles className="h-4 w-4" />
-          Release notes
-        </Button>
-      )}
+      <div className={mobileSectionTitleClass}>Utilities</div>
+      <Button
+        asChild
+        variant="outline"
+        className={cn(mobileControlClass, "cursor-pointer justify-start gap-3")}
+      >
+        <Link href="/settings" onClick={closeSheet}>
+          <IconSettings className={mobileControlIconClass} />
+          Settings
+        </Link>
+      </Button>
       {showHealthIndicator && (
         <Button
           type="button"
           variant="outline"
-          className="w-full cursor-pointer justify-start gap-2"
+          className={cn(mobileControlClass, "cursor-pointer justify-start gap-3")}
           onClick={openHealth}
         >
-          <IconAlertTriangle className="h-4 w-4 text-warning" />
+          <IconAlertTriangle className={cn(mobileControlIconClass, "text-warning")} />
           Health issues
         </Button>
       )}
-      <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
-        <Link href="/stats" onClick={closeSheet}>
-          <IconChartBar className="h-4 w-4 mr-2" />
-          Stats
-        </Link>
-      </Button>
-      <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
-        <Link href="/settings" onClick={closeSheet}>
-          <IconSettings className="h-4 w-4 mr-2" />
-          Settings
-        </Link>
-      </Button>
     </div>
+  );
+}
+
+function ResponsiveMenuSurface({
+  isMobile,
+  open,
+  onOpenChange,
+  contentRef,
+  onOpenAutoFocus,
+  children,
+}: {
+  isMobile: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  contentRef: RefObject<HTMLDivElement | null>;
+  onOpenAutoFocus: (event: Event) => void;
+  children: ReactNode;
+}) {
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        <DrawerContent
+          ref={contentRef}
+          tabIndex={-1}
+          onOpenAutoFocus={onOpenAutoFocus}
+          className="h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] !max-h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] outline-none"
+        >
+          <div
+            data-testid="mobile-home-menu-card"
+            className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-background shadow-2xl shadow-black/20"
+          >
+            <DrawerHeader className="shrink-0 border-b border-border/70 pb-3 text-left">
+              <DrawerTitle>Menu</DrawerTitle>
+            </DrawerHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom,0px)]">
+              {children}
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        ref={contentRef}
+        side="right"
+        tabIndex={-1}
+        onOpenAutoFocus={onOpenAutoFocus}
+        className="w-full overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:max-w-sm"
+      >
+        <SheetHeader>
+          <SheetTitle>Menu</SheetTitle>
+        </SheetHeader>
+        {children}
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -306,23 +354,20 @@ export function MobileMenuSheet({
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
-  showReleaseNotesButton,
-  onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
 }: MobileMenuSheetProps) {
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
+  const { isMobile } = useResponsiveBreakpoint();
   const {
-    workspaces,
     workflows,
-    activeWorkspaceId,
     activeWorkflowId,
     repositories,
     repositoriesLoading,
     allRepositoriesSelected,
     selectedRepositoryId,
     enablePreviewOnClick,
-    onWorkspaceChange,
     onWorkflowChange,
     onRepositoryChange,
     onTogglePreviewOnClick,
@@ -331,7 +376,7 @@ export function MobileMenuSheet({
   } = useKanbanDisplaySettings();
 
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
-  const viewValue = getMobileViewValue(currentPage, kanbanViewMode);
+  const viewValue = getMobileViewValue(currentPage, kanbanViewMode, isMobile);
 
   const handleViewChange = (value: string) => {
     if (!value) return;
@@ -340,55 +385,65 @@ export function MobileMenuSheet({
       onOpenChange(false);
     } else if (value === "kanban") {
       if (currentPage !== "kanban") router.push("/");
-      onViewModeChange("");
+      if (!isMobile) onViewModeChange("");
       onOpenChange(false);
-    } else if (value === "pipeline") {
+    } else if (value === "pipeline" && !isMobile) {
       if (currentPage !== "kanban") router.push("/");
       onViewModeChange("graph2");
       onOpenChange(false);
     }
   };
 
+  const menuContent = (
+    <div className="flex min-h-full flex-col gap-6 p-4">
+      <MobileSearchSection
+        searchQuery={searchQuery}
+        onSearchChange={onSearchChange}
+        isSearchLoading={isSearchLoading}
+      />
+      <MobileWorkspaceSection onOpenChange={onOpenChange} />
+      <MobileViewSection
+        viewValue={viewValue}
+        onViewChange={handleViewChange}
+        showPipeline={!isMobile}
+      />
+
+      <MobileDisplayOptions
+        activeWorkflowId={activeWorkflowId}
+        workflows={workflows}
+        onWorkflowChange={onWorkflowChange}
+        repositoryValue={repositoryValue}
+        repositories={repositories}
+        repositoriesLoading={repositoriesLoading}
+        onRepositoryChange={onRepositoryChange}
+        enablePreviewOnClick={enablePreviewOnClick}
+        onTogglePreviewOnClick={onTogglePreviewOnClick}
+        showWorkflow={!isMobile || currentPage !== "kanban"}
+      />
+
+      <MobileIntegrationsSection onNavigate={() => onOpenChange(false)} />
+
+      <MobileUtilityActions
+        showHealthIndicator={showHealthIndicator}
+        onOpenHealthDialog={onOpenHealthDialog}
+        onOpenChange={onOpenChange}
+      />
+    </div>
+  );
+  const focusMenu = (event: Event) => {
+    event.preventDefault();
+    contentRef.current?.focus({ preventScroll: true });
+  };
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-sm overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle>Menu</SheetTitle>
-        </SheetHeader>
-        <div className="flex flex-col gap-6 p-4">
-          <MobileSearchSection
-            searchQuery={searchQuery}
-            onSearchChange={onSearchChange}
-            isSearchLoading={isSearchLoading}
-          />
-          <MobileViewSection viewValue={viewValue} onViewChange={handleViewChange} />
-
-          <MobileDisplayOptions
-            activeWorkspaceId={activeWorkspaceId}
-            workspaces={workspaces}
-            onWorkspaceChange={onWorkspaceChange}
-            activeWorkflowId={activeWorkflowId}
-            workflows={workflows}
-            onWorkflowChange={onWorkflowChange}
-            repositoryValue={repositoryValue}
-            repositories={repositories}
-            repositoriesLoading={repositoriesLoading}
-            onRepositoryChange={onRepositoryChange}
-            enablePreviewOnClick={enablePreviewOnClick}
-            onTogglePreviewOnClick={onTogglePreviewOnClick}
-          />
-
-          <MobileIntegrationsSection onNavigate={() => onOpenChange(false)} />
-
-          <MobileUtilityActions
-            showReleaseNotesButton={showReleaseNotesButton}
-            onOpenReleaseNotes={onOpenReleaseNotes}
-            showHealthIndicator={showHealthIndicator}
-            onOpenHealthDialog={onOpenHealthDialog}
-            onOpenChange={onOpenChange}
-          />
-        </div>
-      </SheetContent>
-    </Sheet>
+    <ResponsiveMenuSurface
+      isMobile={isMobile}
+      open={open}
+      onOpenChange={onOpenChange}
+      contentRef={contentRef}
+      onOpenAutoFocus={focusMenu}
+    >
+      {menuContent}
+    </ResponsiveMenuSurface>
   );
 }

@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# kandev-instances — list every running kandev backend instance on this host.
+#
+# For each backend process (binary named `kandev` with a listening TCP socket)
+# it prints, tab-separated:
+#   PID  BACKEND_PORT  WEB_PORT  AGENTCTL_PORT  HOME_DIR  REPO_PATH
+#
+# Sources:
+#   - backend PID + listening port: `ss -tlnp` (falls back to `lsof`)
+#   - web port: a separate Vite dev listener from KANDEV_WEB_INTERNAL_URL when
+#     configured and reachable; otherwise the backend port, because production
+#     serves the SPA from the Go backend.
+#   - agentctl port: KANDEV_AGENT_STANDALONE_PORT / AGENTCTL_PORT in environ,
+#     else the `-port=` flag of a child `agentctl` process (else `?`)
+#   - HOME_DIR: KANDEV_HOME_DIR in environ, else HOME, else `?`
+#   - repo path: derived from /proc/<pid>/exe (…/apps/backend/bin/kandev →
+#     repo root) or /proc/<pid>/cwd (else `?`)
+#
+# This is the tool a debugger uses to tell "my isolated instance" apart from
+# "the user's live instance" before touching anything. Unresolved fields print
+# as `?` rather than failing the whole listing.
+#
+# Usage:
+#   scripts/kandev-instances            # human-readable table
+#   scripts/kandev-instances --raw      # tab-separated, no header (scriptable)
+#
+set -euo pipefail
+
+RAW=0
+if [[ "${1:-}" == "--raw" ]]; then
+  RAW=1
+fi
+
+# Read a single env var value from a process's environ. Prints empty on miss.
+read_environ_var() {
+  local pid="$1" var="$2"
+  [[ -r "/proc/$pid/environ" ]] || return 0
+  tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null |
+    awk -F= -v k="$var" '$1==k {sub("^"k"=",""); print; exit}'
+}
+
+# Resolve the repo path from a kandev binary's exe path or cwd.
+# …/apps/backend/bin/kandev → repo root (strip the trailing 4 segments).
+resolve_repo() {
+  local pid="$1" exe cwd
+  exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+  if [[ "$exe" == */apps/backend/bin/kandev ]]; then
+    printf '%s\n' "${exe%/apps/backend/bin/kandev}"
+    return 0
+  fi
+  cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+  if [[ "$cwd" == */apps/backend/bin ]]; then
+    printf '%s\n' "${cwd%/apps/backend/bin}"
+    return 0
+  fi
+  if [[ -n "$cwd" ]]; then
+    printf '%s\n' "$cwd"
+    return 0
+  fi
+  printf '?\n'
+}
+
+# Resolve agentctl port: prefer the env var, fall back to a child agentctl's
+# -port= flag.
+resolve_agentctl_port() {
+  local pid="$1" port
+  port="$(read_environ_var "$pid" KANDEV_AGENT_STANDALONE_PORT)"
+  [[ -z "$port" ]] && port="$(read_environ_var "$pid" AGENTCTL_PORT)"
+  if [[ -z "$port" ]]; then
+    # Inspect child processes for an `agentctl -port=NNNN`.
+    local child cmd
+    for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+      cmd="$(tr '\0' ' ' <"/proc/$child/cmdline" 2>/dev/null || true)"
+      case "$cmd" in
+        *agentctl*-port=*)
+          port="$(printf '%s' "$cmd" | grep -oE 'port=[0-9]+' | head -1 | cut -d= -f2)"
+          break
+          ;;
+      esac
+    done
+  fi
+  printf '%s\n' "${port:-?}"
+}
+
+# True if something is currently listening on the given TCP port.
+port_has_listener() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnH "sport = :$port" 2>/dev/null | grep -q .
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
+# Resolve the web port for a backend.
+#
+# Production serves the SPA from the backend port. In development, a separate
+# Vite server may still be configured via KANDEV_WEB_INTERNAL_URL; report that
+# port only when something is actually listening there.
+resolve_web_port() {
+  local backend_pid="$1" backend_port="${2:-}" port
+  local url cand=""
+  url="$(read_environ_var "$backend_pid" KANDEV_WEB_INTERNAL_URL)"
+  # Match the LAST :<port> so an IPv6 host or path can't fool us; the trailing
+  # host:port is what we want, not the scheme separator (http:).
+  if [[ "$url" =~ :([0-9]+)([/?#].*)?$ ]]; then
+    cand="${BASH_REMATCH[1]}"
+  fi
+  if [[ -n "$cand" ]] && port_has_listener "$cand"; then
+    port="$cand"
+  fi
+  printf '%s\n' "${port:-$backend_port}"
+}
+
+# Emit "PID PORT" pairs for every listening kandev backend socket.
+# Primary: ss. Fallback: lsof. De-duplicated by PID (a backend may also have
+# the agentctl child listening, but agentctl's comm is "agentctl", not
+# "kandev", so it's excluded by the comm filter).
+list_backend_sockets() {
+  if command -v ss >/dev/null 2>&1; then
+    # ss columns: State Recv-Q Send-Q Local:Port Peer:Port users:((...))
+    # The process info is the last field; the local address is the 4th.
+    ss -tlnpH 2>/dev/null | while read -r _ _ _ local_addr _ procinfo; do
+      case "$procinfo" in
+        *'"kandev"'*)
+          local pid port
+          # sed (not grep) so a no-match yields empty + exit 0 instead of tripping
+          # `set -o pipefail` when a socket line carries no pid= field.
+          pid="$(printf '%s\n' "$procinfo" | sed -nE 's/.*pid=([0-9]+).*/\1/p' | head -1)"
+          port="${local_addr##*:}"
+          [[ -n "$pid" && -n "$port" ]] && printf '%s %s\n' "$pid" "$port"
+          ;;
+      esac
+    done
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk '$1=="kandev" {
+      pid=$2; split($9,a,":"); port=a[length(a)]; print pid, port
+    }'
+  fi
+}
+
+# Build a unique "PID PORT" list, keeping the lowest port per PID (the backend
+# HTTP server binds the configured KANDEV_SERVER_PORT; that is the canonical one
+# we report).
+declare -A SEEN_PORT
+mapfile -t PAIRS < <(list_backend_sockets | sort -u)
+for pair in "${PAIRS[@]:-}"; do
+  [[ -z "$pair" ]] && continue
+  pid="${pair%% *}"
+  port="${pair##* }"
+  cur="${SEEN_PORT[$pid]:-}"
+  if [[ -z "$cur" || "$port" -lt "$cur" ]]; then
+    SEEN_PORT[$pid]="$port"
+  fi
+done
+
+if [[ "$RAW" -eq 0 ]]; then
+  printf '%-7s  %-12s  %-8s  %-13s  %-28s  %s\n' \
+    "PID" "BACKEND_PORT" "WEB_PORT" "AGENTCTL_PORT" "HOME_DIR" "REPO_PATH"
+fi
+
+# `set -u` treats an empty associative array as unbound when expanded, so
+# collect the keys with -u temporarily relaxed.
+set +u
+pids=("${!SEEN_PORT[@]}")
+set -u
+
+if [[ ${#pids[@]} -eq 0 ]]; then
+  [[ "$RAW" -eq 0 ]] && echo "(no running kandev instances found)" >&2
+  exit 0
+fi
+
+for pid in "${pids[@]}"; do
+  backend_port="${SEEN_PORT[$pid]}"
+  web_port="$(resolve_web_port "$pid" "$backend_port")"
+  agentctl_port="$(resolve_agentctl_port "$pid")"
+  home_dir="$(read_environ_var "$pid" KANDEV_HOME_DIR)"
+  [[ -z "$home_dir" ]] && home_dir="$(read_environ_var "$pid" HOME)"
+  [[ -z "$home_dir" ]] && home_dir="?"
+  repo="$(resolve_repo "$pid")"
+
+  if [[ "$RAW" -eq 1 ]]; then
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$pid" "$backend_port" "$web_port" "$agentctl_port" "$home_dir" "$repo"
+  else
+    printf '%-7s  %-12s  %-8s  %-13s  %-28s  %s\n' \
+      "$pid" "$backend_port" "$web_port" "$agentctl_port" "$home_dir" "$repo"
+  fi
+done | sort -k2 -n

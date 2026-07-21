@@ -3,8 +3,124 @@ package linear
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"testing"
+
+	"github.com/kandev/kandev/internal/integrations/optional"
 )
+
+func TestService_CreateIssueWatch_AcceptsRichFilters(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	min := 1.0
+	cases := map[string]SearchFilter{
+		"priority":    {Priorities: []int{1}},
+		"labels":      {LabelIDs: []string{"l1"}},
+		"creator":     {CreatorID: "u1"},
+		"estimateMin": {EstimateMin: &min},
+	}
+	for name, filter := range cases {
+		w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+			WorkspaceID:    "ws-1",
+			WorkflowID:     "wf",
+			WorkflowStepID: "step",
+			Filter:         filter,
+		})
+		if err != nil {
+			t.Errorf("%s: create rejected: %v", name, err)
+			continue
+		}
+		if w.ID == "" {
+			t.Errorf("%s: expected ID assigned", name)
+		}
+	}
+}
+
+// fakeRepoLookup is a static RepositoryLookup for repository-binding tests.
+type fakeRepoLookup struct {
+	workspaceID   string
+	defaultBranch string
+	ok            bool
+}
+
+func (f fakeRepoLookup) GetRepository(_ context.Context, _ string) (string, string, bool) {
+	return f.workspaceID, f.defaultBranch, f.ok
+}
+
+func TestService_CreateIssueWatch_RepositoryBinding(t *testing.T) {
+	ctx := context.Background()
+	baseReq := func() *CreateIssueWatchRequest {
+		return &CreateIssueWatchRequest{
+			WorkspaceID:    "ws-1",
+			WorkflowID:     "wf",
+			WorkflowStepID: "step",
+			Filter:         SearchFilter{TeamKey: "ENG"},
+		}
+	}
+
+	t.Run("default branch filled from repo", func(t *testing.T) {
+		f := newSvcFixture(t)
+		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+		req := baseReq()
+		req.RepositoryID = "repo-1"
+		w, err := f.svc.CreateIssueWatch(ctx, req)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if w.RepositoryID != "repo-1" || w.BaseBranch != "main" {
+			t.Fatalf("expected repo-1@main, got repo=%q branch=%q", w.RepositoryID, w.BaseBranch)
+		}
+	})
+
+	t.Run("explicit branch preserved", func(t *testing.T) {
+		f := newSvcFixture(t)
+		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+		req := baseReq()
+		req.RepositoryID = "repo-1"
+		req.BaseBranch = "release/v2"
+		w, err := f.svc.CreateIssueWatch(ctx, req)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if w.BaseBranch != "release/v2" {
+			t.Fatalf("explicit branch overwritten: %q", w.BaseBranch)
+		}
+	})
+
+	t.Run("cross-workspace repo rejected", func(t *testing.T) {
+		f := newSvcFixture(t)
+		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-other", defaultBranch: "main", ok: true})
+		req := baseReq()
+		req.RepositoryID = "repo-1"
+		if _, err := f.svc.CreateIssueWatch(ctx, req); !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("expected ErrInvalidConfig for cross-workspace repo, got %v", err)
+		}
+	})
+
+	t.Run("missing repo rejected", func(t *testing.T) {
+		f := newSvcFixture(t)
+		f.svc.SetRepositoryLookup(fakeRepoLookup{ok: false})
+		req := baseReq()
+		req.RepositoryID = "ghost"
+		if _, err := f.svc.CreateIssueWatch(ctx, req); !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("expected ErrInvalidConfig for missing repo, got %v", err)
+		}
+	})
+
+	t.Run("unbound skips lookup and clears branch", func(t *testing.T) {
+		f := newSvcFixture(t) // no RepositoryLookup wired
+		req := baseReq()
+		req.BaseBranch = "ignored-without-repo"
+		w, err := f.svc.CreateIssueWatch(ctx, req)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if w.RepositoryID != "" || w.BaseBranch != "" {
+			t.Fatalf("unbound watch must stay empty, got repo=%q branch=%q", w.RepositoryID, w.BaseBranch)
+		}
+	})
+}
 
 // withSearchResults returns a fakeClient that always returns the given issues
 // for SearchIssues, ignoring the filter.
@@ -96,6 +212,202 @@ func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	}
 }
 
+func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	// Default create (no cap supplied) persists NULL → reads back as nil
+	// (uncapped). The store column default of 5 must NOT leak through the
+	// INSERT path, which names the column explicitly with a NULL bind.
+	uncapped, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"},
+	})
+	if err != nil {
+		t.Fatalf("create uncapped: %v", err)
+	}
+	if uncapped.MaxInflightTasks != nil {
+		t.Fatalf("expected nil (uncapped), got %v", *uncapped.MaxInflightTasks)
+	}
+	got, err := f.svc.GetIssueWatch(ctx, uncapped.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.MaxInflightTasks != nil {
+		t.Fatalf("uncapped did not round-trip as nil: %v", *got.MaxInflightTasks)
+	}
+
+	// Create with a positive cap round-trips through the nullable column.
+	cap5 := 5
+	capped, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, MaxInflightTasks: &cap5,
+	})
+	if err != nil {
+		t.Fatalf("create capped: %v", err)
+	}
+	if capped.MaxInflightTasks == nil || *capped.MaxInflightTasks != 5 {
+		t.Fatalf("cap not persisted: %v", capped.MaxInflightTasks)
+	}
+
+	// Non-positive caps are rejected on create.
+	for _, bad := range []int{0, -1} {
+		b := bad
+		if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+			WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+			Filter: SearchFilter{TeamKey: "ENG"}, MaxInflightTasks: &b,
+		}); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("expected ErrInvalidConfig for cap=%d, got %v", bad, err)
+		}
+	}
+
+	// PATCH is tri-state: present+int sets the cap, present+null clears it,
+	// absent leaves it unchanged. The absent case is the footgun greptile/the
+	// local reviewer flagged — a partial update must NOT silently drop the cap.
+	cap3 := 3
+	updated, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: optional.Int{Present: true, Value: &cap3},
+	})
+	if err != nil {
+		t.Fatalf("update set cap: %v", err)
+	}
+	if updated.MaxInflightTasks == nil || *updated.MaxInflightTasks != 3 {
+		t.Fatalf("cap not updated: %v", updated.MaxInflightTasks)
+	}
+
+	// Partial PATCH that omits MaxInflightTasks (Present=false) must preserve
+	// the existing cap of 3 — not reset it to uncapped.
+	newPrompt := "changed"
+	preserved, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		Prompt: &newPrompt,
+	})
+	if err != nil {
+		t.Fatalf("partial update: %v", err)
+	}
+	if preserved.MaxInflightTasks == nil || *preserved.MaxInflightTasks != 3 {
+		t.Fatalf("partial PATCH wrongly cleared the cap: %v", preserved.MaxInflightTasks)
+	}
+
+	// Explicit null clears the cap back to uncapped.
+	cleared, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: optional.Int{Present: true, Value: nil},
+	})
+	if err != nil {
+		t.Fatalf("update clear cap: %v", err)
+	}
+	if cleared.MaxInflightTasks != nil {
+		t.Fatalf("expected cap cleared to nil, got %v", *cleared.MaxInflightTasks)
+	}
+
+	// Non-positive cap is rejected on update too.
+	zero := 0
+	if _, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: optional.Int{Present: true, Value: &zero},
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for update cap=0, got %v", err)
+	}
+}
+
+func TestValidateSortBy(t *testing.T) {
+	for _, ok := range []IssueSortBy{
+		SortByDefault, SortByPriorityDesc, SortByPriorityAsc,
+		SortByCreatedDesc, SortByCreatedAsc, SortByUpdatedDesc, SortByUpdatedAsc,
+	} {
+		if err := validateSortBy(ok); err != nil {
+			t.Errorf("validateSortBy(%q) rejected a known value: %v", ok, err)
+		}
+	}
+	if err := validateSortBy(IssueSortBy("bogus")); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for unknown sortBy, got %v", err)
+	}
+}
+
+func TestService_IssueWatch_SortByRoundTrips(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: SortByPriorityDesc,
+	})
+	if err != nil {
+		t.Fatalf("create with sortBy: %v", err)
+	}
+	if created.SortBy != SortByPriorityDesc {
+		t.Fatalf("sortBy not set on create: %q", created.SortBy)
+	}
+	got, err := f.svc.GetIssueWatch(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.SortBy != SortByPriorityDesc {
+		t.Fatalf("sortBy did not round-trip: %q", got.SortBy)
+	}
+
+	// PATCH from one allowed value to another persists through the edit path
+	// (UpdateIssueWatchRequest.SortBy → applyIssueWatchPatch → validate → store).
+	newSort := SortByCreatedAsc
+	updated, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{SortBy: &newSort})
+	if err != nil {
+		t.Fatalf("update sortBy: %v", err)
+	}
+	if updated.SortBy != SortByCreatedAsc {
+		t.Fatalf("sortBy not applied on update: %q", updated.SortBy)
+	}
+	if got, err := f.svc.GetIssueWatch(ctx, created.ID); err != nil {
+		t.Fatalf("get after update: %v", err)
+	} else if got.SortBy != SortByCreatedAsc {
+		t.Fatalf("updated sortBy did not persist: %q", got.SortBy)
+	}
+
+	// PATCH back to "" pins the "Linear default order" case.
+	defaultSort := SortByDefault
+	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{SortBy: &defaultSort}); err != nil {
+		t.Fatalf("update sortBy to default: %v", err)
+	}
+	if got, err := f.svc.GetIssueWatch(ctx, created.ID); err != nil {
+		t.Fatalf("get after reset: %v", err)
+	} else if got.SortBy != SortByDefault {
+		t.Fatalf("reset sortBy did not persist: %q", got.SortBy)
+	}
+
+	// PATCH with an unknown sortBy is rejected.
+	bogus := IssueSortBy("bogus")
+	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{SortBy: &bogus}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for unknown sortBy on update, got %v", err)
+	}
+
+	// Create with an unknown sortBy is rejected.
+	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: IssueSortBy("bogus"),
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for unknown sortBy on create, got %v", err)
+	}
+}
+
+func TestValidateFilterBounds_RejectsNonFiniteAndNegativeEstimates(t *testing.T) {
+	nan := math.NaN()
+	posInf := math.Inf(1)
+	negInf := math.Inf(-1)
+	neg := -1.0
+	cases := map[string]SearchFilter{
+		"estimateMin NaN":  {EstimateMin: &nan},
+		"estimateMax NaN":  {EstimateMax: &nan},
+		"estimateMin +Inf": {EstimateMin: &posInf},
+		"estimateMax -Inf": {EstimateMax: &negInf},
+		"estimateMin < 0":  {EstimateMin: &neg},
+		"estimateMax < 0":  {EstimateMax: &neg},
+	}
+	for name, f := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := validateFilterBounds(f); !errors.Is(err, ErrInvalidConfig) {
+				t.Errorf("expected ErrInvalidConfig, got %v", err)
+			}
+		})
+	}
+}
+
 func TestService_CreateIssueWatch_RejectsOutOfRangeInterval(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
@@ -156,7 +468,7 @@ func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
@@ -200,10 +512,222 @@ func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 	}
 }
 
+func TestService_CheckIssueWatch_AppliesSort(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
+		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	// Mixed priorities in scrambled order; the watch's SortByPriorityDesc must
+	// reorder the returned slice urgent→high→med→low→none. Pins the
+	// sortIssues(out, w.SortBy) call in CheckIssueWatch.
+	f.client.withSearchResults([]LinearIssue{
+		{Identifier: "LOW", Priority: 4, URL: "https://linear.app/x/issue/LOW"},
+		{Identifier: "URGENT", Priority: 1, URL: "https://linear.app/x/issue/URGENT"},
+		{Identifier: "NONE", Priority: 0, URL: "https://linear.app/x/issue/NONE"},
+		{Identifier: "HIGH", Priority: 2, URL: "https://linear.app/x/issue/HIGH"},
+	})
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: SortByPriorityDesc,
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	want := []string{"URGENT", "HIGH", "LOW", "NONE"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d issues, got %d", len(want), len(got))
+	}
+	for i, id := range want {
+		if got[i].Identifier != id {
+			t.Errorf("position %d: got %s, want %s (full: %v)", i, got[i].Identifier, id, identifiers(got))
+		}
+	}
+}
+
+func TestService_CheckIssueWatch_PaginatesBacklog(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
+		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	// Two pages: the URGENT issue is on page 2. Sorting only page 1 would never
+	// surface it first — this pins cross-page accumulation + sort (CodeRabbit).
+	f.client.searchIssuesFn = func(_ SearchFilter, pageToken string, _ int) (*SearchResult, error) {
+		if pageToken == "" {
+			return &SearchResult{Issues: []LinearIssue{
+				{Identifier: "LOW", Priority: 4, URL: "https://linear.app/x/issue/LOW"},
+				{Identifier: "MED", Priority: 3, URL: "https://linear.app/x/issue/MED"},
+			}, IsLast: false, NextPageToken: "p2"}, nil
+		}
+		return &SearchResult{Issues: []LinearIssue{
+			{Identifier: "URGENT", Priority: 1, URL: "https://linear.app/x/issue/URGENT"},
+			{Identifier: "HIGH", Priority: 2, URL: "https://linear.app/x/issue/HIGH"},
+		}, IsLast: true}, nil
+	}
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: SortByPriorityDesc,
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	want := []string{"URGENT", "HIGH", "MED", "LOW"}
+	if len(got) != len(want) {
+		t.Fatalf("expected issues from both pages (%d), got %d: %v", len(want), len(got), identifiers(got))
+	}
+	for i, id := range want {
+		if got[i].Identifier != id {
+			t.Errorf("position %d: got %s, want %s (full: %v)", i, got[i].Identifier, id, identifiers(got))
+		}
+	}
+}
+
+func TestService_CheckIssueWatch_BoundsPages(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
+		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	// Mock never reports IsLast and always hands back a fresh cursor + a fresh
+	// identifier — without the issueWatchMaxPages cap this loops forever.
+	calls := 0
+	f.client.searchIssuesFn = func(_ SearchFilter, _ string, _ int) (*SearchResult, error) {
+		calls++
+		return &SearchResult{Issues: []LinearIssue{
+			{Identifier: fmt.Sprintf("ENG-%d", calls), URL: "https://linear.app/x/issue"},
+		}, IsLast: false, NextPageToken: "next"}, nil
+	}
+
+	// A non-default sort is required for the watch to paginate at all.
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: SortByPriorityDesc,
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if calls != issueWatchMaxPages {
+		t.Errorf("expected SearchIssues called %d times (page cap), got %d", issueWatchMaxPages, calls)
+	}
+	if len(got) != issueWatchMaxPages {
+		t.Errorf("expected %d accumulated issues, got %d", issueWatchMaxPages, len(got))
+	}
+}
+
+// TestService_CheckIssueWatch_DefaultSortFetchesSinglePage pins that a
+// default-order watch keeps the legacy single-page fetch: paginating it would
+// burn Linear rate limit and enlarge dispatch bursts for no ordering benefit.
+func TestService_CheckIssueWatch_DefaultSortFetchesSinglePage(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
+		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	// Mock always offers another page; a paginating watch would loop to the cap.
+	calls := 0
+	f.client.searchIssuesFn = func(_ SearchFilter, _ string, _ int) (*SearchResult, error) {
+		calls++
+		return &SearchResult{Issues: []LinearIssue{
+			{Identifier: fmt.Sprintf("ENG-%d", calls), URL: "https://linear.app/x/issue"},
+		}, IsLast: false, NextPageToken: "next"}, nil
+	}
+
+	// No SortBy => SortByDefault.
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"},
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("default watch must fetch a single page, got %d SearchIssues calls", calls)
+	}
+	if len(got) != 1 {
+		t.Errorf("expected 1 issue from the single page, got %d", len(got))
+	}
+}
+
+// TestService_CheckIssueWatch_CancelStopsPagination pins that a context
+// cancellation on a later page aborts with the error rather than publishing the
+// partial set — dispatch detaches the context, so partial results would still
+// create tasks during shutdown.
+func TestService_CheckIssueWatch_CancelStopsPagination(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
+		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	// Page 1 succeeds; page 2 reports a canceled context.
+	f.client.searchIssuesFn = func(_ SearchFilter, pageToken string, _ int) (*SearchResult, error) {
+		if pageToken == "" {
+			return &SearchResult{Issues: []LinearIssue{
+				{Identifier: "ENG-1", Priority: 4, URL: "https://linear.app/x/issue/ENG-1"},
+			}, IsLast: false, NextPageToken: "p2"}, nil
+		}
+		return nil, context.Canceled
+	}
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: SortByPriorityDesc,
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	got, err := f.svc.CheckIssueWatch(ctx, w)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got err=%v got=%v", err, identifiers(got))
+	}
+	if got != nil {
+		t.Errorf("expected no issues on cancellation, got %v", identifiers(got))
+	}
+}
+
 func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
@@ -221,5 +745,113 @@ func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 	refreshed, _ := f.store.GetIssueWatch(ctx, w.ID)
 	if refreshed.LastPolledAt == nil {
 		t.Error("expected last_polled_at stamped even on search failure (liveness signal)")
+	}
+}
+
+func TestService_UpdateIssueWatch_RepositoryBinding(t *testing.T) {
+	ctx := context.Background()
+	f := newSvcFixture(t)
+	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf",
+		WorkflowStepID: "step",
+		Filter:         SearchFilter{TeamKey: "ENG"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if w.RepositoryID != "" {
+		t.Fatalf("expected unbound on create, got %q", w.RepositoryID)
+	}
+
+	// Bind an existing watch via update — the edit path must persist it.
+	repoID := "repo-1"
+	updated, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{RepositoryID: &repoID})
+	if err != nil {
+		t.Fatalf("update bind: %v", err)
+	}
+	if updated.RepositoryID != "repo-1" || updated.BaseBranch != "main" {
+		t.Fatalf("expected repo-1@main after update, got repo=%q branch=%q", updated.RepositoryID, updated.BaseBranch)
+	}
+
+	// Unbind via update (empty string).
+	empty := ""
+	cleared, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{RepositoryID: &empty})
+	if err != nil {
+		t.Fatalf("update unbind: %v", err)
+	}
+	if cleared.RepositoryID != "" || cleared.BaseBranch != "" {
+		t.Fatalf("expected cleared after update, got repo=%q branch=%q", cleared.RepositoryID, cleared.BaseBranch)
+	}
+}
+
+func TestService_UpdateIssueWatch_RebindAndDeletedRepo(t *testing.T) {
+	ctx := context.Background()
+	f := newSvcFixture(t)
+	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	repo1 := "repo-1"
+	if _, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{RepositoryID: &repo1}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
+	// Rebind to a different repo with no explicit branch → branch resets to the
+	// new repo's default ("develop"), not the previous repo's "main".
+	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "develop", ok: true})
+	repo2 := "repo-2"
+	rebound, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{RepositoryID: &repo2})
+	if err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+	if rebound.RepositoryID != "repo-2" || rebound.BaseBranch != "develop" {
+		t.Fatalf("rebind should reset branch to new default, got repo=%q branch=%q", rebound.RepositoryID, rebound.BaseBranch)
+	}
+
+	// Bound repo is now soft-deleted (lookup fails). Editing an unrelated field
+	// must still succeed — the binding isn't part of this PATCH.
+	f.svc.SetRepositoryLookup(fakeRepoLookup{ok: false})
+	prompt := "updated prompt"
+	edited, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{Prompt: &prompt})
+	if err != nil {
+		t.Fatalf("unrelated edit blocked by deleted bound repo: %v", err)
+	}
+	if edited.Prompt != "updated prompt" || edited.RepositoryID != "repo-2" || edited.BaseBranch != "develop" {
+		t.Fatalf("expected prompt updated + binding preserved, got prompt=%q repo=%q branch=%q", edited.Prompt, edited.RepositoryID, edited.BaseBranch)
+	}
+}
+
+func TestService_IssueWatch_RejectsInvalidBaseBranch(t *testing.T) {
+	ctx := context.Background()
+	f := newSvcFixture(t)
+	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+	base := func() *CreateIssueWatchRequest {
+		return &CreateIssueWatchRequest{
+			WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+			Filter: SearchFilter{TeamKey: "ENG"}, RepositoryID: "repo-1",
+		}
+	}
+
+	bad := base()
+	bad.BaseBranch = "bad..ref"
+	if _, err := f.svc.CreateIssueWatch(ctx, bad); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("expected ErrInvalidConfig for invalid base branch on create, got %v", err)
+	}
+
+	w, err := f.svc.CreateIssueWatch(ctx, base()) // valid: empty branch -> default
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	badRef := "bad..ref"
+	if _, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{BaseBranch: &badRef}); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("expected ErrInvalidConfig for invalid base branch on update, got %v", err)
 	}
 }

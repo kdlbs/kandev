@@ -68,7 +68,13 @@ export type QueueMessageParams = {
   content: string;
   model?: string;
   plan_mode?: boolean;
-  attachments?: Array<{ type: string; data: string; mime_type: string }>;
+  attachments?: Array<{
+    type: string;
+    data: string;
+    mime_type: string;
+    name?: string;
+    delivery_mode?: "prompt" | "path";
+  }>;
   user_id?: string;
 };
 
@@ -92,6 +98,15 @@ export async function clearQueue(sessionId: string): Promise<{ removed: number }
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   return client.request<{ removed: number }>("message.queue.cancel", { session_id: sessionId });
+}
+
+/** Dispatch one queued entry now when the session is ready for input. */
+export async function drainQueuedMessage(sessionId: string): Promise<{ drained: boolean }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  return client.request<{ drained: boolean }>("message.queue.drain", { session_id: sessionId });
 }
 
 /** Fetch the full queue snapshot (entries + capacity). */
@@ -131,7 +146,13 @@ export async function updateQueuedMessage(params: {
   session_id: string;
   entry_id: string;
   content: string;
-  attachments?: Array<{ type: string; data: string; mime_type: string }>;
+  attachments?: Array<{
+    type: string;
+    data: string;
+    mime_type: string;
+    name?: string;
+    delivery_mode?: "prompt" | "path";
+  }>;
   user_id?: string;
 }): Promise<{ entry_id: string }> {
   const client = getWebSocketClient();

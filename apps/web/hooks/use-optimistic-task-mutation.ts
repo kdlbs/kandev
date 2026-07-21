@@ -89,7 +89,7 @@ function toOfficeTaskPatch(patch: Partial<Task>): Partial<OfficeTask> {
     out.assigneeAgentProfileId = patch.assigneeAgentProfileId;
   }
   if (patch.projectId !== undefined) out.projectId = patch.projectId;
-  if (patch.parentId !== undefined) out.parentId = patch.parentId;
+  if (Object.prototype.hasOwnProperty.call(patch, "parentId")) out.parentId = patch.parentId;
   if (patch.labels !== undefined) out.labels = patch.labels;
   if (patch.blockedBy !== undefined) out.blockedBy = patch.blockedBy;
   return out;

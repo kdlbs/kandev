@@ -29,7 +29,10 @@ test.describe("Prompts settings — duplicate name handling", () => {
     await expect(form).toBeVisible();
     await form.getByTestId("prompt-name-input").fill("dupe-prompt");
     await form.getByTestId("prompt-content-input").fill("second content");
-    await form.getByTestId("prompt-submit").click();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
 
     const toast = testPage.getByTestId("toast-message");
     await expect(toast).toBeVisible({ timeout: 5_000 });
@@ -57,14 +60,18 @@ test.describe("Prompts settings — duplicate name handling", () => {
 
     const nameInput = betaRow.getByTestId("prompt-name-input");
     await nameInput.fill("alpha");
-    await betaRow.getByTestId("prompt-submit").click();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
 
     const toast = testPage.getByTestId("toast-message");
     await expect(toast).toBeVisible({ timeout: 5_000 });
     await expect(toast).toContainText(/already exists/i);
 
-    // Backend rejected — the row must still exist under its original name.
-    await testPage.reload();
+    // Backend rejected. Cancel the dirty draft and confirm the original row
+    // remains visible without forcing a guarded page reload.
+    await betaRow.getByRole("button", { name: "Cancel" }).click();
     await expect(
       testPage.locator('[data-testid="prompt-list-item"][data-prompt-name="beta"]'),
     ).toBeVisible();
@@ -81,7 +88,10 @@ test.describe("Prompts settings — duplicate name handling", () => {
     const form = testPage.getByTestId("prompt-create-form");
     await form.getByTestId("prompt-name-input").fill("e2e-fresh-prompt");
     await form.getByTestId("prompt-content-input").fill("hello world");
-    await form.getByTestId("prompt-submit").click();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
 
     await expect(
       testPage.locator('[data-testid="prompt-list-item"][data-prompt-name="e2e-fresh-prompt"]'),

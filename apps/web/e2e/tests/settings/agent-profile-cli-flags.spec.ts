@@ -23,9 +23,8 @@ test.describe("Agent profile — CLI flags", () => {
 
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profileId}`);
 
-    // The CLIFlagsField component is always rendered once the profile form
-    // loads — regardless of whether the agent has curated suggestions.
-    const field = testPage.getByTestId("cli-flags-field");
+    // The Agent CLI flags card is always rendered on the profile editor.
+    const field = testPage.getByTestId("custom-cli-flags-card");
     await expect(field).toBeVisible({ timeout: 15_000 });
 
     // Header and helper copy anchoring the section for the user.
@@ -49,19 +48,19 @@ test.describe("Agent profile — CLI flags", () => {
 
     try {
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
-      await expect(testPage.getByTestId("cli-flags-field")).toBeVisible({ timeout: 15_000 });
+      await expect(testPage.getByTestId("custom-cli-flags-card")).toBeVisible({ timeout: 15_000 });
 
       // Add a custom flag via the UI.
       const flagText = "--my-custom-flag=value";
       await testPage.getByTestId("cli-flag-new-flag-input").fill(flagText);
-      await testPage.getByTestId("cli-flag-new-desc-input").fill("My custom flag for testing");
       await testPage.getByTestId("cli-flag-add-button").click();
 
-      // The row should appear immediately, enabled by default. The row's
-      // positional index depends on how many curated flags the agent seeded
-      // at profile creation, so locate the new row by its flag text rather
-      // than by position.
-      await expect(testPage.getByTestId("cli-flags-list")).toContainText(flagText);
+      // The row should appear immediately, enabled by default. Flag text lives
+      // in an <input> element; use toHaveValue on the last flag-input because
+      // the newly added flag is always appended last.
+      await expect(testPage.locator('[data-testid^="cli-flag-flag-"]').last()).toHaveValue(
+        flagText,
+      );
 
       // Save via the dirty-state save button; wait for unsaved badge to clear.
       const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
@@ -71,8 +70,10 @@ test.describe("Agent profile — CLI flags", () => {
 
       // Reload — the row must still be there.
       await testPage.reload();
-      await expect(testPage.getByTestId("cli-flags-field")).toBeVisible({ timeout: 15_000 });
-      await expect(testPage.getByTestId("cli-flags-list")).toContainText(flagText);
+      await expect(testPage.getByTestId("custom-cli-flags-card")).toBeVisible({ timeout: 15_000 });
+      await expect(testPage.locator('[data-testid^="cli-flag-flag-"]').last()).toHaveValue(
+        flagText,
+      );
 
       // Direct DB-path verification: fetch the profile via the API and assert
       // the cli_flags JSON contains our entry, enabled.
@@ -80,7 +81,6 @@ test.describe("Agent profile — CLI flags", () => {
       const found = stored.cli_flags.find((f) => f.flag === flagText);
       expect(found, `cli_flags should include ${flagText}`).toBeDefined();
       expect(found?.enabled).toBe(true);
-      expect(found?.description).toBe("My custom flag for testing");
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
     }
@@ -101,7 +101,7 @@ test.describe("Agent profile — CLI flags", () => {
 
     try {
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
-      await expect(testPage.getByTestId("cli-flags-field")).toBeVisible({ timeout: 15_000 });
+      await expect(testPage.getByTestId("custom-cli-flags-card")).toBeVisible({ timeout: 15_000 });
 
       // The first row should be enabled; toggle it off.
       const toggle = testPage.getByTestId("cli-flag-enabled-0");
@@ -146,7 +146,7 @@ test.describe("Agent profile — CLI flags", () => {
 
     try {
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
-      await expect(testPage.getByTestId("cli-flags-field")).toBeVisible({ timeout: 15_000 });
+      await expect(testPage.getByTestId("custom-cli-flags-card")).toBeVisible({ timeout: 15_000 });
 
       // Two rows present initially.
       await expect(testPage.getByTestId("cli-flag-row-0")).toBeVisible();

@@ -87,9 +87,51 @@ export type OnTurnCompleteAction =
 
 export type OnExitAction = { type: "disable_plan_mode" };
 
+export type GenericActionType =
+  | "move_to_next"
+  | "move_to_previous"
+  | "move_to_step"
+  | "auto_start_agent"
+  | "queue_run"
+  | "clear_decisions"
+  | "queue_run_for_each_participant";
+
+export type QueueRunConfig = {
+  target?:
+    | "primary"
+    | `participant_role:${string}`
+    | `agent_profile_id:${string}`
+    | "workspace.ceo_agent";
+  task_id?: "this" | string;
+  reason?: string;
+  payload?: Record<string, unknown>;
+};
+
+export type QueueRunForEachParticipantConfig = {
+  role: string;
+  reason?: string;
+  payload?: Record<string, unknown>;
+};
+
+export type GenericAction =
+  | { type: "move_to_next"; config?: TransitionConfig }
+  | { type: "move_to_previous"; config?: TransitionConfig }
+  | { type: "move_to_step"; config: MoveToStepConfig }
+  | { type: "auto_start_agent"; config?: { prompt_override?: string; queue_if_busy?: boolean } }
+  | { type: "queue_run"; config?: QueueRunConfig }
+  | { type: "clear_decisions"; config?: Record<string, never> }
+  | { type: "queue_run_for_each_participant"; config: QueueRunForEachParticipantConfig };
+
 export type StepEvents = {
   on_enter?: OnEnterAction[];
   on_turn_start?: OnTurnStartAction[];
   on_turn_complete?: OnTurnCompleteAction[];
   on_exit?: OnExitAction[];
+  on_comment?: GenericAction[];
+  on_blocker_resolved?: GenericAction[];
+  on_children_completed?: GenericAction[];
+  on_approval_resolved?: GenericAction[];
+  on_heartbeat?: GenericAction[];
+  on_budget_alert?: GenericAction[];
+  on_agent_error?: GenericAction[];
 };

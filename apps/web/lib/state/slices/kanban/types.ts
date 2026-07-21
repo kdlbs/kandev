@@ -1,10 +1,17 @@
-import type { TaskState as TaskStatus } from "@/lib/types/http";
+import type { TaskPendingAction, TaskState as TaskStatus } from "@/lib/types/http";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_exit?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_comment?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_blocker_resolved?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_children_completed?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_approval_resolved?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_heartbeat?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
 };
 
 export type KanbanState = {
@@ -20,6 +27,10 @@ export type KanbanState = {
     is_start_step?: boolean;
     show_in_command_panel?: boolean;
     agent_profile_id?: string;
+    /** Maximum concurrent tasks allowed in this step. 0 or undefined means unlimited. */
+    wip_limit?: number;
+    /** Optional upstream step used by automation to pull more work. */
+    pull_from_step_id?: string | null;
     /**
      * Phase 2 (ADR-0004) semantic UX hint. Read by `<TaskMetaRail>` to
      * pick the right meta surface (review/approval shows multi-agent
@@ -50,6 +61,7 @@ export type KanbanState = {
     }>;
     primarySessionId?: string | null;
     primarySessionState?: string | null;
+    primarySessionPendingAction?: TaskPendingAction | null;
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
     primaryExecutorId?: string | null;
@@ -57,6 +69,7 @@ export type KanbanState = {
     primaryExecutorName?: string | null;
     isRemoteExecutor?: boolean;
     parentTaskId?: string | null;
+    workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
     updatedAt?: string;
     createdAt?: string;
     isPRReview?: boolean;
@@ -72,6 +85,7 @@ export type WorkflowSnapshotData = {
   workflowName: string;
   steps: KanbanState["steps"];
   tasks: KanbanState["tasks"];
+  isPlaceholder?: boolean;
 };
 
 export type KanbanMultiState = {
@@ -103,9 +117,8 @@ export type TaskState = {
   activeSessionId: string | null;
   // pinnedSessionId tracks the session the USER explicitly selected.
   // Set by setActiveSession (user-initiated). Cleared when navigating to a
-  // different task. WS auto-adopt paths use setActiveSessionAuto which leaves
-  // pinnedSessionId alone — and skip auto-replace when the terminating session
-  // matches the pin (the user wants to stay even though the workflow moved on).
+  // different task or when an automatic handoff explicitly takes over. WS
+  // auto-adopt paths must not override a non-terminal pin for the active task.
   pinnedSessionId: string | null;
   // lastSessionByTaskId remembers the most-recent active session for each task.
   // Unlike pinnedSessionId (single global slot, cleared on task change), this
@@ -127,9 +140,9 @@ export type KanbanSliceActions = {
   reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
-  // setActiveSessionAuto is the same as setActiveSession but doesn't update
-  // pinnedSessionId. Used by WS handlers to follow workflow-driven session
-  // switches without overriding a user's manual selection.
+  // setActiveSessionAuto updates the active session without creating or
+  // clearing a user pin. Callers that intentionally override a pin must clear
+  // it explicitly after checking no non-terminal manual pin should be preserved.
   setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   clearActiveSession: () => void;
   setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;

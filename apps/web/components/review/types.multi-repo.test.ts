@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { buildFileTree, reviewFileKey, splitReviewFileKey, type ReviewFile } from "./types";
+import {
+  buildFileTree,
+  getCumulativeReviewRepositoryNames,
+  isReviewMultiRepo,
+  resolvePRReviewRepositoryName,
+  reviewFileKey,
+  sanitizeReviewRepositoryName,
+  splitReviewFileKey,
+  type ReviewFile,
+} from "./types";
 
 const SEP = "\u0000";
 
@@ -102,6 +111,62 @@ describe("reviewFileKey", () => {
     const a = reviewFileKey({ path: "README.md", repository_name: "frontend" });
     const b = reviewFileKey({ path: "README.md", repository_name: "backend" });
     expect(a).not.toBe(b);
+  });
+});
+
+describe("resolvePRReviewRepositoryName", () => {
+  it("uses the sanitized workspace repository name instead of the provider repo name", () => {
+    expect(
+      resolvePRReviewRepositoryName({ repository_id: "repo-1", repo: "widgets" }, "acme/widgets"),
+    ).toBe("acme-widgets");
+  });
+
+  it("falls back to the provider repo name for legacy or unhydrated workspace data", () => {
+    expect(resolvePRReviewRepositoryName({ repo: "widgets" }, "acme/widgets")).toBe("widgets");
+    expect(resolvePRReviewRepositoryName({ repository_id: "repo-1", repo: "widgets" })).toBe(
+      "widgets",
+    );
+  });
+});
+
+describe("sanitizeReviewRepositoryName", () => {
+  it.each([
+    ["acme/widgets", "acme-widgets"],
+    ["owner\\repo", "owner-repo"],
+    ["weird:name space", "weird-name-space"],
+    ["with..dots", "with..dots"],
+    ["--a///b..", "a-b"],
+    ["修复/登录", ""],
+  ])("mirrors the backend repository directory sanitizer for %s", (input, expected) => {
+    expect(sanitizeReviewRepositoryName(input)).toBe(expected);
+  });
+});
+
+describe("isReviewMultiRepo", () => {
+  it("detects multiple named git-status repositories before task links hydrate", () => {
+    expect(isReviewMultiRepo(0, ["frontend", "backend"])).toBe(true);
+  });
+
+  it("uses task links during partial status hydration", () => {
+    expect(isReviewMultiRepo(2, ["frontend"])).toBe(true);
+  });
+
+  it("keeps one named or legacy repository in single-repo mode", () => {
+    expect(isReviewMultiRepo(1, ["frontend"])).toBe(false);
+    expect(isReviewMultiRepo(1, [""])).toBe(false);
+  });
+});
+
+describe("getCumulativeReviewRepositoryNames", () => {
+  it("returns distinct stamped repository names", () => {
+    expect(
+      getCumulativeReviewRepositoryNames({
+        a: { repository_name: "frontend" },
+        b: { repository_name: "backend" },
+        c: { repository_name: "frontend" },
+        d: {},
+      }),
+    ).toEqual(["frontend", "backend"]);
   });
 });
 

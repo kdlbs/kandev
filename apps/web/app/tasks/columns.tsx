@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { Row, ColumnDef } from "@tanstack/react-table";
 import type { Task, Workflow, WorkflowStep, Repository } from "@/lib/types/http";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconTrash, IconLoader, IconArchive } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
@@ -23,8 +23,8 @@ interface ColumnsConfig {
   workflows: Workflow[];
   steps: WorkflowStep[];
   repositories: Repository[];
-  onArchive: (taskId: string) => void;
-  onDelete: (taskId: string) => void;
+  onArchive: (taskId: string, opts?: { cascade?: boolean }) => void;
+  onDelete: (taskId: string, opts?: { cascade?: boolean }) => void;
   deletingTaskId: string | null;
 }
 
@@ -61,8 +61,8 @@ function TitleCell({
 }
 
 type ActionsCtx = {
-  onArchive: (id: string) => void;
-  onDelete: (id: string) => void;
+  onArchive: (id: string, opts?: { cascade?: boolean }) => void;
+  onDelete: (id: string, opts?: { cascade?: boolean }) => void;
   deletingTaskId: string | null;
 };
 
@@ -117,14 +117,18 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
         open={showDeleteConfirm}
         onOpenChange={setShowDeleteConfirm}
         taskTitle={task.title}
+        taskId={task.id}
+        executorType={task.primary_executor_type}
         isDeleting={isDeleting}
-        onConfirm={() => ctx.onDelete(task.id)}
+        onConfirm={({ cascade }) => ctx.onDelete(task.id, { cascade })}
       />
       <TaskArchiveConfirmDialog
         open={showArchiveConfirm}
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}
-        onConfirm={() => ctx.onArchive(task.id)}
+        taskId={task.id}
+        executorType={task.primary_executor_type}
+        onConfirm={({ cascade }) => ctx.onArchive(task.id, { cascade })}
       />
     </div>
   );

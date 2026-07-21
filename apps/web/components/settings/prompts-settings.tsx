@@ -31,29 +31,36 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Request failed";
 }
 
+async function runPromptSave(
+  action: () => Promise<unknown>,
+  reportError: (error: unknown) => void,
+) {
+  try {
+    await action();
+  } catch (error) {
+    reportError(error);
+    throw error;
+  }
+}
+
 type PromptFormState = typeof defaultFormState;
 
 type PromptCreateFormProps = {
   formState: PromptFormState;
   onFormChange: (patch: Partial<PromptFormState>) => void;
-  onSubmit: () => void;
   onCancel: () => void;
-  isValid: boolean;
   isBusy: boolean;
 };
 
-function PromptCreateForm({
-  formState,
-  onFormChange,
-  onSubmit,
-  onCancel,
-  isValid,
-  isBusy,
-}: PromptCreateFormProps) {
+function PromptCreateForm({ formState, onFormChange, onCancel, isBusy }: PromptCreateFormProps) {
+  const nameIsDirty = formState.name !== defaultFormState.name;
+  const contentIsDirty = formState.content !== defaultFormState.content;
   return (
     <div
       className="rounded-lg border border-border/70 bg-background p-4 space-y-3"
       data-testid="prompt-create-form"
+      data-settings-dirty="true"
+      data-settings-dirty-level="container"
     >
       <div className="text-sm font-medium text-foreground">Add prompt</div>
       <Input
@@ -61,6 +68,8 @@ function PromptCreateForm({
         onChange={(event) => onFormChange({ name: event.target.value })}
         placeholder="Prompt name"
         data-testid="prompt-name-input"
+        disabled={isBusy}
+        data-settings-dirty={nameIsDirty}
       />
       <Textarea
         value={formState.content}
@@ -69,11 +78,10 @@ function PromptCreateForm({
         rows={5}
         className="resize-y max-h-60 overflow-auto"
         data-testid="prompt-content-input"
+        disabled={isBusy}
+        data-settings-dirty={contentIsDirty}
       />
       <div className="flex items-center gap-2">
-        <Button onClick={onSubmit} disabled={!isValid || isBusy} data-testid="prompt-submit">
-          Add prompt
-        </Button>
         <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
           Cancel
         </Button>
@@ -90,9 +98,7 @@ type PromptListItemProps = {
   onFormChange: (patch: Partial<PromptFormState>) => void;
   onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
-  onUpdate: () => void;
   onCancel: () => void;
-  isValid: boolean;
   isBusy: boolean;
   showCreate: boolean;
 };
@@ -105,15 +111,15 @@ function PromptListItem({
   onFormChange,
   onStartEditing,
   onOpenDelete,
-  onUpdate,
   onCancel,
-  isValid,
   isBusy,
   showCreate,
 }: PromptListItemProps) {
   const getPromptPreview = (content: string) => {
     return content.split(/\r?\n/)[0] ?? "";
   };
+  const nameIsDirty = isEditing && formState.name !== prompt.name;
+  const contentIsDirty = isEditing && formState.content !== prompt.content;
 
   return (
     <div
@@ -121,6 +127,7 @@ function PromptListItem({
       ref={isEditing ? editingRef : null}
       data-testid="prompt-list-item"
       data-prompt-name={prompt.name}
+      data-settings-dirty={nameIsDirty || contentIsDirty}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -161,6 +168,8 @@ function PromptListItem({
             onChange={(event) => onFormChange({ name: event.target.value })}
             placeholder="Prompt name"
             data-testid="prompt-name-input"
+            disabled={isBusy}
+            data-settings-dirty={nameIsDirty}
           />
           <Textarea
             value={formState.content}
@@ -169,11 +178,10 @@ function PromptListItem({
             rows={5}
             className="resize-y max-h-60 overflow-auto"
             data-testid="prompt-content-input"
+            disabled={isBusy}
+            data-settings-dirty={contentIsDirty}
           />
           <div className="flex items-center gap-2">
-            <Button onClick={onUpdate} disabled={!isValid || isBusy} data-testid="prompt-submit">
-              Save changes
-            </Button>
             <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
               Cancel
             </Button>
@@ -197,9 +205,7 @@ type PromptListContentProps = {
   onFormChange: (patch: Partial<PromptFormState>) => void;
   onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
-  onUpdate: () => void;
   onCancel: () => void;
-  isValid: boolean;
   isBusy: boolean;
   showCreate: boolean;
 };
@@ -213,9 +219,7 @@ function PromptListContent({
   onFormChange,
   onStartEditing,
   onOpenDelete,
-  onUpdate,
   onCancel,
-  isValid,
   isBusy,
   showCreate,
 }: PromptListContentProps) {
@@ -245,9 +249,7 @@ function PromptListContent({
           onFormChange={onFormChange}
           onStartEditing={onStartEditing}
           onOpenDelete={onOpenDelete}
-          onUpdate={onUpdate}
           onCancel={onCancel}
-          isValid={isValid}
           isBusy={isBusy}
           showCreate={showCreate}
         />
@@ -384,11 +386,14 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     toast({ title, description: errorMessage(err), variant: "error" });
   const handleCreate = () => {
     if (!isValid || isBusy) return;
-    createRequest.run(formState).catch(toastError("Couldn't create prompt"));
+    return runPromptSave(() => createRequest.run(formState), toastError("Couldn't create prompt"));
   };
   const handleUpdate = () => {
     if (!isValid || isBusy || !editingId) return;
-    updateRequest.run(editingId, formState).catch(toastError("Couldn't save prompt"));
+    return runPromptSave(
+      () => updateRequest.run(editingId, formState),
+      toastError("Couldn't save prompt"),
+    );
   };
   const startEditing = (prompt: CustomPrompt) => {
     setEditingId(prompt.id);
@@ -426,6 +431,24 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
   };
 }
 
+export function getPromptDraftMeta(
+  prompts: CustomPrompt[],
+  editingId: string | null,
+  showCreate: boolean,
+  formState: PromptFormState,
+) {
+  const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
+  const revision = JSON.stringify(formState);
+  const savedRevision = JSON.stringify({
+    name: editingPrompt?.name ?? "",
+    content: editingPrompt?.content ?? "",
+  });
+  return {
+    isDirty: showCreate || (Boolean(editingId) && revision !== savedRevision),
+    revision: `${showCreate ? "new" : (editingId ?? "none")}:${revision}`,
+  };
+}
+
 export function PromptsSettings() {
   const state = usePromptsState();
   const {
@@ -451,6 +474,7 @@ export function PromptsSettings() {
     resetForm,
   } = usePromptsActions(state);
   const isEditing = Boolean(editingId);
+  const draft = getPromptDraftMeta(prompts, editingId, showCreate, formState);
 
   useEffect(() => {
     if (!editingId) return;
@@ -461,10 +485,16 @@ export function PromptsSettings() {
     <SettingsPageTemplate
       title="Prompts"
       description="Create reusable prompt snippets for the chat input."
-      isDirty={false}
+      isDirty={draft.isDirty}
       saveStatus="idle"
-      onSave={() => undefined}
-      showSaveButton={false}
+      saveId="prompts-item-draft"
+      saveRevision={draft.revision}
+      canSave={!draft.isDirty || isValid}
+      invalidReason={
+        draft.isDirty && !isValid ? "Prompt name and content are required." : undefined
+      }
+      onSave={showCreate ? handleCreate : handleUpdate}
+      onDiscard={resetForm}
     >
       <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
         Use <span className="font-medium text-foreground">@name</span> in the chat input to insert a
@@ -486,9 +516,7 @@ export function PromptsSettings() {
           <PromptCreateForm
             formState={formState}
             onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
-            onSubmit={handleCreate}
             onCancel={resetForm}
-            isValid={isValid}
             isBusy={isBusy}
           />
         )}
@@ -503,9 +531,7 @@ export function PromptsSettings() {
             onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
             onStartEditing={startEditing}
             onOpenDelete={openDeleteDialog}
-            onUpdate={handleUpdate}
             onCancel={resetForm}
-            isValid={isValid}
             isBusy={isBusy}
             showCreate={showCreate}
           />

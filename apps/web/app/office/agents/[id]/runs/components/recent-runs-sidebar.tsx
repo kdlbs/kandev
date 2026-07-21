@@ -1,12 +1,12 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import Link from "@/components/routing/app-link";
+import { usePathname } from "@/lib/routing/client-router";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { cn } from "@/lib/utils";
 import type { AgentRunSummary } from "@/lib/api/domains/office-extended-api";
-import { timeAgo } from "../../../../components/shared/time-ago";
+import { timeAgo } from "@/lib/utils/time";
 
 type Props = {
   runs: AgentRunSummary[];
@@ -36,8 +36,8 @@ function deriveActiveRunId(pathname: string | null, fallback: string): string {
  *   navigation between sibling runs updates the highlight without
  *   re-rendering the parent.
  * - In-progress (`claimed`) rows show an animated spinner icon.
- * - Each row is a Next.js `<Link>` with `aria-current="page"` on the
- *   active one so it's keyboard-navigable + screen-reader friendly.
+ * - Each row is an app link with `aria-current="page"` on the active one
+ *   so it's keyboard-navigable + screen-reader friendly.
  */
 export function RecentRunsSidebar({ runs, agentId, activeRunId }: Props) {
   const pathname = usePathname();

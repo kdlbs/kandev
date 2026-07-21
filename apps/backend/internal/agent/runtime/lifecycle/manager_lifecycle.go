@@ -147,11 +147,12 @@ func (m *Manager) GetRecoveredExecutions() []RecoveredExecution {
 	result := make([]RecoveredExecution, 0, len(executions))
 	for _, exec := range executions {
 		result = append(result, RecoveredExecution{
-			ExecutionID:    exec.ID,
-			TaskID:         exec.TaskID,
-			SessionID:      exec.SessionID,
-			ContainerID:    exec.ContainerID,
-			AgentProfileID: exec.AgentProfileID,
+			ExecutionID:        exec.ID,
+			TaskID:             exec.TaskID,
+			SessionID:          exec.SessionID,
+			ContainerID:        exec.ContainerID,
+			AgentProfileID:     exec.officeProfileID(),
+			ExecutionProfileID: exec.AgentProfileID,
 		})
 	}
 	return result
@@ -165,11 +166,19 @@ func (m *Manager) IsShuttingDown() bool {
 	return m.shuttingDown.Load()
 }
 
+// closeStopCh closes the manager shutdown channel at most once.
+func (m *Manager) closeStopCh() {
+	m.stopOnce.Do(func() { close(m.stopCh) })
+}
+
 // Stop stops the lifecycle manager and releases resources held by executors.
 func (m *Manager) Stop() error {
 	m.logger.Info("stopping lifecycle manager")
 
-	close(m.stopCh)
+	m.closeStopCh()
+	if m.streamManager != nil {
+		m.streamManager.Wait()
+	}
 	m.wg.Wait()
 
 	// Close executor backends that hold resources (e.g., Docker SDK client).
@@ -214,6 +223,8 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 	}
 	return errors.Join(errs...)
 }
+
+const stopReasonStaleExecutionCleanup = "stale execution cleanup"
 
 // cleanupExitedContainer handles cleanup for a single exited container.
 func (m *Manager) cleanupExitedContainer(ctx context.Context, containerID string) {
@@ -305,7 +316,7 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 	// goroutines. Without this, the old agentctl instance keeps running when a new
 	// execution is created for the same session, causing git polling on deleted worktrees.
 	// This is idempotent — returns success if the instance is already gone.
-	m.stopAgentViaBackend(ctx, execution.ID, execution, "stale execution cleanup", false)
+	m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false)
 
 	// Close agentctl connection if it exists
 	if execution.agentctl != nil {
@@ -313,7 +324,7 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 	}
 
 	// Remove from execution store
-	m.executionStore.Remove(execution.ID)
+	m.RemoveExecution(execution.ID)
 
 	// Delete the persistence row in lockstep with store removal so we never
 	// leave a phantom executors_running row pointing at a non-existent
@@ -343,6 +354,10 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 // Typical usage: Called by cleanup loops or after successful StopAgent completion.
 // For stale/dead executions, use CleanupStaleExecutionBySessionID instead.
 func (m *Manager) RemoveExecution(executionID string) {
+	m.releaseActivity(executionActivityKey(executionID))
+	if execution, ok := m.executionStore.Get(executionID); ok {
+		m.cleanupPassthroughMCPConfig(execution)
+	}
 	m.executionStore.Remove(executionID)
 	m.logger.Debug("removed execution from tracking",
 		zap.String("execution_id", executionID))

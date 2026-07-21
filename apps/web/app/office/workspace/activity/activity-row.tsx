@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import type { ActivityEntry } from "@/lib/state/slices/office/types";
-import { timeAgo } from "../../components/shared/time-ago";
+import { timeAgo } from "@/lib/utils/time";
 
 const CANCEL_REASON_LABEL: Record<string, string> = {
   assignee_changed: "assignee changed",

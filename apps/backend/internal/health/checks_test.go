@@ -106,6 +106,51 @@ func TestGitHubChecker_AuthenticatedRateProviderEmpty(t *testing.T) {
 	}
 }
 
+// --- GitExecutableChecker tests ---
+
+func TestGitExecutableChecker_Found(t *testing.T) {
+	checker := &GitExecutableChecker{lookPath: func(name string) (string, error) {
+		if name != "git" {
+			t.Fatalf("lookPath name = %q, want git", name)
+		}
+		return "/usr/bin/git", nil
+	}}
+
+	issues := checker.Check(context.Background())
+	if len(issues) != 0 {
+		t.Errorf("expected 0 issues, got %d", len(issues))
+	}
+}
+
+func TestGitExecutableChecker_Missing(t *testing.T) {
+	checker := &GitExecutableChecker{lookPath: func(name string) (string, error) {
+		if name != "git" {
+			t.Fatalf("lookPath name = %q, want git", name)
+		}
+		return "", fmt.Errorf("not found")
+	}}
+
+	issues := checker.Check(context.Background())
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d", len(issues))
+	}
+	if issues[0].ID != "git_executable_missing" {
+		t.Errorf("issue ID = %q, want %q", issues[0].ID, "git_executable_missing")
+	}
+	if issues[0].Category != "system_requirements" {
+		t.Errorf("category = %q, want %q", issues[0].Category, "system_requirements")
+	}
+	if issues[0].Severity != SeverityError {
+		t.Errorf("severity = %q, want %q", issues[0].Severity, SeverityError)
+	}
+	if !strings.Contains(issues[0].Message, "available on PATH") {
+		t.Errorf("message should mention PATH, got %q", issues[0].Message)
+	}
+	if issues[0].FixURL != "/settings/system/status" {
+		t.Errorf("FixURL = %q, want %q", issues[0].FixURL, "/settings/system/status")
+	}
+}
+
 // --- AgentChecker tests ---
 
 type mockAgentProvider struct {

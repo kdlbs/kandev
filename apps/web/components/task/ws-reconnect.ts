@@ -95,6 +95,10 @@ export function startReconnectLoop({
     if (connectTimeout) clearTimeout(connectTimeout);
     connectTimeout = setTimeout(() => {
       if (!isMounted) return;
+      // The backend replays the PTY buffer whenever a terminal WebSocket
+      // reconnects. Clear the existing xterm contents first so replay replaces
+      // the visible terminal instead of appending duplicate prompt lines.
+      terminal.reset();
       connectWebSocket({
         sessionId,
         environmentId,

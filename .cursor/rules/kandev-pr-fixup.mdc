@@ -1,0 +1,17 @@
+---
+description: Kandev PR fixup workflow prompt for Cursor agents.
+globs: "scripts/pr-state, scripts/pr-resolve, .agents/skills/pr-fixup/**"
+alwaysApply: false
+---
+
+# Kandev PR Fixup
+
+Use `.agents/skills/pr-fixup/SKILL.md` for PR fixups.
+
+The helper scripts are at `<worktree>/scripts/...`, not under the skill directory. Prefer:
+
+- `scripts/pr-state --summary <PR>` for state.
+- `scripts/pr-resolve list <PR>` for actionable review threads.
+- `scripts/pr-resolve reply <PR> <comment_id> <thread_id> <body>` for replies.
+
+After pushing fixes, re-check with `scripts/pr-state --summary <PR>`. If there are no failed checks and `unresolved_review_thread_count` is `0` but checks are queued or in progress, report the exact pending state instead of waiting indefinitely unless the user explicitly asks to wait.

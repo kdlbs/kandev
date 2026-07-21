@@ -15,7 +15,7 @@ import { SessionPanel } from "@kandev/ui/pannel-session";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskChangesPanel } from "./task-changes-panel";
 import { FileTabContent } from "./file-tab-content";
-import { PassthroughTerminal } from "./passthrough-terminal";
+import { PassthroughToolbar } from "./passthrough-toolbar";
 import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
 import { useAppStore } from "@/components/state-provider";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
@@ -27,6 +27,7 @@ import {
   getActiveTabForSession,
   setActiveTabForSession,
 } from "@/lib/local-storage";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { calculateHash } from "@/lib/utils/file-diff";
@@ -52,12 +53,7 @@ function useSessionApprove(activeSessionId: string | null, activeTaskId: string 
   );
   const setTaskSession = useAppStore((state) => state.setTaskSession);
   const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
-  const isPassthroughMode = useMemo(() => {
-    if (!activeSession?.agent_profile_snapshot) return false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const snapshot = activeSession.agent_profile_snapshot as any;
-    return snapshot?.cli_passthrough === true;
-  }, [activeSession?.agent_profile_snapshot]);
+  const isPassthroughMode = useMemo(() => isPassthroughSession(activeSession), [activeSession]);
   const showApproveButton =
     !!activeSession?.review_status && activeSession.review_status !== "approved" && !isAgentWorking;
   const handleApprove = useCallback(async () => {
@@ -414,6 +410,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
           activeTaskId={activeTaskId}
           isPassthroughMode={isPassthroughMode}
           sessionId={sessionId}
+          taskId={sessionId ? activeTaskId : null}
           showRequestChangesTooltip={showRequestChangesTooltip}
           onDismissTooltip={() => setShowRequestChangesTooltip(false)}
           onOpenFile={handleOpenFileFromChat}
@@ -429,6 +426,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
             tab={tab}
             activeSession={activeSession}
             activeSessionId={activeSessionId}
+            taskId={activeSessionId ? activeTaskId : null}
             isSaving={savingFiles.has(tab.path)}
             onFileChange={handleFileChange}
             onFileSave={handleFileSave}
@@ -493,6 +491,7 @@ function ChatTabContent({
   activeTaskId,
   isPassthroughMode,
   sessionId,
+  taskId,
   showRequestChangesTooltip,
   onDismissTooltip,
   onOpenFile,
@@ -500,6 +499,7 @@ function ChatTabContent({
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   sessionId: string | null | undefined;
+  taskId: string | null;
   showRequestChangesTooltip: boolean;
   onDismissTooltip: () => void;
   onOpenFile: (filePath: string) => void;
@@ -525,7 +525,7 @@ function ChatTabContent({
         style={{ minHeight: "200px" }}
       >
         <div className="flex-1 min-h-0 h-full" style={{ minHeight: "150px" }}>
-          <PassthroughTerminal key={activeTaskId} sessionId={sessionId} mode="agent" />
+          <PassthroughToolbar key={activeTaskId} sessionId={sessionId} taskId={activeTaskId} />
         </div>
       </TabsContent>
     );
@@ -538,6 +538,7 @@ function ChatTabContent({
     >
       <TaskChatPanel
         sessionId={sessionId}
+        taskId={taskId}
         onOpenFile={onOpenFile}
         showRequestChangesTooltip={showRequestChangesTooltip}
         onRequestChangesTooltipDismiss={onDismissTooltip}

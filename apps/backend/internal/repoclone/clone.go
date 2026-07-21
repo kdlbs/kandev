@@ -3,6 +3,7 @@ package repoclone
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // ghCredentialHelper is the git credential helper command that delegates to gh CLI.
@@ -79,7 +81,15 @@ func (c *Cloner) RepoPath(owner, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(basePath, owner, name), nil
+	targetPath := filepath.Join(basePath, owner, name)
+	relativePath, err := filepath.Rel(basePath, targetPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve repository path: %w", err)
+	}
+	if relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) || filepath.IsAbs(relativePath) {
+		return "", fmt.Errorf("repository path %q escapes clone base", targetPath)
+	}
+	return targetPath, nil
 }
 
 // EnsureCloned clones the repository if it doesn't exist locally, or fetches if it does.
@@ -105,6 +115,50 @@ func (c *Cloner) EnsureCloned(ctx context.Context, cloneURL, owner, name string)
 	return targetPath, c.clone(ctx, cloneURL, targetPath, owner, name)
 }
 
+// EnsureClonedWithBasicAuth clones or fetches using an ephemeral HTTP
+// Authorization header. The credential is carried only in the Git child
+// process environment, never in the URL, command arguments, or logs.
+func (c *Cloner) EnsureClonedWithBasicAuth(
+	ctx context.Context, cloneURL, owner, name, username, password string,
+) (string, error) {
+	targetPath, err := c.RepoPath(owner, name)
+	if err != nil {
+		return "", err
+	}
+	mu := c.repoMu(targetPath)
+	mu.Lock()
+	defer mu.Unlock()
+	header := "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+	gitDir := filepath.Join(targetPath, ".git")
+	if info, statErr := os.Stat(gitDir); statErr == nil && info.IsDir() {
+		cmd := c.gitCmdWithHTTPHeader(ctx, header, "-C", targetPath, "fetch", "--all", "--prune", "--force", gitNoTags)
+		if out, fetchErr := subproc.RunGitCombinedOutput(ctx, cmd); fetchErr != nil {
+			c.logger.Warn("authenticated git fetch failed", zap.String("path", targetPath), zap.String("output", string(out)), zap.Error(fetchErr))
+		}
+		return targetPath, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return "", fmt.Errorf("create parent directory: %w", err)
+	}
+	c.logger.Info("cloning authenticated repository", zap.String("url", cloneURL), zap.String("target", targetPath))
+	cmd := c.gitCmdWithHTTPHeader(ctx, header, "clone", "--filter=blob:none", gitNoTags, cloneURL, targetPath)
+	if out, cloneErr := subproc.RunGitCombinedOutput(ctx, cmd); cloneErr != nil {
+		return "", fmt.Errorf("git clone failed: %s: %w", string(out), cloneErr)
+	}
+	return targetPath, nil
+}
+
+func (c *Cloner) gitCmdWithHTTPHeader(ctx context.Context, header string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.extraHeader",
+		"GIT_CONFIG_VALUE_0="+header,
+	)
+	return cmd
+}
+
 // gitCmd creates a git command with non-interactive environment settings.
 // When the configured protocol is HTTPS, it adds gh CLI as the credential
 // helper so that git can authenticate using the user's gh auth token.
@@ -126,7 +180,7 @@ func (c *Cloner) gitCmd(ctx context.Context, args ...string) *exec.Cmd {
 func (c *Cloner) fetch(ctx context.Context, repoPath string) {
 	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
 	cmd := c.gitCmd(ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
 		c.logger.Warn("git fetch failed (non-fatal)",
 			zap.String("path", repoPath),
 			zap.String("output", string(out)),
@@ -157,7 +211,7 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath, owner, name st
 
 	// Fallback: git clone with credential helper.
 	cmd := c.gitCmd(ctx, "clone", "--filter=blob:none", gitNoTags, cloneURL, targetPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
 	}
 	return nil
@@ -169,7 +223,7 @@ func (c *Cloner) ghClone(ctx context.Context, owner, name, targetPath string) er
 	nwo := owner + "/" + name
 	cmd := exec.CommandContext(ctx, "gh", "repo", "clone", nwo, targetPath, "--", "--filter=blob:none", gitNoTags)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
+	out, err := subproc.RunGHCombinedOutput(ctx, cmd)
 	if err != nil {
 		c.logger.Debug("gh repo clone failed, falling back to git clone",
 			zap.String("repo", nwo),

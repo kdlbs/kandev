@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { archiveTask, deleteTask, moveTask, updateTask } from "@/lib/api";
+import { replaceTaskUrl } from "@/lib/links";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 
@@ -10,12 +11,12 @@ export function useTaskActions() {
     return moveTask(taskId, payload);
   }, []);
 
-  const deleteTaskById = useCallback(async (taskId: string) => {
-    return deleteTask(taskId);
+  const deleteTaskById = useCallback(async (taskId: string, opts?: { cascade?: boolean }) => {
+    return deleteTask(taskId, opts);
   }, []);
 
-  const archiveTaskById = useCallback(async (taskId: string) => {
-    return archiveTask(taskId);
+  const archiveTaskById = useCallback(async (taskId: string, opts?: { cascade?: boolean }) => {
+    return archiveTask(taskId, opts);
   }, []);
 
   const renameTaskById = useCallback(async (taskId: string, title: string) => {
@@ -38,11 +39,34 @@ export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
   });
 
   return useCallback(
-    async (taskId: string) => {
+    async (taskId: string, opts?: { cascade?: boolean }) => {
       const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
         store.getState().tasks;
-      await archiveTaskById(taskId);
-      await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+
+      const initialSwitch = await removeTaskFromBoard(taskId, {
+        wasActiveTaskId,
+        wasActiveSessionId,
+        switchOnly: true,
+      });
+
+      try {
+        await archiveTaskById(taskId, opts);
+        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+      } catch (error) {
+        if (
+          wasActiveTaskId &&
+          initialSwitch.switchedTaskId !== null &&
+          store.getState().tasks.activeTaskId === initialSwitch.switchedTaskId
+        ) {
+          if (wasActiveSessionId) {
+            store.getState().setActiveSession(wasActiveTaskId, wasActiveSessionId);
+          } else {
+            store.getState().setActiveTask(wasActiveTaskId);
+          }
+          replaceTaskUrl(wasActiveTaskId);
+        }
+        throw error;
+      }
     },
     [archiveTaskById, removeTaskFromBoard, store],
   );

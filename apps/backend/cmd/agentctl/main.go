@@ -89,6 +89,12 @@ func main() {
 // run starts the agentctl server.
 // All instances are managed through the instance management API.
 func run(cfg *config.Config, log *logger.Logger) {
+	// Start the ACP debug-log janitor (no-op unless KANDEV_DEBUG_AGENT_MESSAGES
+	// is set). It periodically flushes the per-session debug writers and prunes
+	// old/oversized files so an always-on debug session can't fill the disk.
+	acpJanitor := shared.NewACPJanitor()
+	acpJanitor.Start(context.Background())
+
 	// Create instance manager
 	instMgr := instance.NewManager(cfg, log)
 
@@ -109,8 +115,10 @@ func run(cfg *config.Config, log *logger.Logger) {
 	// Create control server
 	controlServer := api.NewControlServer(cfg, instMgr, log)
 
-	// Start HTTP server
-	addr := fmt.Sprintf(":%d", cfg.Port)
+	// Start HTTP server. When no auth token is configured (auth disabled),
+	// ListenHost binds to loopback only so the unauthenticated command/shell/
+	// process routes are never reachable beyond the local host.
+	addr := fmt.Sprintf("%s:%d", cfg.ListenHost(), cfg.Port)
 	httpServer := &http.Server{
 		Addr:    addr,
 		Handler: controlServer.Router(),
@@ -143,10 +151,13 @@ func run(cfg *config.Config, log *logger.Logger) {
 		if err := shared.ShutdownTracing(ctx); err != nil {
 			log.Error("error shutting down tracing", zap.Error(err))
 		}
-		// Shutdown all instances
+		// Shutdown all instances first so any final ACP frames they emit during
+		// teardown are still captured by the (still-live) debug writers.
 		if err := instMgr.Shutdown(ctx); err != nil {
 			log.Error("error shutting down instance manager", zap.Error(err))
 		}
+		// Then flush + close all debug-log writers as the final logging step.
+		acpJanitor.Stop()
 		if err := httpServer.Shutdown(ctx); err != nil {
 			log.Error("error shutting down HTTP server", zap.Error(err))
 		}

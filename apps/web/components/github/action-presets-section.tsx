@@ -3,11 +3,14 @@
 import { createElement, useMemo, useState, useCallback } from "react";
 import { IconPlus, IconTrash, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@kandev/ui/tabs";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
 import {
   DEFAULT_ISSUE_PRESETS,
@@ -47,10 +50,22 @@ function newPreset(): GitHubActionPreset {
   };
 }
 
-function PresetIconSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function PresetIconSelect({
+  value,
+  isDirty,
+  onChange,
+}: {
+  value: string;
+  isDirty: boolean;
+  onChange: (v: string) => void;
+}) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="!h-8 py-0.5 text-sm cursor-pointer" aria-label="Icon">
+      <SelectTrigger
+        className="!h-8 py-0.5 text-sm cursor-pointer"
+        aria-label="Icon"
+        data-settings-dirty={isDirty}
+      >
         <SelectValue>
           {createElement(iconForPresetKey(value), { className: "h-4 w-4" })}
         </SelectValue>
@@ -74,29 +89,40 @@ function PresetIconSelect({ value, onChange }: { value: string; onChange: (v: st
 
 function PresetRow({
   preset,
+  baseline,
   expanded,
   onToggle,
   onPatch,
   onRemove,
 }: {
   preset: GitHubActionPreset;
+  baseline?: GitHubActionPreset;
   expanded: boolean;
   onToggle: () => void;
   onPatch: (patch: Partial<GitHubActionPreset>) => void;
   onRemove: () => void;
 }) {
   return (
-    <div className="rounded-md border">
+    <div
+      className="rounded-md border"
+      data-settings-dirty={JSON.stringify(preset) !== JSON.stringify(baseline)}
+      data-settings-dirty-level="container"
+    >
       <div className="flex items-end gap-2 p-2">
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] text-muted-foreground">Icon</span>
-          <PresetIconSelect value={preset.icon} onChange={(v) => onPatch({ icon: v })} />
+          <PresetIconSelect
+            value={preset.icon}
+            isDirty={preset.icon !== baseline?.icon}
+            onChange={(v) => onPatch({ icon: v })}
+          />
         </div>
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] text-muted-foreground">Label</span>
           <Input
             className="h-8 w-40"
             value={preset.label}
+            data-settings-dirty={preset.label !== baseline?.label}
             placeholder="Label"
             onChange={(e) => onPatch({ label: e.target.value })}
           />
@@ -106,6 +132,7 @@ function PresetRow({
           <Input
             className="h-8"
             value={preset.hint}
+            data-settings-dirty={preset.hint !== baseline?.hint}
             placeholder="Hint (optional)"
             onChange={(e) => onPatch({ hint: e.target.value })}
           />
@@ -130,7 +157,11 @@ function PresetRow({
       </div>
       {expanded && (
         <div className="px-2 pb-2 space-y-1">
-          <div className="rounded-md border overflow-hidden">
+          <div
+            className="rounded-md border overflow-hidden"
+            data-settings-dirty={preset.prompt_template !== baseline?.prompt_template}
+            data-settings-dirty-level="container"
+          >
             <ScriptEditor
               value={preset.prompt_template}
               onChange={(v) => onPatch({ prompt_template: v })}
@@ -154,10 +185,12 @@ function PresetRow({
 
 function PresetEditor({
   presets,
+  baseline,
   onChange,
   addLabel,
 }: {
   presets: GitHubActionPreset[];
+  baseline: GitHubActionPreset[];
   onChange: (presets: GitHubActionPreset[]) => void;
   addLabel: string;
 }) {
@@ -187,6 +220,7 @@ function PresetEditor({
         <PresetRow
           key={preset.id}
           preset={preset}
+          baseline={baseline.find((candidate) => candidate.id === preset.id)}
           expanded={expandedId === preset.id}
           onToggle={() => setExpandedId((id) => (id === preset.id ? null : preset.id))}
           onPatch={(p) => patch(index, p)}
@@ -207,47 +241,63 @@ function usePresetDrafts(workspaceId: string): {
   setPrDraft: (next: GitHubActionPreset[]) => void;
   setIssueDraft: (next: GitHubActionPreset[]) => void;
   dirty: boolean;
+  prBaseline: GitHubActionPreset[];
+  issueBaseline: GitHubActionPreset[];
   save: () => Promise<void>;
-  reset: () => Promise<void>;
+  reset: () => void;
+  discard: () => void;
   loading: boolean;
 } {
-  const { presets, save, reset, loading } = useGitHubActionPresets(workspaceId);
+  const { presets, save, loading } = useGitHubActionPresets(workspaceId);
   const [prDraft, setPrDraft] = useState<GitHubActionPreset[]>(() =>
     presets?.pr?.length ? presets.pr : DEFAULT_PR_PRESETS,
   );
   const [issueDraft, setIssueDraft] = useState<GitHubActionPreset[]>(() =>
     presets?.issue?.length ? presets.issue : DEFAULT_ISSUE_PRESETS,
   );
-  // Render-time conditional setState is React's documented "adjust state
-  // during render" pattern; it resets drafts whenever a new server response
-  // replaces the presets reference.
+  const [prBaseline, setPrBaseline] = useState(prDraft);
+  const [issueBaseline, setIssueBaseline] = useState(issueDraft);
+  const dirty = useMemo(
+    () =>
+      JSON.stringify(prBaseline) !== JSON.stringify(prDraft) ||
+      JSON.stringify(issueBaseline) !== JSON.stringify(issueDraft),
+    [prBaseline, issueBaseline, prDraft, issueDraft],
+  );
   const [syncedPresets, setSyncedPresets] = useState(presets);
-  if (presets && presets !== syncedPresets) {
+  if (presets && presets !== syncedPresets && !dirty) {
+    const nextPr = presets.pr?.length ? presets.pr : DEFAULT_PR_PRESETS;
+    const nextIssue = presets.issue?.length ? presets.issue : DEFAULT_ISSUE_PRESETS;
     setSyncedPresets(presets);
-    setPrDraft(presets.pr?.length ? presets.pr : DEFAULT_PR_PRESETS);
-    setIssueDraft(presets.issue?.length ? presets.issue : DEFAULT_ISSUE_PRESETS);
+    setPrBaseline(nextPr);
+    setIssueBaseline(nextIssue);
+    setPrDraft(nextPr);
+    setIssueDraft(nextIssue);
   }
 
-  const dirty = useMemo(() => {
-    const currentPR = presets?.pr ?? DEFAULT_PR_PRESETS;
-    const currentIssue = presets?.issue ?? DEFAULT_ISSUE_PRESETS;
-    return (
-      JSON.stringify(currentPR) !== JSON.stringify(prDraft) ||
-      JSON.stringify(currentIssue) !== JSON.stringify(issueDraft)
-    );
-  }, [presets, prDraft, issueDraft]);
-
   const persist = useCallback(async () => {
-    await save({ pr: prDraft, issue: issueDraft });
+    const submittedPr = prDraft;
+    const submittedIssue = issueDraft;
+    const response = await save({ pr: submittedPr, issue: submittedIssue });
+    const savedPr = response?.pr?.length ? response.pr : submittedPr;
+    const savedIssue = response?.issue?.length ? response.issue : submittedIssue;
+    setPrBaseline(savedPr);
+    setIssueBaseline(savedIssue);
+    setPrDraft((current) =>
+      JSON.stringify(current) === JSON.stringify(submittedPr) ? savedPr : current,
+    );
+    setIssueDraft((current) =>
+      JSON.stringify(current) === JSON.stringify(submittedIssue) ? savedIssue : current,
+    );
   }, [save, prDraft, issueDraft]);
 
-  const doReset = useCallback(async () => {
-    const response = await reset();
-    if (response) {
-      setPrDraft(response.pr?.length ? response.pr : DEFAULT_PR_PRESETS);
-      setIssueDraft(response.issue?.length ? response.issue : DEFAULT_ISSUE_PRESETS);
-    }
-  }, [reset]);
+  const doReset = useCallback(() => {
+    setPrDraft(DEFAULT_PR_PRESETS);
+    setIssueDraft(DEFAULT_ISSUE_PRESETS);
+  }, []);
+  const discard = useCallback(() => {
+    setPrDraft(prBaseline);
+    setIssueDraft(issueBaseline);
+  }, [prBaseline, issueBaseline]);
 
   return {
     prDraft,
@@ -255,42 +305,48 @@ function usePresetDrafts(workspaceId: string): {
     setPrDraft,
     setIssueDraft,
     dirty,
+    prBaseline,
+    issueBaseline,
     save: persist,
     reset: doReset,
+    discard,
     loading,
   };
 }
 
 export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
   const { toast } = useToast();
-  const { prDraft, issueDraft, setPrDraft, setIssueDraft, dirty, save, reset, loading } =
-    usePresetDrafts(workspaceId);
-  const [saving, setSaving] = useState(false);
-  const [resetting, setResetting] = useState(false);
-
-  const handleSave = async () => {
-    setSaving(true);
+  const {
+    prDraft,
+    issueDraft,
+    prBaseline,
+    issueBaseline,
+    setPrDraft,
+    setIssueDraft,
+    dirty,
+    save,
+    reset,
+    discard,
+    loading,
+  } = usePresetDrafts(workspaceId);
+  const handleSave = useCallback(async () => {
     try {
       await save();
       toast({ description: "Quick actions saved", variant: "success" });
     } catch {
       toast({ description: "Failed to save quick actions", variant: "error" });
-    } finally {
-      setSaving(false);
+      throw new Error("Failed to save quick actions");
     }
-  };
-
-  const handleReset = async () => {
-    setResetting(true);
-    try {
-      await reset();
-      toast({ description: "Quick actions reset to defaults", variant: "success" });
-    } catch {
-      toast({ description: "Failed to reset quick actions", variant: "error" });
-    } finally {
-      setResetting(false);
-    }
-  };
+  }, [save, toast]);
+  useSettingsSaveContributor({
+    id: `github-action-presets:${workspaceId}`,
+    revision: JSON.stringify([prDraft, issueDraft]),
+    isDirty: dirty,
+    canSave: !loading,
+    invalidReason: loading ? "Quick actions are still loading." : undefined,
+    save: handleSave,
+    discard,
+  });
 
   return (
     <SettingsSection
@@ -301,40 +357,48 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
           <Button
             size="sm"
             variant="outline"
-            onClick={handleReset}
-            disabled={loading || saving || resetting}
+            onClick={reset}
+            disabled={loading}
             className="cursor-pointer"
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />
             Reset
           </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={!dirty || saving}
-            className="cursor-pointer"
-          >
-            Save changes
-          </Button>
         </div>
       }
     >
-      <Tabs defaultValue="pr">
-        <TabsList>
-          <TabsTrigger value="pr" className="cursor-pointer">
-            Pull requests
-          </TabsTrigger>
-          <TabsTrigger value="issue" className="cursor-pointer">
-            Issues
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="pr">
-          <PresetEditor presets={prDraft} onChange={setPrDraft} addLabel="Add PR action" />
-        </TabsContent>
-        <TabsContent value="issue">
-          <PresetEditor presets={issueDraft} onChange={setIssueDraft} addLabel="Add issue action" />
-        </TabsContent>
-      </Tabs>
+      <SettingsCard isDirty={dirty}>
+        <CardContent className="pt-6">
+          <fieldset disabled={loading} className="contents">
+            <Tabs defaultValue="pr">
+              <TabsList>
+                <TabsTrigger value="pr" className="cursor-pointer">
+                  Pull requests
+                </TabsTrigger>
+                <TabsTrigger value="issue" className="cursor-pointer">
+                  Issues
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="pr">
+                <PresetEditor
+                  presets={prDraft}
+                  baseline={prBaseline}
+                  onChange={setPrDraft}
+                  addLabel="Add PR action"
+                />
+              </TabsContent>
+              <TabsContent value="issue">
+                <PresetEditor
+                  presets={issueDraft}
+                  baseline={issueBaseline}
+                  onChange={setIssueDraft}
+                  addLabel="Add issue action"
+                />
+              </TabsContent>
+            </Tabs>
+          </fieldset>
+        </CardContent>
+      </SettingsCard>
     </SettingsSection>
   );
 }

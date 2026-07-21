@@ -64,11 +64,15 @@ const (
 	MetadataKeyWorktreeBranch = "worktree_branch"
 
 	// Remote executor metadata keys
-	MetadataKeyRepositoryPath   = "repository_path"
-	MetadataKeySetupScript      = "setup_script"
-	MetadataKeyCleanupScript    = "cleanup_script"
-	MetadataKeyRepoSetupScript  = "repository_setup_script"
-	MetadataKeyBaseBranch       = "base_branch"
+	MetadataKeyRepositoryPath  = "repository_path"
+	MetadataKeySetupScript     = "setup_script"
+	MetadataKeyCleanupScript   = "cleanup_script"
+	MetadataKeyRepoSetupScript = "repository_setup_script"
+	MetadataKeyBaseBranch      = "base_branch"
+	// MetadataKeyBaseBranches stores a map[string]string (RepositoryName →
+	// base branch ref) for per-repo diff-stat resolution inside agentctl.
+	// The empty key "" applies to the root / single-repo tracker.
+	MetadataKeyBaseBranches     = "base_branches"
 	MetadataKeyIsRemote         = "is_remote"
 	MetadataKeyRemoteAuthHome   = "remote_auth_target_home"
 	MetadataKeyGitUserName      = "git_user_name"
@@ -80,8 +84,37 @@ const (
 	MetadataKeySpriteCreatedAt  = "sprite_created_at"
 	MetadataKeyLocalPort        = "local_port"
 
+	// MetadataKeyModelOverride holds a user-requested model that overrides the
+	// agent profile's configured model on the next launch. Set by SetSessionModel
+	// for passthrough sessions, which restart the PTY to apply the new --model.
+	MetadataKeyModelOverride = "model_override"
+
 	// Office metadata keys
 	MetadataKeySkillManifestJSON = "skill_manifest_json"
+
+	// SSH runtime metadata keys (per-session, except SSHWorkdirRoot which is per-profile).
+	MetadataKeySSHHostAlias          = "ssh_host_alias"
+	MetadataKeySSHHost               = "ssh_host"
+	MetadataKeySSHPort               = "ssh_port"
+	MetadataKeySSHUser               = "ssh_user"
+	MetadataKeySSHHostFingerprint    = "ssh_host_fingerprint"
+	MetadataKeySSHRemoteTaskDir      = "ssh_remote_task_dir"
+	MetadataKeySSHRemoteSessionDir   = "ssh_remote_session_dir"
+	MetadataKeySSHRemoteAgentctlPort = "ssh_remote_agentctl_port"
+	MetadataKeySSHRemoteAgentctlPID  = "ssh_remote_agentctl_pid"
+	MetadataKeySSHLocalForwardPort   = "ssh_local_forward_port"
+	MetadataKeySSHRemoteAgentctlURL  = "ssh_remote_agentctl_url"
+	MetadataKeySSHWorkdirRoot        = "ssh_workdir_root"
+	MetadataKeySSHProxyJump          = "ssh_proxy_jump"
+	MetadataKeySSHIdentitySource     = "ssh_identity_source"
+	MetadataKeySSHIdentityFile       = "ssh_identity_file"
+	// MetadataKeySSHShell names the login shell used when running commands
+	// over SSH on the remote (probe, agentctl launch, install, setup
+	// scripts). Empty / unset falls back to "bash" at runtime — see
+	// WrapLoginShell. Stored per-profile so different profiles on the same
+	// host can use different shells; flows into req.Metadata via the
+	// standard executor-config merge in buildLaunchMetadata.
+	MetadataKeySSHShell = "ssh_shell"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -94,6 +127,23 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySpriteState:     true,
 	MetadataKeySpriteCreatedAt: true,
 	MetadataKeyLocalPort:       true,
+
+	// SSH runtime
+	MetadataKeySSHHost:               true,
+	MetadataKeySSHPort:               true,
+	MetadataKeySSHUser:               true,
+	MetadataKeySSHHostFingerprint:    true,
+	MetadataKeySSHRemoteTaskDir:      true,
+	MetadataKeySSHRemoteSessionDir:   true,
+	MetadataKeySSHRemoteAgentctlPort: true,
+	MetadataKeySSHRemoteAgentctlPID:  true,
+	MetadataKeySSHLocalForwardPort:   true,
+	MetadataKeySSHRemoteAgentctlURL:  true,
+	MetadataKeySSHWorkdirRoot:        true,
+	MetadataKeySSHProxyJump:          true,
+	MetadataKeySSHIdentitySource:     true,
+	MetadataKeySSHIdentityFile:       true,
+	MetadataKeySSHShell:              true,
 
 	// Executor type marker
 	MetadataKeyIsRemote: true,
@@ -120,6 +170,21 @@ var persistentMetadataPrefixes = []string{
 	"env_secret_id_", // Secret store UUIDs for profile env vars
 }
 
+// sessionScopedMetadataKeys lists metadata keys that point to per-session
+// runtime resources (process PIDs, allocated ports, session directories on
+// the remote). These keys ARE persisted across a SAME-session resume — that's
+// how a backend restart reattaches to a still-running remote agent — but they
+// MUST NOT be carried across SIBLING sessions on the same task. If they were,
+// the second session would try to attach to the first session's agentctl
+// process and end up sharing its ACP session and instance port.
+var sessionScopedMetadataKeys = map[string]bool{
+	MetadataKeySSHRemoteSessionDir:   true,
+	MetadataKeySSHRemoteAgentctlPort: true,
+	MetadataKeySSHRemoteAgentctlPID:  true,
+	MetadataKeySSHLocalForwardPort:   true,
+	MetadataKeySSHRemoteAgentctlURL:  true,
+}
+
 // ShouldPersistMetadataKey returns true if the given metadata key should
 // be carried forward when resuming a session from an ExecutorRunning record.
 func ShouldPersistMetadataKey(key string) bool {
@@ -132,6 +197,58 @@ func ShouldPersistMetadataKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// IsSessionScopedMetadataKey reports whether key references per-session
+// runtime resources that must not leak across sibling sessions on the same
+// task environment.
+func IsSessionScopedMetadataKey(key string) bool {
+	return sessionScopedMetadataKeys[key]
+}
+
+// sshWorkspaceFallbackKeys are the STABLE SSH executor-config keys projected
+// into workspace metadata as a fallback for terminal / workspace-restore when
+// no live ExecutorRunning record exists. This is deliberately a connection +
+// per-profile allowlist and MUST NOT include the session-scoped runtime keys
+// (remote session dir, agentctl port/PID/URL, local forward port) — projecting
+// a stale one would make the lifecycle manager try to reattach to a dead remote
+// agentctl instance instead of creating a fresh one. It mirrors
+// trustedExecutorConfigKeys (the connection-routing set targetFromMetadata
+// reads) plus the two per-profile keys the terminal path needs (workdir root,
+// login shell). Notably it includes ssh_host_alias so alias-only executors
+// (host read from ~/.ssh/config) survive restore.
+var sshWorkspaceFallbackKeys = map[string]bool{
+	MetadataKeySSHHost:            true,
+	MetadataKeySSHHostAlias:       true,
+	MetadataKeySSHPort:            true,
+	MetadataKeySSHUser:            true,
+	MetadataKeySSHHostFingerprint: true,
+	MetadataKeySSHIdentitySource:  true,
+	MetadataKeySSHIdentityFile:    true,
+	MetadataKeySSHProxyJump:       true,
+	MetadataKeySSHWorkdirRoot:     true,
+	MetadataKeySSHShell:           true,
+}
+
+// FilterSSHWorkspaceFallbackConfig returns the subset of a stored SSH executor
+// config that is safe to project into workspace metadata as a fallback for the
+// terminal / workspace-restore path. Only stable connection + per-profile keys
+// are copied (see sshWorkspaceFallbackKeys); session-scoped runtime keys are
+// intentionally dropped. Returns nil when nothing matches.
+func FilterSSHWorkspaceFallbackConfig(config map[string]string) map[string]interface{} {
+	if len(config) == 0 {
+		return nil
+	}
+	filtered := make(map[string]interface{})
+	for k, v := range config {
+		if sshWorkspaceFallbackKeys[k] {
+			filtered[k] = v
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 // FilterPersistentMetadata returns a copy of src containing only keys that
@@ -178,22 +295,27 @@ type RemoteStatusProvider interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID          string
-	TaskID              string
-	TaskTitle           string
-	SessionID           string
-	TaskEnvironmentID   string // Env this execution belongs to (shared across sessions in same task)
-	AgentProfileID      string
-	WorkspacePath       string
-	Protocol            string
-	Env                 map[string]string
-	Metadata            map[string]interface{}
-	McpServers          []McpServerConfig
-	AgentConfig         agents.Agent // Agent type info needed by runtimes
-	PreviousExecutionID string       // Non-empty when reconnecting to a previous execution
-	McpMode             string       // MCP tool mode: "task" (default) or "config"
-	AuthToken           string       // Previously handshaken agentctl token for reconnects
-	BootstrapNonce      string       // Stored nonce for re-handshake after container restart
+	InstanceID             string
+	TaskID                 string
+	TaskTitle              string
+	SessionID              string
+	TaskEnvironmentID      string // Env this execution belongs to (shared across sessions in same task)
+	AgentProfileID         string
+	OfficeAgentProfileID   string
+	WorkspacePath          string
+	Protocol               string
+	Env                    map[string]string
+	AutoApprovePermissions bool
+	// AutoApprovePermissionsOverride is set when a resolved profile explicitly
+	// selected the auto-approve value. Nil preserves agentctl defaults/env fallback.
+	AutoApprovePermissionsOverride *bool
+	Metadata                       map[string]interface{}
+	McpServers                     []McpServerConfig
+	AgentConfig                    agents.Agent // Agent type info needed by runtimes
+	PreviousExecutionID            string       // Non-empty when reconnecting to a previous execution
+	McpMode                        string       // MCP tool mode: "task" (default), "config", or "office"
+	AuthToken                      string       // Previously handshaken agentctl token for reconnects
+	BootstrapNonce                 string       // Stored nonce for re-handshake after container restart
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can
@@ -222,9 +344,10 @@ type ExecutorInstance struct {
 	StandalonePort       int    // Standalone
 
 	// Common fields
-	WorkspacePath string
-	Metadata      map[string]interface{}
-	StopReason    string
+	WorkspacePath   string
+	Metadata        map[string]interface{}
+	StopReason      string
+	AgentStopFailed bool
 
 	// AuthToken is the agentctl auth token retrieved via handshake.
 	// Populated by Docker executor for encrypted storage in SecretStore.
@@ -269,6 +392,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		SessionID:            req.SessionID,
 		TaskEnvironmentID:    req.TaskEnvironmentID,
 		AgentProfileID:       req.AgentProfileID,
+		OfficeAgentProfileID: req.OfficeAgentProfileID,
 		AgentID:              agentID,
 		ContainerID:          ri.ContainerID,
 		ContainerIP:          ri.ContainerIP,

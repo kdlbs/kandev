@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -65,6 +66,55 @@ func TestMockClient_AddPR_GetPR(t *testing.T) {
 	}
 	if pr.Title != "Test PR" {
 		t.Fatalf("expected title 'Test PR', got %q", pr.Title)
+	}
+}
+
+func TestMockClient_AddIssueGetIssueAndReset(t *testing.T) {
+	m := NewMockClient()
+	ctx := context.Background()
+
+	_, err := m.GetIssue(ctx, "owner", "repo", 1456)
+	if err == nil || err.Error() != "mock: issue owner/repo#1456 not found" {
+		t.Fatalf("expected missing issue error, got %v", err)
+	}
+
+	m.AddIssue(&Issue{
+		Number:    1456,
+		Title:     "Test issue",
+		RepoOwner: "owner",
+		RepoName:  "repo",
+	})
+
+	issue, err := m.GetIssue(ctx, "owner", "repo", 1456)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if issue.Title != "Test issue" {
+		t.Fatalf("expected title 'Test issue', got %q", issue.Title)
+	}
+
+	m.Reset()
+	_, err = m.GetIssue(ctx, "owner", "repo", 1456)
+	if err == nil || err.Error() != "mock: issue owner/repo#1456 not found" {
+		t.Fatalf("expected reset issue error, got %v", err)
+	}
+}
+
+func TestMockClient_ListIssuesPaged(t *testing.T) {
+	m := NewMockClient()
+	m.AddIssue(&Issue{Number: 1, RepoOwner: "owner", RepoName: "repo"})
+	m.AddIssue(&Issue{Number: 2, RepoOwner: "owner", RepoName: "repo"})
+	m.AddIssue(&Issue{Number: 3, RepoOwner: "other", RepoName: "repo"})
+
+	page, err := m.ListIssuesPaged(context.Background(), "state:open repo:owner/repo", "", 2, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(page.Issues) != 2 || page.TotalCount != 2 {
+		t.Fatalf("expected two issues, got %#v", page)
+	}
+	if page.Page != 2 || page.PerPage != 10 {
+		t.Fatalf("expected pagination metadata to be preserved, got %#v", page)
 	}
 }
 
@@ -190,6 +240,54 @@ func TestMockClient_SubmitReview(t *testing.T) {
 	}
 	if reviews[0].Event != "APPROVE" || reviews[0].Body != "LGTM" {
 		t.Fatalf("unexpected review: %+v", reviews[0])
+	}
+}
+
+func TestMockClient_CreateAndDeleteGist(t *testing.T) {
+	m := NewMockClient()
+	ctx := context.Background()
+
+	resp, err := m.CreateGist(ctx, CreateGistInput{
+		Description: "snapshot",
+		Public:      false,
+		Files: map[string]GistFile{
+			"snapshot.json": {Content: `{"x":1}`},
+			"README.md":     {Content: "hi"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateGist error: %v", err)
+	}
+	if resp.ID == "" || resp.HTMLURL == "" {
+		t.Fatalf("expected non-empty id/url, got %+v", resp)
+	}
+
+	gists := m.Gists()
+	g, ok := gists[resp.ID]
+	if !ok {
+		t.Fatalf("gist %s not stored", resp.ID)
+	}
+	if g.Public {
+		t.Fatal("gist should default to secret (Public=false)")
+	}
+	if _, ok := g.Files["snapshot.json"]; !ok {
+		t.Fatal("snapshot.json missing from stored gist")
+	}
+
+	if err := m.DeleteGist(ctx, resp.ID); err != nil {
+		t.Fatalf("DeleteGist error: %v", err)
+	}
+	if _, ok := m.Gists()[resp.ID]; ok {
+		t.Fatal("gist still present after delete")
+	}
+	if got := m.DeletedGists(); len(got) != 1 || got[0] != resp.ID {
+		t.Fatalf("expected DeletedGists=[%q], got %v", resp.ID, got)
+	}
+
+	err = m.DeleteGist(ctx, resp.ID)
+	var apiErr *GitHubAPIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 404 {
+		t.Fatalf("expected 404 GitHubAPIError on second delete, got %v", err)
 	}
 }
 

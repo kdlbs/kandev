@@ -1,0 +1,373 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-17T15:32:00.000Z",
+  "qa_status": "accepted",
+  "delivery_contract": {
+    "dimensions": {
+      "width": 960,
+      "height": 600
+    },
+    "frame_rate": 25,
+    "audio": false,
+    "video_formats": [
+      "vp9-webm",
+      "h264-mp4"
+    ],
+    "poster_format": "webp",
+    "camera": {
+      "max_zoom": 1.5,
+      "pointer_containment": "frame-by-frame edge-aware validation",
+      "profile": "cursor-tracked-v2"
+    }
+  },
+  "clips": [
+    {
+      "slug": "task-create",
+      "title": "Create a task",
+      "intended_docs": {
+        "page": "tasks-and-workflows.md",
+        "section": "Create a task"
+      },
+      "accessible_caption": "A focused task is entered while its repository, agent profile, worktree isolation, and start mode remain visible for review.",
+      "duration_seconds": 6.8,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "task-create.webm",
+        "mp4": "task-create.mp4",
+        "poster": "task-create.webp"
+      },
+      "source_scenario": "Enter a focused repository task and review its launch configuration before creation.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "files": {
+        "webm": {
+          "bytes": 122862,
+          "codec": "vp9",
+          "sha256": "811a46756e7010ef7a782d53b4026600f963442be967982d84a63c4c33197b4e"
+        },
+        "mp4": {
+          "bytes": 230793,
+          "codec": "h264",
+          "sha256": "f12c351cd0aa874d1aa32d47417b5608448b33a1eca11c2c66fff352cf94375c"
+        },
+        "poster": {
+          "bytes": 10456,
+          "codec": "webp",
+          "sha256": "23c8a463000d6d332a5d4f97072f1113aa10f9e10d33d5501c4303921d68049f"
+        }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture",
+        "loop_frame": "matched focused crop",
+        "framing": "task composer only; host Files toolbar excluded"
+      }
+    },
+    {
+      "slug": "task-start-agent",
+      "title": "Start an agent on a prepared task",
+      "intended_docs": {
+        "page": "tasks-and-workflows.md",
+        "section": "Start a task"
+      },
+      "accessible_caption": "A prepared task starts its selected agent in the workbench and reaches a completed response.",
+      "duration_seconds": 8.8,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "task-start-agent.webm",
+        "mp4": "task-start-agent.mp4",
+        "poster": "task-start-agent.webp"
+      },
+      "source_scenario": "Start the selected agent from a prepared task and observe the run complete in place.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "files": {
+        "webm": {
+          "bytes": 74553,
+          "codec": "vp9",
+          "sha256": "127e1e10171e03c61f93b9d17c82e0e2fa679635d3ea28d77002ebebaefda6af"
+        },
+        "mp4": {
+          "bytes": 139877,
+          "codec": "h264",
+          "sha256": "44c6b20ac3b9633429fa6b46d8b40b14450ba433609d1152ca4dc237e8ac92a8"
+        },
+        "poster": {
+          "bytes": 3270,
+          "codec": "webp",
+          "sha256": "72f064f427e22c3fd51412ed8ce698741242f1f992909121ed5a37188ad84473"
+        }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture",
+        "loop_frame": "matched focused crop",
+        "framing": "agent workbench only; host Files toolbar excluded"
+      }
+    },
+    {
+      "slug": "plan-review-implement",
+      "title": "Review a plan before implementation",
+      "intended_docs": {
+        "page": "tasks-and-workflows.md",
+        "section": "Use the task plan"
+      },
+      "accessible_caption": "A plan step receives human feedback before the approved plan moves into implementation.",
+      "duration_seconds": 8.64,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "plan-review-implement.webm",
+        "mp4": "plan-review-implement.mp4",
+        "poster": "plan-review-implement.webp"
+      },
+      "source_scenario": "Review an agent-authored plan, add targeted feedback, and approve implementation.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "files": {
+        "webm": {
+          "bytes": 238729,
+          "codec": "vp9",
+          "sha256": "bacdb7c6ae1ae3cfa9fdfb7a0004a0c5ae324c371914cf75090b9af95e694451"
+        },
+        "mp4": {
+          "bytes": 279788,
+          "codec": "h264",
+          "sha256": "bea9b5de1ae656b4a8e89816597c3adc79b10f72d9654661ad189ff9e59b5784"
+        },
+        "poster": {
+          "bytes": 12920,
+          "codec": "webp",
+          "sha256": "98ddaa049f6c1412bb3dba97caa059e6a7618007d3781ef14bd2ef7db4f71eea"
+        }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
+      }
+    },
+    {
+      "slug": "parallel-named-sessions",
+      "title": "Coordinate parallel named sessions",
+      "intended_docs": {
+        "page": "coordination.md",
+        "section": "Run parallel sessions in one task"
+      },
+      "accessible_caption": "Two named sessions run in parallel while their responsibilities remain easy to distinguish.",
+      "duration_seconds": 8.8,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "parallel-named-sessions.webm",
+        "mp4": "parallel-named-sessions.mp4",
+        "poster": "parallel-named-sessions.webp"
+      },
+      "source_scenario": "Open and identify parallel sessions that divide one task into coordinated work streams.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "files": {
+        "webm": {
+          "bytes": 271939,
+          "codec": "vp9",
+          "sha256": "4220345bfbbd19df834d514b29f36aa48706ca5c77a54e51729057c64d275755"
+        },
+        "mp4": {
+          "bytes": 288579,
+          "codec": "h264",
+          "sha256": "5845f1aea8fc8bf0c1011e3d34e4cca32f0eac9bd00436550659b623ab3b1358"
+        },
+        "poster": {
+          "bytes": 10328,
+          "codec": "webp",
+          "sha256": "f50de94baed66df81ad7dfe0dbae5cf9faf98069e15e442864b0c0bbbb4358c6"
+        }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
+      }
+    },
+    {
+      "slug": "diff-line-feedback",
+      "title": "Send line-level change feedback",
+      "intended_docs": {
+        "page": "sessions-and-review.md",
+        "section": "Review a diff"
+      },
+      "accessible_caption": "A changed line is selected, reviewed, and sent back to the agent as precise feedback.",
+      "duration_seconds": 12.8,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "diff-line-feedback.webm",
+        "mp4": "diff-line-feedback.mp4",
+        "poster": "diff-line-feedback.webp"
+      },
+      "source_scenario": "Inspect a real changed file and attach actionable feedback to a specific diff line.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "files": {
+        "webm": {
+          "bytes": 553107,
+          "codec": "vp9",
+          "sha256": "8112ea21664cb97d160d72e48ed13d26cbb8d890080d46f8405059582a9858af"
+        },
+        "mp4": {
+          "bytes": 860171,
+          "codec": "h264",
+          "sha256": "781dc368611571a9760c14f5178badb3b7e5d2ca2f5a5a5b4cca12ce3c630fdd"
+        },
+        "poster": {
+          "bytes": 17460,
+          "codec": "webp",
+          "sha256": "3ea895b1cf74e2ec6402f1e3015ebb5d40ad94797b088239eb075dd4e2b746a7"
+        }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
+      }
+    },
+    {
+      "slug": "code-walkthrough",
+      "title": "Follow a code walkthrough",
+      "intended_docs": {
+        "page": "sessions-and-review.md",
+        "section": "Generate a walkthrough"
+      },
+      "accessible_caption": "A guided walkthrough moves from an explanation to the exact file and lines it describes.",
+      "duration_seconds": 8.8,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "code-walkthrough.webm",
+        "mp4": "code-walkthrough.mp4",
+        "poster": "code-walkthrough.webp"
+      },
+      "source_scenario": "Open an agent-authored walkthrough and follow its anchored source-code step.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "files": {
+        "webm": {
+          "bytes": 489615,
+          "codec": "vp9",
+          "sha256": "2d261513c1cd9f9ba94b4e485ec0fe9f51d07dcf9761b29852bfa9d61a0a3866"
+        },
+        "mp4": {
+          "bytes": 516332,
+          "codec": "h264",
+          "sha256": "bc2cc9fcd160b7cd681c0a1028be37f3efce11ecc462272dfccf33ad103e30d8"
+        },
+        "poster": {
+          "bytes": 19932,
+          "codec": "webp",
+          "sha256": "70936f9e92354d8dda73e2014e81f21ad23e84721d989778e168cc44a843b004"
+        }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
+      }
+    },
+    {
+      "slug": "profile-executor-selection",
+      "title": "Choose an agent and executor profile",
+      "intended_docs": {
+        "page": "executors.md",
+        "section": "Create and select a profile"
+      },
+      "accessible_caption": "Agent, model, repository, and executor choices are reviewed before starting a task.",
+      "duration_seconds": 8.8,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "profile-executor-selection.webm",
+        "mp4": "profile-executor-selection.mp4",
+        "poster": "profile-executor-selection.webp"
+      },
+      "source_scenario": "Configure a task with supported agent and executor profiles before launch.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "files": {
+        "webm": {
+          "bytes": 221944,
+          "codec": "vp9",
+          "sha256": "245a79f4ec696350c57303a74c6a1185a0fe89f382857000d0d0ee93827ded58"
+        },
+        "mp4": {
+          "bytes": 301143,
+          "codec": "h264",
+          "sha256": "41b31239432b1018aa1aca9b1543e7bab8a294e3d3931e56845f2a8801ded95b"
+        },
+        "poster": {
+          "bytes": 7932,
+          "codec": "webp",
+          "sha256": "a4c3cab2425b83c12051efcba0f59dff6ffaebd2f134423d85d637d0e02704d2"
+        }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
+      }
+    },
+    {
+      "slug": "scheduled-workflow-automation",
+      "title": "Schedule workflow automation",
+      "intended_docs": {
+        "page": "automation-and-mcp.md",
+        "section": "Schedule"
+      },
+      "accessible_caption": "A workflow automation is configured with a schedule and saved for recurring execution.",
+      "duration_seconds": 13.6,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "scheduled-workflow-automation.webm",
+        "mp4": "scheduled-workflow-automation.mp4",
+        "poster": "scheduled-workflow-automation.webp"
+      },
+      "source_scenario": "Configure a scheduled workspace automation through the current workflow controls.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "files": {
+        "webm": {
+          "bytes": 442820,
+          "codec": "vp9",
+          "sha256": "a20fe293cc217c97c02320769448f6d70b7e1f79d5bcf579774ac9660bb5edc6"
+        },
+        "mp4": {
+          "bytes": 449247,
+          "codec": "h264",
+          "sha256": "7510585c1c89c10e2437a21dc405aef18192f58716b61bfb2c8d9115533fadf6"
+        },
+        "poster": {
+          "bytes": 9710,
+          "codec": "webp",
+          "sha256": "e39eab0347596152e08b7537ffb09b5b04171aab776d965d6626e3c26b029c2e"
+        }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
+      }
+    }
+  ]
+}

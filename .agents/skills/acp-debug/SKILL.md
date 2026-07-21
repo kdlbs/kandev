@@ -29,10 +29,16 @@ test -x apps/backend/bin/acpdbg || make -C apps/backend build-acpdbg
 acpdbg list                                            # enumerate registered ACP agents
 acpdbg probe <agent>                                   # initialize + session/new + close
 acpdbg probe --exec "<cmd> [args...]"                  # probe an arbitrary binary not in the registry
-acpdbg prompt <agent> --prompt "..." [--model M] [--mode M]
-acpdbg session-load <agent> --session-id <id>
+acpdbg prompt --prompt "..." [--model M] [--mode M] <agent>
+acpdbg session-load --session-id <id> <agent>
 acpdbg matrix                                          # probe every ACP agent in parallel
 ```
+
+> **Flags MUST come before the positional `<agent>`.** The CLI uses Go's stdlib
+> `flag` parser, which stops at the first non-flag token — so any flag placed
+> *after* `<agent>` is silently ignored (`probe`/`matrix`, e.g. a dropped
+> `--timeout`) or errors (`prompt` → `--prompt is required`). Always write
+> `acpdbg prompt --prompt "..." --timeout 240s <agent>`, not `acpdbg prompt <agent> --prompt ...`.
 
 **Shared flags** (apply to every sub-command):
 - `--out DIR` — JSONL output directory (default `./acp-debug/`)
@@ -49,9 +55,9 @@ acpdbg matrix                                          # probe every ACP agent i
 ### 1. Pick the sub-command that matches the user's intent
 
 - "what models does X have" / "does X support modes" → `acpdbg probe X`
-- "test a prompt against X" → `acpdbg prompt X --prompt "..."`
+- "test a prompt against X" → `acpdbg prompt --prompt "..." X`
 - "compare all agents" / "run the matrix" → `acpdbg matrix`
-- "resume session <id>" → `acpdbg session-load X --session-id <id>`
+- "resume session <id>" → `acpdbg session-load --session-id <id> X`
 - "try this random binary" → `acpdbg probe --exec "path/to/bin --acp"`
 
 ### 2. Run the command
@@ -59,7 +65,7 @@ acpdbg matrix                                          # probe every ACP agent i
 Always capture stdout — it contains the JSONL file path (and for `matrix`, the summary table and `matrix-summary.json` path).
 
 ```bash
-apps/backend/bin/acpdbg probe auggie --timeout 45s
+apps/backend/bin/acpdbg probe --timeout 45s auggie
 ```
 
 For `matrix`, prefer `--timeout 60s` so `npx`-spawned agents have time to cold-start.

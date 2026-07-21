@@ -1,11 +1,11 @@
-import type { JiraStatusCategory } from "@/lib/types/jira";
-
 export type AssigneeFilter = "me" | "unassigned" | "anyone";
 export type SortKey = "updated" | "created" | "priority";
 
 export type FilterState = {
   projectKeys: string[];
-  statusCategories: JiraStatusCategory[];
+  // Real project workflow status names (e.g. "In Development"), not the coarse
+  // three-bucket status categories. Empty = no status restriction.
+  statuses: string[];
   assignee: AssigneeFilter;
   searchText: string;
   sort: SortKey;
@@ -13,17 +13,11 @@ export type FilterState = {
 
 export const DEFAULT_FILTERS: FilterState = {
   projectKeys: [],
-  statusCategories: [],
+  statuses: [],
   assignee: "me",
   searchText: "",
   sort: "updated",
 };
-
-export const STATUS_CATEGORY_OPTIONS: { value: JiraStatusCategory; label: string }[] = [
-  { value: "new", label: "To Do" },
-  { value: "indeterminate", label: "In Progress" },
-  { value: "done", label: "Done" },
-];
 
 function quote(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -38,14 +32,9 @@ function searchClause(raw: string): string | null {
   return `text ~ ${quote(trimmed)}`;
 }
 
-function statusClause(categories: JiraStatusCategory[]): string | null {
-  if (categories.length === 0) return null;
-  const labels = categories.map((c) => {
-    if (c === "new") return quote("To Do");
-    if (c === "indeterminate") return quote("In Progress");
-    return quote("Done");
-  });
-  return `statusCategory in (${labels.join(", ")})`;
+function statusClause(statuses: string[]): string | null {
+  if (statuses.length === 0) return null;
+  return `status in (${statuses.map(quote).join(", ")})`;
 }
 
 function assigneeClause(a: AssigneeFilter): string | null {
@@ -68,7 +57,7 @@ function sortClause(s: SortKey): string {
 export function filtersToJql(f: FilterState): string {
   const clauses = [
     projectClause(f.projectKeys),
-    statusClause(f.statusCategories),
+    statusClause(f.statuses),
     assigneeClause(f.assignee),
     searchClause(f.searchText),
   ].filter((c): c is string => c !== null);
@@ -84,7 +73,7 @@ export function filtersEqual(a: FilterState, b: FilterState): boolean {
     a.searchText === b.searchText &&
     a.projectKeys.length === b.projectKeys.length &&
     a.projectKeys.every((k, i) => k === b.projectKeys[i]) &&
-    a.statusCategories.length === b.statusCategories.length &&
-    a.statusCategories.every((c, i) => c === b.statusCategories[i])
+    a.statuses.length === b.statuses.length &&
+    a.statuses.every((s, i) => s === b.statuses[i])
   );
 }

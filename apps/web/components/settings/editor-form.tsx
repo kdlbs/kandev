@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { EditorOption } from "@/lib/types/http";
+import { useSettingsSaveContributor } from "./settings-save-provider";
 
 type CustomKind = "custom_command" | "custom_remote_ssh" | "custom_hosted_url";
 
@@ -107,6 +108,11 @@ function resolveEditorName(state: EditorFormState) {
   }
 }
 
+function normalizeEditorState(state: EditorFormState) {
+  const name = resolveEditorName(state);
+  return name === state.name ? state : { ...state, name };
+}
+
 export function formStateFromEditor(editor: EditorOption): EditorFormState {
   return {
     name: editor.name,
@@ -143,16 +149,21 @@ type EditorFormProps = {
   title: string;
   initialState: EditorFormState;
   onCancel: () => void;
-  onSave: (state: EditorFormState) => void;
+  onSave: (state: EditorFormState) => Promise<unknown> | void;
+  onSaved?: () => void;
   submitLabel: string;
   isSaving: boolean;
+  coordinatedSaveId?: string;
+  dirtyWhenMounted?: boolean;
 };
 
 function EditorKindFields({
   state,
+  baseline,
   setField,
 }: {
   state: EditorFormState;
+  baseline: EditorFormState;
   setField: <K extends keyof EditorFormState>(key: K, value: EditorFormState[K]) => void;
 }) {
   if (state.kind === "custom_command") {
@@ -160,6 +171,7 @@ function EditorKindFields({
       <div className="space-y-2">
         <Input
           value={state.command}
+          data-settings-dirty={state.command !== baseline.command}
           onChange={(event) => setField("command", event.target.value)}
           placeholder="code --goto {file}:{line}"
         />
@@ -172,16 +184,19 @@ function EditorKindFields({
       <div className="space-y-2">
         <Input
           value={state.host}
+          data-settings-dirty={state.host !== baseline.host}
           onChange={(event) => setField("host", event.target.value)}
           placeholder="ssh-host.example.com"
         />
         <Input
           value={state.user}
+          data-settings-dirty={state.user !== baseline.user}
           onChange={(event) => setField("user", event.target.value)}
           placeholder="optional username"
         />
         <Input
           value={state.scheme}
+          data-settings-dirty={state.scheme !== baseline.scheme}
           onChange={(event) => setField("scheme", event.target.value)}
           placeholder="optional scheme (vscode, cursor)"
         />
@@ -196,6 +211,7 @@ function EditorKindFields({
     return (
       <Input
         value={state.url}
+        data-settings-dirty={state.url !== baseline.url}
         onChange={(event) => setField("url", event.target.value)}
         placeholder="https://code.example.com"
       />
@@ -209,14 +225,22 @@ export function EditorForm({
   initialState,
   onCancel,
   onSave,
+  onSaved,
   submitLabel,
   isSaving,
+  coordinatedSaveId,
+  dirtyWhenMounted = false,
 }: EditorFormProps) {
   const [state, setState] = useState<EditorFormState>(initialState);
+  const [baseline, setBaseline] = useState<EditorFormState>(initialState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   useEffect(() => {
+    if (JSON.stringify(stateRef.current) !== JSON.stringify(baseline)) return;
     setState(initialState);
-  }, [initialState]);
+    setBaseline(initialState);
+  }, [baseline, initialState]);
 
   const setField = <K extends keyof EditorFormState>(key: K, value: EditorFormState[K]) => {
     setState((prev) => ({ ...prev, [key]: value }));
@@ -231,21 +255,46 @@ export function EditorForm({
     return false;
   }, [state]);
 
-  const handleSave = () => {
-    const resolvedName = resolveEditorName(state);
-    onSave(resolvedName === state.name ? state : { ...state, name: resolvedName });
+  const handleSave = async () => {
+    const submitted = normalizeEditorState(state);
+    await onSave(submitted);
+    setBaseline(submitted);
+    setState(submitted);
+    onSaved?.();
   };
+  const revision = JSON.stringify(state);
+  const isCoordinatedDirty =
+    Boolean(coordinatedSaveId) && (dirtyWhenMounted || revision !== JSON.stringify(baseline));
+  const normalizedState = normalizeEditorState(state);
+  useSettingsSaveContributor({
+    id: coordinatedSaveId ?? `editor-form-local:${title}`,
+    revision,
+    isDirty: isCoordinatedDirty,
+    canSave: isValid,
+    invalidReason: isValid ? undefined : "Complete the required editor fields before saving.",
+    save: async () => {
+      const submitted = normalizedState;
+      await onSave(submitted);
+      setBaseline(submitted);
+      if (JSON.stringify(stateRef.current) === JSON.stringify(state)) onSaved?.();
+    },
+    discard: () => setState(baseline),
+  });
 
   return (
-    <div className="rounded-lg border border-border/70 bg-background p-4 space-y-4">
+    <div
+      className="rounded-lg border border-border/70 bg-background p-4 space-y-4"
+      data-settings-dirty={isCoordinatedDirty}
+    >
       <div className="text-sm font-medium text-foreground">{title}</div>
       <Input
         value={state.name}
+        data-settings-dirty={state.name !== baseline.name}
         onChange={(event) => setField("name", event.target.value)}
         placeholder="Editor name"
       />
       <Select value={state.kind} onValueChange={(value) => setField("kind", value as CustomKind)}>
-        <SelectTrigger>
+        <SelectTrigger data-settings-dirty={state.kind !== baseline.kind}>
           <SelectValue placeholder="Editor type" />
         </SelectTrigger>
         <SelectContent>
@@ -257,14 +306,21 @@ export function EditorForm({
           ))}
         </SelectContent>
       </Select>
-      <EditorKindFields state={state} setField={setField} />
+      <EditorKindFields state={state} baseline={baseline} setField={setField} />
       <div className="flex items-center justify-end gap-2">
         <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>
           Cancel
         </Button>
-        <Button type="button" onClick={handleSave} disabled={isSaving || !isValid}>
-          {submitLabel}
-        </Button>
+        {!coordinatedSaveId && (
+          <Button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={isSaving || !isValid}
+            className="cursor-pointer"
+          >
+            {submitLabel}
+          </Button>
+        )}
       </div>
     </div>
   );

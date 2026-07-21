@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -142,7 +145,25 @@ func (r *Repository) scanTaskStats(rows *sql.Rows) ([]*models.TaskStats, error) 
 	return results, rows.Err()
 }
 
-// GetGlobalStats retrieves workspace-wide aggregated statistics
+// Outlier bounds for the "average turn size" metric. Determined empirically
+// from prod data: durations under cleanTurnMinDurationMs are no-op/aborted
+// turns and durations at or above cleanTurnMaxDurationMs are zombie turns
+// whose completed_at was backfilled across an agent restart. Both classes
+// badly skew the mean — excluding them drops avg duration from ~1062s to
+// ~289s on a ~4k-turn sample. The duration filter is half-open
+// [cleanTurnMinDurationMs, cleanTurnMaxDurationMs).
+const (
+	cleanTurnMinDurationMs = 1000
+	cleanTurnMaxDurationMs = 3600000
+	cleanTurnMinMessages   = 1
+)
+
+// GetGlobalStats retrieves workspace-wide aggregated statistics.
+// Implemented as a single query over 5 CTEs (tasks, sessions, turns,
+// clean_turn, messages). The four count/sum CTEs each scan their underlying
+// table at most once per request; clean_turn additionally issues one
+// index-only message-count subquery per qualifying turn (kept correlated to
+// stay portable between the SQLite and Postgres dialects).
 func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GlobalStats, error) {
 	var startArg any
 	if start != nil {
@@ -153,62 +174,97 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
 
 	query := fmt.Sprintf(`
+		WITH
+		task_agg AS (
+			SELECT
+				COUNT(*) AS total_tasks,
+				SUM(CASE WHEN t.archived_at IS NOT NULL
+				          OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id)
+				         THEN 1 ELSE 0 END) AS completed_tasks,
+				SUM(CASE WHEN t.state = 'IN_PROGRESS' AND t.archived_at IS NULL THEN 1 ELSE 0 END) AS in_progress_tasks
+			FROM tasks t
+			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR t.created_at >= ?)
+		),
+		session_agg AS (
+			SELECT COUNT(*) AS total_sessions
+			FROM task_sessions s
+			JOIN tasks t ON t.id = s.task_id
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
+		),
+		turn_agg AS (
+			SELECT
+				COUNT(*) AS total_turns,
+				COALESCE(SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END), 0) AS total_duration_ms
+			FROM task_session_turns turn
+			JOIN task_sessions s ON s.id = turn.task_session_id
+			JOIN tasks t ON t.id = s.task_id
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
+		),
+		clean_turn_agg AS (
+			SELECT
+				AVG(dur_ms) AS avg_turn_duration_ms,
+				AVG(msg_count) AS avg_messages_per_turn
+			FROM (
+				SELECT
+					%s AS dur_ms,
+					(SELECT COUNT(*) FROM task_session_messages m WHERE m.turn_id = turn.id) AS msg_count
+				FROM task_session_turns turn
+				JOIN task_sessions s ON s.id = turn.task_session_id
+				JOIN tasks t ON t.id = s.task_id
+				WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
+				  AND turn.completed_at IS NOT NULL
+			) clean
+			WHERE dur_ms >= %d AND dur_ms < %d AND msg_count >= %d
+		),
+		message_agg AS (
+			SELECT
+				COUNT(*) AS total_messages,
+				SUM(CASE WHEN msg.author_type = 'user' THEN 1 ELSE 0 END) AS total_user_messages,
+				SUM(CASE WHEN msg.type LIKE 'tool_%%' THEN 1 ELSE 0 END) AS total_tool_calls
+			FROM task_session_messages msg
+			JOIN task_sessions s ON s.id = msg.task_session_id
+			JOIN tasks t ON t.id = s.task_id
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
+		)
 		SELECT
-			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND is_ephemeral = 0 AND (? IS NULL OR created_at >= ?)) as total_tasks,
-			(SELECT COUNT(*) FROM tasks t
-			 LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
-			 WHERE t.workspace_id = ?
-			   AND t.is_ephemeral = 0
-			   AND (t.archived_at IS NOT NULL
-			        OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id))
-			   AND (? IS NULL OR t.created_at >= ?)) as completed_tasks,
-			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND is_ephemeral = 0 AND state = 'IN_PROGRESS' AND archived_at IS NULL AND (? IS NULL OR created_at >= ?)) as in_progress_tasks,
-			(SELECT COUNT(*) FROM task_sessions s JOIN tasks t ON t.id = s.task_id WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)) as total_sessions,
-			(SELECT COUNT(*) FROM task_session_turns turn
-			 JOIN task_sessions s ON s.id = turn.task_session_id
-			 JOIN tasks t ON t.id = s.task_id
-			 WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)) as total_turns,
-			(SELECT COUNT(*) FROM task_session_messages msg
-			 JOIN task_sessions s ON s.id = msg.task_session_id
-			 JOIN tasks t ON t.id = s.task_id
-			 WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)) as total_messages,
-			(SELECT COUNT(*) FROM task_session_messages msg
-			 JOIN task_sessions s ON s.id = msg.task_session_id
-			 JOIN tasks t ON t.id = s.task_id
-			 WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND msg.author_type = 'user' AND (? IS NULL OR s.started_at >= ?)) as total_user_messages,
-			(SELECT COUNT(*) FROM task_session_messages msg
-			 JOIN task_sessions s ON s.id = msg.task_session_id
-			 JOIN tasks t ON t.id = s.task_id
-			 WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND msg.type LIKE 'tool_%%' AND (? IS NULL OR s.started_at >= ?)) as total_tool_calls,
-			(SELECT COALESCE(SUM(
-				CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END
-			), 0) FROM task_session_turns turn
-			 JOIN task_sessions s ON s.id = turn.task_session_id
-			 JOIN tasks t ON t.id = s.task_id
-			 WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)) as total_duration_ms
-	`, dur)
+			task_agg.total_tasks, task_agg.completed_tasks, task_agg.in_progress_tasks,
+			session_agg.total_sessions,
+			turn_agg.total_turns,
+			message_agg.total_messages, message_agg.total_user_messages, message_agg.total_tool_calls,
+			turn_agg.total_duration_ms,
+			clean_turn_agg.avg_turn_duration_ms, clean_turn_agg.avg_messages_per_turn
+		FROM task_agg, session_agg, turn_agg, clean_turn_agg, message_agg
+	`, dur, dur, cleanTurnMinDurationMs, cleanTurnMaxDurationMs, cleanTurnMinMessages)
 
 	var stats models.GlobalStats
 	var totalDurationMs float64
+	var completedTasks, inProgressTasks sql.NullInt64
+	var userMessages, toolCalls sql.NullInt64
+	var avgTurnDurationMs, avgMessagesPerTurn sql.NullFloat64
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query),
-		workspaceID, startArg, startArg,
-		workspaceID, startArg, startArg,
-		workspaceID, startArg, startArg,
-		workspaceID, startArg, startArg,
-		workspaceID, startArg, startArg,
-		workspaceID, startArg, startArg,
-		workspaceID, startArg, startArg,
-		workspaceID, startArg, startArg,
-		workspaceID, startArg, startArg,
+		workspaceID, startArg, startArg, // task_agg
+		workspaceID, startArg, startArg, // session_agg
+		workspaceID, startArg, startArg, // turn_agg
+		workspaceID, startArg, startArg, // clean_turn_agg
+		workspaceID, startArg, startArg, // message_agg
 	).Scan(
-		&stats.TotalTasks, &stats.CompletedTasks, &stats.InProgressTasks,
-		&stats.TotalSessions, &stats.TotalTurns, &stats.TotalMessages,
-		&stats.TotalUserMessages, &stats.TotalToolCalls, &totalDurationMs,
+		&stats.TotalTasks, &completedTasks, &inProgressTasks,
+		&stats.TotalSessions, &stats.TotalTurns,
+		&stats.TotalMessages, &userMessages, &toolCalls,
+		&totalDurationMs,
+		&avgTurnDurationMs, &avgMessagesPerTurn,
 	)
 	if err != nil {
 		return nil, err
 	}
+	stats.CompletedTasks = int(completedTasks.Int64)
+	stats.InProgressTasks = int(inProgressTasks.Int64)
+	stats.TotalUserMessages = int(userMessages.Int64)
+	stats.TotalToolCalls = int(toolCalls.Int64)
 	stats.TotalDurationMs = int64(totalDurationMs)
+	stats.AvgTurnDurationMs = int64(avgTurnDurationMs.Float64)
+	stats.AvgMessagesPerTurn = avgMessagesPerTurn.Float64
 
 	if stats.TotalTasks > 0 {
 		stats.AvgTurnsPerTask = float64(stats.TotalTurns) / float64(stats.TotalTasks)
@@ -523,4 +579,169 @@ func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start 
 	}
 
 	return &stats, nil
+}
+
+// defaultSessionCodeStatsLimit bounds ListSessionCodeStats when the caller
+// does not specify one, mirroring GetTaskStats' default page size.
+const defaultSessionCodeStatsLimit = 500
+
+// ListSessionCodeStats returns, per session, committed LOC (summed from
+// task_session_commits) and PEAK pending-diff LOC (the largest single
+// task_session_git_snapshots snapshot, not the latest — the latest snapshot
+// is usually a clean tree after a commit, merge, or archive). This is the
+// per-session line-of-code aggregation the kandev-plugin-agent-stats plugin
+// used to compute by reading the SQLite file directly (see ADR 0043); the
+// SQL here mirrors that plugin's sessionsQuery.
+//
+// Portability: the committed-sum half of this query is plain SQL and works
+// unchanged on both drivers. The peak-pending half must walk each snapshot's
+// `files` JSON object (keyed by file path, see task/models.GitSnapshot.Files)
+// to sum per-file additions/deletions — SQLite does this with json_each,
+// Postgres with jsonb_each on the same object; peakPendingSnapshotSubquery
+// branches on driver to build the equivalent fragment for each. Both paths
+// are covered by SQLite unit tests here; the Postgres path is exercised by
+// the ADR 0027-style env-gated Postgres suite (KANDEV_TEST_POSTGRES_DSN) at
+// the task/repository layer for the underlying schema, not re-verified here
+// against a live Postgres instance — if jsonb_each ever proves not to match
+// SQLite's json_each semantics for this shape, guard the Postgres branch
+// with a clear error instead of returning silently-wrong pending numbers.
+func (r *Repository) ListSessionCodeStats(
+	ctx context.Context,
+	filter models.SessionCodeStatsFilter,
+) ([]*models.SessionCodeStats, error) {
+	driver := r.ro.DriverName()
+	where, args := buildSessionCodeStatsFilter(filter)
+	// Exclude office config-mode tasks' sessions (internal bookkeeping, not
+	// plugin-visible work items) — the same exclusion Sessions().List applies
+	// via fetchTasksForWorkspaces' excludeConfig=true, so the Host data API's
+	// List and CodeStats reads cover the same session set.
+	where += " AND " + dialect.ExcludeConfigModePredicate(driver, "t.metadata")
+	query := fmt.Sprintf(`
+		SELECT
+			ts.id AS session_id,
+			COALESCE(commit_stats.insertions, 0) AS lines_added_committed,
+			COALESCE(commit_stats.deletions, 0) AS lines_deleted_committed,
+			COALESCE(peak_stats.peak_additions, 0) AS lines_added_peak_pending,
+			COALESCE(peak_stats.peak_deletions, 0) AS lines_deleted_peak_pending
+		FROM task_sessions ts
+		JOIN tasks t ON t.id = ts.task_id
+		LEFT JOIN (
+			SELECT c.session_id,
+				SUM(c.insertions) AS insertions,
+				SUM(c.deletions) AS deletions
+			FROM task_session_commits c
+			GROUP BY c.session_id
+		) commit_stats ON commit_stats.session_id = ts.id
+		LEFT JOIN (%s) peak_stats ON peak_stats.session_id = ts.id
+		WHERE %s
+		ORDER BY ts.started_at ASC, ts.id ASC
+		LIMIT ? OFFSET ?
+	`, peakPendingSnapshotSubquery(driver), where)
+
+	inQuery, inArgs, err := sqlx.In(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	inQuery = r.ro.Rebind(inQuery)
+
+	rows, err := r.ro.QueryContext(ctx, inQuery, inArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanSessionCodeStats(rows)
+}
+
+// buildSessionCodeStatsFilter turns a SessionCodeStatsFilter into a WHERE
+// clause (against the ts/t aliases used by ListSessionCodeStats) and its
+// positional args, including the trailing LIMIT/OFFSET values.
+func buildSessionCodeStatsFilter(filter models.SessionCodeStatsFilter) (string, []any) {
+	var conds []string
+	var args []any
+	if len(filter.SessionIDs) > 0 {
+		conds = append(conds, "ts.id IN (?)")
+		args = append(args, filter.SessionIDs)
+	}
+	if len(filter.TaskIDs) > 0 {
+		conds = append(conds, "ts.task_id IN (?)")
+		args = append(args, filter.TaskIDs)
+	}
+	if len(filter.WorkspaceIDs) > 0 {
+		conds = append(conds, "t.workspace_id IN (?)")
+		args = append(args, filter.WorkspaceIDs)
+	}
+	if len(filter.States) > 0 {
+		conds = append(conds, "ts.state IN (?)")
+		args = append(args, filter.States)
+	}
+	where := "1 = 1"
+	if len(conds) > 0 {
+		where = strings.Join(conds, " AND ")
+	}
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = defaultSessionCodeStatsLimit
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	args = append(args, limit, offset)
+
+	return where, args
+}
+
+// scanSessionCodeStats reads all rows of a ListSessionCodeStats query result.
+func scanSessionCodeStats(rows *sql.Rows) ([]*models.SessionCodeStats, error) {
+	var results []*models.SessionCodeStats
+	for rows.Next() {
+		var stat models.SessionCodeStats
+		if err := rows.Scan(
+			&stat.SessionID,
+			&stat.LinesAddedCommitted, &stat.LinesDeletedCommitted,
+			&stat.LinesAddedPeakPending, &stat.LinesDeletedPeakPending,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, &stat)
+	}
+	return results, rows.Err()
+}
+
+// peakPendingSnapshotSubquery returns a derived-table SELECT (session_id,
+// peak_additions, peak_deletions) that finds, per session, the MAX single
+// git-snapshot total across task_session_git_snapshots.files. additions and
+// deletions are maximized independently (matching the source plugin), so the
+// reported peak-additions and peak-deletions snapshots need not be the same
+// snapshot.
+func peakPendingSnapshotSubquery(drv string) string {
+	if dialect.IsPostgres(drv) {
+		return `
+			SELECT snap.session_id,
+				MAX(snap.additions) AS peak_additions,
+				MAX(snap.deletions) AS peak_deletions
+			FROM (
+				SELECT g.id AS snapshot_id, g.session_id,
+					SUM(COALESCE((f.jvalue->>'additions')::numeric, 0)) AS additions,
+					SUM(COALESCE((f.jvalue->>'deletions')::numeric, 0)) AS deletions
+				FROM task_session_git_snapshots g,
+					jsonb_each(g.files::jsonb) AS f(jkey, jvalue)
+				GROUP BY g.id, g.session_id
+			) snap
+			GROUP BY snap.session_id`
+	}
+	return `
+		SELECT snap.session_id,
+			MAX(snap.additions) AS peak_additions,
+			MAX(snap.deletions) AS peak_deletions
+		FROM (
+			SELECT g.id AS snapshot_id, g.session_id,
+				SUM(COALESCE(json_extract(f.value, '$.additions'), 0)) AS additions,
+				SUM(COALESCE(json_extract(f.value, '$.deletions'), 0)) AS deletions
+			FROM task_session_git_snapshots g, json_each(g.files) f
+			GROUP BY g.id, g.session_id
+		) snap
+		GROUP BY snap.session_id`
 }

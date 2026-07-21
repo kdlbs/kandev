@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconCircle, IconCircleCheck, IconPlus, IconChevronDown } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -13,8 +13,9 @@ import {
 import { Spinner } from "@kandev/ui/spinner";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
-import type { GitHubIssue } from "@/lib/types/github";
+import type { GitHubIssue, TaskIssueLink } from "@/lib/types/github";
 import type { LaunchPayload, TaskPreset } from "./quick-task-launcher";
+import { TaskRowIndicator } from "./task-row-indicator";
 
 type IssueListProps = {
   items: GitHubIssue[];
@@ -22,6 +23,7 @@ type IssueListProps = {
   error: string | null;
   presets: TaskPreset[];
   onStartTask: (payload: LaunchPayload) => void;
+  issueKeyToTasks?: Map<string, TaskIssueLink[]>;
 };
 
 function StartTaskMenu({
@@ -85,10 +87,12 @@ function IssueRow({
   issue,
   presets,
   onStartTask,
+  tasks,
 }: {
   issue: GitHubIssue;
   presets: TaskPreset[];
   onStartTask: IssueListProps["onStartTask"];
+  tasks: TaskIssueLink[] | undefined;
 }) {
   const StateIcon = issue.state === "open" ? IconCircle : IconCircleCheck;
   const stateClass =
@@ -96,7 +100,11 @@ function IssueRow({
       ? "text-emerald-600 dark:text-emerald-400"
       : "text-purple-600 dark:text-purple-400";
   return (
-    <div className="flex items-start gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
+    <div
+      className="flex items-start gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
+      data-testid="issue-row"
+      data-issue-number={issue.number}
+    >
       <StateIcon className={cn("h-4 w-4 mt-1 shrink-0", stateClass)} />
       <div className="min-w-0 flex-1">
         <Link
@@ -116,6 +124,14 @@ function IssueRow({
             by {issue.author_login} · opened {formatRelativeTime(issue.created_at)}
           </span>
           <IssueLabels labels={issue.labels} />
+          <TaskRowIndicator
+            tasks={tasks?.map((task) => ({
+              id: task.task_id,
+              taskId: task.task_id,
+              fallbackTitle: task.task_title,
+            }))}
+            testIdPrefix="issue-row-task-indicator"
+          />
         </div>
       </div>
       <div className="shrink-0">
@@ -125,7 +141,14 @@ function IssueRow({
   );
 }
 
-function IssueListBody({ loading, error, items, presets, onStartTask }: IssueListProps) {
+function IssueListBody({
+  loading,
+  error,
+  items,
+  presets,
+  onStartTask,
+  issueKeyToTasks,
+}: IssueListProps) {
   if (loading) {
     return (
       <div className="flex justify-center py-10">
@@ -145,14 +168,18 @@ function IssueListBody({ loading, error, items, presets, onStartTask }: IssueLis
   }
   return (
     <div className="divide-y">
-      {items.map((issue) => (
-        <IssueRow
-          key={`${issue.repo_owner}/${issue.repo_name}#${issue.number}`}
-          issue={issue}
-          presets={presets}
-          onStartTask={onStartTask}
-        />
-      ))}
+      {items.map((issue) => {
+        const key = `${issue.repo_owner}/${issue.repo_name}#${issue.number}`;
+        return (
+          <IssueRow
+            key={key}
+            issue={issue}
+            presets={presets}
+            onStartTask={onStartTask}
+            tasks={issueKeyToTasks?.get(key)}
+          />
+        );
+      })}
     </div>
   );
 }

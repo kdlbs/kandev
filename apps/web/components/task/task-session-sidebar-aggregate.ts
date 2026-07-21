@@ -1,4 +1,65 @@
 import type { KanbanState } from "@/lib/state/slices";
+import type { Message, TaskPendingAction } from "@/lib/types/http";
+import {
+  hasPendingClarification,
+  hasPendingPermissionRequest,
+} from "@/lib/utils/pending-clarification";
+
+/** Flat per-session pending flags keyed for shallow comparison so the sidebar
+ *  only re-renders when a clarification/permission flag actually flips, not on
+ *  every streaming token that churns the messages map. */
+const pendingClarKey = (sessionId: string) => `${sessionId}#clar`;
+const pendingPermKey = (sessionId: string) => `${sessionId}#perm`;
+
+export function buildPendingFlags(
+  bySession: Record<string, Message[] | undefined>,
+  sessionIds: string[],
+): Record<string, boolean> {
+  const flags: Record<string, boolean> = {};
+  for (const id of sessionIds) {
+    const msgs = bySession[id];
+    if (msgs === undefined) continue;
+    flags[pendingClarKey(id)] = hasPendingClarification(msgs);
+    flags[pendingPermKey(id)] = hasPendingPermissionRequest(msgs);
+  }
+  return flags;
+}
+
+export type PendingActionFallback = {
+  primarySessionState?: string | null;
+  primarySessionPendingAction?: TaskPendingAction | null;
+};
+
+function fallbackPendingFlags(fallback?: PendingActionFallback): {
+  clarification: boolean;
+  permission: boolean;
+} {
+  if (fallback?.primarySessionState !== "WAITING_FOR_INPUT") {
+    return { clarification: false, permission: false };
+  }
+  return {
+    clarification: fallback.primarySessionPendingAction === "clarification",
+    permission: fallback.primarySessionPendingAction === "permission",
+  };
+}
+
+export function readPendingFlags(
+  pendingFlags: Record<string, boolean>,
+  sessionId?: string | null,
+  fallback?: PendingActionFallback,
+): { clarification: boolean; permission: boolean } {
+  if (!sessionId) return { clarification: false, permission: false };
+  const clarKey = pendingClarKey(sessionId);
+  const permKey = pendingPermKey(sessionId);
+  const hasMessageFlags =
+    Object.prototype.hasOwnProperty.call(pendingFlags, clarKey) ||
+    Object.prototype.hasOwnProperty.call(pendingFlags, permKey);
+  if (!hasMessageFlags) return fallbackPendingFlags(fallback);
+  return {
+    clarification: pendingFlags[clarKey] ?? false,
+    permission: pendingFlags[permKey] ?? false,
+  };
+}
 
 export type SidebarStepInfo = {
   id: string;

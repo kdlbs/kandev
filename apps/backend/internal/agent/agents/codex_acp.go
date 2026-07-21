@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -15,7 +16,7 @@ var codexACPLogoLight []byte
 //go:embed logos/codex_dark.svg
 var codexACPLogoDark []byte
 
-const codexACPPkg = "@zed-industries/codex-acp"
+const codexACPPkg = "@agentclientprotocol/codex-acp"
 
 var (
 	_ Agent            = (*CodexACP)(nil)
@@ -23,25 +24,44 @@ var (
 	_ InferenceAgent   = (*CodexACP)(nil)
 )
 
-// CodexACP implements Agent for the Zed Industries codex-acp package.
-// It speaks the ACP protocol (JSON-RPC 2.0 over stdin/stdout) via a Rust binary
-// wrapping OpenAI Codex. Used for A/B comparison against the native Codex agent.
+// CodexACP implements Agent for the Agent Client Protocol codex-acp package.
+// It speaks the ACP protocol (JSON-RPC 2.0 over stdin/stdout) through the npm
+// bridge for OpenAI Codex. Used for A/B comparison against the native Codex agent.
 type CodexACP struct {
 	StandardPassthrough
+}
+
+// codexPassthroughPermSettings maps passthrough-only toggles to @openai/codex CLI
+// flags. Not returned from PermissionSettings(): ACP auto-approve uses agentctl
+// approval_policy. The legacy --full-auto flag was removed; auto_approve uses
+// --ask-for-approval never.
+var codexPassthroughPermSettings = map[string]PermissionSetting{
+	PermissionKeyAutoApprove: {
+		Supported:    true,
+		Default:      true,
+		Label:        "Auto approve",
+		Description:  "Skip command approval prompts (--ask-for-approval never)",
+		ApplyMethod:  PermissionApplyMethodCLIFlag,
+		CLIFlag:      "--ask-for-approval",
+		CLIFlagValue: "never",
+	},
 }
 
 func NewCodexACP() *CodexACP {
 	return &CodexACP{
 		StandardPassthrough: StandardPassthrough{
-			PermSettings: emptyPermSettings,
+			PermSettings: codexPassthroughPermSettings,
 			Cfg: PassthroughConfig{
-				Supported:      true,
-				Label:          "CLI Passthrough",
-				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("npx", "-y", "@openai/codex", "--full-auto"),
-				ModelFlag:      NewParam("--model", "{model}"),
-				IdleTimeout:    3 * time.Second,
-				BufferMaxBytes: DefaultBufferMaxBytes,
+				Supported:        true,
+				Label:            "CLI Passthrough",
+				Description:      "Show terminal directly instead of chat interface",
+				PassthroughCmd:   NewCommand("npx", "-y", "@openai/codex"),
+				ModelFlag:        NewParam("--model", "{model}"),
+				IdleTimeout:      3 * time.Second,
+				BufferMaxBytes:   DefaultBufferMaxBytes,
+				MCPStrategy:      mcpconfig.CodexStrategy{},
+				AutoInjectPrompt: true,
+				SubmitSequence:   "\r",
 			},
 		},
 	}
@@ -51,7 +71,7 @@ func (a *CodexACP) ID() string          { return "codex-acp" }
 func (a *CodexACP) Name() string        { return "Codex ACP Agent" }
 func (a *CodexACP) DisplayName() string { return "Codex" }
 func (a *CodexACP) Description() string {
-	return "OpenAI Codex coding agent using the ACP protocol via the Zed Industries bridge."
+	return "OpenAI Codex coding agent using the Agent Client Protocol bridge."
 }
 func (a *CodexACP) Enabled() bool     { return true }
 func (a *CodexACP) DisplayOrder() int { return 2 }
@@ -140,8 +160,7 @@ func (a *CodexACP) LoginCommand() *LoginCommand {
 }
 
 // Install both the user-facing OpenAI codex CLI (which `codex login` runs
-// against) and the ACP bridge package — the bridge wraps codex internally
-// and depends on it being on PATH.
+// against) and the ACP bridge package used for chat sessions.
 func (a *CodexACP) InstallScript() string {
 	return "npm install -g @openai/codex " + codexACPPkg
 }

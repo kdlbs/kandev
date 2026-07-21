@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "@/components/routing/app-link";
+import { useEffect, useMemo, useState } from "react";
 import { IconExternalLink, IconHexagon, IconPlus, IconSearch } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@kandev/ui/avatar";
@@ -25,11 +25,13 @@ import {
 } from "@/components/linear/linear-issue-common";
 import { LinearIssueDialog } from "@/components/linear/linear-issue-dialog";
 import { LinearQuickTaskLauncher } from "@/components/linear/linear-quick-task-launcher";
-import { getLinearConfig, listLinearTeams, searchLinearIssues } from "@/lib/api/domains/linear-api";
+import { getLinearConfig, listLinearTeams } from "@/lib/api/domains/linear-api";
+import {
+  useLinearIssueSearch,
+  type LinearSearchState,
+} from "@/components/linear/use-linear-issue-search";
 import type { LinearIssue, LinearTeam } from "@/lib/types/linear";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
-
-const PAGE_SIZE = 25;
 
 type LinearPageClientProps = {
   workspaceId?: string;
@@ -69,13 +71,13 @@ function useLinearPageData(workspaceId?: string) {
         return;
       }
       try {
-        const cfg = await getLinearConfig();
+        const cfg = await getLinearConfig({ workspaceId });
         if (cancelled) return;
         const ok = !!cfg && cfg.hasSecret;
         setConfigured(ok);
         if (ok) {
           try {
-            const list = await listLinearTeams();
+            const list = await listLinearTeams({ workspaceId });
             if (!cancelled) setTeams(list.teams ?? []);
           } catch {
             // Non-fatal: team filter just stays empty.
@@ -92,100 +94,6 @@ function useLinearPageData(workspaceId?: string) {
   }, [workspaceId]);
 
   return { loaded, configured, teams };
-}
-
-type SearchState = {
-  items: LinearIssue[];
-  loading: boolean;
-  error: string | null;
-  page: number;
-  pageSize: number;
-  isLast: boolean;
-  goNext: () => void;
-  goPrev: () => void;
-};
-
-// useIssueSearch is page-based: it caches each page's cursor in `tokensRef` so
-// the user can step backward without re-querying from the first page. Linear
-// returns no total count, so the UI shows a row range plus a Page N indicator.
-function useIssueSearch(
-  workspaceId: string | undefined,
-  query: string,
-  teamKey: string,
-  assigned: string,
-): SearchState {
-  const [items, setItems] = useState<LinearIssue[]>([]);
-  const [page, setPage] = useState(1);
-  const [isLast, setIsLast] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // tokens[i] is the page_token for page i+1; tokens[0] is always "".
-  const tokensRef = useRef<string[]>([""]);
-  const reqRef = useRef(0);
-
-  const fetchPage = useCallback(
-    (p: number) =>
-      searchLinearIssues({
-        query: query || undefined,
-        teamKey: teamKey || undefined,
-        assigned: assigned || undefined,
-        pageToken: tokensRef.current[p - 1] || undefined,
-        maxResults: PAGE_SIZE,
-      }),
-    [query, teamKey, assigned],
-  );
-
-  const run = useCallback(
-    async (p: number) => {
-      if (!workspaceId) return;
-      const reqId = ++reqRef.current;
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetchPage(p);
-        if (reqId !== reqRef.current) return;
-        setItems(res.issues ?? []);
-        setIsLast(res.isLast ?? true);
-        if (!res.isLast && res.nextPageToken) {
-          tokensRef.current[p] = res.nextPageToken;
-        }
-      } catch (err) {
-        if (reqId !== reqRef.current) return;
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (reqId === reqRef.current) setLoading(false);
-      }
-    },
-    [workspaceId, fetchPage],
-  );
-
-  // Reset cursor stack and snap back to page 1 when filters change.
-  useEffect(() => {
-    tokensRef.current = [""];
-    setPage(1);
-  }, [workspaceId, query, teamKey, assigned]);
-
-  // 250ms debounce keeps the keyboard input from firing a request per char.
-  useEffect(() => {
-    if (!workspaceId) return;
-    const id = setTimeout(() => void run(page), 250);
-    return () => clearTimeout(id);
-  }, [run, page, workspaceId]);
-
-  return {
-    items,
-    loading,
-    error,
-    page,
-    pageSize: PAGE_SIZE,
-    isLast,
-    goNext: () => {
-      if (!isLast) setPage((p) => p + 1);
-    },
-    goPrev: () => {
-      setPage((p) => Math.max(1, p - 1));
-    },
-  };
 }
 
 function AssigneeCell({ issue }: { issue: LinearIssue }) {
@@ -280,7 +188,7 @@ function FilterControls({
       <div className="relative flex-1 min-w-[280px]">
         <IconSearch className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search title or description"
+          placeholder="Search by ID, title, or description"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="pl-8"
@@ -411,7 +319,7 @@ function ResultsArea({
   onOpen,
   onStartTask,
 }: {
-  search: SearchState;
+  search: LinearSearchState;
   empty: boolean;
   onOpen: (issue: LinearIssue) => void;
   onStartTask: (issue: LinearIssue) => void;
@@ -439,13 +347,16 @@ function ResultsArea({
 }
 
 export function LinearPageClient({ workspaceId, workflows, steps }: LinearPageClientProps) {
-  const available = useLinearAvailable();
+  const available = useLinearAvailable(workspaceId);
   const { loaded, configured, teams } = useLinearPageData(workspaceId);
 
   const [query, setQuery] = useState("");
   const [teamKey, setTeamKey] = useState("");
   const [assigned, setAssigned] = useState("me");
-  const search = useIssueSearch(workspaceId, query, teamKey, assigned);
+  // Only fetch issues once the integration is configured and available — the
+  // same condition under which the results list (rather than a notice) renders.
+  const searchEnabled = loaded && configured && available;
+  const search = useLinearIssueSearch(workspaceId, query, teamKey, assigned, searchEnabled);
 
   const [openIssue, setOpenIssue] = useState<LinearIssue | null>(null);
   const [launchIssue, setLaunchIssue] = useState<LinearIssue | null>(null);

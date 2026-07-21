@@ -1,3 +1,5 @@
+import type { Window as HappyDOMWindow } from "happy-dom";
+
 function createLocalStorageMock(): Storage {
   const store = new Map<string, string>();
 
@@ -31,6 +33,12 @@ Object.defineProperty(globalThis, "localStorage", {
 });
 
 if (typeof window !== "undefined") {
+  const happyDOMWindow = window as unknown as HappyDOMWindow;
+  happyDOMWindow.happyDOM.settings.fetch.interceptor = {
+    beforeAsyncRequest: ({ window: requestWindow }) =>
+      Promise.resolve(new requestWindow.Response(null, { status: 404 })),
+  };
+
   Object.defineProperty(window, "localStorage", {
     configurable: true,
     value: localStorageMock,

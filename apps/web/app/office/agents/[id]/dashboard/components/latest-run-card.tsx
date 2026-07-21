@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconChevronRight } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent } from "@kandev/ui/card";

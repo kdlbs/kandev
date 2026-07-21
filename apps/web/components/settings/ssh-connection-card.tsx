@@ -1,0 +1,492 @@
+"use client";
+
+import { useCallback, useState } from "react";
+import { Badge } from "@kandev/ui/badge";
+import { Button } from "@kandev/ui/button";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import {
+  IconCheck,
+  IconLoader2,
+  IconShieldLock,
+  IconTerminal2,
+  IconTestPipe,
+  IconX,
+} from "@tabler/icons-react";
+import { testSSHConnection } from "@/lib/api/domains/ssh-api";
+import { FingerprintTrustBlock } from "@/components/settings/ssh-fingerprint-trust-block";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { SSHConnectionForm } from "@/components/settings/ssh-connection-form";
+import {
+  SettingsSaveCancelledError,
+  useSettingsSaveContributor,
+} from "@/components/settings/settings-save-provider";
+import type {
+  SSHIdentitySource,
+  SSHTestRequest,
+  SSHTestResult,
+  SSHTestStep,
+} from "@/lib/types/http-ssh";
+
+// SSHExecutorConfig is the shape we persist into executor.Config on save.
+// The host_fingerprint is set only after a successful Test Connection has
+// completed and the user has ticked "Trust this host".
+export interface SSHExecutorConfig {
+  name: string;
+  host_alias?: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  identity_source: SSHIdentitySource;
+  identity_file?: string;
+  proxy_jump?: string;
+  host_fingerprint?: string;
+}
+
+export interface SSHConnectionCardProps {
+  initial?: Partial<SSHExecutorConfig>;
+  // Called when the user clicks Save after a successful test+trust. The
+  // returned config carries the freshly pinned fingerprint.
+  onSave: (config: SSHExecutorConfig) => Promise<void> | void;
+  // Existing executor routes opt into the shared settings save coordinator.
+  // Create flows omit this and retain their local Save button.
+  coordinatedSaveId?: string;
+  // Existing running sessions for this executor. Triggers the
+  // "this won't affect existing sessions" warning on save.
+  runningSessionCount?: number;
+}
+
+interface SSHConnectionState {
+  form: SSHExecutorConfig;
+  testing: boolean;
+  saving: boolean;
+  result: SSHTestResult | null;
+  // resultStale flips true when the user edits a connection-affecting field
+  // after a successful test, so the prior fingerprint cannot be trusted for
+  // the current form. The result stays visible (the trust-gate spec expects
+  // the checkbox to render) but trust + save are gated off until the user
+  // re-runs Test Connection.
+  resultStale: boolean;
+  trust: boolean;
+  error: string | null;
+}
+
+// Fields whose value, if changed, could route the next connection to a
+// different machine — editing any of them invalidates the current trust tick
+// so the user must re-test against the new target.
+const CONNECTION_FIELDS = new Set<keyof SSHExecutorConfig>([
+  "host_alias",
+  "host",
+  "port",
+  "user",
+  "identity_source",
+  "identity_file",
+  "proxy_jump",
+]);
+
+const SSH_FORM_DEFAULTS: SSHExecutorConfig = {
+  name: "",
+  host_alias: "",
+  host: "",
+  port: 22,
+  user: "",
+  identity_source: "agent",
+  identity_file: "",
+  proxy_jump: "",
+  host_fingerprint: undefined,
+};
+
+function initialState(initial?: Partial<SSHExecutorConfig>): SSHConnectionState {
+  return {
+    form: { ...SSH_FORM_DEFAULTS, ...(initial ?? {}) },
+    testing: false,
+    saving: false,
+    result: null,
+    resultStale: false,
+    trust: false,
+    error: null,
+  };
+}
+
+function confirmRunningSessions(count?: number): boolean {
+  if (!count) return true;
+  return window.confirm(
+    `This executor has ${count} running session(s). ` +
+      "They will keep running on the current host. Only new sessions started " +
+      "after save will use the updated config. Continue?",
+  );
+}
+
+type CoordinatedSSHSaveOptions = {
+  id?: string;
+  form: SSHExecutorConfig;
+  baseline: SSHExecutorConfig;
+  canSave: boolean;
+  save: () => Promise<void>;
+  discard: () => void;
+};
+
+function useCoordinatedSSHSave({
+  id,
+  form,
+  baseline,
+  canSave,
+  save,
+  discard,
+}: CoordinatedSSHSaveOptions) {
+  const revision = JSON.stringify(form);
+  useSettingsSaveContributor({
+    id: id ?? "ssh-connection-create",
+    revision,
+    isDirty: Boolean(id) && revision !== JSON.stringify(baseline),
+    canSave,
+    invalidReason: canSave ? undefined : "Test the connection and trust its fingerprint to save.",
+    save,
+    discard,
+  });
+}
+
+function canTestConnection(form: SSHExecutorConfig, testing: boolean): boolean {
+  if (testing || form.name.trim() === "") return false;
+  return (form.host ?? "").trim() !== "" || (form.host_alias ?? "").trim() !== "";
+}
+
+function useSSHConnection(props: SSHConnectionCardProps) {
+  const [state, setState] = useState<SSHConnectionState>(() => initialState(props.initial));
+  const [baseline, setBaseline] = useState(() => initialState(props.initial).form);
+  const { form, testing, saving, result, resultStale, trust, error } = state;
+  const isDirty =
+    Boolean(props.coordinatedSaveId) && JSON.stringify(form) !== JSON.stringify(baseline);
+
+  const update = useCallback(
+    <K extends keyof SSHExecutorConfig>(key: K, value: SSHExecutorConfig[K]) => {
+      setState((prev) => {
+        const isConnectionField = CONNECTION_FIELDS.has(key);
+        // A connection edit invalidates the prior result. Mark stale when
+        // a test result is already on screen OR a test is mid-flight — in
+        // the latter case handleTest will see the staleness on completion
+        // and refuse to clear it, so a fingerprint returned for the old
+        // form can't be trusted against the new one.
+        const staleAfter = isConnectionField
+          ? prev.result !== null || prev.testing || prev.resultStale
+          : prev.resultStale;
+        return {
+          ...prev,
+          form: { ...prev.form, [key]: value },
+          resultStale: staleAfter,
+          trust: isConnectionField ? false : prev.trust,
+          error: null,
+        };
+      });
+    },
+    [],
+  );
+
+  const setTrust = useCallback((v: boolean) => setState((prev) => ({ ...prev, trust: v })), []);
+
+  const canTest = canTestConnection(form, testing);
+
+  const handleTest = useCallback(async () => {
+    setState((prev) => ({
+      ...prev,
+      testing: true,
+      result: null,
+      resultStale: false,
+      error: null,
+    }));
+    try {
+      const req: SSHTestRequest = {
+        name: form.name,
+        host_alias: form.host_alias || undefined,
+        host: form.host || undefined,
+        port: form.port || undefined,
+        user: form.user || undefined,
+        identity_source: form.identity_source,
+        identity_file: form.identity_file || undefined,
+        proxy_jump: form.proxy_jump || undefined,
+      };
+      const res = await testSSHConnection(req);
+      setState((prev) => ({
+        ...prev,
+        result: res,
+        // Preserve resultStale if the user edited a connection field while
+        // the test was in flight — the returned fingerprint is bound to the
+        // old form and must not be trusted against the new target.
+        resultStale: prev.resultStale,
+        testing: false,
+      }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to reach backend";
+      setState((prev) => ({ ...prev, error: msg, testing: false }));
+    }
+  }, [form]);
+
+  const canSave = !!result?.success && !!result.fingerprint && trust && !resultStale && !saving;
+
+  const handleSave = useCallback(async () => {
+    if (!canSave || !result?.fingerprint) throw new Error("Test and trust this host before saving");
+    if (!confirmRunningSessions(props.runningSessionCount)) throw new SettingsSaveCancelledError();
+    const submitted = form;
+    setState((prev) => ({ ...prev, saving: true, error: null }));
+    try {
+      await props.onSave({ ...submitted, host_fingerprint: result.fingerprint });
+      setBaseline(submitted);
+      setState((prev) => ({ ...prev, saving: false }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to save executor";
+      setState((prev) => ({ ...prev, saving: false, error: msg }));
+      throw e;
+    }
+  }, [canSave, form, props, result]);
+
+  useCoordinatedSSHSave({
+    id: props.coordinatedSaveId,
+    form,
+    baseline,
+    canSave,
+    save: handleSave,
+    discard: () => setState(initialState(baseline)),
+  });
+
+  return {
+    form,
+    testing,
+    saving,
+    result,
+    resultStale,
+    trust,
+    error,
+    canTest,
+    canSave,
+    update,
+    setTrust,
+    handleTest,
+    handleSave,
+    baseline,
+    isDirty,
+  };
+}
+
+export function SSHConnectionCard(props: SSHConnectionCardProps) {
+  const c = useSSHConnection(props);
+  return (
+    <SettingsCard isDirty={c.isDirty} data-testid="ssh-connection-card">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <IconTerminal2 className="h-5 w-5" />
+              Connection
+            </CardTitle>
+            <CardDescription>
+              Run an agent on Linux amd64 or macOS hosts you can reach over SSH.
+            </CardDescription>
+          </div>
+          <ConnectionBadge fingerprint={c.form.host_fingerprint} />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <SSHConnectionForm form={c.form} baseline={c.baseline} onChange={c.update} />
+        {c.form.host_fingerprint && <PinnedFingerprintRow fingerprint={c.form.host_fingerprint} />}
+        <SSHConnectionActions
+          testing={c.testing}
+          saving={c.saving}
+          canTest={c.canTest}
+          canSave={c.canSave}
+          onTest={c.handleTest}
+          onSave={c.handleSave}
+          showSave={!props.coordinatedSaveId}
+        />
+        {c.error && (
+          <p data-testid="ssh-error" className="text-sm text-red-600">
+            {c.error}
+          </p>
+        )}
+        {c.result && (
+          <TestResultDisplay
+            result={c.result}
+            trust={c.trust}
+            resultStale={c.resultStale}
+            onTrustChange={c.setTrust}
+            currentlyPinned={c.form.host_fingerprint}
+          />
+        )}
+      </CardContent>
+    </SettingsCard>
+  );
+}
+
+function PinnedFingerprintRow({ fingerprint }: { fingerprint: string }) {
+  return (
+    <div
+      data-testid="ssh-fingerprint-pinned"
+      className="rounded-md border bg-muted/40 px-3 py-2 text-xs flex items-center gap-2"
+    >
+      <IconShieldLock className="h-4 w-4 shrink-0" />
+      <span className="text-muted-foreground">
+        Pinned fingerprint:{" "}
+        <code data-testid="ssh-fingerprint-pinned-value" className="font-mono">
+          {fingerprint}
+        </code>
+      </span>
+    </div>
+  );
+}
+
+function SSHConnectionActions({
+  testing,
+  saving,
+  canTest,
+  canSave,
+  onTest,
+  onSave,
+  showSave,
+}: {
+  testing: boolean;
+  saving: boolean;
+  canTest: boolean;
+  canSave: boolean;
+  onTest: () => void;
+  onSave: () => void;
+  showSave: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onTest}
+        disabled={!canTest}
+        data-testid="ssh-test-button"
+        className="cursor-pointer"
+      >
+        {testing ? (
+          <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" />
+        ) : (
+          <IconTestPipe className="mr-1.5 h-4 w-4" />
+        )}
+        Test connection
+      </Button>
+      {showSave && (
+        <Button
+          size="sm"
+          onClick={onSave}
+          disabled={!canSave}
+          data-testid="ssh-save-button"
+          className="cursor-pointer"
+        >
+          {saving ? <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+          Save
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function ConnectionBadge({ fingerprint }: { fingerprint?: string }) {
+  if (!fingerprint) {
+    return (
+      <Badge data-testid="ssh-connection-badge" data-status="unverified" variant="secondary">
+        Unverified
+      </Badge>
+    );
+  }
+  return (
+    <Badge
+      data-testid="ssh-connection-badge"
+      data-status="trusted"
+      variant="default"
+      className="bg-green-600"
+    >
+      Trusted
+    </Badge>
+  );
+}
+
+function TestResultDisplay({
+  result,
+  trust,
+  resultStale,
+  onTrustChange,
+  currentlyPinned,
+}: {
+  result: SSHTestResult;
+  trust: boolean;
+  resultStale: boolean;
+  onTrustChange: (v: boolean) => void;
+  currentlyPinned?: string;
+}) {
+  return (
+    <div
+      data-testid="ssh-test-result"
+      data-success={result.success ? "true" : "false"}
+      className="rounded-md border p-3 space-y-2"
+    >
+      <TestResultHeader success={result.success} totalMs={result.total_duration_ms} />
+      {result.steps.map((step: SSHTestStep) => (
+        <StepRow key={step.name} step={step} />
+      ))}
+      {result.error && !result.steps.some((s) => s.error) && (
+        <p data-testid="ssh-test-result-error" className="text-sm text-red-600">
+          {result.error}
+        </p>
+      )}
+      {result.success && result.fingerprint && (
+        <FingerprintTrustBlock
+          fingerprint={result.fingerprint}
+          currentlyPinned={currentlyPinned}
+          trust={trust}
+          resultStale={resultStale}
+          onTrustChange={onTrustChange}
+        />
+      )}
+    </div>
+  );
+}
+
+function TestResultHeader({ success, totalMs }: { success: boolean; totalMs: number }) {
+  return (
+    <div
+      data-testid={success ? "ssh-test-result-success" : "ssh-test-result-failure"}
+      className="flex items-center gap-2 text-sm font-medium"
+    >
+      {success ? (
+        <IconCheck className="h-4 w-4 text-green-600" />
+      ) : (
+        <IconX className="h-4 w-4 text-red-600" />
+      )}
+      {success ? "Connection test passed" : "Connection test failed"}
+      <span className="text-muted-foreground font-normal">({totalMs}ms)</span>
+    </div>
+  );
+}
+
+function StepRow({ step }: { step: SSHTestStep }) {
+  const slug = step.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return (
+    <div
+      data-testid={`ssh-test-step-${slug}`}
+      data-success={step.success ? "true" : "false"}
+      className="flex items-start gap-2 text-sm pl-2"
+    >
+      {step.success ? (
+        <IconCheck className="h-3 w-3 text-green-600 shrink-0 mt-1" />
+      ) : (
+        <IconX className="h-3 w-3 text-red-600 shrink-0 mt-1" />
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span>{step.name}</span>
+          <span className="text-muted-foreground text-xs">({step.duration_ms}ms)</span>
+        </div>
+        {step.output && (
+          <p className="text-xs text-muted-foreground truncate font-mono">{step.output}</p>
+        )}
+        {step.error && (
+          <p data-testid={`ssh-test-step-${slug}-error`} className="text-xs text-red-600 truncate">
+            {step.error}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}

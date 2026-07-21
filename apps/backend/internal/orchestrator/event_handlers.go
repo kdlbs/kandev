@@ -69,6 +69,12 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expec
 			zap.String("expected_exec_id", expectedExecID),
 			zap.String("resume_token", acpSessionID),
 			zap.String("last_message_uuid", lastMessageUUID))
+		// The CAS above proved the token belongs to the session's current
+		// execution — mirror it into the session's durable "acp" metadata
+		// too. executors_running rows are operational state and get pruned;
+		// without this, the ACP session id only survives for agents that
+		// happen to emit a session_info frame (handleSessionInfoEvent).
+		s.persistACPSessionID(ctx, sessionID, acpSessionID)
 	case errors.Is(err, models.ErrExecutionRotated):
 		// The row's agent_execution_id has rotated since the event was emitted —
 		// the token belongs to a defunct execution and must be dropped. The new
@@ -93,6 +99,27 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expec
 		s.logger.Warn("failed to persist resume token for session",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+// persistACPSessionID mirrors the agent's ACP session id into the session's
+// "acp" metadata map. Best-effort: resume correctness never depends on this
+// copy — it exists so the id survives executors_running cleanup for consumers
+// that join sessions to agent-CLI artifacts (e.g. transcript-based usage
+// stats). The repo performs the mirror as a single guarded UPDATE: it merges
+// into the existing acp map (preserving session_info keys), skips when the
+// stored id is already current, and only writes while executors_running still
+// holds acpSessionID as the resume token — so a stale event from a rotated
+// execution can never overwrite the live execution's id.
+func (s *Service) persistACPSessionID(ctx context.Context, sessionID, acpSessionID string) {
+	if sessionID == "" || acpSessionID == "" || s.repo == nil {
+		return
+	}
+	if _, err := s.repo.SetSessionACPSessionID(ctx, sessionID, acpSessionID); err != nil {
+		s.logger.Warn("failed to persist ACP session id to session metadata",
+			zap.String("session_id", sessionID),
+			zap.String("acp_session_id", acpSessionID),
 			zap.Error(err))
 	}
 }

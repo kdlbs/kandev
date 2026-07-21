@@ -43,6 +43,8 @@ type AgentCapabilities struct {
 	Modes         []Mode `json:"modes,omitempty"`
 	CurrentModeID string `json:"current_mode_id,omitempty"`
 
+	ConfigOptions []ConfigOption `json:"config_options,omitempty"`
+
 	Commands []Command `json:"commands,omitempty"`
 
 	LastCheckedAt time.Time `json:"last_checked_at"`
@@ -89,6 +91,22 @@ type Mode struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	Meta        map[string]any `json:"meta,omitempty"`
+}
+
+type ConfigOption struct {
+	Type         string               `json:"type"`
+	ID           string               `json:"id"`
+	Name         string               `json:"name"`
+	Description  string               `json:"description,omitempty"`
+	CurrentValue string               `json:"current_value"`
+	Category     string               `json:"category,omitempty"`
+	Options      []ConfigOptionChoice `json:"options,omitempty"`
+}
+
+type ConfigOptionChoice struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // PromptResult is returned from ExecutePrompt and RawPrompt calls.

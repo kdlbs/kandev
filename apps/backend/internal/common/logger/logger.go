@@ -4,6 +4,7 @@ package logger
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"go.uber.org/zap"
@@ -267,4 +268,24 @@ func (l *Logger) Sugar() *zap.SugaredLogger {
 // process-wide log ring buffer used by Improve Kandev reports.
 func (l *Logger) BufferSnapshot() []buffer.Entry {
 	return buffer.Default().Snapshot()
+}
+
+// LogDirectory returns the directory containing the rotating log file managed
+// by lumberjack, or empty string when the logger is writing to stdout/stderr
+// (no file rotation configured). Powers the System -> Logs page enumeration.
+func (l *Logger) LogDirectory() string {
+	if l == nil || l.rotator == nil || l.rotator.Filename == "" {
+		return ""
+	}
+	return filepath.Dir(l.rotator.Filename)
+}
+
+// LogFilename returns the base filename (no directory) of the active
+// lumberjack log, e.g. "kandev.log". Rotated files use the same base with a
+// timestamp suffix. Empty when no file logging is configured.
+func (l *Logger) LogFilename() string {
+	if l == nil || l.rotator == nil || l.rotator.Filename == "" {
+		return ""
+	}
+	return filepath.Base(l.rotator.Filename)
 }

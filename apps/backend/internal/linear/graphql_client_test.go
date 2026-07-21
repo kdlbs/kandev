@@ -254,3 +254,233 @@ func TestBuildIssueFilter_DropsEmpty(t *testing.T) {
 		t.Error("expected assignee filter")
 	}
 }
+
+func TestBuildIssueFilter_RichFilters(t *testing.T) {
+	min := 1.0
+	max := 5.0
+	got := buildIssueFilter(SearchFilter{
+		Priorities:  []int{1, 2},
+		LabelIDs:    []string{"l1", "l2"},
+		CreatorID:   "u1",
+		EstimateMin: &min,
+		EstimateMax: &max,
+	})
+	prioBlock, ok := got["priority"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing priority filter: %+v", got)
+	}
+	prioIn, _ := prioBlock["in"].([]int)
+	if len(prioIn) != 2 || prioIn[0] != 1 || prioIn[1] != 2 {
+		t.Errorf("priority filter mismatch: %+v", prioBlock)
+	}
+	labelBlock, ok := got["labels"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing labels filter: %+v", got)
+	}
+	some, _ := labelBlock["some"].(map[string]interface{})
+	idBlock, _ := some["id"].(map[string]interface{})
+	in, _ := idBlock["in"].([]string)
+	if len(in) != 2 || in[0] != "l1" {
+		t.Errorf("label ids mismatch: %+v", labelBlock)
+	}
+	creator, _ := got["creator"].(map[string]interface{})
+	idEq, _ := creator["id"].(map[string]interface{})
+	if idEq["eq"] != "u1" {
+		t.Errorf("creator filter mismatch: %+v", got["creator"])
+	}
+	est, ok := got["estimate"].(map[string]interface{})
+	if !ok || est["gte"] != 1.0 || est["lte"] != 5.0 {
+		t.Errorf("estimate filter mismatch: %+v", got["estimate"])
+	}
+}
+
+func TestBuildIssueFilter_PriorityZero(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Priorities: []int{0}})
+	prio, _ := got["priority"].(map[string]interface{})
+	in, _ := prio["in"].([]int)
+	if len(in) != 1 || in[0] != 0 {
+		t.Errorf("priorities=[0] should map to in:[0] (No priority), got %+v", prio)
+	}
+}
+
+func TestParseIssueIdentifier(t *testing.T) {
+	cases := []struct {
+		in      string
+		wantKey string
+		wantNum int
+		wantOK  bool
+	}{
+		{"ENG-123", "ENG", 123, true},
+		{"eng-123", "ENG", 123, true},
+		{"ENG_1-2", "ENG_1", 2, true},
+		{" eng-1 ", "ENG", 1, true},
+		{"ENG-007", "ENG", 7, true},
+		{"", "", 0, false},
+		{"ENG-", "", 0, false},
+		{"-123", "", 0, false},
+		{"ENG-abc", "", 0, false},
+		{"ENG-12-34", "", 0, false},
+		{"1-2", "", 0, false},
+		{"auth bug", "", 0, false},
+	}
+	for _, tc := range cases {
+		gotKey, gotNum, gotOK := parseIssueIdentifier(tc.in)
+		if gotOK != tc.wantOK || gotKey != tc.wantKey || gotNum != tc.wantNum {
+			t.Errorf("parseIssueIdentifier(%q) = (%q,%d,%v), want (%q,%d,%v)",
+				tc.in, gotKey, gotNum, gotOK, tc.wantKey, tc.wantNum, tc.wantOK)
+		}
+	}
+}
+
+func TestBuildIssueFilter_IdentifierQuery(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Query: "ENG-123"})
+	if _, ok := got["searchableContent"]; ok {
+		t.Error("identifier query should not set top-level searchableContent")
+	}
+	or, ok := got["or"].([]map[string]interface{})
+	if !ok || len(or) != 2 {
+		t.Fatalf("expected or with 2 branches, got %+v", got["or"])
+	}
+	sc, _ := or[0]["searchableContent"].(map[string]interface{})
+	if sc["contains"] != "ENG-123" {
+		t.Errorf("first OR branch should match searchableContent.contains on raw query, got %+v", or[0])
+	}
+	if _, bad := sc["containsIgnoreCase"]; bad {
+		t.Error("searchableContent must not use containsIgnoreCase (Linear rejects it with 400)")
+	}
+	team, _ := or[1]["team"].(map[string]interface{})
+	teamKey, _ := team["key"].(map[string]interface{})
+	if teamKey["eq"] != "ENG" {
+		t.Errorf("second OR branch team.key.eq mismatch: %+v", or[1])
+	}
+	num, _ := or[1]["number"].(map[string]interface{})
+	if num["eq"] != 123 {
+		t.Errorf("second OR branch number.eq mismatch: %+v", or[1])
+	}
+}
+
+func TestBuildIssueFilter_IdentifierLowercase(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Query: "eng-123"})
+	or, ok := got["or"].([]map[string]interface{})
+	if !ok || len(or) != 2 {
+		t.Fatalf("expected or with 2 branches, got %+v", got["or"])
+	}
+	sc, _ := or[0]["searchableContent"].(map[string]interface{})
+	if sc["contains"] != "eng-123" {
+		t.Errorf("searchableContent branch should preserve raw query under contains, got %+v", sc)
+	}
+	team, _ := or[1]["team"].(map[string]interface{})
+	teamKey, _ := team["key"].(map[string]interface{})
+	if teamKey["eq"] != "ENG" {
+		t.Errorf("expected upper-cased team key ENG, got %+v", teamKey)
+	}
+}
+
+func TestBuildIssueFilter_IdentifierComposesWithFilters(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{
+		Query:    "ENG-123",
+		TeamKey:  "ENG",
+		Assigned: "me",
+		StateIDs: []string{"s1"},
+	})
+	if _, ok := got["or"]; !ok {
+		t.Error("expected or branch alongside other filters")
+	}
+	if _, ok := got["team"]; !ok {
+		t.Error("expected top-level team filter to remain AND-joined")
+	}
+	if _, ok := got["assignee"]; !ok {
+		t.Error("expected top-level assignee filter to remain AND-joined")
+	}
+	if _, ok := got["state"]; !ok {
+		t.Error("expected top-level state filter to remain AND-joined")
+	}
+}
+
+func TestBuildIssueFilter_NonIdentifierUnchanged(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Query: "auth bug"})
+	sc, ok := got["searchableContent"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected top-level searchableContent for non-identifier query, got %+v", got)
+	}
+	if sc["contains"] != "auth bug" {
+		t.Errorf("searchableContent.contains mismatch: %+v", sc)
+	}
+	if _, bad := sc["containsIgnoreCase"]; bad {
+		t.Error("searchableContent must not use containsIgnoreCase (Linear rejects it with 400)")
+	}
+	if _, ok := got["or"]; ok {
+		t.Error("non-identifier query must not produce an or branch")
+	}
+}
+
+// TestBuildIssueFilter_BareNumber is the regression test for the "error when
+// searching" bug: searching a bare ticket number (e.g. "2438") must (a) never
+// emit containsIgnoreCase — the field Linear's ContentComparator rejects with a
+// BAD_USER_INPUT / status 400 — and (b) OR in an exact number match so the
+// target ticket is actually found (searchableContent never indexes the number).
+func TestBuildIssueFilter_BareNumber(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Query: "2438"})
+	if _, ok := got["searchableContent"]; ok {
+		t.Error("bare-number query should not set a top-level searchableContent filter")
+	}
+	or, ok := got["or"].([]map[string]interface{})
+	if !ok || len(or) != 2 {
+		t.Fatalf("expected or with 2 branches, got %+v", got["or"])
+	}
+	sc, _ := or[0]["searchableContent"].(map[string]interface{})
+	if sc["contains"] != "2438" {
+		t.Errorf("first OR branch should match searchableContent.contains on raw query, got %+v", or[0])
+	}
+	if _, bad := sc["containsIgnoreCase"]; bad {
+		t.Error("searchableContent must not use containsIgnoreCase (Linear rejects it with 400)")
+	}
+	num, _ := or[1]["number"].(map[string]interface{})
+	if num["eq"] != 2438 {
+		t.Errorf("second OR branch should match number.eq=2438, got %+v", or[1])
+	}
+	if _, ok := or[1]["team"]; ok {
+		t.Error("bare-number branch must not scope to a team key (number is matched across teams)")
+	}
+}
+
+// TestBuildIssueFilter_BareNumberComposesWithTeam mirrors the identifier
+// compose test for the bare-number path: a selected team must AND with the
+// number OR branch (Linear ANDs all top-level conditions) so the number search
+// is scoped to that team, and no separate top-level searchableContent leaks in.
+func TestBuildIssueFilter_BareNumberComposesWithTeam(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Query: "2438", TeamKey: "ENG"})
+	if _, ok := got["or"]; !ok {
+		t.Error("expected or branch for bare-number query")
+	}
+	if _, ok := got["team"]; !ok {
+		t.Error("expected top-level team filter to AND with the or branches")
+	}
+	if _, ok := got["searchableContent"]; ok {
+		t.Error("bare-number query must not set a separate top-level searchableContent")
+	}
+}
+
+func TestParseIssueNumber(t *testing.T) {
+	cases := []struct {
+		in     string
+		wantN  int
+		wantOK bool
+	}{
+		{"2438", 2438, true},
+		{" 2438 ", 2438, true},
+		{"007", 7, true},
+		{"", 0, false},
+		{"ENG-123", 0, false},
+		{"12a", 0, false},
+		{"-5", 0, false},
+		{"+5", 0, false},
+		{"99999999999999999999999999", 0, false}, // overflow → treated as free text
+	}
+	for _, tc := range cases {
+		gotN, gotOK := parseIssueNumber(tc.in)
+		if gotOK != tc.wantOK || gotN != tc.wantN {
+			t.Errorf("parseIssueNumber(%q) = (%d,%v), want (%d,%v)", tc.in, gotN, gotOK, tc.wantN, tc.wantOK)
+		}
+	}
+}

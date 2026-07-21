@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { balancedExecutionProfileRouting } from "../../helpers/office-routing";
 
 /**
  * Phase 7 spec #2 — provider fallback under quota_limited.
@@ -36,22 +37,25 @@ test.describe("Office provider routing — fallback", () => {
     await backend.restart();
   });
 
-  test("claude-acp quota fails over to codex-acp", async ({ backend, officeApi, officeSeed }) => {
+  test("claude-acp quota fails over to codex-acp", async ({
+    backend,
+    apiClient,
+    officeApi,
+    officeSeed,
+  }) => {
     test.setTimeout(90_000);
     await backend.restart({
       KANDEV_MOCK_PROVIDERS: "claude-acp,codex-acp,opencode-acp",
       KANDEV_PROVIDER_FAILURES: "claude-acp:quota_limited",
     });
 
-    await officeApi.updateRouting(officeSeed.workspaceId, {
-      enabled: true,
-      provider_order: ["claude-acp", "codex-acp"],
-      default_tier: "balanced",
-      provider_profiles: {
-        "claude-acp": { tier_map: { balanced: "sonnet" }, mode: "default" },
-        "codex-acp": { tier_map: { balanced: "gpt-5" }, mode: "default" },
-      },
-    });
+    const routingConfig = await balancedExecutionProfileRouting(
+      apiClient,
+      officeApi,
+      officeSeed.workspaceId,
+      ["claude-acp", "codex-acp"],
+    );
+    await officeApi.updateRouting(officeSeed.workspaceId, routingConfig);
 
     const task = (await officeApi.createTask(officeSeed.workspaceId, "Fallback test", {
       workflow_id: officeSeed.workflowId,
@@ -70,7 +74,12 @@ test.describe("Office provider routing — fallback", () => {
     // walk to complete first — 40s rides that out without affecting
     // the happy path (resolves in <5s in isolation).
     const deadline = Date.now() + 40_000;
-    let attempts: Array<{ provider_id: string; outcome: string; error_code?: string }> = [];
+    let attempts: Array<{
+      provider_id: string;
+      execution_profile_id: string;
+      outcome: string;
+      error_code?: string;
+    }> = [];
     while (Date.now() < deadline) {
       const runs = (await officeApi.listRuns(officeSeed.workspaceId)) as {
         runs?: Array<{ id: string; task_id?: string }>;
@@ -86,9 +95,16 @@ test.describe("Office provider routing — fallback", () => {
 
     expect(attempts.length).toBeGreaterThanOrEqual(2);
     expect(attempts[0].provider_id).toBe("claude-acp");
+    expect(attempts[0].execution_profile_id).toBe(
+      routingConfig.provider_profiles["claude-acp"].execution_profile_ids.balanced,
+    );
     expect(attempts[0].outcome).toBe("failed_provider_unavailable");
     expect(attempts[0].error_code).toBe("quota_limited");
     expect(attempts[1].provider_id).toBe("codex-acp");
+    expect(attempts[1].execution_profile_id).toBe(
+      routingConfig.provider_profiles["codex-acp"].execution_profile_ids.balanced,
+    );
+    expect(attempts[1].execution_profile_id).not.toBe(attempts[0].execution_profile_id);
     expect(attempts[1].outcome).toBe("launched");
 
     const health = await officeApi.listRoutingHealth(officeSeed.workspaceId);

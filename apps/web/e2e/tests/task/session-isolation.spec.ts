@@ -37,7 +37,7 @@ test.describe("Session isolation", () => {
     await testPage.goto(`/t/${taskWithSession.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Verify there are messages in the chat (agent has responded)
     const chatPanel = testPage.getByTestId("session-chat");
@@ -56,17 +56,13 @@ test.describe("Session isolation", () => {
 
     // 5. Navigate to the session-less task directly via URL
     await testPage.goto(`/t/${taskWithoutSession.id}`);
-    await session.waitForLoad();
+    await expect(testPage.getByRole("link", { name: "Task Without Session" })).toBeVisible({
+      timeout: 5_000,
+    });
 
     // 6. The chat panel should NOT show the message from the previous task
     // This is the core assertion - we're testing that messages don't leak
     await expect(chatPanel.getByText(SIMPLE_MOCK_RESPONSE)).not.toBeVisible({ timeout: 5_000 });
-
-    // 7. Also verify the task title in the page matches the new task
-    // (ensuring we actually navigated to the correct task)
-    await expect(testPage.getByRole("link", { name: "Task Without Session" })).toBeVisible({
-      timeout: 5_000,
-    });
   });
 
   test("switching tasks via sidebar does not show messages from previous task", async ({
@@ -93,7 +89,7 @@ test.describe("Session isolation", () => {
     await testPage.goto(`/t/${taskA.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Verify mock response message is visible for first task
     const chatPanel = testPage.getByTestId("session-chat");
@@ -122,7 +118,7 @@ test.describe("Session isolation", () => {
       timeout: 10_000,
     });
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 7. The chat should NOT show messages from the first task's session
     // (the "simple-message" text should not appear for task B which uses "read-and-edit")

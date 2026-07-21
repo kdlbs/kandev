@@ -1,9 +1,11 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"go.uber.org/zap"
 )
@@ -24,7 +26,14 @@ func (s *Server) handleVscodeStart(c *gin.Context) {
 
 	// Start is non-blocking — it launches in a background goroutine.
 	// Port is allocated automatically using an OS-assigned random port.
-	s.procMgr.StartVscode(c.Request.Context(), req.Theme)
+	if err := s.procMgr.StartVscode(c.Request.Context(), req.Theme); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, process.ErrManagerStopping) {
+			status = http.StatusConflict
+		}
+		c.JSON(status, types.VscodeStartResponse{Error: err.Error()})
+		return
+	}
 	s.logger.Info("code-server start initiated", zap.String("theme", req.Theme))
 
 	// Return current status (will be "installing")

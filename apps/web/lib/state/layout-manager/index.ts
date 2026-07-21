@@ -15,18 +15,34 @@ export type {
 export {
   LAYOUT_SIDEBAR_RATIO,
   LAYOUT_RIGHT_RATIO,
-  LAYOUT_SIDEBAR_MAX_PX,
-  LAYOUT_RIGHT_MAX_PX,
   SIDEBAR_GROUP,
   CENTER_GROUP,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
   TERMINAL_DEFAULT_ID,
+  REUSABLE_PANEL_IDS,
   SIDEBAR_LOCK,
   KNOWN_PANEL_IDS,
   PANEL_REGISTRY,
   panel,
 } from "./constants";
+export type { ReusablePanelId } from "./constants";
+
+// Runtime caps for pinned columns
+export {
+  computeSidebarMaxPx,
+  computeRightMaxPx,
+  computePinnedMaxPxFor,
+  LAYOUT_PINNED_MIN_PX,
+} from "./caps";
+
+// Pinned-column target widths (enforced after every layout-change)
+export {
+  setPinnedTarget,
+  getPinnedTarget,
+  clearPinnedTarget,
+  clearAllPinnedTargets,
+} from "./pinned-targets";
 
 // Presets
 export {
@@ -35,7 +51,6 @@ export {
   planLayout,
   previewLayout,
   getPresetLayout,
-  getPresetSidebarColumn,
 } from "./presets";
 export type { BuiltInPreset } from "./presets";
 
@@ -45,8 +60,20 @@ export { computeColumnWidths, computeGroupHeights, getPinnedWidth } from "./sizi
 // Serializer
 export { toSerializedDockview, fromDockviewApi, filterEphemeral } from "./serializer";
 
+// Session panel normalization for reusable saved layouts
+export {
+  isSessionChatPanel,
+  normalizeReusableSessionPanels,
+  materializeReusableChatPanel,
+} from "./session-panels";
+
 // Applier
-export { applyLayout, getRootSplitview, resolveGroupIds } from "./applier";
+export {
+  applyLayout,
+  getRootSplitview,
+  resolveGroupIds,
+  isCenterCandidateGroupId,
+} from "./applier";
 export type { LayoutGroupIds } from "./applier";
 
 // Merger

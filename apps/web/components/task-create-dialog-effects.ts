@@ -1,58 +1,36 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import type { Repository, Executor } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import { useEffect, useMemo, useRef } from "react";
+import type { Repository, Executor, ExecutorProfile } from "@/lib/types/http";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import {
   discoverRepositoriesAction,
   getLocalRepositoryStatusAction,
 } from "@/app/actions/workspaces";
-import { getLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
-import { fetchRepoBranches, fetchPRInfo } from "@/lib/api/domains/github-api";
+import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import type {
   DialogFormState,
   StoreSelections,
   TaskCreateEffectsArgs,
 } from "@/components/task-create-dialog-types";
+import {
+  useAgentProfileAutopickEffect,
+  useWorkflowAgentProfileEffect,
+} from "@/components/task-create-dialog-autopick";
+import { useMultiRepoGuardEffect } from "@/components/task-create-dialog-multi-repo-guard";
+import { useRepositoryAutoSelectEffect } from "@/components/task-create-dialog-repository-autopick";
+import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
-export function useWorkflowAgentProfileEffect(
-  fs: DialogFormState,
-  workflows: Array<{ id: string; agent_profile_id?: string }>,
-  agentProfiles: AgentProfileOption[],
-) {
-  const { selectedWorkflowId, setAgentProfileId, setWorkflowAgentProfileId } = fs;
-  useEffect(() => {
-    if (!selectedWorkflowId) {
-      setWorkflowAgentProfileId("");
-      return;
-    }
-    const workflow = workflows.find((w) => w.id === selectedWorkflowId);
-    if (workflow?.agent_profile_id) {
-      // Always lock the selector when the workflow specifies an agent profile.
-      // This prevents the race condition where agentProfiles hasn't loaded yet.
-      setWorkflowAgentProfileId(workflow.agent_profile_id);
-      // Only set the agentProfileId once the profile is confirmed available.
-      const profileExists = agentProfiles.some((p) => p.id === workflow.agent_profile_id);
-      if (profileExists) {
-        setAgentProfileId(workflow.agent_profile_id);
-      }
-    } else {
-      setWorkflowAgentProfileId("");
-      // Restore the user's last-used agent profile when unlocking, but only
-      // if it still exists. A clean DB mints fresh UUIDs for the same agents,
-      // so the previous run's id never matches and would otherwise poison
-      // the dialog into "No compatible agent profiles" because
-      // useDefaultSelectionsEffect skips when agentProfileId is truthy.
-      const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
-      const isValidLastId = Boolean(lastId && agentProfiles.some((p) => p.id === lastId));
-      setAgentProfileId(isValidLastId && lastId ? lastId : "");
-    }
-  }, [selectedWorkflowId, workflows, agentProfiles, setAgentProfileId, setWorkflowAgentProfileId]);
-}
+// Re-export autopick hooks for callers that imported them from this module.
+export { useWorkflowAgentProfileEffect };
+export { useRepositoryAutoSelectEffect } from "@/components/task-create-dialog-repository-autopick";
+// Also re-exported for the test file, which expects the symbol to live here.
+export { decideAgentProfileAutopick } from "@/components/task-create-dialog-autopick";
+
+const selectionDebug = createDebugLogger("task-create:selection");
 
 export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
   const { selectedWorkflowId, setFetchedSteps } = fs;
@@ -75,46 +53,6 @@ export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string |
       cancelled = true;
     };
   }, [selectedWorkflowId, workflowId, setFetchedSteps]);
-}
-
-export function useRepositoryAutoSelectEffect(
-  fs: DialogFormState,
-  open: boolean,
-  workspaceId: string | null,
-  repositories: Repository[],
-) {
-  // On open, ensure there's always at least one chip rendered: prefer the
-  // user's last-used repo (or the workspace's only repo) so the chip lands
-  // pre-filled, but fall back to an empty row so the picker is visible
-  // instead of just the "+" button. URL mode is excluded — that flow swaps
-  // the chip row for a URL input.
-  const { repositories: rows, useGitHubUrl, setRepositories } = fs;
-  useEffect(() => {
-    if (!open || !workspaceId || useGitHubUrl) return;
-    if (rows.length > 0) return;
-    const lastUsedRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
-    let pickId: string | null = null;
-    if (lastUsedRepoId && repositories.some((r: Repository) => r.id === lastUsedRepoId)) {
-      pickId = lastUsedRepoId;
-    } else if (repositories.length === 1) {
-      pickId = repositories[0].id;
-    }
-    // Use the functional setter so the deferred microtask sees fresh state.
-    // Without this, a sibling effect (resetTaskForm / useLockedFieldSync) that
-    // seeds rows from `initialValues.repositoryId` synchronously races with
-    // this microtask — the microtask captured rows.length === 0 at queue time
-    // and would blindly clobber the initialValues-seeded row.
-    void Promise.resolve().then(() => {
-      setRepositories((prev) => {
-        if (prev.length > 0) return prev;
-        return [
-          pickId
-            ? { key: "row-0", repositoryId: pickId, branch: "" }
-            : { key: "row-0", branch: "" },
-        ];
-      });
-    });
-  }, [open, repositories, rows, useGitHubUrl, workspaceId, setRepositories]);
 }
 
 export function useDiscoverReposEffect(
@@ -178,14 +116,9 @@ export function useCurrentLocalBranchEffect(
   workspaceId: string | null,
   repositories: Repository[],
 ) {
-  const {
-    repositories: rows,
-    useGitHubUrl,
-    setCurrentLocalBranch,
-    setCurrentLocalBranchLoading,
-  } = fs;
+  const { repositories: rows, useRemote, setCurrentLocalBranch, setCurrentLocalBranchLoading } = fs;
   useEffect(() => {
-    if (!open || !workspaceId || useGitHubUrl || rows.length !== 1) {
+    if (!open || !workspaceId || useRemote || rows.length !== 1) {
       setCurrentLocalBranch("");
       setCurrentLocalBranchLoading(false);
       return;
@@ -220,7 +153,7 @@ export function useCurrentLocalBranchEffect(
   }, [
     open,
     workspaceId,
-    useGitHubUrl,
+    useRemote,
     rows,
     repositories,
     setCurrentLocalBranch,
@@ -230,22 +163,273 @@ export function useCurrentLocalBranchEffect(
 
 /**
  * Picks the default executor ID to auto-fill on dialog open. Repo-less tasks
- * skip the worktree executor (it needs a repo); other modes use the workspace
- * default → DEFAULT_LOCAL_EXECUTOR_TYPE → first available, in priority order.
+ * skip the worktree executor (it needs a repo). Explicit local paths prefer
+ * the local executor because the user chose an on-machine working tree.
+ * Otherwise repo-backed tasks use the workspace default →
+ * DEFAULT_LOCAL_EXECUTOR_TYPE → first available, in priority order.
  */
 function pickDefaultExecutorId(
   executors: Executor[],
   workspaceDefaults: { default_executor_id?: string | null } | null | undefined,
   noRepository: boolean,
+  preferLocalExecutor: boolean,
 ): string | null {
-  const eligible = noRepository
-    ? executors.filter((e: Executor) => e.type !== "worktree")
-    : executors;
+  const eligible =
+    noRepository || preferLocalExecutor
+      ? executors.filter((e: Executor) => e.type !== "worktree")
+      : executors;
   if (eligible.length === 0) return null;
   const defId = workspaceDefaults?.default_executor_id ?? null;
   if (defId && eligible.some((e: Executor) => e.id === defId)) return defId;
+  if (noRepository || preferLocalExecutor) {
+    const directLocal = eligible.find((e: Executor) => isDirectLocalExecutorType(e.type));
+    if (directLocal) return directLocal.id;
+  }
   const local = eligible.find((e: Executor) => e.type === DEFAULT_LOCAL_EXECUTOR_TYPE);
   return local?.id ?? eligible[0].id;
+}
+
+type ExecutorProfileCandidate = ExecutorProfile & {
+  _executorId: string;
+  _executorType: string;
+};
+
+function isDirectLocalExecutorType(executorType: string | undefined): boolean {
+  return executorType === "local" || executorType === "local_pc";
+}
+
+function isWorktreeExecutorType(executorType: string | undefined): boolean {
+  return executorType === "worktree";
+}
+
+function flattenExecutorProfiles(executors: Executor[]): ExecutorProfileCandidate[] {
+  return executors.flatMap((e) =>
+    (e.profiles ?? []).map((p) => ({
+      ...p,
+      _executorId: e.id,
+      _executorType: p.executor_type ?? e.type,
+    })),
+  );
+}
+
+function pickDefaultExecutorProfileId(
+  executors: Executor[],
+  workspaceDefaults: { default_executor_id?: string | null } | null | undefined,
+  noRepository: boolean,
+  preferLocalExecutor: boolean,
+  lastUsedExecutorProfileId?: string | null,
+): string | null {
+  const allProfiles = flattenExecutorProfiles(executors);
+  if (allProfiles.length === 0) return null;
+  const eligibleProfiles =
+    noRepository || preferLocalExecutor
+      ? allProfiles.filter((p) => !isWorktreeExecutorType(p._executorType))
+      : allProfiles;
+  if (eligibleProfiles.length === 0) return null;
+
+  if (
+    lastUsedExecutorProfileId &&
+    eligibleProfiles.some((p) => p.id === lastUsedExecutorProfileId)
+  ) {
+    return lastUsedExecutorProfileId;
+  }
+
+  const executorId = pickDefaultExecutorId(
+    executors,
+    workspaceDefaults,
+    noRepository,
+    preferLocalExecutor,
+  );
+  const executorProfile = eligibleProfiles.find((p) => p._executorId === executorId);
+  return executorProfile?.id ?? eligibleProfiles[0].id;
+}
+
+type ExecutorAutopickContext = {
+  executors: Executor[];
+  workspaceDefaults: StoreSelections["workspaceDefaults"];
+  userSettingsLoaded?: boolean;
+  lastUsedExecutorProfileId?: string | null;
+  noRepository: boolean;
+  preferLocalExecutor: boolean;
+};
+
+type ExecutorProfileLastUsedState = {
+  allProfiles: ExecutorProfileCandidate[];
+  eligibleProfiles: ExecutorProfileCandidate[];
+  settingsId: string | null;
+  settingsValid: boolean;
+};
+
+function getExecutorProfileLastUsedState(
+  context: ExecutorAutopickContext,
+  settingsId: string | null,
+): ExecutorProfileLastUsedState {
+  const { executors, noRepository, preferLocalExecutor } = context;
+  const allProfiles = flattenExecutorProfiles(executors);
+  const eligibleProfiles =
+    noRepository || preferLocalExecutor
+      ? allProfiles.filter((p) => !isWorktreeExecutorType(p._executorType))
+      : allProfiles;
+  return {
+    allProfiles,
+    eligibleProfiles,
+    settingsId,
+    settingsValid: Boolean(settingsId && eligibleProfiles.some((p) => p.id === settingsId)),
+  };
+}
+
+function shouldDeferExecutorProfileAutopick(
+  context: ExecutorAutopickContext,
+  _lastUsed: ExecutorProfileLastUsedState,
+) {
+  return context.userSettingsLoaded === false;
+}
+
+export function shouldWaitForLastUsedExecutorProfile(context: ExecutorAutopickContext) {
+  const lastUsedProfile = getExecutorProfileLastUsedState(
+    context,
+    context.lastUsedExecutorProfileId ?? null,
+  );
+  if (!lastUsedProfile.settingsValid) return false;
+  if (isDebug()) {
+    selectionDebug("executor-autopick", {
+      current: "-",
+      pick: "-",
+      executor_count: context.executors.length,
+      workspace_default: context.workspaceDefaults?.default_executor_id ?? "-",
+      no_repository: context.noRepository,
+      prefer_local_executor: context.preferLocalExecutor,
+      source: "executor-profile-last-used",
+    });
+  }
+  return true;
+}
+
+function logExecutorProfileAutopick(
+  pick: string | null,
+  context: ExecutorAutopickContext,
+  lastUsed: ExecutorProfileLastUsedState,
+  source?: string,
+) {
+  if (!isDebug()) return;
+  selectionDebug("executor-profile-autopick", {
+    current: "-",
+    pick: pick ?? "-",
+    settings_id: lastUsed.settingsId ?? "-",
+    settings_valid: lastUsed.settingsValid,
+    profile_count: lastUsed.allProfiles.length,
+    workspace_default_executor: context.workspaceDefaults?.default_executor_id ?? "-",
+    no_repository: context.noRepository,
+    prefer_local_executor: context.preferLocalExecutor,
+    ...(source ? { source } : {}),
+  });
+}
+
+function useExecutorIdAutopickEffect({
+  open,
+  executorId,
+  context,
+  setExecutorId,
+}: {
+  open: boolean;
+  executorId: string;
+  context: ExecutorAutopickContext;
+  setExecutorId: (id: string) => void;
+}) {
+  const { executors, workspaceDefaults, noRepository, preferLocalExecutor } = context;
+  useEffect(() => {
+    if (!open || executorId || executors.length === 0) return;
+    if (context.userSettingsLoaded === false) {
+      if (isDebug()) {
+        selectionDebug("executor-autopick", {
+          current: "-",
+          pick: "-",
+          executor_count: executors.length,
+          workspace_default: workspaceDefaults?.default_executor_id ?? "-",
+          no_repository: noRepository,
+          prefer_local_executor: preferLocalExecutor,
+          source: "user-settings-loading",
+        });
+      }
+      return;
+    }
+    if (shouldWaitForLastUsedExecutorProfile(context)) {
+      return;
+    }
+    const pick = pickDefaultExecutorId(
+      executors,
+      workspaceDefaults,
+      noRepository,
+      preferLocalExecutor,
+    );
+    if (isDebug()) {
+      selectionDebug("executor-autopick", {
+        current: "-",
+        pick: pick ?? "-",
+        executor_count: executors.length,
+        workspace_default: workspaceDefaults?.default_executor_id ?? "-",
+        no_repository: noRepository,
+        prefer_local_executor: preferLocalExecutor,
+      });
+    }
+    if (pick) void Promise.resolve().then(() => setExecutorId(pick));
+  }, [
+    open,
+    executorId,
+    executors,
+    workspaceDefaults,
+    setExecutorId,
+    noRepository,
+    preferLocalExecutor,
+    context.userSettingsLoaded,
+    context.lastUsedExecutorProfileId,
+  ]);
+}
+
+function useExecutorProfileAutopickEffect({
+  open,
+  executorProfileId,
+  context,
+  setExecutorProfileId,
+}: {
+  open: boolean;
+  executorProfileId: string;
+  context: ExecutorAutopickContext;
+  setExecutorProfileId: (id: string) => void;
+}) {
+  const { executors, workspaceDefaults, noRepository, preferLocalExecutor } = context;
+  useEffect(() => {
+    // Auto-select executor profile: last-used backend setting → source-aware
+    // executor default → first eligible profile.
+    if (!open || executorProfileId || executors.length === 0) return;
+    const lastUsed = getExecutorProfileLastUsedState(
+      context,
+      context.lastUsedExecutorProfileId ?? null,
+    );
+    if (shouldDeferExecutorProfileAutopick(context, lastUsed)) {
+      logExecutorProfileAutopick(null, context, lastUsed, "user-settings-loading");
+      return;
+    }
+    const pick = pickDefaultExecutorProfileId(
+      executors,
+      workspaceDefaults,
+      noRepository,
+      preferLocalExecutor,
+      context.lastUsedExecutorProfileId,
+    );
+    logExecutorProfileAutopick(pick, context, lastUsed);
+    if (pick) void Promise.resolve().then(() => setExecutorProfileId(pick));
+  }, [
+    open,
+    executorProfileId,
+    executors,
+    workspaceDefaults,
+    setExecutorProfileId,
+    noRepository,
+    preferLocalExecutor,
+    context.lastUsedExecutorProfileId,
+    context.userSettingsLoaded,
+  ]);
 }
 
 export function useDefaultSelectionsEffect(
@@ -254,72 +438,50 @@ export function useDefaultSelectionsEffect(
   sel: StoreSelections,
   workflows: Array<{ id: string; agent_profile_id?: string }>,
 ) {
-  const { agentProfiles, executors, workspaceDefaults } = sel;
+  const { executors, workspaceDefaults } = sel;
   const {
-    agentProfileId,
-    workflowAgentProfileId,
-    selectedWorkflowId,
     executorId,
     executorProfileId,
-    setAgentProfileId,
     setExecutorId,
     setExecutorProfileId,
     noRepository,
+    useRemote,
+    repositories,
+    remoteRepos,
   } = fs;
-  useEffect(() => {
-    // Check synchronously whether the selected workflow has an agent override.
-    // This avoids a race condition where workflowAgentProfileId state hasn't
-    // been committed yet by the workflow effect running in the same cycle.
-    const workflowHasAgent = selectedWorkflowId
-      ? workflows.some((w) => w.id === selectedWorkflowId && w.agent_profile_id)
-      : false;
-    if (
-      !open ||
-      agentProfileId ||
-      workflowAgentProfileId ||
-      workflowHasAgent ||
-      agentProfiles.length === 0
-    )
-      return;
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
-    if (lastId && agentProfiles.some((p: AgentProfileOption) => p.id === lastId)) {
-      void Promise.resolve().then(() => setAgentProfileId(lastId));
-      return;
-    }
-    const defId = workspaceDefaults?.default_agent_profile_id ?? null;
-    if (defId && agentProfiles.some((p: AgentProfileOption) => p.id === defId)) {
-      void Promise.resolve().then(() => setAgentProfileId(defId));
-      return;
-    }
-    void Promise.resolve().then(() => setAgentProfileId(agentProfiles[0].id));
-  }, [
+  const preferLocalExecutor =
+    !noRepository && !useRemote && repositories.some((row) => Boolean(row.localPath));
+  const executorAutopickContext = useMemo(
+    () => ({
+      executors,
+      workspaceDefaults,
+      userSettingsLoaded: sel.userSettingsLoaded,
+      lastUsedExecutorProfileId: sel.lastUsedExecutorProfileId,
+      noRepository,
+      preferLocalExecutor,
+    }),
+    [
+      executors,
+      workspaceDefaults,
+      sel.userSettingsLoaded,
+      sel.lastUsedExecutorProfileId,
+      noRepository,
+      preferLocalExecutor,
+    ],
+  );
+  useAgentProfileAutopickEffect(fs, open, sel, workflows);
+  useExecutorIdAutopickEffect({
     open,
-    agentProfileId,
-    workflowAgentProfileId,
-    selectedWorkflowId,
-    workflows,
-    agentProfiles,
-    workspaceDefaults,
-    setAgentProfileId,
-  ]);
-
-  useEffect(() => {
-    if (!open || executorId || executors.length === 0) return;
-    const pick = pickDefaultExecutorId(executors, workspaceDefaults, noRepository);
-    if (pick) void Promise.resolve().then(() => setExecutorId(pick));
-  }, [open, executorId, executors, workspaceDefaults, setExecutorId, noRepository]);
-
-  useEffect(() => {
-    // Auto-select executor profile: last used (localStorage) → first available
-    if (!open || executorProfileId || executors.length === 0) return;
-    const allProfiles = executors.flatMap((e) =>
-      (e.profiles ?? []).map((p) => ({ ...p, _executorId: e.id })),
-    );
-    if (allProfiles.length === 0) return;
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
-    const pick = lastId && allProfiles.some((p) => p.id === lastId) ? lastId : allProfiles[0].id;
-    void Promise.resolve().then(() => setExecutorProfileId(pick));
-  }, [open, executorProfileId, executors, setExecutorProfileId]);
+    executorId,
+    context: executorAutopickContext,
+    setExecutorId,
+  });
+  useExecutorProfileAutopickEffect({
+    open,
+    executorProfileId,
+    context: executorAutopickContext,
+    setExecutorProfileId,
+  });
 
   // Derive executorId from the selected executor profile
   useEffect(() => {
@@ -327,182 +489,115 @@ export function useDefaultSelectionsEffect(
     for (const executor of executors) {
       const match = (executor.profiles ?? []).find((p) => p.id === executorProfileId);
       if (match) {
+        if (isDebug()) {
+          selectionDebug("executor-derived-from-profile", {
+            executor_profile_id: executorProfileId,
+            executor_id: executor.id,
+          });
+        }
         void Promise.resolve().then(() => setExecutorId(executor.id));
         return;
       }
     }
   }, [executorProfileId, executors, setExecutorId]);
 
-  // Multi-repo guard: when 2+ repos are selected, only worktree profiles can
-  // run the task (Docker / Sprites / standalone don't yet provision sibling
-  // repos under one task root). If the current profile is non-worktree, swap
-  // to a worktree profile — preferring the last-used worktree, otherwise the
-  // first one available. Single-repo selections leave the profile alone.
-  useEffect(() => {
-    if (!open || !executorProfileId || executors.length === 0) return;
-    const namedRepos = fs.repositories.filter((r) => r.repositoryId || r.localPath);
-    if (namedRepos.length <= 1) return;
-    const profileToType = new Map<string, string | undefined>();
-    const worktreeProfileIds: string[] = [];
-    for (const e of executors) {
-      for (const p of e.profiles ?? []) {
-        const type = p.executor_type ?? e.type;
-        profileToType.set(p.id, type);
-        if (type === "worktree") worktreeProfileIds.push(p.id);
-      }
-    }
-    if (worktreeProfileIds.length === 0) return;
-    if (profileToType.get(executorProfileId) === "worktree") return;
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
-    const pick = lastId && worktreeProfileIds.includes(lastId) ? lastId : worktreeProfileIds[0];
-    void Promise.resolve().then(() => setExecutorProfileId(pick));
-  }, [open, executorProfileId, executors, fs.repositories, setExecutorProfileId]);
+  const selectedRepoCount = useMemo(
+    () =>
+      computeSelectedRepoCount({
+        noRepository,
+        useRemote,
+        remoteRepos,
+        repositories,
+      } as DialogFormState),
+    [noRepository, useRemote, remoteRepos, repositories],
+  );
+  useMultiRepoGuardEffect({
+    open,
+    executorProfileId,
+    setExecutorProfileId,
+    executors,
+    selectedRepoCount,
+    lastUsedExecutorProfileId: sel.lastUsedExecutorProfileId ?? null,
+  });
 }
 
 /**
- * Auto-selects a sensible branch in the GitHub URL flow. Per-repo (workspace
- * or discovered) branch auto-select happens inside RepoChip when a row's
- * branches load — that keeps the per-row state confined to the chip.
+ * Surfaces a "Invalid GitHub URL" error for the first remote row when its URL
+ * doesn't parse as a repo or a PR URL. Per-row PR-info fetching + branch
+ * auto-select live inside `RemoteRepoChip` via `usePRInfoByURL` and
+ * `useRowBranchAutoSelect`; this effect just keeps the surfaced error banner
+ * in sync with the first row's URL.
  */
-export function useBranchAutoSelectEffect(fs: DialogFormState) {
-  const { githubBranch, githubBranches, useGitHubUrl, setGitHubBranch, githubPrHeadBranch } = fs;
+export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
+  const { useRemote, setGitHubUrlError } = fs;
+  const firstUrl = fs.remoteRepos[0]?.url ?? "";
   useEffect(() => {
-    if (!useGitHubUrl || githubBranches.length === 0 || githubBranch) return;
-    if (githubPrHeadBranch) {
-      const prBranch = githubBranches.find((b) => b.name === githubPrHeadBranch);
-      if (prBranch) {
-        setGitHubBranch(prBranch.name);
-        return;
-      }
-    }
-    // GitHub URL branches are referenced by name only (no remote prefix);
-    // selectPreferredBranch expects origin-prefixed remotes, so pick directly.
-    const preferred =
-      githubBranches.find((b) => b.name === "main") ??
-      githubBranches.find((b) => b.name === "master") ??
-      githubBranches[0];
-    if (preferred) setGitHubBranch(preferred.name);
-  }, [githubBranch, githubBranches, useGitHubUrl, setGitHubBranch, githubPrHeadBranch]);
-}
-
-/** Parse a GitHub URL to extract owner, repo, and optional PR number. Returns null if invalid. */
-function parseGitHubUrl(url: string): { owner: string; repo: string; prNumber?: number } | null {
-  const trimmed = url.trim();
-  if (!trimmed) return null;
-  // Try PR URL first: github.com/owner/repo/pull/123 (with optional trailing path/hash like /files#diff-...)
-  const prMatch = trimmed.match(
-    /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/,
-  );
-  if (prMatch) {
-    return { owner: prMatch[1], repo: prMatch[2], prNumber: parseInt(prMatch[3], 10) };
-  }
-  // Fall back to repo URL: github.com/owner/repo
-  const match = trimmed.match(
-    /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/,
-  );
-  if (!match) return null;
-  return { owner: match[1], repo: match[2] };
-}
-
-export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
-  const {
-    useGitHubUrl,
-    githubUrl,
-    setGitHubBranches,
-    setGitHubBranchesLoading,
-    setGitHubUrlError,
-    setGitHubPrHeadBranch,
-  } = fs;
-  useEffect(() => {
-    if (!open || !useGitHubUrl) {
-      setGitHubBranchesLoading(false);
-      return;
-    }
-    const trimmed = githubUrl.trim();
-    if (!trimmed) {
-      setGitHubBranches([]);
-      setGitHubBranchesLoading(false);
+    if (!open) return;
+    // When the user leaves Remote mode (toggle off / switch to workspace
+    // mode / dialog reopens in non-Remote mode) we must clear any stale
+    // error left over from a previous Remote-mode pass. The early return
+    // used to skip this — the banner stuck around after the field that
+    // produced it had been hidden, which surfaced confusing "Invalid
+    // GitHub URL" text alongside a repo picker.
+    if (!useRemote) {
       setGitHubUrlError(null);
       return;
     }
-    const parsed = parseGitHubUrl(githubUrl);
+    const trimmed = firstUrl.trim();
+    if (!trimmed) {
+      setGitHubUrlError(null);
+      return;
+    }
+    const parsed = parseGitHubAnyUrl(trimmed);
     if (!parsed) {
-      setGitHubBranches([]);
-      setGitHubPrHeadBranch(null);
-      setGitHubBranchesLoading(false);
       setGitHubUrlError("Invalid GitHub URL — expected github.com/owner/repo or .../pull/123");
       return;
     }
-    let cancelled = false;
     setGitHubUrlError(null);
-    setGitHubBranchesLoading(true);
-    setGitHubPrHeadBranch(null);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15_000);
-    const fetchOpts = { init: { signal: controller.signal } };
-
-    const branchesPromise = fetchRepoBranches(parsed.owner, parsed.repo, fetchOpts);
-    const prPromise = parsed.prNumber
-      ? fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber, fetchOpts).catch(() => null)
-      : Promise.resolve(null);
-
-    Promise.all([branchesPromise, prPromise])
-      .then(([branchesRes, prInfo]) => {
-        if (cancelled) return;
-        setGitHubBranches(
-          branchesRes.branches.map((b) => ({ name: b.name, type: "remote" as const })),
-        );
-        setGitHubUrlError(null);
-        if (prInfo) {
-          setGitHubPrHeadBranch(prInfo.head_branch);
-        }
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        const isAbort = err instanceof DOMException && err.name === "AbortError";
-        const isNotConfigured = err instanceof Error && err.message.includes("not configured");
-        let errorMessage = "Repository not found or not accessible";
-        if (isAbort) {
-          errorMessage = "Request timed out. Check your GitHub configuration in Settings.";
-        } else if (isNotConfigured) {
-          errorMessage = "GitHub is not configured. Set up a token in Settings > GitHub.";
-        }
-        setGitHubUrlError(errorMessage);
-        setGitHubBranches([]);
-      })
-      .finally(() => {
-        clearTimeout(timeoutId);
-        if (!cancelled) setGitHubBranchesLoading(false);
-      });
-    return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-      controller.abort();
-    };
-  }, [
-    open,
-    useGitHubUrl,
-    githubUrl,
-    setGitHubBranches,
-    setGitHubBranchesLoading,
-    setGitHubUrlError,
-    setGitHubPrHeadBranch,
-  ]);
+  }, [open, useRemote, firstUrl, setGitHubUrlError]);
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
   const { open, workspaceId, workflowId, repositories, repositoriesLoading } = args;
-  const { agentProfiles, executors, workspaceDefaults, toast, workflows, isLocalExecutor } = args;
+  const {
+    agentProfiles,
+    compatibleAgentProfiles,
+    authLoaded,
+    executors,
+    workspaceDefaults,
+    toast,
+    workflows,
+    isLocalExecutor,
+  } = args;
   useWorkflowStepsEffect(fs, workflowId);
-  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles);
-  useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
+  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles, {
+    lastUsedAgentProfileId: args.lastUsedAgentProfileId,
+    authLoaded,
+    userSettingsLoaded: args.userSettingsLoaded,
+  });
+  useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories, {
+    lastUsedRepositoryId: args.lastUsedRepositoryId,
+    userSettingsLoaded: args.userSettingsLoaded,
+  });
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
-  useBranchAutoSelectEffect(fs);
   useCurrentLocalBranchEffect(fs, open, workspaceId, repositories);
   useResetBranchOnLocalSwitchEffect(fs, isLocalExecutor, args.preserveBranch);
-  useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults }, workflows);
-  useGitHubUrlBranchesEffect(fs, open);
+  useDefaultSelectionsEffect(
+    fs,
+    open,
+    {
+      agentProfiles,
+      compatibleAgentProfiles,
+      authLoaded,
+      executors,
+      workspaceDefaults,
+      userSettingsLoaded: args.userSettingsLoaded,
+      lastUsedAgentProfileId: args.lastUsedAgentProfileId,
+      lastUsedExecutorProfileId: args.lastUsedExecutorProfileId,
+    },
+    workflows,
+  );
+  useGitHubUrlErrorEffect(fs, open);
 }
 
 // Reset row.branch on every "switch to local executor" transition so the

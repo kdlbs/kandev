@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { Separator } from "@kandev/ui/separator";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useToast } from "@/components/toast-provider";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
+import { useSettingsSaveContributor } from "./settings-save-provider";
+import { SettingsCard } from "./settings-card";
 
 export function ConfigChatAgentSection() {
   const workspace = useAppStore(
@@ -13,62 +14,79 @@ export function ConfigChatAgentSection() {
   );
   const profiles = useAppStore((s) => s.agentProfiles.items ?? []);
   const currentProfileId = workspace?.default_config_agent_profile_id ?? "";
-  const [saving, setSaving] = useState(false);
-  const { toast } = useToast();
+  const workspaceId = workspace?.id ?? null;
+  const [syncedWorkspaceId, setSyncedWorkspaceId] = useState(workspaceId);
+  const [savedProfileId, setSavedProfileId] = useState(currentProfileId);
+  const [draftProfileId, setDraftProfileId] = useState(currentProfileId);
 
   const storeApi = useAppStoreApi();
+  const isDirty = draftProfileId !== savedProfileId;
 
-  const handleChange = async (value: string) => {
-    const effectiveValue = value === "none" ? "" : value;
-    if (!workspace) return;
-    setSaving(true);
-    try {
+  useEffect(() => {
+    if (workspaceId !== syncedWorkspaceId) {
+      setSyncedWorkspaceId(workspaceId);
+      setSavedProfileId(currentProfileId);
+      setDraftProfileId(currentProfileId);
+      return;
+    }
+    if (isDirty) return;
+    setSavedProfileId(currentProfileId);
+    setDraftProfileId(currentProfileId);
+  }, [currentProfileId, isDirty, syncedWorkspaceId, workspaceId]);
+
+  useSettingsSaveContributor({
+    id: "utility-config-chat-agent",
+    order: 20,
+    revision: draftProfileId,
+    isDirty: Boolean(workspace) && isDirty,
+    save: async () => {
+      if (!workspace) return;
+      const submitted = draftProfileId;
       await updateWorkspaceAction(workspace.id, {
-        default_config_agent_profile_id: effectiveValue,
+        default_config_agent_profile_id: submitted,
       });
       const { workspaces, setWorkspaces } = storeApi.getState();
       setWorkspaces(
         workspaces.items.map((w) =>
-          w.id === workspace.id ? { ...w, default_config_agent_profile_id: effectiveValue } : w,
+          w.id === workspace.id ? { ...w, default_config_agent_profile_id: submitted } : w,
         ),
       );
-      toast({ title: "Configuration agent updated", variant: "success" });
-    } catch (error) {
-      toast({
-        title: "Failed to update",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "error",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
+      setSavedProfileId(submitted);
+    },
+    discard: () => setDraftProfileId(savedProfileId),
+  });
 
   if (!workspace) return null;
 
   return (
-    <div className="space-y-4">
-      <Separator />
-      <div>
-        <h3 className="text-lg font-semibold">Configuration Chat Agent</h3>
+    <SettingsCard isDirty={isDirty} data-testid="config-chat-agent-card">
+      <CardHeader>
+        <CardTitle className="text-base">
+          <h3>Configuration Chat Agent</h3>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
           Choose which agent profile to use for the Configuration Chat. This agent can manage your
           workflows, agent profiles, and MCP configuration.
         </p>
-      </div>
-      <Select value={currentProfileId || "none"} onValueChange={handleChange} disabled={saving}>
-        <SelectTrigger className="w-full max-w-sm cursor-pointer">
-          <SelectValue placeholder="Choose an agent profile..." />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="none">No default</SelectItem>
-          {profiles.map((p) => (
-            <SelectItem key={p.id} value={p.id} className="cursor-pointer">
-              {p.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+        <Select
+          value={draftProfileId || "none"}
+          onValueChange={(value) => setDraftProfileId(value === "none" ? "" : value)}
+        >
+          <SelectTrigger className="w-full max-w-sm cursor-pointer" data-settings-dirty={isDirty}>
+            <SelectValue placeholder="Choose an agent profile..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">No default</SelectItem>
+            {profiles.map((p) => (
+              <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </CardContent>
+    </SettingsCard>
   );
 }

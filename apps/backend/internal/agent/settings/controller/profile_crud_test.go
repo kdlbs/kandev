@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/agent/settings/models"
 )
 
 // TestSeedCLIFlags_FromCopilot verifies that a fresh Copilot profile gets
@@ -58,6 +61,33 @@ func TestSeedCLIFlags_EmptyForAgentWithNoCurated(t *testing.T) {
 	}
 }
 
+// TestSeedCLIFlags_EmptyForCodexACP ensures the Agent Client Protocol bridge
+// does not expose stale @openai/codex -c overrides as ACP subprocess flags.
+func TestSeedCLIFlags_EmptyForCodexACP(t *testing.T) {
+	flags := seedCLIFlags(agents.NewCodexACP())
+	if len(flags) != 0 {
+		t.Fatalf("expected no seeded flags for codex-acp, got %+v", flags)
+	}
+}
+
+func TestSeedCLIFlags_FromCursorACP(t *testing.T) {
+	flags := seedCLIFlags(agents.NewCursorACP())
+	want := map[string]bool{"--force": false}
+	if len(flags) != len(want) {
+		t.Fatalf("expected %d seeded flags, got %d: %+v", len(want), len(flags), flags)
+	}
+	for _, f := range flags {
+		enabled, ok := want[f.Flag]
+		if !ok {
+			t.Errorf("unexpected seeded flag: %q", f.Flag)
+			continue
+		}
+		if f.Enabled != enabled {
+			t.Errorf("%q: Enabled=%v, want %v", f.Flag, f.Enabled, enabled)
+		}
+	}
+}
+
 // TestValidateCLIFlagDTOs rejects entries whose flag text is empty or
 // whitespace only. Empty descriptions are allowed (custom flags often
 // don't have one).
@@ -88,5 +118,135 @@ func TestValidateCLIFlagDTOs(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestValidateProfileEnvVarDTOs(t *testing.T) {
+	cases := []struct {
+		name    string
+		envVars []dto.ProfileEnvVarDTO
+		wantErr bool
+	}{
+		{name: "valid value", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bar"}}},
+		{name: "valid secret", envVars: []dto.ProfileEnvVarDTO{{Key: "TOKEN", SecretID: "sec-1"}}},
+		{name: "empty key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: ""}}, wantErr: true},
+		{name: "whitespace key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "   "}}, wantErr: true},
+		{name: "equals key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD=KEY", Value: "x"}}, wantErr: true},
+		{name: "null key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD\x00KEY", Value: "x"}}, wantErr: true},
+		{name: "duplicate key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "one"}, {Key: " FOO ", Value: "two"}}, wantErr: true},
+		{name: "value and secret rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bar", SecretID: "sec-1"}}, wantErr: true},
+		{name: "null value rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bad\x00val"}}, wantErr: true},
+		{name: "KANDEV prefix rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "KANDEV_TASK_ID", Value: "x"}}, wantErr: true},
+		{name: "TASK_DESCRIPTION rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "TASK_DESCRIPTION", Value: "x"}}, wantErr: true},
+		{name: "too many entries rejected", envVars: func() []dto.ProfileEnvVarDTO {
+			out := make([]dto.ProfileEnvVarDTO, maxProfileEnvVars+1)
+			for i := range out {
+				out[i] = dto.ProfileEnvVarDTO{Key: fmt.Sprintf("K%d", i), Value: "v"}
+			}
+			return out
+		}(), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateProfileEnvVarDTOs(tc.envVars)
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestCreateProfile_PersistsEnvVars(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "With env",
+		EnvVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bar"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if len(profile.EnvVars) != 1 || profile.EnvVars[0].Key != "FOO" || profile.EnvVars[0].Value != "bar" {
+		t.Fatalf("response env vars: %+v", profile.EnvVars)
+	}
+	if len(st.created) != 1 || len(st.created[0].EnvVars) != 1 || st.created[0].EnvVars[0].Key != "FOO" {
+		t.Fatalf("stored env vars: %+v", st.created)
+	}
+}
+
+func TestCreateAndUpdateProfile_PersistsConfigOptions(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "With config",
+		ConfigOptions: map[string]string{
+			"effort": " high ",
+			"model":  "ignored",
+			"mode":   "ignored",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if profile.ConfigOptions["effort"] != "high" || len(profile.ConfigOptions) != 1 {
+		t.Fatalf("response config options: %+v", profile.ConfigOptions)
+	}
+	if len(st.created) != 1 || st.created[0].ConfigOptions["effort"] != "high" || len(st.created[0].ConfigOptions) != 1 {
+		t.Fatalf("stored config options: %+v", st.created)
+	}
+
+	next := map[string]string{"effort": "low"}
+	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
+		ID:            profile.ID,
+		ConfigOptions: &next,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.ConfigOptions["effort"] != "low" || len(updated.ConfigOptions) != 1 {
+		t.Fatalf("updated response config options: %+v", updated.ConfigOptions)
+	}
+}
+
+func TestCreateAgentProfiles_PersistsEnvVars(t *testing.T) {
+	ctrl := newTestController(nil)
+	st := newFakeStore()
+	ctrl.repo = st
+
+	profiles, err := ctrl.createAgentProfiles(context.Background(), "agent-1", "Test Agent", []CreateAgentProfileRequest{{
+		Name:    "With env",
+		Model:   "model-1",
+		EnvVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bar"}},
+	}}, &testAgent{id: "test-agent", name: "test-agent"})
+	if err != nil {
+		t.Fatalf("createAgentProfiles: %v", err)
+	}
+	if len(profiles) != 1 || len(profiles[0].EnvVars) != 1 || profiles[0].EnvVars[0].Key != "FOO" {
+		t.Fatalf("created env vars: %+v", profiles)
 	}
 }

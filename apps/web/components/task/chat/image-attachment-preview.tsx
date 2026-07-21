@@ -53,7 +53,6 @@ export const ImageAttachmentPreview = memo(function ImageAttachmentPreview({
             disabled && "opacity-50",
           )}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element -- base64/blob preview URLs are not compatible with next/image */}
           <img
             src={attachment.preview}
             alt="Attachment preview"

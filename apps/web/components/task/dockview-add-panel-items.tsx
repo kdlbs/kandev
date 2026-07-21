@@ -7,17 +7,16 @@ import {
   IconFolder,
   IconGitBranch,
   IconGitPullRequest,
-  IconMessagePlus,
-  IconTerminal2,
 } from "@tabler/icons-react";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@kandev/ui/dropdown-menu";
-import { prPanelLabel } from "@/components/github/pr-utils";
+import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
+import { prPanelLabel, prIdentitySlug } from "@/components/github/pr-utils";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
+import { TerminalReopenMenuItems } from "./terminal-reopen-menu";
 
 type AddPanelMenuState = {
   taskId: string | null;
@@ -59,23 +58,13 @@ export function AddPanelMenuItems({
   return (
     <>
       {state.taskId && (
-        <>
-          <DropdownMenuItem
-            onClick={onNewSession}
-            className={MENU_ITEM_CLASS}
-            data-testid="new-session-button"
-          >
-            <IconMessagePlus className={MENU_ICON_CLASS} />
-            New Agent
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <SessionReopenMenuItems taskId={state.taskId} groupId={groupId} />
-        </>
+        <SessionReopenMenuItems
+          taskId={state.taskId}
+          groupId={groupId}
+          onNewSession={onNewSession}
+        />
       )}
-      <DropdownMenuItem onClick={onAddTerminal} className={MENU_ITEM_CLASS}>
-        <IconTerminal2 className={MENU_ICON_CLASS} />
-        Terminal
-      </DropdownMenuItem>
+      <TerminalReopenMenuItems groupId={groupId} onNewTerminal={onAddTerminal} />
       <DropdownMenuItem
         onClick={() => addBrowserPanel(undefined, groupId)}
         className={MENU_ITEM_CLASS}
@@ -110,6 +99,7 @@ export function AddPanelMenuItems({
           key={pr.id}
           onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
           className={MENU_ITEM_CLASS}
+          data-testid={`add-panel-pr-item-${prIdentitySlug(pr)}`}
         >
           <IconGitPullRequest className={MENU_ICON_CLASS} />
           {state.prs.length > 1

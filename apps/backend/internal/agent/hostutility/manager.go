@@ -48,6 +48,8 @@ type Manager struct {
 	mu          sync.RWMutex
 	instances   map[string]*instance // keyed by agent type
 	createGroup singleflight.Group
+	startCancel context.CancelFunc
+	stopped     bool
 }
 
 // instance is a single warm agentctl instance bound to an agent type.
@@ -86,13 +88,39 @@ func (m *Manager) SetAuthToken(token string) {
 // initial probe against each in parallel. Individual agent failures are
 // captured in the cache but do not abort the other agents.
 func (m *Manager) Start(ctx context.Context) error {
+	startCtx, cancel := context.WithCancel(ctx)
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		cancel()
+		return nil
+	}
+	m.startCancel = cancel
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.startCancel = nil
+		m.mu.Unlock()
+		cancel()
+	}()
+
 	// Create a process-scoped parent dir so concurrent kandev processes do not
 	// share state, and so Stop only removes dirs owned by this process.
 	parent, err := os.MkdirTemp("", fmt.Sprintf("kandev-host-utility-%d-*", os.Getpid()))
 	if err != nil {
 		return fmt.Errorf("create host utility tmp dir: %w", err)
 	}
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		if err := os.RemoveAll(parent); err != nil {
+			m.log.Warn("failed to remove unused host utility parent tmp dir",
+				zap.String("path", parent), zap.Error(err))
+		}
+		return nil
+	}
 	m.parentTmpDir = parent
+	m.mu.Unlock()
 	m.log.Info("host utility parent tmp dir created", zap.String("path", parent))
 
 	targets := m.eligibleAgents()
@@ -101,7 +129,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		return nil
 	}
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := errgroup.WithContext(startCtx)
 	for _, ag := range targets {
 		ag := ag
 		g.Go(func() error {
@@ -118,14 +146,47 @@ func (m *Manager) Start(ctx context.Context) error {
 // are untouched.
 func (m *Manager) Stop(ctx context.Context) {
 	m.mu.Lock()
+	m.stopped = true
+	cancel := m.startCancel
+	m.startCancel = nil
 	instances := make([]*instance, 0, len(m.instances))
 	for _, inst := range m.instances {
 		instances = append(instances, inst)
 	}
 	m.instances = make(map[string]*instance)
+	parentTmpDir := m.parentTmpDir
+	m.parentTmpDir = ""
 	m.mu.Unlock()
 
+	if cancel != nil {
+		cancel()
+	}
+
 	for _, inst := range instances {
+		deleteCtx, cancel := hostUtilityDeleteContext(ctx)
+		m.deleteInstance(deleteCtx, inst)
+		cancel()
+	}
+
+	if parentTmpDir != "" {
+		if err := os.RemoveAll(parentTmpDir); err != nil {
+			m.log.Warn("failed to remove host utility parent tmp dir",
+				zap.String("path", parentTmpDir), zap.Error(err))
+		}
+	}
+}
+
+const hostUtilityDeleteTimeout = 2 * time.Second
+
+func hostUtilityDeleteContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), hostUtilityDeleteTimeout)
+}
+
+func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
+	if inst == nil {
+		return
+	}
+	if m.controlClient != nil {
 		if err := m.controlClient.DeleteInstance(ctx, inst.instanceID); err != nil {
 			m.log.Warn("failed to delete host utility instance",
 				zap.String("agent_type", inst.agentType),
@@ -133,13 +194,14 @@ func (m *Manager) Stop(ctx context.Context) {
 				zap.Error(err))
 		}
 	}
-
-	if m.parentTmpDir != "" {
-		if err := os.RemoveAll(m.parentTmpDir); err != nil {
-			m.log.Warn("failed to remove host utility parent tmp dir",
-				zap.String("path", m.parentTmpDir), zap.Error(err))
-		}
-		m.parentTmpDir = ""
+	if inst.workDir == "" {
+		return
+	}
+	if err := os.RemoveAll(inst.workDir); err != nil {
+		m.log.Warn("failed to remove host utility work dir",
+			zap.String("agent_type", inst.agentType),
+			zap.String("path", inst.workDir),
+			zap.Error(err))
 	}
 }
 
@@ -217,11 +279,25 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 		return
 	}
 
+	if ctx.Err() != nil {
+		deleteCtx, cancel := hostUtilityDeleteContext(ctx)
+		m.deleteInstance(deleteCtx, inst)
+		cancel()
+		return
+	}
+
 	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		deleteCtx, cancel := hostUtilityDeleteContext(ctx)
+		m.deleteInstance(deleteCtx, inst)
+		cancel()
+		return
+	}
 	m.instances[agentType] = inst
 	m.mu.Unlock()
 
-	caps := m.probe(ctx, inst, ia)
+	caps := m.probe(ctx, inst, ia, false)
 	m.cache.set(caps)
 	log.Info("host utility bootstrap completed",
 		zap.String("status", string(caps.Status)),
@@ -242,7 +318,17 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 	if !safeAgentTypeName.MatchString(agentType) {
 		return nil, fmt.Errorf("invalid agent type %q: must match %s", agentType, safeAgentTypeName.String())
 	}
-	workDir := filepath.Join(m.parentTmpDir, agentType)
+	m.mu.RLock()
+	parentTmpDir := m.parentTmpDir
+	stopped := m.stopped
+	m.mu.RUnlock()
+	if stopped {
+		return nil, errManagerStopped
+	}
+	if parentTmpDir == "" {
+		return nil, errors.New("host utility manager not started")
+	}
+	workDir := filepath.Join(parentTmpDir, agentType)
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", workDir, err)
 	}
@@ -260,13 +346,21 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 	}
 
 	client := agentctlclient.NewClient(m.controlHost, resp.Port, m.log,
+		agentctlclient.WithExecutionID(resp.ID),
 		agentctlclient.WithAuthToken(m.authToken))
 
 	// Wait a moment for the instance HTTP server to come up.
 	healthCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if err := waitForClientHealthy(healthCtx, client); err != nil {
-		_ = m.controlClient.DeleteInstance(context.Background(), resp.ID)
+		deleteCtx, deleteCancel := hostUtilityDeleteContext(ctx)
+		m.deleteInstance(deleteCtx, &instance{
+			agentType:  agentType,
+			instanceID: resp.ID,
+			workDir:    workDir,
+			client:     client,
+		})
+		deleteCancel()
 		return nil, fmt.Errorf("instance %s not healthy: %w", resp.ID, err)
 	}
 
@@ -303,6 +397,7 @@ func waitForClientHealthy(ctx context.Context, c *agentctlclient.Client) error {
 // installed on the host. The Refresh path uses it to classify Status
 // accurately instead of lumping every error into StatusFailed.
 var errAgentNotInstalled = errors.New("agent not installed")
+var errManagerStopped = errors.New("host utility manager stopped")
 
 // getInstance returns the warm instance for the agent type, lazily recreating
 // it if missing (e.g. after a previous failure or crash).
@@ -320,13 +415,22 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 	}
 
 	m.mu.RLock()
+	if m.stopped {
+		m.mu.RUnlock()
+		return nil, nil, errManagerStopped
+	}
 	inst := m.instances[agentType]
+	parentTmpDir := m.parentTmpDir
 	m.mu.RUnlock()
 	if inst != nil {
-		return inst, ia, nil
+		if err := m.staleInstanceCause(ctx, inst); err == nil {
+			return inst, ia, nil
+		} else if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
 	}
 
-	if m.parentTmpDir == "" {
+	if parentTmpDir == "" {
 		return nil, nil, errors.New("host utility manager not started")
 	}
 
@@ -339,7 +443,13 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 		existing := m.instances[agentType]
 		m.mu.RUnlock()
 		if existing != nil {
-			return existing, nil
+			if err := m.staleInstanceCause(ctx, existing); err == nil {
+				return existing, nil
+			} else if ctx.Err() != nil {
+				return nil, ctx.Err()
+			} else {
+				m.dropStaleInstance(ctx, agentType, existing, err)
+			}
 		}
 		// Pre-check installation so Refresh surfaces `not_installed`
 		// instead of collapsing it into `failed` via createInstance errors.
@@ -351,6 +461,13 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 			return nil, cerr
 		}
 		m.mu.Lock()
+		if m.stopped {
+			m.mu.Unlock()
+			deleteCtx, cancel := hostUtilityDeleteContext(ctx)
+			m.deleteInstance(deleteCtx, created)
+			cancel()
+			return nil, errManagerStopped
+		}
 		m.instances[agentType] = created
 		m.mu.Unlock()
 		return created, nil
@@ -359,6 +476,40 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 		return nil, nil, err
 	}
 	return v.(*instance), ia, nil
+}
+
+const instanceHealthCheckTimeout = 500 * time.Millisecond
+
+func (m *Manager) staleInstanceCause(ctx context.Context, inst *instance) error {
+	if inst == nil || inst.client == nil {
+		return errors.New("host utility instance client missing")
+	}
+	healthCtx, cancel := context.WithTimeout(ctx, instanceHealthCheckTimeout)
+	defer cancel()
+	err := inst.client.Health(healthCtx)
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
+func (m *Manager) dropStaleInstance(ctx context.Context, agentType string, inst *instance, cause error) {
+	m.log.Warn("host utility instance unhealthy; recreating",
+		zap.String("agent_type", agentType),
+		zap.String("instance_id", inst.instanceID),
+		zap.Error(cause))
+	deleteCtx, cancel := hostUtilityDeleteContext(ctx)
+	m.deleteInstance(deleteCtx, inst)
+	cancel()
+
+	m.mu.Lock()
+	if current := m.instances[agentType]; current == inst {
+		delete(m.instances, agentType)
+	}
+	m.mu.Unlock()
 }
 
 // probeTimeout caps each ACP probe so an agent that hangs (e.g. one that
@@ -371,41 +522,22 @@ const probeTimeout = 60 * time.Second
 
 // probe runs an ACP probe against the given instance and translates the result
 // into an AgentCapabilities record suitable for the cache.
-func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.InferenceAgent) AgentCapabilities {
+func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.InferenceAgent, refresh bool) AgentCapabilities {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	cfg := ia.InferenceConfig()
-	req := &agentctlutil.ProbeRequest{
-		AgentID: inst.agentType,
-		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command:   cfg.Command.Args(),
-			ModelFlag: cfg.ModelFlag.Args(),
-			WorkDir:   inst.workDir,
-		},
-	}
+	req := buildProbeRequest(inst, ia, refresh)
 	resp, err := inst.client.Probe(probeCtx, req)
 	now := time.Now()
 	if err != nil {
-		return AgentCapabilities{
-			AgentType:     inst.agentType,
-			Status:        StatusFailed,
-			Error:         err.Error(),
-			LastCheckedAt: now,
-		}
+		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, now)
 	}
 	if !resp.Success {
 		status := StatusFailed
 		if isAuthError(resp.Error) {
 			status = StatusAuthRequired
 		}
-		return AgentCapabilities{
-			AgentType:     inst.agentType,
-			Status:        status,
-			Error:         resp.Error,
-			DurationMs:    resp.DurationMs,
-			LastCheckedAt: now,
-		}
+		return probeFailureCapabilities(inst.agentType, status, resp.Error, resp.DurationMs, now)
 	}
 	caps := AgentCapabilities{
 		AgentType:       inst.agentType,
@@ -439,10 +571,63 @@ func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.Inference
 			ID: m.ID, Name: m.Name, Description: m.Description, Meta: m.Meta,
 		})
 	}
+	for _, opt := range resp.ConfigOptions {
+		choices := make([]ConfigOptionChoice, 0, len(opt.Options))
+		for _, choice := range opt.Options {
+			choices = append(choices, ConfigOptionChoice{
+				Value:       choice.Value,
+				Name:        choice.Name,
+				Description: choice.Description,
+			})
+		}
+		caps.ConfigOptions = append(caps.ConfigOptions, ConfigOption{
+			Type:         opt.Type,
+			ID:           opt.ID,
+			Name:         opt.Name,
+			Description:  opt.Description,
+			CurrentValue: opt.CurrentValue,
+			Category:     opt.Category,
+			Options:      choices,
+		})
+	}
 	for _, c := range resp.Commands {
 		caps.Commands = append(caps.Commands, Command{Name: c.Name, Description: c.Description})
 	}
 	return caps
+}
+
+func buildProbeRequest(
+	inst *instance,
+	ia agents.InferenceAgent,
+	refresh bool,
+) *agentctlutil.ProbeRequest {
+	cfg := ia.InferenceConfig()
+	return &agentctlutil.ProbeRequest{
+		AgentID: inst.agentType,
+		Refresh: refresh,
+		InferenceConfig: &agentctlutil.InferenceConfigDTO{
+			Command:   cfg.Command.Args(),
+			ModelFlag: cfg.ModelFlag.Args(),
+			WorkDir:   inst.workDir,
+			StripEnv:  agents.StripEnvFor(ia),
+		},
+	}
+}
+
+func probeFailureCapabilities(
+	agentType string,
+	status Status,
+	errorMessage string,
+	durationMs int,
+	checkedAt time.Time,
+) AgentCapabilities {
+	return AgentCapabilities{
+		AgentType:     agentType,
+		Status:        status,
+		Error:         errorMessage,
+		DurationMs:    durationMs,
+		LastCheckedAt: checkedAt,
+	}
 }
 
 // isAuthError is a coarse heuristic — ACP auth failures bubble up as string

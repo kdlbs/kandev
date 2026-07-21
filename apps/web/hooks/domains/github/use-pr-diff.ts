@@ -2,7 +2,10 @@
 
 import { useEffect, useCallback, useState, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { createDebugLogger } from "@/lib/debug/log";
 import type { PRDiffFile } from "@/lib/types/github";
+
+const debug = createDebugLogger("review:pr-diff");
 
 type PRDiffState = {
   files: PRDiffFile[];
@@ -26,19 +29,20 @@ async function fetchPRFiles(
   if (!client) return;
 
   setState({ files: [], loading: true, error: null });
+  debug("fetch.start", { owner, repo, prNumber });
   try {
     const response = await client.request<{ files?: PRDiffFile[] }>("github.pr_files.get", {
       owner,
       repo,
       number: prNumber,
     });
-    setState({ files: response?.files ?? [], loading: false, error: null });
+    const files = response?.files ?? [];
+    setState({ files, loading: false, error: null });
+    debug("fetch.success", { owner, repo, prNumber, fileCount: files.length });
   } catch (err) {
-    setState({
-      files: [],
-      loading: false,
-      error: err instanceof Error ? err.message : "Failed to fetch PR files",
-    });
+    const message = err instanceof Error ? err.message : "Failed to fetch PR files";
+    setState({ files: [], loading: false, error: message });
+    debug("fetch.error", { owner, repo, prNumber, error: message });
   }
 }
 

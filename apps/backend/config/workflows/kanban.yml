@@ -1,3 +1,8 @@
+# Internal workflow TEMPLATE definition — NOT the portable import/export format.
+# Steps here reference each other by string `step_id`; the importable YAML uses a
+# `version`/`type`/`workflows` envelope and `step_position`. Don't paste this file
+# (or its `step_id` transitions) into the workflow import endpoint.
+# Format reference: docs/workflow-import-export.md
 id: simple
 name: Kanban
 description: >-

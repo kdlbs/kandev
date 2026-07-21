@@ -1,0 +1,491 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  applyChangesPanelAutoFocusState,
+  markInactiveChangesIncreases,
+  migrateEnvironmentKeys,
+  selectChangesMarkerByEnvironment,
+  shouldClearPendingChangesFocus,
+} from "./changes-panel-focus";
+import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+
+const hashDiffMock = vi.hoisted(() => vi.fn((diff: string) => `hash:${diff}`));
+
+vi.mock("@/lib/utils/hash", () => ({
+  djb2Hash: hashDiffMock,
+}));
+
+const TEST_TIMESTAMP = "2026-06-29T00:00:00Z";
+const INITIAL_FINGERPRINT = "repo:path:initial";
+const UPDATED_FINGERPRINT = "repo:path:updated";
+
+beforeEach(() => {
+  hashDiffMock.mockClear();
+});
+
+function gitStatus(files: string[], timestamp = TEST_TIMESTAMP, diff = ""): GitStatusEntry {
+  return {
+    branch: "main",
+    remote_branch: null,
+    modified: [],
+    added: [],
+    deleted: [],
+    untracked: files,
+    renamed: [],
+    ahead: 0,
+    behind: 0,
+    files: Object.fromEntries(
+      files.map((path) => [path, { path, status: "untracked", staged: false, diff }]),
+    ),
+    timestamp,
+  };
+}
+
+describe("selectChangesMarkerByEnvironment cache", () => {
+  it("reuses cached fingerprints for unchanged git status objects", () => {
+    const file: FileInfo = {
+      path: "one.ts",
+      status: "modified",
+      staged: false,
+      diff: "large diff body",
+    };
+    const status: GitStatusEntry = {
+      branch: "main",
+      remote_branch: null,
+      modified: ["one.ts"],
+      added: [],
+      deleted: [],
+      untracked: [],
+      renamed: [],
+      ahead: 0,
+      behind: 0,
+      files: { "one.ts": file },
+      timestamp: TEST_TIMESTAMP,
+    };
+    const state = {
+      gitStatus: {
+        byEnvironmentId: {},
+        byEnvironmentRepo: {
+          envA: {
+            repo1: status,
+          },
+        },
+      },
+      sessionCommits: {
+        loading: {},
+        refetchTrigger: {},
+        byEnvironmentId: {},
+      },
+    };
+
+    const baseMarker = selectChangesMarkerByEnvironment(state).envA;
+    const nextMarker = selectChangesMarkerByEnvironment(state).envA;
+
+    expect(nextMarker).toEqual(baseMarker);
+    expect(hashDiffMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("selectChangesMarkerByEnvironment", () => {
+  it("ignores timestamp-only git refreshes", () => {
+    const baseState = {
+      gitStatus: {
+        byEnvironmentId: {},
+        byEnvironmentRepo: {
+          envA: {
+            repo1: gitStatus(["one.ts"], "2026-06-29T00:00:00Z"),
+          },
+        },
+      },
+      sessionCommits: {
+        loading: {},
+        refetchTrigger: {},
+        byEnvironmentId: {},
+      },
+    };
+    const nextState = {
+      ...baseState,
+      gitStatus: {
+        byEnvironmentId: {},
+        byEnvironmentRepo: {
+          envA: {
+            repo1: gitStatus(["one.ts"], "2026-06-29T00:01:00Z"),
+          },
+        },
+      },
+    };
+
+    const baseMarker = selectChangesMarkerByEnvironment(baseState).envA;
+    const nextMarker = selectChangesMarkerByEnvironment(nextState).envA;
+
+    expect(nextMarker.count).toBe(baseMarker.count);
+    expect(nextMarker.fingerprint).toBe(baseMarker.fingerprint);
+  });
+
+  it("changes fingerprint for diff-only git updates with the same count", () => {
+    const baseState = {
+      gitStatus: {
+        byEnvironmentId: {},
+        byEnvironmentRepo: {
+          envA: {
+            repo1: gitStatus(["one.ts"], TEST_TIMESTAMP, "old diff"),
+          },
+        },
+      },
+      sessionCommits: {
+        loading: {},
+        refetchTrigger: {},
+        byEnvironmentId: {},
+      },
+    };
+    const nextState = {
+      ...baseState,
+      gitStatus: {
+        byEnvironmentId: {},
+        byEnvironmentRepo: {
+          envA: {
+            repo1: gitStatus(["one.ts"], TEST_TIMESTAMP, "new diff"),
+          },
+        },
+      },
+    };
+
+    const baseMarker = selectChangesMarkerByEnvironment(baseState).envA;
+    const nextMarker = selectChangesMarkerByEnvironment(nextState).envA;
+
+    expect(nextMarker.count).toBe(baseMarker.count);
+    expect(nextMarker.fingerprint).not.toBe(baseMarker.fingerprint);
+  });
+});
+
+function signal(count: number, fingerprint: string): string {
+  return `${count}\u0000${fingerprint}`;
+}
+
+describe("applyChangesPanelAutoFocusState fallback session keys", () => {
+  it("activates pending fallback session keys before the env id mapping arrives", () => {
+    const previousMarkers = {
+      "session-B": { count: 1, fingerprint: INITIAL_FINGERPRINT },
+    };
+    const pendingEnvKeys = new Set(["session-B"]);
+    let activateCalls = 0;
+
+    const previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        "session-B": signal(1, INITIAL_FINGERPRINT),
+      },
+      activeEnvKey: "session-B",
+      previousActiveEnvKey: "envA",
+      environmentIdBySessionId: {},
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect(previousActiveEnvKey).toBe("session-B");
+    expect(activateCalls).toBe(1);
+    expect(pendingEnvKeys.size).toBe(0);
+  });
+
+  it("does not queue updates for the active fallback session key", () => {
+    const previousMarkers = {
+      "session-A": { count: 1, fingerprint: INITIAL_FINGERPRINT },
+    };
+    const pendingEnvKeys = new Set<string>();
+    let activateCalls = 0;
+
+    const previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        "session-A": signal(2, UPDATED_FINGERPRINT),
+      },
+      activeEnvKey: "session-A",
+      previousActiveEnvKey: "session-A",
+      environmentIdBySessionId: {},
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect(previousActiveEnvKey).toBe("session-A");
+    expect(activateCalls).toBe(0);
+    expect(pendingEnvKeys.size).toBe(0);
+    expect(previousMarkers["session-A"]).toEqual({
+      count: 2,
+      fingerprint: UPDATED_FINGERPRINT,
+    });
+  });
+});
+
+describe("applyChangesPanelAutoFocusState", () => {
+  it("migrates keys before queuing, defers during restore, and clears after activation", () => {
+    const previousMarkers = {};
+    const pendingEnvKeys = new Set<string>();
+    let previousActiveEnvKey: string | null = "envA";
+    let activateCalls = 0;
+
+    previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        "session-B": signal(1, INITIAL_FINGERPRINT),
+      },
+      activeEnvKey: "envA",
+      previousActiveEnvKey,
+      environmentIdBySessionId: {},
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect(pendingEnvKeys.size).toBe(0);
+
+    previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        envB: signal(12, UPDATED_FINGERPRINT),
+      },
+      activeEnvKey: "envA",
+      previousActiveEnvKey,
+      environmentIdBySessionId: { "session-B": "envB" },
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+    expect(previousMarkers).toEqual({
+      envB: { count: 12, fingerprint: UPDATED_FINGERPRINT },
+    });
+
+    previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        envB: signal(12, UPDATED_FINGERPRINT),
+      },
+      activeEnvKey: "envB",
+      previousActiveEnvKey,
+      environmentIdBySessionId: { "session-B": "envB" },
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: true,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect(activateCalls).toBe(0);
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+
+    previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        envB: signal(12, UPDATED_FINGERPRINT),
+      },
+      activeEnvKey: "envB",
+      previousActiveEnvKey,
+      environmentIdBySessionId: { "session-B": "envB" },
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect(previousActiveEnvKey).toBe("envB");
+    expect(activateCalls).toBe(1);
+    expect(pendingEnvKeys.size).toBe(0);
+  });
+});
+
+describe("markInactiveChangesIncreases", () => {
+  it("baselines first observations and queues only inactive environment increases", () => {
+    const previousMarkers = {};
+    const pendingEnvKeys = new Set<string>();
+
+    markInactiveChangesIncreases({
+      markersByEnv: {
+        envA: { count: 1, fingerprint: "a1" },
+        envB: { count: 0, fingerprint: "b0" },
+      },
+      activeEnvKey: "envA",
+      previousActiveEnvKey: "envA",
+      previousMarkers,
+      pendingEnvKeys,
+    });
+
+    expect(pendingEnvKeys.size).toBe(0);
+
+    markInactiveChangesIncreases({
+      markersByEnv: {
+        envA: { count: 2, fingerprint: "a2" },
+        envB: { count: 1, fingerprint: "b1" },
+      },
+      activeEnvKey: "envA",
+      previousActiveEnvKey: "envA",
+      previousMarkers,
+      pendingEnvKeys,
+    });
+
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+    expect(previousMarkers).toEqual({
+      envA: { count: 2, fingerprint: "a2" },
+      envB: { count: 1, fingerprint: "b1" },
+    });
+  });
+
+  it("queues a same-batch update for the previously inactive environment", () => {
+    const previousMarkers = {
+      envB: { count: 0, fingerprint: "b0" },
+    };
+    const pendingEnvKeys = new Set<string>();
+
+    markInactiveChangesIncreases({
+      markersByEnv: {
+        envB: { count: 1, fingerprint: "b1" },
+      },
+      activeEnvKey: "envB",
+      previousActiveEnvKey: "envA",
+      previousMarkers,
+      pendingEnvKeys,
+    });
+
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+  });
+
+  it("queues count-neutral meaningful updates for inactive environments", () => {
+    const previousMarkers = {
+      envB: { count: 1, fingerprint: "b1" },
+    };
+    const pendingEnvKeys = new Set<string>();
+
+    markInactiveChangesIncreases({
+      markersByEnv: {
+        envB: { count: 1, fingerprint: "b2" },
+      },
+      activeEnvKey: "envA",
+      previousActiveEnvKey: "envA",
+      previousMarkers,
+      pendingEnvKeys,
+    });
+
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+  });
+});
+
+describe("markInactiveChangesIncreases pending cleanup", () => {
+  it("queues first observed inactive changes after bootstrap", () => {
+    const previousMarkers = {
+      envA: { count: 0, fingerprint: "a0" },
+    };
+    const pendingEnvKeys = new Set<string>();
+
+    markInactiveChangesIncreases({
+      markersByEnv: {
+        envA: { count: 0, fingerprint: "a0" },
+        envB: { count: 1, fingerprint: "b1" },
+      },
+      activeEnvKey: "envA",
+      previousActiveEnvKey: "envA",
+      previousMarkers,
+      pendingEnvKeys,
+      queueFirstObservedInactiveChanges: true,
+    });
+
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+  });
+
+  it("clears pending focus when changes disappear or the environment disappears", () => {
+    const previousMarkers = {
+      envB: { count: 1, fingerprint: "b1" },
+      envC: { count: 1, fingerprint: "c1" },
+    };
+    const pendingEnvKeys = new Set(["envB", "envC"]);
+
+    markInactiveChangesIncreases({
+      markersByEnv: {
+        envB: { count: 0, fingerprint: "b0" },
+      },
+      activeEnvKey: "envA",
+      previousActiveEnvKey: "envA",
+      previousMarkers,
+      pendingEnvKeys,
+      queueFirstObservedInactiveChanges: true,
+    });
+
+    expect(pendingEnvKeys.size).toBe(0);
+    expect(previousMarkers).toEqual({
+      envB: { count: 0, fingerprint: "b0" },
+    });
+  });
+});
+
+describe("applyChangesPanelAutoFocusState restore races", () => {
+  it("keeps pending focus when a stale restore flag produces no panel", () => {
+    const previousMarkers = {
+      envB: { count: 1, fingerprint: "b1" },
+    };
+    const pendingEnvKeys = new Set(["envB"]);
+    let restoring = false;
+
+    applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        envB: signal(1, "b1"),
+      },
+      activeEnvKey: "envB",
+      previousActiveEnvKey: "envA",
+      environmentIdBySessionId: {},
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      getIsRestoringLayout: () => restoring,
+      activate: () => {
+        restoring = true;
+        return "no-panel";
+      },
+    });
+
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+  });
+});
+
+describe("migrateEnvironmentKeys", () => {
+  it("migrates pending and previous fallback session keys to environment keys", () => {
+    const previousMarkers = {
+      "session-B": { count: 1, fingerprint: "b1" },
+    };
+    const pendingEnvKeys = new Set(["session-B"]);
+
+    migrateEnvironmentKeys({
+      environmentIdBySessionId: { "session-B": "envB" },
+      previousMarkers,
+      pendingEnvKeys,
+    });
+
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+    expect(previousMarkers).toEqual({
+      envB: { count: 1, fingerprint: "b1" },
+    });
+  });
+});
+
+describe("shouldClearPendingChangesFocus", () => {
+  it("keeps retryable activation results pending", () => {
+    expect(shouldClearPendingChangesFocus("activated")).toBe(true);
+    expect(shouldClearPendingChangesFocus("no-panel")).toBe(true);
+    expect(shouldClearPendingChangesFocus("blocked-agent-group")).toBe(false);
+    expect(shouldClearPendingChangesFocus("no-api")).toBe(false);
+  });
+});

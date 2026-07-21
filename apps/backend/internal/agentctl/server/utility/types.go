@@ -60,6 +60,10 @@ type ProbeRequest struct {
 	// AgentID is the agent to probe (e.g., "claude-acp", "codex-acp").
 	AgentID string `json:"agent_id" binding:"required"`
 
+	// Refresh asks agent-specific discovery fallbacks to invalidate their own
+	// model caches. ACP session discovery itself always starts a fresh process.
+	Refresh bool `json:"refresh,omitempty"`
+
 	// InferenceConfig is the agent's inference configuration.
 	// Command and WorkDir are required; Model is intentionally omitted for probes.
 	InferenceConfig *InferenceConfigDTO `json:"inference_config,omitempty"`
@@ -96,6 +100,9 @@ type ProbeResponse struct {
 	Modes []ProbeMode `json:"modes,omitempty"`
 	// CurrentModeID is the default/current mode selected by the agent.
 	CurrentModeID string `json:"current_mode_id,omitempty"`
+
+	// ConfigOptions are select-style session options advertised by session/new.
+	ConfigOptions []ProbeConfigOption `json:"config_options,omitempty"`
 
 	// Commands are the slash commands the agent advertises via the
 	// `available_commands_update` session notification (drained briefly
@@ -134,6 +141,22 @@ type ProbeMode struct {
 	Meta        map[string]any `json:"meta,omitempty"`
 }
 
+type ProbeConfigOption struct {
+	Type         string                    `json:"type"`
+	ID           string                    `json:"id"`
+	Name         string                    `json:"name"`
+	Description  string                    `json:"description,omitempty"`
+	CurrentValue string                    `json:"current_value"`
+	Category     string                    `json:"category,omitempty"`
+	Options      []ProbeConfigOptionChoice `json:"options,omitempty"`
+}
+
+type ProbeConfigOptionChoice struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
 // ProbeCommand is a single slash command advertised by the agent via the
 // ACP `available_commands_update` session notification.
 type ProbeCommand struct {
@@ -157,6 +180,9 @@ type InferenceConfigDTO struct {
 	ModelFlag []string `json:"model_flag,omitempty"`
 	// WorkDir is the working directory for the agent process.
 	WorkDir string `json:"work_dir"`
+	// StripEnv lists environment variables to strip from the inference
+	// subprocess environment entirely (not just set to empty).
+	StripEnv []string `json:"strip_env,omitempty"`
 }
 
 // PromptResponse is the response from executing a utility prompt.

@@ -10,13 +10,16 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -64,6 +67,8 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecution
 	return nil
 }
 
+func (m *mockAgentManager) IsAgentCommandConfigured(_ string) bool { return true }
+
 func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
 	return nil
 }
@@ -89,9 +94,16 @@ func (m *mockAgentManager) ResetAgentContext(ctx context.Context, agentExecution
 func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, _, _ string) error {
 	return errors.New("not supported")
 }
+func (m *mockAgentManager) SetSessionModeBySessionID(_ context.Context, _, _ string) error {
+	return errors.New("not supported")
+}
 
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	return false
+}
+
+func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {
+	return m.IsAgentRunningForSession(ctx, sessionID)
 }
 
 func (m *mockAgentManager) WasSessionInitialized(_ string) bool { return false }
@@ -103,6 +115,9 @@ func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID s
 }
 func (m *mockAgentManager) WritePassthroughStdin(_ context.Context, _ string, _ string) error {
 	return nil
+}
+func (m *mockAgentManager) ResolvePassthroughConfig(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+	return agents.PassthroughConfig{}, nil
 }
 func (m *mockAgentManager) MarkPassthroughRunning(_ string) error {
 	return nil
@@ -180,7 +195,10 @@ func (r *testTaskRepository) GetTask(ctx context.Context, taskID string) (*v1.Ta
 	defer r.mu.RUnlock()
 	task, exists := r.tasks[taskID]
 	if !exists {
-		return nil, ErrTaskNotFound
+		// Mirror the production sqlite repository's wrapping so processTasks'
+		// errors.Is(err, taskrepo.ErrTaskNotFound) check exercises the same
+		// path it would in prod.
+		return nil, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, taskID)
 	}
 	copy := *task
 	return &copy, nil
@@ -191,10 +209,51 @@ func (r *testTaskRepository) UpdateTaskState(ctx context.Context, taskID string,
 	defer r.mu.Unlock()
 	task, exists := r.tasks[taskID]
 	if !exists {
-		return ErrTaskNotFound
+		return fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, taskID)
 	}
 	task.State = state
 	return nil
+}
+
+func (r *testTaskRepository) UpdateTaskStateIfCurrentIn(
+	_ context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	task, exists := r.tasks[taskID]
+	if !exists {
+		return false, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, taskID)
+	}
+	for _, candidate := range allowed {
+		if task.State != candidate {
+			continue
+		}
+		task.State = state
+		return true, nil
+	}
+	return false, nil
+}
+
+func (r *testTaskRepository) UpdateTaskStateIfNotArchived(
+	_ context.Context, taskID string, state v1.TaskState,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	task, exists := r.tasks[taskID]
+	if !exists {
+		return false, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, taskID)
+	}
+	task.State = state
+	return true, nil
+}
+
+func (r *testTaskRepository) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, _ string,
+	_ models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	return r.UpdateTaskStateIfNotArchived(ctx, taskID, state)
 }
 
 func createTestLogger() *logger.Logger {

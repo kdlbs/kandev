@@ -506,6 +506,22 @@ func TestInbox_TaskReviewRequest_AgentScoped(t *testing.T) {
 	}
 }
 
+func TestInbox_TaskReviewRequest_IgnoresRunnerOnlyTask(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTaskWithAssignee(t, deps.db, "runner-only", "ws-i", "Runner only",
+		"in_progress", 2, "agent-runner")
+
+	items, err := deps.svc.GetInboxItems(context.Background(), "ws-i")
+	if err != nil {
+		t.Fatalf("inbox: %v", err)
+	}
+	for _, it := range items {
+		if it.Type == "task_review_request" && it.EntityID == "runner-only" {
+			t.Fatalf("runner-only task produced review request item: %#v", it)
+		}
+	}
+}
+
 // -- helpers --
 
 // mustAddParticipant inserts a participant row directly via the repo.

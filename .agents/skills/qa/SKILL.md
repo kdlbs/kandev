@@ -109,7 +109,10 @@ Mark task 5 as in_progress.
 Check that the implementation has tests covering the behaviors you just verified:
 - Are the happy path and key error paths tested?
 - Are edge cases from Phase 4 covered?
+- Are tests at the right level: unit for pure logic, integration for boundaries, E2E for critical browser flows?
+- Do tests assert behavior/state/output rather than implementation details or mock behavior?
 - If tests are missing, write them using `/tdd` (or `/e2e` for user-facing flows)
+- Avoid snapshot tests unless the snapshot change will be deliberately reviewed.
 
 Mark task 5 as completed.
 

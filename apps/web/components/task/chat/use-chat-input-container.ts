@@ -9,7 +9,11 @@ import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
-import type { MessageAttachment, ChatInputContainerHandle } from "./chat-input-container";
+import type {
+  ChatSubmitResult,
+  MessageAttachment,
+  ChatInputContainerHandle,
+} from "./chat-input-container";
 
 type UseChatInputContainerParams = {
   ref: React.ForwardedRef<ChatInputContainerHandle>;
@@ -43,7 +47,8 @@ type UseChatInputContainerParams = {
     reviewComments?: DiffComment[],
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
-  ) => void;
+    inlineTaskMentions?: import("@/hooks/use-inline-mention").TaskMentionData[],
+  ) => ChatSubmitResult;
 };
 
 function useInputHandle(
@@ -90,6 +95,20 @@ function getInputPlaceholder(
   return "Ask to make changes, @mention files";
 }
 
+export function shouldShowChatFocusHint(args: {
+  isInputFocused: boolean;
+  value: string;
+  hasClarification: boolean;
+  hasPendingComments: boolean;
+}) {
+  return (
+    !args.isInputFocused &&
+    args.value.trim().length === 0 &&
+    !args.hasClarification &&
+    !args.hasPendingComments
+  );
+}
+
 function computeDerivedState(params: {
   isStarting: boolean;
   isPreparingEnvironment: boolean;
@@ -103,6 +122,7 @@ function computeDerivedState(params: {
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
   allItemsLength: number;
   isInputFocused: boolean;
+  value: string;
   placeholder: string | undefined;
   isAgentBusy: boolean;
   hasAgentCommands: boolean;
@@ -132,7 +152,12 @@ function computeDerivedState(params: {
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
   );
   const hasContextZone = params.allItemsLength > 0;
-  const showFocusHint = !params.isInputFocused && !hasClarification && !hasPendingComments;
+  const showFocusHint = shouldShowChatFocusHint({
+    isInputFocused: params.isInputFocused,
+    value: params.value,
+    hasClarification,
+    hasPendingComments,
+  });
   const inputPlaceholder = getInputPlaceholder(
     params.placeholder,
     params.isAgentBusy,
@@ -198,7 +223,6 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     if (showRequestChangesTooltip && inputRef.current) inputRef.current.focus();
   }, [showRequestChangesTooltip, inputRef]);
 
-  const handleAgentCommand = useCallback((cmd: string) => onSubmit(`/${cmd}`), [onSubmit]);
   const handleSubmitWithReset = useCallback(
     () => handleSubmit(resetHeight),
     [handleSubmit, resetHeight],
@@ -217,6 +241,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     pendingCommentsByFile,
     allItemsLength: allItems.length,
     isInputFocused,
+    value,
     placeholder,
     isAgentBusy,
     hasAgentCommands,
@@ -238,7 +263,6 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     fileInputRef,
     handleChange: handleChangeWithAutoExpand,
     handleSubmitWithReset,
-    handleAgentCommand,
     allItems,
     ...derived,
   };

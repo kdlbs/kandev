@@ -1,16 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { IconCode } from "@tabler/icons-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Button } from "@kandev/ui/button";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useShellSettings } from "@/hooks/domains/settings/use-shell-settings";
-import { updateUserSettings } from "@/lib/api";
-import { useRequest } from "@/lib/http/use-request";
+import { SettingsCard } from "@/components/settings/settings-card";
 
 const AUTO_SHELL = "auto";
 const CUSTOM_SHELL = "custom";
@@ -29,6 +25,7 @@ function resolveShellSelection(preferredShell: string, shellOptions: ShellOption
 
 type ShellSelectProps = {
   shellSelection: string;
+  isDirty: boolean;
   onSelectionChange: (value: string) => void;
   customShell: string;
   onCustomShellChange: (value: string) => void;
@@ -38,6 +35,7 @@ type ShellSelectProps = {
 
 function ShellSelect({
   shellSelection,
+  isDirty,
   onSelectionChange,
   customShell,
   onCustomShellChange,
@@ -52,7 +50,7 @@ function ShellSelect({
           onValueChange={onSelectionChange}
           disabled={!shellLoaded || shellOptions.length === 0}
         >
-          <SelectTrigger>
+          <SelectTrigger data-settings-dirty={isDirty}>
             <SelectValue
               placeholder={
                 shellOptions.length === 0 ? "Shell options unavailable" : "Select a shell"
@@ -81,6 +79,7 @@ function ShellSelect({
         <div className="space-y-2">
           <Input
             value={customShell}
+            data-settings-dirty={isDirty}
             onChange={(event) => onCustomShellChange(event.target.value)}
             placeholder="/bin/zsh"
           />
@@ -93,39 +92,28 @@ function ShellSelect({
   );
 }
 
-export function ShellSettingsCard() {
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
-  const shellSettings = useShellSettings();
-  const initialShellValue = shellSettings.preferredShell ?? "";
-  const initialShellOptions = shellSettings.shellOptions ?? [];
-  const initialSelection = resolveShellSelection(initialShellValue, initialShellOptions);
-  const [preferredShell, setPreferredShell] = useState(initialShellValue);
-  const [baselineShell, setBaselineShell] = useState(initialShellValue);
+export function ShellSettingsCard({
+  preferredShell,
+  isDirty,
+  onPreferredShellChange,
+  shellLoaded,
+  shellOptions,
+}: {
+  preferredShell: string;
+  isDirty?: boolean;
+  onPreferredShellChange: (value: string) => void;
+  shellLoaded: boolean;
+  shellOptions: ShellOption[];
+}) {
+  const initialSelection = resolveShellSelection(preferredShell, shellOptions);
   const [shellSelection, setShellSelection] = useState(initialSelection.selection);
   const [customShell, setCustomShell] = useState(initialSelection.customShell);
-  const [shellLoaded] = useState(shellSettings.loaded);
-  const [shellOptions] = useState<ShellOption[]>(initialShellOptions);
 
-  const saveShellRequest = useRequest(async () => {
-    const trimmed = preferredShell.trim();
-    const currentSettings = storeApi.getState().userSettings;
-    await updateUserSettings({
-      workspace_id: currentSettings.workspaceId ?? "",
-      repository_ids: currentSettings.repositoryIds,
-      preferred_shell: trimmed,
-    });
-    setBaselineShell(trimmed);
-    setUserSettings({
-      ...currentSettings,
-      preferredShell: trimmed || null,
-      loaded: true,
-    });
-  });
-
-  // Store data is SSR-hydrated for settings. Local state is initialized once.
-
-  const shellDirty = preferredShell.trim() !== baselineShell.trim();
+  useLayoutEffect(() => {
+    const next = resolveShellSelection(preferredShell, shellOptions);
+    setShellSelection(next.selection);
+    setCustomShell(next.customShell);
+  }, [preferredShell, shellOptions]);
 
   return (
     <SettingsSection
@@ -133,38 +121,32 @@ export function ShellSettingsCard() {
       title="Shell"
       description="Pick the default shell for task sessions"
     >
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4">
+      <SettingsCard isDirty={isDirty}>
+        <CardHeader>
           <CardTitle className="text-base">Preferred Shell</CardTitle>
-          <Button
-            type="button"
-            onClick={() => saveShellRequest.run()}
-            disabled={!shellLoaded || !shellDirty || saveShellRequest.isLoading}
-          >
-            {saveShellRequest.isLoading ? "Saving..." : "Save"}
-          </Button>
         </CardHeader>
         <CardContent className="space-y-4">
           <ShellSelect
             shellSelection={shellSelection}
+            isDirty={Boolean(isDirty)}
             onSelectionChange={(value) => {
               setShellSelection(value);
               if (value === AUTO_SHELL) {
-                setPreferredShell("");
+                onPreferredShellChange("");
                 setCustomShell("");
                 return;
               }
               if (value === CUSTOM_SHELL) {
-                setPreferredShell(customShell);
+                onPreferredShellChange(customShell);
                 return;
               }
-              setPreferredShell(value);
+              onPreferredShellChange(value);
               setCustomShell("");
             }}
             customShell={customShell}
             onCustomShellChange={(value) => {
               setCustomShell(value);
-              setPreferredShell(value);
+              onPreferredShellChange(value);
             }}
             shellLoaded={shellLoaded}
             shellOptions={shellOptions}
@@ -173,7 +155,7 @@ export function ShellSettingsCard() {
             New task sessions will use this shell. Existing sessions keep their current shell.
           </p>
         </CardContent>
-      </Card>
+      </SettingsCard>
     </SettingsSection>
   );
 }

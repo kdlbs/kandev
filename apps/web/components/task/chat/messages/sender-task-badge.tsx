@@ -1,9 +1,10 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconRobot } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useAppStore } from "@/components/state-provider";
 import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { linkToTask } from "@/lib/links";
 
@@ -12,6 +13,10 @@ export type SenderTaskInfo = {
   /** Title captured when the message was queued/sent. Survives the sender
    * task being renamed, archived, or unloaded from the live kanban state. */
   snapshotTitle: string;
+  /** Sender session id, when the message came from a specific session. */
+  sessionId?: string;
+  /** Sender session's user-supplied name captured at send time ("" when unnamed). */
+  sessionName?: string;
 };
 
 const SENDER_TITLE_MAX = 24;
@@ -38,8 +43,16 @@ type SenderTaskBadgeProps = {
  */
 export function SenderTaskBadge({ sender, size = "sm" }: SenderTaskBadgeProps) {
   const liveTask = useTaskById(sender.id);
+  // Live-resolve the sender session's name when it's in the store (sibling
+  // sessions on the loaded task), falling back to the send-time snapshot.
+  const liveSessionName = useAppStore((state) =>
+    sender.sessionId ? (state.taskSessions.items[sender.sessionId]?.name ?? null) : null,
+  );
   const fullTitle = liveTask?.title || sender.snapshotTitle || "(unknown task)";
-  const truncated = truncateTitle(fullTitle);
+  const sessionName = liveSessionName ?? sender.sessionName ?? "";
+  const truncated = sessionName
+    ? `${truncateTitle(fullTitle)} · ${truncateTitle(sessionName)}`
+    : truncateTitle(fullTitle);
 
   const sizeClass =
     size === "xs" ? "gap-1 px-1.5 py-0.5 text-[10px]" : "gap-1.5 px-2.5 py-1 text-xs font-medium";
@@ -73,7 +86,16 @@ export function SenderTaskBadge({ sender, size = "sm" }: SenderTaskBadgeProps) {
       <Tooltip>
         <TooltipTrigger asChild>{wrapped}</TooltipTrigger>
         <TooltipContent>
-          From agent in task <span className="font-semibold">&ldquo;{fullTitle}&rdquo;</span>
+          {sessionName ? (
+            <>
+              From session <span className="font-semibold">&ldquo;{sessionName}&rdquo;</span> in
+              task <span className="font-semibold">&ldquo;{fullTitle}&rdquo;</span>
+            </>
+          ) : (
+            <>
+              From agent in task <span className="font-semibold">&ldquo;{fullTitle}&rdquo;</span>
+            </>
+          )}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

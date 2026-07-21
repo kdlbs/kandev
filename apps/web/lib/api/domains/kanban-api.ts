@@ -56,10 +56,16 @@ export async function createTask(
       repository_id: string;
       base_branch?: string;
       checkout_branch?: string;
+      pr_number?: number;
       local_path?: string;
       name?: string;
       default_branch?: string;
       github_url?: string;
+      remote_url?: string;
+      provider?: "github" | "gitlab" | "azure_devops";
+      provider_repo_id?: string;
+      provider_owner?: string;
+      provider_name?: string;
       fresh_branch?: boolean;
       confirm_discard?: boolean;
       consented_dirty_files?: string[];
@@ -71,10 +77,17 @@ export async function createTask(
     executor_id?: string;
     executor_profile_id?: string;
     plan_mode?: boolean;
-    attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
+    attachments?: Array<{
+      type: string;
+      data: string;
+      mime_type: string;
+      name?: string;
+      delivery_mode?: "prompt" | "path";
+    }>;
     parent_id?: string;
     workspace_path?: string;
-    priority?: number;
+    priority?: string;
+    project_id?: string;
     metadata?: Record<string, unknown>;
     /** Office task-handoffs phase 4/5 — workspace policy. */
     workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
@@ -112,8 +125,43 @@ export async function updateTask(
   });
 }
 
-export async function deleteTask(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`/api/v1/tasks/${taskId}`, {
+export async function detachTask(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<Task>(`/api/v1/tasks/${taskId}/detach`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
+export async function updateTaskRepositoryBaseBranch(
+  taskId: string,
+  taskRepositoryId: string,
+  baseBranch: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{
+    id: string;
+    task_id: string;
+    repository_id: string;
+    base_branch: string;
+    checkout_branch?: string;
+    position?: number;
+  }>(`/api/v1/tasks/${taskId}/repositories/${taskRepositoryId}`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PATCH",
+      body: JSON.stringify({ base_branch: baseBranch }),
+    },
+  });
+}
+
+export async function deleteTask(
+  taskId: string,
+  params?: { cascade?: boolean },
+  options?: ApiRequestOptions,
+) {
+  const query = params?.cascade ? "?cascade=true" : "";
+  return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
   });
@@ -144,11 +192,43 @@ export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
 }
 
-export async function archiveTask(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`/api/v1/tasks/${taskId}/archive`, {
+export async function archiveTask(
+  taskId: string,
+  params?: { cascade?: boolean },
+  options?: ApiRequestOptions,
+) {
+  const query = params?.cascade ? "?cascade=true" : "";
+  return fetchJson<void>(`/api/v1/tasks/${taskId}/archive${query}`, {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },
   });
+}
+
+export type BranchRecovery = {
+  task_id: string;
+  repository_id: string;
+  branch: string;
+  status: "local" | "remote" | "missing";
+};
+
+export type UnarchiveTaskResponse = {
+  success: boolean;
+  cascade_id: string;
+  unarchived_ids: string[];
+  skipped_ids: string[];
+  affected_group_ids: string[];
+  recovery: BranchRecovery[];
+};
+
+export async function unarchiveTask(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<UnarchiveTaskResponse>(`/api/v1/tasks/${taskId}/unarchive`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
+export async function getSubtaskCount(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ count: number }>(`/api/v1/tasks/${taskId}/subtask-count`, options);
 }
 
 export async function listTasksByWorkspace(
@@ -160,6 +240,7 @@ export async function listTasksByWorkspace(
     includeArchived?: boolean;
     workflowId?: string | null;
     repositoryId?: string | null;
+    sort?: string;
   } = {},
   options?: ApiRequestOptions,
 ) {
@@ -171,5 +252,6 @@ export async function listTasksByWorkspace(
   if (params.includeArchived) url.searchParams.set("include_archived", "true");
   if (params.workflowId) url.searchParams.set("workflow_id", params.workflowId);
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
+  if (params.sort) url.searchParams.set("sort", params.sort);
   return fetchJson<ListTasksResponse>(url.toString(), options);
 }

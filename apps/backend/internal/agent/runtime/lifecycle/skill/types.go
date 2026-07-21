@@ -15,17 +15,25 @@ package skill
 import "context"
 
 // Skill is the runtime-tier view of a skill record. It carries only
-// what the deployer needs to materialise files; the upstream office
-// model (with workspace, file inventory, created_at, ...) collapses
-// to these three fields.
+// what the deployer needs to materialise files; upstream office
+// metadata such as workspace IDs and timestamps is resolved before the
+// deployer receives the skill.
 type Skill struct {
 	Slug    string
 	Content string
+	Files   []SkillFile
 	// SourceType discriminates how Content was produced. Today the
 	// deployer only writes inline content; other source types are
 	// resolved upstream by the SkillReader before reaching the
 	// deployer.
 	SourceType string
+}
+
+// SkillFile is a supporting file inside a skill package. Paths are
+// validated during delivery and must stay relative to the skill root.
+type SkillFile struct {
+	Path    string
+	Content string
 }
 
 // InstructionFile is the runtime-tier view of an agent's instruction

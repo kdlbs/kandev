@@ -113,7 +113,7 @@ test.describe("Git commit body", () => {
     const session = await openTaskSession(testPage, "Git Commit Body Test");
 
     // Wait for agent to finish initial turn
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -212,7 +212,7 @@ test.describe("Git commit pre-hooks", () => {
     const session = await openTaskSession(testPage, "Git Hook Test");
 
     // Wait for agent to finish initial turn
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");

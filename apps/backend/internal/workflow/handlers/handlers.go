@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -12,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/workflow/controller"
 	"github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -142,7 +145,7 @@ func (h *Handlers) httpCreateStepsFromTemplate(c *gin.Context) {
 		TemplateID: req.TemplateID,
 	}); err != nil {
 		h.logger.Error("failed to create steps from template", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create steps"})
+		h.writeStepMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"success": true})
@@ -161,7 +164,7 @@ func (h *Handlers) httpCreateStep(c *gin.Context) {
 	resp, err := h.controller.CreateStep(c.Request.Context(), req)
 	if err != nil {
 		h.logger.Error("failed to create step", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create step"})
+		h.writeStepMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, resp.Step)
@@ -177,16 +180,39 @@ func (h *Handlers) httpUpdateStep(c *gin.Context) {
 	resp, err := h.controller.UpdateStep(c.Request.Context(), req)
 	if err != nil {
 		h.logger.Error("failed to update step", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update step"})
+		h.writeStepMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, resp.Step)
 }
 
+func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrWorkflowReadOnly) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case isStepValidationError(msg):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case strings.Contains(msg, "not found"):
+		c.JSON(http.StatusNotFound, gin.H{"error": "Step not found"})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save step"})
+	}
+}
+
+func isStepValidationError(msg string) bool {
+	return strings.Contains(msg, "wip_limit must be non-negative") ||
+		strings.Contains(msg, "pull_from_step_id") ||
+		strings.Contains(msg, "same workflow") ||
+		strings.Contains(msg, "pull cycle")
+}
+
 func (h *Handlers) httpDeleteStep(c *gin.Context) {
 	if err := h.controller.DeleteStep(c.Request.Context(), c.Param("id")); err != nil {
 		h.logger.Error("failed to delete step", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete step"})
+		h.writeStepMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -207,7 +233,7 @@ func (h *Handlers) httpReorderSteps(c *gin.Context) {
 		StepIDs:    req.StepIDs,
 	}); err != nil {
 		h.logger.Error("failed to reorder steps", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reorder steps"})
+		h.writeStepMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -240,13 +266,30 @@ func (h *Handlers) httpExportWorkflow(c *gin.Context) {
 }
 
 func (h *Handlers) httpExportWorkflows(c *gin.Context) {
-	resp, err := h.controller.ExportWorkflows(c.Request.Context(), c.Param("id"))
+	resp, err := h.controller.ExportWorkflows(c.Request.Context(), c.Param("id"), parseExportIDs(c))
 	if err != nil {
 		h.logger.Error("failed to export workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export workflows"})
 		return
 	}
 	h.respondYAML(c, resp)
+}
+
+// parseExportIDs reads the optional comma-separated `ids` query param. It
+// returns nil when the param is absent (export all, back-compat) and a non-nil
+// slice (possibly empty) when present, restricting the export to those IDs.
+func parseExportIDs(c *gin.Context) []string {
+	raw, ok := c.GetQuery("ids")
+	if !ok {
+		return nil
+	}
+	ids := []string{}
+	for _, part := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			ids = append(ids, trimmed)
+		}
+	}
+	return ids
 }
 
 func (h *Handlers) httpImportWorkflows(c *gin.Context) {

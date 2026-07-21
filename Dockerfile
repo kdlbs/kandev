@@ -3,7 +3,7 @@
 # Single-stage build that consumes prebuilt artifacts. The release workflow
 # (.github/workflows/release.yml) extracts the per-arch release bundle
 # (`kandev-linux-{x64,arm64}.tar.gz`) into the build context, then this file
-# just COPYs the binaries + web standalone + CLI into the runtime layout.
+# just COPYs the native binaries into the runtime layout.
 #
 # Building this file outside CI (manual `docker build .`) will fail because
 # the `bundle/` directory isn't present in the build context. To build
@@ -14,64 +14,108 @@
 # Run:
 #   docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
 
-FROM node:24-bookworm-slim
+FROM debian:bookworm-slim AS apt-keys
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /nodesource.gpg && \
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+        | gpg --dearmor -o /microsoft.gpg && \
+    rm -rf /var/lib/apt/lists/*
+
+FROM debian:bookworm-slim
+
+ARG NODE_MAJOR=24
+
+COPY --from=apt-keys /nodesource.gpg /usr/share/keyrings/nodesource.gpg
+COPY --from=apt-keys /microsoft.gpg /usr/share/keyrings/microsoft.gpg
 
 # Install runtime dependencies. gh is included because the GitHub integration
 # (PR review, webhooks) shells out to it for auth fallback when GITHUB_TOKEN
-# is not set. apprise is installed via pipx for notification fan-out.
+# is not set. Node/npm support agent CLI installs and the universal image's
+# pnpm layer. Azure CLI + azure-devops extension support agentctl Azure Repos PR
+# creation (az repos pr create). apprise is installed via pipx for notification
+# fan-out.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        apt-transport-https \
+        ca-certificates \
+        curl \
         git \
         gh \
-        ca-certificates \
         gosu \
         tini \
         python3 \
         python3-venv \
         pipx && \
+    echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list && \
+    arch="$(dpkg --print-architecture)" && \
+    printf "%s\n" \
+        "Types: deb" \
+        "URIs: https://packages.microsoft.com/repos/azure-cli/" \
+        "Suites: bookworm" \
+        "Components: main" \
+        "Architectures: $arch" \
+        "Signed-by: /usr/share/keyrings/microsoft.gpg" \
+        > /etc/apt/sources.list.d/azure-cli.sources && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends nodejs azure-cli && \
+    rm -f \
+        /etc/apt/sources.list.d/nodesource.list \
+        /etc/apt/sources.list.d/azure-cli.sources \
+        /usr/share/keyrings/nodesource.gpg \
+        /usr/share/keyrings/microsoft.gpg && \
     rm -rf /var/lib/apt/lists/* && \
     PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install apprise
 
-# Replace the node base image's default user so we own uid 1000.
+# Create the runtime user with uid 1000.
 # Home is placed under /data so agent CLI auth state (gh, claude, codex, auggie,
 # copilot, amp, ...) lives on the PV and survives pod restarts and image upgrades.
-RUN userdel -r node && groupadd -r kandev && useradd -r -g kandev -u 1000 -d /data/home -M kandev
+RUN groupadd -r kandev && useradd -r -g kandev -u 1000 -d /data/home -M kandev
+
+# Install azure-devops extension under the runtime user's Azure config dir on /data.
+RUN mkdir -p /data/home/.azure && \
+    AZURE_CONFIG_DIR=/data/home/.azure az extension add --name azure-devops && \
+    chown -R kandev:kandev /data/home/.azure
 
 # Create app directory structure matching what `kandev start` expects:
 #   /app/apps/backend/bin/kandev
-#   /app/apps/web/.next/standalone/web/server.js
-RUN mkdir -p /app/apps/backend/bin /app/apps/web/.next/standalone /usr/local/lib/kandev-cli /data/worktrees
+RUN mkdir -p /app/apps/backend/bin /data/worktrees
 
 # Build context layout (prepared by the release workflow from the extracted
 # bundle tarball):
 #   bundle/bin/kandev                  - native Go backend (per-arch)
 #   bundle/bin/agentctl                - native agentctl (per-arch)
-#   bundle/bin/agentctl-linux-amd64    - amd64 agentctl helper (always amd64)
-#   bundle/web/...                     - Next.js standalone + static + public
-#   bundle/cli/bin/cli.js              - CLI entrypoint (calls cli.bundle.js)
-#   bundle/cli/dist/cli.bundle.js      - self-contained CLI bundle (deps inlined)
-#   bundle/cli/package.json            - package metadata (version, etc.)
+#   bundle/bin/agentctl-linux-amd64    - linux/amd64 agentctl helper
+#   bundle/bin/agentctl-linux-arm64    - linux/arm64 agentctl helper
+#   bundle/bin/agentctl-darwin-arm64   - darwin/arm64 agentctl helper
+#   bundle/bin/agentctl-darwin-amd64   - darwin/amd64 agentctl helper
 #
-# The bundle's `bin/agentctl-linux-amd64` variant is bind-mounted into
-# Docker-executor sandboxes by the lifecycle manager; ship it next to kandev
-# so the AgentctlResolver finds it without manual configuration.
-COPY bundle/bin/kandev               /app/apps/backend/bin/kandev
-COPY bundle/bin/agentctl-linux-amd64 /app/apps/backend/bin/agentctl-linux-amd64
-COPY bundle/bin/agentctl             /usr/local/bin/agentctl
-COPY bundle/web/                     /app/apps/web/.next/standalone/
-COPY bundle/cli/                     /usr/local/lib/kandev-cli/
-COPY docker-entrypoint.sh            /usr/local/bin/docker-entrypoint.sh
+# The bundle's platform-specific agentctl helpers are uploaded into remote
+# SSH hosts and bind-mounted into Docker-executor sandboxes by the lifecycle
+# manager; ship them next to kandev so the AgentctlResolver finds them without
+# manual configuration.
+COPY bundle/bin/kandev                 /app/apps/backend/bin/kandev
+COPY bundle/bin/agentctl-linux-amd64   /app/apps/backend/bin/agentctl-linux-amd64
+COPY bundle/bin/agentctl-linux-arm64   /app/apps/backend/bin/agentctl-linux-arm64
+COPY bundle/bin/agentctl-darwin-arm64  /app/apps/backend/bin/agentctl-darwin-arm64
+COPY bundle/bin/agentctl-darwin-amd64  /app/apps/backend/bin/agentctl-darwin-amd64
+COPY bundle/bin/agentctl               /usr/local/bin/agentctl
+COPY docker-entrypoint.sh              /usr/local/bin/docker-entrypoint.sh
 
-# Re-apply executable bits stripped by tar/COPY edge cases, then link the
-# CLI launcher onto PATH. The CLI's deps are inlined into dist/cli.bundle.js
-# by the release bundle step, so no `npm install` is needed here.
+# Re-apply executable bits stripped by tar/COPY edge cases, then link the native
+# launcher onto PATH.
 RUN chmod +x \
         /app/apps/backend/bin/kandev \
         /app/apps/backend/bin/agentctl-linux-amd64 \
+        /app/apps/backend/bin/agentctl-linux-arm64 \
+        /app/apps/backend/bin/agentctl-darwin-arm64 \
+        /app/apps/backend/bin/agentctl-darwin-amd64 \
         /usr/local/bin/agentctl \
-        /usr/local/lib/kandev-cli/bin/cli.js \
         /usr/local/bin/docker-entrypoint.sh && \
-    ln -s /usr/local/lib/kandev-cli/bin/cli.js /usr/local/bin/kandev && \
+    ln -s /app/apps/backend/bin/kandev /usr/local/bin/kandev && \
     chown -R kandev:kandev /app /data
 
 # Kandev home directory (DB, worktrees, sessions, repos)
@@ -91,10 +135,10 @@ ENV KANDEV_NO_BROWSER=1 \
 
 WORKDIR /app
 
-# Only the backend port is exposed — it reverse-proxies the Next.js frontend
-# (which listens on 37429 internally), so users hit a single port.
+# Only the backend port is exposed; the Go backend serves API, WebSocket, and
+# embedded SPA assets on the same listener.
 EXPOSE 38429
 
 # tini as PID 1 for signal handling; entrypoint handles privilege drop
 ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
-CMD ["kandev", "start", "--backend-port", "38429", "--web-port", "37429", "--verbose"]
+CMD ["kandev", "start", "--backend-port", "38429", "--verbose"]

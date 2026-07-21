@@ -113,6 +113,10 @@ func (s *mockStore) ListActiveWorktreePaths(_ context.Context) ([]string, error)
 	return paths, nil
 }
 
+func (s *mockStore) CountActiveWorktreeReferences(_ context.Context, _ string, _ []string) (int, error) {
+	return 0, nil
+}
+
 // GetWorktreesBySessionID — MultiRepoStore.
 func (s *mockStore) GetWorktreesBySessionID(_ context.Context, sessionID string) ([]*Worktree, error) {
 	var out []*Worktree
@@ -125,9 +129,9 @@ func (s *mockStore) GetWorktreesBySessionID(_ context.Context, sessionID string)
 }
 
 // GetWorktreeBySessionAndRepository — MultiRepoStore.
-func (s *mockStore) GetWorktreeBySessionAndRepository(_ context.Context, sessionID, repoID string) (*Worktree, error) {
+func (s *mockStore) GetWorktreeBySessionAndRepository(_ context.Context, sessionID, repoID, branchSlug string) (*Worktree, error) {
 	for _, wt := range s.worktrees {
-		if wt.SessionID == sessionID && wt.RepositoryID == repoID && wt.Status == StatusActive {
+		if wt.SessionID == sessionID && wt.RepositoryID == repoID && wt.BranchSlug == branchSlug && wt.Status == StatusActive {
 			return wt, nil
 		}
 	}
@@ -292,6 +296,54 @@ func TestSanitizeForBranch(t *testing.T) {
 			maxLen:   13,
 			expected: "fix-the-login",
 		},
+		{
+			name:     "CJK-only title strips to empty",
+			title:    "修复登录问题",
+			maxLen:   20,
+			expected: "",
+		},
+		{
+			name:     "Cyrillic-only title strips to empty",
+			title:    "Исправить баг",
+			maxLen:   20,
+			expected: "",
+		},
+		{
+			name:     "Arabic-only title strips to empty",
+			title:    "إصلاح الخطأ",
+			maxLen:   20,
+			expected: "",
+		},
+		{
+			name:     "emoji-only title strips to empty",
+			title:    "🐛🔥",
+			maxLen:   20,
+			expected: "",
+		},
+		{
+			name:     "mixed ASCII and CJK keeps ASCII parts",
+			title:    "Fix 修复 bug",
+			maxLen:   20,
+			expected: "fix-bug",
+		},
+		{
+			name:     "CJK with ASCII number keeps the number",
+			title:    "Bug 42 修复",
+			maxLen:   20,
+			expected: "bug-42",
+		},
+		{
+			name:     "Issue-number prefix survives non-ASCII title body",
+			title:    "Issue #42: 修复登录问题",
+			maxLen:   20,
+			expected: "issue-42",
+		},
+		{
+			name:     "accented Latin characters are stripped",
+			title:    "café résumé",
+			maxLen:   20,
+			expected: "caf-r-sum",
+		},
 	}
 
 	for _, tt := range tests {
@@ -334,6 +386,18 @@ func TestSemanticWorktreeName(t *testing.T) {
 			taskTitle: "!@#$%^&*()",
 			suffix:    "ab12cd34",
 			expected:  "ab12cd34",
+		},
+		{
+			name:      "non-ASCII-only title falls back to suffix",
+			taskTitle: "修复登录问题",
+			suffix:    "ab12cd34",
+			expected:  "ab12cd34",
+		},
+		{
+			name:      "mixed ASCII and CJK keeps ASCII parts",
+			taskTitle: "Fix 修复 bug",
+			suffix:    "ab12cd34",
+			expected:  "fix-bug_ab12cd34",
 		},
 	}
 
@@ -834,7 +898,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", 0)
 	if err != nil {
 		t.Fatalf("fetchBranchToLocal() unexpected error: %v", err)
 	}
@@ -873,7 +937,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", 0)
 	if err != nil {
 		t.Fatalf("fetchBranchToLocal() should fall back to local branch, got error: %v", err)
 	}
@@ -918,7 +982,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", 0)
 	if err == nil {
 		t.Fatal("fetchBranchToLocal() should fail when branch not found anywhere")
 	}
@@ -957,7 +1021,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", 0)
 	if err == nil {
 		t.Fatal("fetchBranchToLocal() should fail when remote ref is missing and no local branch")
 	}

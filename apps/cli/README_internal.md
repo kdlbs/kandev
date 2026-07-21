@@ -5,38 +5,35 @@
 ```mermaid
 flowchart TD
     A["kandev"] --> B["CLI parses arguments"]
-    B --> C{"Command?"}
+    B --> C{"Install channel?"}
 
-    C -->|run / default| D["resolveRuntime()"]
-    C -->|dev| F["Use local repo"]
-    C -->|start| G["Use local build"]
+    C -->|Homebrew / manual| H["bin/kandev native launcher"]
+    C -->|npm / npx| D["bin/cli.js native shim"]
 
     D --> D1{"KANDEV_BUNDLE_DIR set?"}
     D1 -->|yes| D2["Use env bundle (Homebrew)"]
     D1 -->|no| D3["require.resolve('@kdlbs/runtime-{platform}')"]
     D3 -->|hit| D4["Use installed npm bundle"]
-    D3 -->|miss| D5{"--runtime-version given?"}
-    D5 -->|yes| D6["Download from GitHub Releases (cache)"]
-    D5 -->|no| D7["Throw: 'No runtime found'"]
+    D3 -->|miss| D5["Throw: 'No runtime found'"]
 
-    D2 --> E["Start backend + Next.js standalone"]
+    D2 --> E["Start Go backend serving static SPA"]
     D4 --> E
     D6 --> E
 
-    F --> F1["make dev + next dev"]
-    G --> G1["binary + next start"]
+    F --> F1["make dev + web dev server"]
+    G --> G1["backend binary serving Vite dist"]
 ```
 
 ## Overview
 
-This package provides the `kandev` CLI launcher. The runtime bundle (Go backend, agentctl, Next.js standalone web) is **installed by the package manager** — there is no first-run download.
+This package provides the `kandev` CLI launcher. The runtime bundle (Go backend, agentctl, and static Vite web assets) is **installed by the package manager** — there is no first-run download.
 
 Two install channels share the same release artifacts:
 
 - **npm/npx**: `kandev@X.Y.Z` declares `optionalDependencies` for `@kdlbs/runtime-{platform}@X.Y.Z`. npm 7+ filters by `os`/`cpu` and installs only the matching one.
-- **Homebrew**: `kdlbs/homebrew-kandev` formula downloads the GitHub release tarball into the Cellar and sets `KANDEV_BUNDLE_DIR`.
+- **Homebrew**: `kdlbs/homebrew-kandev` formula downloads the GitHub release tarball into the Cellar and installs `bin/kandev` as the public command.
 
-Both channels resolve to the same runtime bundle layout (`bin/kandev`, `bin/agentctl`, `web/server.js`). The CLI launcher (`runtime.ts`) abstracts over them.
+Both channels resolve to a native runtime bundle. Homebrew/manual bundles contain `bin/kandev` and `bin/agentctl`; npm runtime packages also include the platform-matched binaries. The public command remains `kandev`; the hidden backend mode is `kandev __backend`.
 
 ## Artifact shapes
 
@@ -45,19 +42,19 @@ The GitHub release bundle and the npm runtime package are **different shapes** b
 ```
 # GitHub release bundle (used by Homebrew + manual installs)
 kandev/
-├── bin/{kandev,agentctl}
-├── web/server.js
-└── cli/
-    ├── bin/cli.js              # #!/usr/bin/env node + chmod +x
-    └── dist/cli.bundle.js      # esbuild single-file bundle (deps inlined)
+└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-darwin-arm64,agentctl-darwin-amd64}
 
 # npm runtime package (@kdlbs/runtime-{platform})
 @kdlbs/runtime-{platform}/
-├── bin/{kandev,agentctl}
-└── web/server.js
+└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-darwin-arm64,agentctl-darwin-amd64}
+
+# Tauri desktop resource directory
+apps/desktop/src-tauri/resources/kandev/
+└── bin/{kandev[.exe],agentctl[.exe],agentctl-linux-amd64,agentctl-darwin-arm64,agentctl-darwin-amd64}
 ```
 
-The `cli/` directory is only in the GitHub bundle (Homebrew needs the launcher). For npm installs, the main `kandev` package already provides the CLI; the runtime package only ships the binaries + web bundle.
+For npm installs, the main `kandev` package provides only a tiny Node bin shim that execs `bin/kandev` from the platform runtime package.
+For desktop release builds, `scripts/release/prepare-desktop-runtime.sh` extracts the matching GitHub release bundle into the Tauri resource directory before `tauri build` runs.
 
 ## Commands
 
@@ -73,7 +70,7 @@ The `cli/` directory is only in the GitHub bundle (Homebrew needs the launcher).
 | -------------------------- | ---------------------------------------------------------- |
 | `--version`, `-V`          | Print CLI version and exit                                 |
 | `--port`, `--backend-port` | Backend port                                               |
-| `--web-internal-port`      | Override internal Next.js port                             |
+| `--web-internal-port`      | Override internal Vite dev web port                        |
 | `--verbose`, `-v`          | Show info logs                                             |
 | `--debug`                  | Show debug logs + agent message dumps                      |
 | `--runtime-version <tag>`  | **Advanced/debug**: download a specific GitHub runtime tag |
@@ -91,23 +88,22 @@ npx kandev@latest                    # always pulls latest
 
 There is no `KANDEV_NO_UPDATE_PROMPT` or `KANDEV_SKIP_UPDATE` env var anymore — they're gone with the self-updater.
 
-## Bundling for Homebrew
+## npm shim
 
-The Homebrew bundle uses `dist/cli.bundle.js`, an esbuild single-file output that inlines `tree-kill`, `tar`, and other Node deps. Required because the Cellar has no `node_modules`. The npm package uses the unbundled `dist/cli.js` and resolves deps via npm.
+The npm package has no runtime dependencies beyond its platform optional runtime package. `bin/cli.js` resolves `KANDEV_BUNDLE_DIR` first, then the matching `@kdlbs/runtime-*` package, and execs the native `bin/kandev` binary with the original arguments.
 
 ```bash
-pnpm -C apps/cli build      # produces dist/cli.js
-pnpm -C apps/cli bundle     # produces dist/cli.bundle.js (~212KB)
+pnpm -C apps/cli build      # syntax-checks the shim
+pnpm -C apps/cli test       # tests runtime resolution
 ```
 
 Smoke test the bundle in a clean directory:
 
 ```bash
-mkdir /tmp/smoke && cd /tmp/smoke
-node /path/to/apps/cli/dist/cli.bundle.js --help
+KANDEV_BUNDLE_DIR=/path/to/dist/kandev node /path/to/apps/cli/bin/cli.js --help
 ```
 
-If `Cannot find module 'tree-kill'` appears, the bundle is broken.
+If the runtime package or bundle is missing, the shim prints an actionable runtime-resolution error.
 
 ## Local Development
 
@@ -130,9 +126,9 @@ Releases run entirely in GitHub Actions. From the GHA UI:
 4. Optionally tick `dry_run` to validate without publishing.
 5. Click **Run workflow**.
 
-The workflow does everything: version bump, CHANGELOG, PR, merge, tag, build, npm publish, Homebrew tap update. See [/.github/workflows/release.yml](../../.github/workflows/release.yml).
+The workflow does everything: version bump, CHANGELOG, PR, merge, tag, runtime bundles, desktop artifacts, npm publish, Homebrew tap update. See [/.github/workflows/release.yml](../../.github/workflows/release.yml).
 
-Single SemVer flow: `apps/cli/package.json` version, git tag, npm packages, and Homebrew formula are all bumped to the same `X.Y.Z`.
+Single SemVer flow: `apps/cli/package.json` version, git tag, npm packages, Homebrew formula, GitHub runtime tarballs, and desktop artifacts are all bumped to the same `X.Y.Z`.
 
 Versioning:
 
@@ -142,15 +138,12 @@ Versioning:
 
 ## Environment Overrides
 
-| Variable                              | Description                                                           |
-| ------------------------------------- | --------------------------------------------------------------------- |
-| `KANDEV_BUNDLE_DIR`                   | Force runtime bundle location (set by Homebrew wrapper, tests)        |
-| `KANDEV_PORT` / `KANDEV_BACKEND_PORT` | Backend port                                                          |
-| `KANDEV_WEB_PORT`                     | Internal Next.js port                                                 |
-| `KANDEV_HEALTH_TIMEOUT_MS`            | Override health check timeout (ms)                                    |
-| `KANDEV_GITHUB_OWNER`                 | Override GitHub repo owner (default: `kdlbs`) for `--runtime-version` |
-| `KANDEV_GITHUB_REPO`                  | Override GitHub repo name (default: `kandev`) for `--runtime-version` |
-| `KANDEV_GITHUB_TOKEN`                 | Optional GitHub token for rate limits                                 |
+| Variable                              | Description                                                    |
+| ------------------------------------- | -------------------------------------------------------------- |
+| `KANDEV_BUNDLE_DIR`                   | Force runtime bundle location (set by Homebrew wrapper, tests) |
+| `KANDEV_PORT` / `KANDEV_BACKEND_PORT` | Backend port                                                   |
+| `KANDEV_WEB_PORT`                     | Internal Vite dev web port override                            |
+| `KANDEV_HEALTH_TIMEOUT_MS`            | Override health check timeout (ms)                             |
 
 ## Supported Platforms
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -12,12 +12,16 @@ import { SwimlaneContainer } from "./kanban/swimlane-container";
 import { KanbanHeader } from "./kanban/kanban-header";
 import { MobileFab } from "./kanban/mobile-fab";
 import { MobileSearchBar } from "./kanban/mobile-search-bar";
-import { MobileTaskSheet } from "./kanban/mobile-task-sheet";
 import { TaskMultiSelectToolbar } from "./kanban/task-multi-select-toolbar";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
-import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
+import {
+  resolveBoardWorkflowId,
+  resolveBoardWorkflowSteps,
+  resolveDesiredWorkflowId,
+} from "@/lib/kanban/resolve-workflow";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
+import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskMultiSelect } from "@/hooks/use-task-multi-select";
 import { HomepageCommands } from "./homepage-commands";
@@ -51,6 +55,8 @@ function useWorkflowSelection({
   setActiveWorkflow: (id: string | null) => void;
   setWorkflows: (workflows: WorkflowsState["items"]) => void;
 }) {
+  const searchParams = useSearchParams();
+  const routeWorkflowId = searchParams.get("workflowId");
   const userSettingsRef = useRef(userSettings);
   useEffect(() => {
     userSettingsRef.current = userSettings;
@@ -71,7 +77,7 @@ function useWorkflowSelection({
     );
 
     const desiredWorkflowId = resolveDesiredWorkflowId({
-      activeWorkflowId: workflowsState.activeId,
+      activeWorkflowId: routeWorkflowId ?? workflowsState.activeId,
       settingsWorkflowId: settings.workflowId,
       workspaceWorkflows,
     });
@@ -88,6 +94,7 @@ function useWorkflowSelection({
     setActiveWorkflow,
     setWorkflows,
     store,
+    routeWorkflowId,
     workspaceState.activeId,
   ]);
 }
@@ -167,6 +174,17 @@ function useKanbanBoardHooks(
       onWorkflowChange: handleWorkflowChange,
       searchQuery,
     });
+  const handlePersistedWorkflowChange = useCallback(
+    (workflowId: string | null) => {
+      commitSettings({
+        workspaceId: userSettings.workspaceId,
+        workflowId,
+        repositoryIds: userSettings.repositoryIds,
+      });
+      handleWorkflowChange(workflowId);
+    },
+    [commitSettings, handleWorkflowChange, userSettings.repositoryIds, userSettings.workspaceId],
+  );
   return {
     isDialogOpen,
     editingTask,
@@ -176,6 +194,7 @@ function useKanbanBoardHooks(
     handleEdit,
     handleDelete,
     handleArchive,
+    handleWorkflowChange: handlePersistedWorkflowChange,
     handleDialogOpenChange,
     handleDialogSuccess,
     deletingTaskId,
@@ -226,6 +245,47 @@ function useMultiSelectDerived(
   return { isMixedWorkflowSelection, multiSelectSteps };
 }
 
+function useEffectiveWorkflowContext({
+  isMobile,
+  selectedWorkflowId,
+  hydratedWorkflowId,
+  activeSteps,
+}: {
+  isMobile: boolean;
+  selectedWorkflowId: string | null;
+  hydratedWorkflowId: string | null;
+  activeSteps: ReturnType<typeof useKanbanBoardHooks>["activeSteps"];
+}) {
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const [mobileWorkflowFocusId, setMobileWorkflowFocusId] = useState<string | null>(null);
+  const effectiveWorkflowId = resolveBoardWorkflowId({
+    isMobile,
+    selectedWorkflowId,
+    focusedWorkflowId: mobileWorkflowFocusId,
+    hydratedWorkflowId,
+  });
+  const effectiveSteps = useMemo(
+    () =>
+      resolveBoardWorkflowSteps({
+        effectiveWorkflowId,
+        hydratedWorkflowId,
+        snapshots,
+        activeSteps,
+      }),
+    [activeSteps, effectiveWorkflowId, hydratedWorkflowId, snapshots],
+  );
+  const multiSelect = useTaskMultiSelect(effectiveWorkflowId);
+  const selection = useMultiSelectDerived(multiSelect.selectedIds, snapshots, effectiveSteps);
+
+  return {
+    effectiveWorkflowId,
+    effectiveSteps,
+    multiSelect,
+    ...selection,
+    setMobileWorkflowFocusId,
+  };
+}
+
 function useKanbanBoardSetup(
   onPreviewTask: KanbanBoardProps["onPreviewTask"],
   onOpenTask: KanbanBoardProps["onOpenTask"],
@@ -246,6 +306,7 @@ function useKanbanBoardSetup(
 
   useAllWorkflowSnapshots(workspaceState.activeId);
   useWorkspacePRs(workspaceState.activeId);
+  useWorkspaceMRs(workspaceState.activeId);
 
   const hooks = useKanbanBoardHooks(searchQuery, workspaceState, workflowsState);
   const { handleOpenTask, handleCardClick } = useKanbanNavigation({
@@ -264,30 +325,30 @@ function useKanbanBoardSetup(
     [onBeforeEdit, handleEdit],
   );
 
-  const multiSelect = useTaskMultiSelect(kanban.workflowId);
+  const {
+    effectiveWorkflowId,
+    effectiveSteps,
+    multiSelect,
+    isMixedWorkflowSelection,
+    multiSelectSteps,
+    setMobileWorkflowFocusId,
+  } = useEffectiveWorkflowContext({
+    isMobile,
+    selectedWorkflowId: workflowsState.activeId,
+    hydratedWorkflowId: kanban.workflowId,
+    activeSteps: hooks.activeSteps,
+  });
   const { isMultiSelectMode, toggleSelect } = multiSelect;
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const { isMixedWorkflowSelection, multiSelectSteps } = useMultiSelectDerived(
-    multiSelect.selectedIds,
-    snapshots,
-    hooks.activeSteps,
-  );
 
-  // Mobile bottom sheet: intercept card clicks to show task info first
-  const [mobileSheetTask, setMobileSheetTask] = useState<Task | null>(null);
   const handleCardClickOrSelect = useCallback(
     (task: Task) => {
       if (isMultiSelectMode) {
         toggleSelect(task.id);
         return;
       }
-      if (isMobile) {
-        setMobileSheetTask(task);
-      } else {
-        handleCardClick(task);
-      }
+      handleCardClick(task);
     },
-    [isMultiSelectMode, toggleSelect, isMobile, handleCardClick],
+    [isMultiSelectMode, toggleSelect, handleCardClick],
   );
 
   const automation = useMoveErrorState(router);
@@ -315,45 +376,58 @@ function useKanbanBoardSetup(
     ...automation,
     handleOpenTask,
     handleCardClick: handleCardClickOrSelect,
-    mobileSheetTask,
-    setMobileSheetTask,
     multiSelect,
     isMixedWorkflowSelection,
     multiSelectSteps,
+    effectiveWorkflowId,
+    effectiveSteps,
+    setMobileWorkflowFocusId,
   };
 }
 
 export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanBoardProps = {}) {
   const s = useKanbanBoardSetup(onPreviewTask, onOpenTask, onBeforeEdit);
+  const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
+  const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
+
+  // Collapse search on unmount so the global flag doesn't auto-open (and focus)
+  // the search bar after navigating to another route.
+  useEffect(() => () => setMobileSearchOpen(false), [setMobileSearchOpen]);
+
+  // Memoized so the dialog/child components don't see a new array identity on
+  // every board re-render. Declared before the early return to keep hook order
+  // stable.
+  const stepOptions = useMemo(
+    () =>
+      s.effectiveSteps.map((step) => ({
+        id: step.id,
+        title: step.title,
+        events: step.events,
+      })),
+    [s.effectiveSteps],
+  );
 
   if (!s.isMounted) {
     return <div className="h-dvh w-full bg-background" />;
   }
 
-  const stepOptions = s.activeSteps.map((step) => ({
-    id: step.id,
-    title: step.title,
-    events: step.events,
-  }));
-
   return (
     <div className="h-dvh w-full flex flex-col" data-testid="kanban-board">
       <HomepageCommands onCreateTask={s.handleCreate} />
       <KanbanHeader
-        onCreateTask={s.handleCreate}
         workspaceId={s.workspaceState.activeId ?? undefined}
         searchQuery={s.searchQuery}
         onSearchChange={s.setSearchQuery}
       />
-      {s.isMobile && (
+      {s.isMobile && isMobileSearchOpen && (
         <MobileSearchBar searchQuery={s.searchQuery} onSearchChange={s.setSearchQuery} />
       )}
       <KanbanBoardDialogs
         isDialogOpen={s.isDialogOpen}
         handleDialogOpenChange={s.handleDialogOpenChange}
         workspaceId={s.workspaceState.activeId}
-        workflowId={s.kanban.workflowId}
-        defaultStepId={s.activeSteps[0]?.id ?? null}
+        workflowId={s.effectiveWorkflowId}
+        defaultStepId={s.effectiveSteps[0]?.id ?? null}
         stepOptions={stepOptions}
         editingTask={s.editingTask}
         handleDialogSuccess={s.handleDialogSuccess}
@@ -377,8 +451,11 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         selectedRepositoryIds={s.userSettings.repositoryIds}
         selectedIds={s.multiSelect.selectedIds}
         onToggleSelect={s.multiSelect.toggleSelect}
+        onSelectRange={s.multiSelect.selectRange}
         isMultiSelectMode={s.multiSelect.isMultiSelectMode}
         onToggleMultiSelect={s.multiSelect.toggleMultiSelect}
+        onWorkflowChange={s.handleWorkflowChange}
+        onMobileWorkflowFocusChange={s.setMobileWorkflowFocusId}
       />
       <TaskMultiSelectToolbar
         selectedIds={s.multiSelect.selectedIds}
@@ -390,21 +467,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         onBulkArchive={s.multiSelect.bulkArchive}
         onBulkMove={s.multiSelect.bulkMove}
       />
-      {s.isMobile && (
-        <>
-          <MobileFab onClick={s.handleCreate} />
-          <MobileTaskSheet
-            task={s.mobileSheetTask}
-            open={!!s.mobileSheetTask}
-            onOpenChange={(open) => {
-              if (!open) s.setMobileSheetTask(null);
-            }}
-            onGoToSession={s.handleOpenTask}
-            onEdit={s.handleEdit}
-            onDelete={s.handleDelete}
-          />
-        </>
-      )}
+      {s.isMobile && <MobileFab onClick={s.handleCreate} />}
     </div>
   );
 }

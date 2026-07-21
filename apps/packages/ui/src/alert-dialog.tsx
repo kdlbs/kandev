@@ -5,6 +5,7 @@ import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 
 import { cn } from "./lib/utils";
 import { Button } from "./button";
+import { handleDialogDefaultActionKeyDown } from "./lib/dialog-default-action";
 
 function AlertDialog({ ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
   React.useEffect(() => {
@@ -50,10 +51,18 @@ function AlertDialogOverlay({
 function AlertDialogContent({
   className,
   size = "default",
+  enterConfirms = true,
+  onKeyDown,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content> & {
   size?: "default" | "sm";
+  /** Pressing Enter activates the semantic action button. Default: true. */
+  enterConfirms?: boolean;
 }) {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    onKeyDown?.(event);
+    if (enterConfirms) handleDialogDefaultActionKeyDown(event);
+  };
   return (
     <AlertDialogPortal>
       <AlertDialogOverlay />
@@ -64,6 +73,7 @@ function AlertDialogContent({
           "data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 bg-background ring-foreground/10 gap-3 rounded-xl p-4 ring-1 duration-100 data-[size=default]:max-w-xs data-[size=sm]:max-w-64 data-[size=default]:sm:max-w-sm group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2 outline-none",
           className,
         )}
+        onKeyDown={handleKeyDown}
         {...props}
       />
     </AlertDialogPortal>

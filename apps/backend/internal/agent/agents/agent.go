@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/pkg/agent"
@@ -75,6 +76,18 @@ type InferenceAgent interface {
 type PassthroughAgent interface {
 	PassthroughConfig() PassthroughConfig
 	BuildPassthroughCommand(opts PassthroughOptions) Command
+}
+
+// NativeBinaryAgent is an optional capability for agents whose npm package also
+// ships a standalone CLI binary that behaves identically to `npx -y <pkg>`.
+// When that binary is present in the execution environment, the lifecycle
+// prefers it (BuildCommand receives CommandOptions.PreferNativeBinary=true) to
+// skip the per-launch npm registry round-trip — which is slow behind a private
+// registry. Containerized runtimes ship a controlled image and keep npx.
+type NativeBinaryAgent interface {
+	// NativeBinaryName is the executable to look for on PATH (e.g. "copilot").
+	// An empty string disables native-binary preference.
+	NativeBinaryName() string
 }
 
 // LoginCommand describes an interactive CLI command for authenticating with
@@ -147,6 +160,10 @@ type CommandOptions struct {
 	// Runtime.IsContainerized() to pick a host absolute path vs. a bare
 	// name resolved via the container's PATH.
 	Runtime agentruntime.Runtime
+	// PreferNativeBinary is set by the lifecycle when a NativeBinaryAgent's
+	// standalone CLI was found in the execution environment. Such agents emit
+	// the native binary (e.g. "copilot --acp") instead of "npx -y <pkg>".
+	PreferNativeBinary bool
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
@@ -157,6 +174,10 @@ type PassthroughOptions struct {
 	Resume           bool            // generic "continue last session" (e.g. -c, --resume latest)
 	PermissionValues map[string]bool // e.g. {"auto_approve": true}
 	WorkDir          string
+	// MCPArgs are extra argv tokens produced by the agent's MCP passthrough
+	// strategy (e.g. claude's "--mcp-config <path>", codex's repeated "-c
+	// mcp_servers.…" overrides). Appended to the built command.
+	MCPArgs []string
 	// CLIFlagTokens are user-configured CLI flag argv tokens derived from
 	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
 	// verbatim to the built passthrough command, mirroring CommandOptions.
@@ -179,8 +200,27 @@ type RuntimeConfig struct {
 	ModelFlag       Param  // e.g. NewParam("--model", "{model}")
 	WorkspaceFlag   string // e.g. "--workspace-root"
 	AssumeMcpSse    bool   // Override: assume agent supports SSE MCP servers even if not advertised
+	AssumeMcpHttp   bool   // Override: assume agent supports HTTP MCP servers even if not advertised
 	ProjectSkillDir string // CWD-relative path for project-level skills (e.g. ".claude/skills")
 	UserSkillDir    string // home-relative path for user-level skills (e.g. ".claude/skills")
+	// ProjectMCPStrategy materializes resolved MCP servers into a project-local
+	// config file before a protocol-mode agent subprocess starts. Use this for
+	// agents whose ACP adapter does not wire session/new mcpServers through to
+	// the underlying CLI.
+	ProjectMCPStrategy mcpconfig.PassthroughMCPStrategy
+	// RequiresProcessKill is true for agents whose subprocess should skip the
+	// graceful stdin-close wait because it is known not to exit on EOF (e.g.
+	// OpenCode's ACP runtime, which keeps its HTTP server and MCP child tree
+	// alive). Agentctl still reaps the process group for every agent after
+	// graceful shutdown or timeout; this flag only makes that reap immediate.
+	RequiresProcessKill bool
+	// StripEnv lists environment variables to remove from the agent's child
+	// process environment entirely (not just set to empty). Some programs
+	// distinguish unset from empty string and change behavior based on
+	// presence rather than value. The process manager strips these from the
+	// final child env after adapter merge; the inference executor strips
+	// them from the one-shot probe/inference subprocess env.
+	StripEnv []string
 }
 
 // MountTemplate defines a mount with template variables.
@@ -224,6 +264,29 @@ func (c SessionConfig) SupportsRecovery() bool {
 // filter chain across agents, so the literal lives in exactly one place.
 const PermissionApplyMethodCLIFlag = "cli_flag"
 
+// PermissionApplyMethodAgentctlAutoApprove maps the profile auto_approve column
+// to AGENTCTL_AUTO_APPROVE_PERMISSIONS at launch (all ACP agents).
+const PermissionApplyMethodAgentctlAutoApprove = "agentctl_auto_approve"
+
+// PermissionKeyAutoApprove is the PermissionSettings map key wired to the
+// profile "Auto approve" toggle (see PermissionValues in buildAgentCommand).
+// Centralised for the same reason as PermissionApplyMethodCLIFlag: a typo in
+// any one agent silently disables its auto-approve flag.
+const PermissionKeyAutoApprove = "auto_approve"
+
+// PermissionKeyCursorForce is the Cursor-specific CLI --force toggle (unsandboxed
+// run-everything). Separate from PermissionKeyAutoApprove (agentctl ACP approval).
+const PermissionKeyCursorForce = "cursor_force"
+
+// PermissionKeyDangerouslySkipPermissions is wired to the profile's
+// DangerouslySkipPermissions column (a dedicated bool, not the cli_flags list).
+// Agents whose CLI accepts --dangerously-skip-permissions (or equivalent)
+// declare a PermissionSetting under this key with ApplyMethod=cli_flag so the
+// passthrough Settings() pass emits the flag from the profile bool. The
+// catalog seeder excludes this key to avoid duplicating the toggle into the
+// curated cli_flags list (which would also double-emit the flag at launch).
+const PermissionKeyDangerouslySkipPermissions = "dangerously_skip_permissions"
+
 // PermissionSetting defines metadata for a permission setting option.
 type PermissionSetting struct {
 	Supported    bool   `json:"supported"`
@@ -251,7 +314,30 @@ type PassthroughConfig struct {
 	StabilityWindow   time.Duration
 	ResumeFlag        Param // generic "continue last session" (e.g. NewParam("-c"), NewParam("--resume", "latest"))
 	SessionResumeFlag Param // resume a specific session by ID (e.g. NewParam("--resume"))
-	WaitForTerminal   bool
+	// MCPStrategy materializes resolved MCP servers into this CLI's passthrough
+	// shape (config file + flag, repeated -c overrides, project file, or env var)
+	// without touching the user's global config. Nil means no MCP injection.
+	MCPStrategy     mcpconfig.PassthroughMCPStrategy
+	WaitForTerminal bool
+	// AutoInjectPrompt enables writing the task description to the PTY stdin
+	// after the first idle window. Default false preserves today's behavior.
+	AutoInjectPrompt bool
+	// SubmitSequence is appended after the prompt text when auto-injecting
+	// and when routing chat-compose messages to the PTY. "\r" for most TUIs.
+	// Empty inherits DefaultPassthroughSubmitSequence at PTY write sites.
+	SubmitSequence string
+	// DisableBracketedPaste sends prompt bytes verbatim (plus SubmitSequence).
+	// Claude Code enables bracketed-paste *mode* (?2004h) in its Ink TUI; injecting
+	// ESC[200~…ESC[201~ delimiters breaks input (nothing appears in the prompt).
+	DisableBracketedPaste bool
+	// SubmitDelay is the wait inserted before each non-first chunk when writing the
+	// prompt+submit sequence to PTY stdin. Ink-based TUIs (Claude Code) detect a
+	// "paste burst" when many stdin bytes arrive in one read and absorb the
+	// trailing \r into the pasted content instead of dispatching it as Enter.
+	// Splitting the prompt body from the submit byte with a small delay forces the
+	// submit to arrive as a discrete keystroke. 0 disables (other TUIs handle one
+	// atomic write fine).
+	SubmitDelay time.Duration
 }
 
 // DefaultBufferMaxBytes is the default maximum buffer size for passthrough mode (2 MB).

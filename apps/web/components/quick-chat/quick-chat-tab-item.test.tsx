@@ -23,6 +23,17 @@ function startEditing(label: HTMLElement) {
 }
 
 describe("QuickChatTabItem rename", () => {
+  it("renders an accessible configuration indicator", () => {
+    const { getByLabelText } = render(
+      <QuickChatTabItem
+        {...makeProps()}
+        {...({ kind: "config" } as Partial<Parameters<typeof QuickChatTabItem>[0]>)}
+      />,
+    );
+
+    expect(getByLabelText("Configuration chat")).toBeTruthy();
+  });
+
   it("commits the rename on Enter, calling onRename exactly once", () => {
     const onRename = vi.fn();
     const { getByText, getByLabelText } = render(<QuickChatTabItem {...makeProps({ onRename })} />);

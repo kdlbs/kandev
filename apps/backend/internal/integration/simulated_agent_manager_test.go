@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -145,6 +146,8 @@ func (s *SimulatedAgentManagerClient) StartAgentProcess(ctx context.Context, age
 		zap.String("agent_execution_id", agentExecutionID))
 	return nil
 }
+
+func (s *SimulatedAgentManagerClient) IsAgentCommandConfigured(_ string) bool { return true }
 
 // runAgentSimulation simulates the agent execution lifecycle
 func (s *SimulatedAgentManagerClient) runAgentSimulation(instance *simulatedInstance, req *executor.LaunchAgentRequest) {
@@ -395,6 +398,10 @@ func (s *SimulatedAgentManagerClient) IsAgentRunningForSession(ctx context.Conte
 	return false
 }
 
+func (s *SimulatedAgentManagerClient) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {
+	return s.IsAgentRunningForSession(ctx, sessionID)
+}
+
 // CancelAgent cancels the current agent turn for a session.
 // Returns lifecycle.ErrNoExecutionForSession when no live execution exists for the session
 // (for example, after CrashAgentForSession has been used to simulate a crash), matching the
@@ -484,12 +491,19 @@ func (s *SimulatedAgentManagerClient) SetSessionModelBySessionID(_ context.Conte
 	return fmt.Errorf("not supported")
 }
 
+func (s *SimulatedAgentManagerClient) SetSessionModeBySessionID(_ context.Context, _, _ string) error {
+	return fmt.Errorf("not supported")
+}
+
 func (s *SimulatedAgentManagerClient) WasSessionInitialized(_ string) bool { return false }
 func (s *SimulatedAgentManagerClient) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return false
 }
 func (s *SimulatedAgentManagerClient) WritePassthroughStdin(_ context.Context, _ string, _ string) error {
 	return nil
+}
+func (s *SimulatedAgentManagerClient) ResolvePassthroughConfig(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+	return agents.PassthroughConfig{}, nil
 }
 func (s *SimulatedAgentManagerClient) MarkPassthroughRunning(_ string) error {
 	return nil

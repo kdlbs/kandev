@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, memo } from "react";
+import { memo } from "react";
 import {
   IconCheck,
   IconCode,
@@ -14,28 +14,12 @@ import {
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn, transformPathsInText } from "@/lib/utils";
 import { prettifyToolTitle } from "@/lib/pretty-tool-title";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Message } from "@/lib/types/http";
-import type { PermissionActionType, PermissionOptionKind } from "@/lib/types/permission";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { PermissionActionRow } from "./permission-action-row";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
-
-type PermissionOption = {
-  option_id: string;
-  name: string;
-  kind: PermissionOptionKind;
-};
-
-type PermissionRequestMetadata = {
-  pending_id: string;
-  tool_call_id: string;
-  options: PermissionOption[];
-  action_type: PermissionActionType;
-  action_details: { command?: string; path?: string; cwd?: string };
-  status?: "pending" | "approved" | "rejected";
-};
+import { parsePermission, usePermissionResponseHandlers } from "./use-permission-handlers";
 
 const TOOL_ICON_RULES: Array<{ keywords: string[]; Icon: typeof IconCode }> = [
   { keywords: ["edit", "replace", "write", "save"], Icon: IconEdit },
@@ -87,6 +71,7 @@ type ToolCallExpandedContentProps = {
   isPermissionPending: boolean;
   onApprove: () => void;
   onReject: () => void;
+  onAllowAlways?: () => void;
   isResponding: boolean;
 };
 
@@ -96,6 +81,7 @@ function ToolCallExpandedContent({
   isPermissionPending,
   onApprove,
   onReject,
+  onAllowAlways,
   isResponding,
 }: ToolCallExpandedContentProps) {
   return (
@@ -115,6 +101,7 @@ function ToolCallExpandedContent({
         <PermissionActionRow
           onApprove={onApprove}
           onReject={onReject}
+          onAllowAlways={onAllowAlways}
           isResponding={isResponding}
         />
       )}
@@ -126,14 +113,6 @@ function hasToolOutput(output: unknown): boolean {
   if (!output) return false;
   if (typeof output === "string") return output.length > 0;
   return Object.keys(output as object).length > 0;
-}
-
-function parsePermission(permissionMessage: Message | undefined) {
-  const permissionMetadata = permissionMessage?.metadata as PermissionRequestMetadata | undefined;
-  const permissionStatus = permissionMetadata?.status;
-  const isPermissionPending =
-    !!permissionMessage && permissionStatus !== "approved" && permissionStatus !== "rejected";
-  return { permissionMetadata, permissionStatus, isPermissionPending };
 }
 
 function parseToolCallOutput(metadata: ToolCallMetadata | undefined) {
@@ -185,63 +164,6 @@ function parseToolCallMetadata(comment: Message, permissionMessage: Message | un
   };
 }
 
-type UsePermissionHandlersParams = {
-  permissionMetadata: PermissionRequestMetadata | undefined;
-  permissionMessage: Message | undefined;
-};
-
-function usePermissionResponseHandlers({
-  permissionMetadata,
-  permissionMessage,
-}: UsePermissionHandlersParams) {
-  const [isResponding, setIsResponding] = useState(false);
-
-  const handleRespond = useCallback(
-    async (optionId: string, cancelled: boolean = false) => {
-      if (!permissionMetadata || !permissionMessage) return;
-      const client = getWebSocketClient();
-      if (!client) {
-        console.error("WebSocket client not available");
-        return;
-      }
-      setIsResponding(true);
-      try {
-        await client.request("permission.respond", {
-          session_id: permissionMessage.session_id,
-          pending_id: permissionMetadata.pending_id,
-          option_id: cancelled ? undefined : optionId,
-          cancelled,
-        });
-      } catch (error) {
-        console.error("Failed to respond to permission request:", error);
-      } finally {
-        setIsResponding(false);
-      }
-    },
-    [permissionMessage, permissionMetadata],
-  );
-
-  const handleApprove = useCallback(() => {
-    const allowOption = permissionMetadata?.options.find(
-      (opt) => opt.kind === "allow_once" || opt.kind === "allow_always",
-    );
-    if (allowOption) handleRespond(allowOption.option_id);
-  }, [permissionMetadata, handleRespond]);
-
-  const handleReject = useCallback(() => {
-    const rejectOption = permissionMetadata?.options.find(
-      (opt) => opt.kind === "reject_once" || opt.kind === "reject_always",
-    );
-    if (rejectOption) {
-      handleRespond(rejectOption.option_id);
-    } else {
-      handleRespond("", true);
-    }
-  }, [permissionMetadata, handleRespond]);
-
-  return { isResponding, handleApprove, handleReject };
-}
-
 export const ToolCallMessage = memo(function ToolCallMessage({
   comment,
   permissionMessage,
@@ -260,10 +182,11 @@ export const ToolCallMessage = memo(function ToolCallMessage({
     inlineOutput,
     isSuccess,
   } = parseToolCallMetadata(comment, permissionMessage);
-  const { isResponding, handleApprove, handleReject } = usePermissionResponseHandlers({
-    permissionMetadata,
-    permissionMessage,
-  });
+  const { isResponding, handleApprove, handleAllowAlways, hasAllowAlways, handleReject } =
+    usePermissionResponseHandlers({
+      permissionMetadata,
+      permissionMessage,
+    });
   const autoExpanded = status === "running" || isPermissionPending;
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
 
@@ -315,6 +238,7 @@ export const ToolCallMessage = memo(function ToolCallMessage({
         isPermissionPending={isPermissionPending}
         onApprove={handleApprove}
         onReject={handleReject}
+        onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
         isResponding={isResponding}
       />
     </ExpandableRow>

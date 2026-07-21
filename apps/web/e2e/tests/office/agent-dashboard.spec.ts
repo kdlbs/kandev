@@ -168,14 +168,29 @@ test.describe("Agent dashboard", () => {
       finishedAt: new Date().toISOString(),
     });
 
-    // The page is a Server Component (page.tsx pre-fetches the
-    // summary) wrapped in a Client Component layout. The dashboard
-    // view receives the server-fetched snapshot synchronously into
-    // useState, so the chart primitives + latest-run card are present
-    // in the rendered DOM with no waiting on a client-side fetch.
+    // The route loader pre-fetches the summary before rendering the
+    // dashboard view. The view receives the snapshot synchronously into
+    // useState, so the chart primitives and latest-run card are present in
+    // the rendered DOM with no waiting on a client-side fetch.
     await testPage.goto(`/office/agents/${officeSeed.agentId}/dashboard`);
     await expect(testPage.getByTestId("latest-run-card")).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("stacked-bar").first()).toBeVisible({ timeout: 15_000 });
     await expect(testPage.locator('[data-segment-key="succeeded"]').first()).toBeAttached();
+  });
+
+  test("dashboard content is not hidden by a stuck Suspense boundary", async ({
+    testPage,
+    officeSeed,
+  }) => {
+    // Regression guard for a React 19 Suspense loop caused by feeding
+    // `use(params)` a fresh `Promise.resolve({ id })` on every render of
+    // `OfficeRoutes`. Symptom: the dashboard tree lived in the DOM but the
+    // office wrapper was stuck with `display: none !important` from
+    // React's `hideInstance` because the enclosing Suspense kept re-entering
+    // fallback. `toBeVisible()` traverses ancestors, so it catches the case
+    // where a parent hides the subtree even though the target is attached.
+    await testPage.goto(`/office/agents/${officeSeed.agentId}/dashboard`);
+    await expect(testPage.getByTestId("agent-detail-section")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("agent-dashboard-view")).toBeVisible({ timeout: 15_000 });
   });
 });

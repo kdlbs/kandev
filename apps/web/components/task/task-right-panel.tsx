@@ -3,24 +3,27 @@
 import type { ReactNode, MouseEvent } from "react";
 import type { Layout } from "react-resizable-panels";
 import { memo, useEffect, useCallback, useState, useMemo } from "react";
-import { Badge } from "@kandev/ui/badge";
-import { SessionPanel, SessionPanelContent } from "@kandev/ui/pannel-session";
+import { SessionPanel } from "@kandev/ui/pannel-session";
 import { Group, Panel } from "react-resizable-panels";
-import { TabsContent } from "@kandev/ui/tabs";
 import {
   getLocalStorage,
   setLocalStorage,
   getSessionStorage,
   setSessionStorage,
 } from "@/lib/local-storage";
-import { ShellTerminal } from "@/components/task/shell-terminal";
-import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { useAppStore } from "@/components/state-provider";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDefaultLayout } from "@/lib/layout/use-default-layout";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 import { useTerminals } from "@/hooks/domains/session/use-terminals";
+import { shouldConfirmTerminalClose } from "@/lib/terminal/terminal-busy-registry";
+import { ParkedTerminalsMenu } from "@/components/task/parked-terminals-menu";
+import { CloseTerminalConfirmDialog } from "@/components/task/close-terminal-confirm-dialog";
+import {
+  CommandsTabContent,
+  TerminalTabContents,
+} from "@/components/task/task-right-panel-tab-contents";
 import type { RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
@@ -34,21 +37,53 @@ type TaskRightPanelProps = {
 
 const DEFAULT_RIGHT_LAYOUT: Record<string, number> = { top: 55, bottom: 45 };
 
-function buildTerminalTabs(
-  terminals: Terminal[],
-  handleCloseDevTab: (event: MouseEvent) => void,
-  handleCloseTab: (event: MouseEvent, id: string) => void,
-): SessionTab[] {
-  return terminals.map((terminal) => ({
-    id: terminal.id,
-    label: terminal.label,
-    className: terminal.closable ? "group flex items-center cursor-pointer" : "cursor-pointer",
-    closable: terminal.closable,
-    onClose:
-      terminal.type === "dev-server"
-        ? handleCloseDevTab
-        : (e: MouseEvent) => handleCloseTab(e, terminal.id),
-  }));
+function pickCurrentRenameValue(terminal: Terminal): string {
+  if (terminal.customName && terminal.customName !== "") return terminal.customName;
+  if (terminal.seq) return `Terminal ${terminal.seq}`;
+  return terminal.label;
+}
+
+type TerminalTabsBuilderOpts = {
+  terminals: Terminal[];
+  handleCloseDevTab: (event: MouseEvent) => void;
+  handleCloseTab: (event: MouseEvent, id: string) => void;
+  onContextMenu?: (event: MouseEvent, terminal: Terminal) => void;
+  onDoubleClick?: (event: MouseEvent, terminal: Terminal) => void;
+};
+
+/**
+ * Builds the SessionTab[] for the right-panel strip.
+ *
+ * Ordinary terminals get a `#N` badge (sequence number from the DB row) and
+ * a context-menu hook for rename/destroy. Dev-server and script terminals
+ * preserve their existing label/closable semantics.
+ */
+function buildTerminalTabs({
+  terminals,
+  handleCloseDevTab,
+  handleCloseTab,
+  onContextMenu,
+  onDoubleClick,
+}: TerminalTabsBuilderOpts): SessionTab[] {
+  return terminals.map((terminal) => {
+    const isOrdinary = terminal.kind === "ordinary";
+    const isDev = terminal.type === "dev-server";
+    return {
+      id: terminal.id,
+      label: terminal.label,
+      badge: isOrdinary && terminal.seq ? `#${terminal.seq}` : undefined,
+      truncate: !isOrdinary,
+      className: terminal.closable ? "group flex items-center cursor-pointer" : "cursor-pointer",
+      closable: terminal.closable,
+      onClose: isDev ? handleCloseDevTab : (e: MouseEvent) => handleCloseTab(e, terminal.id),
+      onContextMenu:
+        isOrdinary && onContextMenu ? (e: MouseEvent) => onContextMenu(e, terminal) : undefined,
+      onDoubleClick:
+        isOrdinary && onDoubleClick ? (e: MouseEvent) => onDoubleClick(e, terminal) : undefined,
+      testId: `terminal-tab-${terminal.id}`,
+      closeTestId: `terminal-tab-close-${terminal.id}`,
+    };
+  });
 }
 
 function useRightPanelScripts(repositoryId: string | null, initialScripts: RepositoryScript[]) {
@@ -91,6 +126,8 @@ function useRightPanelTabs({
   terminals,
   handleCloseDevTab,
   handleCloseTab,
+  renameTerminal,
+  destroyTerminal,
   sessionId,
   setRightPanelActiveTab,
 }: {
@@ -98,13 +135,46 @@ function useRightPanelTabs({
   terminals: Terminal[];
   handleCloseDevTab: (event: MouseEvent) => void;
   handleCloseTab: (event: MouseEvent, terminalId: string) => void;
+  renameTerminal: (id: string, name: string | null) => Promise<void> | void;
+  destroyTerminal: (id: string) => Promise<void> | void;
   sessionId: string | null;
   setRightPanelActiveTab: (sessionId: string, tabId: string) => void;
 }) {
+  const onContextMenu = useCallback(
+    (event: MouseEvent, terminal: Terminal) => {
+      event.preventDefault();
+      // Browser prompt() is intentionally low-tech; the next iteration
+      // promotes this to a real shadcn ContextMenu, but window.prompt
+      // ships the renameable-terminal requirement today.
+      const current = pickCurrentRenameValue(terminal);
+      const choice = window.prompt(
+        `Rename terminal (leave empty to reset, type "destroy" to remove and stop the PTY).`,
+        current,
+      );
+      if (choice === null) return;
+      const trimmed = choice.trim();
+      if (trimmed.toLowerCase() === "destroy") {
+        void destroyTerminal(terminal.id);
+        return;
+      }
+      void renameTerminal(terminal.id, trimmed === "" ? null : trimmed);
+    },
+    [renameTerminal, destroyTerminal],
+  );
+
   const tabs: SessionTab[] = useMemo(() => {
     const commandsTabs: SessionTab[] = hasScripts ? [{ id: "commands", label: "Commands" }] : [];
-    return [...commandsTabs, ...buildTerminalTabs(terminals, handleCloseDevTab, handleCloseTab)];
-  }, [hasScripts, terminals, handleCloseDevTab, handleCloseTab]);
+    return [
+      ...commandsTabs,
+      ...buildTerminalTabs({
+        terminals,
+        handleCloseDevTab,
+        handleCloseTab,
+        onContextMenu,
+        onDoubleClick: onContextMenu,
+      }),
+    ];
+  }, [hasScripts, terminals, handleCloseDevTab, handleCloseTab, onContextMenu]);
 
   const handleTabChange = useCallback(
     (value: string) => {
@@ -114,6 +184,52 @@ function useRightPanelTabs({
   );
 
   return { tabs, handleTabChange };
+}
+
+/**
+ * Gate the X-button close behind a confirm when the terminal looks busy or is
+ * a script terminal — mirrors the dockview tab and mobile picker so every
+ * close path warns before it destroys a running shell. Idle shells still close
+ * immediately via the underlying `handleCloseTab`.
+ */
+function useConfirmableTerminalClose({
+  terminals,
+  handleCloseTab,
+  destroyTerminal,
+}: {
+  terminals: Terminal[];
+  handleCloseTab: (event: MouseEvent, terminalId: string) => void;
+  destroyTerminal: (id: string) => Promise<void>;
+}) {
+  const [pendingClose, setPendingClose] = useState<Terminal | null>(null);
+
+  const handleAskCloseTab = useCallback(
+    (event: MouseEvent, terminalId: string) => {
+      const terminal = terminals.find((t) => t.id === terminalId);
+      const needsConfirm =
+        !!terminal &&
+        shouldConfirmTerminalClose(terminalId, {
+          type: terminal.type,
+          kind: terminal.kind,
+        });
+      if (needsConfirm) {
+        event.preventDefault();
+        event.stopPropagation();
+        setPendingClose(terminal);
+        return;
+      }
+      handleCloseTab(event, terminalId);
+    },
+    [terminals, handleCloseTab],
+  );
+
+  const handleConfirmClose = useCallback(async () => {
+    if (!pendingClose) return;
+    await destroyTerminal(pendingClose.id);
+    setPendingClose(null);
+  }, [pendingClose, destroyTerminal]);
+
+  return { pendingClose, setPendingClose, handleAskCloseTab, handleConfirmClose };
 }
 
 type CollapsedRightPanelProps = {
@@ -170,6 +286,9 @@ type RightPanelContentProps = {
   scripts: RepositoryScript[];
   handleRunCommand: (script: RepositoryScript) => void;
   terminals: Terminal[];
+  parkedTerminals: Terminal[];
+  resumeTerminal: (id: string) => Promise<void> | void;
+  destroyTerminal: (id: string) => Promise<void> | void;
   environmentId: string | null;
   devProcessId: string | null | undefined;
   devOutput: string | undefined;
@@ -190,6 +309,9 @@ function RightPanelContent({
   scripts,
   handleRunCommand,
   terminals,
+  parkedTerminals,
+  resumeTerminal,
+  destroyTerminal,
   environmentId,
   devProcessId,
   devOutput,
@@ -217,10 +339,10 @@ function RightPanelContent({
       defaultLayout={rightLayout}
       onLayoutChanged={onRightLayoutChange}
     >
-      <Panel id="top" minSize={30} className="min-h-0">
+      <Panel id="top" minSize={15} className="min-h-0">
         {topPanel}
       </Panel>
-      <Panel id="bottom" minSize={20} className="min-h-0">
+      <Panel id="bottom" minSize={15} className="min-h-0">
         <SessionPanel borderSide="left" margin="top">
           <SessionTabs
             tabs={tabs}
@@ -231,6 +353,15 @@ function RightPanelContent({
             collapsible
             isCollapsed={isBottomCollapsed}
             onToggleCollapse={() => setIsBottomCollapsed(true)}
+            rightContent={
+              parkedTerminals.length > 0 ? (
+                <ParkedTerminalsMenu
+                  parkedTerminals={parkedTerminals}
+                  onResume={resumeTerminal}
+                  onDestroy={destroyTerminal}
+                />
+              ) : undefined
+            }
             className="flex-1 min-h-0"
           >
             <CommandsTabContent scripts={scripts} onRunCommand={handleRunCommand} />
@@ -248,18 +379,17 @@ function RightPanelContent({
   );
 }
 
-const TaskRightPanel = memo(function TaskRightPanel({
-  topPanel,
-  sessionId = null,
-  repositoryId = null,
+function useTaskRightPanel({
+  sessionId,
+  repositoryId,
   initialScripts = [],
   initialTerminals,
-}: TaskRightPanelProps) {
-  const rightPanelIds = ["top", "bottom"];
+}: Required<Pick<TaskRightPanelProps, "sessionId" | "repositoryId">> &
+  Pick<TaskRightPanelProps, "initialScripts" | "initialTerminals">) {
   const rightLayoutKey = "task-layout-right-v2";
   const { defaultLayout: rightLayout, onLayoutChanged: onRightLayoutChange } = useDefaultLayout({
     id: rightLayoutKey,
-    panelIds: rightPanelIds,
+    panelIds: ["top", "bottom"],
     baseLayout: DEFAULT_RIGHT_LAYOUT,
   });
 
@@ -274,18 +404,15 @@ const TaskRightPanel = memo(function TaskRightPanel({
   const closeLayoutPreview = useLayoutStore((state) => state.closePreview);
 
   // Use the terminals hook — env-keyed for shell ops, session-keyed for tab UX
+  const terminalsApi = useTerminals({ sessionId, environmentId, initialTerminals });
   const {
     terminals,
     activeTab,
-    terminalTabValue,
-    addTerminal,
     handleCloseDevTab: baseHandleCloseDevTab,
     handleCloseTab,
-    handleRunCommand,
-    isStoppingDev,
-    devProcessId,
-    devOutput,
-  } = useTerminals({ sessionId, environmentId, initialTerminals });
+    renameTerminal,
+    destroyTerminal,
+  } = terminalsApi;
 
   // Wrap handleCloseDevTab to also close the layout preview
   const handleCloseDevTab = useCallback(
@@ -306,108 +433,97 @@ const TaskRightPanel = memo(function TaskRightPanel({
     isBottomCollapsed,
     setRightPanelActiveTab,
   });
+  const closeConfirm = useConfirmableTerminalClose({ terminals, handleCloseTab, destroyTerminal });
   const { tabs, handleTabChange } = useRightPanelTabs({
     hasScripts,
     terminals,
     handleCloseDevTab,
-    handleCloseTab,
+    handleCloseTab: closeConfirm.handleAskCloseTab,
+    renameTerminal,
+    destroyTerminal,
     sessionId,
     setRightPanelActiveTab,
   });
-  return (
-    <RightPanelContent
-      isBottomCollapsed={isBottomCollapsed}
-      topPanel={topPanel}
-      tabs={tabs}
-      terminalTabValue={terminalTabValue}
-      handleTabChange={handleTabChange}
-      addTerminal={addTerminal}
-      setIsBottomCollapsed={setIsBottomCollapsed}
-      rightLayoutKey={rightLayoutKey}
-      rightLayout={rightLayout}
-      onRightLayoutChange={onRightLayoutChange}
-      scripts={scripts}
-      handleRunCommand={handleRunCommand}
-      terminals={terminals}
-      environmentId={environmentId}
-      devProcessId={devProcessId}
-      devOutput={devOutput}
-      isStoppingDev={isStoppingDev}
-    />
-  );
-});
 
-/** Commands tab content showing repository scripts */
-function CommandsTabContent({
-  scripts,
-  onRunCommand,
-}: {
-  scripts: RepositoryScript[];
-  onRunCommand: (script: RepositoryScript) => void;
-}) {
-  return (
-    <TabsContent value="commands" className="flex-1 min-h-0">
-      <SessionPanelContent>
-        <div className="grid gap-2">
-          {scripts.map((script) => (
-            <button
-              key={script.id}
-              type="button"
-              onClick={() => onRunCommand(script)}
-              className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-left hover:bg-muted cursor-pointer min-w-0"
-            >
-              <span className="flex-1 min-w-0 truncate text-xs">{script.name}</span>
-              <Badge variant="secondary" className="shrink-0 font-mono text-xs max-w-[60%] min-w-0">
-                <span className="truncate block">{script.command}</span>
-              </Badge>
-            </button>
-          ))}
-        </div>
-      </SessionPanelContent>
-    </TabsContent>
-  );
+  return {
+    ...terminalsApi,
+    rightLayoutKey,
+    rightLayout,
+    onRightLayoutChange,
+    isBottomCollapsed,
+    setIsBottomCollapsed,
+    environmentId,
+    scripts,
+    tabs,
+    handleTabChange,
+    closeConfirm,
+  };
 }
 
-/** Terminal tab contents (dev-server and shell terminals) */
-function TerminalTabContents({
-  terminals,
-  environmentId,
-  devProcessId,
-  devOutput,
-  isStoppingDev,
-}: {
-  terminals: Terminal[];
-  environmentId: string | null;
-  devProcessId: string | null | undefined;
-  devOutput: string | undefined;
-  isStoppingDev: boolean;
-}) {
+const TaskRightPanel = memo(function TaskRightPanel({
+  topPanel,
+  sessionId = null,
+  repositoryId = null,
+  initialScripts = [],
+  initialTerminals,
+}: TaskRightPanelProps) {
+  const {
+    terminals,
+    parkedTerminals,
+    terminalTabValue,
+    addTerminal,
+    handleRunCommand,
+    resumeTerminal,
+    destroyTerminal,
+    isStoppingDev,
+    devProcessId,
+    devOutput,
+    rightLayoutKey,
+    rightLayout,
+    onRightLayoutChange,
+    isBottomCollapsed,
+    setIsBottomCollapsed,
+    environmentId,
+    scripts,
+    tabs,
+    handleTabChange,
+    closeConfirm,
+  } = useTaskRightPanel({ sessionId, repositoryId, initialScripts, initialTerminals });
+  const { pendingClose, setPendingClose, handleConfirmClose } = closeConfirm;
   return (
     <>
-      {terminals.map((terminal) => (
-        <TabsContent key={terminal.id} value={terminal.id} className="flex-1 min-h-0">
-          <SessionPanelContent className="p-0">
-            {terminal.type === "dev-server" ? (
-              <ShellTerminal
-                key={devProcessId}
-                processOutput={devOutput}
-                processId={devProcessId ?? null}
-                isStopping={isStoppingDev}
-              />
-            ) : (
-              <PassthroughTerminal
-                key={terminal.id}
-                mode="shell"
-                environmentId={environmentId}
-                terminalId={terminal.id}
-                label={terminal.type === "shell" ? terminal.label : undefined}
-              />
-            )}
-          </SessionPanelContent>
-        </TabsContent>
-      ))}
+      <RightPanelContent
+        isBottomCollapsed={isBottomCollapsed}
+        topPanel={topPanel}
+        tabs={tabs}
+        terminalTabValue={terminalTabValue}
+        handleTabChange={handleTabChange}
+        addTerminal={addTerminal}
+        setIsBottomCollapsed={setIsBottomCollapsed}
+        rightLayoutKey={rightLayoutKey}
+        rightLayout={rightLayout}
+        onRightLayoutChange={onRightLayoutChange}
+        scripts={scripts}
+        handleRunCommand={handleRunCommand}
+        terminals={terminals}
+        parkedTerminals={parkedTerminals}
+        resumeTerminal={resumeTerminal}
+        destroyTerminal={destroyTerminal}
+        environmentId={environmentId}
+        devProcessId={devProcessId}
+        devOutput={devOutput}
+        isStoppingDev={isStoppingDev}
+      />
+      <CloseTerminalConfirmDialog
+        open={pendingClose !== null}
+        terminalName={pendingClose?.label || "Terminal"}
+        onOpenChange={(open) => {
+          if (!open) setPendingClose(null);
+        }}
+        onConfirm={handleConfirmClose}
+      />
     </>
   );
-}
+});
 
 export { TaskRightPanel };

@@ -72,9 +72,11 @@ var _ dashboard.SessionTerminator = (*recordingTerminator)(nil)
 type recordingReactivity struct {
 	result *dashboard.TaskReactivityResult
 	err    error
+	calls  []dashboard.TaskReactivityChange
 }
 
-func (r *recordingReactivity) ApplyTaskMutation(_ context.Context, _ string, _ string, _ dashboard.TaskReactivityChange) (*dashboard.TaskReactivityResult, error) {
+func (r *recordingReactivity) ApplyTaskMutation(_ context.Context, _ string, _ string, change dashboard.TaskReactivityChange) (*dashboard.TaskReactivityResult, error) {
+	r.calls = append(r.calls, change)
 	return r.result, r.err
 }
 

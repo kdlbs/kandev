@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { JiraConfig } from "@/lib/types/jira";
 
-const getJiraConfigMock = vi.fn<[], Promise<JiraConfig | null>>();
+const getJiraConfigMock = vi.fn<() => Promise<JiraConfig | null>>();
 
 vi.mock("@/lib/api/domains/jira-api", () => ({
   getJiraConfig: () => getJiraConfigMock(),
@@ -36,6 +36,7 @@ function makeConfig(overrides: Partial<JiraConfig>): JiraConfig {
     siteUrl: "https://example.atlassian.net",
     email: "u@example.com",
     authMethod: "api_token",
+    instanceType: "cloud",
     defaultProjectKey: "PROJ",
     hasSecret: true,
     lastOk: true,

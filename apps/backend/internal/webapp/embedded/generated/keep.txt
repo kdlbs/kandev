@@ -1,0 +1,1 @@
+Generated Vite assets are copied here by `make sync-embedded-web`.

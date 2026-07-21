@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/securityutil"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -149,7 +150,7 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 
 	g.logger.Debug("executing git command", zap.Strings("args", args))
 
-	err := cmd.Run()
+	err := subproc.RunGit(ctx, cmd)
 	output := stdout.String()
 	if stderr.Len() > 0 {
 		if output != "" {
@@ -528,6 +529,11 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool,
 		}
 
 		g.workspaceTracker.NotifyGitCommit(commit)
+		// Refresh git status so the UI's "unstaged" list clears immediately.
+		// NotifyGitCommit only updates cachedHeadSHA — without an explicit
+		// refresh, currentStatus keeps the pre-commit "modified" entries until
+		// the next poll tick (which never fires when polling is paused).
+		g.triggerRefresh()
 	}
 
 	return result, nil
@@ -959,7 +965,7 @@ type PRCreateResult struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// CreatePR creates a pull request using the gh CLI.
+// CreatePR creates a pull request using the repository host's CLI.
 // It first pushes the current branch to the remote, then creates the PR.
 func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch string, draft bool) (*PRCreateResult, error) {
 	if !g.tryLock("create-pr") {
@@ -969,7 +975,6 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 
 	result := &PRCreateResult{}
 
-	// Get current branch name for --head flag
 	branch, err := g.getCurrentBranch(ctx)
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to get current branch: %s", err.Error())
@@ -977,7 +982,13 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	}
 	g.logger.Debug("current branch", zap.String("branch", branch))
 
-	// First, push the branch to remote (with --set-upstream in case it's a new branch)
+	remoteURL, err := g.getOriginRemoteURL(ctx)
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	g.logger.Debug("origin remote", zap.String("remote", redactRemoteURL(remoteURL)))
+
 	pushOutput, err := g.runGitCommand(ctx, "push", "--set-upstream", "origin", "HEAD")
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to push branch: %s", pushOutput)
@@ -986,57 +997,18 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	}
 	g.logger.Debug("pushed branch to remote", zap.String("output", pushOutput))
 
-	// Now create the PR
-	// Use --head to explicitly specify the branch (helps gh in worktree scenarios)
-	args := []string{"pr", "create", "--title", title, "--body", body, "--head", branch}
-
-	// Strip remote prefix (e.g., "origin/main" -> "main") since gh expects just the branch name
-	cleanBaseBranch := strings.TrimPrefix(baseBranch, "origin/")
-	if cleanBaseBranch != "" {
-		args = append(args, "--base", cleanBaseBranch)
-	}
-
-	if draft {
-		args = append(args, "--draft")
-	}
-
-	cmd := exec.CommandContext(ctx, "gh", args...)
-	cmd.Dir = g.workDir
-
-	// Clear GIT_DIR and GIT_WORK_TREE to ensure gh uses the worktree's .git file
-	// and correctly detects the current branch. Inherited env vars can confuse gh
-	// when running from a worktree.
-	env := filterGitEnv(os.Environ())
-	cmd.Env = env
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	g.logger.Debug("executing gh command",
-		zap.Strings("args", args),
-		zap.String("workDir", g.workDir))
-
-	err = cmd.Run()
-	output := stdout.String()
-	if stderr.Len() > 0 {
-		if output != "" {
-			output += "\n"
-		}
-		output += stderr.String()
-	}
-	result.Output = output
-
-	if err != nil {
-		result.Error = fmt.Sprintf("%s: %s", err.Error(), strings.TrimSpace(stderr.String()))
+	switch detectPRProvider(remoteURL) {
+	case prProviderAzureRepos:
+		return g.createAzureReposPR(ctx, result, remoteURL, branch, title, body, baseBranch, draft)
+	case prProviderGitHub:
+		return g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
+	default:
+		result.Error = fmt.Sprintf(
+			"unsupported git remote for PR creation: %s (GitHub and Azure Repos are supported)",
+			redactRemoteURL(remoteURL),
+		)
 		return result, nil
 	}
-
-	// Extract PR URL from output (gh pr create outputs the URL on success)
-	result.PRURL = strings.TrimSpace(stdout.String())
-	result.Success = true
-	g.logger.Info("PR created", zap.String("url", result.PRURL))
-	return result, nil
 }
 
 // parseStatSummary parses a git --shortstat / --stat summary line like

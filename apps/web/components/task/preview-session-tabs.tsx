@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { IconLoader2 } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
+import { PanelLoadingState } from "@/components/panel-loading-state";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -14,7 +13,8 @@ import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ens
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { PassthroughTerminal } from "./passthrough-terminal";
+import { EnsureSessionErrorEmptyState } from "./ensure-session-error";
+import { PassthroughToolbar } from "./passthrough-toolbar";
 import { TaskChatPanel } from "./task-chat-panel";
 import {
   buildAgentLabelsById,
@@ -30,6 +30,7 @@ type PreviewSessionTabsProps = {
   taskId: string;
   sessionId: string | null;
   ensureSession?: UseEnsureTaskSessionResult;
+  workspaceId?: string | null;
   onSessionChange?: (sessionId: string | null) => void;
 };
 
@@ -43,6 +44,7 @@ export function PreviewSessionTabs({
   taskId,
   sessionId,
   ensureSession,
+  workspaceId,
   onSessionChange,
 }: PreviewSessionTabsProps) {
   const { sessions, isLoaded } = useTaskSessions(taskId);
@@ -97,7 +99,13 @@ export function PreviewSessionTabs({
       return <PreviewLoadingState label="Preparing workspace…" />;
     }
     if (ensureSession?.status === "error") {
-      return <PreviewEnsureError onRetry={ensureSession.retry} />;
+      return (
+        <EnsureSessionErrorEmptyState
+          error={ensureSession.error}
+          onRetry={ensureSession.retry}
+          workspaceId={workspaceId ?? null}
+        />
+      );
     }
     return <PreviewEmptyState />;
   }
@@ -162,16 +170,17 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
   );
 
   if (session.is_passthrough) {
-    return (
-      <div className="h-full bg-card">
-        <PassthroughTerminal sessionId={session.id} mode="agent" />
-      </div>
-    );
+    return <PassthroughToolbar sessionId={session.id} taskId={taskId} />;
   }
 
   return (
     <div className="flex h-full flex-col">
-      <TaskChatPanel onSend={handleSendMessage} sessionId={session.id} hideSessionsDropdown />
+      <TaskChatPanel
+        onSend={handleSendMessage}
+        sessionId={session.id}
+        taskId={taskId}
+        hideSessionsDropdown
+      />
     </div>
   );
 }
@@ -181,15 +190,7 @@ function RunningSpinner() {
 }
 
 function PreviewLoadingState({ label }: { label: string }) {
-  return (
-    <div
-      className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground"
-      data-testid="preview-loading-state"
-    >
-      <IconLoader2 className="h-4 w-4 animate-spin" />
-      {label}
-    </div>
-  );
+  return <PanelLoadingState testId="preview-loading-state" label={label} />;
 }
 
 function PreviewEmptyState() {
@@ -201,20 +202,6 @@ function PreviewEmptyState() {
       >
         No agents yet.
       </div>
-    </div>
-  );
-}
-
-function PreviewEnsureError({ onRetry }: { onRetry: () => void }) {
-  return (
-    <div
-      className="flex h-full flex-col items-center justify-center gap-3 text-sm"
-      data-testid="preview-ensure-error"
-    >
-      <span className="text-muted-foreground">Failed to prepare workspace.</span>
-      <Button variant="outline" size="sm" className="cursor-pointer" onClick={onRetry}>
-        Retry
-      </Button>
     </div>
   );
 }

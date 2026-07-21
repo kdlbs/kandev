@@ -1,18 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { IconDownload, IconTrash } from "@tabler/icons-react";
-import { Card, CardContent } from "@kandev/ui/card";
-import { Button } from "@kandev/ui/button";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
+import type { WorkflowReplayCycleDiagnostic } from "@/lib/workflows/replay-cycle-analysis";
 import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { WorkflowPipelineEditor } from "@/components/settings/workflow-pipeline-editor";
 import { listWorkflowStepsAction } from "@/app/actions/workspaces";
 import { HelpTip } from "./workflow-pipeline-editor-helpers";
@@ -21,15 +19,23 @@ import {
   useWorkflowStepActions,
   useWorkflowDeleteHandlers,
   useStepDeleteHandlers,
-  useWorkflowSaveActions,
-  handleExportWorkflow,
 } from "./workflow-card-actions";
+import { WorkflowCardHeaderActions } from "./workflow-card-header-actions";
+import { SettingsCard } from "./settings-card";
+import { isWorkflowFieldDirty } from "./workflow-dirty-state";
+import { WorkflowSyncedBadge } from "./workflow-synced-badge";
+import { useWorkflowMutationGuard } from "./workflow-mutation-guard";
+import { WorkflowCycleGuardDialog } from "./workflow-cycle-diagnostic";
+import { useWorkflowDraftContributor } from "./use-workflow-draft-contributor";
+
+const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
 
 type WorkflowCardProps = {
   workflow: Workflow;
+  savedWorkflow?: Workflow;
   isWorkflowDirty: boolean;
+  isOrderDirty?: boolean;
   initialWorkflowSteps?: WorkflowStep[];
-  templateStepCount?: number;
   otherWorkflows?: Workflow[];
   onUpdateWorkflow: (updates: {
     name?: string;
@@ -37,31 +43,37 @@ type WorkflowCardProps = {
     agent_profile_id?: string;
   }) => void;
   onDeleteWorkflow: () => Promise<unknown>;
-  onSaveWorkflow: () => Promise<unknown>;
-  onWorkflowCreated?: (created: Workflow) => void;
+  onWorkflowSaved: (params: {
+    clientWorkflow: Workflow;
+    submittedWorkflow: Workflow;
+    savedWorkflow: Workflow;
+    currentSteps: WorkflowStep[];
+    savedSteps: WorkflowStep[];
+    finalizeIdentity: boolean;
+  }) => void;
+  onDiscardWorkflow: () => void;
 };
 
 function useWorkflowSteps(
   workflowId: string,
   initialSteps: WorkflowStep[] | undefined,
-  isNewWorkflow: boolean,
   toast: ReturnType<typeof useToast>["toast"],
 ) {
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>(initialSteps ?? []);
+  const [savedWorkflowSteps, setSavedWorkflowSteps] = useState<WorkflowStep[]>(initialSteps ?? []);
   const [workflowLoading, setWorkflowLoading] = useState(false);
 
   useEffect(() => {
-    if (isNewWorkflow) {
-      setWorkflowSteps(initialSteps ?? []);
-      setWorkflowLoading(false);
-      return;
-    }
+    if (workflowId.startsWith(TEMP_WORKFLOW_PREFIX)) return;
     let cancelled = false;
     const load = async () => {
       setWorkflowLoading(true);
       try {
         const res = await listWorkflowStepsAction(workflowId);
-        if (!cancelled) setWorkflowSteps(res.steps ?? []);
+        if (!cancelled) {
+          setWorkflowSteps(res.steps ?? []);
+          setSavedWorkflowSteps(res.steps ?? []);
+        }
       } catch {
         if (!cancelled) toast({ title: "Failed to load workflow steps", variant: "error" });
       } finally {
@@ -72,18 +84,26 @@ function useWorkflowSteps(
     return () => {
       cancelled = true;
     };
-  }, [workflowId, initialSteps, isNewWorkflow, toast]);
+  }, [workflowId, initialSteps, toast]);
 
   const refreshWorkflowSteps = async () => {
     try {
       const res = await listWorkflowStepsAction(workflowId);
       setWorkflowSteps(res.steps ?? []);
+      setSavedWorkflowSteps(res.steps ?? []);
     } catch {
       /* ignore */
     }
   };
 
-  return { workflowSteps, setWorkflowSteps, workflowLoading, refreshWorkflowSteps };
+  return {
+    workflowSteps,
+    setWorkflowSteps,
+    savedWorkflowSteps,
+    setSavedWorkflowSteps,
+    workflowLoading,
+    refreshWorkflowSteps,
+  };
 }
 
 type WorkflowDeleteState = {
@@ -140,6 +160,8 @@ type StepDeleteState = {
   setTargetStepForMigration: (v: string) => void;
   stepMigrateLoading: boolean;
   setStepMigrateLoading: (v: boolean) => void;
+  stepDeletePending: boolean;
+  setStepDeletePending: (v: boolean) => void;
 };
 
 function useStepDeleteState(): StepDeleteState {
@@ -148,6 +170,7 @@ function useStepDeleteState(): StepDeleteState {
   const [stepTaskCount, setStepTaskCount] = useState<number | null>(null);
   const [targetStepForMigration, setTargetStepForMigration] = useState<string>("");
   const [stepMigrateLoading, setStepMigrateLoading] = useState(false);
+  const [stepDeletePending, setStepDeletePending] = useState(false);
   return {
     stepDeleteOpen,
     setStepDeleteOpen,
@@ -159,54 +182,9 @@ function useStepDeleteState(): StepDeleteState {
     setTargetStepForMigration,
     stepMigrateLoading,
     setStepMigrateLoading,
+    stepDeletePending,
+    setStepDeletePending,
   };
-}
-
-type WorkflowCardActionsProps = {
-  isNewWorkflow: boolean;
-  workflowId: string;
-  setExportYaml: (json: string) => void;
-  setExportOpen: (open: boolean) => void;
-  toast: ReturnType<typeof useToast>["toast"];
-  onDeleteClick: () => Promise<void>;
-  deleteDisabled: boolean;
-};
-
-function WorkflowCardActions({
-  isNewWorkflow,
-  workflowId,
-  setExportYaml,
-  setExportOpen,
-  toast,
-  onDeleteClick,
-  deleteDisabled,
-}: WorkflowCardActionsProps) {
-  return (
-    <div className="flex justify-end gap-2">
-      {!isNewWorkflow && (
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => handleExportWorkflow({ workflowId, setExportYaml, setExportOpen, toast })}
-          className="cursor-pointer"
-        >
-          <IconDownload className="h-4 w-4 mr-2" />
-          Export
-        </Button>
-      )}
-      <Button
-        type="button"
-        variant="destructive"
-        onClick={onDeleteClick}
-        disabled={deleteDisabled}
-        className="cursor-pointer"
-        data-testid="delete-workflow-button"
-      >
-        <IconTrash className="h-4 w-4 mr-2" />
-        Delete Workflow
-      </Button>
-    </div>
-  );
 }
 
 type WorkflowCardDialogsProps = {
@@ -221,59 +199,74 @@ type WorkflowCardDialogsProps = {
   setExportOpen: (open: boolean) => void;
   exportYaml: string;
   stepDel: StepDeleteState;
+  stepToDeleteName: string;
   stepsForStepMigration: WorkflowStep[];
   stepDeleteHandlers: {
     handleMigrateAndDeleteStep: () => Promise<void>;
     handleDeleteStepAndTasks: () => Promise<void>;
   };
+  hasUnsavedChanges: boolean;
+  mutationGuard: ReturnType<typeof useWorkflowMutationGuard>;
 };
 
 type WorkflowCardBodyProps = {
   workflow: Workflow;
-  isWorkflowDirty: boolean;
+  savedWorkflow?: Workflow;
   onUpdateWorkflow: (updates: {
     name?: string;
     description?: string;
     agent_profile_id?: string;
   }) => void;
-  activeSaveRequest: { isLoading: boolean; status: "idle" | "loading" | "success" | "error" };
-  handleSaveWorkflow: () => Promise<void>;
   workflowLoading: boolean;
   workflowSteps: WorkflowStep[];
+  savedWorkflowSteps: WorkflowStep[];
+  diagnostics: WorkflowReplayCycleDiagnostic[];
+  mutationPending: boolean;
   stepActions: {
     handleUpdateWorkflowStep: (id: string, updates: Partial<WorkflowStep>) => Promise<void>;
     handleAddWorkflowStep: () => Promise<void>;
     handleRemoveWorkflowStep: (id: string) => Promise<void>;
     handleReorderWorkflowSteps: (steps: WorkflowStep[]) => Promise<void>;
   };
+  readOnly: boolean;
 };
 
 function WorkflowCardBody({
   workflow,
-  isWorkflowDirty,
+  savedWorkflow,
   onUpdateWorkflow,
-  activeSaveRequest,
-  handleSaveWorkflow,
   workflowLoading,
   workflowSteps,
+  savedWorkflowSteps,
+  diagnostics,
+  mutationPending,
   stepActions,
+  readOnly,
 }: WorkflowCardBodyProps) {
   const healthyProfiles = useHealthyAgentProfiles(workflow.agent_profile_id);
 
   return (
     <>
-      <div className="flex items-end gap-2">
+      <Label>Workflow details</Label>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-2">
         <div className="flex-1 space-y-1.5">
           <Label className="flex items-center gap-2">
             <span>Workflow Name</span>
-            {isWorkflowDirty && <UnsavedChangesBadge />}
+            {readOnly && <WorkflowSyncedBadge sourcePath={workflow.source_path} />}
+            {readOnly && (
+              <span className="text-xs text-muted-foreground">
+                Read-only — managed by workflow sync
+              </span>
+            )}
           </Label>
           <Input
             value={workflow.name}
             onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
+            disabled={readOnly}
+            data-settings-dirty={isWorkflowFieldDirty(workflow, savedWorkflow, "name")}
           />
         </div>
-        <div className="w-[240px] shrink-0 space-y-1.5">
+        <div className="w-full space-y-1.5 sm:w-[240px] sm:shrink-0">
           <Label className="flex items-center gap-1">
             <span>Agent Profile</span>
             <HelpTip text="Default agent profile for tasks in this workflow. When set, the agent selector is locked in the task creation dialog." />
@@ -283,10 +276,16 @@ function WorkflowCardBody({
             onValueChange={(value) =>
               onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
             }
+            disabled={readOnly}
           >
             <SelectTrigger
               className="w-full cursor-pointer"
               data-testid="workflow-agent-profile-select"
+              data-settings-dirty={isWorkflowFieldDirty(
+                workflow,
+                savedWorkflow,
+                "agent_profile_id",
+              )}
             >
               <SelectValue placeholder="None (use task default)" />
             </SelectTrigger>
@@ -302,12 +301,6 @@ function WorkflowCardBody({
             </SelectContent>
           </Select>
         </div>
-        <UnsavedSaveButton
-          isDirty={isWorkflowDirty}
-          isLoading={activeSaveRequest.isLoading}
-          status={activeSaveRequest.status}
-          onClick={handleSaveWorkflow}
-        />
       </div>
       <div className="space-y-2">
         <Label>Workflow Steps</Label>
@@ -316,10 +309,13 @@ function WorkflowCardBody({
         ) : (
           <WorkflowPipelineEditor
             steps={workflowSteps}
+            savedSteps={savedWorkflowSteps}
+            diagnostics={diagnostics}
             onUpdateStep={stepActions.handleUpdateWorkflowStep}
             onAddStep={stepActions.handleAddWorkflowStep}
             onRemoveStep={stepActions.handleRemoveWorkflowStep}
             onReorderSteps={stepActions.handleReorderWorkflowSteps}
+            readOnly={mutationPending || readOnly}
           />
         )}
       </div>
@@ -336,8 +332,11 @@ function WorkflowCardDialogs({
   setExportOpen,
   exportYaml,
   stepDel,
+  stepToDeleteName,
   stepsForStepMigration,
   stepDeleteHandlers,
+  hasUnsavedChanges,
+  mutationGuard,
 }: WorkflowCardDialogsProps) {
   return (
     <>
@@ -355,6 +354,7 @@ function WorkflowCardDialogs({
         deleteLoading={deleteWorkflowLoading}
         onDelete={wfDeleteHandlers.handleDeleteWorkflow}
         onMigrateAndDelete={wfDeleteHandlers.handleMigrateAndDeleteWorkflow}
+        hasUnsavedChanges={hasUnsavedChanges}
       />
       <WorkflowExportDialog
         open={exportOpen}
@@ -365,33 +365,53 @@ function WorkflowCardDialogs({
       <StepDeleteDialog
         open={stepDel.stepDeleteOpen}
         onOpenChange={stepDel.setStepDeleteOpen}
+        stepName={stepToDeleteName}
         stepTaskCount={stepDel.stepTaskCount}
         stepsForMigration={stepsForStepMigration}
         targetStep={stepDel.targetStepForMigration}
         setTargetStep={stepDel.setTargetStepForMigration}
         loading={stepDel.stepMigrateLoading}
+        pending={stepDel.stepDeletePending}
         onMigrateAndDelete={stepDeleteHandlers.handleMigrateAndDeleteStep}
         onDeleteAndTasks={stepDeleteHandlers.handleDeleteStepAndTasks}
+        hasUnsavedChanges={hasUnsavedChanges}
+      />
+      <WorkflowCycleGuardDialog
+        proposal={mutationGuard.proposal}
+        onCancel={mutationGuard.cancelProposal}
+        onConfirm={mutationGuard.confirmProposal}
       />
     </>
   );
 }
 
 function useWorkflowCardState(props: WorkflowCardProps) {
-  const { workflow, initialWorkflowSteps, templateStepCount = 0, otherWorkflows = [] } = props;
-  const { onDeleteWorkflow, onSaveWorkflow, onWorkflowCreated } = props;
+  const { workflow, initialWorkflowSteps, otherWorkflows = [] } = props;
+  const { onDeleteWorkflow } = props;
   const { toast } = useToast();
   const [exportOpen, setExportOpen] = useState(false);
   const [exportYaml, setExportYaml] = useState("");
   const wfDel = useWorkflowDeleteState();
   const stepDel = useStepDeleteState();
-  const isNewWorkflow = workflow.id.startsWith("temp-");
+  // Workflows synced from a configured GitHub repo are read-only: the
+  // backend rejects definition mutations with a 409, so the UI disables the
+  // matching affordances (name/agent-profile/steps/delete) up front.
+  const readOnly = workflow.source === "github";
   const deleteWorkflowRequest = useRequest(onDeleteWorkflow);
-  const { workflowSteps, setWorkflowSteps, workflowLoading, refreshWorkflowSteps } =
-    useWorkflowSteps(workflow.id, initialWorkflowSteps, isNewWorkflow, toast);
+  const {
+    workflowSteps,
+    setWorkflowSteps,
+    savedWorkflowSteps,
+    setSavedWorkflowSteps,
+    workflowLoading,
+    refreshWorkflowSteps,
+  } = useWorkflowSteps(workflow.id, initialWorkflowSteps, toast);
+  const isNewWorkflow = workflow.id.startsWith(TEMP_WORKFLOW_PREFIX);
+  const mutationGuard = useWorkflowMutationGuard(workflowSteps);
   const stepActions = useWorkflowStepActions({
     workflow,
     isNewWorkflow,
+    readOnly,
     workflowSteps,
     setWorkflowSteps,
     refreshWorkflowSteps,
@@ -400,19 +420,24 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     setTargetStepForMigration: stepDel.setTargetStepForMigration,
     setStepDeleteOpen: stepDel.setStepDeleteOpen,
     toast,
+    mutationGuard,
   });
-  const { activeSaveRequest, handleSaveWorkflow } = useWorkflowSaveActions({
+  const workflowDraft = useWorkflowDraftContributor({
     workflow,
-    isNewWorkflow,
+    isWorkflowDirty: props.isWorkflowDirty,
     workflowSteps,
-    templateStepCount,
-    onSaveWorkflow,
-    onWorkflowCreated,
+    savedWorkflowSteps,
+    setWorkflowSteps,
+    setSavedWorkflowSteps,
+    mutationGuard,
     toast,
+    onWorkflowSaved: props.onWorkflowSaved,
+    onDiscardWorkflow: props.onDiscardWorkflow,
+    onDeleteWorkflow: props.onDeleteWorkflow,
   });
   const wfDeleteHandlers = useWorkflowDeleteHandlers({
     workflow,
-    isNewWorkflow,
+    readOnly,
     otherWorkflows,
     wfDel,
     deleteWorkflowRun: deleteWorkflowRequest.run,
@@ -422,7 +447,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     workflow,
     stepDel,
     refreshWorkflowSteps,
-    toast,
+    runMutation: stepActions.runMutation,
   });
   const stepsForStepMigration = stepDel.stepToDelete
     ? workflowSteps.filter((s) => s.id !== stepDel.stepToDelete)
@@ -435,48 +460,62 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     setExportYaml,
     wfDel,
     stepDel,
-    isNewWorkflow,
+    readOnly,
+    mutationGuard,
     deleteWorkflowRequest,
     workflowSteps,
+    savedWorkflowSteps,
     workflowLoading,
     stepActions,
-    activeSaveRequest,
-    handleSaveWorkflow,
     wfDeleteHandlers,
     stepDeleteHandlers,
     stepsForStepMigration,
+    ...workflowDraft,
   };
 }
 
 export function WorkflowCard(props: WorkflowCardProps) {
-  const { workflow, isWorkflowDirty, otherWorkflows = [], onUpdateWorkflow } = props;
+  const { workflow, savedWorkflow, otherWorkflows = [], onUpdateWorkflow } = props;
   const s = useWorkflowCardState(props);
+  const visibleSavedSteps = savedWorkflow ? s.savedWorkflowSteps : [];
 
   return (
-    <Card
+    <SettingsCard
+      isDirty={s.hasUnsavedChanges || props.isOrderDirty}
       data-testid={`workflow-card-${workflow.id}`}
-      className={isWorkflowDirty ? "ring-yellow-500/50" : undefined}
     >
       <CardContent className="pt-6">
         <div className="space-y-4">
           <WorkflowCardBody
             workflow={workflow}
-            isWorkflowDirty={isWorkflowDirty}
+            savedWorkflow={savedWorkflow}
             onUpdateWorkflow={onUpdateWorkflow}
-            activeSaveRequest={s.activeSaveRequest}
-            handleSaveWorkflow={s.handleSaveWorkflow}
             workflowLoading={s.workflowLoading}
             workflowSteps={s.workflowSteps}
+            savedWorkflowSteps={visibleSavedSteps}
+            diagnostics={s.mutationGuard.diagnostics}
+            mutationPending={s.mutationGuard.isMutationPending}
             stepActions={s.stepActions}
+            readOnly={s.readOnly}
           />
-          <WorkflowCardActions
-            isNewWorkflow={s.isNewWorkflow}
+          <WorkflowCardHeaderActions
             workflowId={workflow.id}
             setExportYaml={s.setExportYaml}
             setExportOpen={s.setExportOpen}
             toast={s.toast}
-            onDeleteClick={s.wfDeleteHandlers.handleDeleteWorkflowClick}
-            deleteDisabled={s.deleteWorkflowRequest.isLoading || s.wfDel.workflowDeleteLoading}
+            onDeleteClick={async () => {
+              if (workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)) await s.removeDraftWorkflow();
+              else await s.wfDeleteHandlers.handleDeleteWorkflowClick();
+            }}
+            deleteDisabled={
+              s.mutationGuard.isMutationPending ||
+              s.deleteWorkflowRequest.isLoading ||
+              s.wfDel.workflowDeleteLoading ||
+              s.isRemovingDraft ||
+              s.readOnly
+            }
+            readOnly={s.readOnly}
+            exportDisabled={workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)}
           />
         </div>
       </CardContent>
@@ -489,9 +528,14 @@ export function WorkflowCard(props: WorkflowCardProps) {
         setExportOpen={s.setExportOpen}
         exportYaml={s.exportYaml}
         stepDel={s.stepDel}
+        stepToDeleteName={
+          s.workflowSteps.find((step) => step.id === s.stepDel.stepToDelete)?.name ?? "selected"
+        }
         stepsForStepMigration={s.stepsForStepMigration}
         stepDeleteHandlers={s.stepDeleteHandlers}
+        hasUnsavedChanges={s.hasUnsavedChanges}
+        mutationGuard={s.mutationGuard}
       />
-    </Card>
+    </SettingsCard>
   );
 }

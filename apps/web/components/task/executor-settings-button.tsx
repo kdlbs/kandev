@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { IconBox, IconLoader2, IconTrash } from "@tabler/icons-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 import { getExecutorStatusIcon } from "@/lib/executor-icons";
 import { TaskResetEnvConfirmDialog } from "./task-reset-env-confirm-dialog";
@@ -31,10 +32,11 @@ export function ExecutorSettingsButton({
   const isPreparing = isPreparingPhase(prepare.phase);
   // Promote the foreground polling cadence while preparing so the icon flips
   // to "ready" without the user hovering over the trigger.
-  const { env, container, loading, isResetting, reset, status } = useTaskEnvironment(
+  const { env, container, ssh, loading, isResetting, reset, status } = useTaskEnvironment(
     taskId,
     open || isPreparing,
   );
+  const hasWorktreePath = Boolean(env?.worktree_path);
 
   const handleReset = useCallback(
     async (opts: { pushBranch: boolean }) => {
@@ -80,18 +82,40 @@ export function ExecutorSettingsButton({
           data-testid="executor-settings-popover"
         >
           <PrepareStatusSection summary={prepare} />
-          <EnvironmentInfo env={env} container={container} loading={loading} />
+          <EnvironmentInfo env={env} container={container} ssh={ssh} loading={loading} />
           <div className="border-t border-border px-2 py-1.5 flex items-center justify-end">
-            <Button
-              variant="destructive"
-              size="sm"
-              className="cursor-pointer text-xs"
-              disabled={!env || isResetting}
-              data-testid="executor-settings-reset"
-              onClick={() => setResetDialogOpen(true)}
-            >
-              <IconTrash className="h-3.5 w-3.5 mr-1" /> Reset environment
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={!env || isResetting ? 0 : -1} aria-label="Reset environment">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="cursor-pointer text-xs"
+                    disabled={!env || isResetting}
+                    data-testid="executor-settings-reset"
+                    onClick={() => setResetDialogOpen(true)}
+                  >
+                    <IconTrash className="h-3.5 w-3.5 mr-1" /> Reset environment
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p className="font-medium">Reset environment</p>
+                <p className="mt-1 text-xs">
+                  Deletes the current task environment (container, sandbox, and/or worktree) and
+                  forces a fresh one to be created for your next run.
+                </p>
+                <p className="mt-1 text-xs text-destructive">
+                  Any uncommitted or unpushed changes are lost.
+                </p>
+                {hasWorktreePath && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Push your branch to its remote in the confirmation dialog to preserve committed
+                    work before resetting.
+                  </p>
+                )}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </HoverCardContent>
       </HoverCard>
@@ -99,7 +123,7 @@ export function ExecutorSettingsButton({
       <TaskResetEnvConfirmDialog
         open={resetDialogOpen}
         onOpenChange={setResetDialogOpen}
-        hasWorktreePath={Boolean(env?.worktree_path)}
+        hasWorktreePath={hasWorktreePath}
         isResetting={isResetting}
         onConfirm={handleReset}
       />

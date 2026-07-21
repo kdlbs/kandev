@@ -22,7 +22,10 @@ import type {
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { snapshotToState, taskToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
+import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 import type { AppState } from "@/lib/state/store";
+import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
 
 function buildWorktreeState(allSessions: TaskSession[]) {
   const sessionsWithWorktrees = allSessions.filter((s) => s.worktree_id);
@@ -56,6 +59,12 @@ type BuildSessionPageStateParams = {
   agents: Awaited<ReturnType<typeof listAgents>>;
   repositories: Awaited<ReturnType<typeof listRepositories>>["repositories"];
   allSessions: TaskSession[];
+  // Full session payload (with agent_profile_snapshot) for the active sessionId,
+  // when available. The list endpoint returns lightweight summaries without the
+  // snapshot, which would force the model selector to fall back to the agent's
+  // default model on SSR — visible as a brief flash of the wrong model before
+  // the WS-driven cached state arrives.
+  activeSession: TaskSession | null;
   workspaces: Awaited<ReturnType<typeof listWorkspaces>>["workspaces"];
   workflows: Awaited<ReturnType<typeof listWorkflows>>["workflows"];
   turns: Awaited<ReturnType<typeof listSessionTurns>>["turns"];
@@ -92,17 +101,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
   const scripts = repository?.scripts ?? [];
   return {
     workspaces: {
-      items: workspaces.map((w) => ({
-        id: w.id,
-        name: w.name,
-        description: w.description ?? null,
-        owner_id: w.owner_id,
-        default_executor_id: w.default_executor_id ?? null,
-        default_environment_id: w.default_environment_id ?? null,
-        default_agent_profile_id: w.default_agent_profile_id ?? null,
-        created_at: w.created_at,
-        updated_at: w.updated_at,
-      })),
+      items: workspaces.map(mapWorkspaceItem),
       activeId: task.workspace_id,
     },
     // Don't write activeId — null means "All Workflows"; task context lives in kanban.workflowId.
@@ -137,9 +136,16 @@ function buildResourceState(p: BuildSessionPageStateParams) {
 }
 
 function buildSessionState(p: BuildSessionPageStateParams) {
-  const { task, sessionId, allSessions, turns } = p;
+  const { task, sessionId, allSessions, activeSession, turns } = p;
+  // Prefer the full active session payload (with agent_profile_snapshot) over
+  // its summary entry in allSessions so the model selector can resolve the
+  // persisted model on first render without flashing the agent default.
+  const itemsBySessionId = Object.fromEntries(allSessions.map((s) => [s.id, s]));
+  if (activeSession?.id) {
+    itemsBySessionId[activeSession.id] = activeSession;
+  }
   return {
-    taskSessions: { items: Object.fromEntries(allSessions.map((s) => [s.id, s])) },
+    taskSessions: { items: itemsBySessionId },
     taskSessionsByTask: {
       itemsByTaskId: { [task.id]: allSessions },
       loadingByTaskId: { [task.id]: false },
@@ -160,65 +166,11 @@ function buildSessionState(p: BuildSessionPageStateParams) {
 }
 
 function buildPrepareProgressState(allSessions: TaskSession[]) {
-  const bySessionId: Record<
-    string,
-    {
-      sessionId: string;
-      status: string;
-      steps: Array<{
-        name: string;
-        command?: string;
-        status: string;
-        output?: string;
-        error?: string;
-        warning?: string;
-        warningDetail?: string;
-        startedAt?: string;
-        endedAt?: string;
-      }>;
-      errorMessage?: string;
-      durationMs?: number;
-    }
-  > = {};
+  const bySessionId: Record<string, SessionPrepareState> = {};
 
   for (const session of allSessions) {
-    const pr = session.metadata?.prepare_result as
-      | {
-          status?: string;
-          steps?: Array<{
-            name: string;
-            command?: string;
-            status: string;
-            output?: string;
-            error?: string;
-            warning?: string;
-            warning_detail?: string;
-            started_at?: string;
-            ended_at?: string;
-          }>;
-          error_message?: string;
-          duration_ms?: number;
-        }
-      | undefined;
-    if (!pr) continue;
-
-    bySessionId[session.id] = {
-      sessionId: session.id,
-      status: pr.status ?? "completed",
-      steps: (pr.steps ?? []).map((s) => ({
-        name: s.name,
-        command: s.command,
-        status: s.status,
-        output: s.output,
-        error: s.error,
-        warning: s.warning,
-        warningDetail: s.warning_detail,
-        startedAt: s.started_at,
-        endedAt: s.ended_at,
-      })),
-      errorMessage: pr.error_message,
-      durationMs: pr.duration_ms,
-    };
+    const prepareState = prepareResultToSessionState(session.id, session.metadata);
+    if (prepareState) bySessionId[session.id] = prepareState;
   }
 
   if (Object.keys(bySessionId).length === 0) return {};
@@ -233,23 +185,23 @@ export type FetchedSessionData = {
 };
 
 export async function fetchSessionData(sessionId: string): Promise<FetchedSessionData> {
-  const [allSessionsResponse, task] = await (async () => {
-    // We need task + sessions; caller provides sessionId
-    const { fetchTaskSession } = await import("@/lib/api");
-    const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" });
-    const session = sessionResponse.session;
-    if (!session?.task_id) throw new Error("No task_id found for session");
-    const t = await fetchTask(session.task_id, { cache: "no-store" });
-    const sessResp = await listTaskSessions(session.task_id, { cache: "no-store" });
-    return [sessResp, t] as const;
-  })();
+  const { fetchTaskSession } = await import("@/lib/api");
+  const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" });
+  const activeSession = sessionResponse.session ?? null;
+  if (!activeSession?.task_id) throw new Error("No task_id found for session");
+  const [task, allSessionsResponse] = await Promise.all([
+    fetchTask(activeSession.task_id, { cache: "no-store" }),
+    listTaskSessions(activeSession.task_id, { cache: "no-store" }),
+  ]);
 
-  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse);
+  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, activeSession);
 }
 
 export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSessionData> {
-  const task = await fetchTask(taskId, { cache: "no-store" });
-  const allSessionsResponse = await listTaskSessions(taskId, { cache: "no-store" });
+  const [task, allSessionsResponse] = await Promise.all([
+    fetchTask(taskId, { cache: "no-store" }),
+    listTaskSessions(taskId, { cache: "no-store" }),
+  ]);
   const sessions = allSessionsResponse.sessions ?? [];
 
   const sessionId = task.primary_session_id ?? sessions[0]?.id;
@@ -259,7 +211,26 @@ export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSe
     return fetchTaskDataOnly(task, allSessionsResponse);
   }
 
-  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse);
+  // Refetch the active session via the single-session endpoint to get
+  // agent_profile_snapshot, which the list endpoint strips. See
+  // BuildSessionPageStateParams.activeSession for the SSR-flicker rationale.
+  // A failure here (auth, 5xx, timeout) degrades gracefully to the original
+  // initial-flash behaviour but should surface in server logs so silent
+  // 401/500s are debuggable.
+  const { fetchTaskSession } = await import("@/lib/api");
+  const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" }).catch((e) => {
+    console.warn(
+      "[session-page-state] failed to fetch active session snapshot; SSR will fall back to summary entry",
+      e,
+    );
+    return null;
+  });
+  return fetchSessionDataFromTask(
+    task,
+    sessionId,
+    allSessionsResponse,
+    sessionResponse?.session ?? null,
+  );
 }
 
 async function fetchTaskDataOnly(
@@ -298,6 +269,7 @@ async function fetchTaskDataOnly(
     agents,
     repositories,
     allSessions,
+    activeSession: null,
     workspaces,
     workflows,
     turns: [],
@@ -308,10 +280,67 @@ async function fetchTaskDataOnly(
   return { task, sessionId: null, initialState, initialTerminals: [] };
 }
 
+type TerminalApiResponse = Awaited<ReturnType<typeof fetchTerminals>>[number];
+
+function shouldHydrateTerminal(t: TerminalApiResponse): boolean {
+  const id = t.id ?? t.terminal_id ?? "";
+  if (!id || id === "bottom-panel") return false;
+  if (t.state === "parked") return false;
+  return true;
+}
+
+function classifyTerminal(
+  t: TerminalApiResponse,
+  id: string,
+): { isScript: boolean; isOrdinary: boolean } {
+  const isScript = t.kind === "script" || id.startsWith("script-");
+  const isOrdinary = t.kind === "ordinary" || (!isScript && t.seq !== undefined);
+  return { isScript, isOrdinary };
+}
+
+function deriveHydratedLabel(
+  t: TerminalApiResponse,
+  isScript: boolean,
+  isOrdinary: boolean,
+): string {
+  if (t.display_name) return t.display_name;
+  if (t.custom_name && t.custom_name !== "") return t.custom_name;
+  if (t.label) return t.label;
+  if (isOrdinary && t.seq) return `Terminal ${t.seq}`;
+  return isScript ? "Script" : "Terminal";
+}
+
+function pickTerminalKind(
+  isOrdinary: boolean,
+  isScript: boolean,
+): "ordinary" | "script" | undefined {
+  if (isOrdinary) return "ordinary";
+  if (isScript) return "script";
+  return undefined;
+}
+
+function hydrateTerminal(t: TerminalApiResponse): Terminal {
+  const id = (t.id ?? t.terminal_id ?? "") as string;
+  const { isScript, isOrdinary } = classifyTerminal(t, id);
+  const kind = pickTerminalKind(isOrdinary, isScript);
+  return {
+    id,
+    type: isScript ? ("script" as const) : ("shell" as const),
+    label: deriveHydratedLabel(t, isScript, isOrdinary),
+    closable: t.closable ?? true,
+    kind,
+    seq: t.seq,
+    customName: t.custom_name ?? undefined,
+    state: t.state,
+    ptyStatus: t.pty_status,
+  };
+}
+
 async function fetchSessionDataFromTask(
   task: Task,
   sessionId: string,
   allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
+  activeSession: TaskSession | null,
 ): Promise<FetchedSessionData> {
   // User shells are env-scoped — look up this session's task_environment_id
   // from the already-fetched session list. Sessions w/o env (legacy) skip
@@ -342,7 +371,7 @@ async function fetchSessionDataFromTask(
     })),
     listSessionTurns(sessionId, { cache: "no-store" }).catch(() => ({ turns: [], total: 0 })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    sessionEnvId ? fetchTerminals(sessionEnvId).catch(() => []) : Promise.resolve([]),
+    sessionEnvId ? fetchTerminals(task.id, sessionEnvId).catch(() => []) : Promise.resolve([]),
     listTaskSessionMessages(sessionId, { limit: 50, sort: "desc" }, { cache: "no-store" }).catch(
       () => null as ListMessagesResponse | null,
     ),
@@ -354,12 +383,9 @@ async function fetchSessionDataFromTask(
   const workflows = workflowsResponse.workflows ?? [];
   const turns = turnsResponse.turns ?? [];
 
-  const initialTerminals: Terminal[] = terminalsResponse.map((t) => ({
-    id: t.terminal_id,
-    type: t.initial_command ? ("script" as const) : ("shell" as const),
-    label: t.label,
-    closable: t.closable,
-  }));
+  const initialTerminals: Terminal[] = terminalsResponse
+    .filter(shouldHydrateTerminal)
+    .map(hydrateTerminal);
 
   const initialState = buildSessionPageState({
     task,
@@ -368,6 +394,7 @@ async function fetchSessionDataFromTask(
     agents,
     repositories,
     allSessions,
+    activeSession,
     workspaces,
     workflows,
     turns,

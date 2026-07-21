@@ -1,8 +1,13 @@
+import fs from "node:fs";
 import os from "node:os";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resolveHomeDir, resolveServiceUser } from "./paths";
+import { captureLauncher, homebrewShimPath, resolveHomeDir, resolveServiceUser } from "./paths";
+
+const originalArgv = [...process.argv];
+const originalBundleDir = process.env.KANDEV_BUNDLE_DIR;
+const originalVersion = process.env.KANDEV_VERSION;
 
 describe("resolveServiceUser", () => {
   const originalSudoUser = process.env.SUDO_USER;
@@ -67,6 +72,32 @@ describe("resolveServiceUser", () => {
   });
 });
 
+describe("captureLauncher", () => {
+  afterEach(() => {
+    process.argv.splice(0, process.argv.length, ...originalArgv);
+    if (originalBundleDir === undefined) delete process.env.KANDEV_BUNDLE_DIR;
+    else process.env.KANDEV_BUNDLE_DIR = originalBundleDir;
+    if (originalVersion === undefined) delete process.env.KANDEV_VERSION;
+    else process.env.KANDEV_VERSION = originalVersion;
+    vi.restoreAllMocks();
+  });
+
+  it("resolves npm global bin symlinks before detecting the install kind", () => {
+    delete process.env.KANDEV_BUNDLE_DIR;
+    delete process.env.KANDEV_VERSION;
+    process.argv[1] = "/tmp/kandev-test/npm-global/bin/kandev";
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "realpathSync").mockReturnValue(
+      "/tmp/kandev-test/npm-global/lib/node_modules/kandev/bin/cli.js",
+    );
+
+    expect(captureLauncher()).toMatchObject({
+      cliEntry: "/tmp/kandev-test/npm-global/lib/node_modules/kandev/bin/cli.js",
+      kind: "npm",
+    });
+  });
+});
+
 describe("resolveHomeDir", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -100,5 +131,73 @@ describe("resolveHomeDir", () => {
     // time. We just check it ends with .kandev and starts with the home dir.
     const result = resolveHomeDir(undefined, false);
     expect(result.endsWith(".kandev")).toBe(true);
+  });
+});
+
+describe("homebrewShimPath", () => {
+  it("derives the floating bin shim from a linuxbrew Cellar cli.js path", () => {
+    expect(
+      homebrewShimPath("/home/linuxbrew/.linuxbrew/Cellar/kandev/0.52.0/libexec/cli/bin/cli.js"),
+    ).toBe("/home/linuxbrew/.linuxbrew/bin/kandev");
+  });
+
+  it("derives the floating bin shim from an Apple-silicon Cellar path", () => {
+    expect(homebrewShimPath("/opt/homebrew/Cellar/kandev/1.2.3/libexec/cli/bin/cli.js")).toBe(
+      "/opt/homebrew/bin/kandev",
+    );
+  });
+
+  it("returns undefined for a non-Cellar path (npm install)", () => {
+    expect(homebrewShimPath("/usr/local/lib/node_modules/kandev/bin/cli.js")).toBeUndefined();
+  });
+});
+
+describe("captureLauncher shim resolution", () => {
+  const originalArgv = process.argv;
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("adopts the floating shim when it exists on disk", () => {
+    const cliEntry = "/opt/homebrew/Cellar/kandev/1.2.3/libexec/cli/bin/cli.js";
+    const shim = "/opt/homebrew/bin/kandev";
+    process.argv = ["/path/to/node", cliEntry];
+    vi.stubEnv("KANDEV_BUNDLE_DIR", "/opt/homebrew/Cellar/kandev/1.2.3/libexec");
+    // Both the cli.js entry and the shim resolve on disk.
+    vi.spyOn(fs, "existsSync").mockImplementation((p) => p === cliEntry || p === shim);
+    vi.spyOn(fs, "realpathSync").mockReturnValue(cliEntry);
+
+    const info = captureLauncher();
+    expect(info.kind).toBe("homebrew");
+    expect(info.shimPath).toBe(shim);
+  });
+
+  it("falls back to version-pinned paths when the shim is absent on disk", () => {
+    const cliEntry = "/opt/homebrew/Cellar/kandev/1.2.3/libexec/cli/bin/cli.js";
+    process.argv = ["/path/to/node", cliEntry];
+    vi.stubEnv("KANDEV_BUNDLE_DIR", "/opt/homebrew/Cellar/kandev/1.2.3/libexec");
+    // The cli.js entry resolves, but the floating shim does not exist.
+    vi.spyOn(fs, "existsSync").mockImplementation((p) => p === cliEntry);
+    vi.spyOn(fs, "realpathSync").mockReturnValue(cliEntry);
+
+    const info = captureLauncher();
+    expect(info.kind).toBe("homebrew");
+    expect(info.shimPath).toBeUndefined();
+  });
+
+  it("classifies a non-Cellar bundle as a local checkout install", () => {
+    const cliEntry = "/Users/alice/src/kandev/dist/kandev/cli/bin/cli.js";
+    process.argv = ["/path/to/node", cliEntry];
+    vi.stubEnv("KANDEV_BUNDLE_DIR", "/Users/alice/src/kandev/dist/kandev");
+    vi.spyOn(fs, "existsSync").mockImplementation((p) => p === cliEntry);
+    vi.spyOn(fs, "realpathSync").mockReturnValue(cliEntry);
+
+    const info = captureLauncher();
+    expect(info.kind).toBe("local");
+    expect(info.bundleDir).toBe("/Users/alice/src/kandev/dist/kandev");
+    expect(info.shimPath).toBeUndefined();
   });
 });

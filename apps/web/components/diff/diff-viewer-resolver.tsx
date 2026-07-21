@@ -7,7 +7,7 @@ import {
   DiffViewInline as PierreDiffViewInline,
 } from "./diff-viewer";
 import { MonacoDiffViewer } from "@/components/editors/monaco/monaco-diff-viewer";
-import type { FileDiffData, DiffComment } from "@/lib/diff/types";
+import type { FileDiffData, DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import type { RevertBlockInfo } from "./diff-viewer";
 export type { RevertBlockInfo };
 
@@ -17,12 +17,13 @@ interface DiffViewerResolverProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;
   compact?: boolean;
   hideHeader?: boolean;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   enableAcceptReject?: boolean;

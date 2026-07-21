@@ -16,6 +16,13 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+const (
+	// Orphan cleanup is startup hygiene, not a user-confirmed bulk action.
+	// Keep automatic batches small so registry bugs fail closed.
+	maxOrphanCleanupAgentTypesPerRun = 20
+	maxOrphanCleanupProfilesPerRun   = 50
+)
+
 // CapabilityReader is the minimum surface of the host utility manager that
 // the reconciler needs. Declared as an interface so tests can inject a fake.
 type CapabilityReader interface {
@@ -37,6 +44,27 @@ type ProfileReconciler struct {
 	registry    *registry.Registry
 	store       store.Repository
 	log         *logger.Logger
+}
+
+type orphanCleanupCandidate struct {
+	agent   *models.Agent
+	profile *models.AgentProfile
+}
+
+type orphanCleanupSummary struct {
+	enabledAgentCount        int
+	dbAgentCount             int
+	orphanAgentCount         int
+	profilesCandidateCount   int
+	profilesCandidatePartial bool
+	profilesDeletedCount     int
+	profileListFailureCount  int
+	skipped                  bool
+	skipReason               string
+	enabledAgentIDs          []string
+	orphanAgentNames         []string
+	maxAgentTypesPerRun      int
+	maxProfilesPerRun        int
 }
 
 // NewProfileReconciler constructs a reconciler.
@@ -63,7 +91,8 @@ func (r *ProfileReconciler) Run(ctx context.Context) error {
 	}
 
 	// Orphan cleanup first: removed agents can't come back, regardless of
-	// probe state, so we can clean these unconditionally.
+	// probe state. The cleanup itself fails closed when the registry is empty
+	// so a transient registry/bootstrap issue cannot mass-delete profiles.
 	r.cleanupOrphans(ctx)
 
 	// Walk enabled inference agents and reconcile each one.
@@ -83,22 +112,82 @@ func (r *ProfileReconciler) Run(ctx context.Context) error {
 // each DB agent by a UUID in `id`, with the registry-facing identifier stored
 // in `name` — we match against the registry on `name`.
 func (r *ProfileReconciler) cleanupOrphans(ctx context.Context) {
-	enabled := make(map[string]struct{})
-	for _, ag := range r.registry.ListEnabled() {
-		enabled[ag.ID()] = struct{}{}
+	summary := orphanCleanupSummary{
+		maxAgentTypesPerRun: maxOrphanCleanupAgentTypesPerRun,
+		maxProfilesPerRun:   maxOrphanCleanupProfilesPerRun,
+	}
+	defer func() {
+		r.logOrphanCleanupSummary(summary)
+	}()
+
+	if !r.registry.IsLoaded() {
+		summary.skipped = true
+		summary.skipReason = "registry_not_loaded"
+		r.log.Warn("orphan cleanup skipped: registry is not loaded")
+		return
+	}
+	enabledAgents := r.registry.ListEnabled()
+	summary.enabledAgentCount = len(enabledAgents)
+	if len(enabledAgents) == 0 {
+		summary.skipped = true
+		summary.skipReason = "enabled_registry_empty"
+		r.log.Warn("orphan cleanup skipped: enabled agent registry is empty")
+		return
+	}
+	enabled := make(map[string]struct{}, len(enabledAgents))
+	for _, ag := range enabledAgents {
+		id := ag.ID()
+		enabled[id] = struct{}{}
+		summary.enabledAgentIDs = append(summary.enabledAgentIDs, id)
 	}
 
 	dbAgents, err := r.store.ListAgents(ctx)
 	if err != nil {
+		summary.skipped = true
+		summary.skipReason = "list_agents_failed"
 		r.log.Warn("orphan cleanup: list agents failed", zap.Error(err))
 		return
 	}
+	summary.dbAgentCount = len(dbAgents)
+	candidates := r.collectOrphanCleanupCandidates(ctx, dbAgents, enabled, &summary)
+	if summary.profileListFailureCount > 0 {
+		summary.skipped = true
+		summary.skipReason = "profile_list_failed"
+		r.log.Warn("orphan cleanup skipped: profile list failed for one or more orphan agents",
+			zap.Int("profile_list_failure_count", summary.profileListFailureCount))
+		return
+	}
+	if exceedsOrphanCleanupLimit(summary.orphanAgentCount, len(candidates)) {
+		summary.skipped = true
+		summary.skipReason = "safety_limit_exceeded"
+		r.log.Warn("orphan cleanup skipped: candidate batch exceeds safety limit",
+			zap.Int("orphan_agent_count", summary.orphanAgentCount),
+			zap.Int("profiles_candidate_count", len(candidates)),
+			zap.Int("max_agent_types_per_run", maxOrphanCleanupAgentTypesPerRun),
+			zap.Int("max_profiles_per_run", maxOrphanCleanupProfilesPerRun),
+			zap.Strings("orphan_agents", summary.orphanAgentNames))
+		return
+	}
+	r.deleteOrphanCleanupCandidates(ctx, candidates, &summary)
+}
+
+func (r *ProfileReconciler) collectOrphanCleanupCandidates(
+	ctx context.Context,
+	dbAgents []*models.Agent,
+	enabled map[string]struct{},
+	summary *orphanCleanupSummary,
+) []orphanCleanupCandidate {
+	var candidates []orphanCleanupCandidate
 	for _, dbAgent := range dbAgents {
 		if _, ok := enabled[dbAgent.Name]; ok {
 			continue
 		}
+		summary.orphanAgentCount++
+		summary.orphanAgentNames = append(summary.orphanAgentNames, dbAgent.Name)
 		profiles, err := r.store.ListAgentProfiles(ctx, dbAgent.ID)
 		if err != nil {
+			summary.profileListFailureCount++
+			summary.profilesCandidatePartial = true
 			r.log.Warn("orphan cleanup: list profiles failed",
 				zap.String("agent_id", dbAgent.ID),
 				zap.String("agent_name", dbAgent.Name),
@@ -106,16 +195,59 @@ func (r *ProfileReconciler) cleanupOrphans(ctx context.Context) {
 			continue
 		}
 		for _, p := range profiles {
-			r.log.Info("soft-deleting orphan profile",
-				zap.String("profile_id", p.ID),
-				zap.String("agent_id", p.AgentID),
-				zap.String("agent_name", dbAgent.Name))
-			if err := r.store.DeleteAgentProfile(ctx, p.ID); err != nil {
-				r.log.Warn("orphan cleanup: delete failed",
-					zap.String("profile_id", p.ID), zap.Error(err))
-			}
+			candidates = append(candidates, orphanCleanupCandidate{
+				agent:   dbAgent,
+				profile: p,
+			})
 		}
 	}
+	if summary.profileListFailureCount == 0 {
+		summary.profilesCandidateCount = len(candidates)
+	}
+	return candidates
+}
+
+func exceedsOrphanCleanupLimit(orphanAgentCount, profileCount int) bool {
+	return orphanAgentCount > maxOrphanCleanupAgentTypesPerRun ||
+		profileCount > maxOrphanCleanupProfilesPerRun
+}
+
+func (r *ProfileReconciler) deleteOrphanCleanupCandidates(
+	ctx context.Context,
+	candidates []orphanCleanupCandidate,
+	summary *orphanCleanupSummary,
+) {
+	for _, candidate := range candidates {
+		r.log.Info("soft-deleting orphan profile",
+			zap.String("profile_id", candidate.profile.ID),
+			zap.String("agent_id", candidate.profile.AgentID),
+			zap.String("agent_name", candidate.agent.Name))
+		if err := r.store.DeleteAgentProfile(ctx, candidate.profile.ID); err != nil {
+			r.log.Warn("orphan cleanup: delete failed",
+				zap.String("profile_id", candidate.profile.ID), zap.Error(err))
+			continue
+		}
+		summary.profilesDeletedCount++
+	}
+}
+
+func (r *ProfileReconciler) logOrphanCleanupSummary(summary orphanCleanupSummary) {
+	fields := []zap.Field{
+		zap.Int("enabled_agent_count", summary.enabledAgentCount),
+		zap.Int("db_agent_count", summary.dbAgentCount),
+		zap.Int("orphan_agent_count", summary.orphanAgentCount),
+		zap.Int("profiles_candidate_count", summary.profilesCandidateCount),
+		zap.Bool("profiles_candidate_partial", summary.profilesCandidatePartial),
+		zap.Int("profiles_deleted_count", summary.profilesDeletedCount),
+		zap.Int("profile_list_failure_count", summary.profileListFailureCount),
+		zap.Bool("skipped", summary.skipped),
+		zap.String("skip_reason", summary.skipReason),
+		zap.Int("max_agent_types_per_run", summary.maxAgentTypesPerRun),
+		zap.Int("max_profiles_per_run", summary.maxProfilesPerRun),
+		zap.Strings("enabled_agents", summary.enabledAgentIDs),
+		zap.Strings("orphan_agents", summary.orphanAgentNames),
+	}
+	r.log.Info("orphan cleanup summary", fields...)
 }
 
 // reconcileAgent validates or seeds profiles for a single inference agent.
@@ -146,6 +278,29 @@ func (r *ProfileReconciler) reconcileAgent(ctx context.Context, ag agents.Agent)
 	}
 
 	if len(profiles) == 0 {
+		// Only seed for an agent that has never been provisioned. Soft-deleted
+		// rows mean the profile(s) were deliberately removed, so re-seeding
+		// would resurrect them on every boot (the bug this guards).
+		//
+		// A soft-deleted row here implies a *user* deletion, not system orphan
+		// cleanup: cleanupOrphans is the only system path that soft-deletes
+		// profiles, and it acts solely on agents absent from ListEnabled(),
+		// whereas reconcileAgent runs only for ListInferenceAgents(). Both gate
+		// on Enabled(), so the sets are disjoint — an enabled, reconciled agent
+		// is never orphan-cleaned. (If Enabled() ever becomes dynamic, revisit:
+		// a re-enabled agent reuses its DB id via ensureDBAgent and would then
+		// see its orphan-cleaned rows here.)
+		hadProfiles, err := r.store.HasDeletedAgentProfiles(ctx, dbAgent.ID)
+		if err != nil {
+			r.log.Warn("reconcile: check deleted profiles failed",
+				zap.String("agent_id", agentType), zap.Error(err))
+			return
+		}
+		if hadProfiles {
+			r.log.Debug("skipping seed: agent has user-deleted profiles",
+				zap.String("agent_id", agentType))
+			return
+		}
 		r.seedDefaultProfile(ctx, ag, dbAgent, caps)
 		return
 	}
@@ -258,9 +413,9 @@ func (r *ProfileReconciler) healProfile(
 
 // healProfileName updates the profile name when it still matches the agent
 // display name (stale seed from before we started naming profiles after the
-// current model). User-modified profiles are skipped.
+// current model). Workspace-scoped and user-modified profiles are skipped.
 func healProfileName(p *models.AgentProfile, caps hostutility.AgentCapabilities) bool {
-	if p.UserModified || p.Name != p.AgentDisplayName || caps.CurrentModelID == "" {
+	if p.WorkspaceID != "" || p.UserModified || p.Name != p.AgentDisplayName || caps.CurrentModelID == "" {
 		return false
 	}
 	for _, m := range caps.Models {

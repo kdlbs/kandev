@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -56,6 +57,18 @@ type Config struct {
 	// at startup and exposes POST /auth/handshake for the backend to retrieve it.
 	// The nonce is burned after a single successful handshake.
 	BootstrapNonce string
+
+	// IdleTimeout is the duration after which an instance with no in-flight
+	// requests and no recent HTTP activity is reaped by the instance
+	// manager. Sourced from KANDEV_ACP_IDLE_TIMEOUT (default 1h).
+	// Setting it to 0 disables the reaper.
+	IdleTimeout time.Duration
+
+	// IdleReaperInterval is how often the idle reaper scans for stale
+	// instances. Sourced from KANDEV_ACP_IDLE_REAPER_INTERVAL (default 1m).
+	// Only the test suite needs to override this; production code should
+	// rely on the default.
+	IdleReaperInterval time.Duration
 
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
@@ -192,13 +205,32 @@ type InstanceConfig struct {
 	// AssumeMcpSse overrides MCP capability filtering to assume the agent supports SSE.
 	AssumeMcpSse bool
 
+	// AssumeMcpHttp overrides MCP capability filtering to assume the agent supports HTTP.
+	AssumeMcpHttp bool
+
 	// McpMode controls which MCP tools are registered for this instance.
-	// "task" (default) registers kanban/plan tools; "config" registers config tools.
+	// "task" (default), "config", and "office" select distinct tool surfaces.
 	McpMode string
 
 	// AuthToken is a shared secret for authenticating requests.
 	// Inherited from the parent Config at instance creation time.
 	AuthToken string
+
+	// RequiresProcessKill skips the graceful stdin-close wait and reaps the
+	// agent's process group immediately. Required for agents whose runtime
+	// keeps child processes alive when stdin closes (opencode acp).
+	RequiresProcessKill bool
+
+	// StripEnv lists environment variables to strip from the agent's child
+	// process environment entirely (not just set to empty).
+	StripEnv []string
+
+	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
+	// stats. The empty key "" applies to the root / single-repo tracker.
+	// process.Manager reads this at construction and stamps each
+	// WorkspaceTracker's baseBranch. Empty falls back to the hardcoded
+	// origin/main → master priority list inside workspace_git_status.go.
+	BaseBranches map[string]string
 }
 
 // Load loads the configuration from environment variables.
@@ -218,11 +250,13 @@ func Load() *Config {
 			HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
 			ProcessBufferMaxBytes:  getEnvInt64("AGENTCTL_PROCESS_BUFFER_MAX_BYTES", 2*1024*1024),
 		},
-		ShellEnabled:  getEnvBool("AGENTCTL_SHELL_ENABLED", true),
-		LogLevel:      getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
-		LogFormat:     getEnv("AGENTCTL_LOG_FORMAT", "json"),
-		McpLogFile:    getEnv("KANDEV_MCP_LOG_FILE", ""),
-		VscodeCommand: getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
+		ShellEnabled:       getEnvBool("AGENTCTL_SHELL_ENABLED", true),
+		LogLevel:           getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
+		LogFormat:          getEnv("AGENTCTL_LOG_FORMAT", "json"),
+		McpLogFile:         getEnv("KANDEV_MCP_LOG_FILE", ""),
+		VscodeCommand:      getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
+		IdleTimeout:        getEnvDuration("KANDEV_ACP_IDLE_TIMEOUT", time.Hour),
+		IdleReaperInterval: getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute),
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend
@@ -233,6 +267,24 @@ func Load() *Config {
 	}
 
 	return cfg
+}
+
+// ListenHost returns the interface agentctl should bind its HTTP listeners to.
+//
+// When no AuthToken is configured the bearer-token middleware is a pass-through
+// (auth disabled), which would otherwise expose command/shell/process routes
+// unauthenticated. In that case we bind to loopback only so the surface is
+// never reachable beyond the local host. This does not affect the normal flow:
+// the launcher always injects AGENTCTL_BOOTSTRAP_NONCE, so a token is generated
+// and auth is enforced — including Docker, where the backend must reach agentctl
+// across the container boundary and an all-interfaces bind is required.
+//
+// An empty return means "all interfaces" (the historical ":port" form).
+func (c *Config) ListenHost() string {
+	if c.AuthToken == "" {
+		return "127.0.0.1"
+	}
+	return ""
 }
 
 // ConsumeNonce atomically validates and burns the bootstrap nonce.
@@ -324,12 +376,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.AutoStart != nil {
 		cfg.AutoStart = *overrides.AutoStart
 	}
-	if overrides.Env != nil {
-		cfg.AgentEnv = overrides.Env
-	}
-	if overrides.ApprovalPolicy != "" {
-		cfg.ApprovalPolicy = overrides.ApprovalPolicy
-	}
+	applyApprovalOverrides(cfg, overrides)
 	if overrides.AgentType != "" {
 		cfg.AgentType = overrides.AgentType
 	}
@@ -348,27 +395,61 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.AssumeMcpSse {
 		cfg.AssumeMcpSse = true
 	}
+	if overrides.AssumeMcpHttp {
+		cfg.AssumeMcpHttp = true
+	}
 	if overrides.McpMode != "" {
 		cfg.McpMode = overrides.McpMode
+	}
+	if overrides.RequiresProcessKill {
+		cfg.RequiresProcessKill = true
+	}
+	if len(overrides.StripEnv) > 0 {
+		cfg.StripEnv = overrides.StripEnv
+	}
+	if len(overrides.BaseBranches) > 0 {
+		cfg.BaseBranches = overrides.BaseBranches
+	}
+}
+
+// applyApprovalOverrides sets approval-related instance overrides. Env is a
+// legacy path that can only enable auto-approve; explicit values win.
+func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
+	if overrides.Env != nil {
+		cfg.AgentEnv = overrides.Env
+		if envBool(overrides.Env, "AGENTCTL_AUTO_APPROVE_PERMISSIONS") {
+			cfg.AutoApprovePermissions = true
+		}
+	}
+	if overrides.AutoApprovePermissions != nil {
+		cfg.AutoApprovePermissions = *overrides.AutoApprovePermissions
+	}
+	if overrides.ApprovalPolicy != "" {
+		cfg.ApprovalPolicy = overrides.ApprovalPolicy
 	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
-	InstanceID         string
-	Protocol           agent.Protocol
-	AgentCommand       string
-	WorkDir            string
-	AutoStart          *bool
-	Env                []string
-	ApprovalPolicy     string
-	AgentType          string
-	McpServers         []McpServerConfig
-	SessionID          string
-	TaskID             string
-	DisableAskQuestion bool
-	AssumeMcpSse       bool
-	McpMode            string
+	InstanceID             string
+	Protocol               agent.Protocol
+	AgentCommand           string
+	WorkDir                string
+	AutoStart              *bool
+	Env                    []string
+	AutoApprovePermissions *bool
+	ApprovalPolicy         string
+	AgentType              string
+	McpServers             []McpServerConfig
+	SessionID              string
+	TaskID                 string
+	DisableAskQuestion     bool
+	AssumeMcpSse           bool
+	AssumeMcpHttp          bool
+	McpMode                string
+	RequiresProcessKill    bool
+	StripEnv               []string
+	BaseBranches           map[string]string
 }
 
 // ParseCommand splits a command string into arguments
@@ -404,6 +485,18 @@ func CollectAgentEnv(additional map[string]string) []string {
 		result = append(result, k+"="+v)
 	}
 	return result
+}
+
+func envBool(env []string, key string) bool {
+	prefix := key + "="
+	for _, entry := range env {
+		value, ok := strings.CutPrefix(entry, prefix)
+		if !ok {
+			continue
+		}
+		return value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes")
+	}
+	return false
 }
 
 // isNpmEnvVar returns true if the key is an npm-related environment variable
@@ -459,13 +552,31 @@ func getEnvBool(key string, defaultValue bool) bool {
 	return defaultValue
 }
 
+// getEnvDuration parses a duration value from an env var. Accepts any value
+// time.ParseDuration accepts (e.g. "1h", "30m", "500ms"). "0" disables the
+// feature. Invalid or missing values return defaultValue.
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return defaultValue
+	}
+	return d
+}
+
 // kandevMcpServerName is the name used for the local kandev MCP server.
 const kandevMcpServerName = "kandev"
 
 // injectKandevMcpServer prepends the local kandev MCP server to the list of MCP servers.
 // This replaces any existing kandev server to avoid duplicates.
 // The kandev MCP server provides tools like ask_user_question to the agent.
-// Both SSE and HTTP variants are injected - agent capability filtering will select the appropriate one.
+// Both HTTP and SSE variants are injected - agent capability filtering will select the
+// appropriate one. HTTP is listed first so that when an agent advertises both transports
+// the "first surviving entry wins" dedup keeps the HTTP entry (modern streamable MCP);
+// SSE remains as a fallback for SSE-only agents.
 func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfig {
 	portStr := strconv.Itoa(port)
 	kandevMcpSse := McpServerConfig{
@@ -481,7 +592,7 @@ func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfi
 
 	// Filter out any existing kandev server and prepend the local ones
 	result := make([]McpServerConfig, 0, len(servers)+2)
-	result = append(result, kandevMcpSse, kandevMcpHttp)
+	result = append(result, kandevMcpHttp, kandevMcpSse)
 	for _, srv := range servers {
 		if srv.Name != kandevMcpServerName {
 			result = append(result, srv)

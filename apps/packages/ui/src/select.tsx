@@ -55,6 +55,7 @@ function SelectContent({
   children,
   position = "item-aligned",
   align = "center",
+  onWheel,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   return (
@@ -69,6 +70,10 @@ function SelectContent({
         )}
         position={position}
         align={align}
+        onWheel={(event) => {
+          onWheel?.(event);
+          event.stopPropagation();
+        }}
         {...props}
       >
         <SelectScrollUpButton />

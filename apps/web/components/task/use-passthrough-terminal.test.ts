@@ -3,6 +3,8 @@ import { buildTerminalWsUrl } from "./use-passthrough-terminal";
 import { reconnectDelayMs, startReconnectLoop } from "./ws-reconnect";
 import type { Terminal } from "@xterm/xterm";
 
+const WS_BASE_URL = "ws://localhost:38429";
+
 describe("reconnectDelayMs", () => {
   it("returns 300ms for attempt 0", () => {
     expect(reconnectDelayMs(0)).toBe(300);
@@ -29,7 +31,7 @@ describe("reconnectDelayMs", () => {
 describe("buildTerminalWsUrl", () => {
   it("routes shell terminals by task environment ID", () => {
     expect(
-      buildTerminalWsUrl("ws://localhost:38429", {
+      buildTerminalWsUrl(WS_BASE_URL, {
         mode: "shell",
         environmentId: "env-1",
         terminalId: "terminal with spaces",
@@ -39,7 +41,7 @@ describe("buildTerminalWsUrl", () => {
 
   it("routes agent terminals by session ID", () => {
     expect(
-      buildTerminalWsUrl("ws://localhost:38429", {
+      buildTerminalWsUrl(WS_BASE_URL, {
         mode: "agent",
         sessionId: "session-1",
       }),
@@ -62,11 +64,11 @@ describe("startReconnectLoop", () => {
 
     const stop = startReconnectLoop({
       environmentId: "env-1",
-      wsBaseUrl: "ws://localhost:38429",
+      wsBaseUrl: WS_BASE_URL,
       mode: "shell",
       terminalId: "shell-1",
       label: undefined,
-      terminal: {} as Terminal,
+      terminal: { reset: vi.fn() } as unknown as Terminal,
       fitAndResize: vi.fn(),
       wsRef: { current: null },
       attachAddonRef: { current: null },
@@ -79,6 +81,45 @@ describe("startReconnectLoop", () => {
 
     expect(connectWebSocket).toHaveBeenCalledTimes(1);
     expect(onDisconnected).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("resets xterm before each connection so replayed PTY buffers do not append duplicates", () => {
+    vi.useFakeTimers();
+
+    const terminal = { reset: vi.fn() } as unknown as Terminal;
+    let closes = 0;
+    const connectWebSocket = vi.fn(({ onSocketClose }) => {
+      if (closes < 1) {
+        closes += 1;
+        onSocketClose({ code: 1006 } as CloseEvent);
+      }
+    });
+
+    const stop = startReconnectLoop({
+      environmentId: "env-1",
+      wsBaseUrl: WS_BASE_URL,
+      mode: "shell",
+      terminalId: "shell-1",
+      label: undefined,
+      terminal,
+      fitAndResize: vi.fn(),
+      wsRef: { current: null },
+      attachAddonRef: { current: null },
+      onConnected: vi.fn(),
+      onDisconnected: vi.fn(),
+      connectWebSocket,
+    });
+
+    vi.advanceTimersByTime(150);
+
+    expect(connectWebSocket).toHaveBeenCalledTimes(1);
+    expect(terminal.reset).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(300);
+
+    expect(connectWebSocket).toHaveBeenCalledTimes(2);
+    expect(terminal.reset).toHaveBeenCalledTimes(2);
     stop();
   });
 });

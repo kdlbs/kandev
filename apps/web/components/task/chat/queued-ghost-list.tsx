@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { IconLayoutList, IconTrash, IconX } from "@tabler/icons-react";
+import { IconLayoutList, IconPlayerPlay, IconTrash, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { Button } from "@kandev/ui";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
@@ -10,14 +10,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { stripSystemTags } from "@/lib/utils/system-tags";
 import { useQueue } from "@/hooks/domains/session/use-queue";
-import { QueuedGhostMessage } from "./queued-ghost-message";
+import { isWorkflowQueuedMessage, QueuedGhostMessage } from "./queued-ghost-message";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
 const HEAD_PREVIEW_MAX = 80;
 
 /** Inter-task entries are dispatched with queued_by="agent" and stay read-only. */
 function canUserEditEntry(entry: QueuedMessage): boolean {
-  return entry.queued_by !== "agent";
+  return entry.queued_by !== "agent" && !isWorkflowQueuedMessage(entry);
 }
 
 function headPreviewText(entries: QueuedMessage[]): string {
@@ -47,28 +47,97 @@ function useEscToClose(open: boolean, onClose: () => void): void {
       // the clarification overlay).
       if (isEditableTarget(e.target)) return;
       e.preventDefault();
+      e.stopPropagation();
       onClose();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture Escape before an enclosing Radix dialog handles it as a dismissal.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
 }
 
 type QueueAffordanceProps = {
   sessionId: string | null;
   children: ReactNode;
+  canDrain?: boolean;
+  /**
+   * Optional render slot for placing the chip inside an external row (e.g. the
+   * chat status bar). The callback receives the chip node (or `null` when no
+   * chip should be shown) and returns the row markup. When omitted, the chip
+   * falls back to rendering inline above the input.
+   */
+  renderStatusBar?: (queueChip: ReactNode) => ReactNode;
 };
+
+type QueuePanelHandlerArgs = {
+  clearAll: () => Promise<void>;
+  drainNext: () => Promise<void>;
+  editEntry: (entryId: string, content: string) => Promise<void>;
+  removeEntry: (entryId: string) => Promise<void>;
+};
+
+function useQueuePanelHandlers({
+  clearAll,
+  drainNext,
+  editEntry,
+  removeEntry,
+}: QueuePanelHandlerArgs) {
+  const handleSave = useCallback(
+    async (entryId: string, content: string) => {
+      await editEntry(entryId, content);
+    },
+    [editEntry],
+  );
+  const handleRemove = useCallback(
+    async (entryId: string) => {
+      try {
+        await removeEntry(entryId);
+      } catch (err) {
+        console.error("Failed to remove queued entry:", err);
+        toast.error("Failed to remove queued message.");
+      }
+    },
+    [removeEntry],
+  );
+  const handleClear = useCallback(() => {
+    clearAll().catch((err) => {
+      console.error("Failed to clear queued messages:", err);
+      toast.error("Failed to clear queued messages.");
+    });
+  }, [clearAll]);
+  const handleDrain = useCallback(() => {
+    drainNext().catch((err) => {
+      console.error("Failed to run queued message:", err);
+      toast.error("Failed to run queued message.");
+    });
+  }, [drainNext]);
+
+  return { handleSave, handleRemove, handleClear, handleDrain };
+}
 
 /**
  * Wraps the chat input with the per-session queue affordance:
  * - When there are no queued entries, just renders `children` (the input).
- * - Otherwise a small floating "n queued" chip sits over the input frame and
- *   clicking it expands a panel above the input. Drained or session-switched
- *   queues auto-collapse.
+ * - Otherwise a small "n queued" chip is exposed (either inline above the
+ *   input, or via `renderStatusBar` into a caller-controlled row); clicking
+ *   it expands a panel above the input. Drained or session-switched queues
+ *   auto-collapse.
  */
-export function QueueAffordance({ sessionId, children }: QueueAffordanceProps) {
-  const { entries, count, max, isFull, clearAll, editEntry, removeEntry } = useQueue(sessionId);
+export function QueueAffordance({
+  sessionId,
+  children,
+  canDrain = false,
+  renderStatusBar,
+}: QueueAffordanceProps) {
+  const { entries, count, max, isFull, isLoading, clearAll, drainNext, editEntry, removeEntry } =
+    useQueue(sessionId);
   const [isOpen, setIsOpen] = useState(false);
+  const { handleSave, handleRemove, handleClear, handleDrain } = useQueuePanelHandlers({
+    clearAll,
+    drainNext,
+    editEntry,
+    removeEntry,
+  });
 
   // Reset disclosure on session switch or full drain using render-phase state
   // adjustment (React docs: "Adjusting some state when a prop changes"). This
@@ -88,36 +157,30 @@ export function QueueAffordance({ sessionId, children }: QueueAffordanceProps) {
   const close = useCallback(() => setIsOpen(false), []);
   useEscToClose(isOpen, close);
 
-  const handleSave = useCallback(
-    async (entryId: string, content: string) => {
-      await editEntry(entryId, content);
-    },
-    [editEntry],
-  );
+  const hasEntries = !!sessionId && entryCount > 0;
+  const chipNode =
+    hasEntries && !isOpen ? (
+      <QueueChip
+        count={count}
+        isFull={isFull}
+        previewText={headPreviewText(entries)}
+        onToggle={() => setIsOpen((v) => !v)}
+      />
+    ) : null;
 
-  const handleRemove = useCallback(
-    async (entryId: string) => {
-      try {
-        await removeEntry(entryId);
-      } catch (err) {
-        console.error("Failed to remove queued entry:", err);
-        toast.error("Failed to remove queued message.");
-      }
-    },
-    [removeEntry],
-  );
-
-  const handleClear = useCallback(() => {
-    clearAll().catch((err) => {
-      console.error("Failed to clear queued messages:", err);
-      toast.error("Failed to clear queued messages.");
-    });
-  }, [clearAll]);
-
-  if (!sessionId || entryCount === 0) return <>{children}</>;
+  if (!hasEntries) {
+    return (
+      <>
+        {/* Call renderStatusBar even with null so the status bar stays mounted when the queue is empty. */}
+        {renderStatusBar?.(null)}
+        {children}
+      </>
+    );
+  }
 
   return (
     <>
+      {renderStatusBar?.(chipNode)}
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CollapsibleContent
           className={cn(
@@ -130,21 +193,19 @@ export function QueueAffordance({ sessionId, children }: QueueAffordanceProps) {
             count={count}
             max={max}
             isFull={isFull}
+            canDrain={canDrain}
+            isLoading={isLoading}
             onClose={close}
             onClear={handleClear}
+            onDrain={handleDrain}
             onSave={handleSave}
             onRemove={handleRemove}
           />
         </CollapsibleContent>
       </Collapsible>
-      {!isOpen && (
+      {!renderStatusBar && chipNode && (
         <div className="flex items-center px-1 pb-1 animate-in fade-in-0 slide-in-from-bottom-1 duration-150 motion-reduce:animate-none">
-          <QueueChip
-            count={count}
-            isFull={isFull}
-            previewText={headPreviewText(entries)}
-            onToggle={() => setIsOpen((v) => !v)}
-          />
+          {chipNode}
         </div>
       )}
       {children}
@@ -161,9 +222,9 @@ type QueueChipProps = {
 
 function chipPalette(isFull: boolean): string {
   if (isFull) {
-    return "text-amber-600 dark:text-amber-400 border-amber-500/40 hover:bg-amber-500/10";
+    return "text-amber-600 dark:text-amber-400 border-amber-500/60 hover:bg-amber-500/10";
   }
-  return "text-muted-foreground border-border hover:text-foreground hover:border-border/80";
+  return "text-muted-foreground border-muted-foreground/40 hover:text-foreground hover:border-muted-foreground/60";
 }
 
 function QueueChip({ count, isFull, previewText, onToggle }: QueueChipProps) {
@@ -206,8 +267,11 @@ type QueuePanelProps = {
   count: number;
   max: number;
   isFull: boolean;
+  canDrain: boolean;
+  isLoading: boolean;
   onClose: () => void;
   onClear: () => void;
+  onDrain: () => void;
   onSave: (entryId: string, content: string) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
 };
@@ -217,8 +281,11 @@ function QueuePanel({
   count,
   max,
   isFull,
+  canDrain,
+  isLoading,
   onClose,
   onClear,
+  onDrain,
   onSave,
   onRemove,
 }: QueuePanelProps) {
@@ -237,7 +304,10 @@ function QueuePanel({
         count={count}
         max={max}
         isFull={isFull}
+        canDrain={canDrain}
+        isLoading={isLoading}
         onClear={onClear}
+        onDrain={onDrain}
         onClose={onClose}
       />
       <div className="space-y-1.5">
@@ -260,11 +330,23 @@ type QueuePanelHeaderProps = {
   count: number;
   max: number;
   isFull: boolean;
+  canDrain: boolean;
+  isLoading: boolean;
   onClear: () => void;
+  onDrain: () => void;
   onClose: () => void;
 };
 
-function QueuePanelHeader({ count, max, isFull, onClear, onClose }: QueuePanelHeaderProps) {
+function QueuePanelHeader({
+  count,
+  max,
+  isFull,
+  canDrain,
+  isLoading,
+  onClear,
+  onDrain,
+  onClose,
+}: QueuePanelHeaderProps) {
   const capacityText = max > 0 ? `${count} of ${max}` : `${count}`;
   return (
     <div className="flex items-center justify-between gap-3 py-1">
@@ -277,6 +359,20 @@ function QueuePanelHeader({ count, max, isFull, onClear, onClose }: QueuePanelHe
         </span>
       </div>
       <div className="flex items-center gap-1">
+        {canDrain && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+            onClick={onDrain}
+            disabled={isLoading}
+            title="Run next queued message"
+            data-testid="queue-drain-next"
+          >
+            <IconPlayerPlay className="mr-1 h-3 w-3" />
+            Run next
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"

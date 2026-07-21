@@ -1,6 +1,7 @@
 package routing_test
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -10,6 +11,74 @@ import (
 
 var testKnown = []routing.ProviderID{
 	"claude-acp", "codex-acp", "opencode-acp", "copilot-acp", "amp-acp",
+}
+
+func TestProviderProfileMarshalJSON_WritesCanonicalExecutionProfileIDs(t *testing.T) {
+	raw, err := json.Marshal(routing.ProviderProfile{
+		TierMap: routing.TierMap{Balanced: "sonnet"},
+	})
+	if err != nil {
+		t.Fatalf("marshal empty tier profile ids: %v", err)
+	}
+	if strings.Contains(string(raw), "execution_profile_ids") {
+		t.Fatalf("empty execution_profile_ids should be omitted, got %s", raw)
+	}
+
+	raw, err = json.Marshal(routing.ProviderProfile{
+		TierMap: routing.TierMap{Balanced: "sonnet"},
+		TierProfileIDs: routing.TierProfileIDs{
+			Balanced: "profile-balanced",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal tier profile ids: %v", err)
+	}
+	if !strings.Contains(string(raw), `"execution_profile_ids":{"balanced":"profile-balanced"}`) {
+		t.Fatalf("canonical execution_profile_ids should be present, got %s", raw)
+	}
+	if strings.Contains(string(raw), "tier_profile_ids") {
+		t.Fatalf("legacy tier_profile_ids should not be written, got %s", raw)
+	}
+}
+
+func TestProviderProfileUnmarshalJSON_PrefersCanonicalExecutionProfileIDs(t *testing.T) {
+	var profile routing.ProviderProfile
+	err := json.Unmarshal([]byte(`{
+		"tier_map":{"balanced":"sonnet"},
+		"execution_profile_ids":{"balanced":"canonical-profile"},
+		"tier_profile_ids":{"balanced":"legacy-profile"}
+	}`), &profile)
+	if err != nil {
+		t.Fatalf("unmarshal provider profile: %v", err)
+	}
+	if got := profile.ExecutionProfileID(routing.TierBalanced); got != "canonical-profile" {
+		t.Fatalf("balanced profile = %q, want canonical-profile", got)
+	}
+}
+
+func TestProviderProfileUnmarshalJSON_DecodesLegacyTierProfileIDs(t *testing.T) {
+	var profile routing.ProviderProfile
+	err := json.Unmarshal([]byte(`{
+		"tier_map":{"balanced":"sonnet"},
+		"tier_profile_ids":{"balanced":"legacy-profile"}
+	}`), &profile)
+	if err != nil {
+		t.Fatalf("unmarshal legacy provider profile: %v", err)
+	}
+	if got := profile.ExecutionProfileID(routing.TierBalanced); got != "legacy-profile" {
+		t.Fatalf("balanced profile = %q, want legacy-profile", got)
+	}
+
+	raw, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatalf("marshal migrated provider profile: %v", err)
+	}
+	if !strings.Contains(string(raw), `"execution_profile_ids":{"balanced":"legacy-profile"}`) {
+		t.Fatalf("legacy mapping was not rewritten canonically: %s", raw)
+	}
+	if strings.Contains(string(raw), "tier_profile_ids") {
+		t.Fatalf("legacy key survived rewrite: %s", raw)
+	}
 }
 
 func TestValidateWorkspaceConfig(t *testing.T) {
@@ -32,7 +101,10 @@ func TestValidateWorkspaceConfig(t *testing.T) {
 				DefaultTier:   routing.TierBalanced,
 				ProviderOrder: []routing.ProviderID{"claude-acp"},
 				ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
-					"claude-acp": {TierMap: routing.TierMap{Balanced: "sonnet"}},
+					"claude-acp": {
+						ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "claude-sonnet"},
+						TierMap:             routing.TierMap{Balanced: "sonnet"},
+					},
 				},
 			},
 		},
@@ -94,7 +166,10 @@ func TestValidateWorkspaceConfig(t *testing.T) {
 				DefaultTier:   routing.TierBalanced,
 				ProviderOrder: []routing.ProviderID{"claude-acp", "codex-acp"},
 				ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
-					"claude-acp": {TierMap: routing.TierMap{Balanced: "sonnet"}},
+					"claude-acp": {
+						ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "claude-sonnet"},
+						TierMap:             routing.TierMap{Balanced: "sonnet"},
+					},
 				},
 			},
 			wantErr: "no profile",
@@ -106,8 +181,14 @@ func TestValidateWorkspaceConfig(t *testing.T) {
 				DefaultTier:   routing.TierFrontier,
 				ProviderOrder: []routing.ProviderID{"claude-acp", "codex-acp"},
 				ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
-					"claude-acp": {TierMap: routing.TierMap{Frontier: "opus"}},
-					"codex-acp":  {TierMap: routing.TierMap{Balanced: "gpt-5.4"}},
+					"claude-acp": {
+						ExecutionProfileIDs: routing.ExecutionProfileIDs{Frontier: "claude-opus"},
+						TierMap:             routing.TierMap{Frontier: "opus"},
+					},
+					"codex-acp": {
+						ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "codex-balanced"},
+						TierMap:             routing.TierMap{Balanced: "gpt-5.4"},
+					},
 				},
 			},
 			wantErr: "default-tier",
@@ -221,8 +302,16 @@ func TestValidateAgentOverridesAgainstWorkspace(t *testing.T) {
 		DefaultTier:   routing.TierBalanced,
 		ProviderOrder: []routing.ProviderID{"claude-acp", "codex-acp"},
 		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
-			"claude-acp": {TierMap: routing.TierMap{Frontier: "opus", Balanced: "sonnet"}},
-			"codex-acp":  {TierMap: routing.TierMap{Balanced: "gpt-5"}},
+			"claude-acp": {
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{
+					Frontier: "claude-opus", Balanced: "claude-sonnet",
+				},
+				TierMap: routing.TierMap{Frontier: "opus", Balanced: "sonnet"},
+			},
+			"codex-acp": {
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "codex-balanced"},
+				TierMap:             routing.TierMap{Balanced: "gpt-5"},
+			},
 		},
 	}
 	balancedOnly := &routing.WorkspaceConfig{
@@ -230,8 +319,14 @@ func TestValidateAgentOverridesAgainstWorkspace(t *testing.T) {
 		DefaultTier:   routing.TierBalanced,
 		ProviderOrder: []routing.ProviderID{"claude-acp", "codex-acp"},
 		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
-			"claude-acp": {TierMap: routing.TierMap{Balanced: "sonnet"}},
-			"codex-acp":  {TierMap: routing.TierMap{Balanced: "gpt-5"}},
+			"claude-acp": {
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "claude-sonnet"},
+				TierMap:             routing.TierMap{Balanced: "sonnet"},
+			},
+			"codex-acp": {
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "codex-balanced"},
+				TierMap:             routing.TierMap{Balanced: "gpt-5"},
+			},
 		},
 	}
 

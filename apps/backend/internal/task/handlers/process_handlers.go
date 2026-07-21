@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -64,6 +65,7 @@ func RegisterProcessRoutes(
 	session := api.Group("/task-sessions/:id")
 	session.POST("/set-mode", handlers.httpSetSessionMode)
 	session.POST("/set-model", handlers.httpSetSessionModel)
+	session.POST("/set-config-option", handlers.httpSetSessionConfigOption)
 	session.POST("/authenticate", handlers.httpAuthenticate)
 }
 
@@ -390,13 +392,13 @@ func (h *ProcessHandlers) httpListProcesses(c *gin.Context) {
 	if err != nil {
 		var netErr net.Error
 		// Handle expected "no processes" conditions gracefully:
-		// - no execution found: agent hasn't started yet (async launch)
+		// - ErrNoExecutionForSession: agent hasn't started yet (async launch)
 		// - connection refused: agent not running
 		// - deadline exceeded: agent not responding
 		if errors.Is(err, context.DeadlineExceeded) ||
-			errors.As(err, &netErr) ||
-			strings.Contains(err.Error(), "connection refused") ||
-			strings.Contains(err.Error(), "no execution found") {
+			errors.Is(err, syscall.ECONNREFUSED) ||
+			errors.Is(err, lifecycle.ErrNoExecutionForSession) ||
+			errors.As(err, &netErr) {
 			h.logger.Debug("process list unavailable (agent not ready)", zap.String("session_id", sessionID), zap.Error(err))
 			c.JSON(http.StatusOK, []agentctlclient.ProcessInfo{})
 			return
@@ -477,7 +479,25 @@ func resolveScriptCommand(
 	}
 }
 
-// httpSetSessionMode sets the session mode for a running agent.
+func (h *ProcessHandlers) applyIfSessionReady(sessionID string, allowPassthrough bool, apply func() error) error {
+	execution, running := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
+	if !running {
+		return nil
+	}
+	if !h.lifecycleMgr.WasSessionInitialized(execution.ID) &&
+		(!allowPassthrough || execution.PassthroughProcessID == "") {
+		return nil
+	}
+	if err := apply(); err != nil {
+		if _, stillRunning := h.lifecycleMgr.GetExecutionBySessionID(sessionID); !stillRunning {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// httpSetSessionMode applies the session mode now or records it for the next launch.
 func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
 	sessionID := c.Param("id")
 	var req struct {
@@ -487,7 +507,9 @@ func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if err := h.lifecycleMgr.SetSessionModeBySessionID(c.Request.Context(), sessionID, req.ModeID); err != nil {
+	if err := h.applyIfSessionReady(sessionID, false, func() error {
+		return h.lifecycleMgr.SetSessionModeBySessionID(c.Request.Context(), sessionID, req.ModeID)
+	}); err != nil {
 		h.logger.Error("failed to set session mode",
 			zap.String("session_id", sessionID),
 			zap.String("mode_id", req.ModeID),
@@ -495,10 +517,19 @@ func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	writeCtx := context.WithoutCancel(c.Request.Context())
+	if err := h.service.PersistSessionRuntimeMode(writeCtx, sessionID, req.ModeID); err != nil {
+		h.logger.Error("failed to persist session mode",
+			zap.String("session_id", sessionID),
+			zap.String("mode_id", req.ModeID),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": "failed to persist session runtime config"})
+		return
+	}
 	c.JSON(200, gin.H{"ok": true})
 }
 
-// httpSetSessionModel sets the session model for a running agent.
+// httpSetSessionModel applies the session model now or records it for the next launch.
 func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 	sessionID := c.Param("id")
 	var req struct {
@@ -508,12 +539,56 @@ func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if err := h.lifecycleMgr.SetSessionModelBySessionID(c.Request.Context(), sessionID, req.ModelID); err != nil {
+	if err := h.applyIfSessionReady(sessionID, true, func() error {
+		return h.lifecycleMgr.SetSessionModelBySessionID(c.Request.Context(), sessionID, req.ModelID)
+	}); err != nil {
 		h.logger.Error("failed to set session model",
 			zap.String("session_id", sessionID),
 			zap.String("model_id", req.ModelID),
 			zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	writeCtx := context.WithoutCancel(c.Request.Context())
+	if err := h.service.PersistSessionRuntimeModel(writeCtx, sessionID, req.ModelID); err != nil {
+		h.logger.Error("failed to persist session model",
+			zap.String("session_id", sessionID),
+			zap.String("model_id", req.ModelID),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": "failed to persist session runtime config"})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true})
+}
+
+// httpSetSessionConfigOption applies an option now or records it for the next launch.
+func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
+	sessionID := c.Param("id")
+	var req struct {
+		ConfigID string `json:"config_id"`
+		Value    string `json:"value"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+	if err := h.applyIfSessionReady(sessionID, false, func() error {
+		return h.lifecycleMgr.SetSessionConfigOptionBySessionID(c.Request.Context(), sessionID, req.ConfigID, req.Value)
+	}); err != nil {
+		h.logger.Error("failed to set session config option",
+			zap.String("session_id", sessionID),
+			zap.String("config_id", req.ConfigID),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	writeCtx := context.WithoutCancel(c.Request.Context())
+	if err := h.service.PersistSessionRuntimeConfigOption(writeCtx, sessionID, req.ConfigID, req.Value); err != nil {
+		h.logger.Error("failed to persist session config option",
+			zap.String("session_id", sessionID),
+			zap.String("config_id", req.ConfigID),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": "failed to persist session runtime config"})
 		return
 	}
 	c.JSON(200, gin.H{"ok": true})

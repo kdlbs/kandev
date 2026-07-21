@@ -1,8 +1,10 @@
 package models
 
 import (
+	"encoding/json"
 	"errors"
 	"maps"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -13,6 +15,19 @@ import (
 // ErrExecutorRunningNotFound is returned when no executor running record exists for a session.
 var ErrExecutorRunningNotFound = errors.New("executor running not found")
 
+// ErrTaskSessionNotFound is returned when no task session record exists.
+var ErrTaskSessionNotFound = errors.New("task session not found")
+
+// ErrTaskWalkthroughNotFound is returned when no walkthrough record exists.
+var ErrTaskWalkthroughNotFound = errors.New("task walkthrough not found")
+
+// ErrExecutorNotFound is returned by the executor repository when no
+// executor row exists for the given ID. Callers should use errors.Is to
+// distinguish "row doesn't exist" (404 semantically) from transport-level
+// failures (storage outage, timeout, ctx cancel) that happen to also
+// surface from the same lookup.
+var ErrExecutorNotFound = errors.New("executor not found")
+
 // ErrExecutionRotated is returned by CAS-style updates on executors_running when the
 // row's agent_execution_id has rotated since the caller observed it. Indicates the
 // caller's write target a now-defunct execution and should be discarded — typically
@@ -20,6 +35,20 @@ var ErrExecutorRunningNotFound = errors.New("executor running not found")
 // context reset, fresh re-launch). Callers should not retry; the new execution
 // will produce its own events.
 var ErrExecutionRotated = errors.New("execution rotated; CAS write rejected")
+
+// Status values for executors_running.status. The lifecycle manager mirrors
+// active execution state into this column; the orchestrator flips a row to
+// "prepared" when a prepare-only launch finishes with the agent process
+// intentionally not started.
+const (
+	ExecutorRunningStatusStarting = "starting"
+	ExecutorRunningStatusRunning  = "running"
+	ExecutorRunningStatusReady    = "ready"
+	ExecutorRunningStatusFailed   = "failed"
+	ExecutorRunningStatusStopped  = "stopped"
+	ExecutorRunningStatusComplete = "completed"
+	ExecutorRunningStatusPrepared = "prepared"
+)
 
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {
@@ -38,6 +67,7 @@ type SearchMessagesOptions struct {
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
+	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
@@ -46,21 +76,332 @@ const (
 )
 
 // TaskSession.Metadata key that records how the session came into existence.
-// Read by maybySwitchSessionForProfile to decide whether transitioning to a
-// step with no agent_profile override should revert to the task default:
-// workflow-spawned sessions (created_by=workflow_switch) -> yes, revert.
-// user-created sessions (no created_by tag)              -> no, preserve.
+// workflow_switch means the session profile was selected by workflow routing
+// rather than direct user selection.
 const (
 	SessionMetaKeyCreatedBy        = "created_by"
 	SessionCreatedByWorkflowSwitch = "workflow_switch"
 )
 
+// SessionMetaKeySessionMode records the agent's last-known session permission
+// mode (auto / default / accept-edits, etc.) so it survives a backend restart or
+// SSR reload, alongside the in-memory re-apply on context reset. See issue #1183.
+const SessionMetaKeySessionMode = "session_mode"
+
+// SessionMetaKeyRuntimeConfig records the provider's latest session runtime
+// state (model, mode, and dynamic config options) separately from the profile
+// snapshot that seeded the session.
+const SessionMetaKeyRuntimeConfig = "runtime_config"
+
+// SessionMetaKeyRuntimeConfigOverrides records explicit user selections
+// separately from provider snapshots so delayed events cannot clobber resume
+// intent. Overrides are applied after SessionMetaKeyRuntimeConfig.
+const SessionMetaKeyRuntimeConfigOverrides = "runtime_config_overrides"
+
+// SessionMetaKeyACPConfigBaseline records the write-once effective ACP select
+// values with which a task session started. It is comparison metadata only;
+// runtime restoration continues to use SessionMetaKeyRuntimeConfig.
+const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
+
+// SessionMetaKeyACPModelState records the provider's latest complete model
+// selector state so task-detail boot hydration does not wait for WebSocket
+// reconnection. It is display metadata and is not replayed to the provider.
+const SessionMetaKeyACPModelState = "acp_model_state"
+
+// TurnMetaKeyRuntimeConfigSnapshot stores the immutable effective runtime
+// configuration attributed to one prompt/response turn.
+const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
+
+// SessionRuntimeConfig is persisted as provider state or explicit overrides.
+// On resume, explicit values take precedence over the latest provider snapshot
+// so delayed provider events cannot replace user intent.
+type SessionRuntimeConfig struct {
+	Model         string            `json:"model,omitempty"`
+	Mode          string            `json:"mode,omitempty"`
+	ConfigOptions map[string]string `json:"config_options,omitempty"`
+}
+
+// TurnRuntimeConfigSnapshot is the minimal display state captured when a turn
+// starts. It intentionally excludes the provider's complete option catalog.
+type TurnRuntimeConfigSnapshot struct {
+	Model          string                    `json:"model,omitempty"`
+	Mode           string                    `json:"mode,omitempty"`
+	ConfigOptions  []TurnRuntimeConfigOption `json:"config_options,omitempty"`
+	ConfigBaseline map[string]string         `json:"config_baseline,omitempty"`
+}
+
+// TurnRuntimeConfigOption preserves one selected value in provider order.
+type TurnRuntimeConfigOption struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Value     string `json:"value"`
+	ValueName string `json:"value_name,omitempty"`
+}
+
+// LoadTurnRuntimeConfigSnapshot decodes typed and JSON-rehydrated turn metadata.
+func LoadTurnRuntimeConfigSnapshot(metadata map[string]interface{}) (TurnRuntimeConfigSnapshot, bool) {
+	if metadata == nil {
+		return TurnRuntimeConfigSnapshot{}, false
+	}
+	raw := metadata[TurnMetaKeyRuntimeConfigSnapshot]
+	if snapshot, ok := raw.(TurnRuntimeConfigSnapshot); ok {
+		return snapshot, snapshot.Model != "" || snapshot.Mode != "" || len(snapshot.ConfigOptions) > 0
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return TurnRuntimeConfigSnapshot{}, false
+	}
+	var snapshot TurnRuntimeConfigSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return TurnRuntimeConfigSnapshot{}, false
+	}
+	return snapshot, snapshot.Model != "" || snapshot.Mode != "" || len(snapshot.ConfigOptions) > 0
+}
+
+// SessionMetaKeyPendingStepCompletion stores the agent's (or manual fallback's)
+// step-complete signal under TaskSession.Metadata. ADR 0015: the orchestrator
+// reads this on turn-end for steps with AutoAdvanceRequiresSignal=true and
+// only fires on_turn_complete transitions when a matching signal is present.
+// Cleared on successful transition, on user reply before transition, or any
+// other step change.
+const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
+
+// SessionMetaKeyLastAgentError stores the last recoverable agent runtime
+// failure for UI surfaces that need to keep the error visible after auto-resume.
+const SessionMetaKeyLastAgentError = "last_agent_error"
+
+// LastAgentError is persisted under TaskSession.Metadata[SessionMetaKeyLastAgentError].
+type LastAgentError struct {
+	Message          string     `json:"message"`
+	OccurredAt       time.Time  `json:"occurred_at"`
+	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
+	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
+}
+
+func LoadLastAgentError(metadata map[string]interface{}) (LastAgentError, bool) {
+	if metadata == nil {
+		return LastAgentError{}, false
+	}
+	raw, ok := metadata[SessionMetaKeyLastAgentError]
+	if !ok || raw == nil {
+		return LastAgentError{}, false
+	}
+	var out LastAgentError
+	if err := mapToLastAgentError(raw, &out); err != nil || out.Message == "" {
+		return LastAgentError{}, false
+	}
+	return out, true
+}
+
+func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, out)
+}
+
+func (e LastAgentError) Stamp() string {
+	return e.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + e.Message
+}
+
+func (e LastAgentError) MatchesStamp(stamp string) bool {
+	if stamp == e.Stamp() {
+		return true
+	}
+	suffix := ":" + e.Message
+	if !strings.HasSuffix(stamp, suffix) {
+		return false
+	}
+	rawOccurredAt := strings.TrimSuffix(stamp, suffix)
+	if rawOccurredAt == "" {
+		return e.OccurredAt.IsZero()
+	}
+	occurredAt, err := time.Parse(time.RFC3339Nano, rawOccurredAt)
+	if err != nil {
+		return false
+	}
+	return occurredAt.Equal(e.OccurredAt)
+}
+
+func (e LastAgentError) IsDismissed() bool {
+	return e.DismissedAt != nil && !e.DismissedAt.IsZero()
+}
+
+// PendingStepCompletionSignal source values.
+const (
+	StepCompletionSourceAgent          = "agent"
+	StepCompletionSourceManualFallback = "manual_fallback"
+)
+
+// PendingStepCompletionSignal is the JSON shape persisted under
+// TaskSession.Metadata[SessionMetaKeyPendingStepCompletion]. It records an
+// agent-emitted (or user-emitted via the fallback button) completion signal
+// that the orchestrator should consume to drive a workflow step transition.
+// See ADR 0015 for the lifecycle (set → read → clear).
+type PendingStepCompletionSignal struct {
+	StepID     string    `json:"step_id"`
+	Source     string    `json:"source"`
+	Summary    string    `json:"summary"`
+	Handoff    string    `json:"handoff,omitempty"`
+	Blockers   string    `json:"blockers,omitempty"`
+	SignaledAt time.Time `json:"signaled_at"`
+}
+
+// LoadSessionRuntimeConfig decodes the runtime-config bag entry from session
+// metadata. It tolerates both typed values and JSON-rehydrated maps.
+func LoadSessionRuntimeConfig(metadata map[string]interface{}) (SessionRuntimeConfig, bool) {
+	return loadSessionRuntimeConfig(metadata, SessionMetaKeyRuntimeConfig)
+}
+
+// LoadSessionRuntimeConfigOverrides decodes explicit user runtime selections.
+func LoadSessionRuntimeConfigOverrides(metadata map[string]interface{}) (SessionRuntimeConfig, bool) {
+	return loadSessionRuntimeConfig(metadata, SessionMetaKeyRuntimeConfigOverrides)
+}
+
+func loadSessionRuntimeConfig(metadata map[string]interface{}, key string) (SessionRuntimeConfig, bool) {
+	if metadata == nil {
+		return SessionRuntimeConfig{}, false
+	}
+	raw, ok := metadata[key]
+	if !ok || raw == nil {
+		return SessionRuntimeConfig{}, false
+	}
+	switch v := raw.(type) {
+	case SessionRuntimeConfig:
+		return v, !v.IsZero()
+	case map[string]string:
+		out := SessionRuntimeConfig{
+			Model:         v["model"],
+			Mode:          v["mode"],
+			ConfigOptions: maps.Clone(v),
+		}
+		delete(out.ConfigOptions, "model")
+		delete(out.ConfigOptions, "mode")
+		if len(out.ConfigOptions) == 0 {
+			out.ConfigOptions = nil
+		}
+		return out, !out.IsZero()
+	case map[string]interface{}:
+		out := SessionRuntimeConfig{
+			Model: StringFromAny(v["model"]),
+			Mode:  StringFromAny(v["mode"]),
+		}
+		if opts := stringMapFromAny(v["config_options"]); len(opts) > 0 {
+			out.ConfigOptions = opts
+		}
+		return out, !out.IsZero()
+	default:
+		return SessionRuntimeConfig{}, false
+	}
+}
+
+// LoadSessionACPConfigBaseline decodes the write-once ACP configuration
+// baseline from session metadata. It tolerates typed and JSON-rehydrated maps.
+func LoadSessionACPConfigBaseline(metadata map[string]interface{}) (map[string]string, bool) {
+	if metadata == nil {
+		return nil, false
+	}
+	values := stringMapFromAnyPreservingEmpty(metadata[SessionMetaKeyACPConfigBaseline])
+	if len(values) == 0 {
+		return nil, false
+	}
+	return values, true
+}
+
+func stringMapFromAnyPreservingEmpty(raw interface{}) map[string]string {
+	switch values := raw.(type) {
+	case map[string]string:
+		return maps.Clone(values)
+	case map[string]interface{}:
+		out := make(map[string]string, len(values))
+		for key, value := range values {
+			if str, ok := value.(string); ok {
+				out[key] = str
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// IsZero reports whether the runtime config carries any selected value.
+func (c SessionRuntimeConfig) IsZero() bool {
+	return c.Model == "" && c.Mode == "" && len(c.ConfigOptions) == 0
+}
+
+func stringMapFromAny(raw interface{}) map[string]string {
+	switch v := raw.(type) {
+	case map[string]string:
+		return maps.Clone(v)
+	case map[string]interface{}:
+		out := make(map[string]string, len(v))
+		for key, value := range v {
+			if str := StringFromAny(value); str != "" {
+				out[key] = str
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// LoadPendingStepSignal decodes the pending-completion bag entry from a
+// session's metadata. Single source of truth shared by the MCP handler
+// (write site, idempotency check) and the orchestrator (read site, gating).
+// Survives both the in-process typed shape and the JSON-rehydrated
+// `map[string]interface{}` shape produced when the row is loaded fresh from
+// SQLite after a backend restart.
+func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompletionSignal, bool) {
+	if metadata == nil {
+		return PendingStepCompletionSignal{}, false
+	}
+	raw, ok := metadata[SessionMetaKeyPendingStepCompletion]
+	if !ok || raw == nil {
+		return PendingStepCompletionSignal{}, false
+	}
+	switch v := raw.(type) {
+	case PendingStepCompletionSignal:
+		return v, true
+	case map[string]interface{}:
+		out := PendingStepCompletionSignal{
+			StepID:   StringFromAny(v["step_id"]),
+			Source:   StringFromAny(v["source"]),
+			Summary:  StringFromAny(v["summary"]),
+			Handoff:  StringFromAny(v["handoff"]),
+			Blockers: StringFromAny(v["blockers"]),
+		}
+		if ts, ok := v["signaled_at"].(string); ok {
+			if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+				out.SignaledAt = parsed
+			}
+		}
+		return out, out.StepID != ""
+	}
+	return PendingStepCompletionSignal{}, false
+}
+
+// StringFromAny narrows an interface{} slot to a string, returning "" when
+// the value is absent or of a different type. Used by both the
+// PendingStepCompletionSignal map-shape decoder and the orchestrator's
+// step-completion event-payload parser — single source of truth so the
+// two decoders can't drift on what counts as a "missing string".
+func StringFromAny(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
 // Task origin values for the Origin field.
 const (
-	TaskOriginManual       = "manual"
-	TaskOriginAgentCreated = "agent_created"
-	TaskOriginRoutine      = "routine"
-	TaskOriginOnboarding   = "onboarding"
+	TaskOriginManual        = "manual"
+	TaskOriginAgentCreated  = "agent_created"
+	TaskOriginRoutine       = "routine"
+	TaskOriginOnboarding    = "onboarding"
+	TaskOriginAutomationRun = "automation_run"
 )
 
 // Task represents a task in the database
@@ -114,6 +455,28 @@ type Task struct {
 	IsFromOffice bool `json:"is_from_office,omitempty"`
 }
 
+// ChildCompletionRow is the compact active-child projection used to decide
+// whether a parent task's on_children_completed trigger is ready to fire.
+type ChildCompletionRow struct {
+	ID                   string       `json:"id" db:"id"`
+	State                v1.TaskState `json:"state" db:"state"`
+	Title                string       `json:"title" db:"title"`
+	WorkflowStepID       string       `json:"workflow_step_id" db:"workflow_step_id"`
+	TerminalWorkflowStep bool         `json:"terminal_workflow_step"` // computed by annotateTerminalChildSteps, not a DB column
+	UpdatedAt            time.Time    `json:"updated_at" db:"updated_at"`
+}
+
+// IsTerminalTaskState reports whether a task state means no further child work
+// is expected from that task.
+func IsTerminalTaskState(state v1.TaskState) bool {
+	switch state {
+	case v1.TaskStateCompleted, v1.TaskStateFailed, v1.TaskStateCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 // TaskTreeFilters provides filter options for the task tree query.
 type TaskTreeFilters struct {
 	ProjectID  string
@@ -130,6 +493,15 @@ const (
 	WorkflowStyleCustom = "custom"
 )
 
+// WorkflowSource values are persisted in workflows.source and record where a
+// workflow definition came from. Manual workflows are user-managed; GitHub
+// workflows are owned by the workflow-sync poller and may be overwritten or
+// removed on each sync.
+const (
+	WorkflowSourceManual = "manual"
+	WorkflowSourceGitHub = "github"
+)
+
 // Workflow represents a task workflow
 type Workflow struct {
 	ID                 string  `json:"id"`
@@ -139,6 +511,11 @@ type Workflow struct {
 	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 	SortOrder          int     `json:"sort_order"`
+	// Source records where the workflow definition came from ("manual" or
+	// "github"). SourcePath is the repo-relative file path the definition
+	// was synced from; empty for manual workflows.
+	Source     string `json:"source,omitempty"`
+	SourcePath string `json:"source_path,omitempty"`
 	// Hidden workflows are excluded from management and picker UIs by default.
 	// Used by system-only flows like Improve Kandev.
 	Hidden bool `json:"hidden,omitempty"`
@@ -232,6 +609,42 @@ const (
 	MessageTypeTodo MessageType = "todo"
 )
 
+// PermissionStatus is the resolution status of a permission request message,
+// stored under metadata.status. Pending is the absence sentinel: a freshly
+// created permission_request message does not set metadata.status, and any
+// reader treats that as PermissionStatusPending.
+type PermissionStatus string
+
+const (
+	// PermissionStatusPending is the empty-string sentinel for the unresolved
+	// state. CreatePermissionRequestMessage does not write metadata.status at
+	// all; readers compare against this constant instead of the bare "".
+	PermissionStatusPending PermissionStatus = ""
+	// PermissionStatusApproved means the user (or automation) accepted the request.
+	PermissionStatusApproved PermissionStatus = "approved"
+	// PermissionStatusRejected means the user did not accept the request.
+	// Collapses two distinct ACP outcomes: explicit Deny (selected option with
+	// kind reject_once/reject_always) AND dialog dismissal (ACP cancelled
+	// outcome on the wire, triggered today only by the fallback path when the
+	// prompt offers no reject_* option). Split into separate Rejected /
+	// Dismissed statuses if the audit trail ever needs to distinguish them.
+	PermissionStatusRejected PermissionStatus = "rejected"
+	// PermissionStatusExpired means the request became unanswerable: the agent
+	// withdrew the prompt before a response arrived (permission_cancelled
+	// event), or agentctl rejected the response because the pending entry was
+	// already gone. No ACP outcome ever reaches the wire in this state.
+	PermissionStatusExpired PermissionStatus = "expired"
+)
+
+// TaskPendingAction is the compact task-list projection for a primary session
+// blocked on user input.
+type TaskPendingAction string
+
+const (
+	TaskPendingActionClarification TaskPendingAction = "clarification"
+	TaskPendingActionPermission    TaskPendingAction = "permission"
+)
+
 // Message represents a message in a task session
 type Message struct {
 	ID            string                 `json:"id"`
@@ -245,6 +658,7 @@ type Message struct {
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 	RequestsInput bool                   `json:"requests_input"` // True if agent is requesting user input
 	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"` // Authoritative per-message change signal
 }
 
 // ToAPI converts internal Message to API type.
@@ -256,7 +670,7 @@ func (m *Message) ToAPI() *v1.Message {
 		messageType = string(MessageTypeMessage)
 	}
 	hasHidden := sysprompt.HasSystemContent(m.Content)
-	meta := m.Metadata
+	meta := ProjectMessageMetadata(m.Metadata)
 	if hasHidden {
 		if meta == nil {
 			meta = make(map[string]interface{})
@@ -278,6 +692,7 @@ func (m *Message) ToAPI() *v1.Message {
 		Metadata:      meta,
 		RequestsInput: m.RequestsInput,
 		CreatedAt:     m.CreatedAt,
+		UpdatedAt:     m.UpdatedAt,
 	}
 	if hasHidden {
 		result.RawContent = m.Content
@@ -354,6 +769,7 @@ type TaskSessionWorktree struct {
 	SessionID    string    `json:"session_id"`
 	WorktreeID   string    `json:"worktree_id"`
 	RepositoryID string    `json:"repository_id"`
+	BranchSlug   string    `json:"branch_slug,omitempty"`
 	Position     int       `json:"position"`
 	CreatedAt    time.Time `json:"created_at"`
 
@@ -375,9 +791,11 @@ type SessionBranchInfo struct {
 type TaskSession struct {
 	ID                   string                 `json:"id"`
 	TaskID               string                 `json:"task_id"`
-	AgentExecutionID     string                 `json:"agent_execution_id"` // Docker container/agent execution
-	ContainerID          string                 `json:"container_id"`       // Docker container ID for cleanup
-	AgentProfileID       string                 `json:"agent_profile_id"`   // ID of the agent profile used
+	Name                 string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
+	AgentExecutionID     string                 `json:"agent_execution_id"`   // Docker container/agent execution
+	ContainerID          string                 `json:"container_id"`         // Docker container ID for cleanup
+	AgentProfileID       string                 `json:"agent_profile_id"`     // ID of the agent profile used
+	ExecutionProfileID   string                 `json:"execution_profile_id"` // Concrete profile used for this execution
 	ExecutorID           string                 `json:"executor_id"`
 	ExecutorProfileID    string                 `json:"executor_profile_id"`
 	EnvironmentID        string                 `json:"environment_id"`
@@ -431,6 +849,9 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		result["worktree_path"] = s.Worktrees[0].WorktreePath
 		result["worktree_branch"] = s.Worktrees[0].WorktreeBranch
 	}
+	if s.Name != "" {
+		result["name"] = s.Name
+	}
 	if s.ErrorMessage != "" {
 		result["error_message"] = s.ErrorMessage
 	}
@@ -476,19 +897,22 @@ type Repository struct {
 	// populated after the repo is cloned/synced on the agent host.
 	LocalPath string `json:"local_path"`
 	// Provider fields describe the upstream source (e.g. github/gitlab) for future syncing.
-	Provider             string     `json:"provider"`
-	ProviderRepoID       string     `json:"provider_repo_id"`
-	ProviderOwner        string     `json:"provider_owner"`
-	ProviderName         string     `json:"provider_name"`
-	DefaultBranch        string     `json:"default_branch"`
-	WorktreeBranchPrefix string     `json:"worktree_branch_prefix"`
-	PullBeforeWorktree   bool       `json:"pull_before_worktree"`
-	SetupScript          string     `json:"setup_script"`
-	CleanupScript        string     `json:"cleanup_script"`
-	DevScript            string     `json:"dev_script"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
-	DeletedAt            *time.Time `json:"deleted_at,omitempty"`
+	Provider               string     `json:"provider"`
+	ProviderRepoID         string     `json:"provider_repo_id"`
+	ProviderOwner          string     `json:"provider_owner"`
+	ProviderName           string     `json:"provider_name"`
+	RemoteURL              string     `json:"remote_url"`
+	DefaultBranch          string     `json:"default_branch"`
+	WorktreeBranchPrefix   string     `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string     `json:"worktree_branch_template"`
+	PullBeforeWorktree     bool       `json:"pull_before_worktree"`
+	SetupScript            string     `json:"setup_script"`
+	CleanupScript          string     `json:"cleanup_script"`
+	DevScript              string     `json:"dev_script"`
+	CopyFiles              string     `json:"copy_files"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+	DeletedAt              *time.Time `json:"deleted_at,omitempty"`
 }
 
 // RepositoryScript represents a custom script for a repository
@@ -511,6 +935,7 @@ const (
 	ExecutorTypeLocalDocker  ExecutorType = "local_docker"
 	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
 	ExecutorTypeSprites      ExecutorType = "sprites"
+	ExecutorTypeSSH          ExecutorType = "ssh"
 	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
 )
 
@@ -519,7 +944,7 @@ const (
 // These environments run shells inside the container/VM, not on the host.
 func IsRemoteExecutorType(t ExecutorType) bool {
 	switch t {
-	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeMockRemote:
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeMockRemote:
 		return true
 	default:
 		return false
@@ -541,6 +966,8 @@ func (t ExecutorType) Runtime() agentruntime.Runtime {
 		return agentruntime.RuntimeRemoteDocker
 	case ExecutorTypeSprites:
 		return agentruntime.RuntimeSprites
+	case ExecutorTypeSSH:
+		return agentruntime.RuntimeSSH
 	default:
 		return agentruntime.RuntimeStandalone
 	}
@@ -558,7 +985,7 @@ func IsContainerizedExecutorType(t ExecutorType) bool {
 // IsAlwaysResumableRuntime reports whether the given runtime represents
 // an executor that can always be resumed even without an explicit resume token.
 func IsAlwaysResumableRuntime(runtime agentruntime.Runtime) bool {
-	return runtime == agentruntime.RuntimeSprites
+	return runtime == agentruntime.RuntimeSprites || runtime == agentruntime.RuntimeSSH
 }
 
 const (
@@ -592,28 +1019,37 @@ type Executor struct {
 
 // ExecutorRunning tracks an active executor instance for a session.
 type ExecutorRunning struct {
-	ID               string                 `json:"id"`
-	SessionID        string                 `json:"session_id"`
-	TaskID           string                 `json:"task_id"`
-	ExecutorID       string                 `json:"executor_id"`
-	Runtime          agentruntime.Runtime   `json:"runtime,omitempty"`
-	Status           string                 `json:"status"`
-	Resumable        bool                   `json:"resumable"`
-	ResumeToken      string                 `json:"resume_token,omitempty"`
-	LastMessageUUID  string                 `json:"last_message_uuid,omitempty"`
-	AgentExecutionID string                 `json:"agent_execution_id,omitempty"`
-	ContainerID      string                 `json:"container_id,omitempty"`
-	AgentctlURL      string                 `json:"agentctl_url,omitempty"`
-	AgentctlPort     int                    `json:"agentctl_port,omitempty"`
-	PID              int                    `json:"pid,omitempty"`
-	WorktreeID       string                 `json:"worktree_id,omitempty"`
-	WorktreePath     string                 `json:"worktree_path,omitempty"`
-	WorktreeBranch   string                 `json:"worktree_branch,omitempty"`
-	ErrorMessage     string                 `json:"error_message,omitempty"`
-	Metadata         map[string]interface{} `json:"metadata,omitempty"`
-	LastSeenAt       *time.Time             `json:"last_seen_at,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
+	ID                 string               `json:"id"`
+	SessionID          string               `json:"session_id"`
+	TaskID             string               `json:"task_id"`
+	ExecutionProfileID string               `json:"execution_profile_id"`
+	ExecutorID         string               `json:"executor_id"`
+	Runtime            agentruntime.Runtime `json:"runtime,omitempty"`
+	Status             string               `json:"status"`
+	Resumable          bool                 `json:"resumable"`
+	ResumeToken        string               `json:"resume_token,omitempty"`
+	LastMessageUUID    string               `json:"last_message_uuid,omitempty"`
+	AgentExecutionID   string               `json:"agent_execution_id,omitempty"`
+	ContainerID        string               `json:"container_id,omitempty"`
+	AgentctlURL        string               `json:"agentctl_url,omitempty"`
+	AgentctlPort       int                  `json:"agentctl_port,omitempty"`
+	// PID is SSH-only: the agentctl PID on the *remote* host, used by the SSH
+	// executor's remote-pid stop path. It is 0 for local/standalone rows.
+	PID int `json:"pid,omitempty"`
+	// LocalPID is a host-local liveness handle: the PID of the standalone
+	// agentctl control-server process Kandev spawned on this host. Populated for
+	// local/standalone runtimes so a dead row is distinguishable from a live one
+	// without external context. 0 for SSH/remote rows (their process lives on
+	// another host — see PID). Never probe LocalPID for SSH rows.
+	LocalPID       int                    `json:"local_pid,omitempty"`
+	WorktreeID     string                 `json:"worktree_id,omitempty"`
+	WorktreePath   string                 `json:"worktree_path,omitempty"`
+	WorktreeBranch string                 `json:"worktree_branch,omitempty"`
+	ErrorMessage   string                 `json:"error_message,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	LastSeenAt     *time.Time             `json:"last_seen_at,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
 // ProfileEnvVar represents an environment variable for an executor profile.
@@ -733,6 +1169,7 @@ type TaskEnvironmentRepo struct {
 	ID                string    `json:"id"`
 	TaskEnvironmentID string    `json:"task_environment_id"`
 	RepositoryID      string    `json:"repository_id"`
+	BranchSlug        string    `json:"branch_slug,omitempty"`
 	WorktreeID        string    `json:"worktree_id,omitempty"`
 	WorktreePath      string    `json:"worktree_path,omitempty"`
 	WorktreeBranch    string    `json:"worktree_branch,omitempty"`
@@ -801,6 +1238,9 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 	if r.WorktreeID != "" {
 		out["worktree_id"] = r.WorktreeID
 	}
+	if r.BranchSlug != "" {
+		out["branch_slug"] = r.BranchSlug
+	}
 	if r.WorktreePath != "" {
 		out["worktree_path"] = r.WorktreePath
 	}
@@ -815,13 +1255,16 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 
 // TaskPlan represents a plan associated with a task
 type TaskPlan struct {
-	ID        string    `json:"id"`
-	TaskID    string    `json:"task_id"`
-	Title     string    `json:"title"`
-	Content   string    `json:"content"`
-	CreatedBy string    `json:"created_by"` // "agent" or "user"
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                             string     `json:"id"`
+	TaskID                         string     `json:"task_id"`
+	Title                          string     `json:"title"`
+	Content                        string     `json:"content"`
+	CreatedBy                      string     `json:"created_by"` // "agent" or "user"
+	CreatedAt                      time.Time  `json:"created_at"`
+	UpdatedAt                      time.Time  `json:"updated_at"`
+	ImplementationStartedAt        *time.Time `json:"implementation_started_at,omitempty"`
+	ImplementationStartedSessionID *string    `json:"implementation_started_session_id,omitempty"`
+	ImplementationStartedBy        *string    `json:"implementation_started_by,omitempty"`
 }
 
 // TaskPlanRevision is one immutable snapshot in the revision history of a task plan.
@@ -837,6 +1280,32 @@ type TaskPlanRevision struct {
 	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"` // bumps on coalesce merge
+}
+
+// TaskWalkthrough is an agent-authored guided code tour attached to a task.
+// It is the "what & where" of a review narration: an ordered list of Steps,
+// each anchored to a concrete repo/file/line, rendered as popovers over the
+// review diff. Mirrors the TaskPlan artifact pattern (one per task, agent-authored).
+type TaskWalkthrough struct {
+	ID        string            `json:"id"`
+	TaskID    string            `json:"task_id"`
+	Title     string            `json:"title"`
+	Steps     []WalkthroughStep `json:"steps"`
+	CreatedBy string            `json:"created_by"` // always "agent"
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+}
+
+// WalkthroughStep is a single anchored stop in a TaskWalkthrough. Text is
+// markdown shown in the popover; File/Line locate the anchor inside the diff
+// (Repo disambiguates in multi-repo reviews, LineEnd optionally spans a range).
+type WalkthroughStep struct {
+	Title   string `json:"title,omitempty"`
+	Repo    string `json:"repo,omitempty"`
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	LineEnd int    `json:"line_end,omitempty"`
+	Text    string `json:"text"`
 }
 
 // TaskDocument represents a named document (plan, spec, notes, etc.) associated with a task.

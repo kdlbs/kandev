@@ -4,7 +4,6 @@ package scheduler
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +11,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -20,7 +21,6 @@ import (
 var (
 	ErrSchedulerAlreadyRunning = errors.New("scheduler is already running")
 	ErrSchedulerNotRunning     = errors.New("scheduler is not running")
-	ErrTaskNotFound            = errors.New("task not found")
 )
 
 // SchedulerConfig holds scheduler configuration
@@ -43,6 +43,26 @@ func DefaultSchedulerConfig() SchedulerConfig {
 type TaskRepository interface {
 	GetTask(ctx context.Context, taskID string) (*v1.Task, error)
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
+	// UpdateTaskStateIfCurrentIn atomically transitions state only when the
+	// task's current state is in allowed AND the task is not archived
+	// (archived_at IS NULL, enforced inside the write's own transaction —
+	// not just by a caller's earlier, non-transactional archived-state
+	// check). Returns whether a row was modified.
+	UpdateTaskStateIfCurrentIn(ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState) (bool, error)
+	// UpdateTaskStateIfNotArchived is UpdateTaskStateIfCurrentIn without the
+	// prior-state constraint — for writers (e.g. IN_PROGRESS runtime
+	// reconciliation) that legitimately fire from many prior states and only
+	// need the archived_at IS NULL guarantee. Returns whether a row was
+	// modified.
+	UpdateTaskStateIfNotArchived(ctx context.Context, taskID string, state v1.TaskState) (bool, error)
+	// UpdateTaskStateIfSessionState additionally pins the owning session's
+	// current state, closing races with clarification and terminal transitions.
+	UpdateTaskStateIfSessionState(
+		ctx context.Context,
+		taskID, sessionID string,
+		expectedSessionState models.TaskSessionState,
+		state v1.TaskState,
+	) (bool, error)
 }
 
 // QueueStatus contains queue statistics
@@ -286,7 +306,7 @@ func (s *Scheduler) processTasks(ctx context.Context) {
 				zap.Error(err))
 
 			// Don't re-enqueue if task was deleted from DB
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, taskrepo.ErrTaskNotFound) {
 				s.logger.Warn("task no longer exists, dropping from queue",
 					zap.String("task_id", task.ID))
 				continue

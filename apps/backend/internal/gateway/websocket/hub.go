@@ -27,6 +27,12 @@ type Hub struct {
 	userSubscribers map[string]map[*Client]bool
 	// Clients subscribed to specific office run ids (for run.event.appended).
 	runSubscribers map[string]map[*Client]bool
+	// Clients subscribed to backend/resource metrics.
+	systemMetricsSubscribers map[*Client]bool
+
+	// done closes after Run has stopped so late connection teardown cannot
+	// block trying to unregister from an unserviced hub channel.
+	done chan struct{}
 
 	// Channels for client management
 	register   chan *Client
@@ -43,7 +49,8 @@ type Hub struct {
 
 	// sessionMode tracks per-session focus state and fires listeners when
 	// effective mode (paused/slow/fast) transitions. See hub_session_mode.go.
-	sessionMode *sessionModeTracker
+	sessionMode            *sessionModeTracker
+	metricsInterestTracker SystemMetricsInterestTracker
 
 	// dispatchCtx is the hub's lifetime context, set by Run. Dispatched
 	// message handlers use it instead of the per-connection context so that
@@ -59,24 +66,34 @@ type Hub struct {
 // NewHub creates a new WebSocket hub
 func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 	return &Hub{
-		clients:            make(map[*Client]bool),
-		taskSubscribers:    make(map[string]map[*Client]bool),
-		sessionSubscribers: make(map[string]map[*Client]bool),
-		userSubscribers:    make(map[string]map[*Client]bool),
-		runSubscribers:     make(map[string]map[*Client]bool),
-		register:           make(chan *Client),
-		unregister:         make(chan *Client),
-		broadcast:          make(chan *ws.Message, 256),
-		dispatcher:         dispatcher,
-		sessionMode:        newSessionModeTracker(),
-		logger:             log.WithFields(zap.String("component", "ws_hub")),
+		clients:                  make(map[*Client]bool),
+		taskSubscribers:          make(map[string]map[*Client]bool),
+		sessionSubscribers:       make(map[string]map[*Client]bool),
+		userSubscribers:          make(map[string]map[*Client]bool),
+		runSubscribers:           make(map[string]map[*Client]bool),
+		systemMetricsSubscribers: make(map[*Client]bool),
+		done:                     make(chan struct{}),
+		register:                 make(chan *Client),
+		unregister:               make(chan *Client),
+		broadcast:                make(chan *ws.Message, 256),
+		dispatcher:               dispatcher,
+		sessionMode:              newSessionModeTracker(),
+		logger:                   log.WithFields(zap.String("component", "ws_hub")),
 	}
+}
+
+type SystemMetricsInterestTracker interface {
+	MetricsSubscribe(clientID string)
+	MetricsUnsubscribe(clientID string)
 }
 
 // Run starts the hub's main processing loop
 func (h *Hub) Run(ctx context.Context) {
 	h.logger.Info("WebSocket hub started")
-	defer h.logger.Info("WebSocket hub stopped")
+	defer func() {
+		close(h.done)
+		h.logger.Info("WebSocket hub stopped")
+	}()
 
 	h.mu.Lock()
 	h.dispatchCtx = ctx
@@ -108,15 +125,28 @@ func (h *Hub) Run(ctx context.Context) {
 // after shutdown and call into listeners with stale state.
 func (h *Hub) closeAllClients() {
 	h.mu.Lock()
+	metricClientIDs := make([]string, 0, len(h.systemMetricsSubscribers))
 	for client := range h.clients {
+		if client.systemMetricsSubscribed {
+			metricClientIDs = append(metricClientIDs, client.ID)
+			client.systemMetricsSubscribed = false
+		}
 		client.closeSend()
 		delete(h.clients, client)
 	}
+	tracker := h.metricsInterestTracker
 	h.taskSubscribers = make(map[string]map[*Client]bool)
 	h.sessionSubscribers = make(map[string]map[*Client]bool)
 	h.runSubscribers = make(map[string]map[*Client]bool)
+	h.systemMetricsSubscribers = make(map[*Client]bool)
 	h.sessionMode.focusByClient = make(map[string]map[*Client]bool)
 	h.mu.Unlock()
+
+	for _, clientID := range metricClientIDs {
+		if tracker != nil {
+			tracker.MetricsUnsubscribe(clientID)
+		}
+	}
 
 	h.stopAllPendingTransitions()
 }
@@ -156,13 +186,31 @@ func (h *Hub) removeClient(client *Client) {
 	for runID := range client.runSubscriptions {
 		removeClientFromSubscriberMap(h.runSubscribers, runID, client)
 	}
+	var metricClientID string
+	var tracker SystemMetricsInterestTracker
+	if client.systemMetricsSubscribed {
+		delete(h.systemMetricsSubscribers, client)
+		client.systemMetricsSubscribed = false
+		metricClientID = client.ID
+		tracker = h.metricsInterestTracker
+	}
 	h.mu.Unlock()
+
+	if tracker != nil && metricClientID != "" {
+		tracker.MetricsUnsubscribe(metricClientID)
+	}
 
 	for _, sessionID := range dedupStrings(affectedSessions) {
 		h.recomputeSessionMode(sessionID)
 	}
 
 	h.logger.Debug("Client unregistered", zap.String("client_id", client.ID))
+}
+
+func (h *Hub) SetSystemMetricsInterestTracker(tracker SystemMetricsInterestTracker) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.metricsInterestTracker = tracker
 }
 
 // dedupStrings returns the input with duplicates removed, preserving order.
@@ -214,12 +262,20 @@ func (h *Hub) broadcastMessage(msg *ws.Message) {
 
 // Register adds a client to the hub
 func (h *Hub) Register(client *Client) {
-	h.register <- client
+	select {
+	case h.register <- client:
+	case <-h.done:
+		client.closeSend()
+	}
 }
 
 // Unregister removes a client from the hub
 func (h *Hub) Unregister(client *Client) {
-	h.unregister <- client
+	select {
+	case h.unregister <- client:
+	case <-h.done:
+		client.closeSend()
+	}
 }
 
 // Broadcast sends a notification to all connected clients
@@ -269,18 +325,51 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 	h.sendToClients(data, clients, msg.Action)
 }
 
-// BroadcastToSession sends a notification to clients subscribed to a specific session
+// getSessionRecipientsLocked returns the deduped set of clients that should
+// receive a session-scoped broadcast: those subscribed to the session OR
+// focused on it.
+//
+// Focus is the stable "actively viewing this session" signal — it's held for
+// the whole time the task page is open. The ref-counted session.subscribe, by
+// contrast, churns to 0 during task-switch/resume (the sidebar hands the
+// active session off to the task-page hooks, and the resume state transitions
+// re-run the subscription effects). If a client is focused but its subscribe
+// ref-count was transiently dropped, it must still receive session events
+// (e.g. the session.message.updated that marks an agent_boot script_execution
+// completed) — otherwise the UI is stuck until a manual refetch.
+func (h *Hub) getSessionRecipientsLocked(sessionID string) []*Client {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	subs := h.sessionSubscribers[sessionID]
+	focus := h.sessionMode.focusByClient[sessionID]
+	clients := make([]*Client, 0, len(subs)+len(focus))
+	seen := make(map[*Client]struct{}, len(subs)+len(focus))
+	for client := range subs {
+		seen[client] = struct{}{}
+		clients = append(clients, client)
+	}
+	for client := range focus {
+		if _, ok := seen[client]; ok {
+			continue
+		}
+		clients = append(clients, client)
+	}
+	return clients
+}
+
+// BroadcastToSession sends a notification to clients subscribed to OR focused on
+// a specific session. See getSessionRecipientsLocked for why focus is included.
 func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-	clients := h.getSubscribersLocked(h.sessionSubscribers, sessionID)
+	clients := h.getSessionRecipientsLocked(sessionID)
 	h.logger.Debug("BroadcastToSession",
 		zap.String("session_id", sessionID),
 		zap.String("action", msg.Action),
-		zap.Int("subscriber_count", len(clients)))
+		zap.Int("recipient_count", len(clients)))
 	h.sendToClients(data, clients, msg.Action)
 }
 
@@ -392,6 +481,21 @@ func (h *Hub) BroadcastToRun(runID string, msg *ws.Message) {
 	h.sendToClients(data, clients, msg.Action)
 }
 
+func (h *Hub) BroadcastToSystemMetrics(msg *ws.Message) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal message", zap.Error(err))
+		return
+	}
+	h.mu.RLock()
+	clients := make([]*Client, 0, len(h.systemMetricsSubscribers))
+	for client := range h.systemMetricsSubscribers {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
+	h.sendToClients(data, clients, msg.Action)
+}
+
 // SubscribeToRun subscribes a client to office run-event notifications.
 func (h *Hub) SubscribeToRun(client *Client, runID string) {
 	h.mu.Lock()
@@ -419,6 +523,42 @@ func (h *Hub) UnsubscribeFromRun(client *Client, runID string) {
 		if len(clients) == 0 {
 			delete(h.runSubscribers, runID)
 		}
+	}
+}
+
+func (h *Hub) SubscribeToSystemMetrics(client *Client) {
+	h.mu.Lock()
+	if _, ok := h.clients[client]; !ok {
+		h.mu.Unlock()
+		return
+	}
+	if client.systemMetricsSubscribed {
+		h.mu.Unlock()
+		return
+	}
+	h.systemMetricsSubscribers[client] = true
+	client.systemMetricsSubscribed = true
+	tracker := h.metricsInterestTracker
+	h.mu.Unlock()
+
+	if tracker != nil {
+		tracker.MetricsSubscribe(client.ID)
+	}
+}
+
+func (h *Hub) UnsubscribeFromSystemMetrics(client *Client) {
+	h.mu.Lock()
+	if !client.systemMetricsSubscribed {
+		h.mu.Unlock()
+		return
+	}
+	delete(h.systemMetricsSubscribers, client)
+	client.systemMetricsSubscribed = false
+	tracker := h.metricsInterestTracker
+	h.mu.Unlock()
+
+	if tracker != nil {
+		tracker.MetricsUnsubscribe(client.ID)
 	}
 }
 

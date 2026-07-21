@@ -1,0 +1,213 @@
+"use client";
+
+import { useCallback, useEffect, useRef } from "react";
+import Link from "@/components/routing/app-link";
+import { usePathname, useRouter } from "@/lib/routing/client-router";
+import { IconPlus, IconRobot, IconSitemap } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useInOffice } from "@/hooks/use-in-office";
+import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import { listAgentProfiles } from "@/lib/api/domains/office-api";
+import { cn } from "@/lib/utils";
+import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { selectActiveSessionsForAgent } from "@/lib/state/slices/session/selectors";
+import { AgentAvatar } from "@/app/office/components/agent-avatar";
+import { AgentStatusDot } from "@/app/office/agents/components/agent-status-dot";
+import { LiveAgentIndicator } from "@/app/office/agents/components/live-agent-indicator";
+import {
+  APP_SIDEBAR_SECTION_IDS,
+  SIDEBAR_ITEM_ACTIVE,
+  SIDEBAR_ITEM_INACTIVE,
+} from "../app-sidebar-constants";
+import { AppSidebarSection } from "../app-sidebar-section";
+
+type AgentsSectionProps = {
+  collapsed: boolean;
+};
+
+const hasStaleOfficeData = ({
+  agentsLength,
+  inboxCount,
+  inboxItemsLength,
+  projectsLength,
+}: {
+  agentsLength: number;
+  inboxCount: number;
+  inboxItemsLength: number;
+  projectsLength: number;
+}) => agentsLength > 0 || inboxItemsLength > 0 || projectsLength > 0 || inboxCount > 0;
+
+function isCurrentWorkspaceResponse(
+  requestWorkspaceId: string | null,
+  activeWorkspaceId: string | null,
+) {
+  return activeWorkspaceId !== null && requestWorkspaceId === activeWorkspaceId;
+}
+
+function AgentsSectionHeaderAction({ router }: { router: { push: (path: string) => void } }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            asChild
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 cursor-pointer"
+            aria-label="Agent topology"
+          >
+            <Link href="/office/workspace/org">
+              <IconSitemap className="h-3 w-3 text-muted-foreground/60" />
+            </Link>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Agent topology</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 cursor-pointer"
+            aria-label="Add agent"
+            onClick={() => router.push("/office/agents")}
+          >
+            <IconPlus className="h-3 w-3 text-muted-foreground/60" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Add agent</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+export function AgentsSection({ collapsed }: AgentsSectionProps) {
+  const router = useRouter();
+  const inOffice = useInOffice();
+  const store = useAppStoreApi();
+  const agents = useAppStore((s) => s.office.agentProfiles);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
+  const setProjects = useAppStore((s) => s.setProjects);
+  const setInboxItems = useAppStore((s) => s.setInboxItems);
+  const setInboxCount = useAppStore((s) => s.setInboxCount);
+  const projects = useAppStore((s) => s.office.projects);
+  const inboxItems = useAppStore((s) => s.office.inboxItems);
+  const inboxCount = useAppStore((s) => s.office.inboxCount);
+  const visibleAgents = workspaceId ? agents : [];
+  const fetchSequenceRef = useRef(0);
+
+  const refetchAgents = useCallback(async () => {
+    if (!workspaceId || !inOffice) return;
+    const requestId = ++fetchSequenceRef.current;
+    const requestedWorkspaceId = workspaceId;
+    const res = await listAgentProfiles(requestedWorkspaceId).catch(() => ({ agents: [] }));
+    if (!isCurrentWorkspaceResponse(requestedWorkspaceId, store.getState().workspaces.activeId))
+      return;
+    if (requestId !== fetchSequenceRef.current) return;
+    setOfficeAgentProfiles(res.agents ?? []);
+  }, [inOffice, setOfficeAgentProfiles, store, workspaceId]);
+
+  useEffect(() => {
+    refetchAgents();
+  }, [refetchAgents]);
+
+  useEffect(() => {
+    if (!inOffice || workspaceId) return;
+    if (
+      !hasStaleOfficeData({
+        agentsLength: agents.length,
+        inboxCount,
+        inboxItemsLength: inboxItems.length,
+        projectsLength: projects.length,
+      })
+    )
+      return;
+    setOfficeAgentProfiles([]);
+    setProjects([]);
+    setInboxItems([]);
+    setInboxCount(0);
+  }, [
+    agents.length,
+    inboxCount,
+    inboxItems.length,
+    inOffice,
+    projects.length,
+    setInboxCount,
+    setInboxItems,
+    setOfficeAgentProfiles,
+    setProjects,
+    workspaceId,
+  ]);
+
+  useOfficeRefetch("agents", refetchAgents);
+
+  if (!inOffice) return null;
+
+  return (
+    <AppSidebarSection
+      id={APP_SIDEBAR_SECTION_IDS.agents}
+      label="Agents"
+      collapsed={collapsed}
+      icon={IconRobot}
+      headerAction={<AgentsSectionHeaderAction router={router} />}
+      headerActionVisibility="always"
+      defaultExpanded
+    >
+      {visibleAgents.length === 0 ? (
+        <p className="px-3 py-2 text-xs text-muted-foreground">No agents yet</p>
+      ) : (
+        visibleAgents.map((agent) => <AgentRow key={agent.id} agent={agent} />)
+      )}
+    </AppSidebarSection>
+  );
+}
+
+function AgentRow({ agent }: { agent: AgentProfile }) {
+  const pathname = usePathname();
+  const href = `/office/agents/${agent.id}`;
+  const isActive = pathname === href;
+  const liveCount = useAppStore((s) => selectActiveSessionsForAgent(s, agent.id));
+  const errorCount = useAppStore((s) =>
+    s.office.inboxItems.reduce((acc, item) => {
+      if (item.type !== "agent_run_failed") return acc;
+      const payloadAgent =
+        typeof item.payload?.agent_profile_id === "string" ? item.payload.agent_profile_id : "";
+      return payloadAgent === agent.id ? acc + 1 : acc;
+    }, 0),
+  );
+  const isAutoPaused = (agent.pauseReason ?? "").startsWith("Auto-paused:");
+
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "flex items-center gap-2.5 px-2.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
+        isActive ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
+      )}
+    >
+      <AgentAvatar role={agent.role} name={agent.name} size="sm" />
+      <span className="flex-1 truncate">{agent.name}</span>
+      {isAutoPaused ? (
+        <span
+          data-testid="sidebar-agent-paused-badge"
+          title={agent.pauseReason}
+          className="rounded-full bg-red-500/15 text-red-600 dark:text-red-400 px-1.5 py-0.5 text-[10px] font-medium"
+        >
+          paused
+        </span>
+      ) : null}
+      {!isAutoPaused && errorCount > 0 ? (
+        <span className="rounded-full bg-red-500/15 text-red-600 dark:text-red-400 px-1.5 py-0.5 text-[10px] font-medium">
+          {errorCount} error{errorCount === 1 ? "" : "s"}
+        </span>
+      ) : null}
+      {liveCount > 0 && <LiveAgentIndicator count={liveCount} />}
+      {liveCount === 0 && !isAutoPaused && errorCount === 0 && (
+        <AgentStatusDot status={agent.status} />
+      )}
+    </Link>
+  );
+}

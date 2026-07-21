@@ -192,8 +192,140 @@
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;
   }
+  /* App shell: lock the document to the viewport; each route owns its scroll container. */
+  html,
+  body {
+    @apply h-full overflow-hidden overscroll-none;
+  }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  [data-settings-dirty="true"] {
+    border-color: color-mix(in oklab, var(--success) 65%, var(--border)) !important;
+  }
+
+  [data-settings-dirty="true"]:not(:focus-visible) {
+    @apply ring-1 ring-success/15;
+  }
+
+  [data-settings-dirty="true"][data-settings-dirty-level="container"] {
+    @apply ring-0;
+    border-color: color-mix(in oklab, var(--success) 45%, var(--border)) !important;
+  }
+
+  [data-slot="card"]:has([data-settings-dirty="true"]),
+  [data-settings-dirty="true"][data-settings-dirty-level="card"] {
+    @apply ring-0;
+    border-color: color-mix(in oklab, var(--success) 35%, var(--border)) !important;
+  }
+
+  [data-workflow-replay-cycle="true"] {
+    @apply ring-1 ring-warning/20;
+    border-color: color-mix(in oklab, var(--warning) 65%, var(--border)) !important;
+  }
+}
+
+/* iOS Safari auto-zooms a focused form control whose computed font-size is
+   < 16px (native <select> included). Force 16px on coarse-pointer (touch)
+   devices to stop focus-zoom. !important because some controls are styled by
+   more specific selectors that would otherwise win on specificity — e.g. the
+   compact `.tiptap pre .code-block-language` picker (0.625rem). Bumping that
+   picker to 16px only happens on touch, where a larger tap target is an
+   improvement; desktop (fine pointer) keeps the compact size. Only true
+   editing hosts get the contenteditable rule — `[contenteditable="false"]`
+   decorations (mention chips, code-block views) are excluded.
+   `any-pointer` (not `pointer`) so the floor also applies on hybrid devices
+   whose primary pointer is fine (e.g. a touchscreen laptop with a mouse),
+   where a touch tap can still focus a field. */
+@media (any-pointer: coarse) {
+  input,
+  textarea,
+  select,
+  [contenteditable="true"],
+  [contenteditable="plaintext-only"] {
+    font-size: 16px !important;
+  }
+}
+
+/* Radix menus are poppers: their inline transform lives on a generated wrapper,
+   not the menu surface. On mobile viewports, pin that wrapper to the
+   viewport and let the menu scroll internally like a compact bottom sheet. */
+@media (max-width: 639px) {
+  .mobile-task-actions {
+    display: flex !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  .mobile-task-actions-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .mobile-task-actions-with-stats {
+    gap: 0.125rem;
+  }
+
+  .mobile-task-actions-slot {
+    position: static;
+  }
+
+  .mobile-task-diff-stats {
+    opacity: 1 !important;
+  }
+
+  [data-radix-popper-content-wrapper]:has(
+    > :is(
+      [data-slot="context-menu-content"],
+      [data-slot="context-menu-sub-content"],
+      [data-slot="dropdown-menu-content"],
+      [data-slot="dropdown-menu-sub-content"]
+    )
+  ) {
+    position: fixed !important;
+    inset: auto 8px max(8px, env(safe-area-inset-bottom, 0px)) 8px !important;
+    width: auto !important;
+    min-width: 0 !important;
+    transform: none !important;
+  }
+
+  :is(
+    [data-slot="context-menu-content"],
+    [data-slot="context-menu-sub-content"],
+    [data-slot="dropdown-menu-content"],
+    [data-slot="dropdown-menu-sub-content"]
+  ) {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    max-height: min(70dvh, calc(100dvh - 16px - env(safe-area-inset-bottom, 0px))) !important;
+    padding: 0.5rem !important;
+    border-radius: 1rem !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    transform-origin: bottom center !important;
+  }
+
+  :is(
+    [data-slot="context-menu-item"],
+    [data-slot="context-menu-checkbox-item"],
+    [data-slot="context-menu-radio-item"],
+    [data-slot="context-menu-sub-trigger"],
+    [data-slot="dropdown-menu-item"],
+    [data-slot="dropdown-menu-checkbox-item"],
+    [data-slot="dropdown-menu-radio-item"],
+    [data-slot="dropdown-menu-sub-trigger"]
+  ) {
+    min-height: 44px;
+    padding-block: 0.625rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    cursor: pointer;
   }
 }
 
@@ -355,10 +487,10 @@
 @keyframes border-flash-glow {
   0%,
   100% {
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 20%, transparent);
+    opacity: 0.35;
   }
   50% {
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 60%, transparent);
+    opacity: 1;
   }
 }
 
@@ -405,71 +537,72 @@
   border-radius: 4px;
 }
 
-@keyframes chat-input-running {
-  0%,
-  100% {
-    border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
-    box-shadow:
-      0 0 6px 1px color-mix(in oklab, var(--primary) 12%, transparent),
-      0 0 15px 3px color-mix(in oklab, var(--primary) 6%, transparent);
-  }
-  50% {
-    border-color: color-mix(in oklab, var(--primary) 70%, var(--border));
-    box-shadow:
-      0 0 20px 4px color-mix(in oklab, var(--primary) 20%, transparent),
-      0 0 50px 8px color-mix(in oklab, var(--primary) 10%, transparent);
-  }
-}
-
-.chat-input-running {
-  animation: chat-input-running 3s ease-in-out infinite;
-}
-
-@keyframes chat-input-running-plan {
-  0%,
-  100% {
-    border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
-    box-shadow:
-      0 0 6px 1px color-mix(in oklab, var(--primary) 12%, transparent),
-      0 0 15px 3px color-mix(in oklab, var(--primary) 6%, transparent);
-  }
-  50% {
-    border-color: color-mix(in oklab, var(--primary) 70%, var(--border));
-    box-shadow:
-      0 0 20px 4px color-mix(in oklab, var(--primary) 20%, transparent),
-      0 0 50px 8px color-mix(in oklab, var(--primary) 10%, transparent);
-  }
-}
-
+/* Chat-input "running" affordance.
+ *
+ * The colored border is a static border-color (painted once). The pulsing glow
+ * lives on a pseudo-element that animates only `opacity`, which the compositor
+ * handles on the GPU without a per-frame main-thread paint. The glow is driven
+ * from the OUTER `.relative` wrapper (`.chat-input-glow*`) because the inner
+ * input box has `overflow-hidden`, which would clip a child's outer box-shadow. */
+.chat-input-running,
 .chat-input-running-plan {
-  animation: chat-input-running-plan 3s ease-in-out infinite;
-}
-
-@keyframes chat-input-starting {
-  0%,
-  100% {
-    border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
-    box-shadow:
-      0 0 4px 1px color-mix(in oklab, var(--primary) 10%, transparent),
-      0 0 10px 2px color-mix(in oklab, var(--primary) 5%, transparent);
-  }
-  50% {
-    border-color: color-mix(in oklab, var(--primary) 60%, var(--border));
-    box-shadow:
-      0 0 12px 3px color-mix(in oklab, var(--primary) 15%, transparent),
-      0 0 30px 6px color-mix(in oklab, var(--primary) 8%, transparent);
-  }
+  border-color: color-mix(in oklab, var(--primary) 55%, var(--border));
 }
 
 .chat-input-starting {
-  animation: chat-input-starting 2s ease-in-out infinite;
+  border-color: color-mix(in oklab, var(--primary) 50%, var(--border));
+}
+
+/* The glow pseudo-element sits at `z-index: -1` so the input content paints on
+ * top of it. `isolation: isolate` makes the wrapper its own stacking context so
+ * that negative z-index stays local instead of dropping behind ancestor
+ * backgrounds (which would hide the glow entirely). */
+.chat-input-glow-running,
+.chat-input-glow-starting {
+  position: relative;
+  isolation: isolate;
+}
+
+@keyframes chat-input-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.chat-input-glow-running::after,
+.chat-input-glow-starting::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 0.25rem;
+  pointer-events: none;
+  z-index: -1;
+  animation: chat-input-glow-pulse 3s ease-in-out infinite;
+}
+
+.chat-input-glow-running::after {
+  box-shadow:
+    0 0 20px 4px color-mix(in oklab, var(--primary) 20%, transparent),
+    0 0 50px 8px color-mix(in oklab, var(--primary) 10%, transparent);
+}
+
+.chat-input-glow-starting::after {
+  box-shadow:
+    0 0 12px 3px color-mix(in oklab, var(--primary) 15%, transparent),
+    0 0 30px 6px color-mix(in oklab, var(--primary) 8%, transparent);
+  animation-duration: 2s;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-changes-flash,
-  .chat-input-running,
-  .chat-input-running-plan,
-  .chat-input-starting,
+  .chat-input-glow-running::after,
+  .chat-input-glow-starting::after,
+  .border-flash-animation::after,
+  .node-border-running::after,
   .search-flash,
   .animate-queue-open,
   .animate-queue-close {
@@ -489,6 +622,7 @@
     border-radius: inherit;
     pointer-events: none;
     z-index: 10;
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 60%, transparent);
     animation: border-flash-glow 3s ease-in-out infinite;
   }
 }
@@ -775,8 +909,13 @@
 
 .markdown-body table {
   border-collapse: collapse;
+  /* width:100% fills the container and pins the table to it, so it can never
+     shrink-to-fit and grow into the surrounding overflow-x-auto scroll
+     container (which is what produced a horizontal scrollbar under width:auto).
+     Long values wrap instead of overflowing. */
   width: 100%;
   margin: 0.75rem 0;
+  table-layout: auto;
 }
 
 .markdown-body th,
@@ -784,11 +923,31 @@
   border: 1px solid var(--border);
   padding: 0.25rem 0.5rem;
   font-size: 13px;
+  vertical-align: top;
+}
+
+.markdown-body td {
+  overflow-wrap: anywhere;
 }
 
 .markdown-body th {
   background: var(--muted);
   font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Label/value tables (common in agent output) put short keys in the first
+   column. Keep that column on one line and sized to its content so a long
+   value cell can't starve it down to a few characters and wrap "Failing"
+   into "Failin g". */
+.markdown-body td:first-child {
+  white-space: nowrap;
+  width: 1%;
+}
+
+.markdown-body td:not(:first-child) code {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body thead {
@@ -1110,6 +1269,53 @@
   color: var(--primary);
 }
 
+.markdown-preview-source-block {
+  position: relative;
+}
+
+.markdown-preview-commented-range {
+  background-color: color-mix(in oklch, var(--accent) 46%, transparent);
+  border-radius: 4px;
+  cursor: pointer;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.markdown-preview-commented-range:hover {
+  background-color: color-mix(in oklch, var(--accent) 62%, transparent);
+}
+
+.markdown-preview-comment-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  color: var(--primary);
+  vertical-align: middle;
+  border: 1px solid color-mix(in oklch, var(--primary) 35%, transparent);
+  border-radius: 4px;
+  background-color: color-mix(in oklch, var(--background) 88%, transparent);
+  cursor: pointer;
+}
+
+.markdown-preview-comment-badge:hover {
+  color: var(--primary-foreground);
+  background-color: var(--primary);
+}
+
+.markdown-preview-pre-comment-wrapper {
+  position: relative;
+}
+
+.markdown-preview-pre-comment-wrapper .markdown-preview-comment-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  margin-left: 0;
+}
+
 /* Drag handle */
 .plan-drag-handle {
   display: flex;
@@ -1324,6 +1530,22 @@
   background-color: color-mix(in oklab, var(--primary) 15%, transparent) !important;
 }
 
+/* Monaco Editor - Walkthrough active range */
+.monaco-walkthrough-line {
+  background-color: color-mix(in oklab, var(--primary) 11%, transparent) !important;
+}
+.monaco-walkthrough-line-number {
+  background-color: color-mix(in oklab, var(--primary) 15%, transparent) !important;
+  color: var(--foreground) !important;
+}
+.monaco-walkthrough-range,
+.monaco-walkthrough-range-start {
+  background-color: color-mix(in oklab, var(--primary) 10%, transparent) !important;
+}
+.monaco-walkthrough-range-start {
+  border-left: 3px solid color-mix(in oklab, var(--primary) 72%, transparent) !important;
+}
+
 /* Monaco Editor - Peek view / references widget overrides */
 .monaco-editor .peekview-widget .head {
   box-sizing: border-box;
@@ -1362,24 +1584,34 @@
   border-radius: 8px;
 }
 
-/* Pipeline node rotating border for running tasks */
-@keyframes node-border-pulse {
+/* Pipeline node glow for running tasks — static ring on the element, the pulse
+ * is opacity-only on a pseudo-element so it composites on the GPU rather than
+ * repainting the box-shadow every frame. */
+@keyframes node-border-glow {
   0%,
   100% {
-    box-shadow:
-      0 0 0 1px color-mix(in oklab, var(--primary) 42%, var(--border)),
-      0 0 0 0 color-mix(in oklab, var(--primary) 0%, transparent);
+    opacity: 0.5;
   }
   50% {
-    box-shadow:
-      0 0 0 1px color-mix(in oklab, var(--primary) 68%, var(--border)),
-      0 0 0 3px color-mix(in oklab, var(--primary) 12%, transparent);
+    opacity: 1;
   }
 }
 
 .node-border-running {
   position: relative;
-  animation: node-border-pulse 2.8s ease-in-out infinite;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary) 42%, var(--border));
+}
+
+.node-border-running::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--primary) 68%, var(--border)),
+    0 0 0 3px color-mix(in oklab, var(--primary) 12%, transparent);
+  animation: node-border-glow 2.8s ease-in-out infinite;
 }
 
 .chat-message-list {
@@ -1458,4 +1690,56 @@
 }
 .animate-queue-close {
   animation: queue-panel-close 180ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Unified AppSidebar — header/text content fades in when the rail expands
+ * from its collapsed (icon-only) state. */
+@keyframes app-sidebar-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.sidebar-fade-in {
+  animation: app-sidebar-fade-in 200ms ease-out;
+}
+
+/* AppSidebar section expand/collapse — a quick height animation that pushes
+ * sibling sections, replacing the old opacity fade. Driven by the Radix
+ * Collapsible `data-state` + content-height CSS var. */
+@keyframes sidebar-section-expand {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+  }
+}
+@keyframes sidebar-section-collapse {
+  from {
+    height: var(--radix-collapsible-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+.sidebar-section-content {
+  overflow: hidden;
+}
+.sidebar-section-content[data-state="open"] {
+  animation: sidebar-section-expand 180ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.sidebar-section-content[data-state="closed"] {
+  animation: sidebar-section-collapse 160ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-fade-in,
+  .sidebar-section-content[data-state="open"],
+  .sidebar-section-content[data-state="closed"] {
+    animation: none;
+  }
 }

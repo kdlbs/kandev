@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -104,6 +105,44 @@ func TestWorkspaceGroup_RawInsertDefaultsAreSafe(t *testing.T) {
 	}
 	if got.CleanupPolicy != models.WorkspaceCleanupPolicyNeverDelete {
 		t.Errorf("raw insert cleanup_policy = %q, want never_delete", got.CleanupPolicy)
+	}
+}
+
+func TestWorkspaceGroup_ListByWorkspace(t *testing.T) {
+	repo := newWorkspaceGroupTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
+	groups := []*models.WorkspaceGroup{
+		{ID: "target-later", WorkspaceID: "ws-1", OwnerTaskID: "owner-2", MaterializedKind: models.WorkspaceGroupKindPlainFolder, CreatedAt: base.Add(time.Minute), UpdatedAt: base.Add(time.Minute)},
+		{ID: "other-workspace", WorkspaceID: "ws-2", OwnerTaskID: "owner-3", MaterializedKind: models.WorkspaceGroupKindPlainFolder, CreatedAt: base.Add(-time.Minute), UpdatedAt: base.Add(-time.Minute)},
+		{ID: "target-earlier", WorkspaceID: "ws-1", OwnerTaskID: "owner-1", MaterializedKind: models.WorkspaceGroupKindPlainFolder, CreatedAt: base, UpdatedAt: base},
+	}
+	for _, g := range groups {
+		if err := repo.CreateWorkspaceGroup(ctx, g); err != nil {
+			t.Fatalf("create %s: %v", g.ID, err)
+		}
+	}
+
+	got, err := repo.ListWorkspaceGroupsByWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("list returned %d groups, want 2", len(got))
+	}
+	if got[0].ID != "target-earlier" || got[1].ID != "target-later" {
+		t.Fatalf("list order = [%s %s], want [target-earlier target-later]", got[0].ID, got[1].ID)
+	}
+
+	empty, err := repo.ListWorkspaceGroupsByWorkspace(ctx, "ws-empty")
+	if err != nil {
+		t.Fatalf("list empty: %v", err)
+	}
+	if empty == nil {
+		t.Fatal("empty list should be a non-nil slice")
+	}
+	if len(empty) != 0 {
+		t.Fatalf("empty list returned %d groups, want 0", len(empty))
 	}
 }
 

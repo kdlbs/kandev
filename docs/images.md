@@ -11,7 +11,7 @@ Kandev publishes two container image flavors to GitHub Container Registry. Both 
 
 ## What's in `:universal` (and what's not)
 
-**Language toolchains:** Go (latest stable), Rust (rustup, stable default toolchain), pnpm (preinstalled via corepack so `pnpm` is on `$PATH` for everyone).
+**Language toolchains:** Go (latest stable), Rust (rustup, stable default toolchain), pnpm (preinstalled through npm into `/usr/local` so `pnpm` is on `$PATH` for everyone).
 
 **Build essentials:** `build-essential` (gcc, g++, make, libc-dev), `pkg-config`, `python3-dev`, `libssl-dev`. These cover CGO compilation, native Python pip wheels, and native Node modules.
 

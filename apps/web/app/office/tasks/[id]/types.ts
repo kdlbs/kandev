@@ -136,6 +136,7 @@ export type Task = {
   projectName?: string;
   projectColor?: string;
   parentId?: string;
+  workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   parentTitle?: string;
   parentIdentifier?: string;
   blockedBy: string[];

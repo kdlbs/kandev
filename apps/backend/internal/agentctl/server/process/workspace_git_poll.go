@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -120,7 +121,7 @@ func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures
 	// stop after maxConsecutiveGitFailures to avoid wasting CPU.
 	probeCmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
 	probeCmd.Dir = wt.workDir
-	if err := probeCmd.Run(); err != nil {
+	if err := subproc.RunGit(ctx, probeCmd); err != nil {
 		*consecutiveFailures++
 		if *consecutiveFailures >= maxConsecutiveGitFailures {
 			wt.logger.Error("git not functional, stopping git polling",
@@ -141,7 +142,7 @@ func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures
 func (wt *WorkspaceTracker) getHeadSHA(ctx context.Context) string {
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
 	cmd.Dir = wt.workDir
-	out, err := cmd.Output()
+	out, err := subproc.RunGitOutput(ctx, cmd)
 	if err != nil {
 		return ""
 	}
@@ -153,7 +154,7 @@ func (wt *WorkspaceTracker) getHeadSHA(ctx context.Context) string {
 func (wt *WorkspaceTracker) getCurrentBranchName(ctx context.Context) string {
 	cmd := exec.CommandContext(ctx, "git", "symbolic-ref", "--short", "-q", "HEAD")
 	cmd.Dir = wt.workDir
-	out, err := cmd.Output()
+	out, err := subproc.RunGitOutput(ctx, cmd)
 	if err != nil {
 		return ""
 	}
@@ -167,7 +168,7 @@ func (wt *WorkspaceTracker) getCurrentBranchName(ctx context.Context) string {
 // directory traversal that --untracked-files=all performs on large repos.
 func (wt *WorkspaceTracker) getGitStatusHash(ctx context.Context) string {
 	cmd := wt.pollingGitCommand(ctx, "status", "--porcelain", "--untracked-files=no")
-	out, err := cmd.Output()
+	out, err := subproc.RunGitOutput(ctx, cmd)
 	if err != nil {
 		return ""
 	}
@@ -347,11 +348,15 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 	var baseBranch string
 
 	// Try integration branch candidates first (origin/main, origin/master, main, master)
-	// This ensures we get the branch-off point from the main development line
+	// This ensures we get the branch-off point from the main development line.
+	// Routed through subproc.RunGit so each rev-parse counts against the global
+	// git semaphore — handleBranchSwitch can invoke this on every detected
+	// branch change, so an unthrottled burst here was the exact pattern the
+	// throttle is meant to prevent on CrowdStrike-instrumented macOS.
 	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
 		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
 		checkCmd.Dir = wt.workDir
-		if err := checkCmd.Run(); err == nil {
+		if err := subproc.RunGit(ctx, checkCmd); err == nil {
 			baseBranch = candidate
 			break
 		}
@@ -361,7 +366,7 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 	if baseBranch == "" {
 		upstreamCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", branch+"@{upstream}")
 		upstreamCmd.Dir = wt.workDir
-		upstreamOut, err := upstreamCmd.Output()
+		upstreamOut, err := subproc.RunGitOutput(ctx, upstreamCmd)
 		if err == nil && len(upstreamOut) > 0 {
 			baseBranch = strings.TrimSpace(string(upstreamOut))
 		}
@@ -372,7 +377,7 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 	if baseBranch != "" && head != "" {
 		mergeBaseCmd := exec.CommandContext(ctx, "git", "merge-base", baseBranch, head)
 		mergeBaseCmd.Dir = wt.workDir
-		if mergeBaseOut, err := mergeBaseCmd.Output(); err == nil {
+		if mergeBaseOut, err := subproc.RunGitOutput(ctx, mergeBaseCmd); err == nil {
 			return strings.TrimSpace(string(mergeBaseOut))
 		}
 	}
@@ -384,7 +389,7 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 func (wt *WorkspaceTracker) isAncestor(ctx context.Context, commit1, commit2 string) bool {
 	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", commit1, commit2)
 	cmd.Dir = wt.workDir
-	err := cmd.Run()
+	err := subproc.RunGit(ctx, cmd)
 	// Exit code 0 means commit1 IS an ancestor of commit2
 	// Exit code 1 means commit1 is NOT an ancestor of commit2
 	return err == nil
@@ -397,7 +402,7 @@ func (wt *WorkspaceTracker) isOnRemote(ctx context.Context, commitSHA string) bo
 	// Use git branch -r --contains to check if commit is on any remote branch
 	cmd := exec.CommandContext(ctx, "git", "branch", "-r", "--contains", commitSHA)
 	cmd.Dir = wt.workDir
-	out, err := cmd.Output()
+	out, err := subproc.RunGitOutput(ctx, cmd)
 	if err != nil {
 		// If the command fails, assume it's not on remote (safer default)
 		return false

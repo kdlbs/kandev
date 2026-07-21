@@ -135,6 +135,28 @@ func (h *TaskHandlers) wsDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{responseKeySuccess: true})
 }
 
+func (h *TaskHandlers) wsMarkTaskPlanImplementationStarted(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+		Actor     string `json:"actor"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	plan, err := h.planService.MarkImplementationStarted(ctx, service.MarkImplementationStartedRequest{
+		TaskID:    req.TaskID,
+		SessionID: req.SessionID,
+		Actor:     req.Actor,
+	})
+	if err != nil {
+		return taskPlanServiceError(msg, err, "Failed to mark task plan implementation started")
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+}
+
 // wsListTaskPlanRevisions returns revision metadata newest-first (no content).
 func (h *TaskHandlers) wsListTaskPlanRevisions(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
@@ -210,17 +232,27 @@ func (h *TaskHandlers) wsRevertTaskPlan(ctx context.Context, msg *ws.Message) (*
 		AuthorName:       req.AuthorName,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrTaskIDRequired):
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		case errors.Is(err, service.ErrRevisionIDRequired):
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "revision_id is required", nil)
-		case errors.Is(err, service.ErrRevisionNotFound):
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Revision not found", nil)
-		case errors.Is(err, service.ErrRevisionTaskMismatch):
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Revision does not belong to task", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to revert plan: "+err.Error(), nil)
+		return taskPlanServiceError(msg, err, "Failed to revert plan")
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanRevisionFromModel(rev))
+}
+
+func taskPlanServiceError(msg *ws.Message, err error, fallback string) (*ws.Message, error) {
+	switch {
+	case errors.Is(err, service.ErrTaskIDRequired):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	case errors.Is(err, service.ErrSessionIDRequired):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	case errors.Is(err, service.ErrSessionTaskMismatch):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Session does not belong to task", nil)
+	case errors.Is(err, service.ErrTaskPlanNotFound):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task plan not found", nil)
+	case errors.Is(err, service.ErrRevisionIDRequired):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "revision_id is required", nil)
+	case errors.Is(err, service.ErrRevisionNotFound):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Revision not found", nil)
+	case errors.Is(err, service.ErrRevisionTaskMismatch):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Revision does not belong to task", nil)
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fallback+": "+err.Error(), nil)
 }

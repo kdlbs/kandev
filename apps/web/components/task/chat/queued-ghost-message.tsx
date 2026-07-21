@@ -19,11 +19,16 @@ import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
 import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { stripSystemTags } from "@/lib/utils/system-tags";
-import { openImageInWindow } from "@/components/task/chat/file-attachment";
+import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import {
   SenderTaskBadge,
   type SenderTaskInfo,
 } from "@/components/task/chat/messages/sender-task-badge";
+import {
+  WorkflowStepMessageBadge,
+  workflowMessageInfoFromMetadata,
+  type WorkflowStepMessageInfo,
+} from "@/components/task/chat/messages/workflow-step-message-badge";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
@@ -44,29 +49,18 @@ function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
   if (attachments.length === 0) return null;
   const images = attachments.filter((a) => a.type === "image");
   const files = attachments.filter((a) => a.type !== "image");
-  const onImageKeyDown = (att: QueuedAttachment) => (e: React.KeyboardEvent<HTMLImageElement>) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      openImageInWindow(att.mime_type, att.data);
-    }
-  };
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {images.map((att, i) => (
-        /* eslint-disable-next-line @next/next/no-img-element -- base64 data URLs are not compatible with next/image */
-        <img
+        <ImagePreviewDialog
           key={`img-${i}`}
           src={`data:${att.mime_type};base64,${att.data}`}
           alt={`Attachment ${i + 1}`}
-          role={interactive ? "button" : undefined}
-          tabIndex={interactive ? 0 : undefined}
-          className={cn(
+          interactive={interactive}
+          thumbnailClassName={cn(
             "h-10 w-10 rounded-md border border-border object-cover",
-            interactive &&
-              "cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary",
+            interactive && "transition-opacity hover:opacity-90",
           )}
-          onClick={interactive ? () => openImageInWindow(att.mime_type, att.data) : undefined}
-          onKeyDown={interactive ? onImageKeyDown(att) : undefined}
         />
       ))}
       {files.map((_, i) => (
@@ -87,9 +81,18 @@ export type QueuedGhostMessageHandle = {
   startEdit: () => void;
 };
 
-type SenderKind = "user" | "agent" | "system";
+type SenderKind = "user" | "agent" | "workflow" | "system";
+
+export function isWorkflowQueuedMessage(entry: QueuedMessage): boolean {
+  return (
+    entry.queued_by === "workflow" ||
+    entry.queued_by === "workflow-auto-start" ||
+    workflowMessageInfoFromMetadata(entry.metadata) !== null
+  );
+}
 
 function senderKindOf(entry: QueuedMessage): SenderKind {
+  if (isWorkflowQueuedMessage(entry)) return "workflow";
   if (!entry.queued_by) return "system";
   // Inter-task messages dispatched via dispatchTaskMessage hardcode
   // queued_by="agent"; that's the only signal needed.
@@ -101,8 +104,13 @@ function senderLabel(entry: QueuedMessage): string {
   const kind = senderKindOf(entry);
   if (kind === "agent") {
     const title = entry.metadata?.sender_task_title;
-    return typeof title === "string" && title.length > 0 ? `From ${title}` : "From agent";
+    const sessionName = entry.metadata?.sender_session_name;
+    const base = typeof title === "string" && title.length > 0 ? `From ${title}` : "From agent";
+    return typeof sessionName === "string" && sessionName.length > 0
+      ? `${base} · ${sessionName}`
+      : base;
   }
+  if (kind === "workflow") return "Workflow";
   if (kind === "system") return "System";
   return "You";
 }
@@ -114,6 +122,9 @@ function senderIconFor(kind: SenderKind): { Icon: typeof IconUser; tone: string 
     return { Icon: IconRobot, tone: "text-amber-500 dark:text-amber-400" };
   }
   if (kind === "system") {
+    return { Icon: IconInfoCircle, tone: "text-muted-foreground" };
+  }
+  if (kind === "workflow") {
     return { Icon: IconInfoCircle, tone: "text-muted-foreground" };
   }
   return { Icon: IconUser, tone: "text-blue-500 dark:text-blue-300" };
@@ -132,11 +143,27 @@ function SenderIcon({ entry }: SenderIconProps) {
 function getSenderTaskInfo(entry: QueuedMessage): SenderTaskInfo | null {
   if (senderKindOf(entry) !== "agent") return null;
   const meta = entry.metadata as
-    | { sender_task_id?: string; sender_task_title?: string }
+    | {
+        sender_task_id?: string;
+        sender_task_title?: string;
+        sender_session_id?: string;
+        sender_session_name?: string;
+      }
     | undefined;
   const id = meta?.sender_task_id;
   if (typeof id !== "string" || id.length === 0) return null;
-  return { id, snapshotTitle: meta?.sender_task_title ?? "" };
+  return {
+    id,
+    snapshotTitle: meta?.sender_task_title ?? "",
+    sessionId: meta?.sender_session_id,
+    sessionName: meta?.sender_session_name,
+  };
+}
+
+function getWorkflowMessageInfo(entry: QueuedMessage): WorkflowStepMessageInfo | null {
+  const info = workflowMessageInfoFromMetadata(entry.metadata);
+  if (info) return info;
+  return entry.queued_by === "workflow" || entry.queued_by === "workflow-auto-start" ? {} : null;
 }
 
 type EditViewProps = {
@@ -232,6 +259,7 @@ function DisplayView({ entry, positionLabel, canEdit, onStartEdit, onRemove }: D
   const visible = stripSystemTags(entry.content);
   const attachments = (entry.attachments ?? []) as QueuedAttachment[];
   const senderTask = getSenderTaskInfo(entry);
+  const workflowMessage = getWorkflowMessageInfo(entry);
   const [expanded, setExpanded] = useState(false);
   const canExpand = shouldOfferExpand(visible);
   return (
@@ -243,9 +271,10 @@ function DisplayView({ entry, positionLabel, canEdit, onStartEdit, onRemove }: D
         >
           {positionLabel}
         </span>
-        {!senderTask && <SenderIcon entry={entry} />}
+        {!senderTask && !workflowMessage && <SenderIcon entry={entry} />}
       </span>
       <div className="flex-1 min-w-0 space-y-1">
+        {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} size="xs" />}
         {senderTask && <SenderTaskBadge sender={senderTask} size="xs" />}
         {visible && (
           <div

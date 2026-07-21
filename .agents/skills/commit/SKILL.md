@@ -51,7 +51,9 @@ ci: add PR title linting workflow
 
 ## Steps
 
-**Create a task for each step below and mark them as completed as you go.**
+Track these steps with an internal todo/checklist and mark them complete as you go.
+Do not create, update, or delete Kandev subtasks for this workflow unless the user
+explicitly requests task tracking.
 
 1. **Understand changes:** Run `git status` and `git diff` to understand all changes. Review recent commits with `git log --oneline -10` to match project style.
 
@@ -76,7 +78,7 @@ ci: add PR title linting workflow
 
    Why this matters: a missing hook lets lint regressions slip past local commits and only surface in CI (e.g. funlen / cognitive complexity on backend Go code). The hook catches them in <1s at commit time. See `Makefile`'s `doctor` target for the idempotent install command.
 
-3. **Run verify (MANDATORY — do NOT skip):** Delegate to the `verify` subagent to run the full verification pipeline (rebase, format, typecheck, test, lint). It will fix any issues it finds. **Wait for it to complete before proceeding.** Do NOT proceed to step 4 until verify passes. If verify cannot fix the failures, stop and surface the errors to the user — do not commit. Do NOT substitute this with a partial check (e.g. running only the changed package's tests).
+3. **Run verify (MANDATORY — do NOT skip):** Run `/verify` to complete the full verification pipeline (rebase, format, typecheck, test, lint). Depending on runtime policy, `/verify` may delegate to the `verify` subagent or use its documented direct-command fallback. **Wait for it to complete before proceeding.** Do NOT proceed to step 4 until verify passes. If verify cannot fix the failures, stop and surface the errors to the user — do not commit. Do NOT substitute this with a partial check (e.g. running only the changed package's tests).
 
 4. **Stage files:** Stage relevant files (prefer specific files over `git add -A`).
    - **Splitting commits with new files:** When introducing a brand-new file alongside the file that uses it, stage them together. The Go lint pre-commit hook stashes *unstaged* changes before linting but keeps *untracked* files in the working tree — so a new helper committed alone, while its (still-unstaged) caller sits in the working tree, lints as `unused` and rejects the commit.

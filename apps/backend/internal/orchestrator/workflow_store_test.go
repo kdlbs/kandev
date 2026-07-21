@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -139,6 +140,104 @@ func TestWorkflowStore_ApplyTransition(t *testing.T) {
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		t.Errorf("expected review status to be cleared, got %q", session.ReviewStatus)
+	}
+}
+
+func TestWorkflowStore_ApplyTransitionRejectsFullWIPLimitedTarget(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "occupant",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step2",
+		Title:          "Occupant",
+		State:          "TODO",
+		Priority:       "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask occupant: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Limited", Position: 1, WIPLimit: 1,
+	}
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+
+	err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", "on_turn_complete")
+	if err == nil {
+		t.Fatalf("expected WIP-limited transition to be rejected")
+	}
+	if !strings.Contains(err.Error(), "WIP limit") {
+		t.Fatalf("error = %q, want WIP limit rejection", err.Error())
+	}
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Fatalf("task moved despite WIP limit: %s", task.WorkflowStepID)
+	}
+}
+
+func TestWorkflowStore_ApplyTransitionPullsNextFeederTaskOnVacate(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step-limited")
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task-low",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step-feeder",
+		Title:          "Low",
+		State:          "TODO",
+		Priority:       "low",
+		Position:       0,
+	}); err != nil {
+		t.Fatalf("CreateTask low: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task-critical",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step-feeder",
+		Title:          "Critical",
+		State:          "TODO",
+		Priority:       "critical",
+		Position:       0,
+	}); err != nil {
+		t.Fatalf("CreateTask critical: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-limited"] = &wfmodels.WorkflowStep{
+		ID: "step-limited", WorkflowID: "wf1", Name: "Limited", Position: 0,
+		WIPLimit: 1, PullFromStepID: "step-feeder",
+	}
+	stepGetter.steps["step-next"] = &wfmodels.WorkflowStep{
+		ID: "step-next", WorkflowID: "wf1", Name: "Next", Position: 1,
+	}
+	var movedTaskID string
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger(),
+		func(_ context.Context, task *models.Task, _, _, _, _ string) {
+			movedTaskID = task.ID
+		})
+
+	if err := store.ApplyTransition(ctx, "t1", "s1", "step-limited", "step-next", "on_turn_complete"); err != nil {
+		t.Fatalf("ApplyTransition: %v", err)
+	}
+
+	pulled, err := repo.GetTask(ctx, "task-critical")
+	if err != nil {
+		t.Fatalf("GetTask(task-critical): %v", err)
+	}
+	if pulled.WorkflowStepID != "step-limited" {
+		t.Fatalf("critical feeder task step = %s, want step-limited", pulled.WorkflowStepID)
+	}
+	if movedTaskID != "task-critical" {
+		t.Fatalf("moved event task = %s, want task-critical", movedTaskID)
 	}
 }
 

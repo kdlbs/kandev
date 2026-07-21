@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
+const MUTED_FOREGROUND = "text-muted-foreground";
+
 const STATUS_RANK: Record<string, number> = {
   // Higher = more attention-worthy. Drives the aggregated icon color when a
   // task has multiple PRs (we surface the worst state).
@@ -15,15 +17,44 @@ const STATUS_RANK: Record<string, number> = {
   "text-emerald-400": 2,
   "text-green-500": 1,
   "text-purple-500": 0,
-  "text-muted-foreground": 0,
+  [MUTED_FOREGROUND]: 0,
 };
 
-// Requires checks_state === "success" (not just "") so repos with no CI configured
-// won't trigger ready-to-merge on mergeable_state=clean alone.
+function hasExplicitPRChecksPassed(pr: TaskPR): boolean {
+  return pr.checks_state === "success";
+}
+
+export function hasPRChecksPassedForDisplay(pr: TaskPR): boolean {
+  if (pr.checks_state === "success") return true;
+  if (pr.checks_state !== "" || pr.checks_total <= 0) return false;
+  return pr.checks_passing >= pr.checks_total;
+}
+
+export function hasPRChecksInProgressForDisplay(pr: TaskPR): boolean {
+  if (pr.checks_state === "pending") return true;
+  return pr.checks_state === "" && pr.checks_total > 0 && pr.checks_passing < pr.checks_total;
+}
+
+export function hasPRChecksPassedWithoutReviewWaitForDisplay(pr: TaskPR): boolean {
+  if (!hasPRChecksPassedForDisplay(pr)) return false;
+  if (pr.required_reviews != null && pr.review_count < pr.required_reviews) return false;
+  if (pr.pending_review_count > 0) return false;
+  return pr.review_state === "approved" || pr.review_state === "";
+}
+
+// Requires a positive CI signal so repos with no CI configured won't trigger
+// ready-to-merge on mergeable_state=clean alone. Display surfaces may fall
+// back to aggregate counts, but merge actions require GitHub's explicit
+// success rollup because stored counts can be preserved across lightweight
+// syncs that do not populate check details.
 export function isPRReadyToMerge(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
-  if (pr.checks_state !== "success") return false;
+  if (!hasExplicitPRChecksPassed(pr)) return false;
   if (pr.mergeable_state !== "clean") return false;
+  // Guard against stale mergeable_state: enforce required_reviews to match GitHub's gate.
+  if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
+    return false;
+  }
   if (pr.review_state === "approved") return true;
   // No review process: no requested reviewers and no submitted reviews. GitHub
   // sets mergeable_state=clean when branch protection is satisfied, so this
@@ -38,9 +69,33 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
 // that branch protection's required count is met.
 export function isPRAwaitingReview(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
-  if (pr.checks_state !== "success") return false;
+  if (!hasPRChecksPassedForDisplay(pr)) return false;
+  // Shortfall is "awaiting review" even when no reviewer is currently requested.
+  if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
+    return true;
+  }
   if (pr.review_state === "approved") return pr.pending_review_count > 0;
   return pr.review_state === "pending" || pr.pending_review_count > 0;
+}
+
+export function isPRWaitingOnBranchProtection(pr: TaskPR): boolean {
+  if (pr.state !== "open") return false;
+  if (pr.mergeable_state !== "blocked") return false;
+  if (!hasPRChecksPassedForDisplay(pr)) return false;
+  if (pr.review_state === "changes_requested") return false;
+  return !isPRAwaitingReview(pr);
+}
+
+// Colour for the hard merge blockers that must beat ready/awaiting-review:
+// conflicts ("dirty") are a hard stop, "behind" needs a base update first.
+// Returns null for every other state so the caller falls through to its
+// review/check-driven colours. ("blocked" is handled later, after
+// awaiting-review, so an outstanding review still reads as sky.)
+function openMergeBlockerColor(pr: TaskPR): string | null {
+  if (pr.state !== "open") return null;
+  if (pr.mergeable_state === "dirty") return "text-red-500";
+  if (pr.mergeable_state === "behind") return "text-yellow-500";
+  return null;
 }
 
 export function getPRStatusColor(pr: TaskPR): string {
@@ -49,6 +104,8 @@ export function getPRStatusColor(pr: TaskPR): string {
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
     return "text-red-500";
   }
+  const blockerColor = openMergeBlockerColor(pr);
+  if (blockerColor) return blockerColor;
   if (isPRReadyToMerge(pr)) {
     return "text-emerald-400";
   }
@@ -57,13 +114,18 @@ export function getPRStatusColor(pr: TaskPR): string {
   if (isPRAwaitingReview(pr)) {
     return "text-sky-400";
   }
-  if (pr.review_state === "approved" && pr.checks_state === "success") {
+  // Branch protection can be a normal repository-rule wait after CI has passed.
+  // Keep it muted so it doesn't read like a failure.
+  if (isPRWaitingOnBranchProtection(pr)) {
+    return MUTED_FOREGROUND;
+  }
+  if (hasPRChecksPassedWithoutReviewWaitForDisplay(pr)) {
     return "text-green-500";
   }
-  if (pr.checks_state === "pending" || pr.review_state === "pending") {
+  if (hasPRChecksInProgressForDisplay(pr) || pr.review_state === "pending") {
     return "text-yellow-500";
   }
-  return "text-muted-foreground";
+  return MUTED_FOREGROUND;
 }
 
 export function getPRTooltip(pr: TaskPR): string {
@@ -81,13 +143,18 @@ export function getPRTooltip(pr: TaskPR): string {
 
 /**
  * Picks the most attention-worthy color across N PRs. For multi-repo tasks one
- * red PR should dominate the visual even if the others are green.
+ * red PR should dominate the visual even if the others are green. Terminal
+ * (merged/closed) PRs are dropped when at least one PR is still open so a
+ * task whose first PR landed and was followed by a new open PR surfaces the
+ * live PR's status instead of the merged-purple from the closed one.
  */
 export function aggregatePRStatusColor(prs: TaskPR[]): string {
-  if (prs.length === 0) return "text-muted-foreground";
-  let bestColor = "text-muted-foreground";
+  if (prs.length === 0) return MUTED_FOREGROUND;
+  const open = prs.filter((p) => p.state === "open");
+  const target = open.length > 0 ? open : prs;
+  let bestColor = MUTED_FOREGROUND;
   let bestRank = -1;
-  for (const pr of prs) {
+  for (const pr of target) {
     const color = getPRStatusColor(pr);
     const rank = STATUS_RANK[color] ?? 0;
     if (rank > bestRank) {
@@ -96,6 +163,46 @@ export function aggregatePRStatusColor(prs: TaskPR[]): string {
     }
   }
   return bestColor;
+}
+
+/**
+ * True when at least one PR is open AND every open PR is ready to merge.
+ * Terminal (merged/closed) siblings are ignored so they can't drag the result
+ * to false. Extracted so the rule is testable without mounting MultiPRIcon.
+ */
+export function areAllOpenPRsReadyToMerge(prs: TaskPR[]): boolean {
+  const openPRs = prs.filter((p) => p.state === "open");
+  return openPRs.length > 0 && openPRs.every(isPRReadyToMerge);
+}
+
+/**
+ * Attention rank for a single PR, reusing the same colour→rank table that
+ * drives the aggregate icon. Terminal PRs (merged/closed) return -1 so they're
+ * never the default focus when a task mixes open and finished PRs.
+ */
+export function prStatusRank(pr: TaskPR): number {
+  if (pr.state !== "open") return -1;
+  return STATUS_RANK[getPRStatusColor(pr)] ?? 0;
+}
+
+/**
+ * Picks the most attention-worthy PR to focus first in a multi-PR popover —
+ * the worst open status (failing > pending > awaiting-review > ready/passing).
+ * Ties resolve to the first PR (creation order). Falls back to the first PR
+ * when every PR is terminal so the popover always has something to show.
+ */
+export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
+  if (prs.length === 0) return null;
+  let best = prs[0];
+  let bestRank = prStatusRank(prs[0]);
+  for (let i = 1; i < prs.length; i++) {
+    const rank = prStatusRank(prs[i]);
+    if (rank > bestRank) {
+      best = prs[i];
+      bestRank = rank;
+    }
+  }
+  return best;
 }
 
 export function PRTaskIcon({ taskId }: { taskId: string }) {
@@ -130,7 +237,7 @@ function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
 
 function MultiPRIcon({ taskId, prs }: { taskId: string; prs: TaskPR[] }) {
   const aggregateColor = aggregatePRStatusColor(prs);
-  const allReady = prs.every(isPRReadyToMerge);
+  const allReady = areAllOpenPRsReadyToMerge(prs);
   return (
     <Tooltip>
       <TooltipTrigger asChild>

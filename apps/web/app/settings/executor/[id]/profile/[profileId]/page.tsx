@@ -1,7 +1,8 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
+import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -18,8 +19,10 @@ import {
 } from "@kandev/ui/dialog";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
-import { RequestIndicator } from "@/components/request-indicator";
 import { useToast } from "@/components/toast-provider";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
   updateExecutorProfile,
@@ -28,7 +31,6 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
 import {
-  getSaveButtonLabel,
   upsertExecutorProfile,
   type SaveStatus,
 } from "@/components/settings/profile-edit/profile-edit-page-chrome";
@@ -100,23 +102,31 @@ export default function ProfileDetailPage({
 
 function ProfileDetailsCard({
   name,
+  baselineName,
   onNameChange,
 }: {
   name: string;
+  baselineName: string;
   onNameChange: (v: string) => void;
 }) {
+  const isDirty = name.trim() !== baselineName.trim();
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle>Profile Details</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="profile-name">Name</Label>
-          <Input id="profile-name" value={name} onChange={(e) => onNameChange(e.target.value)} />
+          <Input
+            id="profile-name"
+            value={name}
+            onChange={(e) => onNameChange(e.target.value)}
+            data-settings-dirty={isDirty}
+          />
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -126,23 +136,34 @@ function EnvVarRow({
   secrets,
   onUpdate,
   onRemove,
+  baselineRow,
 }: {
   row: EnvVarRow;
   index: number;
   secrets: { id: string; name: string }[];
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
+  baselineRow?: EnvVarRow;
 }) {
+  const isDirty = !baselineRow || JSON.stringify(row) !== JSON.stringify(baselineRow);
   return (
-    <div className="flex items-start gap-2">
+    <div
+      className="flex items-start gap-2"
+      data-settings-dirty={isDirty}
+      data-settings-dirty-level="container"
+    >
       <Input
         value={row.key}
         onChange={(e) => onUpdate(index, "key", e.target.value)}
         placeholder="KEY"
         className="font-mono text-xs flex-[2]"
+        data-settings-dirty={!baselineRow || row.key !== baselineRow.key}
       />
       <Select value={row.mode} onValueChange={(v) => onUpdate(index, "mode", v)}>
-        <SelectTrigger className="w-[100px] text-xs">
+        <SelectTrigger
+          className="w-[100px] text-xs"
+          data-settings-dirty={!baselineRow || row.mode !== baselineRow.mode}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -156,10 +177,14 @@ function EnvVarRow({
           onChange={(e) => onUpdate(index, "value", e.target.value)}
           placeholder="value"
           className="font-mono text-xs flex-[3]"
+          data-settings-dirty={!baselineRow || row.value !== baselineRow.value}
         />
       ) : (
         <Select value={row.secretId} onValueChange={(v) => onUpdate(index, "secretId", v)}>
-          <SelectTrigger className="flex-[3] text-xs">
+          <SelectTrigger
+            className="flex-[3] text-xs"
+            data-settings-dirty={!baselineRow || row.secretId !== baselineRow.secretId}
+          >
             <SelectValue placeholder="Select secret..." />
           </SelectTrigger>
           <SelectContent>
@@ -186,19 +211,23 @@ function EnvVarRow({
 
 function EnvVarsCard({
   rows,
+  baselineRows,
   secrets,
   onAdd,
   onUpdate,
   onRemove,
 }: {
   rows: EnvVarRow[];
+  baselineRows: EnvVarRow[];
   secrets: { id: string; name: string }[];
   onAdd: () => void;
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
 }) {
+  const isDirty =
+    JSON.stringify(rowsToEnvVars(rows)) !== JSON.stringify(rowsToEnvVars(baselineRows));
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
@@ -228,6 +257,7 @@ function EnvVarsCard({
           <EnvVarRow
             key={idx}
             row={row}
+            baselineRow={baselineRows[idx]}
             index={idx}
             secrets={secrets}
             onUpdate={onUpdate}
@@ -235,53 +265,31 @@ function EnvVarsCard({
           />
         ))}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
 function ProfileActions({
   executorId,
-  saveStatus,
-  nameValid,
-  onSave,
   onRequestDelete,
 }: {
   executorId: string;
-  saveStatus: SaveStatus;
-  nameValid: boolean;
-  onSave: () => void;
   onRequestDelete: () => void;
 }) {
   const router = useRouter();
-  const isSaving = saveStatus === "loading";
-  const saveLabel = getSaveButtonLabel(saveStatus);
   return (
     <div className="flex items-center justify-between">
       <Button variant="destructive" size="sm" onClick={onRequestDelete} className="cursor-pointer">
         <IconTrash className="h-4 w-4 mr-1" />
         Delete Profile
       </Button>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          onClick={() => router.push(`/settings/executor/${executorId}`)}
-          className="cursor-pointer"
-        >
-          Cancel
-        </Button>
-        <Button
-          onClick={onSave}
-          disabled={!nameValid || isSaving}
-          className="min-w-36 cursor-pointer"
-        >
-          {saveLabel}
-          {saveStatus !== "idle" && (
-            <span className="ml-2">
-              <RequestIndicator status={saveStatus} />
-            </span>
-          )}
-        </Button>
-      </div>
+      <Button
+        variant="outline"
+        onClick={() => router.push(`/settings/executor/${executorId}`)}
+        className="cursor-pointer"
+      >
+        Cancel
+      </Button>
     </div>
   );
 }
@@ -349,6 +357,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         setError(message);
         setSaveStatus("error");
         toast({ title: "Failed to save profile", description: message, variant: "error" });
+        throw err;
       }
     },
     [executor, profile.id, executors, setExecutors, toast],
@@ -365,7 +374,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
             : e,
         ),
       );
-      router.push(`/settings/executor/${executor.id}`);
+      runWithNavigationBlockerBypassed(() => router.push(`/settings/executor/${executor.id}`));
     } catch {
       setDeleting(false);
       setDeleteDialogOpen(false);
@@ -438,15 +447,27 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   const persistence = useProfilePersistence(executor, profile);
   const form = useProfileFormState(executor, profile);
 
-  const handleSave = () => {
-    if (!form.name.trim()) return;
-    void persistence.save({
-      name: form.name.trim(),
-      prepare_script: form.prepareScript,
-      cleanup_script: form.cleanupScript,
-      env_vars: rowsToEnvVars(form.envVarRows),
-    });
+  const savePayload = {
+    name: form.name.trim(),
+    prepare_script: form.prepareScript,
+    cleanup_script: form.cleanupScript,
+    env_vars: rowsToEnvVars(form.envVarRows),
   };
+  const saveRevision = serializeSettingsRevision(savePayload);
+  const [savedRevision, setSavedRevision] = useState(saveRevision);
+  const handleSave = async () => {
+    await persistence.save(savePayload);
+    setSavedRevision(saveRevision);
+  };
+  useSettingsSaveContributor({
+    id: `legacy-executor-profile:${profile.id}`,
+    revision: saveRevision,
+    isDirty: saveRevision !== savedRevision,
+    canSave: Boolean(form.name.trim()),
+    invalidReason: form.name.trim() ? undefined : "Profile name is required.",
+    save: handleSave,
+    discard: () => undefined,
+  });
 
   return (
     <div className="space-y-8">
@@ -465,7 +486,11 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         </Button>
       </div>
       <Separator />
-      <ProfileDetailsCard name={form.name} onNameChange={form.setName} />
+      <ProfileDetailsCard
+        name={form.name}
+        baselineName={profile.name}
+        onNameChange={form.setName}
+      />
       {form.isSprites && form.spritesSecretId && (
         <>
           <SpritesConnectionCard secretId={form.spritesSecretId} />
@@ -474,6 +499,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       )}
       <EnvVarsCard
         rows={form.envVarRows}
+        baselineRows={envVarsToRows(profile.env_vars)}
         secrets={secrets}
         onAdd={form.addEnvVar}
         onUpdate={form.updateEnvVar}
@@ -483,6 +509,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         title="Prepare Script"
         description={form.prepareDesc}
         value={form.prepareScript}
+        baselineValue={profile.prepare_script ?? ""}
         onChange={form.setPrepareScript}
         height="300px"
         placeholders={form.placeholders}
@@ -493,6 +520,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
           title="Cleanup Script"
           description="Runs after the agent session ends for cleanup tasks."
           value={form.cleanupScript}
+          baselineValue={profile.cleanup_script ?? ""}
           onChange={form.setCleanupScript}
           height="200px"
           placeholders={form.placeholders}
@@ -502,9 +530,6 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       {persistence.error && <p className="text-sm text-destructive">{persistence.error}</p>}
       <ProfileActions
         executorId={executor.id}
-        saveStatus={persistence.saveStatus}
-        nameValid={Boolean(form.name.trim())}
-        onSave={handleSave}
         onRequestDelete={() => persistence.setDeleteDialogOpen(true)}
       />
       <DeleteProfileDialog

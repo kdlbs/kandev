@@ -1,0 +1,118 @@
+name: CI base image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/docker/ci-base/**
+      - .github/workflows/ci-base-image.yml
+      - apps/backend/go.mod
+      - apps/pnpm-lock.yaml
+      - apps/web/package.json
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/docker/ci-base/**
+      - .github/workflows/ci-base-image.yml
+      - apps/backend/go.mod
+      - apps/pnpm-lock.yaml
+      - apps/web/package.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/kdlbs/kandev-ci
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # Push the built images to GHCR on any `push` to main (the default
+      # publish path) or on manual `workflow_dispatch` (used to seed new tag
+      # names from a feature branch before the consumer workflows on the same
+      # branch can pull them — otherwise we hit a chicken-and-egg loop where
+      # the PR that introduces a new tag can never go green).
+      - name: Log in to GHCR
+        if: |
+          github.event_name == 'workflow_dispatch'
+          || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          # Hash reflects image content (Dockerfile + dependencies) only; the
+          # workflow file is intentionally excluded so cosmetic edits to it
+          # (renaming a step, fixing a summary) don't produce a wasteful retag.
+          hash=$(cat \
+              .github/docker/ci-base/Dockerfile \
+              apps/backend/go.mod \
+              apps/pnpm-lock.yaml \
+              apps/web/package.json \
+            | sha256sum | cut -c1-12)
+          echo "image_tag=${hash}" >> "$GITHUB_OUTPUT"
+          echo "Computed content hash: sha-${hash}"
+
+      # Stage 1: runtime (Playwright + Node + pnpm + Docker CLI — no Go).
+      # Consumed by the `e2e` shards and `e2e-report`, where the smaller pull
+      # is the speedup that pays for the split.
+      - name: Build and push runtime
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: .github/docker/ci-base/Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,scope=runtime,mode=max
+          tags: |
+            ${{ env.IMAGE_NAME }}:runtime-sha-${{ steps.tag.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:runtime-latest
+
+      # Stage 2: build (runtime + Go + golangci-lint + go-licenses).
+      # Consumed by the `build` job, `backend-tests`, and `frontend-tests`.
+      # `cache-from` includes the runtime scope so the shared lower layers
+      # only build once across both pushes.
+      - name: Build and push build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: .github/docker/ci-base/Dockerfile
+          target: build
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+          cache-from: |
+            type=gha,scope=build
+            type=gha,scope=runtime
+          cache-to: type=gha,scope=build,mode=max
+          tags: |
+            ${{ env.IMAGE_NAME }}:build-sha-${{ steps.tag.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:build-latest
+
+      - name: Summarize
+        run: |
+          {
+            echo "### Kandev CI base image"
+            echo ""
+            echo "- runtime: \`${IMAGE_NAME}:runtime-sha-${IMAGE_TAG}\` / \`runtime-latest\`"
+            echo "- build:   \`${IMAGE_NAME}:build-sha-${IMAGE_TAG}\` / \`build-latest\`"
+            echo "- pushed:  \`${PUSHED}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+          PUSHED: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}

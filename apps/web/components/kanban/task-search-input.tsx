@@ -12,6 +12,7 @@ interface TaskSearchInputProps {
   debounceMs?: number;
   isLoading?: boolean;
   className?: string;
+  autoFocus?: boolean;
 }
 
 export function TaskSearchInput({
@@ -21,14 +22,23 @@ export function TaskSearchInput({
   debounceMs = 300,
   isLoading = false,
   className,
+  autoFocus = false,
 }: TaskSearchInputProps) {
   const [localValue, setLocalValue] = useState(value);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Sync local value when external value changes
   useEffect(() => {
     setLocalValue(value);
   }, [value]);
+
+  // Focus on mount when requested (e.g. when the mobile search bar expands)
+  useEffect(() => {
+    if (autoFocus) {
+      inputRef.current?.focus();
+    }
+  }, [autoFocus]);
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -73,11 +83,12 @@ export function TaskSearchInput({
         <IconSearch className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
       )}
       <Input
+        ref={inputRef}
         type="text"
         value={localValue}
         onChange={handleChange}
         placeholder={placeholder}
-        className="pl-8 pr-8 w-full border border-border"
+        className="pl-8 pr-8 w-full border border-border text-[16px] md:text-[16px] lg:text-xs/relaxed"
       />
       {localValue && !isLoading && (
         <button

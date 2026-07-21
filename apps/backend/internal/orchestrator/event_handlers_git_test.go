@@ -5,8 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/office/costs/modelsdev"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -225,4 +228,95 @@ func TestPushTrackerForget(t *testing.T) {
 			t.Errorf("expected %q to survive (different session)", k)
 		}
 	}
+}
+
+type fakeModelInfoLookup struct {
+	info modelsdev.ModelInfo
+	ok   bool
+}
+
+func (f fakeModelInfoLookup) LookupModelInfo(context.Context, string) (modelsdev.ModelInfo, bool) {
+	return f.info, f.ok
+}
+
+func TestResolveContextWindowValues(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyRuntimeConfig, models.SessionRuntimeConfig{
+		Model: "gpt-5.3-codex-spark",
+	}))
+
+	base := watcher.ContextWindowData{
+		TaskID:        "t1",
+		TaskSessionID: "s1",
+	}
+
+	t.Run("positive ACP size wins", func(t *testing.T) {
+		svc := &Service{
+			repo:            repo,
+			modelInfoLookup: fakeModelInfoLookup{info: modelsdev.ModelInfo{ContextWindow: 128000}, ok: true},
+		}
+		size, remaining, efficiency, source, ok := svc.resolveContextWindowValues(ctx, watcher.ContextWindowData{
+			TaskID:                 base.TaskID,
+			TaskSessionID:          base.TaskSessionID,
+			ContextWindowSize:      258400,
+			ContextWindowUsed:      100000,
+			ContextWindowRemaining: 158400,
+			ContextEfficiency:      38.7,
+		})
+
+		require.True(t, ok)
+		require.Equal(t, int64(258400), size)
+		require.Equal(t, int64(158400), remaining)
+		require.Equal(t, 38.7, efficiency)
+		require.Equal(t, "acp", source)
+	})
+
+	t.Run("models.dev fallback supplies missing ACP size", func(t *testing.T) {
+		svc := &Service{
+			repo:            repo,
+			modelInfoLookup: fakeModelInfoLookup{info: modelsdev.ModelInfo{ContextWindow: 128000}, ok: true},
+		}
+		size, remaining, efficiency, source, ok := svc.resolveContextWindowValues(ctx, watcher.ContextWindowData{
+			TaskID:            base.TaskID,
+			TaskSessionID:     base.TaskSessionID,
+			ContextWindowUsed: 64000,
+		})
+
+		require.True(t, ok)
+		require.Equal(t, int64(128000), size)
+		require.Equal(t, int64(64000), remaining)
+		require.Equal(t, 50.0, efficiency)
+		require.Equal(t, "api", source)
+	})
+
+	t.Run("models.dev fallback uses cached runtime model before session load", func(t *testing.T) {
+		svc := &Service{
+			modelInfoLookup: fakeModelInfoLookup{info: modelsdev.ModelInfo{ContextWindow: 96000}, ok: true},
+		}
+		svc.runtimeModelBySession.Store("s1", "gpt-5.3-codex-spark")
+		size, remaining, efficiency, source, ok := svc.resolveContextWindowValues(ctx, watcher.ContextWindowData{
+			TaskID:            base.TaskID,
+			TaskSessionID:     base.TaskSessionID,
+			ContextWindowUsed: 24000,
+		})
+
+		require.True(t, ok)
+		require.Equal(t, int64(96000), size)
+		require.Equal(t, int64(72000), remaining)
+		require.Equal(t, 25.0, efficiency)
+		require.Equal(t, "api", source)
+	})
+
+	t.Run("lookup miss hides context window", func(t *testing.T) {
+		svc := &Service{repo: repo, modelInfoLookup: fakeModelInfoLookup{}}
+		_, _, _, _, ok := svc.resolveContextWindowValues(ctx, watcher.ContextWindowData{
+			TaskID:            base.TaskID,
+			TaskSessionID:     base.TaskSessionID,
+			ContextWindowUsed: 64000,
+		})
+
+		require.False(t, ok)
+	})
 }

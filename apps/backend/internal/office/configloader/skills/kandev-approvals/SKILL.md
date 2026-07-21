@@ -1,6 +1,6 @@
 ---
 name: kandev-approvals
-description: List pending approvals and decide them (approve or reject)
+description: Clear the CEO approval queue when hire requests, budget grants, or other sensitive Office mutations are waiting for approve or reject decisions.
 kandev:
   system: true
   version: "0.42.0"
@@ -32,7 +32,7 @@ The note is visible on the approval row and surfaced to the requester on their n
 
 For `hire_agent`:
 - Does the role match the workload? (`agents list` to verify org composition first)
-- Is the monthly budget available? (`kandev-budget`)
+- Is the monthly budget available? (`kandev-team-admin`)
 - Is the reason concrete?
 
 For `budget_grant`:

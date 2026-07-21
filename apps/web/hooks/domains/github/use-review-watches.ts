@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import {
   listReviewWatches,
   createReviewWatch,
@@ -8,6 +8,8 @@ import {
   deleteReviewWatch,
   triggerReviewWatch,
   triggerAllReviewWatches,
+  previewResetReviewWatch,
+  resetReviewWatch,
 } from "@/lib/api/domains/github-api";
 import { useAppStore } from "@/components/state-provider";
 import type { CreateReviewWatchRequest, UpdateReviewWatchRequest } from "@/lib/types/github";
@@ -25,21 +27,37 @@ export function useReviewWatches(workspaceId?: string | null) {
   const addWatch = useAppStore((state) => state.addReviewWatch);
   const updateWatch = useAppStore((state) => state.updateReviewWatch);
   const removeWatch = useAppStore((state) => state.removeReviewWatch);
+  const loadedScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (workspaceId === null || loaded || loading) return;
+    if (workspaceId === null) return;
+    const scopeKey = workspaceId ?? "__all__";
+    if (loadedScopeRef.current === scopeKey) return;
+    let cancelled = false;
+    loadedScopeRef.current = scopeKey;
     setReviewWatchesLoading(true);
     listReviewWatches(workspaceId ?? undefined, { cache: "no-store" })
       .then((response) => {
+        if (cancelled) return;
         setReviewWatches(response?.watches ?? []);
       })
       .catch(() => {
+        if (cancelled) return;
         setReviewWatches([]);
       })
       .finally(() => {
+        if (cancelled) return;
         setReviewWatchesLoading(false);
       });
-  }, [workspaceId, loaded, loading, setReviewWatches, setReviewWatchesLoading]);
+    return () => {
+      cancelled = true;
+      // Clear the scope guard so a same-scope re-mount (React StrictMode's
+      // double-invoke, or an effect re-run) re-issues the fetch. Without this,
+      // the cancelled first fetch drops its response while the guard blocks the
+      // second run, leaving the store stuck at loading with no items.
+      if (loadedScopeRef.current === scopeKey) loadedScopeRef.current = null;
+    };
+  }, [workspaceId, setReviewWatches, setReviewWatchesLoading]);
 
   const create = useCallback(
     async (req: CreateReviewWatchRequest) => {
@@ -51,8 +69,8 @@ export function useReviewWatches(workspaceId?: string | null) {
   );
 
   const update = useCallback(
-    async (id: string, req: UpdateReviewWatchRequest) => {
-      const watch = await updateReviewWatch(id, req);
+    async (id: string, watchWorkspaceId: string, req: UpdateReviewWatchRequest) => {
+      const watch = await updateReviewWatch(id, watchWorkspaceId, req);
       updateWatch(watch);
       return watch;
     },
@@ -60,21 +78,39 @@ export function useReviewWatches(workspaceId?: string | null) {
   );
 
   const remove = useCallback(
-    async (id: string) => {
-      await deleteReviewWatch(id);
+    async (id: string, watchWorkspaceId: string) => {
+      await deleteReviewWatch(id, watchWorkspaceId);
       removeWatch(id);
     },
     [removeWatch],
   );
 
-  const trigger = useCallback(async (id: string) => {
-    return triggerReviewWatch(id);
+  const trigger = useCallback(async (id: string, watchWorkspaceId: string) => {
+    return triggerReviewWatch(id, watchWorkspaceId);
   }, []);
 
   const triggerAll = useCallback(async () => {
     if (!workspaceId) return null;
     return triggerAllReviewWatches(workspaceId);
   }, [workspaceId]);
+
+  const previewReset = useCallback(async (id: string, watchWorkspaceId: string) => {
+    return previewResetReviewWatch(id, watchWorkspaceId);
+  }, []);
+
+  const reset = useCallback(
+    async (id: string, watchWorkspaceId: string) => {
+      const result = await resetReviewWatch(id, watchWorkspaceId);
+      try {
+        const response = await listReviewWatches(workspaceId ?? undefined, { cache: "no-store" });
+        setReviewWatches(response?.watches ?? []);
+      } catch {
+        // Reset succeeded; a stale settings table is less harmful than failing the action.
+      }
+      return result;
+    },
+    [setReviewWatches, workspaceId],
+  );
 
   return {
     items,
@@ -85,5 +121,7 @@ export function useReviewWatches(workspaceId?: string | null) {
     remove,
     trigger,
     triggerAll,
+    previewReset,
+    reset,
   };
 }

@@ -29,7 +29,8 @@ import {
   isSessionDeletable,
   isSessionResumable,
 } from "@/hooks/domains/session/use-session-actions";
-import { NewSessionDialog } from "../new-session-dialog";
+import { HandoffDropdownMenuSub } from "../handoff-profile-menu-items";
+import { NewSessionDialog, type HandoffPreset } from "../new-session-dialog";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { formatTaskSessionStateLabel } from "@/lib/ui/state-labels";
@@ -60,7 +61,9 @@ function buildSessionRows(
     return {
       id: s.id,
       agentName: profile?.agent_name ?? null,
-      agentLabel: labelParts[1] || labelParts[0] || profile?.label || "Agent",
+      // User-supplied session name wins over the derived profile label,
+      // matching the desktop session tab title precedence.
+      agentLabel: s.name || labelParts[1] || labelParts[0] || profile?.label || "Agent",
       state: (s.state as TaskSessionState | undefined) ?? null,
       isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
       index: idx + 1,
@@ -87,20 +90,28 @@ function StateBadge({ state }: { state: TaskSessionState | null }) {
 }
 
 function SessionActionsMenu({
+  taskId,
   state,
   isPrimary,
   onSetPrimary,
   onStop,
   onResume,
   onAskDelete,
+  onHandoffProfile,
 }: {
+  taskId: string;
   state: TaskSessionState | null;
   isPrimary: boolean;
   onSetPrimary: () => void;
   onStop: () => void;
   onResume: () => void;
   onAskDelete: () => void;
+  onHandoffProfile: (profileId: string) => void;
 }) {
+  const hasLifecycleAction =
+    !!state &&
+    (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -141,6 +152,8 @@ function SessionActionsMenu({
             Delete
           </DropdownMenuItem>
         )}
+        {hasLifecycleAction && <DropdownMenuSeparator />}
+        <HandoffDropdownMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -209,15 +222,25 @@ function SessionRowItem({
   onSelect: (sessionId: string) => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffPreset, setHandoffPreset] = useState<HandoffPreset | null>(null);
   const actions = useSessionActions({ sessionId: row.id, taskId });
   const isOnly = totalSessions === 1;
   const showBadges = totalSessions > 1;
+  const handleHandoffProfile = useCallback(
+    (profileId: string) => {
+      setHandoffPreset({ sourceSessionId: row.id, targetProfileId: profileId });
+      setHandoffOpen(true);
+    },
+    [row.id],
+  );
 
   return (
     <>
       <div
         role="button"
         tabIndex={0}
+        aria-current={isActive ? "true" : undefined}
         onClick={() => onSelect(row.id)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -242,14 +265,27 @@ function SessionRowItem({
         <span className="text-sm truncate flex-1">{row.agentLabel}</span>
         <StateBadge state={row.state} />
         <SessionActionsMenu
+          taskId={taskId}
           state={row.state}
           isPrimary={row.isPrimary}
           onSetPrimary={() => void actions.setPrimary()}
           onStop={() => void actions.stop()}
           onResume={() => void actions.resume()}
           onAskDelete={() => setConfirmDelete(true)}
+          onHandoffProfile={handleHandoffProfile}
         />
       </div>
+      {handoffPreset && (
+        <NewSessionDialog
+          open={handoffOpen}
+          onOpenChange={(open) => {
+            setHandoffOpen(open);
+            if (!open) setHandoffPreset(null);
+          }}
+          taskId={taskId}
+          handoff={handoffPreset}
+        />
+      )}
       <DeleteSessionConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
@@ -278,13 +314,14 @@ function useSessionRows(taskId: string | null) {
 
 const MobileSessionsList = memo(function MobileSessionsList({
   taskId,
+  activeSessionId,
   onClose,
 }: {
   taskId: string | null;
+  activeSessionId: string | null;
   onClose: () => void;
 }) {
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const { rows, isLoading } = useSessionRows(taskId);
   const [launchOpen, setLaunchOpen] = useState(false);
 
@@ -349,36 +386,63 @@ const MobileSessionsList = memo(function MobileSessionsList({
   );
 });
 
-function useActiveSessionPillLabel(taskId: string | null): {
+function useActiveSessionPillLabel(
+  taskId: string | null,
+  sessionId: string | null | undefined,
+): {
   label: string;
   count: string | undefined;
+  agentName: string | null;
+  effectiveSessionId: string | null;
 } {
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const storedActiveSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const { rows } = useSessionRows(taskId);
-  const activeRow = rows.find((r) => r.id === activeSessionId);
+  const effectiveSessionId = sessionId === undefined ? storedActiveSessionId : sessionId;
+  const activeRow = rows.find((r) => r.id === effectiveSessionId);
   const total = rows.length;
   const idx = activeRow?.index;
   let count: string | undefined;
   if (total > 1 && idx) count = `${idx}/${total}`;
   else if (total > 1) count = `${total}`;
-  return { label: activeRow?.agentLabel ?? "Session", count };
+  return {
+    label: activeRow?.agentLabel ?? "Session",
+    count,
+    agentName: activeRow?.agentName ?? null,
+    effectiveSessionId,
+  };
 }
 
 export const MobileSessionsPicker = memo(function MobileSessionsPicker({
   taskId,
+  sessionId,
   compact,
   fullWidth,
 }: {
   taskId: string | null;
+  sessionId?: string | null;
   compact?: boolean;
   fullWidth?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const { label, count } = useActiveSessionPillLabel(taskId);
+  const { label, count, agentName, effectiveSessionId } = useActiveSessionPillLabel(
+    taskId,
+    sessionId,
+  );
   if (!taskId) return null;
   return (
     <>
       <MobilePillButton
+        icon={
+          agentName ? (
+            <span
+              className="flex shrink-0 items-center"
+              data-testid="mobile-session-agent-icon"
+              data-agent-name={agentName}
+            >
+              <AgentLogo agentName={agentName} size={16} className="shrink-0" />
+            </span>
+          ) : undefined
+        }
         label={label}
         count={count}
         compact={compact}
@@ -389,7 +453,11 @@ export const MobileSessionsPicker = memo(function MobileSessionsPicker({
         ariaLabel={`Active session: ${label}. Tap to switch.`}
       />
       <MobilePickerSheet open={open} onOpenChange={setOpen} title="Sessions">
-        <MobileSessionsList taskId={taskId} onClose={() => setOpen(false)} />
+        <MobileSessionsList
+          taskId={taskId}
+          activeSessionId={effectiveSessionId}
+          onClose={() => setOpen(false)}
+        />
       </MobilePickerSheet>
     </>
   );

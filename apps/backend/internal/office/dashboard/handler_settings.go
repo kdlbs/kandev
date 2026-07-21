@@ -104,7 +104,13 @@ func (h *Handler) gitStatus(c *gin.Context) {
 // -- Meta --
 
 func (h *Handler) getMeta(c *gin.Context) {
-	c.JSON(http.StatusOK, MetaResponse{
+	c.JSON(http.StatusOK, BuildMetaResponse())
+}
+
+// BuildMetaResponse returns the static Office metadata payload used by both
+// the HTTP endpoint and the SPA boot payload.
+func BuildMetaResponse() MetaResponse {
+	return MetaResponse{
 		Statuses:           models.AllStatuses(),
 		Priorities:         models.AllPriorities(),
 		Roles:              models.AllRoles(),
@@ -116,7 +122,7 @@ func (h *Handler) getMeta(c *gin.Context) {
 		InboxItemTypes:     models.AllInboxItemTypes(),
 		Permissions:        allPermissionMeta(),
 		PermissionDefaults: allPermissionDefaults(),
-	})
+	}
 }
 
 func allPermissionMeta() []PermissionMeta {

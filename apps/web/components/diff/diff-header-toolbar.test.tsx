@@ -87,7 +87,19 @@ describe("useDiffHeaderToolbar", () => {
     renderToolbar(node as ReactElement);
 
     fireEvent.click(screen.getByLabelText("Edit"));
-    expect(onOpenFile).toHaveBeenCalledWith("src/renamed.ts");
+    expect(onOpenFile).toHaveBeenCalledWith("src/renamed.ts", undefined);
+  });
+
+  it("forwards the repo subpath to onOpenFile so multi-repo files open under the right repository", () => {
+    const onOpenFile = vi.fn();
+    const { result } = renderHook(() =>
+      useDiffHeaderToolbar({ ...baseOpts, onOpenFile, repo: "enrichment-commons" }),
+    );
+    const node = result.current(headerProp("src/foo.ts"));
+    renderToolbar(node as ReactElement);
+
+    fireEvent.click(screen.getByLabelText("Edit"));
+    expect(onOpenFile).toHaveBeenCalledWith("src/foo.ts", "enrichment-commons");
   });
 
   it("falls back to opts.filePath when the callback prop has no fileDiff.name", () => {
@@ -97,7 +109,7 @@ describe("useDiffHeaderToolbar", () => {
     renderToolbar(node as ReactElement);
 
     fireEvent.click(screen.getByLabelText("Edit"));
-    expect(onOpenFile).toHaveBeenCalledWith(FILE);
+    expect(onOpenFile).toHaveBeenCalledWith(FILE, undefined);
   });
 
   it("shows the markdown preview button only for .md/.mdx files", () => {

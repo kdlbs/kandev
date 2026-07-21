@@ -318,9 +318,120 @@ test.describe("Changes panel section ordering", () => {
     // PR files should appear above commits
     await expectAbove(prFiles, commits);
 
+    // Review mode (PR, no local changes): with ≤5 PR files, PR Changes is
+    // expanded by default; Commits stays collapsed.
+    await expect(testPage.getByTestId("pr-changes-section-collapse-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    await expect(testPage.getByTestId("commits-section-collapse-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
     // No unstaged or staged sections
     await expect(testPage.getByTestId("unstaged-files-section")).not.toBeVisible();
     await expect(testPage.getByTestId("staged-files-section")).not.toBeVisible();
+  });
+
+  /**
+   * Large PR diffs (>5 files) skip auto-expanding PR Changes and expand
+   * Commits instead so the panel doesn't open buried in a long file list.
+   */
+  test("large PR diff expands commits instead of PR Changes", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { workflow, inboxStep, workingStep, doneStep } = await seedWorkflow(
+      apiClient,
+      seedData.workspaceId,
+    );
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 301,
+        title: "Large PR",
+        state: "open",
+        head_branch: "feat/large",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        additions: 100,
+        deletions: 10,
+      },
+    ]);
+    await apiClient.mockGitHubAddPRFiles(
+      "testorg",
+      "testrepo",
+      301,
+      Array.from({ length: 6 }, (_, i) => ({
+        filename: `file-${i}.ts`,
+        status: "modified" as const,
+        additions: 10,
+        deletions: 1,
+      })),
+    );
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 301, [
+      {
+        sha: "eee1111222233334444555566667777aaaabbbb",
+        message: "large change",
+        author_login: "test-user",
+        author_date: "2026-03-01T12:00:00Z",
+      },
+    ]);
+
+    const profile = await createStandardProfile(apiClient, "Large PR Profile");
+    const task = await apiClient.createTask(seedData.workspaceId, "Large PR Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: profile.id,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await apiClient.moveTask(task.id, workflow.id, workingStep.id);
+    await expect(kanban.taskCardInColumn("Large PR Task", doneStep.id)).toBeVisible({
+      timeout: 45_000,
+    });
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 301,
+      pr_url: "https://github.com/testorg/testrepo/pull/301",
+      pr_title: "Large PR",
+      head_branch: "feat/large",
+      base_branch: "main",
+      author_login: "test-user",
+      additions: 100,
+      deletions: 10,
+    });
+
+    await kanban.taskCardInColumn("Large PR Task", doneStep.id).click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.clickTab("Changes");
+
+    await expect(testPage.getByTestId("pr-files-section")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+
+    await expect(testPage.getByTestId("pr-changes-section-collapse-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await expect(testPage.getByTestId("commits-section-collapse-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
   });
 
   /**
@@ -529,7 +640,6 @@ test.describe("PR diff regression", () => {
     // Assert PR diff content appears (not "No changes")
     await assertPRDiffContains(testPage, "DESKTOP_PR_OVERLAP_MARKER_A");
 
-    git.exec("git checkout -- .");
     git.exec("git clean -fd");
   });
 });

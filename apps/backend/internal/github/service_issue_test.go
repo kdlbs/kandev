@@ -27,8 +27,17 @@ type stubSessionChecker struct {
 	err error
 }
 
-func (s *stubSessionChecker) HasTaskSessions(_ context.Context, _ string) (bool, error) {
+func (s *stubSessionChecker) HasUserAuthoredMessage(_ context.Context, _ string) (bool, error) {
 	return s.has, s.err
+}
+
+func newCleanupTestService(client Client, log *logger.Logger, checker TaskSessionChecker) *Service {
+	return &Service{
+		client:               client,
+		logger:               log,
+		taskSessionChecker:   checker,
+		cleanupFailureCounts: make(map[string]int),
+	}
 }
 
 func TestShouldDeleteIssueTask(t *testing.T) {
@@ -44,46 +53,51 @@ func TestShouldDeleteIssueTask(t *testing.T) {
 	}
 
 	t.Run("open issue returns false", func(t *testing.T) {
-		svc := &Service{client: &issueStateClient{state: "open"}, logger: log}
-		del, _ := svc.shouldDeleteIssueTask(context.Background(), task)
+		svc := newCleanupTestService(&issueStateClient{state: "open"}, log, nil)
+		del, _ := svc.shouldDeleteIssueTask(context.Background(), task, CleanupPolicyAuto)
 		if del {
 			t.Error("expected false for open issue")
 		}
 	})
 
-	t.Run("closed issue without sessions returns true", func(t *testing.T) {
-		svc := &Service{
-			client:             &issueStateClient{state: "closed"},
-			logger:             log,
-			taskSessionChecker: &stubSessionChecker{has: false},
-		}
-		del, reason := svc.shouldDeleteIssueTask(context.Background(), task)
+	t.Run("closed issue with no user messages returns true", func(t *testing.T) {
+		svc := newCleanupTestService(&issueStateClient{state: "closed"}, log, &stubSessionChecker{has: false})
+		del, reason := svc.shouldDeleteIssueTask(context.Background(), task, CleanupPolicyAuto)
 		if !del {
-			t.Error("expected true for closed issue without sessions")
+			t.Error("expected true for closed issue without user messages")
 		}
 		if reason != "issue_closed" {
 			t.Errorf("reason = %q, want %q", reason, "issue_closed")
 		}
 	})
 
-	t.Run("closed issue with sessions returns false", func(t *testing.T) {
-		svc := &Service{
-			client:             &issueStateClient{state: "closed"},
-			logger:             log,
-			taskSessionChecker: &stubSessionChecker{has: true},
-		}
-		del, _ := svc.shouldDeleteIssueTask(context.Background(), task)
+	t.Run("closed issue with user message returns false under auto", func(t *testing.T) {
+		svc := newCleanupTestService(&issueStateClient{state: "closed"}, log, &stubSessionChecker{has: true})
+		del, _ := svc.shouldDeleteIssueTask(context.Background(), task, CleanupPolicyAuto)
 		if del {
-			t.Error("expected false for closed issue with active sessions")
+			t.Error("expected false for closed issue when user engaged")
+		}
+	})
+
+	t.Run("closed issue under always deletes even with user message", func(t *testing.T) {
+		svc := newCleanupTestService(&issueStateClient{state: "closed"}, log, &stubSessionChecker{has: true})
+		del, _ := svc.shouldDeleteIssueTask(context.Background(), task, CleanupPolicyAlways)
+		if !del {
+			t.Error("expected true for closed issue under CleanupPolicyAlways")
+		}
+	})
+
+	t.Run("closed issue under never keeps task", func(t *testing.T) {
+		svc := newCleanupTestService(&issueStateClient{state: "closed"}, log, &stubSessionChecker{has: false})
+		del, _ := svc.shouldDeleteIssueTask(context.Background(), task, CleanupPolicyNever)
+		if del {
+			t.Error("expected false under CleanupPolicyNever")
 		}
 	})
 
 	t.Run("API error returns false", func(t *testing.T) {
-		svc := &Service{
-			client: &issueStateClient{err: fmt.Errorf("api error")},
-			logger: log,
-		}
-		del, _ := svc.shouldDeleteIssueTask(context.Background(), task)
+		svc := newCleanupTestService(&issueStateClient{err: fmt.Errorf("api error")}, log, nil)
+		del, _ := svc.shouldDeleteIssueTask(context.Background(), task, CleanupPolicyAuto)
 		if del {
 			t.Error("expected false when API returns error")
 		}

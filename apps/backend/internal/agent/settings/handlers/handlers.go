@@ -18,6 +18,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const queryValueTrue = "true"
+
 var availableAgentsBroadcastTimeout = 10 * time.Second
 
 type Handlers struct {
@@ -50,6 +52,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
 	api.GET("/agents/available", h.httpListAvailableAgents)
+	api.GET("/agents/usage", h.httpAgentSubscriptionUsage)
 	api.GET("/agents", h.httpListAgents)
 	api.POST("/agents", h.httpCreateAgent)
 	api.POST("/agents/tui", h.httpCreateCustomTUIAgent)
@@ -79,6 +82,11 @@ func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, resp)
 	h.broadcastAvailableAgentsAsync()
+}
+
+func (h *Handlers) httpAgentSubscriptionUsage(c *gin.Context) {
+	fresh := c.Query("fresh") == queryValueTrue || c.Query("fresh") == "1"
+	c.JSON(http.StatusOK, h.controller.SubscriptionUsage(c.Request.Context(), fresh))
 }
 
 func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
@@ -176,10 +184,11 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
-	Name     string           `json:"name"`
-	Model    string           `json:"model"`
-	Mode     string           `json:"mode,omitempty"`
-	CLIFlags []dto.CLIFlagDTO `json:"cli_flags,omitempty"`
+	Name     string                 `json:"name"`
+	Model    string                 `json:"model"`
+	Mode     string                 `json:"mode,omitempty"`
+	CLIFlags []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars  []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -203,6 +212,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			Model:    profile.Model,
 			Mode:     profile.Mode,
 			CLIFlags: profile.CLIFlags,
+			EnvVars:  profile.EnvVars,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{
@@ -354,12 +364,15 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 }
 
 type createProfileRequest struct {
-	Name           string           `json:"name"`
-	Model          string           `json:"model"`
-	Mode           string           `json:"mode,omitempty"`
-	AllowIndexing  bool             `json:"allow_indexing"`
-	CLIPassthrough bool             `json:"cli_passthrough"`
-	CLIFlags       []dto.CLIFlagDTO `json:"cli_flags,omitempty"`
+	Name           string                 `json:"name"`
+	Model          string                 `json:"model"`
+	Mode           string                 `json:"mode,omitempty"`
+	ConfigOptions  map[string]string      `json:"config_options,omitempty"`
+	AllowIndexing  bool                   `json:"allow_indexing"`
+	AutoApprove    bool                   `json:"auto_approve"`
+	CLIPassthrough bool                   `json:"cli_passthrough"`
+	CLIFlags       []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars        []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
 }
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
@@ -377,11 +390,18 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		Name:           body.Name,
 		Model:          body.Model,
 		Mode:           body.Mode,
+		ConfigOptions:  body.ConfigOptions,
 		AllowIndexing:  body.AllowIndexing,
+		AutoApprove:    body.AutoApprove,
 		CLIPassthrough: body.CLIPassthrough,
 		CLIFlags:       body.CLIFlags,
+		EnvVars:        body.EnvVars,
 	})
 	if err != nil {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to create profile", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create profile"})
 		return
@@ -396,12 +416,15 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 }
 
 type updateProfileRequest struct {
-	Name           *string           `json:"name,omitempty"`
-	Model          *string           `json:"model,omitempty"`
-	Mode           *string           `json:"mode,omitempty"`
-	AllowIndexing  *bool             `json:"allow_indexing,omitempty"`
-	CLIPassthrough *bool             `json:"cli_passthrough,omitempty"`
-	CLIFlags       *[]dto.CLIFlagDTO `json:"cli_flags,omitempty"`
+	Name           *string                 `json:"name,omitempty"`
+	Model          *string                 `json:"model,omitempty"`
+	Mode           *string                 `json:"mode,omitempty"`
+	ConfigOptions  *map[string]string      `json:"config_options,omitempty"`
+	AllowIndexing  *bool                   `json:"allow_indexing,omitempty"`
+	AutoApprove    *bool                   `json:"auto_approve,omitempty"`
+	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
+	CLIFlags       *[]dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars        *[]dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -419,13 +442,20 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		Name:           body.Name,
 		Model:          body.Model,
 		Mode:           body.Mode,
+		ConfigOptions:  body.ConfigOptions,
 		AllowIndexing:  body.AllowIndexing,
+		AutoApprove:    body.AutoApprove,
 		CLIPassthrough: body.CLIPassthrough,
 		CLIFlags:       body.CLIFlags,
+		EnvVars:        body.EnvVars,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
+			return
+		}
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		h.logger.Error("failed to update profile", zap.Error(err))
@@ -442,7 +472,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 }
 
 func (h *Handlers) httpDeleteProfile(c *gin.Context) {
-	force := c.Query("force") == "true"
+	force := c.Query("force") == queryValueTrue
 	profile, err := h.controller.DeleteProfile(c.Request.Context(), c.Param("id"), force)
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
@@ -452,8 +482,10 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 		var inUseErr *controller.ErrProfileInUseDetail
 		if errors.As(err, &inUseErr) {
 			c.JSON(http.StatusConflict, gin.H{
-				"error":           "agent profile is used by active session(s)",
+				"error":           "agent profile is in use",
 				"active_sessions": inUseErr.ActiveSessions,
+				"watchers":        inUseErr.Watchers,
+				"routing_tiers":   inUseErr.RoutingTiers,
 			})
 			return
 		}
@@ -542,7 +574,7 @@ func (h *Handlers) httpGetAgentModels(c *gin.Context) {
 	}
 
 	// Check for refresh query parameter
-	refresh := c.Query("refresh") == "true"
+	refresh := c.Query("refresh") == queryValueTrue
 
 	resp, err := h.controller.FetchDynamicModels(c.Request.Context(), agentName, refresh)
 	if err != nil {

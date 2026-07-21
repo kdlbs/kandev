@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/shared"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 
 	"go.uber.org/zap"
@@ -149,6 +150,12 @@ type TaskCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID, reason string, force bool) error
 }
 
+// TaskDetacher applies the canonical task hierarchy/workspace detachment and
+// publishes the task lifecycle and Office refresh events.
+type TaskDetacher interface {
+	DetachTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
+}
+
 // SessionTerminator flips the (task, agent) office session row to a terminal
 // state. Used when an agent stops being a participant on a task — reassignment,
 // reviewer/approver removal, or agent instance deletion. Idempotent: skipping
@@ -209,8 +216,12 @@ type TaskReactivityChange struct {
 	Comment        *TaskReactivityComment
 	ReopenIntent   bool
 	ResumeIntent   bool
-	ActorID        string
-	ActorType      string
+	// SkipAssigneeCommentWake suppresses only the legacy assignee
+	// task_comment wake. Mention fan-out still runs so @mentions on
+	// the same comment remain additive.
+	SkipAssigneeCommentWake bool
+	ActorID                 string
+	ActorType               string
 }
 
 // TaskReactivityComment is the slim view of a comment for the reactivity pipeline.
@@ -268,6 +279,7 @@ type ApprovalReactivityQueuer interface {
 // next to the rest of the routing code.
 type RoutingProvider interface {
 	GetConfig(ctx context.Context, workspaceID string) (*routing.WorkspaceConfig, []routing.ProviderID, error)
+	ListExecutionProfiles(ctx context.Context, workspaceID string) ([]routing.ExecutionProfileSummary, error)
 	UpdateConfig(ctx context.Context, workspaceID string, cfg routing.WorkspaceConfig) error
 	Retry(ctx context.Context, workspaceID, providerID string) (string, *time.Time, error)
 	Health(ctx context.Context, workspaceID string) ([]models.ProviderHealth, error)
@@ -320,23 +332,25 @@ type DashboardService struct {
 	activity         shared.ActivityLogger
 	agents           shared.AgentReader
 	costs            shared.CostChecker
-	permissions      shared.PermissionLister  // optional; nil means no permission items in inbox
-	settingsProvider SettingsProvider         // optional; nil means settings endpoints are unavailable
-	governanceStore  GovernanceSettingsStore  // optional; nil means governance settings are unavailable
-	eb               bus.EventBus             // optional; nil means no events are published
-	retryCanceller   RetryCanceller           // optional; nil means retries are not cancelled on reassign
-	taskCanceller    TaskCanceller            // optional; used to hard-cancel sessions on status→cancelled
-	sessionTerm      SessionTerminator        // optional; flips office session rows to COMPLETED on participation removal
-	reactivity       ReactivityApplier        // optional; runs the office reactivity pipeline on mutations
-	approvalQueuer   ApprovalReactivityQueuer // optional; queues approval-flow runs
-	skillLister      SkillLister              // optional; nil means skill_count is always 0
-	routineLister    RoutineLister            // optional; nil means routine_count is always 0
-	failureNotifier  FailureNotifier          // optional; nil means assignee changes don't auto-dismiss inbox entries
-	failureInbox     FailureInboxSource       // optional; nil disables the new agent_run_failed / agent_paused_after_failures inbox sources
-	markFixed        MarkFixedHandler         // optional; nil disables the dismiss endpoint
-	decisions        DecisionStore            // workflow-domain decisions store (ADR 0005 Wave E); nil disables decision endpoints
-	routingProvider  RoutingProvider          // optional; nil disables /routing endpoints (503)
-	attemptLister    RouteAttemptLister       // optional; nil disables attempt embedding on run-detail responses
+	permissions      shared.PermissionLister         // optional; nil means no permission items in inbox
+	settingsProvider SettingsProvider                // optional; nil means settings endpoints are unavailable
+	governanceStore  GovernanceSettingsStore         // optional; nil means governance settings are unavailable
+	eb               bus.EventBus                    // optional; nil means no events are published
+	retryCanceller   RetryCanceller                  // optional; nil means retries are not cancelled on reassign
+	taskCanceller    TaskCanceller                   // optional; used to hard-cancel sessions on status→cancelled
+	taskDetacher     TaskDetacher                    // optional; canonical empty-parent mutation
+	sessionTerm      SessionTerminator               // optional; flips office session rows to COMPLETED on participation removal
+	reactivity       ReactivityApplier               // optional; runs the office reactivity pipeline on mutations
+	engineDispatcher shared.WorkflowEngineDispatcher // optional; synchronously routes comment triggers through the engine
+	approvalQueuer   ApprovalReactivityQueuer        // optional; queues approval-flow runs
+	skillLister      SkillLister                     // optional; nil means skill_count is always 0
+	routineLister    RoutineLister                   // optional; nil means routine_count is always 0
+	failureNotifier  FailureNotifier                 // optional; nil means assignee changes don't auto-dismiss inbox entries
+	failureInbox     FailureInboxSource              // optional; nil disables the new agent_run_failed / agent_paused_after_failures inbox sources
+	markFixed        MarkFixedHandler                // optional; nil disables the dismiss endpoint
+	decisions        DecisionStore                   // workflow-domain decisions store (ADR 0005 Wave E); nil disables decision endpoints
+	routingProvider  RoutingProvider                 // optional; nil disables /routing endpoints (503)
+	attemptLister    RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -443,6 +457,12 @@ func (s *DashboardService) SetTaskCanceller(c TaskCanceller) {
 	s.taskCanceller = c
 }
 
+// SetTaskDetacher wires the canonical task detachment operation used when the
+// Office parent picker selects "No parent".
+func (s *DashboardService) SetTaskDetacher(d TaskDetacher) {
+	s.taskDetacher = d
+}
+
 // SetSessionTerminator wires the office session terminator. Optional; when
 // nil, participation removal won't flip the prior agent's session to a
 // terminal state (the row stays IDLE/RUNNING and its conversation lingers).
@@ -455,6 +475,12 @@ func (s *DashboardService) SetSessionTerminator(t SessionTerminator) {
 // (blockers resolved, children completed, comments, mentions, etc.).
 func (s *DashboardService) SetReactivityApplier(r ReactivityApplier) {
 	s.reactivity = r
+}
+
+// SetWorkflowEngineDispatcher wires the synchronous workflow-engine
+// dispatcher used for dashboard-created comments.
+func (s *DashboardService) SetWorkflowEngineDispatcher(d shared.WorkflowEngineDispatcher) {
+	s.engineDispatcher = d
 }
 
 // SetApprovalReactivityQueuer sets the queuer used to fire approval-flow
@@ -644,8 +670,9 @@ func (s *DashboardService) CreateComment(ctx context.Context, comment *models.Ta
 	if err := s.repo.CreateTaskComment(ctx, comment); err != nil {
 		return err
 	}
-	s.publishCommentCreated(ctx, comment)
-	s.runReactivityForComment(ctx, comment)
+	engineHandled := s.dispatchCommentEngineTrigger(ctx, comment)
+	s.publishCommentCreated(ctx, comment, engineHandled)
+	s.runReactivityForComment(ctx, comment, engineHandled)
 	return nil
 }
 

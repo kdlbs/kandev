@@ -13,10 +13,13 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -45,6 +48,211 @@ func TestErrSessionWorkspaceNotReady_UnrelatedError(t *testing.T) {
 	if errors.Is(unrelated, ErrSessionWorkspaceNotReady) {
 		t.Errorf("expected errors.Is to be false for unrelated error")
 	}
+}
+
+func TestGetOrEnsureExecutionLeaderCancellationDoesNotAbortLiveWaiter(t *testing.T) {
+	mgr, _ := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-shared": {
+				TaskID: "task-1", SessionID: "session-shared", TaskEnvironmentID: "env-1",
+				WorkspacePath: "/workspace/task-1", AgentID: "auggie",
+			},
+		},
+	})
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	defer cancelLeader()
+	type result struct {
+		caller string
+		err    error
+	}
+	results := make(chan result, 2)
+	go func() {
+		_, err := mgr.GetOrEnsureExecution(leaderCtx, "session-shared")
+		results <- result{caller: "leader", err: err}
+	}()
+	select {
+	case <-maintenance.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("leader did not reach activity admission")
+	}
+	go func() {
+		_, err := mgr.GetOrEnsureExecution(context.Background(), "session-shared")
+		results <- result{caller: "follower", err: err}
+	}()
+	cancelLeader()
+	maintenance.Release()
+	for range 2 {
+		got := <-results
+		if got.caller == "leader" && !errors.Is(got.err, context.Canceled) {
+			t.Fatalf("leader error = %v, want context cancellation", got.err)
+		}
+		if got.caller == "follower" && got.err != nil {
+			t.Fatalf("live follower failed after leader cancellation: %v", got.err)
+		}
+	}
+}
+
+func TestShortDeadlineLeaderDoesNotAbortLiveCoalescedWaiter(t *testing.T) {
+	provider := &notifyingWorkspaceInfoProvider{
+		mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-shared": {
+					TaskID: "task-1", SessionID: "session-shared", TaskEnvironmentID: "env-1",
+					WorkspacePath: "/workspace/task-1", AgentID: "auggie",
+				},
+			},
+		},
+		environmentReached: make(chan struct{}),
+	}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+	backend.entered = make(chan struct{}, 1)
+	backend.barrier = make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(backend.barrier)
+		}
+	}()
+
+	leaderCtx, cancelLeader := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancelLeader()
+	leaderResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetOrEnsureExecution(leaderCtx, "session-shared")
+		leaderResult <- err
+	}()
+	select {
+	case <-backend.entered:
+	case <-time.After(time.Second):
+		t.Fatal("leader did not reach CreateInstance")
+	}
+
+	followerResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-1")
+		followerResult <- err
+	}()
+	select {
+	case <-provider.environmentReached:
+	case <-time.After(time.Second):
+		t.Fatal("follower did not resolve its environment")
+	}
+	select {
+	case err := <-followerResult:
+		t.Fatalf("follower returned before shared creation completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if err := <-leaderResult; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("leader error = %v, want context deadline", err)
+	}
+	close(backend.barrier)
+	released = true
+	if err := <-followerResult; err != nil {
+		t.Fatalf("live follower failed after leader deadline: %v", err)
+	}
+}
+
+func TestCoalescedExecutionStopsWithManager(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-shutdown": {
+				TaskID: "task-1", SessionID: "session-shutdown", TaskEnvironmentID: "env-1",
+				WorkspacePath: "/workspace/task-1", AgentID: "auggie",
+			},
+		},
+	})
+	backend.entered = make(chan struct{}, 1)
+	backend.barrier = make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(backend.barrier)
+		}
+	}()
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetOrEnsureExecution(context.Background(), "session-shutdown")
+		result <- err
+	}()
+	select {
+	case <-backend.entered:
+	case <-time.After(time.Second):
+		t.Fatal("creation did not reach CreateInstance")
+	}
+	mgr.closeStopCh()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("creation error = %v, want manager cancellation", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		close(backend.barrier)
+		released = true
+		<-result
+		t.Fatal("manager shutdown did not cancel coalesced creation")
+	}
+}
+
+func TestCoalescedExecutionCreationHasManagerDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		log := newTestLogger()
+		execRegistry := NewExecutorRegistry(log)
+		backend := &createInstanceExecutor{
+			MockExecutor: MockExecutor{name: executor.NameStandalone},
+			entered:      make(chan struct{}, 1),
+			barrier:      make(chan struct{}),
+		}
+		execRegistry.Register(backend)
+		mgr := NewManager(
+			newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{},
+			&MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log,
+		)
+		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-deadline": {
+					TaskID: "task-1", SessionID: "session-deadline", TaskEnvironmentID: "env-1",
+					WorkspacePath: "/workspace/task-1", AgentID: "auggie",
+				},
+			},
+		}
+		cleanupManagerStopCh(t, mgr)
+		coordinator := activity.NewCoordinator(activity.Options{})
+		mgr.SetActivityCoordinator(coordinator)
+
+		startedAt := time.Now()
+		result := make(chan error, 1)
+		go func() {
+			_, err := mgr.GetOrEnsureExecution(context.Background(), "session-deadline")
+			result <- err
+		}()
+		<-backend.entered
+
+		select {
+		case err := <-result:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("creation error = %v, want manager deadline", err)
+			}
+			if elapsed := time.Since(startedAt); elapsed != coalescedExecutionCreationTimeout {
+				t.Fatalf("manager deadline elapsed after %v, want %v", elapsed, coalescedExecutionCreationTimeout)
+			}
+		case <-time.After(coalescedExecutionCreationTimeout + time.Second):
+			t.Fatal("blocked creation outlived the manager startup deadline")
+		}
+
+		maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+		if err != nil {
+			t.Fatalf("activity remained held after manager deadline: %v", err)
+		}
+		maintenance.Release()
+	})
 }
 
 func TestResolveTaskEnvironmentID(t *testing.T) {
@@ -590,13 +798,65 @@ func TestEnsureWorkspaceExecutionForSession_ReusesExistingTaskEnvironmentExecuti
 	}
 }
 
+func TestCreateExecutionResolvesProfileOnceForEnvAndAutoApprove(t *testing.T) {
+	profileResolver := &countingProfileResolver{
+		info: &AgentProfileInfo{
+			ProfileID:   "profile-1",
+			AgentID:     "auggie",
+			AutoApprove: true,
+			EnvVars:     []settingsmodels.ProfileEnvVar{{Key: "CLAUDE_CONFIG_DIR", Value: "/tmp/claude"}},
+		},
+	}
+	mgr, backend := newEnvironmentExecutionTestManagerWithProfileResolver(t, &mockWorkspaceInfoProvider{}, profileResolver)
+
+	_, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
+		SessionID:      "session-1",
+		AgentID:        "auggie",
+		AgentProfileID: "profile-1",
+		WorkspacePath:  "/workspace/task-1",
+	})
+	if err != nil {
+		t.Fatalf("createExecution returned error: %v", err)
+	}
+
+	if got := profileResolver.calls.Load(); got != 1 {
+		t.Fatalf("ResolveProfile calls = %d, want 1", got)
+	}
+	if backend.lastRequest == nil {
+		t.Fatal("CreateInstance was not called")
+	}
+	if !backend.lastRequest.AutoApprovePermissions {
+		t.Fatal("AutoApprovePermissions = false, want true")
+	}
+	if backend.lastRequest.AutoApprovePermissionsOverride == nil || !*backend.lastRequest.AutoApprovePermissionsOverride {
+		t.Fatalf("AutoApprovePermissionsOverride = %v, want true", backend.lastRequest.AutoApprovePermissionsOverride)
+	}
+	if got := backend.lastRequest.Env["CLAUDE_CONFIG_DIR"]; got != "/tmp/claude" {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want %q", got, "/tmp/claude")
+	}
+}
+
 // --- test helpers ---
+
+type notifyingWorkspaceInfoProvider struct {
+	*mockWorkspaceInfoProvider
+	environmentReached chan struct{}
+}
+
+func (p *notifyingWorkspaceInfoProvider) GetWorkspaceInfoForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*WorkspaceInfo, error) {
+	close(p.environmentReached)
+	return p.mockWorkspaceInfoProvider.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
+}
 
 type createInstanceExecutor struct {
 	MockExecutor
 	client       *agentctl.Client
 	createCount  atomic.Int32
 	stopCount    atomic.Int32
+	lastRequest  *ExecutorCreateRequest
 	authToken    string
 	nonce        string
 	delay        time.Duration
@@ -634,6 +894,7 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 		case <-time.After(e.delay):
 		}
 	}
+	e.lastRequest = req
 	e.createCount.Add(1)
 	if progress != nil {
 		completeStepSuccess(progress)
@@ -657,6 +918,14 @@ func (e *createInstanceExecutor) StopInstance(ctx context.Context, instance *Exe
 }
 
 func newEnvironmentExecutionTestManager(t *testing.T, provider WorkspaceInfoProvider) (*Manager, *createInstanceExecutor) {
+	return newEnvironmentExecutionTestManagerWithProfileResolver(t, provider, &MockProfileResolver{})
+}
+
+func newEnvironmentExecutionTestManagerWithProfileResolver(
+	t *testing.T,
+	provider WorkspaceInfoProvider,
+	profileResolver ProfileResolver,
+) (*Manager, *createInstanceExecutor) {
 	t.Helper()
 	log := newTestLogger()
 	execRegistry := NewExecutorRegistry(log)
@@ -667,12 +936,23 @@ func newEnvironmentExecutionTestManager(t *testing.T, provider WorkspaceInfoProv
 	execRegistry.Register(backend)
 
 	mgr := NewManager(
-		newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, profileResolver, nil,
 		ExecutorFallbackWarn, "", log,
 	)
 	mgr.workspaceInfoProvider = provider
-	t.Cleanup(func() { close(mgr.stopCh) })
+	cleanupManagerStopCh(t, mgr)
 	return mgr, backend
+}
+
+type countingProfileResolver struct {
+	info  *AgentProfileInfo
+	err   error
+	calls atomic.Int32
+}
+
+func (r *countingProfileResolver) ResolveProfile(_ context.Context, _ string) (*AgentProfileInfo, error) {
+	r.calls.Add(1)
+	return r.info, r.err
 }
 
 func newReadyAgentctlClient(t *testing.T, log *logger.Logger) *agentctl.Client {

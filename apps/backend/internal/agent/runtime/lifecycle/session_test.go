@@ -3,7 +3,9 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,8 +17,10 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -28,15 +32,28 @@ func newSessionTestLogger() *logger.Logger {
 	return log
 }
 
+// newTestStopCh returns a stopCh shared with t.Cleanup so any background
+// StreamManager retry loop that races past the test body's return drains
+// cleanly. Closing on cleanup is what lets goleak.VerifyTestMain stay green
+// for tests that exercise connectWorkspaceStream's backoff.
+func newTestStopCh(t *testing.T) chan struct{} {
+	t.Helper()
+	stopCh := make(chan struct{})
+	t.Cleanup(func() { closeStopChOnce(stopCh) })
+	return stopCh
+}
+
 // mockAgentServer creates a test WebSocket server simulating agentctl.
 // It responds to agent stream requests and tracks which actions were called and in what order.
 type mockAgentServer struct {
-	server      *httptest.Server
-	mu          sync.Mutex
-	actionLog   []string // ordered log of actions received
-	upgrader    websocket.Upgrader
-	handler     func(msg ws.Message) *ws.Message
-	wsConnected chan struct{} // closed when WS stream connects
+	server               *httptest.Server
+	mu                   sync.Mutex
+	actionLog            []string // ordered log of actions received
+	rejectStreamAttempts int
+	agentStatus          string
+	upgrader             websocket.Upgrader
+	handler              func(msg ws.Message) *ws.Message
+	wsConnected          chan struct{} // closed when WS stream connects
 }
 
 func newMockAgentServer(t *testing.T) *mockAgentServer {
@@ -49,9 +66,28 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		status := m.agentStatus
+		m.mu.Unlock()
+		if status == "" {
+			status = "running"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"agent_status":%q}`, status)
+	})
 
 	// Agent stream WebSocket endpoint
 	mux.HandleFunc("/api/v1/agent/stream", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		if m.rejectStreamAttempts > 0 {
+			m.rejectStreamAttempts--
+			m.mu.Unlock()
+			http.Error(w, "stream temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		m.mu.Unlock()
+
 		conn, err := m.upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
@@ -128,6 +164,12 @@ func (m *mockAgentServer) buildResponse(msg ws.Message) *ws.Message {
 	return m.defaultHandler(msg)
 }
 
+func (m *mockAgentServer) rejectNextStreamAttempts(count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rejectStreamAttempts = count
+}
+
 func (m *mockAgentServer) defaultHandler(msg ws.Message) *ws.Message {
 	switch msg.Action {
 	case "agent.initialize":
@@ -152,6 +194,11 @@ func (m *mockAgentServer) defaultHandler(msg ws.Message) *ws.Message {
 		})
 		return resp
 	case "agent.prompt":
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"success": true,
+		})
+		return resp
+	case "agent.session.set_model", "agent.session.set_mode", "agent.session.set_config_option":
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"success": true,
 		})
@@ -196,12 +243,14 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 	defer mock.Close()
 
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	// Set up real stream manager with callbacks
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
 	client := createTestClient(t, mock.server.URL)
@@ -234,7 +283,7 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -265,20 +314,373 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 	}
 }
 
+func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	eventBus := &MockEventBusWithTracking{}
+	sm.SetDependencies(NewEventPublisher(eventBus, log), streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	execution := &AgentExecution{
+		ID:            "exec-1",
+		TaskID:        "task-1",
+		SessionID:     "session-1",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "default-model",
+		ConfigOptions: []streams.ConfigOption{
+			{
+				ID: "model", Category: "model", CurrentValue: "default-model",
+				Options: []streams.ConfigOptionValue{{Value: "stale-cached-model"}},
+			},
+			{ID: "effort", CurrentValue: "medium"},
+			{ID: "fast_mode", CurrentValue: "off"},
+		},
+	})
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:            agents.NewCommand("test-agent"),
+			Protocol:       agent.ProtocolACP,
+			SessionConfig:  agents.SessionConfig{},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
+		return nil
+	}, "sonnet", "plan", map[string]string{
+		"effort": "high",
+		"model":  "ignored",
+		"mode":   "ignored",
+	})
+	if err != nil {
+		t.Fatalf("InitializeAndPrompt failed: %v", err)
+	}
+
+	actions := mock.getActionLog()
+	for _, want := range []string{
+		"agent.session.set_model",
+		"agent.session.set_mode",
+		"agent.session.set_config_option",
+	} {
+		if !containsAction(actions, want) {
+			t.Fatalf("actions = %v, missing %s", actions, want)
+		}
+	}
+
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data != nil && settledConfigEventData(event.Data.Data) {
+			t.Fatal("startup requests without an authoritative config snapshot must not be marked settled")
+		}
+	}
+}
+
+func settledConfigEventData(data any) bool {
+	metadata, _ := data.(map[string]any)
+	settled, _ := metadata["config_options_settled"].(bool)
+	return settled
+}
+
+func configValueByID(options []streams.ConfigOption, id string) string {
+	for _, option := range options {
+		if option.ID == id {
+			return option.CurrentValue
+		}
+	}
+	return ""
+}
+
+func TestPublishSettledConfigOptionsAppliesToDelayedModelState(t *testing.T) {
+	log := newSessionTestLogger()
+	eventBus := &MockEventBusWithTracking{}
+	publisher := NewEventPublisher(eventBus, log)
+	sm := NewSessionManager(log, nil)
+	sm.SetDependencies(publisher, nil, nil, nil)
+	execution := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+
+	sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", nil)
+	mgr := &Manager{logger: log, eventPublisher: publisher}
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:           streams.EventTypeSessionModels,
+		SessionID:      "acp-session-1",
+		CurrentModelID: "sonnet",
+		ConfigOptions: []streams.ConfigOption{
+			{ID: "model", Category: "model", CurrentValue: "sonnet"},
+			{ID: "effort", CurrentValue: "high"},
+		},
+		Data: map[string]any{
+			"config_options_source":    "provider_response",
+			"config_options_config_id": "effort",
+		},
+	})
+
+	var settled *AgentStreamEventData
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data != nil && settledConfigEventData(event.Data.Data) {
+			settled = event.Data
+		}
+	}
+	if settled == nil {
+		t.Fatal("expected delayed model state to carry settlement marker")
+	}
+	if got := configValueByID(settled.ConfigOptions, "model"); got != "sonnet" {
+		t.Errorf("settled model = %q, want sonnet", got)
+	}
+	if got := configValueByID(settled.ConfigOptions, "effort"); got != "high" {
+		t.Errorf("settled effort = %q, want high", got)
+	}
+}
+
+func TestConfigBaselineRetainsProviderDefaultsWhenProfileOverrideSettles(t *testing.T) {
+	log := newSessionTestLogger()
+	eventBus := &MockEventBusWithTracking{}
+	publisher := NewEventPublisher(eventBus, log)
+	sm := NewSessionManager(log, nil)
+	sm.SetDependencies(publisher, nil, nil, nil)
+	execution := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "gpt-5",
+		ConfigOptions: []streams.ConfigOption{
+			{ID: "model", Category: "model", CurrentValue: "gpt-5"},
+			{ID: "effort", CurrentValue: "medium"},
+			{ID: "fast_mode", CurrentValue: "off"},
+		},
+	})
+	providerDefaults := execution.GetModelState()
+
+	// Startup requested effort=high, but the stable ACP response's complete
+	// configOptions reports the provider's dependent final state. Stream
+	// dispatch is deliberately delayed until after the startup RPC boundary.
+	sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", providerDefaults)
+	mgr := &Manager{logger: log, eventPublisher: publisher}
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:           streams.EventTypeSessionModels,
+		SessionID:      "acp-session-1",
+		CurrentModelID: "gpt-5",
+		ConfigOptions: []streams.ConfigOption{
+			{ID: "model", Category: "model", CurrentValue: "gpt-5"},
+			{ID: "effort", CurrentValue: "low"},
+			{ID: "fast_mode", CurrentValue: "on"},
+		},
+		Data: map[string]any{
+			"config_options_source":    "provider_response",
+			"config_options_config_id": "effort",
+		},
+	})
+
+	var settledEvents []*AgentStreamEventData
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data != nil && settledConfigEventData(event.Data.Data) {
+			settledEvents = append(settledEvents, event.Data)
+		}
+	}
+	if len(settledEvents) != 1 {
+		t.Fatalf("settled event count = %d, want 1 authoritative provider state", len(settledEvents))
+	}
+	settled := settledEvents[0]
+	if got := configValueByID(settled.ConfigOptions, "effort"); got != "low" {
+		t.Errorf("settled effort = %q, want provider-reported low", got)
+	}
+	if got := configValueByID(settled.ConfigOptions, "fast_mode"); got != "on" {
+		t.Errorf("settled fast_mode = %q, want provider-reported dependent on", got)
+	}
+	if got := configValueByID(settled.ConfigBaselineCandidate, "effort"); got != "medium" {
+		t.Errorf("baseline effort = %q, want provider default medium", got)
+	}
+	if got := configValueByID(settled.ConfigBaselineCandidate, "fast_mode"); got != "off" {
+		t.Errorf("baseline fast_mode = %q, want provider default off", got)
+	}
+}
+
+func TestConfigSettlementAuthoritativeResponseOrdering(t *testing.T) {
+	newHarness := func() (*SessionManager, *Manager, *AgentExecution, *MockEventBusWithTracking) {
+		log := newSessionTestLogger()
+		eventBus := &MockEventBusWithTracking{}
+		publisher := NewEventPublisher(eventBus, log)
+		sm := NewSessionManager(log, nil)
+		sm.SetDependencies(publisher, nil, nil, nil)
+		return sm, &Manager{logger: log, eventPublisher: publisher}, &AgentExecution{
+			ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		}, eventBus
+	}
+	event := func(source, configID, effort, fastMode string) agentctl.AgentEvent {
+		return agentctl.AgentEvent{
+			Type:           streams.EventTypeSessionModels,
+			SessionID:      "acp-session-1",
+			CurrentModelID: "gpt-5",
+			ConfigOptions: []streams.ConfigOption{
+				{ID: "model", Category: "model", CurrentValue: "gpt-5"},
+				{ID: "effort", CurrentValue: effort},
+				{ID: "fast_mode", CurrentValue: fastMode},
+			},
+			Data: map[string]any{
+				"config_options_source":    source,
+				"config_options_config_id": configID,
+			},
+		}
+	}
+	settledEvents := func(eventBus *MockEventBusWithTracking) []*AgentStreamEventData {
+		var settled []*AgentStreamEventData
+		for _, published := range eventBus.getStreamEvents() {
+			if published.Data != nil && settledConfigEventData(published.Data.Data) {
+				settled = append(settled, published.Data)
+			}
+		}
+		return settled
+	}
+
+	t.Run("old provider update then settle then matching response", func(t *testing.T) {
+		sm, mgr, execution, eventBus := newHarness()
+		mgr.handleAgentEvent(execution, event("provider_update", "", "medium", "off"))
+		providerDefaults := execution.GetModelState()
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", providerDefaults)
+		mgr.handleAgentEvent(execution, event("provider_response", "effort", "low", "on"))
+
+		settled := settledEvents(eventBus)
+		if len(settled) != 1 || configValueByID(settled[0].ConfigOptions, "effort") != "low" {
+			t.Fatalf("settled events = %#v, want matching response effort=low", settled)
+		}
+	})
+
+	t.Run("matching response then newer provider update then settle", func(t *testing.T) {
+		sm, mgr, execution, eventBus := newHarness()
+		mgr.handleAgentEvent(execution, event("provider_response", "effort", "high", "off"))
+		mgr.handleAgentEvent(execution, event("provider_update", "", "low", "on"))
+		providerDefaults := &CachedModelState{ConfigOptions: []streams.ConfigOption{
+			{ID: "model", Category: "model", CurrentValue: "gpt-5"},
+			{ID: "effort", CurrentValue: "medium"},
+			{ID: "fast_mode", CurrentValue: "off"},
+		}}
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", providerDefaults)
+
+		settled := settledEvents(eventBus)
+		if len(settled) != 1 {
+			t.Fatalf("settled events = %#v, want one event", settled)
+		}
+		if got := configValueByID(settled[0].ConfigOptions, "effort"); got != "low" {
+			t.Fatalf("published live effort = %q, want newest provider update low", got)
+		}
+		if got := configValueByID(settled[0].ConfigOptions, "fast_mode"); got != "on" {
+			t.Fatalf("published live fast mode = %q, want newest provider update on", got)
+		}
+		if got := configValueByID(settled[0].ConfigBaselineCandidate, "effort"); got != "medium" {
+			t.Fatalf("baseline candidate effort = %q, want provider default medium", got)
+		}
+		if got := configValueByID(settled[0].ConfigBaselineCandidate, "fast_mode"); got != "off" {
+			t.Fatalf("baseline candidate fast mode = %q, want retained response off", got)
+		}
+		if got := configValueByID(execution.GetModelState().ConfigOptions, "effort"); got != "low" {
+			t.Fatalf("live effort = %q, want newest provider update low", got)
+		}
+	})
+
+	t.Run("pending settlement ignores unrelated provider update", func(t *testing.T) {
+		sm, mgr, execution, eventBus := newHarness()
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", nil)
+		mgr.handleAgentEvent(execution, event("provider_update", "", "medium", "off"))
+
+		if settled := settledEvents(eventBus); len(settled) != 0 {
+			t.Fatalf("provider update settled pending response: %#v", settled)
+		}
+		if got := configValueByID(execution.GetModelState().ConfigOptions, "effort"); got != "medium" {
+			t.Fatalf("live effort = %q, want provider update medium", got)
+		}
+	})
+
+	t.Run("queued initial state remains baseline before matching profile response", func(t *testing.T) {
+		sm, mgr, execution, eventBus := newHarness()
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", nil)
+		mgr.handleAgentEvent(execution, event("provider_update", "", "medium", "off"))
+		mgr.handleAgentEvent(execution, event("provider_response", "effort", "high", "off"))
+
+		settled := settledEvents(eventBus)
+		if len(settled) != 1 {
+			t.Fatalf("settled events = %#v, want one event", settled)
+		}
+		if got := configValueByID(settled[0].ConfigBaselineCandidate, "effort"); got != "medium" {
+			t.Fatalf("baseline effort = %q, want queued provider default medium", got)
+		}
+		if got := configValueByID(settled[0].ConfigOptions, "effort"); got != "high" {
+			t.Fatalf("live effort = %q, want profile-selected high", got)
+		}
+	})
+
+	t.Run("first provider update settles empty startup config", func(t *testing.T) {
+		sm, mgr, execution, eventBus := newHarness()
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "", nil)
+		mgr.handleAgentEvent(execution, event("provider_update", "", "medium", "off"))
+
+		settled := settledEvents(eventBus)
+		if len(settled) != 1 {
+			t.Fatalf("settled events = %#v, want first provider update to settle", settled)
+		}
+		if got := configValueByID(settled[0].ConfigBaselineCandidate, "effort"); got != "medium" {
+			t.Fatalf("baseline candidate effort = %q, want medium", got)
+		}
+	})
+
+	t.Run("matching response is consumed once", func(t *testing.T) {
+		sm, mgr, execution, eventBus := newHarness()
+		mgr.handleAgentEvent(execution, event("provider_response", "effort", "low", "on"))
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", nil)
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", nil)
+
+		if settled := settledEvents(eventBus); len(settled) != 1 {
+			t.Fatalf("settled event count = %d, want response consumed once", len(settled))
+		}
+	})
+}
+
+func containsAction(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 	// This test verifies that InitializeAndPrompt returns an error if
 	// the stream fails to connect within the timeout.
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	// Create a stream manager that will try to connect to a server that doesn't exist
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
-	// Point client at a port that doesn't exist
-	badClient := agentctl.NewClient("127.0.0.1", 1, log)
+	// Bind to a random port and immediately close it so the port is guaranteed
+	// to be closed and returns connection refused quickly on every system.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if cerr := ln.Close(); cerr != nil {
+		t.Fatalf("failed to close listener: %v", cerr)
+	}
+	badClient := agentctl.NewClient("127.0.0.1", port, log)
 	defer badClient.Close()
 
 	execution := &AgentExecution{
@@ -304,9 +706,9 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
+	err = sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 
 	// Should fail because stream couldn't connect and Initialize fails
 	if err == nil {
@@ -322,11 +724,13 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	defer mock.Close()
 
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
 	client := createTestClient(t, mock.server.URL)
@@ -359,7 +763,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "Build a feature", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -427,7 +831,7 @@ func TestInitializeAndPrompt_NoStreamManager(t *testing.T) {
 	// But it should NOT panic due to nil streamManager.
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 
 	// Expect error because Initialize call over WS will fail (stream not connected)
 	if err == nil {
@@ -522,6 +926,74 @@ func TestIsMethodNotFoundErr(t *testing.T) {
 	}
 }
 
+func TestIsTransportDeadErr(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "peer disconnected before response",
+			err:      fmt.Errorf("session/load failed: %w", fmt.Errorf("peer disconnected before response")),
+			expected: true,
+		},
+		{
+			name:     "peer disconnected while waiting for pre-response notifications",
+			err:      fmt.Errorf("peer disconnected while waiting for pre-response notifications"),
+			expected: true,
+		},
+		{
+			name:     "connection closed cause",
+			err:      fmt.Errorf("load session failed: connection closed"),
+			expected: true,
+		},
+		{
+			name:     "notification queue overflow",
+			err:      fmt.Errorf("load session failed: notification queue overflow"),
+			expected: true,
+		},
+		{
+			name:     "context canceled",
+			err:      context.Canceled,
+			expected: true,
+		},
+		{
+			name:     "context deadline exceeded wrapped",
+			err:      fmt.Errorf("load session failed: %w", context.DeadlineExceeded),
+			expected: true,
+		},
+		{
+			name:     "method not found is not transport-dead",
+			err:      &acp.RequestError{Code: -32601, Message: "Method not found"},
+			expected: false,
+		},
+		{
+			name:     "session unknown is not transport-dead",
+			err:      &acp.RequestError{Code: -32002, Message: "Resource not found"},
+			expected: false,
+		},
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "unrelated error",
+			err:      fmt.Errorf("some other failure"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTransportDeadErr(tt.err)
+			if got != tt.expected {
+				t.Errorf("isTransportDeadErr(%v) = %v, want %v", tt.err, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 	mock := newMockAgentServer(t)
 	defer mock.Close()
@@ -593,6 +1065,50 @@ func waitForWSConnected(t *testing.T, mock *mockAgentServer) {
 	}
 }
 
+func TestSendPrompt_RetriesUntilUpdateStreamReconnects(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+	mock.rejectNextStreamAttempts(1)
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	sm.SetDependencies(nil, streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	execution := &AgentExecution{
+		ID:            "test-exec",
+		TaskID:        "test-task",
+		SessionID:     "test-session",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	result, err := sm.SendPrompt(ctx, execution, "hello after resume", false, nil, true)
+	if err != nil {
+		t.Fatalf("SendPrompt should retry after a transient stream reconnect failure: %v", err)
+	}
+	if result == nil || result.StopReason != PromptStopReasonDispatched {
+		t.Fatalf("expected StopReason=%q, got %+v", PromptStopReasonDispatched, result)
+	}
+
+	actions := mock.getActionLog()
+	if len(actions) != 1 || actions[0] != "agent.prompt" {
+		t.Fatalf("expected one prompt after reconnect, got actions: %v", actions)
+	}
+}
+
 // TestSendPrompt_DispatchOnlyReturnsWithoutWaiting verifies that dispatch-only
 // mode returns immediately after agentctl.Prompt succeeds, without blocking on
 // the agent's complete event. This is what message_task_kandev relies on so the
@@ -650,6 +1166,52 @@ func TestSendPrompt_DispatchOnlyReturnsWithoutWaiting(t *testing.T) {
 	}
 }
 
+func TestSendPrompt_AdvancesGenerationForEveryDispatch(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+	store := NewExecutionStore()
+	sm.SetDependencies(nil, nil, store, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:            "test-exec",
+		TaskID:        "test-task",
+		SessionID:     "test-session",
+		WorkspacePath: "/workspace",
+		Status:        v1.AgentStatusRunning,
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+	if err := store.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	if _, err := sm.SendPrompt(ctx, execution, "initial", false, nil, true); err != nil {
+		t.Fatalf("dispatch initial prompt: %v", err)
+	}
+	if !store.OwnsPromptGeneration(execution.SessionID, execution.ID, 1) {
+		t.Fatal("initial prompt must own generation 1 even when execution starts running")
+	}
+
+	if _, err := sm.SendPrompt(ctx, execution, "replacement", true, nil, true); err != nil {
+		t.Fatalf("dispatch replacement prompt: %v", err)
+	}
+	if !store.OwnsPromptGeneration(execution.SessionID, execution.ID, 2) {
+		t.Fatal("replacement prompt must advance generation while execution remains running")
+	}
+}
+
 // TestSendPrompt_DrainsStaleSignalFromPriorDispatchOnly verifies that a leftover
 // completion signal from a previous dispatch-only prompt does not cause the next
 // (waiting) SendPrompt to return immediately with a stale result.
@@ -693,6 +1255,65 @@ func TestSendPrompt_DrainsStaleSignalFromPriorDispatchOnly(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
 		t.Fatalf("expected deadline exceeded error, got: %v", err)
+	}
+}
+
+func TestWaitForPromptDone_TreatsPromptAbandonedAfterCancelAsCancelEscalated(t *testing.T) {
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+	execution := &AgentExecution{
+		ID:           "test-exec",
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		IsError: true,
+		Error:   "prompt abandoned after cancel",
+	}
+
+	_, err := sm.waitForPromptDone(context.Background(), execution)
+	if !errors.Is(err, ErrCancelEscalated) {
+		t.Fatalf("expected ErrCancelEscalated, got: %v", err)
+	}
+	if !errors.Is(err, ErrAgentReported) {
+		t.Fatalf("expected ErrAgentReported wrapper, got: %v", err)
+	}
+}
+
+func TestSendPrompt_TriggerTimeCancelReleaseReturnsErrCancelEscalated(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "prompt abandoned after cancel", nil)
+			return resp
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:            "test-exec",
+		TaskID:        "test-task",
+		SessionID:     "test-session",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+
+	_, err := sm.SendPrompt(ctx, execution, "hello", false, nil, true)
+	if !errors.Is(err, ErrCancelEscalated) {
+		t.Fatalf("expected ErrCancelEscalated, got: %v", err)
 	}
 }
 

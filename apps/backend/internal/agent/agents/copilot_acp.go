@@ -17,10 +17,16 @@ var copilotACPLogoDark []byte
 
 const copilotACPPkg = "@github/copilot"
 
+// copilotNativeBinary is the standalone CLI installed by the @github/copilot
+// npm package. When present on PATH we run it directly instead of paying the
+// per-launch `npx` registry round-trip.
+const copilotNativeBinary = "copilot"
+
 var (
-	_ Agent            = (*CopilotACP)(nil)
-	_ PassthroughAgent = (*CopilotACP)(nil)
-	_ InferenceAgent   = (*CopilotACP)(nil)
+	_ Agent             = (*CopilotACP)(nil)
+	_ PassthroughAgent  = (*CopilotACP)(nil)
+	_ InferenceAgent    = (*CopilotACP)(nil)
+	_ NativeBinaryAgent = (*CopilotACP)(nil)
 )
 
 // CopilotACP implements Agent for GitHub Copilot using ACP protocol mode.
@@ -79,7 +85,14 @@ func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) 
 	return result, nil
 }
 
+// NativeBinaryName returns the standalone Copilot CLI name probed for in the
+// execution environment. See NativeBinaryAgent.
+func (a *CopilotACP) NativeBinaryName() string { return copilotNativeBinary }
+
 func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
+	if opts.PreferNativeBinary {
+		return Cmd(copilotNativeBinary, "--acp").Build()
+	}
 	return Cmd("npx", "-y", copilotACPPkg, "--acp").Build()
 }
 

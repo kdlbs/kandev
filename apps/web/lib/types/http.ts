@@ -1,4 +1,5 @@
 import type { ExecutorType } from "./executor";
+import type { UserSettings } from "./http-user-settings";
 import type {
   AgentProfileId,
   RepositoryId,
@@ -10,6 +11,17 @@ import type {
 import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 
 export type { ExecutorType } from "./executor";
+export type {
+  SavedLayout,
+  SidebarViewApi,
+  SidebarViewDraftApi,
+  SidebarTaskPrefsApi,
+  TaskCreateLastUsedApi,
+  MCPTaskAgentProfileDefault,
+  UserSettings,
+  UserSettingsResponse,
+  UserSettingsUpdatePayload,
+} from "./http-user-settings";
 export * from "./ids";
 export type {
   MoveToStepConfig,
@@ -40,6 +52,9 @@ export type TaskState =
 // Workflow Review Status
 export type WorkflowReviewStatus = "pending" | "approved" | "changes_requested" | "rejected";
 
+// Reasons the backend tags on an auto-deleted task.deleted event.
+export type TaskDeletionReason = "pr_approved_by_user" | "pr_merged_or_closed" | "issue_closed";
+
 // Workflow Template - pre-defined workflow configurations
 export type WorkflowTemplate = {
   id: string;
@@ -53,6 +68,7 @@ export type WorkflowTemplate = {
 
 // Step Definition - template step configuration
 export type StepDefinition = {
+  id?: string;
   name: string;
   position: number;
   color?: string;
@@ -61,6 +77,8 @@ export type StepDefinition = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: AgentProfileId;
+  wip_limit?: number;
+  pull_from_step_id?: string | null;
 };
 
 // Workflow Step - instance of a step on a workflow
@@ -77,11 +95,21 @@ export type WorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  wip_limit?: number;
+  pull_from_step_id?: string | null;
   /**
    * Phase 2 (ADR-0004) semantic UX hint. Backend code does not branch on this;
    * frontend uses it to choose presentation (review/approval styling, etc).
    */
   stage_type?: "work" | "review" | "approval" | "custom";
+  /**
+   * ADR 0015: gate on_turn_complete transitions on an explicit
+   * `step_complete_kandev` MCP signal from the agent. When true, the
+   * step's auto-advance only fires once the agent (or the manual
+   * fallback button) signals completion. Default false preserves
+   * legacy "any turn-end advances" behaviour.
+   */
+  auto_advance_requires_signal?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -125,6 +153,8 @@ export type TaskSessionState =
   | "FAILED"
   | "CANCELLED";
 
+export type TaskPendingAction = "clarification" | "permission";
+
 export type Workflow = {
   id: WorkflowId;
   workspace_id: WorkspaceId;
@@ -139,6 +169,14 @@ export type Workflow = {
    * shell (kanban board, office task pane, etc). Backend does NOT branch on it.
    */
   style?: "kanban" | "office" | "custom";
+  /**
+   * Workflow provenance. `"github"` marks workflows synced from a configured
+   * GitHub repo (see workflow sync); omitted/`"manual"` for user-created
+   * workflows. `source_path` is the repo-relative file the workflow was
+   * synced from and is omitted for manual workflows.
+   */
+  source?: string;
+  source_path?: string;
   created_at: string;
   updated_at: string;
 };
@@ -170,10 +208,18 @@ export type Repository = {
   default_branch: string;
   scripts?: RepositoryScript[];
   worktree_branch_prefix: string;
+  worktree_branch_template?: string;
   pull_before_worktree: boolean;
   setup_script: string;
   cleanup_script: string;
   dev_script: string;
+  /**
+   * Comma-separated gitignored files/globs seeded into each new worktree.
+   * Append `:symlink` to an entry (e.g. `.env.local:symlink`) to link it back
+   * to the main repo instead of copying it; `::symlink` escapes a literal
+   * suffix. Remote executors always copy the bytes.
+   */
+  copy_files: string;
   created_at: string;
   updated_at: string;
 };
@@ -254,6 +300,7 @@ export type Task = {
   repositories?: TaskRepository[];
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
+  primary_session_pending_action?: TaskPendingAction | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -305,6 +352,8 @@ export type WorkflowStepDTO = {
   auto_archive_after_hours?: number;
   agent_profile_id?: AgentProfileId;
   stage_type?: "work" | "review" | "approval" | "custom";
+  wip_limit?: number;
+  pull_from_step_id?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -315,9 +364,25 @@ export type MoveTaskResponse = {
   workflow_step: WorkflowStepDTO;
 };
 
+/** A worktree associated with a task session (one per repo on multi-repo tasks). */
+export type TaskSessionWorktree = {
+  /** Session-worktree association ID. */
+  id: string;
+  session_id: SessionId;
+  worktree_id: string;
+  repository_id?: RepositoryId;
+  branch_slug?: string;
+  position: number;
+  worktree_path?: string;
+  worktree_branch?: string;
+  created_at?: string;
+};
+
 export type TaskSession = {
   id: SessionId;
   task_id: TaskId;
+  /** Optional user-supplied label shown on the session tab. */
+  name?: string;
   agent_profile_id?: AgentProfileId;
   container_id?: string;
   executor_id?: string;
@@ -328,6 +393,7 @@ export type TaskSession = {
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   state: TaskSessionState;
   error_message?: string;
@@ -386,56 +452,6 @@ export type User = {
   email: string;
   created_at: string;
   updated_at: string;
-};
-
-export type SavedLayout = {
-  id: string;
-  name: string;
-  is_default: boolean;
-  layout: Record<string, unknown>;
-  created_at: string;
-};
-
-export type SidebarViewApi = {
-  id: string;
-  name: string;
-  filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
-  sort: { key: string; direction: string };
-  group: string;
-  collapsed_groups: string[];
-};
-
-export type UserSettings = {
-  user_id: string;
-  workspace_id: WorkspaceId;
-  kanban_view_mode?: string;
-  workflow_filter_id?: string;
-  repository_ids: string[];
-  initial_setup_complete?: boolean;
-  preferred_shell?: string;
-  default_editor_id?: string;
-  enable_preview_on_click?: boolean;
-  chat_submit_key?: "enter" | "cmd_enter";
-  review_auto_mark_on_scroll?: boolean;
-  show_release_notification?: boolean;
-  release_notes_last_seen_version?: string;
-  lsp_auto_start_languages?: string[];
-  lsp_auto_install_languages?: string[];
-  lsp_server_configs?: Record<string, Record<string, unknown>>;
-  saved_layouts?: SavedLayout[];
-  sidebar_views?: SidebarViewApi[];
-  default_utility_agent_id?: string;
-  default_utility_model?: string;
-  keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
-  terminal_link_behavior?: string;
-  terminal_font_family?: string;
-  terminal_font_size?: number;
-  updated_at: string;
-};
-
-export type UserSettingsResponse = {
-  settings: UserSettings;
-  shell_options?: Array<{ value: string; label: string }>;
 };
 
 export type EditorOption = {
@@ -516,6 +532,7 @@ export type RepositoryPathValidationResponse = {
   path: string;
   exists: boolean;
   is_git: boolean;
+  /** @deprecated Compatibility field; manual validity is determined by `exists` and `is_git`. */
   allowed: boolean;
   default_branch?: string;
   message?: string;
@@ -650,6 +667,8 @@ export type Message = {
   metadata?: Record<string, unknown>;
   requests_input?: boolean;
   created_at: string;
+  /** Authoritative per-message change signal; advances on every content/metadata update. */
+  updated_at?: string;
 };
 
 export type Turn = {
@@ -692,6 +711,8 @@ export type StepPortable = {
   is_start_step: boolean;
   allow_manual_move: boolean;
   auto_archive_after_hours?: number;
+  wip_limit?: number;
+  pull_from_step_position?: number;
 };
 
 export type ImportWorkflowsResult = {

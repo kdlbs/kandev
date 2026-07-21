@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import { test as base, expect } from "../../fixtures/test-base";
 import { OfficeApiClient } from "../../helpers/office-api-client";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 
 /**
  * Regression E2E tests for office issue chat features.
@@ -119,28 +120,27 @@ test.describe("Office issue chat", () => {
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
 
     // The sidebar must show the CEO agent link — not "No agents yet".
-    // The aside renders the agent link plus an adjacent "Open <name>" icon
-    // link; scope the locator to the aside and take the first match.
-    await expect(testPage.locator("aside").getByRole("link", { name: /CEO/i }).first()).toBeVisible(
-      { timeout: 5_000 },
-    );
+    // Post-overhaul the Agents list lives in the unified AppSidebar's
+    // COLLAPSIBLE Agents section, which defaults to collapsed on `/office`.
+    // Expand it first, then assert the agent `<Link>` (accessible name = agent
+    // name; the avatar is aria-hidden), scoped to the rail.
+    const sidebar = new AppSidebarPage(testPage);
+    await sidebar.expandSection("Agents");
+    await expect(sidebar.root.getByRole("link", { name: /CEO/i }).first()).toBeVisible({
+      timeout: 5_000,
+    });
     // "No agents yet" must NOT be visible.
-    await expect(testPage.getByText("No agents yet")).not.toBeVisible();
+    await expect(sidebar.root.getByText("No agents yet")).not.toBeVisible();
   });
 
-  test("sidebar shows task count badge", async ({ testPage }) => {
-    test.setTimeout(15_000);
-
-    await testPage.goto("/office");
-    await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
-
-    // Tasks link must include a count badge (at least 1 from onboarding).
-    // The sidebar link's accessible name includes the badge count, so use
-    // a regex that matches "Tasks" followed by a number somewhere.
-    const tasksLink = testPage.locator("aside").getByRole("link", { name: /Tasks/i }).first();
-    await expect(tasksLink).toBeVisible();
-    await expect(tasksLink).toContainText(/\d+/, { timeout: 5_000 });
-  });
+  // NOTE (overhaul): the "sidebar shows task count badge" test was removed.
+  // Pre-overhaul the office sidebar had a dedicated "Tasks" navigation <Link>
+  // whose accessible name carried a count badge. The unified AppSidebar
+  // replaced that with a collapsible "Tasks" *section header* (a <button>
+  // rendered by app-sidebar-section.tsx, with a TasksViewPicker header action)
+  // — there is no longer an in-sidebar Tasks link, and no count badge on it.
+  // The feature the test asserted no longer exists, so the test was deleted
+  // rather than rewritten to assert a different surface.
 
   test("issue list shows the onboarding task", async ({ testPage }) => {
     test.setTimeout(15_000);

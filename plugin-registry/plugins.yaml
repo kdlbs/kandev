@@ -1,0 +1,38 @@
+# Kandev plugin registry — the curated, human-edited source of truth.
+#
+# This file is the official Kandev marketplace source: a minimal pointer list of
+# plugin repositories. It records *which repos* are in the official catalog, not
+# the plugin metadata itself (name, description, version, tarball URL, stars) —
+# that is read from each plugin's own GitHub release when the index is built.
+#
+# Curation model:
+#   - A plugin appears in the official catalog only after a maintainer approves a
+#     pull request that adds an entry here.
+#   - Every PR is validated against plugin-registry/schema.json in CI, and the
+#     `id` is checked against the target repo's latest-release manifest `id`.
+#   - See plugin-registry/README.md for how to submit a plugin.
+#
+# Field reference (full contract in schema.json):
+#   id         required  MUST equal the plugin manifest `id`; unique in this file.
+#   repo       required  owner/name of the public GitHub repo that publishes releases.
+#   featured   optional  maintainer may pin an entry above star order (default false).
+#   categories optional  category tags used for filtering in the catalog.
+
+# The catalog starts empty — there are no first-party plugin repos at launch.
+# Entries are added by PR as plugins are published (see the template below).
+# An empty list builds a valid, empty index.json; the marketplace shows an
+# "no plugins yet" state until the first entry lands.
+plugins:
+  - id: kandev-session-cost
+    repo: kdlbs/kandev-plugin-session-cost
+    categories: [analytics]
+  - id: kandev-provider-usage
+    repo: kdlbs/kandev-plugin-provider-usage
+    categories: [analytics]
+# Example entry (copy, uncomment, and fill in when adding a plugin):
+#
+# plugins:
+#   - id: my-plugin              # MUST equal the plugin manifest `id`
+#     repo: owner/kandev-plugin-my-plugin
+#     featured: false            # optional; maintainers may pin above star order
+#     categories: [integrations] # optional

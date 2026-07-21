@@ -6,24 +6,35 @@ import { replaceTaskUrl } from "@/lib/links";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
-import { useTasks } from "@/hooks/use-tasks";
+import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
+import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import {
-  hasPendingClarificationForSession,
-  hasPendingPermissionForSession,
+  hasPendingClarification,
+  hasPendingPermissionRequest,
 } from "@/lib/utils/pending-clarification";
+import { toKanbanTask, workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import {
   repositoryId as toRepositoryId,
   type TaskState,
+  type TaskSession,
   type TaskSessionState,
   type Repository,
   type Task,
   type WorkflowSnapshot,
+  type Message,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { repositorySlug } from "@/lib/repository-slug";
 import { resolvePreferredSessionId } from "../task-select-helpers";
+import { agentErrorMessageForTask } from "@/lib/task-agent-error";
+import {
+  agentErrorAcknowledgementSessionIds,
+  usePersistResolvedAgentErrorAcknowledgements,
+} from "../use-agent-error-acknowledgements";
 
 // Map workflow snapshot to kanban state on workspace switch.
 function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) {
@@ -44,35 +55,7 @@ function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) 
       show_in_command_panel: step.show_in_command_panel,
       agent_profile_id: step.agent_profile_id,
     })),
-    tasks: snapshot.tasks.map((task) => ({
-      id: task.id,
-      workflowStepId: task.workflow_step_id,
-      title: task.title,
-      description: task.description ?? undefined,
-      position: task.position ?? 0,
-      state: task.state,
-      repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
-      // Carry the full TaskRepository array so the mobile repo picker
-      // (useTaskRepoCount + MobileReposSection) keeps working after a
-      // workspace switch. Without this, the picker silently disappears for
-      // multi-repo tasks because length defaults to 0.
-      repositories: task.repositories?.map((r) => ({
-        id: r.id,
-        repository_id: r.repository_id,
-        base_branch: r.base_branch,
-        checkout_branch: r.checkout_branch,
-        position: r.position,
-      })),
-      primarySessionId: task.primary_session_id ?? undefined,
-      primarySessionState: task.primary_session_state ?? undefined,
-      sessionCount: task.session_count ?? undefined,
-      reviewStatus: task.review_status ?? undefined,
-      primaryExecutorId: task.primary_executor_id ?? undefined,
-      primaryExecutorType: task.primary_executor_type ?? undefined,
-      primaryExecutorName: task.primary_executor_name ?? undefined,
-      isRemoteExecutor: task.is_remote_executor ?? false,
-      updatedAt: task.updated_at,
-    })),
+    tasks: snapshot.tasks.map(toKanbanTask),
   };
 }
 
@@ -84,7 +67,84 @@ function sortByUpdatedAtDesc<T extends { updated_at?: string | null }>(items: T[
   });
 }
 
-export function useSheetData(workspaceId: string | null, workflowId: string | null) {
+type SheetItemCtx = {
+  repositoryPathsById: Map<string, string | undefined>;
+  workflowNameById: Map<string, string>;
+  stepTitleById: Map<string, string>;
+  sessionsById: Record<string, TaskSession>;
+  sessionsByTaskId: Parameters<typeof getSessionInfoForTask>[1];
+  gitStatusByEnvId: Parameters<typeof getSessionInfoForTask>[2];
+  envIdBySessionId: Parameters<typeof getSessionInfoForTask>[3];
+  messagesBySession: Record<string, Message[] | undefined>;
+  dismissedAgentErrors: Record<string, string>;
+  acknowledgedAgentErrors: Record<string, string>;
+};
+
+function toSheetItem(
+  task: KanbanState["tasks"][number] & { _workflowId: string },
+  ctx: SheetItemCtx,
+) {
+  const sessionInfo = getSessionInfoForTask(
+    task.id,
+    ctx.sessionsByTaskId,
+    ctx.gitStatusByEnvId,
+    ctx.envIdBySessionId,
+  );
+  const resolvedSessionState =
+    sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
+  const pending = pendingFlagsForTask(task, resolvedSessionState, ctx.messagesBySession);
+  return {
+    id: task.id,
+    title: task.title,
+    // Carry the parent link so the mobile task switcher nests subtasks the same
+    // way the desktop sidebar does (applyView/TaskSwitcher read parentTaskId).
+    parentTaskId: task.parentTaskId ?? undefined,
+    workspaceMode: task.workspaceMode,
+    state: task.state as TaskState | undefined,
+    sessionState: resolvedSessionState,
+    description: task.description,
+    workflowId: task._workflowId,
+    workflowName: ctx.workflowNameById.get(task._workflowId),
+    workflowStepId: task.workflowStepId,
+    workflowStepTitle: ctx.stepTitleById.get(task.workflowStepId),
+    repositoryPath: task.repositoryId
+      ? ctx.repositoryPathsById.get(toRepositoryId(task.repositoryId))
+      : undefined,
+    diffStats: sessionInfo.diffStats,
+    updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
+    isRemoteExecutor: task.isRemoteExecutor,
+    remoteExecutorType: task.primaryExecutorType ?? undefined,
+    remoteExecutorName: task.primaryExecutorName ?? undefined,
+    primarySessionId: task.primarySessionId ?? null,
+    hasPendingClarification: pending.clarification,
+    hasPendingPermission: pending.permission,
+    agentErrorMessage: agentErrorMessageForTask(task, ctx.sessionsById, ctx.sessionsByTaskId, ctx),
+  };
+}
+
+function pendingFlagsForTask(
+  task: Pick<KanbanState["tasks"][number], "primarySessionId" | "primarySessionPendingAction">,
+  primarySessionState: TaskSessionState | undefined,
+  messagesBySession: Record<string, Message[] | undefined>,
+): { clarification: boolean; permission: boolean } {
+  if (!task.primarySessionId) return { clarification: false, permission: false };
+  const messages = messagesBySession[task.primarySessionId];
+  if (messages !== undefined) {
+    return {
+      clarification: hasPendingClarification(messages),
+      permission: hasPendingPermissionRequest(messages),
+    };
+  }
+  if (primarySessionState !== "WAITING_FOR_INPUT") {
+    return { clarification: false, permission: false };
+  }
+  return {
+    clarification: task.primarySessionPendingAction === "clarification",
+    permission: task.primarySessionPendingAction === "permission",
+  };
+}
+
+export function useSheetData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionsById = useAppStore((state) => state.taskSessions.items);
@@ -92,7 +152,15 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
   const messagesBySession = useAppStore((state) => state.messages.bySession);
-  const { tasks, isLoading: tasksLoading } = useTasks(workflowId);
+  const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
+  const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
+  const {
+    allTasks,
+    allSteps,
+    stepsByWorkflowId,
+    workflows,
+    isLoading: tasksLoading,
+  } = useWorkspaceSidebarTasks(workspaceId);
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
@@ -102,53 +170,47 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
     return activeTaskId;
   }, [activeSessionId, activeTaskId, sessionsById]);
 
+  const acknowledgementSessionIds = useMemo(
+    () => agentErrorAcknowledgementSessionIds(allTasks, sessionsByTaskId),
+    [allTasks, sessionsByTaskId],
+  );
+  usePersistResolvedAgentErrorAcknowledgements({
+    sessionsById,
+    sessionIds: acknowledgementSessionIds,
+    messagesBySession,
+    dismissedAgentErrors,
+  });
+
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
-    const repositoryPathsById = new Map(
-      repositories.map((repo: Repository) => [repo.id, repo.local_path]),
-    );
-    return tasks.map((task: KanbanState["tasks"][number]) => {
-      const sessionInfo = getSessionInfoForTask(
-        task.id,
-        sessionsByTaskId,
-        gitStatusByEnvId,
-        envIdBySessionId,
-      );
-      return {
-        id: task.id,
-        title: task.title,
-        state: task.state as TaskState | undefined,
-        sessionState:
-          sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
-        description: task.description,
-        workflowStepId: task.workflowStepId,
-        repositoryPath: task.repositoryId
-          ? repositoryPathsById.get(toRepositoryId(task.repositoryId))
-          : undefined,
-        diffStats: sessionInfo.diffStats,
-        updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
-        isRemoteExecutor: task.isRemoteExecutor,
-        remoteExecutorType: task.primaryExecutorType ?? undefined,
-        remoteExecutorName: task.primaryExecutorName ?? undefined,
-        primarySessionId: task.primarySessionId ?? null,
-        hasPendingClarification: hasPendingClarificationForSession(
-          messagesBySession,
-          task.primarySessionId,
-        ),
-        hasPendingPermission: hasPendingPermissionForSession(
-          messagesBySession,
-          task.primarySessionId,
-        ),
-      };
-    });
+    const ctx: SheetItemCtx = {
+      repositoryPathsById: new Map(
+        repositories.map((repo: Repository) => [repo.id, repositorySlug(repo)]),
+      ),
+      workflowNameById: new Map(workflows.map((w) => [w.id, w.name])),
+      stepTitleById: new Map(allSteps.map((s) => [s.id, s.title])),
+      sessionsById,
+      sessionsByTaskId,
+      gitStatusByEnvId,
+      envIdBySessionId,
+      messagesBySession,
+      dismissedAgentErrors,
+      acknowledgedAgentErrors,
+    };
+    return allTasks.map((task) => toSheetItem(task, ctx));
   }, [
     repositoriesByWorkspace,
-    tasks,
+    allTasks,
+    allSteps,
+    workflows,
     workspaceId,
+    sessionsById,
     sessionsByTaskId,
     gitStatusByEnvId,
     envIdBySessionId,
     messagesBySession,
+    dismissedAgentErrors,
+    acknowledgedAgentErrors,
   ]);
 
   const dialogSteps = useMemo(
@@ -165,9 +227,10 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
   return {
     activeTaskId,
     selectedTaskId,
-    steps,
     workspaces,
-    // Skeleton while snapshot hydrates kanban — otherwise shows "No tasks yet." even when tasks exist.
+    workflows,
+    stepsByWorkflowId,
+    // Skeleton while the first snapshot fetch is in flight — otherwise shows "No tasks yet." even when tasks exist.
     tasksLoading,
     tasksWithRepositories,
     dialogSteps,
@@ -255,12 +318,49 @@ function mergeSessionFields(
   taskSessionId: string | null,
 ) {
   return {
-    primarySessionId:
-      taskSessionId ?? task.primary_session_id ?? existing?.primarySessionId ?? undefined,
-    primarySessionState: task.primary_session_state ?? existing?.primarySessionState ?? undefined,
-    sessionCount: task.session_count ?? existing?.sessionCount ?? (taskSessionId ? 1 : undefined),
-    reviewStatus: task.review_status ?? existing?.reviewStatus ?? undefined,
+    primarySessionId: resolvePrimarySessionId(task, existing, taskSessionId),
+    primarySessionState: resolvePrimarySessionState(task, existing),
+    primarySessionPendingAction: resolvePrimarySessionPendingAction(task, existing),
+    sessionCount: resolveSessionCount(task, existing, taskSessionId),
+    reviewStatus: resolveReviewStatus(task, existing),
   };
+}
+
+function resolvePrimarySessionId(
+  task: Task,
+  existing: KanbanState["tasks"][number] | undefined,
+  taskSessionId: string | null,
+) {
+  return taskSessionId ?? task.primary_session_id ?? existing?.primarySessionId ?? undefined;
+}
+
+function resolvePrimarySessionState(
+  task: Task,
+  existing: KanbanState["tasks"][number] | undefined,
+) {
+  return task.primary_session_state ?? existing?.primarySessionState ?? undefined;
+}
+
+function resolvePrimarySessionPendingAction(
+  task: Task,
+  existing: KanbanState["tasks"][number] | undefined,
+) {
+  if ("primary_session_pending_action" in task) {
+    return task.primary_session_pending_action ?? undefined;
+  }
+  return existing?.primarySessionPendingAction ?? undefined;
+}
+
+function resolveSessionCount(
+  task: Task,
+  existing: KanbanState["tasks"][number] | undefined,
+  taskSessionId: string | null,
+) {
+  return task.session_count ?? existing?.sessionCount ?? (taskSessionId ? 1 : undefined);
+}
+
+function resolveReviewStatus(task: Task, existing: KanbanState["tasks"][number] | undefined) {
+  return task.review_status ?? existing?.reviewStatus ?? undefined;
 }
 
 /**
@@ -278,6 +378,8 @@ function buildKanbanTaskUpsert(
   const taskSessionId = meta?.taskSessionId ?? null;
   return {
     id: task.id,
+    parentTaskId: task.parent_id ?? undefined,
+    workspaceMode: workspaceModeFromMetadata(task.metadata),
     workflowStepId: task.workflow_step_id,
     title: task.title,
     description: task.description,
@@ -402,35 +504,47 @@ function useSheetDeleteActions(
   removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
 ) {
   const { deleteTaskById } = useTaskActions();
-  const [deletingTask, setDeletingTask] = useState<{ id: string; title: string } | null>(null);
+  const [deletingTask, setDeletingTask] = useState<{
+    id: string;
+    title: string;
+    executorType?: string | null;
+  } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
-      const task = store.getState().kanban.tasks.find((t) => t.id === taskId);
-      setDeletingTask({ id: taskId, title: task?.title ?? "this task" });
+      const state = store.getState();
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      setDeletingTask({
+        id: taskId,
+        title: task?.title ?? "this task",
+        executorType: task?.primaryExecutorType,
+      });
     },
     [store],
   );
 
-  const handleDeleteConfirm = useCallback(async () => {
-    if (!deletingTask || isDeleting) return;
-    const taskId = deletingTask.id;
-    setIsDeleting(true);
-    // Capture active state before the async API call — the WS "task.deleted"
-    // handler may clear activeTaskId/activeSessionId before removeTaskFromBoard runs.
-    const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-      store.getState().tasks;
-    try {
-      await deleteTaskById(taskId);
-      await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
-    } catch (error) {
-      console.error("Failed to delete task:", error);
-    } finally {
-      setIsDeleting(false);
-      setDeletingTask(null);
-    }
-  }, [deletingTask, isDeleting, deleteTaskById, removeTaskFromBoard, store]);
+  const handleDeleteConfirm = useCallback(
+    async (opts?: { cascade?: boolean }) => {
+      if (!deletingTask || isDeleting) return;
+      const taskId = deletingTask.id;
+      setIsDeleting(true);
+      // Capture active state before the async API call — the WS "task.deleted"
+      // handler may clear activeTaskId/activeSessionId before removeTaskFromBoard runs.
+      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
+        store.getState().tasks;
+      try {
+        await deleteTaskById(taskId, opts);
+        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+      } catch (error) {
+        console.error("Failed to delete task:", error);
+      } finally {
+        setIsDeleting(false);
+        setDeletingTask(null);
+      }
+    },
+    [deletingTask, isDeleting, deleteTaskById, removeTaskFromBoard, store],
+  );
 
   const deletingTaskId = isDeleting ? (deletingTask?.id ?? null) : null;
 
@@ -451,18 +565,20 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
   const deleteActions = useSheetDeleteActions(store, removeTaskFromBoard);
+  const detachActions = useTaskDetachDialog(store);
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = state.kanban.tasks.find((t) => t.id === taskId);
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       if (task?.primarySessionId) {
-        const targetSessionId = resolvePreferredSessionId(
+        const targetSessionId = resolvePreferredSessionId({
           taskId,
-          task.primarySessionId,
-          state.tasks.lastSessionByTaskId,
-          state.environmentIdBySessionId,
-        );
+          primarySessionId: task.primarySessionId,
+          lastSessionByTaskId: state.tasks.lastSessionByTaskId,
+          environmentIdBySessionId: state.environmentIdBySessionId,
+          taskSessionsById: state.taskSessions.items,
+        });
         setActiveSession(taskId, targetSessionId);
         loadTaskSessionsForTask(taskId);
         replaceTaskUrl(taskId);
@@ -479,29 +595,41 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
     [loadTaskSessionsForTask, setActiveSession, setActiveTask, store, onOpenChange],
   );
 
-  const [archivingTask, setArchivingTask] = useState<{ id: string; title: string } | null>(null);
+  const [archivingTask, setArchivingTask] = useState<{
+    id: string;
+    title: string;
+    executorType?: string | null;
+  } | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
 
   const handleArchiveTask = useCallback(
     (taskId: string) => {
-      const task = store.getState().kanban.tasks.find((t) => t.id === taskId);
-      setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
+      const state = store.getState();
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      setArchivingTask({
+        id: taskId,
+        title: task?.title ?? "this task",
+        executorType: task?.primaryExecutorType,
+      });
     },
     [store],
   );
 
-  const handleArchiveConfirm = useCallback(async () => {
-    if (!archivingTask) return;
-    setIsArchiving(true);
-    try {
-      await archiveAndSwitch(archivingTask.id);
-    } catch (error) {
-      console.error("Failed to archive task:", error);
-    } finally {
-      setIsArchiving(false);
-      setArchivingTask(null);
-    }
-  }, [archivingTask, archiveAndSwitch]);
+  const handleArchiveConfirm = useCallback(
+    async (opts?: { cascade?: boolean }) => {
+      if (!archivingTask) return;
+      setIsArchiving(true);
+      try {
+        await archiveAndSwitch(archivingTask.id, opts);
+      } catch (error) {
+        console.error("Failed to archive task:", error);
+      } finally {
+        setIsArchiving(false);
+        setArchivingTask(null);
+      }
+    },
+    [archivingTask, archiveAndSwitch],
+  );
 
   const { handleWorkspaceChange, handleTaskCreated } = useWorkspaceAndTaskCreatedActions({
     workspaceId,
@@ -522,5 +650,6 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
     isArchiving,
     handleArchiveConfirm,
     ...deleteActions,
+    ...detachActions,
   };
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { IconRobot } from "@tabler/icons-react";
-import type { SlashCommand } from "@/hooks/use-inline-slash";
+import type { SlashCommand } from "./slash-command-types";
 import { PopupMenu, PopupMenuItem, useMenuItemRefs } from "./popup-menu";
 
 type SlashCommandMenuProps = {

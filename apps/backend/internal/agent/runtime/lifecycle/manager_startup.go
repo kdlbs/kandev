@@ -3,38 +3,115 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// startPassthroughExecution dispatches a passthrough-routed execution to the
+// resume or fresh launch path. profileInfo may be nil — see routePassthrough's
+// contract.
+func (m *Manager) startPassthroughExecution(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) error {
+	if execution.isResumedSession {
+		// Resume reuses the launched session id; ResumePassthroughSession does
+		// its own profile lookup for command building.
+		return m.ResumePassthroughSession(ctx, execution.SessionID)
+	}
+	if profileInfo == nil {
+		// Snapshot-driven routing leaves profileInfo nil so we resolve fresh
+		// here for command building.
+		if execution.AgentProfileID == "" || m.profileResolver == nil {
+			return fmt.Errorf("execution %q is passthrough but has no resolvable profile", execution.ID)
+		}
+		resolved, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+		if err != nil {
+			return fmt.Errorf("resolve profile for passthrough execution %q: %w", execution.ID, err)
+		}
+		profileInfo = resolved
+	}
+	return m.startPassthroughSession(ctx, execution, profileInfo)
+}
+
+// routePassthrough decides whether an execution should launch on the passthrough
+// PTY path or the ACP path. The session-creation snapshot
+// (execution.IsPassthrough) is authoritative for session-backed launches.
+// Sessionless launches (legacy controller.LaunchAgent) fall back to live profile
+// state so first-time launches reflect the current mode. A profile resolve
+// failure on the fallback path is treated as "not passthrough" — callers that
+// need profile info for command building handle the resolve error themselves.
+//
+// When the sessionless fallback path resolved the profile, the resolved
+// *AgentProfileInfo is returned so the caller can reuse it for command building
+// without a second round-trip. Snapshot-driven routing returns nil for the
+// profile because the caller must resolve fresh — the snapshot deliberately
+// outlives any particular live profile state.
+func (m *Manager) routePassthrough(ctx context.Context, execution *AgentExecution) (bool, *AgentProfileInfo) {
+	if execution.IsPassthrough {
+		return true, nil
+	}
+	if execution.SessionID != "" || execution.AgentProfileID == "" || m.profileResolver == nil {
+		return false, nil
+	}
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+	if err != nil || profileInfo == nil {
+		return false, nil
+	}
+	if !profileInfo.CLIPassthrough {
+		return false, nil
+	}
+	return true, profileInfo
+}
+
 // StartAgentProcess configures and starts the agent subprocess for an execution.
 // This must be called after Launch() to actually start the agent (e.g., auggie, codex).
 // The command is built internally based on the execution's agent profile.
-func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) error {
+func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (retErr error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
-
-	// Check if this execution should use passthrough mode
-	if execution.AgentProfileID != "" && m.profileResolver != nil {
-		profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
-		if err == nil && profileInfo.CLIPassthrough {
-			// On resume (e.g., after backend restart), use the resume command path
-			// so the agent receives resume flags (-c / --resume).
-			if execution.isResumedSession {
-				return m.ResumePassthroughSession(ctx, execution.SessionID)
-			}
-			return m.startPassthroughSession(ctx, execution, profileInfo)
+	activityClaim, err := m.ensureExecutionActivity(ctx, executionID, activity.KindExecutionPreparing)
+	if err != nil {
+		return err
+	}
+	operationCtx := activityClaim.Context(ctx)
+	defer func() {
+		if retErr != nil {
+			activityClaim.Release()
+			return
 		}
+		activityClaim.Commit()
+	}()
+
+	// Decide passthrough vs ACP. The session-creation snapshot
+	// (execution.IsPassthrough, sourced from TaskSession.IsPassthrough) is
+	// the source of truth: a profile that toggles CLIPassthrough after the
+	// session was created must not strand existing sessions in the wrong
+	// launch path. Non-session launches (e.g. the low-level
+	// controller.LaunchAgent path) leave IsPassthrough false and fall back to
+	// live profile resolution so first-time launches still pick the current
+	// mode.
+	//
+	// Profile resolution is needed only for *command building* in the
+	// non-resume passthrough path; it is not part of the routing decision. A
+	// transient resolve error must not silently route a passthrough session
+	// to ACP — the resume branch routes on the snapshot alone, and the fresh
+	// branch surfaces the resolve error explicitly.
+	isPassthrough, profileInfo := m.routePassthrough(operationCtx, execution)
+	if err := context.Cause(operationCtx); err != nil {
+		return err
+	}
+	if isPassthrough {
+		return m.startPassthroughExecution(operationCtx, execution, profileInfo)
 	}
 
 	if execution.agentctl == nil {
@@ -51,13 +128,13 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	}
 
 	// Wait for agentctl to be ready
-	if err := execution.agentctl.WaitForReady(ctx, 60*time.Second); err != nil {
+	if err := execution.agentctl.WaitForReady(operationCtx, 60*time.Second); err != nil {
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
 
 	taskDescription := getTaskDescriptionFromMetadata(execution)
-	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
+	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
 
 	var bootCommand string
 	if reuseExisting {
@@ -76,7 +153,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 			zap.String("acp_session_id", execution.ACPSessionID))
 
 		var err error
-		bootCommand, err = m.configureAndStartAgent(ctx, execution, taskDescription, approvalPolicy)
+		bootCommand, err = m.configureAndStartAgent(operationCtx, execution, approvalPolicy)
 		if err != nil {
 			return err
 		}
@@ -87,7 +164,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 			zap.String("command", bootCommand))
 	}
 
-	return m.initializeAgentSession(ctx, execution, bootCommand, agentDisplayName, taskDescription)
+	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription)
 }
 
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.
@@ -165,7 +242,7 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 
 // buildEnvForExecution builds environment variables for any runtime.
 // This is the unified method used by the runtime interface.
-func (m *Manager) buildEnvForExecution(executionID string, req *LaunchRequest, agentConfig agents.Agent) map[string]string {
+func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo) (map[string]string, error) {
 	env := make(map[string]string)
 
 	// Copy request environment
@@ -173,12 +250,18 @@ func (m *Manager) buildEnvForExecution(executionID string, req *LaunchRequest, a
 		env[k] = v
 	}
 
+	if profileInfo != nil {
+		m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
+	} else {
+		m.mergeAgentProfileEnv(ctx, executionProfileID(req), env)
+	}
+
 	// Add standard variables for recovery after backend restart
 	env["KANDEV_INSTANCE_ID"] = executionID
 	env["KANDEV_TASK_ID"] = req.TaskID
 	env["KANDEV_SESSION_ID"] = req.SessionID
 	env["KANDEV_AGENT_PROFILE_ID"] = req.AgentProfileID
-	env["TASK_DESCRIPTION"] = req.TaskDescription
+	env["KANDEV_EXECUTION_PROFILE_ID"] = executionProfileID(req)
 
 	// Add agent runtime default env vars (e.g., MCP_TIMEOUT for Claude Code)
 	if agentConfig != nil {
@@ -193,15 +276,58 @@ func (m *Manager) buildEnvForExecution(executionID string, req *LaunchRequest, a
 
 	// Add required credentials from agent config
 	if m.credsMgr != nil && agentConfig != nil {
-		ctx := context.Background()
 		for _, credKey := range agentConfig.Runtime().RequiredEnv {
 			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
 				env[credKey] = value
 			}
 		}
 	}
+	if req.managedGoCachePath != "" {
+		env["GOCACHE"] = req.managedGoCachePath
+	}
 
-	return env
+	if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
+		return nil, err
+	}
+
+	return env, nil
+}
+
+func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *LaunchRequest) error {
+	if req == nil || m.managedGoCache == nil || !isHostLocalExecutor(req.ExecutorType) {
+		return nil
+	}
+	env, err := m.managedGoCache.ExecutionEnvironment(ctx)
+	if err != nil {
+		return fmt.Errorf("prepare managed Go cache: %w", err)
+	}
+	path := env["GOCACHE"]
+	if path == "" {
+		return nil
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("managed GOCACHE must be absolute: %q", path)
+	}
+	path = filepath.Clean(path)
+	if req.Env == nil {
+		req.Env = make(map[string]string)
+	}
+	req.Env["GOCACHE"] = path
+	if req.Metadata == nil {
+		req.Metadata = make(map[string]interface{})
+	}
+	req.Metadata[managedGoCacheMetadataKey] = path
+	req.managedGoCachePath = path
+	return nil
+}
+
+func isHostLocalExecutor(executorType string) bool {
+	switch models.ExecutorType(executorType) {
+	case "", models.ExecutorTypeLocal, "local_pc", models.ExecutorTypeWorktree:
+		return true
+	default:
+		return false
+	}
 }
 
 // waitForAgentctlReady waits for the agentctl HTTP server to be ready.

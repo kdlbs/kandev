@@ -1,28 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-
-/** Navigate to a kanban card by title and open its session page. */
-async function openTaskSession(page: Parameters<typeof KanbanPage>[0], title: string) {
-  const kanban = new KanbanPage(page);
-  await kanban.goto();
-
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await card.click();
-  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-  const session = new SessionPage(page);
-  await session.waitForLoad();
-
-  // Reload to get fresh SSR state — the session may have started via API before
-  // the WS connection was established, causing the UI to miss "session is RUNNING"
-  // events. A reload guarantees hydrated state from the server.
-  await page.reload();
-  await session.waitForLoad();
-
-  return session;
-}
+import { openTaskSession } from "../../helpers/session";
 
 /**
  * Stop the running session via the tab context menu (session.stop → CANCELLED state),
@@ -63,7 +41,7 @@ test.describe("New session with deleted agent profile", () => {
     });
 
     // 2. Create task using the custom profile with a slow response so we can cancel it
-    await apiClient.createTaskWithAgent(
+    const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Deleted Profile Resume Test",
       profile.id,
@@ -76,7 +54,7 @@ test.describe("New session with deleted agent profile", () => {
     );
 
     // 3. Navigate to the task and stop the agent to get CANCELLED state
-    const session = await openTaskSession(testPage, "Deleted Profile Resume Test");
+    const session = await openTaskSession(testPage, task.id);
     await stopRunningSession(session);
 
     // 4. While on the page, force-delete the custom agent profile.
@@ -111,7 +89,7 @@ test.describe("New session with deleted agent profile", () => {
     });
 
     // 2. Create task using the custom profile with a slow response so we can cancel it
-    await apiClient.createTaskWithAgent(
+    const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Deleted Profile Dialog Test",
       profile.id,
@@ -124,7 +102,7 @@ test.describe("New session with deleted agent profile", () => {
     );
 
     // 3. Navigate to the task and stop the agent to get CANCELLED state
-    const session = await openTaskSession(testPage, "Deleted Profile Dialog Test");
+    const session = await openTaskSession(testPage, task.id);
     await stopRunningSession(session);
 
     // 4. While on the page, force-delete the custom agent profile.

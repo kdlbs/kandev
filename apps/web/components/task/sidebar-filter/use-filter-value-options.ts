@@ -5,6 +5,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import type { FilterDimension } from "@/lib/state/slices/ui/sidebar-view-types";
 import { getExecutorLabel } from "@/lib/executor-icons";
+import { repositorySlug } from "@/lib/repository-slug";
 
 type Option = { value: string; label: string; color?: string; group?: string };
 type Snapshots = AppState["kanbanMulti"]["snapshots"];
@@ -45,11 +46,10 @@ function executorTypeOptions(snapshots: Snapshots): Option[] {
   return [...seen].sort().map((v) => ({ value: v, label: getExecutorLabel(v) }));
 }
 
-function repositoryOptions(repositoriesByWorkspace: ReposByWorkspace): Option[] {
+export function repositoryOptions(repositoriesByWorkspace: ReposByWorkspace): Option[] {
   const repos = Object.values(repositoriesByWorkspace).flat();
   return repos.map((r) => {
-    const slug =
-      r.provider_owner && r.provider_name ? `${r.provider_owner}/${r.provider_name}` : r.local_path;
+    const slug = repositorySlug(r);
     return { value: slug, label: slug };
   });
 }

@@ -132,7 +132,10 @@ func (r *SpritesExecutor) runTerminalCleanupScript(ctx context.Context, sprite *
 // Terminal stop reasons that trigger destructive executor cleanup
 // (sandbox teardown, container removal, per-instance session-dir removal).
 // Anything outside this set is treated as a "preserve" stop — see
-// shouldRunExecutorCleanup.
+// shouldRunExecutorCleanup. Stale execution cleanup is intentionally excluded
+// from this shared set: Docker has a runtime-specific helper to remove local
+// stale containers, while Sprites preserves cloud sandboxes for faster and less
+// destructive recovery.
 const (
 	StopReasonTaskArchived    = "task archived"
 	StopReasonTaskDeleted     = "task deleted"

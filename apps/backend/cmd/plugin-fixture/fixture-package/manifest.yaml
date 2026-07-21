@@ -1,0 +1,49 @@
+# Manifest for the plugin-fixture SDK plugin (docs/plans/plugins/GRPC-CONTRACT.md
+# §6). Used by Go integration tests and Playwright e2e tests — see
+# apps/backend/cmd/plugin-fixture and the `e2e-plugin-package` Makefile
+# target, which stages this directory, builds the plugin-fixture binary for
+# the host platform into server/, and packs the whole tree with
+# cmd/plugin-pack into apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz.
+id: "kandev-plugin-e2e"
+api_version: 1
+version: "1.0.0"
+display_name: "Kandev E2E Fixture Plugin"
+description: "SDK-based plugin backend used by backend integration tests and Playwright e2e tests"
+author: "kandev"
+categories: ["tools"]
+repo_url: "https://github.com/kdlbs/kandev-plugin-template"
+
+runtime:
+  type: binary
+  executables:
+    linux-amd64: "server/plugin-linux-amd64"
+    linux-arm64: "server/plugin-linux-arm64"
+    darwin-amd64: "server/plugin-darwin-amd64"
+    darwin-arm64: "server/plugin-darwin-arm64"
+    windows-amd64: "server/plugin-windows-amd64.exe"
+
+capabilities:
+  events: ["task.created"]
+  state: true
+  secrets: true
+
+webhooks:
+  - key: "test-hook"
+    description: "Records inbound webhooks for e2e polling"
+    method: "POST"
+
+ui:
+  bundle: "/ui/bundle.js"
+
+config_schema:
+  type: object
+  required: ["api_token"]
+  properties:
+    api_token:
+      type: string
+      title: "API token"
+      description: "Secret token; masked on the operator API, delivered to the plugin via the Host GetConfig RPC."
+      secret: true
+    greeting:
+      type: string
+      title: "Greeting"

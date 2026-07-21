@@ -55,9 +55,18 @@ describe("selectPreferredBranch", () => {
     expect(selectPreferredBranch(branches)).toBe("main");
   });
 
-  it("prefers local master over origin/main", () => {
+  it("keeps local master ahead of origin/main", () => {
     const branches = [
       { name: "master", type: "local" },
+      { name: "main", type: "remote", remote: "origin" },
+    ];
+    expect(selectPreferredBranch(branches)).toBe("master");
+  });
+
+  it("keeps local master ahead of remote conventional branches", () => {
+    const branches = [
+      { name: "master", type: "local" },
+      { name: "master", type: "remote", remote: "origin" },
       { name: "main", type: "remote", remote: "origin" },
     ];
     expect(selectPreferredBranch(branches)).toBe("master");

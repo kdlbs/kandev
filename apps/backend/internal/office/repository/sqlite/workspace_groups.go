@@ -31,13 +31,13 @@ func (r *Repository) createWorkspaceGroupTables() error {
 		owned_by_kandev INTEGER NOT NULL DEFAULT 0,
 		cleanup_policy TEXT NOT NULL DEFAULT 'never_delete',
 		cleanup_status TEXT NOT NULL DEFAULT 'active',
-		cleaned_at DATETIME,
+		cleaned_at TIMESTAMP,
 		cleanup_error TEXT NOT NULL DEFAULT '',
 		restore_status TEXT NOT NULL DEFAULT 'not_needed',
 		restore_error TEXT NOT NULL DEFAULT '',
 		restore_config_json TEXT NOT NULL DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_task_workspace_groups_workspace
@@ -49,10 +49,10 @@ func (r *Repository) createWorkspaceGroupTables() error {
 		workspace_group_id TEXT NOT NULL,
 		task_id TEXT NOT NULL,
 		role TEXT NOT NULL DEFAULT 'member',
-		released_at DATETIME,
+		released_at TIMESTAMP,
 		release_reason TEXT NOT NULL DEFAULT '',
 		released_by_cascade_id TEXT NOT NULL DEFAULT '',
-		created_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
 		PRIMARY KEY (workspace_group_id, task_id),
 		FOREIGN KEY (workspace_group_id) REFERENCES task_workspace_groups(id) ON DELETE CASCADE
 	);
@@ -125,6 +125,28 @@ func (r *Repository) GetWorkspaceGroup(ctx context.Context, id string) (*models.
 		return nil, err
 	}
 	return &g, nil
+}
+
+// ListWorkspaceGroupsByWorkspace returns all workspace-group rows owned by a workspace.
+func (r *Repository) ListWorkspaceGroupsByWorkspace(ctx context.Context, workspaceID string) ([]*models.WorkspaceGroup, error) {
+	var groups []*models.WorkspaceGroup
+	err := r.ro.SelectContext(ctx, &groups, r.ro.Rebind(`
+		SELECT id, workspace_id, owner_task_id, materialized_path,
+			materialized_environment_id, materialized_kind, owned_by_kandev,
+			cleanup_policy, cleanup_status, cleaned_at, cleanup_error,
+			restore_status, restore_error, restore_config_json,
+			created_at, updated_at
+		FROM task_workspace_groups
+		WHERE workspace_id = ?
+		ORDER BY created_at, id
+	`), workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if groups == nil {
+		groups = []*models.WorkspaceGroup{}
+	}
+	return groups, nil
 }
 
 // MarkWorkspaceMaterialized records the materialized path/environment AND

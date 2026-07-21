@@ -14,17 +14,11 @@ import { workflowId, workspaceId as toWorkspaceId, type Workflow } from "@/lib/t
  */
 export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: string) {
   const storeWorkflows = useAppStore((state) => state.workflows.items);
-  // Hidden workflows (e.g. the system "Improve Kandev" template) are loaded
-  // into the global store with `includeHidden: true` so the kanban can resolve
-  // them when a task references one, but they must never surface in the
-  // settings management UI. Filter them out at the store boundary so all
-  // downstream merging logic remains hidden-agnostic.
-  const scopedStoreWorkflows = useMemo(() => {
-    const visible = storeWorkflows.filter((w) => !w.hidden);
-    return workspaceId ? visible.filter((w) => w.workspaceId === workspaceId) : visible;
-  }, [storeWorkflows, workspaceId]);
+  const scopedStoreWorkflows = useScopedStoreWorkflows(storeWorkflows, workspaceId);
   const [workflowItems, setWorkflowItems] = useState<Workflow[]>(initialWorkflows);
   const [savedWorkflowItems, setSavedWorkflowItems] = useState<Workflow[]>(initialWorkflows);
+  const savedWorkflowItemsRef = useRef(savedWorkflowItems);
+  savedWorkflowItemsRef.current = savedWorkflowItems;
 
   // Track all IDs we've ever seen from SSR props so we only add genuinely new ones
   // (not re-add workflows the user deleted locally).
@@ -90,7 +84,9 @@ export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: 
       const updated = filtered.map((w) => {
         if (w.id.startsWith("temp-")) return w;
         const sw = scopedStoreWorkflows.find((s) => s.id === w.id);
-        if (sw && sw.name !== w.name) return { ...w, name: sw.name };
+        const saved = savedWorkflowItemsRef.current.find((item) => item.id === w.id);
+        const hasLocalNameDraft = saved && w.name !== saved.name;
+        if (sw && sw.name !== w.name && !hasLocalNameDraft) return { ...w, name: sw.name };
         return w;
       });
 
@@ -107,8 +103,20 @@ export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: 
     setSavedWorkflowItems((prev) => {
       const toAdd = newFromStore(prev);
       const filtered = prev.filter((w) => !deletedIds.has(w.id));
-      if (toAdd.length === 0 && filtered.length === prev.length) return prev;
-      return [...toAdd, ...filtered];
+      const updated = filtered.map((workflow) => {
+        const server = scopedStoreWorkflows.find((item) => item.id === workflow.id);
+        return server && server.name !== workflow.name
+          ? { ...workflow, name: server.name }
+          : workflow;
+      });
+      if (
+        toAdd.length === 0 &&
+        updated.length === prev.length &&
+        updated.every((workflow, index) => workflow === prev[index])
+      ) {
+        return prev;
+      }
+      return [...toAdd, ...updated];
     });
   }, [scopedStoreWorkflows]);
 
@@ -116,15 +124,7 @@ export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: 
     return new Map(savedWorkflowItems.map((w) => [w.id, w]));
   }, [savedWorkflowItems]);
 
-  const isWorkflowDirty = (workflow: Workflow) => {
-    const saved = savedWorkflowsById.get(workflow.id);
-    if (!saved) return true;
-    return (
-      workflow.name !== saved.name ||
-      workflow.description !== saved.description ||
-      (workflow.agent_profile_id ?? "") !== (saved.agent_profile_id ?? "")
-    );
-  };
+  const isWorkflowDirty = (workflow: Workflow) => workflowIsDirty(workflow, savedWorkflowsById);
 
   return {
     workflowItems,
@@ -133,6 +133,36 @@ export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: 
     setSavedWorkflowItems,
     isWorkflowDirty,
   };
+}
+
+function workflowIsDirty(workflow: Workflow, savedWorkflows: Map<string, Workflow>): boolean {
+  const saved = savedWorkflows.get(workflow.id);
+  if (!saved) return true;
+  return (
+    workflow.name !== saved.name ||
+    workflow.description !== saved.description ||
+    (workflow.agent_profile_id ?? "") !== (saved.agent_profile_id ?? "")
+  );
+}
+
+function useScopedStoreWorkflows<
+  T extends {
+    id: string;
+    workspaceId: string;
+    name: string;
+    description?: string | null;
+    hidden?: boolean;
+    style?: string;
+  },
+>(storeWorkflows: T[], workspaceId?: string): T[] {
+  return useMemo(() => {
+    const visible = storeWorkflows.filter(
+      (workflow) => !workflow.hidden && workflow.style !== "office",
+    );
+    return workspaceId
+      ? visible.filter((workflow) => workflow.workspaceId === workspaceId)
+      : visible;
+  }, [storeWorkflows, workspaceId]);
 }
 
 function storeItemToWorkflow(sw: {

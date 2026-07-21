@@ -179,8 +179,8 @@ func TestGetPR_NilClient(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when client is nil")
 	}
-	if !strings.Contains(err.Error(), "github client not available") {
-		t.Errorf("unexpected error: %v", err)
+	if !errors.Is(err, ErrNoClient) {
+		t.Errorf("err = %v, want ErrNoClient", err)
 	}
 }
 
@@ -254,6 +254,16 @@ func TestParsePRURL(t *testing.T) {
 		{
 			name:    "invalid PR number",
 			url:     "https://github.com/owner/repo/pull/abc",
+			wantErr: true,
+		},
+		{
+			name:    "zero PR number",
+			url:     "https://github.com/owner/repo/pull/0",
+			wantErr: true,
+		},
+		{
+			name:    "negative PR number",
+			url:     "https://github.com/owner/repo/pull/-1",
 			wantErr: true,
 		},
 		{
@@ -663,17 +673,24 @@ func TestFindLatestCommentTime(t *testing.T) {
 	}
 }
 
-// --- mockEventBus for SyncTaskPR tests ---
+// --- mockEventBus shared by SyncTaskPR and review-watch tests ---
 
 type mockEventBus struct {
-	mu     sync.Mutex
-	events []*bus.Event
+	mu          sync.Mutex
+	events      []*bus.Event
+	publishedCh chan struct{}
 }
 
 func (m *mockEventBus) Publish(_ context.Context, _ string, event *bus.Event) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.events = append(m.events, event)
+	m.mu.Unlock()
+	if m.publishedCh != nil {
+		select {
+		case m.publishedCh <- struct{}{}:
+		default:
+		}
+	}
 	return nil
 }
 

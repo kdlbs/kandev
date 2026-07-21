@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/components/routing/app-link";
+import { useRouter } from "@/lib/routing/client-router";
+import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { IconGitBranch, IconLayoutColumns, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -26,7 +27,8 @@ type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -62,6 +64,7 @@ type WorkspaceEditFormProps = {
 type SelectFieldProps = {
   label: string;
   value: string;
+  isDirty: boolean;
   onChange: (v: string) => void;
   options: { id: string; name: string }[];
   emptyLabel: string;
@@ -71,6 +74,7 @@ type SelectFieldProps = {
 function SelectField({
   label,
   value,
+  isDirty,
   onChange,
   options,
   emptyLabel,
@@ -80,7 +84,7 @@ function SelectField({
     <div className="space-y-2">
       <Label>{label}</Label>
       <Select value={value || "none"} onValueChange={(v) => onChange(v === "none" ? "" : v)}>
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="w-full" data-settings-dirty={isDirty}>
           <SelectValue placeholder={`Select ${label.toLowerCase()}`} />
         </SelectTrigger>
         <SelectContent>
@@ -102,35 +106,33 @@ function SelectField({
 }
 
 type WorkspaceSettingsCardProps = {
-  isDirty: boolean;
   workspaceNameDraft: string;
+  nameIsDirty: boolean;
   onNameChange: (value: string) => void;
   defaultExecutorId: string;
+  executorIsDirty: boolean;
   onExecutorChange: (value: string) => void;
   activeExecutors: Executor[];
   executorsEmpty: boolean;
   defaultAgentProfileId: string;
+  agentProfileIsDirty: boolean;
   onAgentProfileChange: (value: string) => void;
   agentProfiles: AgentProfileOption[];
-  isLoading: boolean;
-  saveStatus: "idle" | "loading" | "success" | "error";
-  onSave: () => void;
 };
 
 function WorkspaceSettingsCard({
-  isDirty,
   workspaceNameDraft,
+  nameIsDirty,
   onNameChange,
   defaultExecutorId,
+  executorIsDirty,
   onExecutorChange,
   activeExecutors,
   executorsEmpty,
   defaultAgentProfileId,
+  agentProfileIsDirty,
   onAgentProfileChange,
   agentProfiles,
-  isLoading,
-  saveStatus,
-  onSave,
 }: WorkspaceSettingsCardProps) {
   const executorOptions = activeExecutors.map((e: Executor) => ({ id: e.id, name: e.name }));
   const profileOptions = agentProfiles.map((p: AgentProfileOption) => ({
@@ -138,12 +140,9 @@ function WorkspaceSettingsCard({
     name: p.label,
   }));
   return (
-    <Card>
+    <SettingsCard isDirty={nameIsDirty || executorIsDirty || agentProfileIsDirty}>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <span>Workspace Settings</span>
-          {isDirty && <UnsavedChangesBadge />}
-        </CardTitle>
+        <CardTitle>Workspace Settings</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
@@ -152,12 +151,14 @@ function WorkspaceSettingsCard({
             <Input
               id="workspace-name"
               value={workspaceNameDraft}
+              data-settings-dirty={nameIsDirty}
               onChange={(e) => onNameChange(e.target.value)}
             />
           </div>
           <SelectField
             label="Default Executor"
             value={defaultExecutorId}
+            isDirty={executorIsDirty}
             onChange={onExecutorChange}
             options={executorsEmpty ? [] : executorOptions}
             emptyLabel="No executors available"
@@ -166,22 +167,15 @@ function WorkspaceSettingsCard({
           <SelectField
             label="Default Agent Profile"
             value={defaultAgentProfileId}
+            isDirty={agentProfileIsDirty}
             onChange={onAgentProfileChange}
             options={profileOptions}
             emptyLabel="No agent profiles available"
             emptyValue="empty-agent-profiles"
           />
-          <div className="flex justify-end pt-2">
-            <UnsavedSaveButton
-              isDirty={isDirty}
-              isLoading={isLoading}
-              status={saveStatus}
-              onClick={onSave}
-            />
-          </div>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -216,6 +210,7 @@ function WorkspaceLinksCard({ workspaceId }: WorkspaceLinksCardProps) {
 }
 
 type DeleteWorkspaceCardProps = {
+  workspaceName: string;
   deleteDialogOpen: boolean;
   setDeleteDialogOpen: (open: boolean) => void;
   deleteConfirmText: string;
@@ -224,6 +219,7 @@ type DeleteWorkspaceCardProps = {
 };
 
 function DeleteWorkspaceCard({
+  workspaceName,
   deleteDialogOpen,
   setDeleteDialogOpen,
   deleteConfirmText,
@@ -246,6 +242,7 @@ function DeleteWorkspaceCard({
               variant="destructive"
               onClick={() => setDeleteDialogOpen(true)}
               className="cursor-pointer"
+              data-testid="workspace-settings-delete-button"
             >
               <IconTrash className="h-4 w-4 mr-2" />
               Delete
@@ -259,7 +256,8 @@ function DeleteWorkspaceCard({
           <DialogHeader>
             <DialogTitle>Delete Workspace</DialogTitle>
             <DialogDescription>
-              Type &quot;delete&quot; to confirm deletion. This action cannot be undone.
+              Type the workspace name <span className="font-medium">{workspaceName}</span> to
+              confirm deletion. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -268,7 +266,9 @@ function DeleteWorkspaceCard({
               id="confirm-delete"
               value={deleteConfirmText}
               onChange={(event) => setDeleteConfirmText(event.target.value)}
-              placeholder="delete"
+              placeholder={workspaceName}
+              autoComplete="off"
+              data-testid="workspace-settings-delete-confirm-input"
             />
           </div>
           <DialogFooter>
@@ -282,8 +282,9 @@ function DeleteWorkspaceCard({
             <Button
               variant="destructive"
               onClick={onDelete}
-              disabled={deleteConfirmText !== "delete"}
+              disabled={deleteConfirmText !== workspaceName}
               className="cursor-pointer"
+              data-testid="workspace-settings-delete-confirm-button"
             >
               Delete
             </Button>
@@ -384,6 +385,7 @@ function buildSaveHandler({
         description: error instanceof Error ? error.message : "Request failed",
         variant: "error",
       });
+      throw error;
     }
   };
 }
@@ -433,11 +435,11 @@ function useWorkspaceEditForm(workspace: Workspace) {
   });
 
   const handleDeleteWorkspace = async () => {
-    if (deleteConfirmText !== "delete") return;
+    if (deleteConfirmText !== currentWorkspace.name) return;
     try {
-      await deleteWorkspaceRequest.run(currentWorkspace.id);
+      await deleteWorkspaceRequest.run(currentWorkspace.id, currentWorkspace.name);
       setWorkspaces(workspaces.filter((ws: Workspace) => ws.id !== currentWorkspace.id));
-      router.push("/settings/workspace");
+      runWithNavigationBlockerBypassed(() => router.push("/settings/workspace"));
     } catch (error) {
       toast({
         title: "Failed to delete workspace",
@@ -445,6 +447,18 @@ function useWorkspaceEditForm(workspace: Workspace) {
         variant: "error",
       });
     }
+  };
+
+  // Clears pre-fill so Cancel-then-reopen can't silently bypass the re-type requirement.
+  const handleDeleteDialogOpenChange = (open: boolean) => {
+    setDeleteDialogOpen(open);
+    if (!open) setDeleteConfirmText("");
+  };
+
+  const handleDiscard = () => {
+    setWorkspaceNameDraft(savedState.name);
+    setDefaultExecutorId(savedState.executorId);
+    setDefaultAgentProfileId(savedState.agentProfileId);
   };
 
   return {
@@ -456,15 +470,16 @@ function useWorkspaceEditForm(workspace: Workspace) {
     defaultAgentProfileId,
     setDefaultAgentProfileId,
     deleteDialogOpen,
-    setDeleteDialogOpen,
+    setDeleteDialogOpen: handleDeleteDialogOpenChange,
     deleteConfirmText,
     setDeleteConfirmText,
     activeExecutors,
     executors,
     agentProfiles,
+    savedState,
     isDirty,
-    saveWorkspaceRequest,
     handleSave,
+    handleDiscard,
     handleDeleteWorkspace,
   };
 }
@@ -485,11 +500,26 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     activeExecutors,
     executors,
     agentProfiles,
+    savedState,
     isDirty,
-    saveWorkspaceRequest,
     handleSave,
+    handleDiscard,
     handleDeleteWorkspace,
   } = useWorkspaceEditForm(workspace);
+
+  useSettingsSaveContributor({
+    id: `workspace:${currentWorkspace.id}`,
+    revision: JSON.stringify({
+      workspaceNameDraft,
+      defaultExecutorId,
+      defaultAgentProfileId,
+    }),
+    isDirty,
+    canSave: Boolean(workspaceNameDraft.trim()),
+    invalidReason: workspaceNameDraft.trim() ? undefined : "Workspace name is required.",
+    save: handleSave,
+    discard: handleDiscard,
+  });
 
   return (
     <div className="space-y-8">
@@ -501,23 +531,23 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
       </div>
       <Separator />
       <WorkspaceSettingsCard
-        isDirty={isDirty}
         workspaceNameDraft={workspaceNameDraft}
+        nameIsDirty={workspaceNameDraft.trim() !== savedState.name}
         onNameChange={setWorkspaceNameDraft}
         defaultExecutorId={defaultExecutorId}
+        executorIsDirty={defaultExecutorId !== savedState.executorId}
         onExecutorChange={setDefaultExecutorId}
         activeExecutors={activeExecutors}
         executorsEmpty={executors.length === 0}
         defaultAgentProfileId={defaultAgentProfileId}
+        agentProfileIsDirty={defaultAgentProfileId !== savedState.agentProfileId}
         onAgentProfileChange={setDefaultAgentProfileId}
         agentProfiles={agentProfiles}
-        isLoading={saveWorkspaceRequest.isLoading}
-        saveStatus={saveWorkspaceRequest.status}
-        onSave={handleSave}
       />
       <WorkspaceLinksCard workspaceId={currentWorkspace.id} />
       <Separator />
       <DeleteWorkspaceCard
+        workspaceName={currentWorkspace.name}
         deleteDialogOpen={deleteDialogOpen}
         setDeleteDialogOpen={setDeleteDialogOpen}
         deleteConfirmText={deleteConfirmText}

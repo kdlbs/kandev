@@ -1,4 +1,6 @@
 import type React from "react";
+import { formatSlashCommandLabel, normalizeSlashCommandName } from "./tiptap-slash-command-utils";
+import type { SlashCommand } from "./slash-command-types";
 
 // ── JSON node types ─────────────────────────────────────────────────
 
@@ -10,6 +12,13 @@ export type JSONNode = {
   content?: JSONNode[];
 };
 
+export type EditorContentNode = {
+  type: string;
+  text?: string;
+  attrs?: Record<string, unknown>;
+  content?: EditorContentNode[];
+};
+
 // ── Serialization ───────────────────────────────────────────────────
 
 function serializeInline(nodes: JSONNode[]): string {
@@ -18,6 +27,9 @@ function serializeInline(nodes: JSONNode[]): string {
       if (n.type === "hardBreak") return "\n";
       if (n.type === "contextMention") {
         return n.attrs?.label ? `@${n.attrs.label}` : "";
+      }
+      if (n.type === "slashCommand") {
+        return formatSlashCommandLabel(n.attrs);
       }
       const text = n.text ?? "";
       if (n.marks?.some((m) => m.type === "code")) {
@@ -71,6 +83,74 @@ export function escapeHtml(str: string): string {
 export function textToHtml(text: string): string {
   const lines = text.split("\n");
   return lines.map((line) => `<p>${escapeHtml(line) || "<br>"}</p>`).join("");
+}
+
+function slashCommandName(command: SlashCommand): string {
+  return normalizeSlashCommandName(command.agentCommandName || command.label);
+}
+
+function slashCommandAttrs(command: SlashCommand): Record<string, unknown> {
+  const name = slashCommandName(command);
+  return {
+    id: command.id,
+    label: `/${name}`,
+    commandName: name,
+    description: command.description,
+  };
+}
+
+function slashCommandMap(commands: readonly SlashCommand[]): Map<string, SlashCommand> {
+  const map = new Map<string, SlashCommand>();
+  for (const command of commands) {
+    const name = slashCommandName(command);
+    if (name) map.set(name, command);
+  }
+  return map;
+}
+
+function textLineToNodes(line: string, commands: Map<string, SlashCommand>): EditorContentNode[] {
+  const nodes: EditorContentNode[] = [];
+  const tokenPattern = /\/\S+/g;
+  let cursor = 0;
+  for (const match of line.matchAll(tokenPattern)) {
+    const index = match.index ?? 0;
+    const token = match[0];
+    const command = commands.get(normalizeSlashCommandName(token));
+    if (!command) continue;
+    if (index > cursor) {
+      nodes.push({ type: "text", text: line.slice(cursor, index) });
+    }
+    nodes.push({ type: "slashCommand", attrs: slashCommandAttrs(command) });
+    cursor = index + token.length;
+  }
+  if (cursor < line.length) {
+    nodes.push({ type: "text", text: line.slice(cursor) });
+  }
+  return nodes;
+}
+
+export function textToEditorContent(
+  text: string,
+  slashCommands: readonly SlashCommand[] = [],
+): EditorContentNode {
+  const commands = slashCommandMap(slashCommands);
+  const content: EditorContentNode[] = [];
+  let inCodeFence = false;
+  for (const line of text.split("\n")) {
+    const isFenceLine = line.trimStart().startsWith("```");
+    let nodes: EditorContentNode[];
+    if (inCodeFence || isFenceLine) {
+      nodes = line ? [{ type: "text", text: line }] : [];
+    } else {
+      nodes = textLineToNodes(line, commands);
+    }
+    content.push(nodes.length > 0 ? { type: "paragraph", content: nodes } : { type: "paragraph" });
+    if (isFenceLine) inCodeFence = !inCodeFence;
+  }
+  return {
+    type: "doc",
+    content,
+  };
 }
 
 // ── Code fence parsing ──────────────────────────────────────────────

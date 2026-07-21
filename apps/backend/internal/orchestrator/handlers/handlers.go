@@ -3,11 +3,12 @@ package handlers
 
 import (
 	"context"
-	"strings"
+	"errors"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -42,6 +43,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionDelete, h.wsDeleteSession)
 	d.RegisterFunc(ws.ActionSessionSetPrimary, h.wsSetPrimarySession)
 	d.RegisterFunc(ws.ActionSessionSetPlanMode, h.wsSetPlanMode)
+	d.RegisterFunc(ws.ActionSessionRename, h.wsRenameSession)
 	d.RegisterFunc(ws.ActionGitHubCheckSessionPR, h.wsCheckSessionPR)
 }
 
@@ -114,8 +116,8 @@ func (h *Handlers) wsEnsureSession(ctx context.Context, msg *ws.Message) (*ws.Me
 			zap.Error(err))
 		// Mirror httpEnsureTaskSession's NotFound mapping so the frontend can
 		// distinguish unknown task ids from real server errors. EnsureSession
-		// wraps the repo error as "task not found: %w".
-		if strings.Contains(err.Error(), "task not found") {
+		// wraps the repo's ErrTaskNotFound.
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to ensure session: "+err.Error(), nil)
@@ -179,7 +181,7 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 type wsRecoverSessionRequest struct {
 	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
-	Action    string `json:"action"` // "resume" or "fresh_start"
+	Action    string `json:"action"` // "resume", "fresh_start", or "cancel_retry"
 }
 
 func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -193,8 +195,16 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	// Cancel an in-progress transient (529 Overloaded) retry loop and surface
+	// the manual recovery banner. Distinct from resume/fresh_start: it does not
+	// relaunch the agent, it stops the backoff timer.
+	if req.Action == "cancel_retry" {
+		cancelled := h.service.CancelTransientRetry(ctx, req.TaskID, req.SessionID)
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
+	}
+
 	if req.Action != "resume" && req.Action != "fresh_start" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume' or 'fresh_start'", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'fresh_start', or 'cancel_retry'", nil)
 	}
 
 	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action)
@@ -240,6 +250,10 @@ type wsPermissionRespondRequest struct {
 	PendingID string `json:"pending_id"`
 	OptionID  string `json:"option_id,omitempty"`
 	Cancelled bool   `json:"cancelled,omitempty"`
+	// Rejected is true when the user explicitly clicked Deny. Distinct from
+	// Cancelled (user dismissed the dialog) so the backend can persist
+	// "rejected" status without triggering the cancellation event path.
+	Rejected bool `json:"rejected,omitempty"`
 }
 
 func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -261,9 +275,10 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 		zap.String("session_id", req.SessionID),
 		zap.String("pending_id", req.PendingID),
 		zap.String("option_id", req.OptionID),
-		zap.Bool("cancelled", req.Cancelled))
+		zap.Bool("cancelled", req.Cancelled),
+		zap.Bool("rejected", req.Rejected))
 
-	if err := h.service.RespondToPermission(ctx, req.SessionID, req.PendingID, req.OptionID, req.Cancelled); err != nil {
+	if err := h.service.RespondToPermission(ctx, req.SessionID, req.PendingID, req.OptionID, req.Cancelled, req.Rejected); err != nil {
 		h.logger.Error("failed to respond to permission", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to respond to permission: "+err.Error(), nil)
 	}
@@ -385,6 +400,26 @@ func (h *Handlers) wsSetPrimarySession(ctx context.Context, msg *ws.Message) (*w
 	if err := h.service.SetPrimarySession(ctx, req.SessionID); err != nil {
 		h.logger.Error("failed to set primary session", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set primary session: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+}
+
+type wsRenameSessionRequest struct {
+	SessionID string `json:"session_id"`
+	Name      string `json:"name"`
+}
+
+func (h *Handlers) wsRenameSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsRenameSessionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if err := h.service.RenameSession(ctx, req.SessionID, req.Name); err != nil {
+		h.logger.Error("failed to rename session", zap.String("session_id", req.SessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to rename session: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }

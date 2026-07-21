@@ -15,7 +15,7 @@ const MOBILE_DIFF_SOURCE_FILTER_KEY = "mobile-diff-source-filter";
 type MobileDiffSheetProps = {
   mode: DiffSheetMode | null;
   onClose: () => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   selectedDiff: SelectedDiff | null;
   onClearSelected: () => void;
   sourceCounts: SourceCounts;
@@ -157,7 +157,7 @@ function renderPanel(
   activeSource: ReviewSource,
   selectedDiff: SelectedDiff | null,
   onClearSelected: () => void,
-  onOpenFile?: (filePath: string) => void,
+  onOpenFile?: (filePath: string, repo?: string) => void,
 ): React.ReactNode {
   if (!mode) return null;
   if (mode.kind === "commit") {

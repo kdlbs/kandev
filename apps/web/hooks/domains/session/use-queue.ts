@@ -3,6 +3,7 @@ import { useAppStore } from "@/components/state-provider";
 import {
   queueMessage,
   clearQueue,
+  drainQueuedMessage,
   getQueueStatus,
   updateQueuedMessage,
   removeQueuedEntry,
@@ -16,6 +17,8 @@ export type MessageAttachment = {
   type: string;
   data: string;
   mime_type: string;
+  name?: string;
+  delivery_mode?: "prompt" | "path";
 };
 
 /** Selectors over the queue slice for one session. */
@@ -42,6 +45,23 @@ type QueueActionsArgs = {
   setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"];
   metaMax: number | undefined;
 };
+
+function useDrainNextAction(
+  sessionId: string | null,
+  setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"],
+  refetch: (sid: string) => Promise<void>,
+) {
+  return useCallback(async () => {
+    if (!sessionId) return;
+    setQueueLoading(sessionId, true);
+    try {
+      await drainQueuedMessage(sessionId);
+      await refetch(sessionId);
+    } finally {
+      setQueueLoading(sessionId, false);
+    }
+  }, [sessionId, refetch, setQueueLoading]);
+}
 
 /** Build an action set bound to the supplied session + slice setters. */
 function useQueueActions({
@@ -106,6 +126,8 @@ function useQueueActions({
     }
   }, [sessionId, setQueueEntries, setQueueLoading, metaMax]);
 
+  const drainNext = useDrainNextAction(sessionId, setQueueLoading, refetch);
+
   const editEntry = useCallback(
     async (entryId: string, content: string, attachments?: MessageAttachment[]) => {
       if (!sessionId) return;
@@ -142,7 +164,7 @@ function useQueueActions({
     [sessionId, refetch, removeQueueEntry],
   );
 
-  return { refetch, queue, clearAll, editEntry, removeEntry };
+  return { refetch, queue, clearAll, drainNext, editEntry, removeEntry };
 }
 
 /**
@@ -156,7 +178,8 @@ function useQueueActions({
 export function useQueue(sessionId: string | null) {
   const state = useQueueState(sessionId);
   const { entries, meta, isLoading } = state;
-  const { refetch, queue, clearAll, editEntry, removeEntry } = useQueueActions({
+  const connectionStatus = useAppStore((appState) => appState.connection.status);
+  const { refetch, queue, clearAll, drainNext, editEntry, removeEntry } = useQueueActions({
     sessionId,
     setQueueEntries: state.setQueueEntries,
     removeQueueEntry: state.removeQueueEntry,
@@ -166,10 +189,24 @@ export function useQueue(sessionId: string | null) {
 
   useEffect(() => {
     if (!sessionId) return;
+    if (connectionStatus !== "connected") return;
     void refetch(sessionId).catch((err) => {
       console.error("Failed to fetch queue status:", err);
     });
-  }, [sessionId, refetch]);
+  }, [sessionId, connectionStatus, refetch]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const refetchOnVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (connectionStatus !== "connected") return;
+      void refetch(sessionId).catch((err) => {
+        console.error("Failed to fetch queue status after visibility change:", err);
+      });
+    };
+    document.addEventListener("visibilitychange", refetchOnVisible);
+    return () => document.removeEventListener("visibilitychange", refetchOnVisible);
+  }, [sessionId, connectionStatus, refetch]);
 
   const refetchBound = useCallback(
     () => (sessionId ? refetch(sessionId) : Promise.resolve()),
@@ -184,6 +221,7 @@ export function useQueue(sessionId: string | null) {
     isLoading,
     queue,
     clearAll,
+    drainNext,
     editEntry,
     removeEntry,
     refetch: refetchBound,

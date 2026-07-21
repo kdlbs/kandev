@@ -27,7 +27,7 @@ type TaskNestContextMenuItemsProps = {
 export function TaskNestContextMenuItems({ task, disabled }: TaskNestContextMenuItemsProps) {
   const workflowId = task.workflowId;
   const tasks = useAppStore((s) =>
-    workflowId ? s.kanbanMulti.snapshots[workflowId]?.tasks : undefined,
+    workflowId ? s.kanbanMulti?.snapshots?.[workflowId]?.tasks : undefined,
   );
   const nestTask = useNestTask();
 

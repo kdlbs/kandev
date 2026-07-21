@@ -3,8 +3,128 @@
 import { useCallback } from "react";
 import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
-import { setLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
+import { createDebugLogger } from "@/lib/debug/log";
+import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
+
+type TaskCreateLastUsedPatch = {
+  repository_id?: string | null;
+  branch?: string | null;
+  agent_profile_id?: string | null;
+  executor_profile_id?: string | null;
+};
+
+type TaskCreateLastUsedPayload = {
+  repositories?: Array<{
+    repository_id?: string;
+    base_branch?: string;
+    checkout_branch?: string;
+    fresh_branch?: boolean;
+  }>;
+  agent_profile_id?: string;
+  executor_profile_id?: string;
+};
+
+let lastQueuedLastUsed: Partial<TaskCreateLastUsedState> = {};
+const lastUsedDebug = createDebugLogger("task-create:last-used");
+
+/**
+ * Clears task-create last-used overlay state.
+ * Pass `clearQueued` when test setup or teardown should also wipe the queued
+ * overlay that protects settings fetches from stale server values.
+ */
+export function resetTaskCreateLastUsedSync(
+  options: {
+    clearQueued?: boolean;
+    syncedSettings?: TaskCreateLastUsedState | null | undefined;
+  } = {},
+) {
+  if (options.clearQueued) {
+    lastQueuedLastUsed = {};
+  } else if (taskCreateLastUsedSettingsMatchQueue(options.syncedSettings)) {
+    lastQueuedLastUsed = {};
+  }
+  lastUsedDebug("overlay-reset");
+}
+
+export function readQueuedTaskCreateLastUsedState(): Partial<TaskCreateLastUsedState> {
+  return lastQueuedLastUsed;
+}
+
+export function clearQueuedTaskCreateLastUsedIfSynced(
+  settings: TaskCreateLastUsedState | null | undefined,
+) {
+  if (!hasQueuedTaskCreateLastUsed()) return;
+  if (!taskCreateLastUsedSettingsMatchQueue(settings)) return;
+  lastQueuedLastUsed = {};
+  lastUsedDebug("overlay-cleared-after-settings-sync");
+}
+
+function hasQueuedTaskCreateLastUsed() {
+  return Object.values(lastQueuedLastUsed).some((value) => value !== undefined);
+}
+
+function taskCreateLastUsedSettingsMatchQueue(
+  settings: TaskCreateLastUsedState | null | undefined,
+) {
+  return Object.entries(lastQueuedLastUsed).every(([key, value]) => {
+    if (value === undefined) return true;
+    return settings?.[key as keyof TaskCreateLastUsedState] === value;
+  });
+}
+
+function mapTaskCreateLastUsedPatch(
+  pending: TaskCreateLastUsedPatch,
+): Partial<TaskCreateLastUsedState> {
+  return {
+    repositoryId: pending.repository_id,
+    branch: pending.branch,
+    agentProfileId: pending.agent_profile_id,
+    executorProfileId: pending.executor_profile_id,
+  };
+}
+
+function compactTaskCreateLastUsedState(state: Partial<TaskCreateLastUsedState>) {
+  return Object.fromEntries(
+    Object.entries(state).filter(([, value]) => value !== undefined),
+  ) as Partial<TaskCreateLastUsedState>;
+}
+
+export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
+  lastQueuedLastUsed = {
+    ...lastQueuedLastUsed,
+    ...compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch)),
+  };
+  lastUsedDebug("overlay-updated", { patch, queued: lastQueuedLastUsed });
+}
+
+export function replaceQueuedTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
+  lastQueuedLastUsed = compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch));
+  lastUsedDebug("overlay-replaced", { patch, queued: lastQueuedLastUsed });
+}
+
+export function queueTaskCreateLastUsedFromPayload(
+  payload: TaskCreateLastUsedPayload | null | undefined,
+) {
+  if (!payload) return;
+  const firstWorkspaceRepo = payload.repositories?.find((repo) => repo.repository_id);
+  replaceQueuedTaskCreateLastUsed({
+    repository_id: firstWorkspaceRepo?.repository_id,
+    branch: firstWorkspaceRepo ? taskCreateLastUsedPayloadBranch(firstWorkspaceRepo) : undefined,
+    agent_profile_id: payload.agent_profile_id,
+    executor_profile_id: payload.executor_profile_id,
+  });
+}
+
+function taskCreateLastUsedPayloadBranch(
+  repo: NonNullable<TaskCreateLastUsedPayload["repositories"]>[number],
+) {
+  if (repo.fresh_branch) return firstNonEmpty(repo.base_branch, repo.checkout_branch);
+  return firstNonEmpty(repo.checkout_branch, repo.base_branch);
+}
+
+function firstNonEmpty(...values: Array<string | undefined>) {
+  return values.find((value) => value) ?? undefined;
+}
 
 /**
  * Centralizes form-field change handlers for the task-create dialog.
@@ -42,7 +162,11 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
         ? { repositoryId: value, localPath: undefined, branch: "" }
         : { repositoryId: undefined, localPath: value, branch: "" };
       fs.updateRepository(key, patch);
-      if (isWorkspaceRepo) setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, value);
+      if (isWorkspaceRepo) {
+        syncTaskCreateLastUsed({ repository_id: value, branch: null });
+      } else {
+        syncTaskCreateLastUsed({ repository_id: null, branch: null });
+      }
       // Switching the repo invalidates whatever local-status the fresh-branch
       // panel had cached.
       clearFreshBranch(fs);
@@ -53,7 +177,7 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
   const handleRowBranchChange = useCallback(
     (key: string, value: string) => {
       fs.updateRepository(key, { branch: value });
-      setLocalStorage(STORAGE_KEYS.LAST_BRANCH, value);
+      syncTaskCreateLastUsed({ branch: value });
     },
     [fs],
   );
@@ -65,14 +189,14 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
   const handleAgentProfileChange = useCallback(
     (value: string) => {
       fs.setAgentProfileId(value);
-      setLocalStorage(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, value);
+      syncTaskCreateLastUsed({ agent_profile_id: value });
     },
     [fs],
   );
   const handleExecutorProfileChange = useCallback(
     (value: string) => {
       fs.setExecutorProfileId(value);
-      setLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, value);
+      syncTaskCreateLastUsed({ executor_profile_id: value });
     },
     [fs],
   );
@@ -80,13 +204,6 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
     (value: string) => {
       fs.setTaskName(value);
       fs.setHasTitle(value.trim().length > 0);
-    },
-    [fs],
-  );
-  const handleGitHubBranchChange = useCallback(
-    (value: string) => {
-      fs.setGitHubBranch(value);
-      setLocalStorage(STORAGE_KEYS.LAST_BRANCH, value);
     },
     [fs],
   );
@@ -98,27 +215,31 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
     handleAgentProfileChange,
     handleExecutorProfileChange,
     handleTaskNameChange,
-    handleGitHubBranchChange,
     handleWorkflowChange,
   };
 }
 
 function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   /**
-   * Toggles between "repo chips" mode and "GitHub URL" mode. URL mode
-   * replaces the chip row with a single URL input; flipping back restores
-   * the chip flow with whatever rows were already there.
+   * Toggles between "repo chips" mode and "GitHub Remote (URL)" mode. URL mode
+   * replaces the chip row with a URL input; flipping back leaves
+   * `remoteRepos` alone (toggle-back is non-destructive — Task 4 spec). The
+   * seed effect in state.ts inserts a single empty row on the first toggle
+   * into Remote mode.
    */
-  const handleToggleGitHubUrl = useCallback(() => {
-    const next = !fs.useGitHubUrl;
-    fs.setUseGitHubUrl(next);
-    if (!next) {
-      fs.setGitHubUrl("");
-      fs.setGitHubBranches([]);
-      fs.setGitHubUrlError(null);
-      fs.setGitHubPrHeadBranch(null);
+  const handleToggleRemote = useCallback(() => {
+    const next = !fs.useRemote;
+    fs.setUseRemote(next);
+    fs.setGitHubUrlError(null);
+    // Remote and no-repository are mutually exclusive source modes. Without
+    // this, the user could land on both true at once (toggle no-repo on, then
+    // toggle Remote on) and the submit gate's mode-aware checks would produce
+    // confusing results. Mirror the no-repo handler which already clears
+    // useRemote when flipping the other way.
+    if (next) {
+      fs.setNoRepository(false);
+      syncTaskCreateLastUsed({ repository_id: null, branch: null });
     }
-    fs.setGitHubBranch("");
     clearFreshBranch(fs);
   }, [fs]);
 
@@ -132,33 +253,25 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
     [fs],
   );
 
-  const handleGitHubUrlChange = useCallback(
-    (value: string) => {
-      fs.setGitHubUrl(value);
-      fs.setGitHubBranch("");
-      fs.setGitHubBranches([]);
-      fs.setGitHubUrlError(null);
-      fs.setGitHubPrHeadBranch(null);
-    },
-    [fs],
-  );
-
   /**
    * Toggles "no repository" mode. Replaces the chip row with a folder picker.
-   * Clears the URL-mode state and the workspace_path so flipping back returns
-   * the user to a clean slate.
+   * Clears the URL-mode flag and the workspace_path so flipping back returns
+   * the user to a clean slate (the remoteRepos array itself is preserved).
    */
   const handleToggleNoRepository = useCallback(() => {
     const next = !fs.noRepository;
     fs.setNoRepository(next);
     if (next) {
-      fs.setUseGitHubUrl(false);
-      fs.setGitHubUrl("");
-      fs.setGitHubBranch("");
+      fs.setUseRemote(false);
       // Clear the executor selection so the auto-fill effect re-picks a
       // non-worktree default (worktree is unworkable in no-repo mode).
       fs.setExecutorId("");
       fs.setExecutorProfileId("");
+      syncTaskCreateLastUsed({
+        repository_id: null,
+        branch: null,
+        executor_profile_id: null,
+      });
     } else {
       fs.setWorkspacePath("");
     }
@@ -172,9 +285,8 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   );
 
   return {
-    handleToggleGitHubUrl,
+    handleToggleRemote,
     handleToggleFreshBranch,
-    handleGitHubUrlChange,
     handleToggleNoRepository,
     handleWorkspacePathChange,
   };

@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -9,7 +11,23 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/editors/controller"
 	"github.com/kandev/kandev/internal/editors/dto"
+	"github.com/kandev/kandev/internal/editors/service"
 )
+
+// serviceErrorStatus maps known service errors to HTTP status codes so
+// client mistakes (bad worktree_id, unknown editor) don't surface as 500s.
+func serviceErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, service.ErrEditorNotFound), errors.Is(err, service.ErrWorkspaceNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, service.ErrEditorConfigInvalid):
+		return http.StatusBadRequest
+	case errors.Is(err, service.ErrEditorUnavailable):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
+}
 
 type Handlers struct {
 	controller *controller.Controller
@@ -53,7 +71,7 @@ func (h *Handlers) httpOpenSessionEditor(c *gin.Context) {
 	resp, err := h.controller.OpenSessionEditor(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
 		h.logger.Error("failed to open editor", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to open editor"})
+		c.JSON(serviceErrorStatus(err), gin.H{"error": "failed to open editor"})
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -99,10 +117,18 @@ func (h *Handlers) httpDeleteEditor(c *gin.Context) {
 }
 
 func (h *Handlers) httpOpenFolder(c *gin.Context) {
-	resp, err := h.controller.OpenFolder(c.Request.Context(), c.Param("id"))
+	var req dto.OpenFolderRequest
+	// The body is optional for backward compatibility; an empty body decodes
+	// as EOF and keeps the zero value. Checking ContentLength instead would
+	// silently drop the payload of chunked requests (ContentLength == -1).
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	resp, err := h.controller.OpenFolder(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
 		h.logger.Error("failed to open folder", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to open folder"})
+		c.JSON(serviceErrorStatus(err), gin.H{"error": "failed to open folder"})
 		return
 	}
 	c.JSON(http.StatusOK, resp)

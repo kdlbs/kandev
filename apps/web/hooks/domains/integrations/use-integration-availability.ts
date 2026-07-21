@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  invalidateIntegrationAvailability,
+  subscribeIntegrationAvailability,
+} from "@/lib/integrations/integration-availability-events";
+
+export { invalidateIntegrationAvailability };
 
 // The backend poller probes credentials roughly every 90s. Refreshing at the
 // same cadence keeps the UI no more than ~one cycle stale.
@@ -29,6 +35,11 @@ export function useIntegrationAuthed(
       setAuthed(false);
       return;
     }
+    // Drop any auth state carried over from a previous `fetchConfig` before the
+    // new probe resolves. `fetchConfig` is keyed by workspace for per-workspace
+    // integrations, so a workspace switch must not keep showing the previous
+    // workspace's "authed" result during the in-flight recheck.
+    setAuthed(false);
     let cancelled = false;
     // Monotonic request id: if a slow earlier probe finishes after a newer
     // one we ignore it, otherwise an old "auth ok" could clobber a fresh
@@ -48,9 +59,11 @@ export function useIntegrationAuthed(
     }
     void refresh();
     const id = setInterval(() => void refresh(), refreshMs);
+    const unsubscribe = subscribeIntegrationAvailability(() => void refresh());
     return () => {
       cancelled = true;
       clearInterval(id);
+      unsubscribe();
     };
   }, [active, fetchConfig, refreshMs]);
   return authed;

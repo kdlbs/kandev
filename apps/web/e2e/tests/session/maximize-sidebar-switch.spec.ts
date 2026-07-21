@@ -24,7 +24,7 @@ async function gotoTaskAndWaitForIdle(
   await testPage.goto(`/t/${taskId}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: timeoutMs });
+  await session.waitForChatIdle({ timeout: timeoutMs });
   return session;
 }
 
@@ -95,7 +95,7 @@ test.describe("Maximize survives sidebar task switch", () => {
     await sessionA.clickTaskInSidebar("Maximize Task B");
     await expect(testPage).toHaveURL(new RegExp(`/t/${taskB.id}(?:\\?|$)`), { timeout: 15_000 });
     await sessionA.waitForLoad();
-    await expect(sessionA.idleInput()).toBeVisible({ timeout: 30_000 });
+    await sessionA.waitForChatIdle({ timeout: 30_000 });
     // Task B starts with the default layout — sanity check before the bug.
     await sessionA.expectDefaultLayout();
 

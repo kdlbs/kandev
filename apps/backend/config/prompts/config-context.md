@@ -10,9 +10,10 @@ WORKFLOW TOOLS:
 - create_workflow_kandev: Create a new workflow. Required: workspace_id, name. Optional: description.
 - update_workflow_kandev: Update a workflow. Required: workflow_id. Optional: name, description.
 - delete_workflow_kandev: Delete a workflow and all its steps (destructive). Required: workflow_id.
+- import_workflow_kandev: Import one or more workflows into a workspace from a portable document (the kandev_workflow YAML/JSON export envelope). Workflows whose name already exists are skipped. Required: workspace_id, document. Returns the created and skipped workflow names.
 - list_workflow_steps_kandev: List workflow steps (columns) in a workflow. Required: workflow_id.
-- create_workflow_step_kandev: Create a new workflow step. Required: workflow_id, name. Optional: position, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, events.
-- update_workflow_step_kandev: Update a workflow step. Required: step_id. Optional: name, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, auto_archive_after_hours, events.
+- create_workflow_step_kandev: Create a new workflow step. Required: workflow_id, name. Optional: position, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, auto_advance_requires_signal, events.
+- update_workflow_step_kandev: Update a workflow step. Required: step_id. Optional: name, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, auto_archive_after_hours, auto_advance_requires_signal, events.
 - delete_workflow_step_kandev: Delete a workflow step (destructive). Required: step_id.
 - reorder_workflow_steps_kandev: Reorder workflow steps. Required: workflow_id, step_ids (ordered array of step IDs).
 
@@ -44,7 +45,7 @@ TASK TOOLS:
 - update_task_state_kandev: Update task state. Required: task_id, state (TODO, CREATED, SCHEDULING, IN_PROGRESS, REVIEW, BLOCKED, WAITING_FOR_INPUT, COMPLETED, FAILED, CANCELLED).
 
 INTERACTION:
-- ask_user_question_kandev: Ask the user a clarifying question with multiple-choice options. Required: prompt, options.
+- ask_user_question_kandev: Ask the user one or more clarifying questions in a single tool call. Required: questions (array of 1-4 question objects; each has prompt and options (2-6 {label, description})). Optional: context.
 
 EXAMPLE REQUESTS the user might ask:
 - "Create a new workflow called 'Feature Development'"

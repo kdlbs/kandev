@@ -1,0 +1,460 @@
+package sentry
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/integrations/optional"
+)
+
+// withSearchResults returns a fakeClient that always returns the given issues
+// for SearchIssues, ignoring the filter.
+func (c *fakeClient) withSearchResults(issues []SentryIssue) *fakeClient {
+	c.searchIssuesFn = func(_ SearchFilter, _ string) (*SearchResult, error) {
+		return &SearchResult{Issues: issues, IsLast: true}, nil
+	}
+	return c
+}
+
+func validFilter() SearchFilter {
+	return SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"}
+}
+func intPtr(value int) *int {
+	return &value
+}
+
+func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	instID := f.ensureInstance(t, "ws-1")
+
+	// Bad filters are rejected before the instance check, so no instance needed.
+	for name, filter := range map[string]SearchFilter{
+		"empty":          {},
+		"org only":       {OrgSlug: "acme"},
+		"whitespace org": {OrgSlug: "   ", ProjectSlug: "frontend"},
+		"multi status":   {OrgSlug: "acme", ProjectSlug: "frontend", Statuses: []string{"unresolved", "ignored"}},
+	} {
+		if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+			WorkspaceID: "ws-1", SentryInstanceID: instID,
+			WorkflowID: "wf", WorkflowStepID: "step", Filter: filter,
+		}); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("%s filter should be rejected, got %v", name, err)
+		}
+	}
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: instID,
+		WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if w.ID == "" || !w.Enabled {
+		t.Fatalf("unexpected created watch: %+v", w)
+	}
+	if w.SentryInstanceID != instID {
+		t.Errorf("expected instance %q bound, got %q", instID, w.SentryInstanceID)
+	}
+}
+
+// TestService_CreateIssueWatch_InstanceValidation pins the required + owned
+// contract on the bound instance.
+func TestService_CreateIssueWatch_InstanceValidation(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	other := f.seedInstance(t, "ws-2", "Other", "")
+
+	// Missing instance → ErrInstanceRequired.
+	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	}); !errors.Is(err, ErrInstanceRequired) {
+		t.Errorf("expected ErrInstanceRequired for missing instance, got %v", err)
+	}
+	// Instance from another workspace → ErrInstanceNotFound.
+	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: other.ID,
+		WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	}); !errors.Is(err, ErrInstanceNotFound) {
+		t.Errorf("expected ErrInstanceNotFound for cross-workspace instance, got %v", err)
+	}
+}
+
+func TestService_UpdateIssueWatch_LegacyMultiStatusToggle(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	// Seed a legacy watch (unbound, multi-status) directly through the store.
+	w := newTestIssueWatch("ws-1")
+	w.Filter.Statuses = []string{"unresolved", "ignored"}
+	if err := f.store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("seed watch: %v", err)
+	}
+	disabled := false
+	if _, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{Enabled: &disabled}); err != nil {
+		t.Fatalf("toggle on legacy multi-status watch should succeed, got %v", err)
+	}
+	bad := SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend", Statuses: []string{"unresolved", "ignored"}}
+	if _, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{Filter: &bad}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("filter patch with multiple statuses should be rejected, got %v", err)
+	}
+}
+
+func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: f.ensureInstance(t, "ws-1"),
+		WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(), Prompt: "original",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	newPrompt := "updated"
+	updated, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{Prompt: &newPrompt})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Prompt != "updated" {
+		t.Errorf("prompt not updated: got %q, want %q", updated.Prompt, "updated")
+	}
+	if updated.Filter.OrgSlug != "acme" {
+		t.Errorf("filter changed by prompt-only patch: got orgSlug %q, want %q", updated.Filter.OrgSlug, "acme")
+	}
+	if updated.WorkspaceID != created.WorkspaceID {
+		t.Errorf("workspace id changed: got %q, want %q", updated.WorkspaceID, created.WorkspaceID)
+	}
+	empty := SearchFilter{}
+	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{Filter: &empty}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for empty filter patch, got %v", err)
+	}
+}
+
+// TestService_UpdateIssueWatch_InstanceImmutable pins acceptance (g): the bound
+// instance is absent from the update request, so it cannot be changed.
+func TestService_UpdateIssueWatch_InstanceImmutable(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	instA := f.seedInstance(t, "ws-1", "A", "")
+	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: instA.ID,
+		WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	prompt := "changed"
+	updated, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{Prompt: &prompt})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.SentryInstanceID != instA.ID {
+		t.Errorf("instance changed on update: got %q want %q", updated.SentryInstanceID, instA.ID)
+	}
+	reloaded, _ := f.store.GetIssueWatch(ctx, created.ID)
+	if reloaded.SentryInstanceID != instA.ID {
+		t.Errorf("persisted instance changed: got %q want %q", reloaded.SentryInstanceID, instA.ID)
+	}
+}
+
+func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	instID := f.ensureInstance(t, "ws-1")
+	base := func() *CreateIssueWatchRequest {
+		return &CreateIssueWatchRequest{
+			WorkspaceID: "ws-1", SentryInstanceID: instID,
+			WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+		}
+	}
+
+	req := base()
+	req.MaxInflightTasks = intPtr(0)
+	if _, err := f.svc.CreateIssueWatch(ctx, req); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for non-positive cap, got %v", err)
+	}
+	req = base()
+	req.MaxInflightTasks = intPtr(3)
+	created, err := f.svc.CreateIssueWatch(ctx, req)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	reloaded, _ := f.svc.GetIssueWatch(ctx, created.ID)
+	if reloaded.MaxInflightTasks == nil || *reloaded.MaxInflightTasks != 3 {
+		t.Fatalf("expected cap 3 persisted, got %v", reloaded.MaxInflightTasks)
+	}
+	unchanged, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{})
+	if err != nil || unchanged.MaxInflightTasks == nil || *unchanged.MaxInflightTasks != 3 {
+		t.Errorf("omitted cap should stay 3, got %v (err %v)", unchanged.MaxInflightTasks, err)
+	}
+	uncapped, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: optional.Int{Present: true, Value: nil},
+	})
+	if err != nil || uncapped.MaxInflightTasks != nil {
+		t.Errorf("null cap should clear to uncapped, got %v (err %v)", uncapped.MaxInflightTasks, err)
+	}
+	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: optional.Int{Present: true, Value: intPtr(-1)},
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for negative cap patch, got %v", err)
+	}
+}
+
+func TestService_CreateIssueWatch_RejectsOutOfRangeInterval(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	instID := f.ensureInstance(t, "ws-1")
+	for _, n := range []int{1, 30, 59, 3601, 86400} {
+		if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+			WorkspaceID: "ws-1", SentryInstanceID: instID,
+			WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(), PollIntervalSeconds: n,
+		}); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("expected ErrInvalidConfig for pollIntervalSeconds=%d, got %v", n, err)
+		}
+	}
+	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: instID,
+		WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	}); err != nil {
+		t.Errorf("expected zero pollIntervalSeconds to be accepted, got %v", err)
+	}
+}
+
+func TestService_UpdateIssueWatch_RejectsEmptyWorkflowFields(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: f.ensureInstance(t, "ws-1"),
+		WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	empty := ""
+	for _, req := range []*UpdateIssueWatchRequest{{WorkflowID: &empty}, {WorkflowStepID: &empty}} {
+		if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, req); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("expected ErrInvalidConfig for %+v, got %v", req, err)
+		}
+	}
+}
+
+func TestService_UpdateIssueWatch_NotFound(t *testing.T) {
+	f := newSvcFixture(t)
+	prompt := "x"
+	if _, err := f.svc.UpdateIssueWatch(context.Background(), "ghost", &UpdateIssueWatchRequest{Prompt: &prompt}); !errors.Is(err, ErrIssueWatchNotFound) {
+		t.Errorf("expected ErrIssueWatchNotFound, got %v", err)
+	}
+}
+
+func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "A", "sntrys_abc")
+	f.client.withSearchResults([]SentryIssue{
+		{ShortID: "PROJ-1", Title: "one", Permalink: "https://sentry.io/issues/PROJ-1"},
+		{ShortID: "PROJ-2", Title: "two", Permalink: "https://sentry.io/issues/PROJ-2"},
+		{ShortID: "PROJ-3", Title: "three", Permalink: "https://sentry.io/issues/PROJ-3"},
+	})
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: inst.ID,
+		WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+	if _, err := f.store.ReserveIssueWatchTask(ctx, w.ID, "PROJ-2", "https://sentry.io/issues/PROJ-2"); err != nil {
+		t.Fatalf("seed reservation: %v", err)
+	}
+	_, got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 unseen issues, got %d", len(got))
+	}
+	for _, i := range got {
+		if i.ShortID == "PROJ-2" {
+			t.Error("PROJ-2 should have been filtered as already seen")
+		}
+	}
+	refreshed, _ := f.store.GetIssueWatch(ctx, w.ID)
+	if refreshed.LastPolledAt == nil {
+		t.Error("expected last_polled_at stamped after check")
+	}
+}
+
+func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "A", "sntrys_abc")
+	f.client.searchIssuesFn = func(_ SearchFilter, _ string) (*SearchResult, error) {
+		return nil, errors.New("upstream 500")
+	}
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: inst.ID,
+		WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, _, err := f.svc.CheckIssueWatch(ctx, w); err == nil {
+		t.Error("expected error from search to surface to caller")
+	}
+	refreshed, _ := f.store.GetIssueWatch(ctx, w.ID)
+	if refreshed.LastPolledAt == nil {
+		t.Error("expected last_polled_at stamped even on search failure (liveness signal)")
+	}
+}
+
+func TestService_CheckIssueWatch_ClearsLastErrorAfterSuccess(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "A", "sntrys_abc")
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: inst.ID,
+		WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+	if err := f.store.StampIssueWatchError(ctx, w.ID, "upstream 500"); err != nil {
+		t.Fatalf("stamp initial error: %v", err)
+	}
+
+	f.client.withSearchResults(nil)
+	if _, _, err := f.svc.CheckIssueWatch(ctx, w); err != nil {
+		t.Fatalf("check recovered watch: %v", err)
+	}
+	reloaded, err := f.store.GetIssueWatch(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("reload watch: %v", err)
+	}
+	if reloaded.LastError != "" {
+		t.Errorf("last error = %q, want cleared after success", reloaded.LastError)
+	}
+	if reloaded.LastErrorAt != nil {
+		t.Errorf("last error timestamp = %v, want cleared after success", reloaded.LastErrorAt)
+	}
+}
+
+// TestService_CheckIssueWatch_ResolvesSoleInstance pins acceptance (b): an
+// unbound (NULL-instance) watch resolves to its workspace's sole instance at
+// poll time.
+func TestService_CheckIssueWatch_ResolvesSoleInstance(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "Primary", "tok") // the sole healthy instance, with a secret
+	if err := f.store.UpdateAuthHealthForInstance(ctx, inst.ID, true, "", time.Now().UTC()); err != nil {
+		t.Fatalf("mark instance healthy: %v", err)
+	}
+	f.client.withSearchResults([]SentryIssue{
+		{ShortID: "PROJ-1", Title: "one", Permalink: "https://sentry.io/issues/PROJ-1"},
+	})
+	// Watch created directly with a NULL instance (migrated legacy row).
+	w := newTestIssueWatch("ws-1")
+	if err := f.store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("seed unbound watch: %v", err)
+	}
+	if w.SentryInstanceID != "" {
+		t.Fatalf("expected unbound watch, got instance %q", w.SentryInstanceID)
+	}
+	gotInstanceID, got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check unbound watch: %v", err)
+	}
+	if gotInstanceID != inst.ID {
+		t.Errorf("resolved instance = %q, want sole instance %q", gotInstanceID, inst.ID)
+	}
+	if len(got) != 1 || got[0].ShortID != "PROJ-1" {
+		t.Fatalf("expected sole-instance resolution to return PROJ-1, got %+v", got)
+	}
+}
+
+// TestService_ResolveWatchInstanceID_SoleInstanceIgnoresHealth pins the
+// ADR-0030 single-instance contract: an unbound watch resolves to its
+// workspace's only instance even when that instance has never been health
+// probed (LastOk still false) — matching the pre-existing behavior every
+// poller test's saveConfigForWorkspace helper relies on.
+func TestService_ResolveWatchInstanceID_SoleInstanceIgnoresHealth(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "Primary", "tok")
+
+	instanceID, err := f.svc.resolveWatchInstanceID(ctx, newTestIssueWatch("ws-1"))
+	if err != nil {
+		t.Fatalf("resolve watch instance: %v", err)
+	}
+	if instanceID != inst.ID {
+		t.Errorf("resolved instance = %q, want sole instance %q", instanceID, inst.ID)
+	}
+}
+
+func TestService_ResolveWatchInstanceID_AmbiguousMultiInstancePrefersHealthy(t *testing.T) {
+	t.Run("selects the sole healthy instance among several", func(t *testing.T) {
+		f := newSvcFixture(t)
+		ctx := context.Background()
+		f.seedInstance(t, "ws-1", "Unhealthy", "tok")
+		healthy := f.seedInstance(t, "ws-1", "Healthy", "tok")
+		if err := f.store.UpdateAuthHealthForInstance(ctx, healthy.ID, true, "", time.Now().UTC()); err != nil {
+			t.Fatalf("mark instance healthy: %v", err)
+		}
+
+		instanceID, err := f.svc.resolveWatchInstanceID(ctx, newTestIssueWatch("ws-1"))
+		if err != nil {
+			t.Fatalf("resolve watch instance: %v", err)
+		}
+		if instanceID != healthy.ID {
+			t.Errorf("resolved instance = %q, want healthy instance %q", instanceID, healthy.ID)
+		}
+	})
+
+	t.Run("rejects when several instances exist and none is healthy", func(t *testing.T) {
+		f := newSvcFixture(t)
+		ctx := context.Background()
+		f.seedInstance(t, "ws-1", "A", "tok")
+		f.seedInstance(t, "ws-1", "B", "tok")
+
+		if _, err := f.svc.resolveWatchInstanceID(ctx, newTestIssueWatch("ws-1")); !errors.Is(err, ErrNotConfigured) {
+			t.Errorf("expected ErrNotConfigured with no healthy instance among several, got %v", err)
+		}
+	})
+
+	t.Run("rejects when multiple instances are healthy", func(t *testing.T) {
+		f := newSvcFixture(t)
+		ctx := context.Background()
+		for _, name := range []string{"A", "B"} {
+			instance := f.seedInstance(t, "ws-1", name, "tok")
+			if err := f.store.UpdateAuthHealthForInstance(ctx, instance.ID, true, "", time.Now().UTC()); err != nil {
+				t.Fatalf("mark %s healthy: %v", name, err)
+			}
+		}
+
+		if _, err := f.svc.resolveWatchInstanceID(ctx, newTestIssueWatch("ws-1")); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("expected ErrInvalidConfig with multiple healthy instances, got %v", err)
+		}
+	})
+}
+
+// TestService_CheckIssueWatch_UnboundNoInstanceStampsError pins the other half
+// of acceptance (b): an unbound watch whose workspace has no instance stamps a
+// last_error and skips, without disabling the watch.
+func TestService_CheckIssueWatch_UnboundNoInstanceStampsError(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	w := newTestIssueWatch("ws-empty") // workspace has zero instances
+	if err := f.store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("seed watch: %v", err)
+	}
+	if _, _, err := f.svc.CheckIssueWatch(ctx, w); err == nil {
+		t.Error("expected an error when no instance can be resolved")
+	}
+	refreshed, _ := f.store.GetIssueWatch(ctx, w.ID)
+	if refreshed.LastError == "" {
+		t.Error("expected last_error stamped when resolution fails")
+	}
+	if !refreshed.Enabled {
+		t.Error("watch must stay enabled (stamp + skip, not disable) so it auto-heals")
+	}
+}

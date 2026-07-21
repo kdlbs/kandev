@@ -21,7 +21,15 @@ export type ViewContentProps = {
   showMaximizeButton?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
+  mobileWorkflowNavigation?: MobileWorkflowNavigation;
+};
+
+export type MobileWorkflowNavigation = {
+  activeWorkflowId: string;
+  workflows: Array<{ id: string; name: string; taskCount: number }>;
+  onWorkflowChange: (workflowId: string) => void;
 };
 
 export type ViewRegistryEntry = {
@@ -62,4 +70,9 @@ export function getViewByStoredValue(value: string): ViewRegistryEntry | undefin
 
 export function getDefaultView(): ViewRegistryEntry {
   return VIEW_REGISTRY[0];
+}
+
+export function getEffectiveView(value: string, isMobile: boolean): ViewRegistryEntry {
+  if (isMobile) return getDefaultView();
+  return getViewByStoredValue(value) ?? getDefaultView();
 }

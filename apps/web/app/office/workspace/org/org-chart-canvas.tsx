@@ -89,7 +89,7 @@ export function OrgChartCanvas({ agents }: OrgChartCanvasProps) {
   if (agents.length === 0) return <EmptyOrgState />;
 
   return (
-    <div className="relative flex-1 min-h-0 overflow-auto">
+    <div className="relative flex-1 min-h-0 overflow-auto p-4 md:p-6">
       <OrgZoomControls
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
@@ -98,6 +98,7 @@ export function OrgChartCanvas({ agents }: OrgChartCanvasProps) {
       />
 
       <div
+        className="mx-auto"
         style={{
           width: canvasW * zoom,
           height: canvasH * zoom,

@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/components/routing/app-link";
+import { useRouter } from "@/lib/routing/client-router";
 import { IconChevronRight, IconPlayerPlay, IconDeviceFloppy } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -19,7 +19,7 @@ import {
   deleteRoutineTrigger,
 } from "@/lib/api/domains/office-api";
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
-import { timeAgo } from "../../components/shared/time-ago";
+import { timeAgo } from "@/lib/utils/time";
 import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
 
 // Lift the form state out of the component so the file stays under the

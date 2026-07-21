@@ -5,6 +5,8 @@ export class JiraSettingsPage {
   readonly projectInput: Locator;
   readonly emailInput: Locator;
   readonly secretInput: Locator;
+  readonly instanceSelect: Locator;
+  readonly authSelect: Locator;
   readonly testButton: Locator;
   readonly saveButton: Locator;
   readonly deleteButton: Locator;
@@ -15,8 +17,12 @@ export class JiraSettingsPage {
     this.projectInput = page.getByTestId("jira-project-input");
     this.emailInput = page.getByTestId("jira-email-input");
     this.secretInput = page.getByTestId("jira-secret-input");
+    this.instanceSelect = page.locator("#jira-instance");
+    this.authSelect = page.locator("#jira-auth");
     this.testButton = page.getByTestId("jira-test-button");
-    this.saveButton = page.getByTestId("jira-save-button");
+    this.saveButton = page
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: /save changes/i });
     this.deleteButton = page.getByTestId("jira-delete-button");
     this.statusBanner = page.getByTestId("integration-auth-status-banner");
   }
@@ -31,5 +37,20 @@ export class JiraSettingsPage {
     if (args.email !== undefined) await this.emailInput.fill(args.email);
     await this.secretInput.fill(args.secret);
     if (args.projectKey) await this.projectInput.fill(args.projectKey);
+  }
+
+  /** Open the Instance dropdown and pick "Atlassian Cloud" or "Server / Data Center". */
+  async selectInstance(kind: "cloud" | "server") {
+    await this.instanceSelect.click();
+    const label = kind === "server" ? "Server / Data Center" : "Atlassian Cloud";
+    await this.page.getByRole("option", { name: label, exact: true }).click();
+  }
+
+  /** Open the Auth-method dropdown and pick by visible label. */
+  async selectAuth(
+    label: "API token (recommended)" | "Browser session cookie" | "Personal Access Token",
+  ) {
+    await this.authSelect.click();
+    await this.page.getByRole("option", { name: label, exact: true }).click();
   }
 }

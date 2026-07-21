@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -37,6 +38,19 @@ type Config struct {
 // DefaultBranchPrefix is used when no repository-specific prefix is provided.
 const DefaultBranchPrefix = "feature/"
 
+// DefaultBranchNameTemplate is the branch template used for new repositories.
+const DefaultBranchNameTemplate = "feature/{title}-{suffix}"
+
+// BranchNameTemplateInput contains the values available to branch name templates.
+// Users write literal prefixes directly in Template; {prefix} is not supported.
+type BranchNameTemplateInput struct {
+	Template string
+	TaskID   string
+	Title    string
+	Ticket   string
+	Suffix   string
+}
+
 // Validate validates the configuration and returns an error if invalid.
 func (c *Config) Validate() error {
 	if c.BranchPrefix == "" {
@@ -66,13 +80,25 @@ func (c *Config) ExpandedTasksBasePath() (string, error) {
 }
 
 // TaskWorktreePath returns the full path for a worktree inside a task directory.
-// Format: {tasksBase}/{taskDirName}/{repoName}
-func (c *Config) TaskWorktreePath(taskDirName, repoName string) (string, error) {
+//
+// Layout:
+//   - branchSlug == "" → {tasksBase}/{taskDirName}/{repoName}         (legacy single-branch path)
+//   - branchSlug != "" → {tasksBase}/{taskDirName}/{repoName}-{slug}  (sibling at task root)
+//
+// Additional branches sit as siblings of the primary worktree under the task
+// root instead of nesting inside it. Nesting (e.g. `<task>/<repo>/<slug>/`)
+// places the second worktree INSIDE the first worktree's working tree, which
+// pollutes the primary's git scope (file scans, status, etc.) and surfaces a
+// surprise subdirectory to the agent working in the primary.
+func (c *Config) TaskWorktreePath(taskDirName, repoName, branchSlug string) (string, error) {
 	basePath, err := c.ExpandedTasksBasePath()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(basePath, taskDirName, repoName), nil
+	if branchSlug == "" {
+		return filepath.Join(basePath, taskDirName, repoName), nil
+	}
+	return filepath.Join(basePath, taskDirName, repoName+"-"+branchSlug), nil
 }
 
 // BranchName returns the branch name for a given task ID and suffix.
@@ -87,10 +113,19 @@ func (c *Config) SemanticBranchName(semanticName, suffix string) string {
 	return c.BranchPrefix + semanticName + "-" + suffix
 }
 
+// isASCIIAlphaNum reports whether r is an ASCII letter or digit. Restricting
+// to ASCII (rather than the broader unicode.IsLetter/IsDigit) keeps branch
+// and worktree-directory names usable across tools and filesystems — Unicode
+// letters such as CJK ideographs, Cyrillic, or Arabic characters are valid
+// git refs but break many downstream consumers (see issue #1081).
+func isASCIIAlphaNum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
 // SanitizeForBranch converts a task title into a valid git branch name component.
 // It:
 // - Converts to lowercase
-// - Replaces spaces and special characters with hyphens
+// - Replaces spaces and non-ASCII-alphanumeric characters with hyphens
 // - Removes consecutive hyphens
 // - Truncates to maxLen characters
 // - Removes leading/trailing hyphens
@@ -102,12 +137,12 @@ func SanitizeForBranch(title string, maxLen int) string {
 	// Convert to lowercase
 	result := strings.ToLower(title)
 
-	// Replace any character that's not alphanumeric with a hyphen
-	// Git branch names allow: a-z, A-Z, 0-9, /, ., _, -
-	// We'll use only alphanumeric and hyphens for cleaner names
+	// Replace any character that's not ASCII-alphanumeric with a hyphen.
+	// Git branch names allow a broader character set, but we restrict to ASCII
+	// alphanumerics + hyphens for cleaner, portable names.
 	var sb strings.Builder
 	for _, r := range result {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		if isASCIIAlphaNum(r) {
 			sb.WriteRune(r)
 		} else {
 			sb.WriteRune('-')
@@ -140,23 +175,94 @@ func NormalizeBranchPrefix(prefix string) string {
 	return trimmed
 }
 
-// TaskBranchName returns the standard per-task branch name used by isolated
-// executors. The random suffix keeps similarly titled tasks from colliding.
-func TaskBranchName(taskTitle, taskID, prefix string) string {
-	return TaskBranchNameWithSuffix(taskTitle, taskID, prefix, SmallSuffix(3))
+// NormalizeBranchNameTemplate trims and falls back to the default template.
+func NormalizeBranchNameTemplate(template string) string {
+	trimmed := strings.TrimSpace(template)
+	if trimmed == "" {
+		return DefaultBranchNameTemplate
+	}
+	return trimmed
 }
 
-// TaskBranchNameWithSuffix is the deterministic form of TaskBranchName used by
-// worktree naming, where the caller already generated the suffix.
+// ValidateBranchNameTemplate ensures a branch template can render to a safe git branch.
+func ValidateBranchNameTemplate(template string) error {
+	_, err := RenderTaskBranchName(BranchNameTemplateInput{
+		Template: template,
+		TaskID:   "task-123",
+		Title:    "Example task",
+		Ticket:   "TICKET-123",
+		Suffix:   "abc",
+	})
+	return err
+}
+
+// RenderTaskBranchName applies a repository branch-name template and validates
+// that the rendered value is safe to pass to git as a local branch name.
+func RenderTaskBranchName(input BranchNameTemplateInput) (string, error) {
+	template := NormalizeBranchNameTemplate(input.Template)
+
+	title := SanitizeForBranch(input.Title, 20)
+	if title == "" {
+		title = SanitizeForBranch(input.TaskID, 20)
+	}
+	if title == "" {
+		title = "task"
+	}
+
+	titleFull := SanitizeForBranch(input.Title, 80)
+	if titleFull == "" {
+		titleFull = SanitizeForBranch(input.TaskID, 80)
+	}
+	if titleFull == "" {
+		titleFull = "task"
+	}
+
+	taskID := SanitizeForBranch(input.TaskID, 80)
+	ticket := SanitizeForBranch(input.Ticket, 80)
+	suffix := SanitizeForBranch(input.Suffix, 16)
+
+	replacements := map[string]string{
+		"{title}":      title,
+		"{title_full}": titleFull,
+		"{task_id}":    taskID,
+		"{ticket}":     ticket,
+		"{issue_key}":  ticket,
+		"{suffix}":     suffix,
+	}
+	rendered := template
+	for placeholder, value := range replacements {
+		rendered = strings.ReplaceAll(rendered, placeholder, value)
+	}
+	rendered = strings.TrimSpace(rendered)
+	if !isSafeRenderedBranchName(rendered) {
+		return "", fmt.Errorf("invalid branch name")
+	}
+	return rendered, nil
+}
+
+// TaskBranchNameWithSuffix builds the per-task branch name from a caller-supplied suffix.
+// The caller is responsible for generating the suffix (e.g. SmallSuffix(3)) so that
+// naming is deterministic when the suffix is derived externally.
 func TaskBranchNameWithSuffix(taskTitle, taskID, prefix, suffix string) string {
-	sanitized := SanitizeForBranch(taskTitle, 20)
-	if sanitized == "" {
-		sanitized = SanitizeForBranch(taskID, 20)
+	normalizedPrefix := branchPrefixWithSeparator(prefix)
+	branch, err := RenderTaskBranchName(BranchNameTemplateInput{
+		Template: normalizedPrefix + "{title}-{suffix}",
+		TaskID:   taskID,
+		Title:    taskTitle,
+		Suffix:   suffix,
+	})
+	if err == nil {
+		return branch
 	}
-	if sanitized == "" {
-		sanitized = "task"
+	return normalizedPrefix + "task-" + suffix
+}
+
+func branchPrefixWithSeparator(prefix string) string {
+	normalizedPrefix := NormalizeBranchPrefix(prefix)
+	if !strings.HasSuffix(normalizedPrefix, "/") && !strings.HasSuffix(normalizedPrefix, "-") {
+		normalizedPrefix += "-"
 	}
-	return NormalizeBranchPrefix(prefix) + sanitized + "-" + suffix
+	return normalizedPrefix
 }
 
 // ValidateBranchPrefix ensures a prefix contains only safe branch characters.
@@ -175,6 +281,81 @@ func ValidateBranchPrefix(prefix string) error {
 		return fmt.Errorf("invalid branch prefix")
 	}
 	return nil
+}
+
+var renderedBranchNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
+
+func isSafeRenderedBranchName(branch string) bool {
+	if branch == "" || len(branch) > 255 {
+		return false
+	}
+	if strings.Contains(branch, "..") || strings.Contains(branch, "@{") {
+		return false
+	}
+	if strings.Contains(branch, "//") || strings.HasSuffix(branch, "/") {
+		return false
+	}
+	for _, component := range strings.Split(branch, "/") {
+		if component == "" ||
+			strings.HasPrefix(component, ".") ||
+			strings.HasSuffix(component, ".") ||
+			strings.HasSuffix(component, ".lock") {
+			return false
+		}
+	}
+	return renderedBranchNameRegex.MatchString(branch)
+}
+
+// TicketForBranchName resolves the stable external ticket value used by branch templates.
+func TicketForBranchName(identifier string, metadata map[string]any) string {
+	if trimmed := strings.TrimSpace(identifier); trimmed != "" {
+		return trimmed
+	}
+	if value := metadataString(metadata, "jira_issue_key"); value != "" {
+		return value
+	}
+	if value := metadataString(metadata, "linear_issue_identifier"); value != "" {
+		return value
+	}
+	if repo := metadataString(metadata, "issue_repo"); repo != "" {
+		if number := metadataNumberString(metadata, "issue_number"); number != "" {
+			return SanitizeForBranch(repo+"-"+number, 80)
+		}
+	}
+	if repo := metadataString(metadata, "pr_repo"); repo != "" {
+		if number := metadataNumberString(metadata, "pr_number"); number != "" {
+			return SanitizeForBranch(repo+"-"+number, 80)
+		}
+	}
+	return ""
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	if value, ok := metadata[key].(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+func metadataNumberString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	switch value := metadata[key].(type) {
+	case int:
+		return strconv.Itoa(value)
+	case int64:
+		return strconv.FormatInt(value, 10)
+	case float64:
+		return strconv.FormatInt(int64(value), 10)
+	case string:
+		return strings.TrimSpace(value)
+	default:
+		return ""
+	}
 }
 
 const branchSuffixAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -220,7 +401,7 @@ func SanitizeRepoDirName(name string) string {
 	sb.Grow(len(name))
 	for _, r := range name {
 		switch {
-		case unicode.IsLetter(r), unicode.IsDigit(r):
+		case isASCIIAlphaNum(r):
 			sb.WriteRune(r)
 		case r == '_', r == '.', r == '-':
 			sb.WriteRune(r)
@@ -233,6 +414,37 @@ func SanitizeRepoDirName(name string) string {
 }
 
 var repoDirHyphenRun = regexp.MustCompile(`-+`)
+
+// SanitizeBranchSlug converts a git branch name into a filesystem-safe single
+// path segment for use under the per-repo worktree directory. Forward slashes
+// (common in branch names like "feature/foo") collapse to hyphens so the slug
+// never introduces extra path levels. Returns the empty string when the input
+// has no usable characters — callers MUST treat that as "no nesting" rather
+// than as an empty path segment.
+//
+// Determinism: same branch name always produces the same slug. Two branches
+// that differ only in unsafe characters (e.g. "feat/a" and "feat-a") collapse
+// to the same slug and would collide on disk; the service layer should reject
+// such duplicates before reaching the worktree manager.
+func SanitizeBranchSlug(branch string) string {
+	if branch == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.Grow(len(branch))
+	for _, r := range branch {
+		switch {
+		case isASCIIAlphaNum(r):
+			sb.WriteRune(r)
+		case r == '_', r == '.', r == '-':
+			sb.WriteRune(r)
+		default:
+			sb.WriteRune('-')
+		}
+	}
+	result := repoDirHyphenRun.ReplaceAllString(sb.String(), "-")
+	return strings.Trim(result, "-.")
+}
 
 // SemanticWorktreeName generates a semantic worktree directory name from a task title.
 // Format: {sanitizedTitle}_{suffix} e.g. fix-login-bug_ab12cd34

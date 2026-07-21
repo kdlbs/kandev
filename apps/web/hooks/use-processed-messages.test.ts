@@ -7,9 +7,16 @@ import {
 } from "@/lib/types/http";
 import type { RichMetadata } from "@/components/task/chat/types";
 import {
+  buildGroupedRenderItems,
   collapseTodoSnapshotsPerTurn,
   deduplicateAgentBootResumes,
+  insertLastAgentErrorItem,
   isAgentBootResumeMessage,
+  isSetupScriptMessage,
+  messageListMapsEqual,
+  messageMapsEqualByIdentity,
+  reconcileRenderItems,
+  type RenderItem,
 } from "./use-processed-messages";
 
 function makeMessage(
@@ -36,6 +43,17 @@ function makeTodo(
   todos: Array<{ text: string; done?: boolean }>,
 ): Message {
   return { ...makeMessage(id, "todo", { todos }), turn_id: turnId };
+}
+
+function toolExecute(id: string, turnId = "turn-1"): Message {
+  return {
+    ...makeMessage(id, "tool_execute", {
+      status: "complete",
+      normalized: { shell_exec: { command: "gh pr checks", output: { exit_code: 0 } } },
+    }),
+    content: "gh pr checks",
+    turn_id: turnId,
+  };
 }
 
 function bootStarted(id: string): Message {
@@ -80,6 +98,27 @@ describe("isAgentBootResumeMessage", () => {
   it("returns false when metadata is missing", () => {
     const msg = makeMessage("x", "script_execution");
     expect(isAgentBootResumeMessage(msg)).toBe(false);
+  });
+});
+
+describe("isSetupScriptMessage", () => {
+  it("returns true for a script_execution with script_type=setup", () => {
+    const msg = makeMessage("x", "script_execution", { script_type: "setup", status: "exited" });
+    expect(isSetupScriptMessage(msg)).toBe(true);
+  });
+
+  it("returns false for agent_boot and cleanup scripts", () => {
+    expect(isSetupScriptMessage(bootStarted("s1"))).toBe(false);
+    const cleanup = makeMessage("c1", "script_execution", { script_type: "cleanup" });
+    expect(isSetupScriptMessage(cleanup)).toBe(false);
+  });
+
+  it("returns false for non-script messages", () => {
+    expect(isSetupScriptMessage(makeMessage("m1", "message"))).toBe(false);
+  });
+
+  it("returns false when metadata is missing", () => {
+    expect(isSetupScriptMessage(makeMessage("x", "script_execution"))).toBe(false);
   });
 });
 
@@ -199,5 +238,186 @@ describe("collapseTodoSnapshotsPerTurn", () => {
     collapseTodoSnapshotsPerTurn([t1, t2]);
     expect(t1.metadata).toEqual({ todos: [{ text: "a" }] });
     expect(t2.metadata).toEqual({ todos: [{ text: "a", done: true }] });
+  });
+});
+
+describe("buildGroupedRenderItems prepare progress placement", () => {
+  it("does not inject prepare progress into a partial tool-only history window", () => {
+    const partialWindow = [toolExecute("tool-1"), toolExecute("tool-2")];
+
+    const result = buildGroupedRenderItems(partialWindow, "s1", {
+      canAnchorPrepareProgress: false,
+    });
+
+    expect(result.map((item) => item.type)).toEqual(["turn_group"]);
+  });
+
+  it("injects prepare progress when the session start is loaded", () => {
+    const initialPrompt = makeMessage("user-1", "message", undefined, "start");
+
+    const result = buildGroupedRenderItems([initialPrompt], "s1", {
+      canAnchorPrepareProgress: true,
+    });
+
+    expect(result.map((item) => item.type)).toEqual(["message", "prepare_progress"]);
+  });
+});
+
+describe("insertLastAgentErrorItem", () => {
+  it("inserts the notice after the nearest message before the error timestamp", () => {
+    const before = {
+      ...makeMessage("before", "message", undefined, "before"),
+      created_at: "2026-06-14T10:00:00Z",
+    };
+    const after = {
+      ...makeMessage("after", "message", undefined, "after"),
+      created_at: "2026-06-14T10:10:00Z",
+    };
+    const items = buildGroupedRenderItems([before, after], "s1", {
+      canAnchorPrepareProgress: false,
+    });
+
+    const result = insertLastAgentErrorItem(items, "s1", {
+      message: "peer disconnected before response",
+      occurredAt: "2026-06-14T10:05:00Z",
+    });
+
+    expect(result.map((item) => item.type)).toEqual(["message", "agent_error_notice", "message"]);
+  });
+
+  it("uses the notice as the only item when there are no messages", () => {
+    const result = insertLastAgentErrorItem([], "s1", {
+      message: "peer disconnected before response",
+      occurredAt: "2026-06-14T10:05:00Z",
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        type: "agent_error_notice",
+        sessionId: "s1",
+      }),
+    ]);
+  });
+
+  it("appends the notice when existing items have no usable timestamps", () => {
+    const untimed = makeMessage("untimed", "message", undefined, "untimed");
+    const items = buildGroupedRenderItems([untimed], "s1", {
+      canAnchorPrepareProgress: false,
+    });
+
+    const result = insertLastAgentErrorItem(items, "s1", {
+      message: "peer disconnected before response",
+      occurredAt: "2026-06-14T10:05:00Z",
+    });
+
+    expect(result.map((item) => item.type)).toEqual(["message", "agent_error_notice"]);
+  });
+});
+
+describe("messageMapsEqualByIdentity", () => {
+  it("treats maps with the same keys and identical Message refs as equal", () => {
+    const a = makeMessage("perm-1", "permission_request");
+    const b = makeMessage("perm-2", "permission_request");
+    const first = new Map<string, Message>([
+      ["tc-1", a],
+      ["tc-2", b],
+    ]);
+    const second = new Map<string, Message>([
+      ["tc-1", a],
+      ["tc-2", b],
+    ]);
+    expect(messageMapsEqualByIdentity(first, second)).toBe(true);
+  });
+
+  it("is false when sizes differ", () => {
+    const a = makeMessage("perm-1", "permission_request");
+    const first = new Map<string, Message>([["tc-1", a]]);
+    const second = new Map<string, Message>([
+      ["tc-1", a],
+      ["tc-2", makeMessage("perm-2", "permission_request")],
+    ]);
+    expect(messageMapsEqualByIdentity(first, second)).toBe(false);
+  });
+
+  it("is false when a key maps to a different Message ref (e.g. status changed)", () => {
+    const first = new Map<string, Message>([["tc-1", makeMessage("perm-1", "permission_request")]]);
+    const second = new Map<string, Message>([
+      ["tc-1", makeMessage("perm-1", "permission_request")],
+    ]);
+    expect(messageMapsEqualByIdentity(first, second)).toBe(false);
+  });
+});
+
+describe("messageListMapsEqual", () => {
+  it("treats maps whose array values share positional Message refs as equal", () => {
+    const c1 = makeMessage("child-1", "tool_call");
+    const c2 = makeMessage("child-2", "tool_call");
+    const first = new Map<string, Message[]>([["parent-1", [c1, c2]]]);
+    const second = new Map<string, Message[]>([["parent-1", [c1, c2]]]);
+    expect(messageListMapsEqual(first, second)).toBe(true);
+  });
+
+  it("is false when an array length changes (new child appended)", () => {
+    const c1 = makeMessage("child-1", "tool_call");
+    const first = new Map<string, Message[]>([["parent-1", [c1]]]);
+    const second = new Map<string, Message[]>([
+      ["parent-1", [c1, makeMessage("child-2", "tool_call")]],
+    ]);
+    expect(messageListMapsEqual(first, second)).toBe(false);
+  });
+
+  it("is false when a child Message ref changes positionally", () => {
+    const c1 = makeMessage("child-1", "tool_call");
+    const first = new Map<string, Message[]>([["parent-1", [c1]]]);
+    const second = new Map<string, Message[]>([
+      ["parent-1", [makeMessage("child-1", "tool_call")]],
+    ]);
+    expect(messageListMapsEqual(first, second)).toBe(false);
+  });
+});
+
+describe("reconcileRenderItems", () => {
+  const turnGroup = (id: string, messages: Message[]): RenderItem => ({
+    type: "turn_group",
+    id,
+    turnId: messages[0]?.turn_id ?? null,
+    messages,
+  });
+  const messageItem = (message: Message): RenderItem => ({ type: "message", message });
+
+  it("returns the prior array unchanged when nothing changed", () => {
+    const m1 = makeMessage("m1", "message");
+    const prev = [messageItem(m1)];
+    const next = [messageItem(m1)];
+    expect(reconcileRenderItems(prev, next)).toBe(prev);
+  });
+
+  it("reuses unchanged turn-group wrappers while replacing the changed one", () => {
+    const a1 = makeMessage("a1", "tool_call");
+    const a2 = makeMessage("a2", "tool_call");
+    const b1 = makeMessage("b1", "tool_call");
+    const b2 = makeMessage("b2", "tool_call");
+    const groupA = turnGroup("turn-group-a1", [a1, a2]);
+    const groupBPrev = turnGroup("turn-group-b1", [b1]);
+    const prev = [groupA, groupBPrev];
+
+    // groupA identical content (rebuilt wrapper); groupB grows by a token.
+    const groupBNext = turnGroup("turn-group-b1", [b1, b2]);
+    const next = [turnGroup("turn-group-a1", [a1, a2]), groupBNext];
+
+    const result = reconcileRenderItems(prev, next);
+    expect(result[0]).toBe(groupA); // stable → memo holds
+    expect(result[1]).toBe(groupBNext); // changed → fresh wrapper
+  });
+
+  it("keeps stable message wrappers and appends a new item", () => {
+    const m1 = makeMessage("m1", "message");
+    const prev = [messageItem(m1)];
+    const m2 = makeMessage("m2", "message");
+    const next = [messageItem(m1), messageItem(m2)];
+    const result = reconcileRenderItems(prev, next);
+    expect(result).not.toBe(prev);
+    expect(result[0]).toBe(prev[0]);
+    expect(result).toHaveLength(2);
   });
 });

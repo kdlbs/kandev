@@ -2,7 +2,6 @@
 
 import { useMemo, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
 import { filterTasksByRepositories } from "@/lib/kanban/filters";
@@ -26,8 +25,9 @@ export function useKanbanData({
   const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
 
-  // Data fetching hooks
-  useWorkflows(workspaceState.activeId, true);
+  // Data fetching hooks. `state.workflows.items` is loaded by `AppSidebar` via
+  // `useEnsureWorkspaceWorkflows` (unconditional, above any collapsible), so
+  // the kanban page only needs the workflow snapshot here.
   useWorkflowSnapshot(workflowsState.activeId);
 
   // User settings hook
@@ -63,21 +63,25 @@ export function useKanbanData({
     [kanban.steps],
   );
 
-  const tasks = kanban.tasks.map((task: (typeof kanban.tasks)[number]) => ({
-    id: task.id,
-    title: task.title,
-    workflowStepId: task.workflowStepId,
-    state: task.state,
-    description: task.description,
-    position: task.position,
-    repositoryId: task.repositoryId,
-    repositories: task.repositories,
-    primarySessionId: task.primarySessionId,
-    sessionCount: task.sessionCount,
-    reviewStatus: task.reviewStatus,
-    parentTaskId: task.parentTaskId,
-    createdAt: task.createdAt,
-  }));
+  // Memoized so a fresh array of card objects isn't produced on every store
+  // change. Without this, `visibleTasks`/`filteredTasks` (which depend on
+  // `tasks`) and every downstream card re-render on any unrelated store update,
+  // pegging the CPU on large boards.
+  const tasks = useMemo(
+    () =>
+      kanban.tasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        workflowStepId: task.workflowStepId,
+        state: task.state,
+        description: task.description,
+        position: task.position,
+        repositoryId: task.repositoryId,
+        repositories: task.repositories,
+        primarySessionId: task.primarySessionId,
+      })),
+    [kanban.tasks],
+  );
 
   const activeSteps = kanban.workflowId ? steps : [];
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { IconArrowBackUp, IconLoader2 } from "@tabler/icons-react";
 
@@ -18,14 +18,24 @@ export function HunkActionBar({
   onMouseLeave,
 }: HunkActionBarProps) {
   const [loading, setLoading] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
 
   const handleClick = async () => {
     setLoading(true);
     try {
       await onRevert();
-      // Don't setLoading(false) on success — the diff will re-render
-      // and unmount this component when the git status refreshes
     } catch {
+      // Revert failures are surfaced by the caller; keep this overlay from
+      // turning a failed async action into an unhandled event rejection.
+    } finally {
+      if (!mountedRef.current) return;
       setLoading(false);
     }
   };

@@ -4,6 +4,7 @@ import { openSessionInEditor } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { openFileInVscode } from "@/lib/api/domains/vscode-api";
+import { useToast } from "@/components/toast-provider";
 
 type OpenEditorOptions = {
   filePath?: string;
@@ -11,6 +12,7 @@ type OpenEditorOptions = {
   column?: number;
   editorId?: string;
   editorType?: string;
+  worktreeId?: string;
 };
 
 /**
@@ -34,6 +36,7 @@ function parseInternalVscodeURL(url: string): { file: string; line: number; col:
 }
 
 export function useOpenSessionInEditor(sessionId?: string | null) {
+  const { toast } = useToast();
   const request = useRequest(async (options?: OpenEditorOptions) => {
     if (!sessionId) {
       return null;
@@ -46,6 +49,7 @@ export function useOpenSessionInEditor(sessionId?: string | null) {
         file_path: options?.filePath,
         line: options?.line,
         column: options?.column,
+        worktree_id: options?.worktreeId,
       },
       { cache: "no-store" },
     );
@@ -63,13 +67,25 @@ export function useOpenSessionInEditor(sessionId?: string | null) {
         return response;
       }
 
+      // Editor integrations may return registered custom schemes such as vscode://.
       window.open(response.url, "_blank", "noopener,noreferrer");
     }
     return response ?? null;
   });
 
   return {
-    open: (options?: OpenEditorOptions) => request.run(options),
+    open: async (options?: OpenEditorOptions) => {
+      try {
+        return await request.run(options);
+      } catch (error) {
+        toast({
+          title: "Failed to open editor",
+          description: error instanceof Error ? error.message : "Request failed",
+          variant: "error",
+        });
+        return null;
+      }
+    },
     status: request.status,
     isLoading: request.isLoading,
   };

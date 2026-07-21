@@ -63,6 +63,43 @@ func (s *Service) GetTaskSession(ctx context.Context, sessionID string) (*models
 	return s.sessions.GetTaskSession(ctx, sessionID)
 }
 
+// GetExecutorRunningBySessionID returns the live executor row for sessionID,
+// or models.ErrExecutorRunningNotFound if the session has none (e.g. it
+// never started, or has since completed and been cleaned up). Exposed at
+// the service layer — rather than requiring callers to reach into
+// repository.ExecutorRepository directly — for the Host data API's
+// acp_session_id fallback (ADR 0043): a session's ACP conversation id is
+// normally read from TaskSession.Metadata["acp"]["session_id"], but that key
+// is only populated once the agent has emitted a session_info frame;
+// executors_running.resume_token carries the same id and survives on
+// sessions that never got that far.
+func (s *Service) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
+	return s.executors.GetExecutorRunningBySessionID(ctx, sessionID)
+}
+
+func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp string) (*models.TaskSession, error) {
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	lastErr, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok {
+		return session, nil
+	}
+	if stamp != "" && !lastErr.MatchesStamp(stamp) {
+		return session, nil
+	}
+	now := time.Now().UTC()
+	updated, err := s.sessions.DismissLastAgentError(context.WithoutCancel(ctx), sessionID, lastErr, now)
+	if err != nil {
+		return nil, err
+	}
+	if !updated {
+		return session, nil
+	}
+	return s.sessions.GetTaskSession(ctx, sessionID)
+}
+
 // GetPrimarySession returns the primary session for a task.
 func (s *Service) GetPrimarySession(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	return s.sessions.GetPrimarySessionByTaskID(ctx, taskID)
@@ -82,6 +119,20 @@ func (s *Service) GetSessionCountsForTasks(ctx context.Context, taskIDs []string
 // GetPrimarySessionInfoForTasks returns a map of task ID to primary session info for the given task IDs.
 func (s *Service) GetPrimarySessionInfoForTasks(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
 	return s.sessions.GetPrimarySessionInfoByTaskIDs(ctx, taskIDs)
+}
+
+// GetPendingActionsForSessions returns pending user-action projections for
+// sessions whose messages may not be loaded by list views.
+func (s *Service) GetPendingActionsForSessions(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
+	return s.messages.GetPendingActionsBySessionIDs(ctx, sessionIDs)
+}
+
+// BatchGetSessionsForTasks returns all sessions for the given task IDs grouped
+// by task ID. Wraps the repository batch loader so callers in the handler
+// layer can derive primary session, session count, and per-task session info
+// from one round trip instead of three.
+func (s *Service) BatchGetSessionsForTasks(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error) {
+	return s.sessions.BatchGetSessionsByTaskIDs(ctx, taskIDs)
 }
 
 // SetPrimarySession sets a session as the primary session for its task.

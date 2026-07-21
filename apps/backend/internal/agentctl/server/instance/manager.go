@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"syscall"
@@ -23,6 +24,8 @@ import (
 // ServerFactory creates an HTTP handler for an instance given its config and process manager.
 type ServerFactory func(cfg *config.InstanceConfig, procMgr *process.Manager, log *logger.Logger) http.Handler
 
+const instanceHTTPShutdownGrace = 250 * time.Millisecond
+
 // Manager manages multiple agent instances.
 // It handles creation, tracking, and removal of agent instances,
 // each with their own HTTP server on a dedicated port.
@@ -33,19 +36,39 @@ type Manager struct {
 	portAlloc     *PortAllocator
 	serverFactory ServerFactory
 	mu            sync.RWMutex
+
+	// reaperStop is closed by Shutdown to signal the idle reaper to exit.
+	// reaperStopOnce serializes the close so concurrent Shutdown calls can't
+	// double-close; sync.Once is used instead of m.mu because m.mu guards
+	// the instances map and shouldn't gate a one-shot lifecycle signal.
+	// reaperWG waits for the reaper goroutine to finish before Shutdown returns.
+	reaperStop     chan struct{}
+	reaperStopOnce sync.Once
+	reaperWG       sync.WaitGroup
 }
 
 // NewManager creates a new instance manager.
+// If cfg.IdleTimeout > 0, a background goroutine periodically reaps
+// instances that have been idle (no in-flight HTTP requests and no
+// activity) for the configured duration.
 func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
 	// Clean up code-server processes orphaned by a previous session (safety net).
 	process.CleanupOrphanedCodeServers(log)
 
-	return &Manager{
-		config:    cfg,
-		logger:    log.WithFields(zap.String("component", "instance-manager")),
-		instances: make(map[string]*Instance),
-		portAlloc: NewPortAllocator(cfg.Ports.Base, cfg.Ports.Max),
+	m := &Manager{
+		config:     cfg,
+		logger:     log.WithFields(zap.String("component", "instance-manager")),
+		instances:  make(map[string]*Instance),
+		portAlloc:  NewPortAllocator(cfg.Ports.Base, cfg.Ports.Max),
+		reaperStop: make(chan struct{}),
 	}
+
+	if cfg.IdleTimeout > 0 {
+		m.reaperWG.Add(1)
+		go m.runIdleReaper(cfg.IdleTimeout, cfg.IdleReaperInterval)
+	}
+
+	return m
 }
 
 // SetServerFactory sets the factory function for creating HTTP handlers for instances.
@@ -74,26 +97,31 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 	agentCmd := m.resolveAgentCommand(req)
 	autoStart := req.AutoStart
-	mcpServers := buildMcpServerConfigs(req.McpServers)
+	mcpServers := m.buildMcpServerConfigs(req.McpServers)
 
 	m.logger.Info("CreateInstance: received request",
 		zap.String("req_protocol", req.Protocol),
 		zap.String("workspace_path", req.WorkspacePath))
 
 	overrides := &config.InstanceOverrides{
-		InstanceID:         id,
-		Protocol:           agent.Protocol(req.Protocol),
-		AgentCommand:       agentCmd,
-		WorkDir:            req.WorkspacePath,
-		AutoStart:          &autoStart,
-		Env:                config.CollectAgentEnv(req.Env),
-		AgentType:          req.AgentType,
-		McpServers:         mcpServers,
-		SessionID:          req.SessionID,
-		TaskID:             req.TaskID,
-		DisableAskQuestion: req.DisableAskQuestion,
-		AssumeMcpSse:       req.AssumeMcpSse,
-		McpMode:            req.McpMode,
+		InstanceID:             id,
+		Protocol:               agent.Protocol(req.Protocol),
+		AgentCommand:           agentCmd,
+		WorkDir:                req.WorkspacePath,
+		AutoStart:              &autoStart,
+		Env:                    config.CollectAgentEnv(req.Env),
+		AutoApprovePermissions: req.AutoApprovePermissions,
+		AgentType:              req.AgentType,
+		McpServers:             mcpServers,
+		SessionID:              req.SessionID,
+		TaskID:                 req.TaskID,
+		DisableAskQuestion:     req.DisableAskQuestion,
+		AssumeMcpSse:           req.AssumeMcpSse,
+		AssumeMcpHttp:          req.AssumeMcpHttp,
+		McpMode:                req.McpMode,
+		RequiresProcessKill:    req.RequiresProcessKill,
+		StripEnv:               req.StripEnv,
+		BaseBranches:           req.BaseBranches,
 	}
 
 	m.logger.Info("CreateInstance: applying overrides",
@@ -108,14 +136,10 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
 
-	// Start workspace tracker immediately so process output can be streamed
-	// even without an agent running (for dev server, etc.)
-	procMgr.GetWorkspaceTracker().Start(context.Background())
+	// Start root + per-repo trackers so file-change events fire even in passthrough mode.
+	procMgr.StartAllWorkspaceTrackers(context.Background())
 
-	handler := m.buildHTTPHandler(instanceCfg, procMgr)
-	httpServer := m.startHTTPServer(port, listener, handler, id)
-
-	// Create and store instance
+	// Create instance up-front so the activity middleware can reference it.
 	inst := &Instance{
 		ID:            id,
 		Port:          port,
@@ -125,8 +149,12 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		Env:           req.Env,
 		CreatedAt:     time.Now(),
 		manager:       procMgr,
-		server:        httpServer,
 	}
+	inst.MarkActivity()
+
+	handler := activityMiddleware(inst)(m.buildHTTPHandler(instanceCfg, procMgr))
+	httpServer := m.startHTTPServer(port, listener, handler, id)
+	inst.server = httpServer
 	m.instances[id] = inst
 
 	m.logger.Info("created instance",
@@ -148,7 +176,9 @@ func (m *Manager) allocatePortAndListener(id string) (int, net.Listener, error) 
 		if err != nil {
 			return 0, nil, fmt.Errorf("failed to allocate port: %w", err)
 		}
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", allocated))
+		// Bind loopback-only when auth is disabled (no token); otherwise bind
+		// all interfaces so Docker/remote executors can reach the instance.
+		ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", m.config.ListenHost(), allocated))
 		if err != nil {
 			if errors.Is(err, syscall.EADDRINUSE) || strings.Contains(err.Error(), "address already in use") {
 				m.portAlloc.MarkUnavailable(allocated)
@@ -177,10 +207,22 @@ func (m *Manager) resolveAgentCommand(req *CreateRequest) string {
 	return agentCmd
 }
 
-// buildMcpServerConfigs converts instance McpServerConfig entries to config.McpServerConfig.
-func buildMcpServerConfigs(mcpServers []McpServerConfig) []config.McpServerConfig {
+// buildMcpServerConfigs converts instance McpServerConfig entries to
+// config.McpServerConfig. Stdio entries whose Command can't be resolved
+// (binary missing from PATH, no longer installed, etc.) are dropped with
+// a warning so the agent doesn't spawn a permanently-broken child for an
+// MCP it can never invoke. See GH issue #1247 — the `/snap/bin/brave`
+// stale-MCP repro.
+func (m *Manager) buildMcpServerConfigs(mcpServers []McpServerConfig) []config.McpServerConfig {
 	result := make([]config.McpServerConfig, 0, len(mcpServers))
 	for _, mcp := range mcpServers {
+		if reason := mcpStdioValidationError(mcp); reason != "" {
+			m.logger.Warn("dropping MCP server: stdio command unavailable",
+				zap.String("mcp_name", mcp.Name),
+				zap.String("command", mcp.Command),
+				zap.String("reason", reason))
+			continue
+		}
 		result = append(result, config.McpServerConfig{
 			Name:    mcp.Name,
 			URL:     mcp.URL,
@@ -192,6 +234,43 @@ func buildMcpServerConfigs(mcpServers []McpServerConfig) []config.McpServerConfi
 		})
 	}
 	return result
+}
+
+// mcpStdioValidationError returns an empty string when the MCP entry is
+// either non-stdio (URL transport) or its stdio Command resolves on PATH.
+// Otherwise it returns a human-readable reason the entry should be dropped.
+//
+// Caveat: PATH is resolved against the agentctl process's environment.
+// In Docker and SSH executor modes the agent may launch in a different
+// environment than agentctl, so a binary that lives only inside the
+// container/remote host but not on the agentctl host will be dropped
+// here even though it would have worked at agent runtime. For Standalone
+// and Sprites this is unambiguously correct; for Docker/SSH it's an
+// acceptable false positive — surfacing the warn log is better than
+// spawning a permanently broken child every session (the `/snap/bin/brave`
+// repro in GH issue #1247).
+func mcpStdioValidationError(mcp McpServerConfig) string {
+	// Non-stdio transports (sse, http, streamable_http) carry their endpoint
+	// in URL — nothing to validate locally.
+	if mcp.URL != "" {
+		return ""
+	}
+	if mcp.Command == "" {
+		return "stdio MCP entry has neither URL nor Command"
+	}
+	// Tolerate a compound `Command` string like "python3 -m mcp_server"
+	// where the user collapsed Command+Args into Command. The first token
+	// is the actual binary to look up; everything else is argv that the
+	// agent will splice in later. This is more permissive than the
+	// schema strictly allows, but it matches what real configs look like.
+	bin := mcp.Command
+	if i := strings.IndexAny(bin, " \t"); i > 0 {
+		bin = bin[:i]
+	}
+	if _, err := exec.LookPath(bin); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // buildHTTPHandler creates the HTTP handler for an instance.
@@ -245,59 +324,116 @@ func (m *Manager) ListInstances() []*InstanceInfo {
 
 // StopInstance stops and removes an instance by ID.
 func (m *Manager) StopInstance(ctx context.Context, id string) error {
-	// Get instance and remove from map under lock (quick operation)
-	m.mu.Lock()
+	m.mu.RLock()
 	inst, ok := m.instances[id]
+	m.mu.RUnlock()
 	if !ok {
+		return fmt.Errorf("instance %s not found", id)
+	}
+	inst.stopMu.Lock()
+	defer inst.stopMu.Unlock()
+
+	// A concurrent successful stop may have removed the instance while this
+	// caller waited for the per-instance teardown lock.
+	m.mu.Lock()
+	if current, exists := m.instances[id]; !exists || current != inst {
 		m.mu.Unlock()
 		return fmt.Errorf("instance %s not found", id)
 	}
-	// Remove from map immediately so new instances aren't blocked
-	delete(m.instances, id)
+	inst.setStatus("stopping")
 	m.mu.Unlock()
 
 	m.logger.Debug("stopping instance", zap.String("instance_id", id))
-
-	// Stop the process manager (potentially slow, done without lock)
 	if inst.manager != nil {
-		if err := inst.manager.Stop(ctx); err != nil {
+		inst.manager.CloseAdmission()
+	}
+
+	// Quiesce HTTP before process teardown. CloseAdmission has already closed every
+	// process-start admission path, including handlers already in flight.
+	var httpStopErr error
+	if inst.server != nil {
+		httpStopErr = m.stopHTTPServer(ctx, id, inst.Port, inst.server)
+	}
+	// Stop the process manager (potentially slow, done without lock)
+	var processStopErr error
+	if inst.manager != nil {
+		if err := inst.manager.StopForTeardown(ctx); err != nil {
+			processStopErr = fmt.Errorf("stop process manager for instance %s: %w", id, err)
 			m.logger.Warn("error stopping process manager",
 				zap.String("instance_id", id),
 				zap.Error(err))
 		}
 	}
 
-	m.logger.Debug("StopInstance: shutting down HTTP server",
-		zap.String("instance_id", id),
-		zap.Int("port", inst.Port))
-
-	// Shutdown HTTP server (potentially slow, done without lock)
-	if inst.server != nil {
-		if err := inst.server.Shutdown(ctx); err != nil {
-			m.logger.Warn("error shutting down HTTP server",
-				zap.String("instance_id", id),
-				zap.Error(err))
-		}
+	stopErr := errors.Join(httpStopErr, processStopErr)
+	if httpStopErr != nil || (processStopErr != nil && !canReleaseInstanceResources(processStopErr)) {
+		return stopErr
 	}
 
 	m.logger.Debug("StopInstance: releasing port",
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
-
-	// Release port (quick operation, re-acquire lock)
 	m.mu.Lock()
-	m.portAlloc.Release(inst.Port)
+	if !inst.portReleased {
+		m.portAlloc.Release(inst.Port)
+		inst.portReleased = true
+	}
+	if stopErr == nil {
+		delete(m.instances, id)
+	}
 	m.mu.Unlock()
 
 	m.logger.Info("StopInstance completed",
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
 
+	return stopErr
+}
+
+type instanceResourceReleaseError interface {
+	CanReleaseInstanceResources() bool
+}
+
+func canReleaseInstanceResources(err error) bool {
+	var classified instanceResourceReleaseError
+	return errors.As(err, &classified) && classified.CanReleaseInstanceResources()
+}
+
+type instanceHTTPServer interface {
+	Shutdown(context.Context) error
+	Close() error
+}
+
+func (m *Manager) stopHTTPServer(ctx context.Context, id string, port int, server instanceHTTPServer) error {
+	serverCtx, cancel := context.WithTimeout(ctx, instanceHTTPShutdownGrace)
+	err := server.Shutdown(serverCtx)
+	cancel()
+	if err == nil || errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	m.logger.Debug("StopInstance: HTTP server graceful shutdown expired, closing active connections",
+		zap.String("instance_id", id),
+		zap.Int("port", port),
+		zap.Duration("grace", instanceHTTPShutdownGrace),
+		zap.Error(err))
+	if closeErr := server.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
+		m.logger.Warn("error closing HTTP server",
+			zap.String("instance_id", id),
+			zap.Error(closeErr))
+		return fmt.Errorf("close HTTP server for instance %s: %w", id, closeErr)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("shutdown HTTP server for instance %s: %w", id, err)
+	}
 	return nil
 }
 
 // Shutdown stops all instances gracefully.
 func (m *Manager) Shutdown(ctx context.Context) error {
+	// Stop the idle reaper first so it doesn't fire StopInstance concurrently
+	// with our explicit per-instance shutdown loop.
+	m.stopReaperOnce()
+
 	m.mu.Lock()
 	ids := make([]string, 0, len(m.instances))
 	for id := range m.instances {
@@ -316,4 +452,21 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	}
 
 	return lastErr
+}
+
+// stopReaperOnce closes the reaper stop channel exactly once and waits for
+// the reaper goroutine to drain. Safe to call multiple times.
+//
+// Note: reaperWG.Wait() blocks until the reaper finishes whatever sweep
+// is currently in flight. Each instance in that sweep gets its own bounded
+// context (idleReaperShutdownTimeout) independent of any caller deadline,
+// so a Shutdown(ctx) caller with a tight deadline can find that the
+// reaper drain consumed it before the main shutdown loop starts. The
+// reaper polls reaperStop between instances, so the worst-case drain is
+// one StopInstance round (15s), not N×timeout.
+func (m *Manager) stopReaperOnce() {
+	m.reaperStopOnce.Do(func() {
+		close(m.reaperStop)
+	})
+	m.reaperWG.Wait()
 }

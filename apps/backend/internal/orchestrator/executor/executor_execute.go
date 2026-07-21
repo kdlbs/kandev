@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"maps"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -28,6 +32,23 @@ func isConfigModeSession(session *models.TaskSession) bool {
 	return ok && cm
 }
 
+// resolveTaskSessionMCPMode derives restricted MCP access from canonical task
+// ownership and session purpose. Config mode wins because those sessions need
+// config tools even if their backing task is Office-owned.
+func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession) (string, error) {
+	if isConfigModeSession(session) {
+		return McpModeConfig, nil
+	}
+	task, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return "", fmt.Errorf("load task for MCP mode: %w", err)
+	}
+	if task != nil && task.AssigneeAgentProfileID != "" {
+		return McpModeOffice, nil
+	}
+	return "", nil
+}
+
 // isContainerizedExecutor returns true for executor types that run agents in
 // containers or remote sandboxes (Docker variants + Sprites). These executors
 // need GitHub token injection for git operations since they don't have access
@@ -40,6 +61,16 @@ func isContainerizedExecutor(executorType string) bool {
 	default:
 		return false
 	}
+}
+
+// executorNeedsResolvedCredentials reports whether an executor runs the agent
+// off the control-plane host and therefore needs credentials resolved into
+// req.Env (rather than inherited from the kandev process environment). This is
+// every containerized executor plus SSH, whose remote agentctl only receives
+// the credential keys we forward in req.Env.
+func executorNeedsResolvedCredentials(executorType string) bool {
+	return isContainerizedExecutor(executorType) ||
+		models.ExecutorType(executorType) == models.ExecutorTypeSSH
 }
 
 // runAgentProcessAsync starts the agent subprocess in a background goroutine.
@@ -57,35 +88,18 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 		updateCtx := context.WithoutCancel(ctx)
 
 		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
-			e.logger.Error("failed to start agent process",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("agent_execution_id", agentExecutionID),
-				zap.Error(err))
-			// Let the orchestrator handle auth errors as recoverable failures
-			// and (for resume) suppress the toast before the session is marked FAILED.
-			if e.onAgentStartFailed != nil && e.onAgentStartFailed(updateCtx, taskID, sessionID, agentExecutionID, err, fromResume) {
-				return
-			}
-			if updateErr := e.updateSessionState(updateCtx, taskID, sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
-				e.logger.Warn("failed to mark session as failed after start error",
-					zap.String("session_id", sessionID),
-					zap.Error(updateErr))
-			}
-			if escalateTaskOnFailure {
-				if updateErr := e.updateTaskState(updateCtx, taskID, v1.TaskStateFailed); updateErr != nil {
-					e.logger.Warn("failed to mark task as failed after start error",
-						zap.String("task_id", taskID),
-						zap.Error(updateErr))
-				}
-			}
-			// Clean up the execution environment (e.g., destroy remote Sprites instance).
-			// Use force=true since the agent process never fully started.
-			if stopErr := e.agentManager.StopAgent(updateCtx, agentExecutionID, true); stopErr != nil {
-				e.logger.Warn("failed to clean up agent after start failure",
-					zap.String("agent_execution_id", agentExecutionID),
-					zap.Error(stopErr))
-			}
+			e.handleAgentProcessStartFailure(
+				updateCtx, taskID, sessionID, agentExecutionID, err,
+				escalateTaskOnFailure, fromResume,
+			)
+			return
+		}
+		if _, terminal := e.stopStartedExecutionIfSessionTerminal(
+			updateCtx,
+			sessionID,
+			agentExecutionID,
+			"terminal post-start race",
+		); terminal {
 			return
 		}
 
@@ -93,24 +107,268 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 	}()
 }
 
+func (e *Executor) handleAgentProcessStartFailure(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	startErr error,
+	escalateTaskOnFailure, fromResume bool,
+) {
+	e.logger.Error("failed to start agent process",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("agent_execution_id", agentExecutionID),
+		zap.Error(startErr))
+
+	// A terminal transition may have landed while StartAgentProcess was
+	// blocked. Drop all failure/recovery side effects in that case. CANCELLED
+	// owns teardown only when another path has claimed this exact execution.
+	if terminalState, terminal := e.currentTerminalSessionState(ctx, sessionID); terminal {
+		if terminalState != models.TaskSessionStateCancelled ||
+			e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
+			e.stopFailedStartExecution(ctx, agentExecutionID, "terminal start race")
+		}
+		return
+	}
+
+	// Let the orchestrator handle auth errors as recoverable failures and
+	// (for resume) suppress the toast before the session is marked FAILED.
+	if e.onAgentStartFailed != nil && e.onAgentStartFailed(
+		ctx, taskID, sessionID, agentExecutionID, startErr, fromResume,
+	) {
+		return
+	}
+
+	changed, finalState, updateErr := e.transitionSessionState(
+		ctx, taskID, sessionID, models.TaskSessionStateFailed, startErr.Error(),
+	)
+	if updateErr != nil {
+		e.logger.Warn("failed to mark session as failed after start error",
+			zap.String("session_id", sessionID),
+			zap.Error(updateErr))
+	}
+	if changed && finalState == models.TaskSessionStateFailed && escalateTaskOnFailure {
+		if updateErr := e.writeTaskFailedForRuntime(ctx, taskID, sessionID); updateErr != nil {
+			e.logger.Warn("failed to mark task as failed after start error",
+				zap.String("task_id", taskID),
+				zap.Error(updateErr))
+		}
+	} else if changed && finalState == models.TaskSessionStateFailed {
+		e.writeTaskReviewStateIfNoWorkingSessions(ctx, taskID, sessionID)
+	}
+
+	// The agent process never fully started. Skip forced cleanup only when a
+	// concurrent path owns teardown for this exact cancelled execution.
+	if finalState != models.TaskSessionStateCancelled ||
+		e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
+		e.stopFailedStartExecution(ctx, agentExecutionID, "start failure")
+	}
+}
+
+func (e *Executor) claimForcedExecutionCleanup(sessionID, agentExecutionID string) bool {
+	if e.onExecutionCleanupClaim == nil {
+		return true
+	}
+	return e.onExecutionCleanupClaim(sessionID, agentExecutionID)
+}
+
+func (e *Executor) stopFailedStartExecution(ctx context.Context, agentExecutionID, phase string) {
+	if stopErr := e.agentManager.StopAgent(ctx, agentExecutionID, true); stopErr != nil {
+		e.logger.Warn("failed to clean up agent after "+phase,
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(stopErr))
+	}
+}
+
+func (e *Executor) currentTerminalSessionState(
+	ctx context.Context,
+	sessionID string,
+) (models.TaskSessionState, bool) {
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || !isStopTerminalSessionState(session.State) {
+		return "", false
+	}
+	return session.State, true
+}
+
+func (e *Executor) stopStartedExecutionIfSessionTerminal(
+	ctx context.Context,
+	sessionID, agentExecutionID, phase string,
+) (models.TaskSessionState, bool) {
+	terminalState, terminal := e.currentTerminalSessionState(ctx, sessionID)
+	if !terminal {
+		return "", false
+	}
+	if e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
+		e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+	}
+	return terminalState, true
+}
+
 // startAgentProcessAsync starts the agent subprocess and transitions the task to IN_PROGRESS on success.
 func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string) {
 	e.runAgentProcessAsync(ctx, taskID, sessionID, agentExecutionID, func(updCtx context.Context) {
-		if updateErr := e.updateTaskState(updCtx, taskID, v1.TaskStateInProgress); updateErr != nil {
+		if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, sessionID); updateErr != nil {
 			e.logger.Warn("failed to update task state to IN_PROGRESS after agent start",
 				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
 				zap.Error(updateErr))
 		}
 	}, true, false)
 }
 
+func (e *Executor) stopUnstartedExecution(ctx context.Context, sessionID, agentExecutionID string) {
+	if agentExecutionID == "" {
+		return
+	}
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if stopErr := e.agentManager.StopAgent(stopCtx, agentExecutionID, true); stopErr != nil {
+		e.logger.Warn("failed to stop unstarted agent execution",
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(stopErr))
+	}
+}
+
+func (e *Executor) cleanupUnstartedExecutionAfterPersistError(
+	ctx context.Context,
+	sessionID, agentExecutionID string,
+	persistErr error,
+) {
+	var superseded *SessionStateSupersededError
+	if errors.As(persistErr, &superseded) &&
+		superseded.State == models.TaskSessionStateCancelled &&
+		!e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
+		return
+	}
+	e.stopUnstartedExecution(ctx, sessionID, agentExecutionID)
+}
+
+func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, taskID, failedSessionID string) {
+	if e.onTaskReviewStateReconcile != nil {
+		e.onTaskReviewStateReconcile(ctx, taskID, failedSessionID)
+		return
+	}
+
+	if e.shouldSkipFailedStartReviewForTask(ctx, taskID, failedSessionID) {
+		return
+	}
+	if e.failedSessionStillWorkingOrUnknown(ctx, taskID, failedSessionID) {
+		return
+	}
+	if e.hasOtherWorkingSessions(ctx, taskID, failedSessionID) {
+		return
+	}
+	// When onTaskStateChange is configured, it owns event publishing for
+	// this write (see its doc comment) — keep routing through it rather
+	// than bypassing it. Only when NEITHER callback is set (no orchestrator
+	// wiring at all — production always wires both, see service.go's
+	// exec.SetOnTaskStateChange/SetOnTaskReviewStateReconcile) do we fall
+	// back to the archive-aware UpdateTaskStateIfCurrentIn CAS directly on
+	// the repository, so even that raw path can't race an archive that
+	// commits between shouldSkipFailedStartReviewForTask's read and this write.
+	if e.onTaskStateChange != nil {
+		if updateErr := e.onTaskStateChange(ctx, taskID, v1.TaskStateReview); updateErr != nil {
+			e.logger.Warn("failed to update task state to REVIEW after start error",
+				zap.String("task_id", taskID),
+				zap.Error(updateErr))
+		}
+		return
+	}
+	if _, _, updateErr := e.repo.UpdateTaskStateIfCurrentIn(ctx, taskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling}); updateErr != nil {
+		e.logger.Warn("failed to update task state to REVIEW after start error",
+			zap.String("task_id", taskID),
+			zap.Error(updateErr))
+	}
+}
+
+func (e *Executor) shouldSkipFailedStartReviewForTask(ctx context.Context, taskID, failedSessionID string) bool {
+	task, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to load task before failed-start REVIEW state reconcile",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.Error(err))
+		return true
+	}
+	if task != nil && task.AssigneeAgentProfileID != "" {
+		e.logger.Debug("skipping failed-start task REVIEW state for office task",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID))
+		return true
+	}
+	if task != nil && task.ArchivedAt != nil {
+		e.logger.Debug("skipping failed-start task REVIEW state for archived task",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID))
+		return true
+	}
+	return false
+}
+
+func (e *Executor) failedSessionStillWorkingOrUnknown(ctx context.Context, taskID, failedSessionID string) bool {
+	if failedSessionID == "" {
+		return false
+	}
+	session, err := e.repo.GetTaskSession(ctx, failedSessionID)
+	if err != nil {
+		e.logger.Warn("failed to load failed session before failed-start REVIEW state reconcile",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.Error(err))
+		return true
+	}
+	if session != nil && isRuntimeWorkingSessionState(session.State) {
+		e.logger.Debug("skipping failed-start task REVIEW state because failed session is active again",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.String("session_state", string(session.State)))
+		return true
+	}
+	return false
+}
+
+func (e *Executor) hasOtherWorkingSessions(ctx context.Context, taskID, failedSessionID string) bool {
+	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to list task sessions before failed-start REVIEW state reconcile",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.Error(err))
+		return true
+	}
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		if failedSessionID != "" && session.ID == failedSessionID {
+			continue
+		}
+		if isRuntimeWorkingSessionState(session.State) {
+			e.logger.Debug("skipping failed-start task REVIEW state while another session is working",
+				zap.String("task_id", taskID),
+				zap.String("failed_session_id", failedSessionID),
+				zap.String("blocking_session_id", session.ID))
+			return true
+		}
+	}
+	return false
+}
+
+func isRuntimeWorkingSessionState(state models.TaskSessionState) bool {
+	return sessionstate.IsWorking(state)
+}
+
 // updateTaskState updates a task's state, using the callback if set for event publishing,
-// or falling back to the raw repository.
+// or falling back to the archive-aware CAS (UpdateTaskStateIfNotArchived) directly. Every
+// call site here is a runtime-driven write (IN_PROGRESS on start/resume, FAILED on launch
+// error) that must never resurrect an archived task's state (PR #1706 review).
 func (e *Executor) updateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
 	if e.onTaskStateChange != nil {
 		return e.onTaskStateChange(ctx, taskID, state)
 	}
-	return e.repo.UpdateTaskState(ctx, taskID, state)
+	_, _, err := e.repo.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+	return err
 }
 
 // updateSessionState updates a session's state, using the callback if set for event publishing,
@@ -120,6 +378,105 @@ func (e *Executor) updateSessionState(ctx context.Context, taskID, sessionID str
 		return e.onSessionStateChange(ctx, taskID, sessionID, state, errorMessage)
 	}
 	return e.repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+}
+
+// transitionSessionState updates a session only when its freshly observed
+// state is non-terminal and different from the requested state. It returns the
+// authoritative final state so callers can tell an accepted write from an
+// idempotent or naturally-terminal race.
+func (e *Executor) transitionSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	state models.TaskSessionState,
+	errorMessage string,
+) (bool, models.TaskSessionState, error) {
+	if e.onSessionStateTransition != nil {
+		return e.onSessionStateTransition(ctx, taskID, sessionID, state, errorMessage)
+	}
+
+	current, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, "", fmt.Errorf("get session before state transition: %w", err)
+	}
+	if current == nil {
+		return false, "", fmt.Errorf("get session before state transition: session %q is nil", sessionID)
+	}
+	if isStopTerminalSessionState(current.State) || current.State == state {
+		return false, current.State, nil
+	}
+	if err := e.updateSessionState(ctx, taskID, sessionID, state, errorMessage); err != nil {
+		return false, current.State, err
+	}
+	refreshed, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, "", fmt.Errorf("get session after state transition: %w", err)
+	}
+	if refreshed == nil {
+		return false, "", fmt.Errorf("get session after state transition: session %q is nil", sessionID)
+	}
+	if refreshed.State != state {
+		return false, refreshed.State, nil
+	}
+	return true, refreshed.State, nil
+}
+
+func isStopTerminalSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateCompleted ||
+		state == models.TaskSessionStateFailed ||
+		state == models.TaskSessionStateCancelled
+}
+
+// updateSessionStarting persists a full session-row STARTING transition, using
+// the orchestrator callback when present so task/session runtime state stays
+// serialized with guarded REVIEW reconciliation.
+func (e *Executor) updateSessionStarting(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+	if e.onSessionStarting != nil {
+		return e.onSessionStarting(ctx, taskID, session, promoteTask)
+	}
+	current, err := e.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, session.ID)
+	}
+	allowedTerminalRecovery := !promoteTask &&
+		session.State == models.TaskSessionStateStarting &&
+		current.State == models.TaskSessionStateFailed
+	if isStopTerminalSessionState(current.State) && !allowedTerminalRecovery {
+		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
+	}
+	return e.persistSessionFullRowIfCurrentState(ctx, session, current.State)
+}
+
+func (e *Executor) persistSessionFullRowIfCurrentState(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) error {
+	changed, err := e.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return nil
+	}
+	current, err := e.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, session.ID)
+	}
+	if isStopTerminalSessionState(current.State) {
+		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
+	}
+	return fmt.Errorf(
+		"session %s state changed from %s to %s before runtime persistence",
+		session.ID,
+		expected,
+		current.State,
+	)
 }
 
 // shouldUseWorktree returns true if the given executor type should use Git worktrees.
@@ -135,6 +492,9 @@ const providerGitHub = "github"
 // repos with a real remote (or a file:// remote, used by Docker E2E tests)
 // participate in remote executors that clone inside the container/sandbox.
 func repositoryCloneURL(repo *models.Repository) string {
+	if strings.TrimSpace(repo.RemoteURL) != "" {
+		return strings.TrimSpace(repo.RemoteURL)
+	}
 	if repo.ProviderOwner != "" && repo.ProviderName != "" {
 		var host string
 		switch strings.ToLower(repo.Provider) {
@@ -346,6 +706,8 @@ func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfile
 		"agent_id":                     profileInfo.AgentID,
 		"agent_name":                   profileInfo.AgentName,
 		"model":                        profileInfo.Model,
+		"mode":                         profileInfo.Mode,
+		"config_options":               maps.Clone(profileInfo.ConfigOptions),
 		"auto_approve":                 profileInfo.AutoApprove,
 		"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
 		"cli_passthrough":              profileInfo.CLIPassthrough,
@@ -390,6 +752,28 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if session.TaskID != task.ID {
 		return nil, fmt.Errorf("session does not belong to task")
 	}
+	if opts.McpMode == "" {
+		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	running, _ := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if running != nil && running.ExecutionProfileID != "" &&
+		running.ExecutionProfileID != agentProfileID {
+		if running.AgentExecutionID != "" {
+			if err := e.agentManager.StopAgentWithReason(
+				ctx, running.AgentExecutionID, "execution profile changed", true,
+			); err != nil && !errors.Is(err, lifecycle.ErrExecutionNotFound) {
+				return nil, fmt.Errorf("stop previous execution profile: %w", err)
+			}
+		}
+		if err := e.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+			return nil, fmt.Errorf("clear previous execution profile: %w", err)
+		}
+		running = nil
+	}
 
 	// Inject session handover context if there are previous sessions for this task.
 	prompt = e.injectHandoverIfNeeded(ctx, task.ID, sessionID, prompt)
@@ -403,12 +787,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	hasRunning, _ := e.repo.HasExecutorRunningRow(ctx, sessionID)
 	if hasRunning {
 		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env)
-		if !errors.Is(err, ErrStaleExecution) {
+		if !errors.Is(err, ErrStaleExecution) && !errors.Is(err, ErrAgentCommandMissing) {
 			return result, err
 		}
-		e.logger.Info("falling through to full LaunchAgent after stale execution",
+		e.logger.Info("falling through to full LaunchAgent for existing workspace",
 			zap.String("task_id", task.ID),
-			zap.String("session_id", sessionID))
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 
 	allRepos, err := e.resolveAllRepoInfo(ctx, task.ID)
@@ -452,6 +837,11 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err != nil {
 		return nil, err
 	}
+	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
+	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
+		req.OfficeAgentProfileID = session.AgentProfileID
+	}
+	req.StartAgent = startAgent
 	mergeEnv(req, opts.Env)
 	if opts.RouteOverride != nil {
 		req.RouteOverride = opts.RouteOverride
@@ -471,12 +861,12 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Unlike ResumeSession we do NOT clear req.TaskDescription — wakeups
 	// deliver the new comment / event as the prompt.
 	if startAgent {
-		if running, _ := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); running != nil && running.ResumeToken != "" {
-			req.ACPSessionID = running.ResumeToken
+		if token := resumeTokenForExecutionProfile(running, agentProfileID); token != "" {
+			req.ACPSessionID = token
 			e.logger.Info("resuming ACP session via stored resume token",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", sessionID),
-				zap.String("acp_session_id", running.ResumeToken))
+				zap.String("acp_session_id", token))
 		}
 	}
 
@@ -519,6 +909,14 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg)
 }
 
+func resumeTokenForExecutionProfile(running *models.ExecutorRunning, profileID string) string {
+	if running == nil || profileID == "" ||
+		(running.ExecutionProfileID != "" && running.ExecutionProfileID != profileID) {
+		return ""
+	}
+	return running.ResumeToken
+}
+
 // handleLaunchFailure marks the session and task as FAILED and returns the original error.
 func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error) error {
 	// Detach from caller context so failure bookkeeping completes even if the
@@ -548,7 +946,10 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID st
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.
 func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig) (*TaskExecution, error) {
 	now := time.Now().UTC()
-	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now)
+	if err := e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now); err != nil {
+		e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
+		return nil, err
+	}
 	e.persistWorktreeAssociation(ctx, task.ID, session, repoInfo.RepositoryID, resp)
 
 	sessionState := v1.TaskSessionStateCreated
@@ -570,6 +971,24 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 
 	if startAgent {
 		e.startAgentProcessAsync(ctx, task.ID, sessionID, resp.AgentExecutionID)
+	} else {
+		// Prepare-only launch: the workspace + agentctl are up but the agent
+		// process is intentionally not being started. The lifecycle manager
+		// writes an active runtime status on row creation; flip it to
+		// 'prepared' so the row doesn't look like an agent process is running.
+		// When the user later starts the agent (StartCreatedSession), Launch
+		// re-runs and rewrites the row with the active runtime status via the
+		// usual path.
+		//
+		// Detach from the caller context so a client disconnect / WS timeout
+		// right after launch returns can't drop this write — that would leave
+		// the row stuck on "starting", which is the exact UX this fix closes.
+		statusCtx := context.WithoutCancel(ctx)
+		if err := e.repo.UpdateExecutorRunningStatus(statusCtx, sessionID, models.ExecutorRunningStatusPrepared); err != nil {
+			e.logger.Warn("failed to mark executors_running as prepared",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 
 	e.logger.Info("agent launched for prepared session",
@@ -613,6 +1032,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		SessionID:         sessionID,
 		TaskEnvironmentID: session.TaskEnvironmentID,
 		IsEphemeral:       task.IsEphemeral,
+		IsPassthrough:     session.IsPassthrough,
 		WorkspacePath:     session.WorkspacePath,
 	}
 
@@ -633,14 +1053,20 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		}
 	}
 
-	// For containerized executors, resolve credentials in this order:
+	// For remote executors (containerized *and* SSH), resolve credentials into
+	// req.Env in this order:
 	// 1. Profile remote_auth_secrets (e.g., gh_cli_env method with secret)
 	// 2. Profile remote_credentials with gh_cli_token (extract from local gh CLI)
 	// 3. Global GITHUB_TOKEN secret (fallback)
 	// 4. Auto-extract from local gh CLI (final fallback)
-	if isContainerizedExecutor(execConfig.ExecutorType) {
+	// SSH is included so env-authenticated agents (e.g. claude-acp reading
+	// CLAUDE_CODE_OAUTH_TOKEN) and remote git get their credentials from the
+	// configured profile/secret store rather than from a blanket forward of the
+	// control-plane process env — the SSH executor only forwards req.Env keys.
+	if executorNeedsResolvedCredentials(execConfig.ExecutorType) {
 		e.applyContainerCredentials(ctx, req, metadata)
 	}
+	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
 
 	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
 	if err != nil {
@@ -653,6 +1079,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	// (mirroring the primary) for downstream code that has not been migrated.
 	if len(allRepos) > 1 {
 		req.Repositories = buildRepoSpecs(allRepos)
+		for i := range req.Repositories {
+			req.Repositories[i].WorktreeBranchTicket = req.WorktreeBranchTicket
+		}
 	}
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.
@@ -688,22 +1117,32 @@ func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAge
 
 // buildRepoSpecs converts resolved repoInfos into per-repo launch specs for
 // the lifecycle layer. Used only when the task has more than one repository.
+// When the same RepositoryID appears more than once, each row gets a stable
+// BranchIdentitySlug for reuse while the lowest-position branch keeps the flat
+// layout (<task>/<repo>/). Other branches use sibling directories like
+// <task>/<repo>-<branch-slug>/.
+// This preserves the legacy single-branch path when a task later gains another
+// branch of the same repository.
 func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
+	branchPlans := buildRepoBranchPlans(allRepos)
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
-			RepositoryID:         info.RepositoryID,
-			RepositoryPath:       info.RepositoryPath,
-			BaseBranch:           info.BaseBranch,
-			CheckoutBranch:       info.CheckoutBranch,
-			WorktreeBranchPrefix: info.WorktreeBranchPrefix,
-			PullBeforeWorktree:   info.PullBeforeWorktree,
+			RepositoryID:           info.RepositoryID,
+			RepositoryPath:         info.RepositoryPath,
+			BaseBranch:             info.BaseBranch,
+			CheckoutBranch:         info.CheckoutBranch,
+			PRNumber:               info.PRNumber,
+			WorktreeBranchPrefix:   info.WorktreeBranchPrefix,
+			WorktreeBranchTemplate: info.WorktreeBranchTemplate,
+			PullBeforeWorktree:     info.PullBeforeWorktree,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
 			spec.RepoSetupScript = info.Repository.SetupScript
 			spec.RepoCleanupScript = info.Repository.CleanupScript
 			spec.DefaultBranch = info.Repository.DefaultBranch
+			spec.CopyFiles = info.Repository.CopyFiles
 		}
 		// Containerized executors need a clone URL; reuse the same helper as
 		// the single-repo path (best-effort — skipped if Repository is nil).
@@ -712,19 +1151,142 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 				spec.RepositoryURL = u
 			}
 		}
+		if plan, ok := branchPlans[info]; ok {
+			spec.BranchIdentitySlug = plan.identitySlug
+			spec.BranchSlug = plan.pathSlug
+		}
 		out = append(out, spec)
 	}
 	return out
+}
+
+type repoBranchPlan struct {
+	identitySlug string
+	pathSlug     string
+}
+
+func buildRepoBranchPlans(allRepos []*repoInfo) map[*repoInfo]repoBranchPlan {
+	groups := make(map[string][]*repoInfo, len(allRepos))
+	for _, info := range allRepos {
+		if info == nil || info.RepositoryID == "" {
+			continue
+		}
+		groups[info.RepositoryID] = append(groups[info.RepositoryID], info)
+	}
+
+	plans := make(map[*repoInfo]repoBranchPlan, len(allRepos))
+	for repoID, group := range groups {
+		identities := branchIdentitySlugsForGroup(repoID, group)
+		if len(group) < 2 {
+			for _, info := range group {
+				plans[info] = repoBranchPlan{identitySlug: identities[info]}
+			}
+			continue
+		}
+		flatIdentity := selectFlatBranchIdentity(group, identities)
+		for _, info := range group {
+			identity := identities[info]
+			pathSlug := identity
+			if identity == flatIdentity {
+				pathSlug = ""
+			}
+			plans[info] = repoBranchPlan{identitySlug: identity, pathSlug: pathSlug}
+		}
+	}
+	return plans
+}
+
+func branchIdentitySlugsForGroup(repoID string, group []*repoInfo) map[*repoInfo]string {
+	raw := make(map[*repoInfo]string, len(group))
+	counts := make(map[string]int, len(group))
+	for _, info := range group {
+		slug := preferredBranchIdentitySlug(info)
+		if slug == "" {
+			slug = "branch-" + branchIdentityHash(repoID, info)
+		}
+		raw[info] = slug
+		counts[slug]++
+	}
+
+	out := make(map[*repoInfo]string, len(group))
+	for _, info := range group {
+		slug := raw[info]
+		if counts[slug] > 1 {
+			slug += "-" + branchIdentityHash(repoID, info)
+		}
+		slug = worktree.SanitizeBranchSlug(slug)
+		if slug == "" {
+			slug = "branch-" + branchIdentityHash(repoID, info)
+		}
+		out[info] = slug
+	}
+	return out
+}
+
+func preferredBranchIdentitySlug(info *repoInfo) string {
+	branch := info.CheckoutBranch
+	if branch == "" {
+		branch = info.BaseBranch
+	}
+	if branch == "" && info.Repository != nil {
+		branch = info.Repository.DefaultBranch
+	}
+	return worktree.SanitizeBranchSlug(branch)
+}
+
+func branchIdentityHash(repoID string, info *repoInfo) string {
+	seed := strings.Join([]string{
+		repoID,
+		info.BaseBranch,
+		info.CheckoutBranch,
+		fmt.Sprintf("%d", info.PRNumber),
+	}, "\x00")
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(seed))
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
+func selectFlatBranchIdentity(group []*repoInfo, identities map[*repoInfo]string) string {
+	candidates := make([]*repoInfo, 0, len(group))
+	candidates = append(candidates, group...)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Position != candidates[j].Position {
+			return candidates[i].Position < candidates[j].Position
+		}
+		leftRank := flatBranchRank(candidates[i])
+		rightRank := flatBranchRank(candidates[j])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return identities[candidates[i]] < identities[candidates[j]]
+	})
+	return identities[candidates[0]]
+}
+
+func flatBranchRank(info *repoInfo) int {
+	if info.CheckoutBranch != "" {
+		return 3
+	}
+	if info.Repository != nil && info.Repository.DefaultBranch != "" && info.BaseBranch == info.Repository.DefaultBranch {
+		return 0
+	}
+	if info.BaseBranch == defaultBaseBranch {
+		return 1
+	}
+	return 2
 }
 
 // applyRepositoryConfig sets repository-related fields on the request and resolves clone URLs.
 func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task, repoInfo *repoInfo, execConfig executorConfig, metadata map[string]interface{}) (map[string]interface{}, error) {
 	if repoInfo.RepositoryPath != "" {
 		req.UseWorktree = shouldUseWorktree(execConfig.ExecutorType)
+		req.RepositoryID = repoInfo.RepositoryID
 		req.RepositoryPath = repoInfo.RepositoryPath
 		req.BaseBranch = repoInfo.BaseBranch
 		req.CheckoutBranch = repoInfo.CheckoutBranch
+		req.PRNumber = repoInfo.PRNumber
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
+		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
@@ -739,6 +1301,9 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 				metadata = make(map[string]interface{})
 			}
 			metadata[lifecycle.MetadataKeyRepoSetupScript] = repoInfo.Repository.SetupScript
+		}
+		if repoInfo.Repository != nil {
+			req.CopyFiles = repoInfo.Repository.CopyFiles
 		}
 	}
 
@@ -832,15 +1397,25 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		}
 	}
 
+	// Lazy workspace restoration creates an execution without an agent command.
+	// Preserve the request's description, environment, and MCP mode above, then
+	// route it through LaunchAgent so lifecycle.Launch can promote the execution
+	// with the effective profile, model, route override, and CLI flags before the
+	// subprocess is started.
+	if !e.agentManager.IsAgentCommandConfigured(executionID) {
+		return nil, ErrAgentCommandMissing
+	}
+
 	// Transition session to STARTING
 	now := time.Now().UTC()
 	session.State = models.TaskSessionStateStarting
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := e.updateSessionStarting(ctx, task.ID, session, true); err != nil {
 		e.logger.Error("failed to update session state for agent start",
 			zap.String("session_id", session.ID),
 			zap.Error(err))
+		return nil, err
 	}
 
 	execution := &TaskExecution{
@@ -1046,6 +1621,12 @@ func (e *Executor) persistTaskEnvironment(
 		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
 			existingEnv.SandboxID = sandboxID
 		}
+		// Refresh TaskDirName when the request carries a new value — covers
+		// resume-after-failure where the original env row was stamped with an
+		// empty task_dir_name and the resume regenerates it.
+		if req.TaskDirName != "" {
+			existingEnv.TaskDirName = req.TaskDirName
+		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
 			e.logger.Warn("failed to update task environment",
 				zap.String("task_id", taskID),
@@ -1096,6 +1677,7 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 	for i, w := range worktrees {
 		out = append(out, &models.TaskEnvironmentRepo{
 			RepositoryID:   w.RepositoryID,
+			BranchSlug:     w.BranchSlug,
 			WorktreeID:     w.WorktreeID,
 			WorktreePath:   w.WorktreePath,
 			WorktreeBranch: w.WorktreeBranch,
@@ -1106,9 +1688,10 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 	return out
 }
 
-// persistTaskEnvironmentRepos inserts per-repo rows under an existing env id,
-// skipping any (env, repo) pair that already exists. Used when an existing
-// environment is reused (resume / re-launch on the same task).
+// persistTaskEnvironmentRepos upserts per-repo rows under an existing env id.
+// Used when an existing environment is reused (resume / re-launch on the same
+// task), including cases where stale or legacy rows need the successful launch
+// result written back for the next handoff.
 func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string, worktrees []RepoWorktreeResult) {
 	if envID == "" || len(worktrees) == 0 {
 		return
@@ -1120,17 +1703,36 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 			zap.Error(err))
 		return
 	}
-	have := make(map[string]bool, len(existing))
+	byKey := make(map[string]*models.TaskEnvironmentRepo, len(existing))
+	legacyFlatByRepo := make(map[string]*models.TaskEnvironmentRepo)
 	for _, row := range existing {
-		have[row.RepositoryID] = true
+		key := row.RepositoryID + "\x00" + row.BranchSlug
+		byKey[key] = row
+		if row.RepositoryID != "" && row.BranchSlug == "" {
+			legacyFlatByRepo[row.RepositoryID] = row
+		}
 	}
 	for i, w := range worktrees {
-		if w.RepositoryID == "" || have[w.RepositoryID] {
+		if w.RepositoryID == "" {
 			continue
+		}
+		key := w.RepositoryID + "\x00" + w.BranchSlug
+		if row := byKey[key]; row != nil {
+			e.refreshTaskEnvironmentRepo(ctx, row, w, i)
+			continue
+		}
+		if w.BranchSlug != "" {
+			if row := legacyFlatByRepo[w.RepositoryID]; row != nil {
+				e.refreshTaskEnvironmentRepo(ctx, row, w, i)
+				delete(legacyFlatByRepo, w.RepositoryID)
+				byKey[key] = row
+				continue
+			}
 		}
 		row := &models.TaskEnvironmentRepo{
 			TaskEnvironmentID: envID,
 			RepositoryID:      w.RepositoryID,
+			BranchSlug:        w.BranchSlug,
 			WorktreeID:        w.WorktreeID,
 			WorktreePath:      w.WorktreePath,
 			WorktreeBranch:    w.WorktreeBranch,
@@ -1144,6 +1746,34 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 				zap.Error(createErr))
 		}
 	}
+}
+
+func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row *models.TaskEnvironmentRepo, w RepoWorktreeResult, position int) {
+	if !taskEnvironmentRepoNeedsRefresh(row, w, position) {
+		return
+	}
+	row.BranchSlug = w.BranchSlug
+	row.WorktreeID = w.WorktreeID
+	row.WorktreePath = w.WorktreePath
+	row.WorktreeBranch = w.WorktreeBranch
+	row.Position = position
+	row.ErrorMessage = w.ErrorMessage
+	if err := e.repo.UpdateTaskEnvironmentRepo(ctx, row); err != nil {
+		e.logger.Warn("failed to update task environment repo",
+			zap.String("env_id", row.TaskEnvironmentID),
+			zap.String("repository_id", row.RepositoryID),
+			zap.String("branch_slug", row.BranchSlug),
+			zap.Error(err))
+	}
+}
+
+func taskEnvironmentRepoNeedsRefresh(row *models.TaskEnvironmentRepo, w RepoWorktreeResult, position int) bool {
+	return row.BranchSlug != w.BranchSlug ||
+		row.WorktreeID != w.WorktreeID ||
+		row.WorktreePath != w.WorktreePath ||
+		row.WorktreeBranch != w.WorktreeBranch ||
+		row.Position != position ||
+		row.ErrorMessage != w.ErrorMessage
 }
 
 // extractSandboxID extracts the sandbox identifier from launch response metadata.

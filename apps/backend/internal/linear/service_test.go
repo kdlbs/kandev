@@ -61,6 +61,8 @@ type fakeClient struct {
 	listStatesFn   func(teamKey string) ([]LinearWorkflowState, error)
 	transitionLog  []string
 	searchIssuesFn func(filter SearchFilter, pageToken string, max int) (*SearchResult, error)
+	listLabelsFn   func(teamKey string) ([]LinearLabel, error)
+	listUsersFn    func(teamKey string) ([]LinearUser, error)
 }
 
 func (c *fakeClient) TestAuth(_ context.Context) (*TestConnectionResult, error) {
@@ -104,6 +106,20 @@ func (c *fakeClient) SearchIssues(_ context.Context, filter SearchFilter, pageTo
 		return c.searchIssuesFn(filter, pageToken, max)
 	}
 	return &SearchResult{}, nil
+}
+
+func (c *fakeClient) ListLabels(_ context.Context, teamKey string) ([]LinearLabel, error) {
+	if c.listLabelsFn != nil {
+		return c.listLabelsFn(teamKey)
+	}
+	return nil, nil
+}
+
+func (c *fakeClient) ListUsers(_ context.Context, teamKey string) ([]LinearUser, error) {
+	if c.listUsersFn != nil {
+		return c.listUsersFn(teamKey)
+	}
+	return nil, nil
 }
 
 type svcFixture struct {
@@ -170,7 +186,7 @@ func TestService_SetConfig_UpsertsAndStoresSecret(t *testing.T) {
 	if !cfg.HasSecret {
 		t.Error("expected HasSecret=true")
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "lin_api_xyz" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("default")); got != "lin_api_xyz" {
 		t.Errorf("secret stored = %q", got)
 	}
 }
@@ -226,7 +242,7 @@ func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "first" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("default")); got != "first" {
 		t.Errorf("secret should be preserved, got %q", got)
 	}
 }

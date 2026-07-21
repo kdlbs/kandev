@@ -16,6 +16,7 @@ import {
 } from "@kandev/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 
 export type ComboboxOption = {
   value: string;
@@ -37,6 +38,7 @@ interface ComboboxProps {
   options: ComboboxOption[];
   value: string;
   onValueChange: (value: string) => void;
+  ariaLabel?: string;
   dropdownLabel?: string;
   placeholder?: string;
   searchPlaceholder?: string;
@@ -46,8 +48,10 @@ interface ComboboxProps {
   triggerClassName?: string;
   showSearch?: boolean;
   testId?: string;
+  dropdownTestId?: string;
   popoverSide?: "top" | "right" | "bottom" | "left";
   popoverAlign?: "start" | "center" | "end";
+  popoverPortal?: boolean;
   /** When true, the trigger always renders the plain label text instead of renderLabel. */
   plainTrigger?: boolean;
   /** Optional custom filter; defaults to cmdk's built-in command-score. */
@@ -138,6 +142,7 @@ export const Combobox = memo(function Combobox({
   options,
   value,
   onValueChange,
+  ariaLabel,
   dropdownLabel,
   placeholder = "Select option...",
   searchPlaceholder = "Search...",
@@ -147,14 +152,17 @@ export const Combobox = memo(function Combobox({
   triggerClassName,
   showSearch = true,
   testId,
+  dropdownTestId,
   popoverSide,
   popoverAlign = "start",
+  popoverPortal = false,
   plainTrigger = false,
   filter,
   headerAction,
   loading = false,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
+  const portalContainer = useTaskCreateDialogPopoverContainer();
   // Track the highlighted item. Defaults to the selected value so the current
   // selection is highlighted when the popover opens (not the first item).
   const [highlighted, setHighlighted] = useState("");
@@ -173,6 +181,7 @@ export const Combobox = memo(function Combobox({
         <Button
           variant="ghost"
           role="combobox"
+          aria-label={ariaLabel}
           aria-expanded={open}
           className={cn("w-full justify-between", !disabled && "cursor-pointer", triggerClassName)}
           disabled={disabled}
@@ -194,14 +203,20 @@ export const Combobox = memo(function Combobox({
       </PopoverTrigger>
       <PopoverContent
         className={cn(
-          "w-[var(--radix-popover-trigger-width)] min-w-[300px] max-w-none p-0 max-h-[var(--radix-popover-content-available-height)]",
+          "w-[var(--radix-popover-trigger-width)] min-w-[min(300px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] p-0 max-h-[var(--radix-popover-content-available-height)] pointer-events-auto",
           className,
         )}
         side={popoverSide}
         align={popoverAlign}
-        portal={false}
+        portal={popoverPortal}
+        portalContainer={portalContainer}
       >
-        <Command value={highlighted} onValueChange={setHighlighted} filter={filter}>
+        <Command
+          value={highlighted}
+          onValueChange={setHighlighted}
+          filter={filter}
+          data-testid={dropdownTestId}
+        >
           {dropdownLabel || headerAction ? (
             <div className="text-muted-foreground flex items-center justify-between gap-2 px-2 py-1 text-xs border-b">
               <span>{dropdownLabel}</span>

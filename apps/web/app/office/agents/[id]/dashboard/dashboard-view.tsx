@@ -24,10 +24,9 @@ type Props = {
  * `agents` and `tasks` channels both impact the dashboard) — matching
  * the project's reactive-only convention.
  *
- * The chart components are pure SSR-safe presentational pieces; this
+ * The chart components are pure route-safe presentational pieces; this
  * shell exists so a future "Refresh" / "Date range" UI has somewhere
- * to live without lifting state up into the parent page (which is a
- * Server Component and therefore can't hold state).
+ * to live without lifting state up into the parent route loader.
  */
 export function DashboardView({ agentId, initial, days }: Props) {
   const [summary, setSummary] = useState<AgentSummaryResponse>(initial);

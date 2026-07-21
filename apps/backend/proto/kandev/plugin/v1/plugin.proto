@@ -1,0 +1,424 @@
+syntax = "proto3";
+
+package kandev.plugin.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/kandev/kandev/proto/kandev/plugin/v1;pluginv1";
+
+// Implemented by the PLUGIN. kandev is the client.
+service Plugin {
+  rpc DeliverEvent(Event) returns (EventAck);
+  rpc HandleWebhook(WebhookRequest) returns (WebhookResponse);
+}
+
+// Implemented by KANDEV (served back over the go-plugin broker).
+// Reads (§5) are capability-gated server-side by an inline per-resource
+// check at the start of each handler — there is no unary interceptor
+// enforcing this centrally. The deferred write RPCs below currently return
+// gRPC Unimplemented unconditionally, regardless of the caller's declared
+// capabilities, until their handlers land.
+//
+// Host data API (ADR 0043): the read/write data RPCs below live on this same
+// `service Host` rather than a separate `service HostData`. They reuse the
+// single broker connection; splitting into a second service would only
+// duplicate that for no benefit. Reads require manifest capability
+// `api_read:<resource>`; writes require `api_write:<resource>` (e.g.
+// `api_read:tasks`, `api_write:comments`). An undeclared capability on a read
+// RPC returns gRPC PermissionDenied with `capability 'api_read:tasks' not
+// declared`.
+//
+// DTOs below are a HAND-DEFINED public contract: the backend maps internal
+// models → these messages explicitly, never generates them from domain
+// structs, and never marshals domain structs through google.protobuf.Struct.
+// Fields are additive-only after merge (ADR 0043); removing or renaming a
+// field is a breaking change requiring a new api_version. Read handlers call
+// the relevant service (never a repository directly); write handlers call
+// service methods that publish task.* events (never repository.TaskRepository).
+service Host {
+  rpc GetState(GetStateRequest) returns (GetStateResponse);
+  rpc SetState(SetStateRequest) returns (SetStateResponse);
+  rpc DeleteState(DeleteStateRequest) returns (DeleteStateResponse);
+  rpc ListState(ListStateRequest) returns (ListStateResponse);
+  rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
+  rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
+
+  // Plugin-scoped secret primitives — capability `secrets`, like
+  // RevealSecret. Keys are namespaced server-side to the calling plugin
+  // (vault id "plugin:<id>:secret:<key>"), so a plugin can only ever read,
+  // write, or delete its OWN secrets; RevealSecret remains the way to
+  // resolve an operator-provided reference to a shared/global secret.
+  // Values are stored in kandev's encrypted secret vault (AES-256-GCM at
+  // rest), never on the plugin record or config file.
+  rpc GetSecret(GetSecretRequest) returns (GetSecretResponse);
+  rpc SetSecret(SetSecretRequest) returns (SetSecretResponse);
+  rpc DeleteSecret(DeleteSecretRequest) returns (DeleteSecretResponse);
+
+  // GetConfig returns the plugin's own operator-editable config (the values
+  // set in Settings > Plugins > <plugin> against the manifest's
+  // config_schema). Ungated: a plugin can always read its own config, secret
+  // values included — that is how e.g. an operator-configured PAT reaches
+  // the plugin.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+
+  // Reads — capability api_read:<resource>
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
+  rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
+  rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
+  rpc ListAgentProfiles(ListAgentProfilesRequest) returns (ListAgentProfilesResponse);
+  rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
+
+  // Sessions + code stats — capability api_read:sessions. Driven by a real
+  // plugin (kandev-plugin-agent-stats) that otherwise read task_sessions,
+  // task_session_commits, and task_session_git_snapshots straight from the
+  // SQLite file. SessionCodeStats is a COMPUTED, stable DTO — deliberately
+  // not the raw commit/snapshot rows, whose JSON schema churns.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc ListSessionCodeStats(ListSessionCodeStatsRequest) returns (ListSessionCodeStatsResponse);
+
+  // Writes — capability api_write:<resource>. Declared now for a stable
+  // contract; handlers land in a later phase (not implemented by this RPC
+  // addition). Route through service methods so the corresponding task.*
+  // events fire — the whole reason not to let plugins write the DB.
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
+  rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
+  rpc CreateComment(CreateCommentRequest) returns (CreateCommentResponse);
+}
+
+message Event {
+  string event_id = 1; // fresh uuid per delivery
+  string event_type = 2; // bus subject, e.g. "task.created"
+  string occurred_at = 3; // RFC3339 UTC
+  string workspace_id = 4; // empty if not derivable
+  google.protobuf.Struct payload = 5; // marshaled bus event.Data
+}
+message EventAck {}
+
+message WebhookRequest {
+  string webhook_key = 1;
+  string method = 2;
+  string path = 3; // remainder after the key
+  string query = 4;
+  map<string, string> headers = 5; // single-valued; multi joined by ", "
+  bytes body = 6;
+}
+message WebhookResponse {
+  int32 status = 1;
+  map<string, string> headers = 2;
+  bytes body = 3;
+}
+
+message GetStateRequest {
+  string scope = 1;
+  string scope_id = 2;
+  string key = 3;
+}
+message GetStateResponse {
+  bool found = 1;
+  google.protobuf.Struct value = 2;
+}
+message SetStateRequest {
+  string scope = 1;
+  string scope_id = 2;
+  string key = 3;
+  google.protobuf.Struct value = 4;
+}
+message SetStateResponse {}
+message DeleteStateRequest {
+  string scope = 1;
+  string scope_id = 2;
+  string key = 3;
+}
+message DeleteStateResponse {}
+message ListStateRequest {
+  string scope = 1;
+  string scope_id = 2;
+}
+message ListStateResponse {
+  repeated StateEntry entries = 1;
+}
+message StateEntry {
+  string key = 1;
+  google.protobuf.Struct value = 2;
+  string updated_at = 3;
+}
+
+message GetConfigRequest {}
+message GetConfigResponse {
+  google.protobuf.Struct config = 1;
+}
+
+message GetSecretRequest {
+  string key = 1;
+}
+message GetSecretResponse {
+  bool found = 1;
+  string value = 2;
+}
+message SetSecretRequest {
+  string key = 1;
+  string value = 2;
+}
+message SetSecretResponse {}
+message DeleteSecretRequest {
+  string key = 1;
+}
+message DeleteSecretResponse {}
+
+message RevealSecretRequest {
+  string ref = 1;
+}
+message RevealSecretResponse {
+  string value = 1;
+}
+
+message EmitEventRequest {
+  string event_name = 1;
+  google.protobuf.Struct payload = 2;
+}
+message EmitEventResponse {}
+
+// ── Host data API (ADR 0043) ─────────────────────────────────────────────────
+// Pagination is opaque-cursor based so the server can change the underlying
+// ordering/store without breaking plugins.
+message Page {
+  int32 limit = 1;   // 0 → server default (e.g. 50); server caps the max
+  string cursor = 2; // empty → first page; echo next_cursor to continue
+}
+message PageInfo {
+  string next_cursor = 1;
+  bool has_more = 2;
+}
+
+// Timestamps are RFC3339 strings (matches the JSON API + the Event envelope
+// convention above), not protobuf Timestamp, to keep one time representation
+// across the whole plugin contract. Optional string fields use `optional` so
+// absent (NULL) is distinguishable from empty.
+
+// ── Task ────────────────────────────────────────────────────────────────────
+message Task {
+  string id = 1;
+  string workspace_id = 2;
+  string workflow_id = 3;
+  string title = 4;
+  string description = 5;
+  string state = 6; // TaskState enum value as a string, stable
+  string priority = 7;
+  string created_by = 8;
+  string created_at = 9; // RFC3339
+  string updated_at = 10;
+  optional string started_at = 11;
+  optional string completed_at = 12;
+  optional string parent_id = 13;
+  string identifier = 14;
+  bool is_ephemeral = 15;
+  repeated TaskRepository repositories = 16;
+  google.protobuf.Struct metadata = 17; // free-form; plugin-tolerant
+}
+message TaskRepository {
+  string id = 1;
+  string repository_id = 2;
+  string base_branch = 3;
+  int32 position = 4;
+}
+
+message TaskFilter {
+  repeated string workspace_ids = 1; // empty → all the plugin may see
+  repeated string workflow_ids = 2;
+  repeated string states = 3;
+  optional string parent_id = 4;
+  bool include_ephemeral = 5; // default false (kanban-visible only)
+}
+message ListTasksRequest {
+  TaskFilter filter = 1;
+  Page page = 2;
+}
+message ListTasksResponse {
+  repeated Task tasks = 1;
+  PageInfo page_info = 2;
+}
+message GetTaskRequest {
+  string id = 1;
+}
+message GetTaskResponse {
+  Task task = 1;
+}
+
+// ── Workspace / Workflow / Steps ─────────────────────────────────────────────
+message Workspace {
+  string id = 1;
+  string name = 2;
+  optional string description = 3;
+  string owner_id = 4;
+  optional string default_executor_id = 5;
+  optional string default_agent_profile_id = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+message ListWorkspacesRequest {
+  Page page = 1;
+}
+message ListWorkspacesResponse {
+  repeated Workspace workspaces = 1;
+  PageInfo page_info = 2;
+}
+
+message Workflow {
+  string id = 1;
+  string workspace_id = 2;
+  string name = 3;
+  optional string description = 4;
+  int32 sort_order = 5;
+  string created_at = 6;
+  string updated_at = 7;
+}
+message ListWorkflowsRequest {
+  string workspace_id = 1;
+  Page page = 2;
+}
+message ListWorkflowsResponse {
+  repeated Workflow workflows = 1;
+  PageInfo page_info = 2;
+}
+
+message WorkflowStep {
+  string id = 1;
+  string workflow_id = 2;
+  string name = 3;
+  int32 position = 4;
+  string stage_type = 5; // work | review | approval | custom
+}
+message ListWorkflowStepsRequest {
+  string workflow_id = 1;
+}
+message ListWorkflowStepsResponse {
+  repeated WorkflowStep steps = 1;
+}
+
+// ── Agent profiles / Repositories (read-only context) ────────────────────────
+message AgentProfile {
+  string id = 1;
+  string agent_id = 2;
+  string display_name = 3;
+  string name = 4;
+  string model = 5;
+  string mode = 6;
+}
+message ListAgentProfilesRequest {
+  Page page = 1;
+}
+message ListAgentProfilesResponse {
+  repeated AgentProfile profiles = 1;
+  PageInfo page_info = 2;
+}
+
+message Repository {
+  string id = 1;
+  string workspace_id = 2;
+  string name = 3; // owner/repo slug when known, else name
+  optional string default_branch = 4;
+}
+message ListRepositoriesRequest {
+  string workspace_id = 1;
+  Page page = 2;
+}
+message ListRepositoriesResponse {
+  repeated Repository repositories = 1;
+  PageInfo page_info = 2;
+}
+
+// ── Sessions ─────────────────────────────────────────────────────────────────
+// Identity + agent context for one agent run on a task. acp_session_id is the
+// join key an external usage tool (e.g. tokscale) uses to attribute tokens —
+// so kandev exposes it and stays out of the token business entirely.
+//
+// acp_session_id resolution (host-side, not the plugin's concern): read
+// session metadata key `$.acp.session_id` first; if absent, fall back to
+// `executors_running.resume_token` for the session's agent execution. Either
+// source may be empty for a session that never reached the ACP handshake, in
+// which case acp_session_id is returned empty.
+message Session {
+  string id = 1;
+  string task_id = 2;
+  string agent_profile_id = 3;
+  string agent_display_name = 4; // from the profile snapshot at run time
+  string model = 5;              // resolved model at run time
+  string acp_session_id = 6;     // external usage-attribution join key
+  string state = 7;
+  string started_at = 8;
+  optional string ended_at = 9;
+  string agent_profile_name = 10; // profile name from the snapshot at run time
+}
+message SessionFilter {
+  repeated string task_ids = 1;
+  repeated string workspace_ids = 2;
+  repeated string states = 3;
+}
+message ListSessionsRequest {
+  SessionFilter filter = 1;
+  Page page = 2;
+}
+message ListSessionsResponse {
+  repeated Session sessions = 1;
+  PageInfo page_info = 2;
+}
+
+// Computed code metrics per session — the aggregate the agent-stats plugin
+// re-derived by hand from commits + git snapshots. Exposed as a stable shape
+// so plugins never touch task_session_commits / task_session_git_snapshots.
+message SessionCodeStats {
+  string session_id = 1;
+  int64 lines_added_committed = 2;     // SUM of commit insertions
+  int64 lines_deleted_committed = 3;   // SUM of commit deletions
+  int64 lines_added_peak_pending = 4;  // peak uncommitted diff additions across snapshots
+  int64 lines_deleted_peak_pending = 5;
+}
+message ListSessionCodeStatsRequest {
+  SessionFilter filter = 1;
+  Page page = 2;
+}
+message ListSessionCodeStatsResponse {
+  repeated SessionCodeStats stats = 1;
+  PageInfo page_info = 2;
+}
+
+// ── Writes (phase 2; api_write) ──────────────────────────────────────────────
+message CreateTaskRequest {
+  string workspace_id = 1;
+  string workflow_id = 2;
+  optional string workflow_step_id = 3;
+  string title = 4;
+  string description = 5;
+  optional string parent_id = 6;
+  bool start_agent = 7;
+  // kandev stamps source = "plugin:<id>" server-side; not settable here.
+}
+message CreateTaskResponse {
+  Task task = 1;
+}
+message UpdateTaskRequest {
+  string id = 1;
+  optional string title = 2;
+  optional string description = 3;
+  optional string state = 4;
+  optional string workflow_step_id = 5;
+}
+message UpdateTaskResponse {
+  Task task = 1;
+}
+message Comment {
+  string id = 1;
+  string task_id = 2;
+  string body = 3;
+  string source = 4; // "plugin:<id>"
+  string created_at = 5;
+}
+message CreateCommentRequest {
+  string task_id = 1;
+  string body = 2;
+}
+message CreateCommentResponse {
+  Comment comment = 1;
+}

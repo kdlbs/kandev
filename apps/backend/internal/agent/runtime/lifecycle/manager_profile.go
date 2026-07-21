@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"go.uber.org/zap"
@@ -144,17 +145,17 @@ func runtimeName(rt ExecutorBackend) executor.Name {
 	return rt.Name()
 }
 
-// resolveProfileModelAndMode resolves the model and mode configured on an agent profile.
-// Returns empty strings if the profile cannot be resolved.
-func (m *Manager) resolveProfileModelAndMode(ctx context.Context, profileID string) (string, string) {
+// resolveProfileSessionConfig resolves the ACP session config on an agent profile.
+// Returns empty values if the profile cannot be resolved.
+func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID string) (string, string, map[string]string) {
 	if profileID == "" || m.profileResolver == nil {
-		return "", ""
+		return "", "", nil
 	}
 	info, err := m.profileResolver.ResolveProfile(ctx, profileID)
 	if err != nil || info == nil {
-		return "", ""
+		return "", "", nil
 	}
-	return info.Model, info.Mode
+	return info.Model, info.Mode, info.ConfigOptions
 }
 
 // initializeACPSession delegates to SessionManager for full ACP session initialization and prompting.
@@ -162,7 +163,57 @@ func (m *Manager) resolveProfileModelAndMode(ctx context.Context, profileID stri
 // invokes the callback when there's no taskDescription/attachments to send, which is a *boot*
 // signal (the agent has never run a turn). When there IS a prompt, the callback is unused and
 // MarkReady fires later from handleCompleteEvent — that path is the true turn-end.
+//
+// Persisted session runtime state and explicit overrides take precedence over
+// profile defaults. This preserves user-selected model and reasoning-effort
+// values across process recovery.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
-	profileModel, profileMode := m.resolveProfileModelAndMode(ctx, execution.AgentProfileID)
-	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, profileModel, profileMode)
+	profileModel, profileMode, profileConfigOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
+	model, mode, configOptions := m.effectiveSessionRuntimeConfig(ctx, execution, profileModel, profileMode, profileConfigOptions)
+	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, model, mode, configOptions)
+}
+
+func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *AgentExecution, profileModel, profileMode string, profileConfigOptions map[string]string) (string, string, map[string]string) {
+	model := profileModel
+	mode := profileMode
+	configOptions := maps.Clone(profileConfigOptions)
+	info := m.sessionWorkspaceInfo(ctx, execution)
+	if info == nil {
+		return model, mode, configOptions
+	}
+	if info.RuntimeModel != "" {
+		model = info.RuntimeModel
+	}
+	if info.SessionMode != "" {
+		mode = info.SessionMode
+	}
+	if info.RuntimeConfigOptionsSet {
+		configOptions = maps.Clone(info.RuntimeConfigOptions)
+	}
+	return model, mode, configOptions
+}
+
+// effectiveSessionMode prefers a session-level permission mode persisted in the
+// session metadata (session_mode — declared via the set_session_mode workflow
+// action or a user toggle) over the agent profile's default mode. This makes a
+// fresh launch start in the declared mode before the first prompt, rather than
+// reverting to the profile default. Falls back to profileMode when no provider
+// is wired, the lookup fails, or no session mode is set. See issue #1183.
+func (m *Manager) effectiveSessionMode(ctx context.Context, execution *AgentExecution, profileMode string) string {
+	info := m.sessionWorkspaceInfo(ctx, execution)
+	if info == nil || info.SessionMode == "" {
+		return profileMode
+	}
+	return info.SessionMode
+}
+
+func (m *Manager) sessionWorkspaceInfo(ctx context.Context, execution *AgentExecution) *WorkspaceInfo {
+	if m.workspaceInfoProvider == nil || execution == nil {
+		return nil
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, execution.TaskID, execution.SessionID)
+	if err != nil {
+		return nil
+	}
+	return info
 }

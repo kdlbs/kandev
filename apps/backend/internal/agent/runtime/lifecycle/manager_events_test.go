@@ -6,7 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -79,6 +84,35 @@ func createTestExecution(id, taskID, sessionID string) *AgentExecution {
 		Status:       v1.AgentStatusRunning,
 		StartedAt:    time.Now(),
 		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+}
+
+func TestHandleAgentEvent_UserMessageChunkNotBufferedAsAssistant(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "<hidden-system-prompt>\nhello",
+		Role: "user",
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "Hello.",
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+
+	var streamedText string
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data != nil && event.Data.Type == "message_streaming" {
+			streamedText += event.Data.Text
+		}
+	}
+	if streamedText != "Hello." {
+		t.Fatalf("streamed assistant text = %q, want %q", streamedText, "Hello.")
 	}
 }
 
@@ -200,6 +234,88 @@ func TestHandleAgentEvent_StreamingThenToolCallThenComplete(t *testing.T) {
 	if len(completeEvents) > 0 && completeEvents[0].Data.Text != "" {
 		t.Errorf("complete event should not have text when streaming was used (even after tool_call), got %q",
 			completeEvents[0].Data.Text)
+	}
+}
+
+// TestHandleAgentEvent_SubagentToolCallDoesNotSplitStreaming is the regression test
+// for streaming messages being shattered into multiple DB rows: a subagent (Task tool)
+// streams its internal tool calls (tagged with ParentToolCallID) on the same session
+// while the parent agent is still streaming text. Those tool calls must NOT flush the
+// message buffer — otherwise every subagent tool call starts a new message row,
+// splitting the parent's message mid-sentence and breaking markdown across rows.
+func TestHandleAgentEvent_SubagentToolCallDoesNotSplitStreaming(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	// Parent agent starts streaming its message
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "Here's the CI picture\n",
+	})
+
+	execution.messageMu.Lock()
+	msgIDBefore := execution.currentMessageID
+	execution.messageMu.Unlock()
+	if msgIDBefore == "" {
+		t.Fatal("currentMessageID should be set after message_chunk")
+	}
+
+	// A subagent's internal tool call arrives mid-stream (ParentToolCallID set)
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             "tool_call",
+		ToolCallID:       "subagent-tool-1",
+		ParentToolCallID: "parent-task-tool",
+		ToolName:         "execute",
+	})
+
+	// The parent's streaming message must survive the subagent tool call
+	execution.messageMu.Lock()
+	msgIDAfter := execution.currentMessageID
+	execution.messageMu.Unlock()
+	if msgIDAfter != msgIDBefore {
+		t.Errorf("subagent tool_call must not close the streaming message: message ID changed from %q to %q",
+			msgIDBefore, msgIDAfter)
+	}
+
+	// More parent text — must APPEND to the same message, not create a new one
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "on the new PR.\n",
+	})
+
+	var streamingEvents []AgentStreamEventPayload
+	for _, e := range eventBus.getStreamEvents() {
+		if e.Data != nil && e.Data.Type == "message_streaming" {
+			streamingEvents = append(streamingEvents, e)
+		}
+	}
+	if len(streamingEvents) < 2 {
+		t.Fatalf("expected at least 2 message_streaming events, got %d", len(streamingEvents))
+	}
+	last := streamingEvents[len(streamingEvents)-1]
+	if !last.Data.IsAppend {
+		t.Error("text after a subagent tool_call should append to the existing message, got IsAppend=false")
+	}
+	if last.Data.MessageID != msgIDBefore {
+		t.Errorf("text after a subagent tool_call should keep message ID %q, got %q",
+			msgIDBefore, last.Data.MessageID)
+	}
+
+	// A top-level tool call (no ParentToolCallID) must still flush as before
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:       "tool_call",
+		ToolCallID: "tool-1",
+		ToolName:   "read_file",
+	})
+
+	execution.messageMu.Lock()
+	msgIDAfterTopLevel := execution.currentMessageID
+	execution.messageMu.Unlock()
+	if msgIDAfterTopLevel != "" {
+		t.Errorf("currentMessageID should be cleared after a top-level tool_call, got %q", msgIDAfterTopLevel)
 	}
 }
 
@@ -556,6 +672,136 @@ func TestHandleAgentEvent_PromptDoneChDoesNotBlockWhenFull(t *testing.T) {
 		// Good — didn't block
 	case <-time.After(2 * time.Second):
 		t.Fatal("handleAgentEvent blocked when promptDoneCh was full")
+	}
+}
+
+func TestHandleAgentEvent_DelayedCompleteCannotFinishReplacementPrompt(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	if _, err := mgr.executionStore.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin original prompt: %v", err)
+	}
+	if _, err := mgr.executionStore.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin replacement prompt: %v", err)
+	}
+
+	execution.messageMu.Lock()
+	execution.messageBuffer.WriteString("replacement output")
+	execution.currentMessageID = "replacement-message"
+	execution.messageMu.Unlock()
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             "complete",
+		SessionID:        execution.SessionID,
+		PromptGeneration: 1,
+	})
+
+	if execution.Status != v1.AgentStatusRunning {
+		t.Fatalf("replacement status = %s, want %s", execution.Status, v1.AgentStatusRunning)
+	}
+	select {
+	case signal := <-execution.promptDoneCh:
+		t.Fatalf("delayed completion signaled replacement prompt: %+v", signal)
+	default:
+	}
+	execution.messageMu.Lock()
+	buffer := execution.messageBuffer.String()
+	messageID := execution.currentMessageID
+	execution.messageMu.Unlock()
+	if buffer != "replacement output" || messageID != "replacement-message" {
+		t.Fatalf("replacement stream state changed: buffer=%q message_id=%q", buffer, messageID)
+	}
+	for _, published := range eventBus.PublishedEvents {
+		if published.Subject == events.AgentReady {
+			t.Fatal("delayed completion published AgentReady for replacement prompt")
+		}
+	}
+}
+
+func TestHandleAgentEvent_ErrorClaimCannotRaceReplacementPrompt(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	if _, err := mgr.executionStore.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin original prompt: %v", err)
+	}
+
+	errorReached := make(chan struct{})
+	releaseError := make(chan struct{})
+	var blockOnce sync.Once
+	zapLogger := zap.NewExample().WithOptions(zap.Hooks(func(entry zapcore.Entry) error {
+		if entry.Message != "agent error" && entry.Message != "agent turn complete" {
+			return nil
+		}
+		blockOnce.Do(func() {
+			close(errorReached)
+			<-releaseError
+		})
+		return nil
+	}))
+	mgr.logger, _ = logger.NewFromZap(zapLogger)
+
+	errorHandled := make(chan struct{})
+	go func() {
+		defer close(errorHandled)
+		mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+			Type:             "error",
+			Error:            "original prompt failed",
+			SessionID:        execution.SessionID,
+			PromptGeneration: 1,
+		})
+	}()
+	<-errorReached
+
+	errorOwnsLifecycle := !execution.promptLifecycleMu.TryLock()
+	if !errorOwnsLifecycle {
+		execution.promptLifecycleMu.Unlock()
+	}
+
+	replacementStarted := make(chan error, 1)
+	go func() {
+		_, err := mgr.executionStore.BeginPrompt(execution.ID)
+		replacementStarted <- err
+	}()
+	writeReplacementOutput := func() {
+		execution.messageMu.Lock()
+		execution.messageBuffer.WriteString("replacement output")
+		execution.currentMessageID = "replacement-message"
+		execution.messageMu.Unlock()
+	}
+	if !errorOwnsLifecycle {
+		if err := <-replacementStarted; err != nil {
+			t.Fatalf("begin replacement prompt: %v", err)
+		}
+		writeReplacementOutput()
+	}
+
+	close(releaseError)
+	if errorOwnsLifecycle {
+		if err := <-replacementStarted; err != nil {
+			t.Fatalf("begin replacement prompt: %v", err)
+		}
+		writeReplacementOutput()
+	}
+	<-errorHandled
+
+	if !errorOwnsLifecycle {
+		t.Error("error event released prompt lifecycle ownership before mutating execution state")
+	}
+	if execution.Status != v1.AgentStatusRunning {
+		t.Fatalf("replacement status = %s, want %s", execution.Status, v1.AgentStatusRunning)
+	}
+	execution.messageMu.Lock()
+	buffer := execution.messageBuffer.String()
+	messageID := execution.currentMessageID
+	execution.messageMu.Unlock()
+	if buffer != "replacement output" || messageID != "replacement-message" {
+		t.Fatalf("replacement stream state changed: buffer=%q message_id=%q", buffer, messageID)
 	}
 }
 

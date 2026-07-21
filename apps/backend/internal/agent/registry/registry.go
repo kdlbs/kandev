@@ -29,6 +29,7 @@ type (
 // Registry manages agent configurations
 type Registry struct {
 	agents map[string]agents.Agent
+	loaded bool
 	mu     sync.RWMutex
 	logger *logger.Logger
 }
@@ -61,6 +62,9 @@ func (r *Registry) LoadDefaults() {
 		agents.NewKiroACP(),
 		agents.NewQoderACP(),
 		agents.NewTraeACP(),
+		agents.NewOmpACP(),
+		agents.NewDevinACP(),
+		agents.NewGrokACP(),
 		agents.NewMockAgent(),
 	}
 
@@ -71,6 +75,21 @@ func (r *Registry) LoadDefaults() {
 		r.agents[ag.ID()] = ag
 		r.logger.Debug("loaded default agent type", zap.String("id", ag.ID()))
 	}
+	r.loaded = true
+}
+
+// MarkLoaded records that the initial registry population completed.
+func (r *Registry) MarkLoaded() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.loaded = true
+}
+
+// IsLoaded reports whether the initial registry population completed.
+func (r *Registry) IsLoaded() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.loaded
 }
 
 // Get returns an agent by ID

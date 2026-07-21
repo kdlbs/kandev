@@ -7,6 +7,7 @@ import {
   IconLayoutRows,
   IconMessageForward,
   IconArrowsMaximize,
+  IconRoute,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
@@ -31,6 +32,8 @@ export type ChangesTopBarProps = {
   handleToggleSplitView: (v: boolean) => void;
   handleToggleAutoMark: (v: boolean) => void;
   handleFixComments: () => void;
+  handleRequestWalkthrough?: () => void;
+  requestWalkthroughDisabled?: boolean;
 };
 
 function ChangesTopBarLeft({
@@ -81,6 +84,40 @@ function ChangesTopBarLeft({
   );
 }
 
+function ReviewWalkthroughRequestButton({
+  handleRequestWalkthrough,
+  requestWalkthroughDisabled,
+}: Pick<ChangesTopBarProps, "handleRequestWalkthrough" | "requestWalkthroughDisabled">) {
+  if (!handleRequestWalkthrough) return null;
+  const tooltip = requestWalkthroughDisabled
+    ? "Loading changed files..."
+    : "Walk me through these changes";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="inline-flex"
+          tabIndex={requestWalkthroughDisabled ? 0 : undefined}
+          aria-label={requestWalkthroughDisabled ? tooltip : undefined}
+        >
+          <Button
+            size="sm"
+            variant="ghost"
+            className="px-1.5 h-5 cursor-pointer"
+            aria-label="Walk me through these review changes"
+            data-testid="review-request-walkthrough"
+            disabled={requestWalkthroughDisabled}
+            onClick={handleRequestWalkthrough}
+          >
+            <IconRoute className="h-3.5 w-3.5" />
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function ChangesTopBarRight({
   splitView,
   wordWrap,
@@ -88,6 +125,8 @@ function ChangesTopBarRight({
   setWordWrap,
   handleToggleSplitView,
   handleFixComments,
+  handleRequestWalkthrough,
+  requestWalkthroughDisabled,
 }: Pick<
   ChangesTopBarProps,
   | "splitView"
@@ -96,15 +135,22 @@ function ChangesTopBarRight({
   | "setWordWrap"
   | "handleToggleSplitView"
   | "handleFixComments"
+  | "handleRequestWalkthrough"
+  | "requestWalkthroughDisabled"
 >) {
   return (
     <>
+      <ReviewWalkthroughRequestButton
+        handleRequestWalkthrough={handleRequestWalkthrough}
+        requestWalkthroughDisabled={requestWalkthroughDisabled}
+      />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             size="sm"
             variant="ghost"
             className="px-1.5 h-5 cursor-pointer"
+            aria-label="Expand review"
             onClick={() => window.dispatchEvent(new CustomEvent("open-review-dialog"))}
           >
             <IconArrowsMaximize className="h-3.5 w-3.5" />
@@ -172,6 +218,8 @@ export function ChangesTopBar({
   handleToggleSplitView,
   handleToggleAutoMark,
   handleFixComments,
+  handleRequestWalkthrough,
+  requestWalkthroughDisabled,
 }: ChangesTopBarProps) {
   return (
     <PanelHeaderBarSplit
@@ -192,6 +240,8 @@ export function ChangesTopBar({
           setWordWrap={setWordWrap}
           handleToggleSplitView={handleToggleSplitView}
           handleFixComments={handleFixComments}
+          handleRequestWalkthrough={handleRequestWalkthrough}
+          requestWalkthroughDisabled={requestWalkthroughDisabled}
         />
       }
     />

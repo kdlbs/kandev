@@ -22,30 +22,53 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default. The Linux `test` job and the Windows `test-windows`
+# job only read source and run tests — no PR/issue writes, no release ops.
+# `packages: read` is required for the Linux job to pull the kandev-ci
+# container image from GHCR (currently public; explicit grant keeps the
+# workflow working if the package ever goes private). Declaring any scope
+# explicitly zeroes out every unlisted one.
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   test:
     name: Run Backend Tests
     runs-on: ubuntu-latest
+    # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
+    # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
+    # Skips the per-run setup-go / golangci-lint download steps below.
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
     defaults:
       run:
+        # Container jobs default to `sh` (dash); pin to bash so `set -o pipefail`
+        # and other bash-isms in the steps below work without per-step overrides.
+        shell: bash
         working-directory: apps/backend
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        if: ${{ !contains(runner.name, 'homelab') }}
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
+      # actions/checkout under a container job marks the workspace as a safe
+      # directory automatically, but subsequent `git` invocations from steps
+      # that run outside the action (e.g. the gofmt diff below) can still hit
+      # "dubious ownership" when the runner UID differs from the repo owner.
+      - name: Mark workspace safe for git
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache Go modules
+        # Homelab self-hosted runners (kept for future re-enablement; the
+        # `container:` above forces the job onto a github-hosted runner today,
+        # so this condition is dormant). If homelab is reactivated, split this
+        # job into a matrix where the homelab variant omits `container:`.
         if: ${{ contains(runner.name, 'homelab') }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/go/pkg/mod
@@ -100,11 +123,13 @@ jobs:
           fi
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.9
-          args: ./... --new-from-rev=${{ env.BASE_SHA }}
-          working-directory: apps/backend
+        # golangci-lint is preinstalled in the kandev-ci image; invoke it
+        # directly instead of going through `golangci/golangci-lint-action`,
+        # which would re-download its own binary on every run. `--timeout=5m`
+        # matches the action's previous implicit default (the binary's own
+        # default is 1m, which can trip on cold caches).
+        shell: bash
+        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=5m
 
       - name: Run tests
         run: |
@@ -112,13 +137,14 @@ jobs:
           go test -v -race -coverprofile=coverage.out -covermode=atomic -json ./... 2>&1 | tee test-results.json
 
       - name: Generate test report
-        uses: robherley/go-test-action@v0
+        uses: robherley/go-test-action@3856e4e57831b3b6d6d8d89f91747e5200c533f7 # v0
         if: always()
         with:
           fromJSONFile: apps/backend/test-results.json
+          omit: successful
 
       - name: Upload test artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: always()
         with:
           name: test-results
@@ -126,6 +152,65 @@ jobs:
             apps/backend/coverage.out
             apps/backend/test-results.json
           retention-days: 30
+
+  postgres-boot:
+    name: Backend Postgres
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    timeout-minutes: 10
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    services:
+      postgres:
+        image: postgres:16@sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
+        env:
+          POSTGRES_USER: kandev
+          POSTGRES_PASSWORD: kandev
+          POSTGRES_DB: kandev_admin
+        options: >-
+          --health-cmd "pg_isready -U kandev -d kandev_admin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/backend
+    env:
+      KANDEV_TEST_POSTGRES_DSN: host=postgres port=5432 user=kandev password=kandev dbname=kandev_admin sslmode=disable
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Run env-gated Postgres tests
+        run: |
+          set -euo pipefail
+
+          mapfile -t postgres_packages < <(
+            grep -RIl 'PostgresDSNFromEnv' . --include='*_test.go' \
+              | xargs -r dirname \
+              | sort -u
+          )
+
+          if [[ "${#postgres_packages[@]}" -eq 0 ]]; then
+            echo "::error::No Postgres test packages found"
+            exit 1
+          fi
+
+          printf 'Running Postgres tests in:\n'
+          printf '  %s\n' "${postgres_packages[@]}"
+
+          output_file="$(mktemp)"
+          go test -v -race "${postgres_packages[@]}" 2>&1 | tee "${output_file}"
+
+          if ! grep -q '^=== RUN   TestPostgresBootInitializesRepositories$' "${output_file}"; then
+            echo "::error::Postgres boot smoke test matched no tests"
+            exit 1
+          fi
 
   test-windows:
     name: Backend (windows)
@@ -142,10 +227,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
@@ -167,3 +252,8 @@ jobs:
       # every platform.
       - name: Test windows-sensitive packages
         run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...
+
+      # Keep this targeted: the service package has broad subprocess coverage,
+      # while this native test is the Windows path-semantics regression.
+      - name: Test explicit local repository paths
+        run: go test -race -v -run '^TestExplicitLocalRepositoryWindowsPathSemantics$' ./internal/task/service

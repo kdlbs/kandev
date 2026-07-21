@@ -1,139 +1,172 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { IWatermarkPanelProps } from "dockview-react";
-import {
-  IconMessage,
-  IconFileText,
-  IconTerminal2,
-  IconDeviceDesktop,
-  IconGitBranch,
-  IconFolder,
-} from "@tabler/icons-react";
+import { IconPlus, IconLayoutSidebarRightCollapse } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { PANEL_REGISTRY } from "@/lib/state/layout-manager";
+import { useAppStore } from "@/components/state-provider";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
+import { useUserShells } from "@/hooks/domains/session/use-user-shells";
+import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
+import { AddPanelMenuItems } from "./dockview-add-panel-items";
+import { NewSessionDialog } from "./new-session-dialog";
+import { useActiveSessionDevScript } from "./repository-scripts-menu";
 
-type PanelOption = {
-  id: string;
-  label: string;
-  icon: React.ElementType;
-  /** Whether only one instance is allowed (focus existing instead of adding). */
-  singleton?: boolean;
-};
-
-const PANEL_OPTIONS: PanelOption[] = [
-  { id: "chat", label: "Agent", icon: IconMessage, singleton: true },
-  { id: "plan", label: "Plan", icon: IconFileText },
-  { id: "terminal", label: "Terminal", icon: IconTerminal2 },
-  { id: "browser", label: "Browser", icon: IconDeviceDesktop },
-  { id: "changes", label: "Changes", icon: IconGitBranch, singleton: true },
-  { id: "files", label: "Files", icon: IconFolder, singleton: true },
-];
-
+/**
+ * Watermark rendered by Dockview when a group becomes empty (e.g. after
+ * the user splits a group and the new half has no panels yet). Mirrors
+ * the header "+" menu so the user gets the same rich picker — existing
+ * sessions and terminals are listed (clicking re-focuses an open tab or
+ * re-opens a parked one) instead of always minting a fresh panel.
+ *
+ * Before this, the watermark's terminal button called createUserShell
+ * without a taskId, so it produced a legacy passthrough shell that
+ * never appeared in the user-shell list at all.
+ */
 export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps) {
+  const groupId = group?.id;
   const environmentId = useEnvironmentId();
-
-  const handleAdd = useCallback(
-    async (option: PanelOption) => {
-      const groupId = group?.id;
-
-      if (option.id === "terminal") {
-        let terminalId = `terminal-${Date.now()}`;
-        if (environmentId) {
-          try {
-            const result = await createUserShell(environmentId);
-            terminalId = result.terminalId;
-          } catch {
-            // Fall back to default terminal ID
-          }
-        }
-        containerApi.addPanel({
-          id: terminalId,
-          component: "terminal",
-          title: "Terminal",
-          // environmentId is stamped into params so cleanup can call
-          // stopUserShell with the correct env even after task switches.
-          params: { terminalId, environmentId: environmentId ?? undefined },
-          ...(groupId ? { position: { referenceGroup: groupId } } : {}),
-        });
-        return;
-      }
-
-      if (option.id === "browser") {
-        const browserId = `browser:${Date.now()}`;
-        containerApi.addPanel({
-          id: browserId,
-          component: "browser",
-          title: "Browser",
-          params: { url: "" },
-          ...(groupId ? { position: { referenceGroup: groupId } } : {}),
-        });
-        return;
-      }
-
-      // Singleton panels — focus if exists, otherwise add to this group
-      if (option.singleton) {
-        const existing = containerApi.getPanel(option.id);
-        if (existing) {
-          existing.api.setActive();
-          return;
-        }
-      }
-
-      const config = PANEL_REGISTRY[option.id];
-      if (!config) return;
-
-      containerApi.addPanel({
-        id: option.id,
-        component: config.component,
-        title: config.title,
-        ...(config.tabComponent ? { tabComponent: config.tabComponent } : {}),
-        ...(groupId ? { position: { referenceGroup: groupId } } : {}),
-      });
-    },
-    [containerApi, group, environmentId],
-  );
-
-  // Check which singletons already exist so we can hide them
-  const existingPanels = useMemo(() => {
-    const ids = new Set<string>();
-    try {
-      for (const panel of containerApi.panels) {
-        ids.add(panel.id);
-      }
-    } catch {
-      // API may not be ready
-    }
-    return ids;
-  }, [containerApi]);
-
+  const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   const sidebarGroupId = useDockviewStore((s) => s.sidebarGroupId);
-  const isSidebarGroup = group?.id === sidebarGroupId;
-  if (isSidebarGroup) return null;
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
+
+  // Eagerly populate the user-shell store so the Terminals submenu has
+  // its list ready the moment the watermark opens.
+  useUserShells(environmentId, taskID);
+
+  const menuState = useWatermarkMenuState(containerApi, taskID);
+  const handlers = useWatermarkHandlers(groupId, environmentId, taskID);
+
+  if (group?.id === sidebarGroupId) return null;
+  if (!groupId) return null;
 
   return (
-    <div className="flex items-center justify-center h-full w-full">
-      <div className="flex flex-wrap gap-2 justify-center max-w-xs">
-        {PANEL_OPTIONS.map((option) => {
-          if (option.singleton && existingPanels.has(option.id)) return null;
-          const Icon = option.icon;
-          return (
-            <Button
-              key={option.id}
-              variant="outline"
-              size="sm"
-              className="cursor-pointer gap-1.5 text-muted-foreground hover:text-foreground"
-              onClick={() => handleAdd(option)}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {option.label}
-            </Button>
-          );
-        })}
-      </div>
+    <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
+      <IconLayoutSidebarRightCollapse className="h-5 w-5 opacity-50" />
+      <p className="text-xs">Empty group</p>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className="cursor-pointer gap-1.5"
+            data-testid="watermark-add-panel-btn"
+          >
+            <IconPlus className="h-3.5 w-3.5" />
+            Add panel
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center" className="w-44">
+          <AddPanelMenuItems
+            groupId={groupId}
+            state={menuState}
+            onNewSession={() => setShowNewSessionDialog(true)}
+            onAddTerminal={handlers.handleAddTerminal}
+            onRunScript={handlers.handleRunScript}
+            onRunDevScript={handlers.handleRunDevScript}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {taskID && (
+        <NewSessionDialog
+          open={showNewSessionDialog}
+          onOpenChange={setShowNewSessionDialog}
+          taskId={taskID}
+          groupId={groupId}
+        />
+      )}
     </div>
   );
+}
+
+function useWatermarkMenuState(
+  containerApi: IWatermarkPanelProps["containerApi"],
+  taskID: string | null,
+) {
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const isPassthrough = useAppStore((s) => {
+    if (!activeSessionId) return false;
+    return s.taskSessions.items[activeSessionId]?.is_passthrough === true;
+  });
+  const { prs } = useTaskPR(taskID);
+  return useMemo(
+    () => ({
+      taskId: taskID,
+      isPassthrough,
+      hasChanges: Boolean(containerApi.getPanel("changes") ?? containerApi.getPanel("diff-files")),
+      hasFiles: Boolean(containerApi.getPanel("files") ?? containerApi.getPanel("all-files")),
+      prs,
+    }),
+    [taskID, isPassthrough, containerApi, prs],
+  );
+}
+
+function useWatermarkHandlers(
+  groupId: string | undefined,
+  environmentId: string | null,
+  taskID: string | null,
+) {
+  const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
+  const addUserShell = useAppStore((s) => s.addUserShell);
+  const devScript = useActiveSessionDevScript();
+
+  const handleAddTerminal = useCallback(async () => {
+    if (!environmentId || !groupId) return;
+    try {
+      const result = await createUserShell(environmentId, { taskId: taskID ?? undefined });
+      addUserShell(environmentId, {
+        terminalId: result.terminalId,
+        kind: result.kind,
+        seq: result.seq,
+        displayName: result.displayName,
+        customName: null,
+        state: result.state ?? "open",
+        ptyStatus: result.ptyStatus ?? "stopped",
+        running: result.ptyStatus === "running",
+        label: result.label,
+        closable: result.closable ?? true,
+        initialCommand: result.initialCommand,
+      });
+      addTerminalPanel(result.terminalId, groupId, environmentId, taskID ?? undefined, "Terminal");
+    } catch (error) {
+      console.error("Failed to create terminal:", error);
+    }
+  }, [environmentId, taskID, groupId, addTerminalPanel, addUserShell]);
+
+  const handleRunScript = useCallback(
+    async (scriptId: string) => {
+      if (!environmentId || !groupId) return;
+      try {
+        const result = await createUserShell(environmentId, { scriptId });
+        addTerminalPanel(
+          result.terminalId,
+          groupId,
+          environmentId,
+          undefined,
+          result.label ?? "Script",
+        );
+      } catch (error) {
+        console.error("Failed to run script:", error);
+      }
+    },
+    [environmentId, groupId, addTerminalPanel],
+  );
+
+  const handleRunDevScript = useCallback(async () => {
+    if (!environmentId || !devScript || !groupId) return;
+    try {
+      const result = await createUserShell(environmentId, {
+        command: devScript,
+        label: "Dev Server",
+      });
+      addTerminalPanel(result.terminalId, groupId, environmentId, undefined, "Dev Server");
+    } catch (error) {
+      console.error("Failed to start dev script:", error);
+    }
+  }, [environmentId, devScript, groupId, addTerminalPanel]);
+
+  return { handleAddTerminal, handleRunScript, handleRunDevScript };
 }

@@ -5,18 +5,18 @@ name: release
 #
 # Flow (one click → everything below):
 #   1. prepare           — bump version, regen CHANGELOG, open + merge release PR, push tag vX.Y.Z
-#   2. build-web         — build Next.js standalone bundle (shared across arches)
-#   3. build-cli         — build + esbuild-bundle CLI (shared across arches)
-#   4. build-bundles     — assemble bin/ + web/ + cli/ tarballs for 5 platforms
+#   2. build-web         — build Vite SPA bundle (shared across arches)
+#   3. build-bundles     — assemble native bin/ tarballs for 5 platforms
+#   4. build-desktop     — package Tauri desktop installers from matching runtime bundles
 #   5. docker-{amd64,arm64} — native per-arch image builds (no QEMU), consuming
-#                          the prebuilt linux bundles from step 4
+#                          the prebuilt linux bundles from step 3
 #   6. docker-manifest   — stitch the two arch digests into the user-facing
 #                          multi-arch tags via `buildx imagetools create`
 #   7. docker-universal-{amd64,arm64} — native universal builds on top of
 #                          docker-manifest's per-arch base
 #   8. docker-universal-manifest — size-gate amd64 staging, then promote both
 #                          arches to the user-facing :universal tags
-#   9. publish-release   — create GH release with .tar.gz + .sha256 assets + auto-generated notes
+#   9. publish-release   — create GH release with runtime + desktop assets and release notes
 #  10. publish-npm       — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
 #  11. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
 #
@@ -24,8 +24,14 @@ name: release
 # Each package (kandev + 5 @kdlbs/runtime-* packages) must have this workflow
 # configured as its trusted publisher on npmjs.com (Settings → Publishing access).
 #
-# Required secrets:
+# Required secrets for public releases:
 #   HOMEBREW_TAP_DEPLOY_KEY  — SSH private key for kdlbs/homebrew-kandev deploy key
+# Optional secrets for signed desktop artifacts. If these are incomplete, the
+# workflow still builds unsigned desktop artifacts and warns in release notes.
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / KEYCHAIN_PASSWORD — macOS Developer ID signing
+#   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID or APPLE_API_KEY / APPLE_API_ISSUER / APPLE_API_KEY_P8 — macOS notarization
+#   WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD — Windows installer signing
+#   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD — updater artifact signing
 
 on:
   workflow_dispatch:
@@ -43,6 +49,15 @@ on:
         description: "Dry run (no PR, tag, npm publish, or tap update)"
         type: boolean
         default: false
+      desktop_validation_only:
+        description: "Build desktop artifacts only (no PR, tag, publish, npm, or tap update)"
+        type: boolean
+        default: false
+      backfill_tag:
+        description: "Existing release tag to rebuild/publish (for recovery; leave empty for normal release)"
+        required: false
+        default: ""
+        type: string
 
 # Default to read-only at the workflow level. Each job opts into the writes
 # it actually needs.
@@ -59,28 +74,30 @@ jobs:
     outputs:
       version: ${{ steps.compute.outputs.version }}
       tag: ${{ steps.compute.outputs.tag }}
+      ref: ${{ steps.compute.outputs.ref }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
           version: "9.15.9"
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "24"
 
       - name: Install git-cliff
         env:
-          # Pinned to v2.6.1. To bump, also update the sha512 below — fetch the
+          # Pinned to v2.13.1 to match git-cliff-action@v4's default runtime.
+          # To bump, also update the sha512 below — fetch the
           # new one from:
           # https://github.com/orhun/git-cliff/releases/download/<tag>/<asset>.sha512
-          CLIFF_VERSION: "2.6.1"
-          CLIFF_ASSET: "git-cliff-2.6.1-x86_64-unknown-linux-gnu.tar.gz"
-          CLIFF_SHA512: "b1e7a6b70fc794accdccd9717eff5a8bf8b507f0308da44d837d935be31b18b19db3758d1a9bb4975fbca7d01ddaae251229a753ae2cd2ecc24845cfc50d067f"
+          CLIFF_VERSION: "2.13.1"
+          CLIFF_ASSET: "git-cliff-2.13.1-x86_64-unknown-linux-gnu.tar.gz"
+          CLIFF_SHA512: "e716cce3a07dda41b1e370d6afbd7a59eb3d4739509fb7856aeec8da2be28c0396584e29e106141c1a1c535c1827dbc1f60417524f5cfb1da9e11f700bd00f30"
         run: |
           set -euo pipefail
           curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${CLIFF_VERSION}/${CLIFF_ASSET}" -o /tmp/git-cliff.tar.gz
@@ -98,9 +115,104 @@ jobs:
       - name: Compute next version
         id: compute
         env:
+          BACKFILL_TAG: ${{ inputs.backfill_tag }}
           BUMP: ${{ inputs.bump }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          DESKTOP_VALIDATION_ONLY: ${{ inputs.desktop_validation_only }}
+          CURRENT_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
+          if [ -n "$BACKFILL_TAG" ]; then
+            echo "::notice::backfill_tag is set; the 'bump' input ($BUMP) is ignored."
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "backfill_tag cannot be combined with dry_run." >&2
+              exit 1
+            fi
+            if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then
+              echo "backfill_tag cannot be combined with desktop_validation_only." >&2
+              exit 1
+            fi
+
+            case "$BACKFILL_TAG" in
+              refs/tags/*) BACKFILL_TAG="${BACKFILL_TAG#refs/tags/}" ;;
+            esac
+
+            if [[ ! "$BACKFILL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "backfill_tag must be a SemVer release tag like v1.2.3." >&2
+              exit 1
+            fi
+            BACKFILL_REF="refs/tags/$BACKFILL_TAG"
+            if ! git rev-parse --verify --quiet "${BACKFILL_REF}^{commit}" >/dev/null; then
+              echo "backfill_tag does not exist: $BACKFILL_TAG" >&2
+              exit 1
+            fi
+
+            NEXT="${BACKFILL_TAG#v}"
+            LATEST_RELEASE_TAG="$(git tag --list 'v*' | python3 -c "
+          import sys, re
+          best = None
+          best_tag = ''
+          for t in (l.strip() for l in sys.stdin if l.strip()):
+              s = t.lstrip('v')
+              m3 = re.match(r'^(\d+)\.(\d+)\.(\d+)$', s)
+              m2 = re.match(r'^(\d+)\.(\d+)$', s)
+              if m3:
+                  v = tuple(int(x) for x in m3.groups())
+                  tag = f'v{v[0]}.{v[1]}.{v[2]}'
+              elif m2:
+                  v = (int(m2.group(1)), int(m2.group(2)), 0)
+                  tag = f'v{v[0]}.{v[1]}.{v[2]}'
+              else:
+                  continue
+              if best is None or v > best:
+                  best = v
+                  best_tag = tag
+          print(best_tag)
+          ")"
+            if [ -z "$LATEST_RELEASE_TAG" ]; then
+              echo "backfill_tag cannot be used: no existing release tags found." >&2
+              exit 1
+            fi
+            if [ "$LATEST_RELEASE_TAG" != "$BACKFILL_TAG" ]; then
+              echo "backfill_tag must be the latest release tag ($LATEST_RELEASE_TAG) because backfill publishes mutable channels." >&2
+              exit 1
+            fi
+
+            BACKFILL_REF="$BACKFILL_REF" BACKFILL_TAG="$BACKFILL_TAG" NEXT="$NEXT" node <<'NODE'
+            const { execFileSync } = require("node:child_process");
+
+            const tag = process.env.BACKFILL_TAG;
+            const ref = process.env.BACKFILL_REF;
+            const next = process.env.NEXT;
+            const show = (path) => execFileSync("git", ["show", `${ref}:${path}`], { encoding: "utf8" });
+            const versions = new Map([
+              ["apps/cli/package.json", JSON.parse(show("apps/cli/package.json")).version],
+              ["apps/desktop/package.json", JSON.parse(show("apps/desktop/package.json")).version],
+              ["apps/desktop/src-tauri/tauri.conf.json", JSON.parse(show("apps/desktop/src-tauri/tauri.conf.json")).version],
+              ["apps/desktop/src-tauri/Cargo.toml", show("apps/desktop/src-tauri/Cargo.toml").match(/^version = "([^"]+)"/m)?.[1]],
+              [
+                "apps/desktop/src-tauri/Cargo.lock",
+                show("apps/desktop/src-tauri/Cargo.lock").match(/\[\[package\]\]\nname = "kandev-desktop"\nversion = "([^"]+)"/)?.[1],
+              ],
+            ]);
+
+            for (const [path, version] of versions) {
+              if (version !== next) {
+                console.error(`backfill_tag version mismatch: ${tag} points to ${path} version ${version ?? "<missing>"} (expected ${next}).`);
+                process.exit(1);
+              }
+            }
+          NODE
+
+            TAG="$BACKFILL_TAG"
+            echo "Backfill existing release tag: $TAG"
+            echo "Next version:                 $NEXT"
+            echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "ref=$BACKFILL_REF" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           PKG_VERSION="$(node -p "require('./apps/cli/package.json').version")"
 
           # Find latest git tag, normalizing legacy two-part tags (vM.m → M.m.0)
@@ -148,6 +260,11 @@ jobs:
           echo "Next tag:                     $TAG"
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then
+            echo "ref=$CURRENT_REF" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=refs/tags/$TAG" >> "$GITHUB_OUTPUT"
+          fi
 
           # Sanity: tag must not already exist
           if git rev-parse "$TAG" >/dev/null 2>&1; then
@@ -160,10 +277,11 @@ jobs:
           fi
 
       - name: Bump version + generate CHANGELOG (in working tree)
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
           NEXT: ${{ steps.compute.outputs.version }}
           TAG: ${{ steps.compute.outputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           # Bump only the main package version. optionalDependencies stay
@@ -171,11 +289,33 @@ jobs:
           # rewrites them to the real version in-flight before publishing,
           # once the matching @kdlbs/runtime-* tarballs exist on npm.
           (cd apps/cli && npm version --no-git-tag-version "$NEXT")
+          (cd apps/desktop && npm version --no-git-tag-version "$NEXT")
+          node <<'NODE'
+          const fs = require("node:fs");
+          const next = process.env.NEXT;
+
+          const tauriConfigPath = "apps/desktop/src-tauri/tauri.conf.json";
+          const tauriConfig = JSON.parse(fs.readFileSync(tauriConfigPath, "utf8"));
+          tauriConfig.version = next;
+          fs.writeFileSync(tauriConfigPath, `${JSON.stringify(tauriConfig, null, 2)}\n`);
+
+          const cargoTomlPath = "apps/desktop/src-tauri/Cargo.toml";
+          const cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
+          fs.writeFileSync(cargoTomlPath, cargoToml.replace(/^version = ".*"$/m, `version = "${next}"`));
+
+          const cargoLockPath = "apps/desktop/src-tauri/Cargo.lock";
+          const cargoLock = fs.readFileSync(cargoLockPath, "utf8");
+          const packageBlock = /(\[\[package\]\]\nname = "kandev-desktop"\nversion = ")[^"]+(")/;
+          if (!packageBlock.test(cargoLock)) {
+            throw new Error("Could not find kandev-desktop package entry in Cargo.lock");
+          }
+          fs.writeFileSync(cargoLockPath, cargoLock.replace(packageBlock, `$1${next}$2`));
+          NODE
           pnpm -C apps install --no-frozen-lockfile
           git-cliff --tag "$TAG" -o CHANGELOG.md
 
       - name: Create release PR + squash-merge + tag
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEXT: ${{ steps.compute.outputs.version }}
@@ -188,7 +328,7 @@ jobs:
           MSG="release: $NEXT"
 
           git checkout -b "$BRANCH"
-          git add apps/cli/package.json CHANGELOG.md apps/pnpm-lock.yaml
+          git add apps/cli/package.json apps/desktop/package.json apps/desktop/src-tauri/Cargo.lock apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/tauri.conf.json CHANGELOG.md apps/pnpm-lock.yaml
           git commit -m "$MSG"
           # If a previous run pushed this branch but failed before the merge
           # landed, the remote branch still exists. Delete it so the push
@@ -230,11 +370,24 @@ jobs:
             }
           }
 
+      - name: Desktop validation summary
+        if: ${{ !inputs.dry_run && inputs.desktop_validation_only }}
+        env:
+          NEXT: ${{ steps.compute.outputs.version }}
+          TAG: ${{ steps.compute.outputs.tag }}
+          REF: ${{ steps.compute.outputs.ref }}
+        run: |
+          echo "Desktop validation for $TAG / $NEXT."
+          echo "Desktop signing is automatic: complete signing inputs produce signed artifacts; otherwise artifacts are unsigned."
+          echo "No release PR, tag, GitHub release, public container tags, npm publish, or Homebrew update will be created."
+          echo "Build jobs will check out $REF."
+
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
         env:
           NEXT: ${{ steps.compute.outputs.version }}
           TAG: ${{ steps.compute.outputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # In dry-run we still bump + run git-cliff locally so the maintainer
           # can verify the computed version + changelog look right, but nothing
@@ -248,70 +401,45 @@ jobs:
           echo "DRY RUN: CHANGELOG.md regenerated (in-runner only)."
 
   build-web:
-    name: Build web standalone
+    name: Build web SPA
     needs: prepare
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
-      - uses: pnpm/action-setup@v5
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
           version: "9.15.9"
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "24"
           cache: pnpm
           cache-dependency-path: apps/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm -C apps install --frozen-lockfile
-      - name: Build web (standalone)
+      - name: Build web (Vite)
         env:
           KANDEV_VERSION: ${{ needs.prepare.outputs.tag }}
+          VITE_KANDEV_API_PORT: ""
+          VITE_KANDEV_DEBUG: ""
         run: pnpm -C apps --filter @kandev/web build
-      - name: Package web bundle
-        run: bash scripts/release/package-web.sh
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: web-bundle
-          path: dist/web
+          path: apps/web/dist
           include-hidden-files: true
-
-  build-cli:
-    name: Build & bundle CLI
-    needs: prepare
-    if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.prepare.outputs.tag }}
-      - uses: pnpm/action-setup@v5
-        with:
-          version: "9.15.9"
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: pnpm
-          cache-dependency-path: apps/pnpm-lock.yaml
-      - name: Install dependencies
-        run: pnpm -C apps install --frozen-lockfile
-      - name: Build and bundle CLI
-        run: bash scripts/release/package-cli.sh
-      - uses: actions/upload-artifact@v5
-        with:
-          name: cli-bundle
-          path: dist/kandev/cli
 
   build-bundles:
     name: Build platform bundle (${{ matrix.platform }})
-    needs: [prepare, build-web, build-cli]
+    needs: [prepare, build-web]
     if: ${{ !inputs.dry_run }}
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             platform: linux-x64
             goos: linux
             goarch: amd64
@@ -338,21 +466,18 @@ jobs:
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
-      - uses: actions/setup-go@v6
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: web-bundle
-          path: dist/web
-      - uses: actions/download-artifact@v5
-        with:
-          name: cli-bundle
-          path: dist/kandev/cli
+          path: apps/backend/internal/webapp/embedded/generated
 
       - name: Install cross-compilation tools
         if: matrix.cc
@@ -360,64 +485,619 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-x86-64
 
+      # The `fts5` build tag is REQUIRED on the kandev binary. The office
+      # task search migrations create a `tasks_fts` virtual table using
+      # `USING fts5(...)`; without the tag, mattn/go-sqlite3 lacks the
+      # module and any subsequent boot against a DB that already has the
+      # virtual table fails with "no such module: fts5" during schema init.
+      # See issue #1006 for the regression this prevents.
+      #
+      # Version ldflags mirror apps/backend/Makefile so `kandev --version`
+      # reports the released tag instead of the build-time default "dev".
       - name: Build backend binaries
         env:
           CC: ${{ matrix.cc || '' }}
+          KANDEV_VERSION: ${{ needs.prepare.outputs.tag }}
         run: |
+          test -f apps/backend/internal/webapp/embedded/generated/index.html
           cd apps/backend
           mkdir -p bin
           EXT=${{ matrix.goos == 'windows' && '.exe' || '' }}
-          go build -o bin/kandev${EXT} ./cmd/kandev
-          go build -o bin/agentctl${EXT} ./cmd/agentctl
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          LDFLAGS="-s -w -X main.Version=${KANDEV_VERSION} -X main.Commit=${COMMIT} -X main.BuildTime=${BUILD_TIME}"
+          # Export to subsequent steps so the cross-compiled agentctl helper
+          # below gets the same version metadata (matches Makefile parity).
+          echo "LDFLAGS=${LDFLAGS}" >> "${GITHUB_ENV}"
+          go build -tags fts5 -ldflags "${LDFLAGS}" -o bin/kandev${EXT} ./cmd/kandev
+          go build -ldflags "${LDFLAGS}" -o bin/agentctl${EXT} ./cmd/agentctl
 
-      # Cross-compile a linux/amd64 agentctl regardless of the host platform.
-      # Remote executors (local Docker, remote Docker, Sprites) bind-mount this
-      # binary into the container — without it, Docker sessions fail with
-      # "agentctl linux binary not found" on Mac/Windows installs and even on
-      # Linux installs (the resolver looks for the -linux-amd64 suffix).
-      # CGO is off so this works from any host without extra toolchain setup.
-      - name: Build linux/amd64 agentctl helper
+      # Cross-compile remote agentctl helpers regardless of the host platform.
+      # Remote executors upload or bind-mount these sidecars into Linux and
+      # macOS SSH hosts. CGO is off so this works from any host without extra
+      # toolchain setup.
+      - name: Build remote agentctl helpers
         run: |
           cd apps/backend
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 CC= go build -o bin/agentctl-linux-amd64 ./cmd/agentctl
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-linux-amd64 ./cmd/agentctl
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-linux-arm64 ./cmd/agentctl
+          # darwin/arm64 is ad-hoc-signed by the Go linker at link time, which is
+          # what Apple Silicon (AMFI) requires; bundle validation enforces it.
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-arm64 ./cmd/agentctl
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-amd64 ./cmd/agentctl
 
       - name: Package bundle
         run: |
-          rm -rf dist/kandev/bin dist/kandev/web
+          rm -rf dist/kandev
           mkdir -p dist/kandev/bin
           EXT=${{ matrix.goos == 'windows' && '.exe' || '' }}
           cp apps/backend/bin/kandev${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl-linux-amd64 dist/kandev/bin/
-          mkdir -p dist/kandev/web
-          cp -R dist/web/. dist/kandev/web/
-          # cli/ was already placed by the build-cli job (downloaded above).
-          # actions/upload-artifact + download-artifact zip-roundtrip strips the
-          # executable bit, so re-apply it. The Homebrew formula's wrapper at
-          # bin/kandev does `exec libexec/cli/bin/cli.js`, which fails with
-          # "Permission denied" if this isn't +x.
-          chmod +x dist/kandev/cli/bin/cli.js
+          cp apps/backend/bin/agentctl-linux-arm64 dist/kandev/bin/
+          cp apps/backend/bin/agentctl-darwin-arm64 dist/kandev/bin/
+          cp apps/backend/bin/agentctl-darwin-amd64 dist/kandev/bin/
           cd dist
           tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
           shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: bundle-${{ matrix.platform }}
           path: |
             dist/kandev-${{ matrix.platform }}.tar.gz
             dist/kandev-${{ matrix.platform }}.tar.gz.sha256
 
+  build-desktop:
+    name: Build desktop app (${{ matrix.platform }})
+    needs: [prepare, build-bundles]
+    if: ${{ !inputs.dry_run }}
+    strategy:
+      matrix:
+        include:
+          - platform: macos-arm64
+            os: macos-15
+            rust_target: aarch64-apple-darwin
+            tauri_bundles: dmg
+          - platform: macos-x64
+            os: macos-15-intel
+            rust_target: x86_64-apple-darwin
+            tauri_bundles: dmg
+          - platform: linux-x64
+            os: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            tauri_bundles: appimage,deb,rpm
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            tauri_bundles: appimage,deb,rpm
+          - platform: windows-x64
+            os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            tauri_bundles: nsis
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+
+      - name: Prepare desktop asset verifier
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          helper="$RUNNER_TEMP/verify-desktop-assets.sh"
+          gh api \
+            --header "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}" \
+            > "$helper"
+          echo "DESKTOP_ASSET_VERIFIER=$helper" >> "$GITHUB_ENV"
+
+      - name: Prepare macOS desktop diagnostics helper
+        if: startsWith(matrix.platform, 'macos-')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          helper="$RUNNER_TEMP/collect-macos-desktop-diagnostics.sh"
+          mkdir -p "$(dirname "$helper")"
+          if [ -f "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" ]; then
+            cp "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" "$helper"
+          else
+            encoded_helper="$RUNNER_TEMP/collect-macos-desktop-diagnostics.sh.b64"
+            gh api \
+              "repos/${{ github.repository }}/contents/.github/scripts/collect-macos-desktop-diagnostics.sh?ref=${{ github.workflow_sha }}" \
+              --jq .content > "$encoded_helper"
+            HELPER="$helper" ENCODED_HELPER="$encoded_helper" python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          encoded = Path(os.environ["ENCODED_HELPER"]).read_text()
+          Path(os.environ["HELPER"]).write_bytes(base64.b64decode(encoded))
+          PY
+          fi
+          chmod +x "$helper"
+          echo "DESKTOP_DIAGNOSTICS_SCRIPT=$helper" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: "9.15.9"
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --target "${{ matrix.rust_target }}"
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: desktop-${{ matrix.platform }}-${{ matrix.rust_target }}
+
+      - name: Install Linux desktop dependencies
+        if: startsWith(matrix.platform, 'linux-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libglib2.0-dev \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            xdg-utils \
+            patchelf
+          command -v xdg-open
+
+      - name: Install dependencies
+        run: pnpm -C apps install --frozen-lockfile
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: bundle-${{ matrix.platform }}
+          path: dist/desktop-runtime
+
+      - name: Prepare desktop runtime resources
+        run: |
+          set -euo pipefail
+          mkdir -p dist/desktop-runtime-src
+          tar -xzf "dist/desktop-runtime/kandev-${{ matrix.platform }}.tar.gz" -C dist/desktop-runtime-src
+          scripts/release/prepare-desktop-runtime.sh \
+            --bundle-dir "dist/desktop-runtime-src/kandev" \
+            --platform "${{ matrix.platform }}" \
+            --output-dir "apps/desktop/src-tauri/resources/kandev"
+
+      - name: Configure macOS signing and notarization
+        if: startsWith(matrix.platform, 'macos-')
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PROVIDER_SHORT_NAME: ${{ secrets.APPLE_PROVIDER_SHORT_NAME }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+
+          if ! bash scripts/release/desktop-signing-ready.sh macos >/dev/null 2>&1; then
+            echo "MACOS_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
+            echo "::notice::macOS signing/notarization inputs are incomplete; building unsigned desktop artifact."
+            exit 0
+          fi
+
+          certificate_path="$RUNNER_TEMP/kandev-developer-id.p12"
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          Path(os.environ["RUNNER_TEMP"], "kandev-developer-id.p12").write_bytes(
+              base64.b64decode(os.environ["APPLE_CERTIFICATE"])
+          )
+          PY
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import "$certificate_path" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+
+          cert_info="$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -n 1 || true)"
+          if [ -z "$cert_info" ]; then
+            cert_info="$(security find-identity -v -p codesigning build.keychain | head -n 1 || true)"
+          fi
+          if [ -z "$cert_info" ]; then
+            echo "::error::No code signing identity found in build.keychain" >&2
+            exit 1
+          fi
+          cert_id="$(echo "$cert_info" | awk -F'"' '{print $2}')"
+          echo "APPLE_SIGNING_IDENTITY=$cert_id" >> "$GITHUB_ENV"
+          echo "MACOS_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+
+          if [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_ISSUER:-}" ] && [ -n "${APPLE_API_KEY_P8:-}" ]; then
+            private_keys_dir="$RUNNER_TEMP/private_keys"
+            mkdir -p "$private_keys_dir"
+            printf '%s\n' "$APPLE_API_KEY_P8" > "$private_keys_dir/AuthKey_${APPLE_API_KEY}.p8"
+            echo "APPLE_API_KEY_PATH=$private_keys_dir/AuthKey_${APPLE_API_KEY}.p8" >> "$GITHUB_ENV"
+          fi
+
+      - name: Sign macOS desktop runtime binaries
+        if: startsWith(matrix.platform, 'macos-') && env.MACOS_SIGNING_ENABLED == 'true'
+        run: |
+          set -euo pipefail
+          runtime_bin="apps/desktop/src-tauri/resources/kandev/bin"
+          for binary in kandev agentctl agentctl-darwin-arm64 agentctl-darwin-amd64; do
+            path="$runtime_bin/$binary"
+            if [ ! -f "$path" ]; then
+              echo "::error::Missing macOS runtime binary at $path" >&2
+              exit 1
+            fi
+            codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$path"
+            codesign --verify --strict --verbose=2 "$path"
+          done
+
+      - name: Detect Windows signing inputs
+        if: matrix.platform == 'windows-x64'
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if bash scripts/release/desktop-signing-ready.sh windows >/dev/null 2>&1; then
+            echo "WINDOWS_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "WINDOWS_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
+            echo "::notice::Windows signing inputs are incomplete; building unsigned desktop artifact."
+          fi
+
+      - name: Sign Windows desktop runtime binaries
+        if: matrix.platform == 'windows-x64' && env.WINDOWS_SIGNING_ENABLED == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          WINDOWS_SIGNTOOL_PATH: ${{ secrets.WINDOWS_SIGNTOOL_PATH }}
+        run: |
+          $runtimeBin = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/resources/kandev/bin"
+          foreach ($binary in @("kandev.exe", "agentctl.exe")) {
+            $path = Join-Path $runtimeBin $binary
+            if (!(Test-Path -LiteralPath $path)) {
+              Write-Error "Missing Windows runtime binary at $path"
+              exit 1
+            }
+            & "$env:GITHUB_WORKSPACE/apps/desktop/src-tauri/windows-sign.ps1" -Path $path
+          }
+
+      - name: Detect Tauri updater signing input
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "UPDATER_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
+            echo "::notice::Tauri updater signing key is absent; signed updater artifacts and latest.json will be skipped."
+            exit 0
+          fi
+          helper="$RUNNER_TEMP/updater-signing-ready.sh"
+          gh api \
+            --header "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/scripts/release/updater-signing-ready.sh?ref=${{ github.workflow_sha }}" \
+            > "$helper"
+          if ! bash "$helper" "${{ matrix.platform }}"; then
+            echo "::error::Updater signing prerequisites failed for ${{ matrix.platform }}." >&2
+            exit 1
+          fi
+          echo "UPDATER_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Build Tauri desktop app
+        timeout-minutes: 70
+        env:
+          CI: "true"
+          DESKTOP_DIAGNOSTICS_PLATFORM: ${{ matrix.platform }}
+          DESKTOP_DIAGNOSTICS_RUST_TARGET: ${{ matrix.rust_target }}
+          TAURI_BUNDLE_ATTEMPTS: ${{ startsWith(matrix.platform, 'macos-') && '2' || '1' }}
+          TAURI_BUILD_TIMEOUT_SECONDS: ${{ startsWith(matrix.platform, 'macos-') && '1800' || '0' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PROVIDER_SHORT_NAME: ${{ secrets.APPLE_PROVIDER_SHORT_NAME }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          WINDOWS_SIGNTOOL_PATH: ${{ secrets.WINDOWS_SIGNTOOL_PATH }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ "${MACOS_SIGNING_ENABLED:-false}" != "true" ]; then
+            unset APPLE_CERTIFICATE
+            unset APPLE_CERTIFICATE_PASSWORD
+            unset APPLE_ID
+            unset APPLE_PASSWORD
+            unset APPLE_TEAM_ID
+            unset APPLE_PROVIDER_SHORT_NAME
+            unset APPLE_API_KEY
+            unset APPLE_API_ISSUER
+            unset APPLE_API_KEY_PATH
+            unset APPLE_SIGNING_IDENTITY
+          fi
+          if [ "${WINDOWS_SIGNING_ENABLED:-false}" != "true" ]; then
+            unset WINDOWS_CERTIFICATE
+            unset WINDOWS_CERTIFICATE_PASSWORD
+            unset WINDOWS_TIMESTAMP_URL
+            unset WINDOWS_SIGNTOOL_PATH
+          fi
+          tauri_bundles="${{ matrix.tauri_bundles }}"
+          updater_config='{"bundle":{"createUpdaterArtifacts":false}}'
+          if [ "${UPDATER_SIGNING_ENABLED:-false}" = "true" ]; then
+            updater_config='{"bundle":{"createUpdaterArtifacts":"v1Compatible"}}'
+            if [[ "${{ matrix.platform }}" == macos-* ]]; then
+              # Tauri derives the macOS updater archive from the app bundle.
+              tauri_bundles="${tauri_bundles},app"
+            fi
+          else
+            unset TAURI_SIGNING_PRIVATE_KEY
+            unset TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          fi
+          pnpm -C apps --filter @kandev/desktop build:vite
+          cd apps/desktop
+
+          collect_macos_desktop_diagnostics() {
+            local label="${1:-failure}"
+            if [[ "${{ matrix.platform }}" != macos-* ]]; then
+              return 0
+            fi
+
+            bash "${DESKTOP_DIAGNOSTICS_SCRIPT:-$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh}" "$label" || true
+          }
+
+          terminate_process_tree() {
+            local pid="$1"
+            terminate_process_tree_with_signal "$pid" TERM
+            sleep 5
+            terminate_process_tree_with_signal "$pid" KILL
+          }
+
+          terminate_process_tree_with_signal() {
+            local pid="$1"
+            local signal="$2"
+            local child
+            while IFS= read -r child; do
+              [ -n "$child" ] || continue
+              terminate_process_tree_with_signal "$child" "$signal"
+            done < <(pgrep -P "$pid" 2>/dev/null || true)
+            kill "-$signal" "$pid" 2>/dev/null || true
+          }
+
+          run_with_timeout() {
+            local timeout_seconds="$1"
+            shift
+            if [ "$timeout_seconds" -le 0 ]; then
+              "$@"
+              return $?
+            fi
+
+            "$@" &
+            local command_pid=$!
+            local start_seconds
+            start_seconds="$(date +%s)"
+            while kill -0 "$command_pid" 2>/dev/null; do
+              local now_seconds
+              now_seconds="$(date +%s)"
+              if [ $((now_seconds - start_seconds)) -ge "$timeout_seconds" ]; then
+                echo "::warning::Command timed out after ${timeout_seconds}s: $*"
+                collect_macos_desktop_diagnostics "timeout"
+                terminate_process_tree "$command_pid"
+                wait "$command_pid" 2>/dev/null || true
+                return 124
+              fi
+              sleep 10
+            done
+            wait "$command_pid"
+          }
+
+          run_tauri_build() {
+            run_with_timeout "$TAURI_BUILD_TIMEOUT_SECONDS" \
+              pnpm tauri build \
+                --features desktop-runtime \
+                --target "${{ matrix.rust_target }}" \
+                --bundles "$tauri_bundles" \
+                --config "$updater_config"
+          }
+
+          status=0
+          for attempt in $(seq 1 "$TAURI_BUNDLE_ATTEMPTS"); do
+            echo "Tauri desktop build attempt $attempt/$TAURI_BUNDLE_ATTEMPTS"
+            if run_tauri_build; then
+              status=0
+              break
+            else
+              status=$?
+            fi
+
+            echo "::warning::Tauri desktop build attempt $attempt/$TAURI_BUNDLE_ATTEMPTS failed with exit code $status."
+            collect_macos_desktop_diagnostics "attempt-${attempt}"
+            if [ "$attempt" -lt "$TAURI_BUNDLE_ATTEMPTS" ]; then
+              sleep 20
+            fi
+          done
+
+          exit "$status"
+
+      - name: Collect macOS desktop diagnostics
+        if: failure() && startsWith(matrix.platform, 'macos-')
+        env:
+          DESKTOP_DIAGNOSTICS_PLATFORM: ${{ matrix.platform }}
+          DESKTOP_DIAGNOSTICS_RUST_TARGET: ${{ matrix.rust_target }}
+        run: |
+          set -euo pipefail
+          bash "${DESKTOP_DIAGNOSTICS_SCRIPT:-$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh}" failure || true
+
+      - name: Upload macOS desktop diagnostics
+        if: failure() && startsWith(matrix.platform, 'macos-')
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: desktop-diagnostics-${{ matrix.platform }}
+          path: |
+            dist/desktop-diagnostics/**
+            apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg/**
+            apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/macos/**
+            apps/desktop/src-tauri/target/release/bundle/dmg/**
+            apps/desktop/src-tauri/target/release/bundle/macos/**
+          if-no-files-found: ignore
+          include-hidden-files: true
+
+      - name: Sign Windows desktop artifacts
+        if: matrix.platform == 'windows-x64' && env.WINDOWS_SIGNING_ENABLED == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          WINDOWS_SIGNTOOL_PATH: ${{ secrets.WINDOWS_SIGNTOOL_PATH }}
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP "kandev-code-signing.pfx"
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+
+          $bundleDir = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle"
+          if (!(Test-Path $bundleDir)) {
+            $bundleDir = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/release/bundle"
+          }
+          if (!(Test-Path $bundleDir)) {
+            Write-Error "Missing Tauri bundle directory"
+            exit 1
+          }
+
+          $timestampUrl = if ([string]::IsNullOrWhiteSpace($env:WINDOWS_TIMESTAMP_URL)) { "https://timestamp.digicert.com" } else { $env:WINDOWS_TIMESTAMP_URL }
+          $signTool = if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNTOOL_PATH)) { "signtool" } else { $env:WINDOWS_SIGNTOOL_PATH }
+          $artifacts = @(Get-ChildItem -Path $bundleDir -Recurse -File -Include *.exe, *.msi)
+          if ($artifacts.Count -eq 0) {
+            Write-Error "No Windows installer artifacts found under $bundleDir"
+            exit 1
+          }
+
+          function Invoke-SignTool {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string[]]$Arguments,
+              [Parameter(Mandatory = $true)]
+              [string]$Description
+            )
+
+            & $signTool @Arguments
+            if ($LASTEXITCODE -ne 0) {
+              throw "$Description failed with exit code $LASTEXITCODE"
+            }
+          }
+
+          # signtool sign is the default Windows signing mechanism for CI artifacts.
+          try {
+            foreach ($artifact in $artifacts) {
+              $signArguments = @(
+                "sign", "/fd", "SHA256", "/td", "SHA256", "/tr", $timestampUrl,
+                "/f", $certificatePath,
+                "/p", $env:WINDOWS_CERTIFICATE_PASSWORD,
+                $artifact.FullName
+              )
+              $verifyArguments = @("verify", "/pa", $artifact.FullName)
+
+              Invoke-SignTool `
+                -Description "signtool sign $($artifact.Name)" `
+                -Arguments $signArguments
+              Invoke-SignTool `
+                -Description "signtool verify $($artifact.Name)" `
+                -Arguments $verifyArguments
+            }
+          } finally {
+            if (Test-Path -LiteralPath $certificatePath) {
+              Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+      - name: Collect desktop artifacts
+        run: |
+          set -euo pipefail
+          out_dir="$GITHUB_WORKSPACE/dist/desktop-artifacts"
+          mkdir -p "$out_dir"
+
+          bundle_dir="apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle"
+          if [ ! -d "$bundle_dir" ]; then
+            bundle_dir="apps/desktop/src-tauri/target/release/bundle"
+          fi
+          if [ ! -d "$bundle_dir" ]; then
+            echo "Missing Tauri bundle directory" >&2
+            exit 1
+          fi
+
+          found=0
+          while IFS= read -r -d '' artifact; do
+            base="$(basename "$artifact")"
+            dest="$out_dir/kandev-desktop-${{ matrix.platform }}-$base"
+            cp "$artifact" "$dest"
+            scripts/release/write-sha256.sh "$dest" "$dest.sha256"
+            found=$((found + 1))
+          done < <(find "$bundle_dir" -type f \( \
+            -name '*.dmg' -o \
+            -name '*.deb' -o \
+            -name '*.rpm' -o \
+            -name '*.msi' -o \
+            -name '*.exe' -o \
+            -name '*.AppImage' -o \
+            -name '*.app.tar.gz' -o \
+            -name '*.AppImage.tar.gz' -o \
+            -name '*.nsis.zip' -o \
+            -name '*.sig' \
+          \) -print0)
+
+          if [ "$found" -eq 0 ]; then
+            echo "No desktop artifacts found under $bundle_dir" >&2
+            exit 1
+          fi
+
+          if [ "${UPDATER_SIGNING_ENABLED:-false}" = "true" ]; then
+            bash "$DESKTOP_ASSET_VERIFIER" --require-updaters \
+              "$out_dir" "${{ matrix.platform }}"
+          else
+            bash "$DESKTOP_ASSET_VERIFIER" "$out_dir" "${{ matrix.platform }}"
+          fi
+          ls -lh "$out_dir"
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: dist/desktop-artifacts/*
+
   # ---------------------------------------------------------------------------
   # Docker base image — split per arch onto native runners, then stitched into
   # a multi-arch manifest list. Each arch consumes the matching linux bundle
-  # produced by build-bundles, so no Go/Next.js/pnpm work happens inside the
+  # produced by build-bundles, so no Go/Vite/pnpm work happens inside the
   # Docker build (the Dockerfile is reduced to apt-get + COPY).
   # ---------------------------------------------------------------------------
   docker-amd64:
     name: Build & push container image (amd64)
     needs: [prepare, build-bundles]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -427,11 +1107,11 @@ jobs:
     env:
       STAGING_IMAGE: ghcr.io/kdlbs/kandev:base-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-amd64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: bundle-linux-x64
           path: dist/bundle
@@ -441,14 +1121,14 @@ jobs:
           set -euo pipefail
           mkdir -p ctx/bundle
           # --strip-components=1 drops the top-level `kandev/` dir inside the
-          # tarball so ctx/bundle/ ends up with bin/, web/, cli/ directly.
+          # tarball so ctx/bundle/ ends up with bin/ directly.
           tar -xzf dist/bundle/kandev-linux-x64.tar.gz --strip-components=1 -C ctx/bundle
           cp docker-entrypoint.sh ctx/
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -461,13 +1141,13 @@ jobs:
       # page link + provenance tooling rely on these annotations.
       - name: Docker metadata (labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ghcr.io/kdlbs/kandev
 
       - name: Build and push (amd64 staging tag)
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: ./ctx
           file: ./Dockerfile
@@ -488,7 +1168,7 @@ jobs:
   docker-arm64:
     name: Build & push container image (arm64)
     needs: [prepare, build-bundles]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -498,11 +1178,11 @@ jobs:
     env:
       STAGING_IMAGE: ghcr.io/kdlbs/kandev:base-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: bundle-linux-arm64
           path: dist/bundle
@@ -514,10 +1194,10 @@ jobs:
           tar -xzf dist/bundle/kandev-linux-arm64.tar.gz --strip-components=1 -C ctx/bundle
           cp docker-entrypoint.sh ctx/
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -525,13 +1205,13 @@ jobs:
 
       - name: Docker metadata (labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ghcr.io/kdlbs/kandev
 
       - name: Build and push (arm64 staging tag)
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: ./ctx
           file: ./Dockerfile
@@ -547,7 +1227,7 @@ jobs:
   docker-manifest:
     name: Assemble multi-arch base manifest
     needs: [prepare, docker-amd64, docker-arm64]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -555,7 +1235,7 @@ jobs:
     steps:
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ghcr.io/kdlbs/kandev
           tags: |
@@ -564,10 +1244,10 @@ jobs:
             type=sha
             type=raw,value=latest
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -601,7 +1281,7 @@ jobs:
   docker-universal-amd64:
     name: Build & push universal image (amd64)
     needs: [prepare, docker-manifest]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -611,14 +1291,14 @@ jobs:
     env:
       STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-amd64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -626,13 +1306,13 @@ jobs:
 
       - name: Docker metadata (labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ghcr.io/kdlbs/kandev
 
       - name: Build and push (universal amd64 staging tag)
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: Dockerfile.universal
@@ -653,7 +1333,7 @@ jobs:
   docker-universal-arm64:
     name: Build & push universal image (arm64)
     needs: [prepare, docker-manifest]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -663,14 +1343,14 @@ jobs:
     env:
       STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -678,13 +1358,13 @@ jobs:
 
       - name: Docker metadata (labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ghcr.io/kdlbs/kandev
 
       - name: Build and push (universal arm64 staging tag)
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: Dockerfile.universal
@@ -704,7 +1384,7 @@ jobs:
     # docker-universal-manifest is included in publish-release's `needs` so
     # its size gate (and any per-arch build failure) blocks the release.
     needs: [prepare, docker-universal-amd64, docker-universal-arm64]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -713,10 +1393,10 @@ jobs:
       AMD64_REF: ghcr.io/kdlbs/kandev@${{ needs.docker-universal-amd64.outputs.digest }}
       ARM64_REF: ghcr.io/kdlbs/kandev@${{ needs.docker-universal-arm64.outputs.digest }}
     steps:
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -760,28 +1440,91 @@ jobs:
 
   publish-release:
     name: Publish GitHub release
-    needs: [prepare, build-bundles, docker-universal-manifest]
-    if: ${{ !inputs.dry_run }}
+    needs: [prepare, build-bundles, build-desktop, docker-universal-manifest]
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: write    # softprops/action-gh-release creates the release
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
+      - name: Prepare desktop asset verifier
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          helper="$RUNNER_TEMP/verify-desktop-assets.sh"
+          gh api \
+            --header "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}" \
+            > "$helper"
+          echo "DESKTOP_ASSET_VERIFIER=$helper" >> "$GITHUB_ENV"
+
+      - name: Install updater signature verifier toolchain
+        run: rustup toolchain install 1.88.0 --profile minimal
+
       - name: Generate release notes
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
         with:
           config: cliff.toml
           args: --latest --strip header
         env:
           OUTPUT: RELEASE_NOTES.md
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/download-artifact@v5
+      - name: Add unsigned desktop warning to release notes
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          unsigned=()
+          if ! bash scripts/release/desktop-signing-ready.sh macos >/dev/null 2>&1; then
+            unsigned+=("macOS")
+          fi
+          if ! bash scripts/release/desktop-signing-ready.sh windows >/dev/null 2>&1; then
+            unsigned+=("Windows")
+          fi
+          if [ "${#unsigned[@]}" -eq 0 ]; then
+            exit 0
+          fi
+
+          platforms="${unsigned[0]}"
+          for ((i = 1; i < ${#unsigned[@]}; i++)); do
+            platforms="$platforms, ${unsigned[$i]}"
+          done
+          tmp="$(mktemp)"
+          {
+            echo "> [!WARNING]"
+            echo "> $platforms desktop installers in this release are unsigned development builds."
+            echo "> They may require manual OS security bypasses and are not trusted downloads."
+            echo
+            cat RELEASE_NOTES.md
+          } > "$tmp"
+          mv "$tmp" RELEASE_NOTES.md
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           pattern: bundle-*
+          path: dist/release-assets
+          merge-multiple: true
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: desktop-*
           path: dist/release-assets
           merge-multiple: true
 
@@ -801,36 +1544,68 @@ jobs:
               exit 1
             fi
           done
+          bash "$DESKTOP_ASSET_VERIFIER" dist/release-assets
           ls -lh dist/release-assets
 
+      - name: Generate and verify updater manifest
+        env:
+          RUSTUP_TOOLCHAIN: 1.88.0
+        run: |
+          set -euo pipefail
+          pub_date="$(git show -s --format=%cI '${{ needs.prepare.outputs.tag }}^{commit}')"
+          node scripts/release/updater-manifest.mjs generate \
+            --assets-dir dist/release-assets \
+            --output dist/release-assets/latest.json \
+            --version "${{ needs.prepare.outputs.version }}" \
+            --tag "${{ needs.prepare.outputs.tag }}" \
+            --repository "${{ github.repository }}" \
+            --notes-file RELEASE_NOTES.md \
+            --pub-date "$pub_date" \
+            --allow-unsigned
+          if [ -f dist/release-assets/latest.json ]; then
+            node scripts/release/updater-manifest.mjs verify \
+              --assets-dir dist/release-assets \
+              --manifest dist/release-assets/latest.json \
+              --version "${{ needs.prepare.outputs.version }}" \
+              --tag "${{ needs.prepare.outputs.tag }}" \
+              --repository "${{ github.repository }}"
+          fi
+
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: ${{ needs.prepare.outputs.tag }}
           body_path: RELEASE_NOTES.md
           files: |
-            dist/release-assets/kandev-*.tar.gz
-            dist/release-assets/kandev-*.tar.gz.sha256
+            dist/release-assets/kandev-linux-*.tar.gz
+            dist/release-assets/kandev-linux-*.tar.gz.sha256
+            dist/release-assets/kandev-macos-*.tar.gz
+            dist/release-assets/kandev-macos-*.tar.gz.sha256
+            dist/release-assets/kandev-windows-*.tar.gz
+            dist/release-assets/kandev-windows-*.tar.gz.sha256
+            dist/release-assets/kandev-desktop-*
+            dist/release-assets/latest.json
+          preserve_order: true
 
   publish-npm:
     name: Publish npm packages
     needs: [prepare, publish-release]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write    # Required for OIDC trusted publishing
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
           version: "9.15.9"
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
@@ -851,12 +1626,12 @@ jobs:
   update-homebrew-tap:
     name: Update Homebrew tap
     needs: [prepare, publish-release]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - name: Update Homebrew tap formula
         env:

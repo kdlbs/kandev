@@ -170,6 +170,23 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 	return nil
 }
 
+func (r *Repository) TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments SET
+			task_id = ?,
+			updated_at = ?
+		WHERE id = ?
+	`), taskID, time.Now().UTC(), envID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task environment not found: %s", envID)
+	}
+	return nil
+}
+
 // DeleteTaskEnvironment deletes a task environment by ID.
 // Per-repo rows are removed via ON DELETE CASCADE.
 func (r *Repository) DeleteTaskEnvironment(ctx context.Context, id string) error {
@@ -211,12 +228,12 @@ func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environment_repos (
-			id, task_environment_id, repository_id,
+			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
 			position, error_message, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
-		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID,
+		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID, repo.BranchSlug,
 		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
 		repo.Position, repo.ErrorMessage, repo.CreatedAt, repo.UpdatedAt,
 	)
@@ -237,12 +254,12 @@ func (r *Repository) insertTaskEnvironmentRepoTx(ctx context.Context, tx *sql.Tx
 
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environment_repos (
-			id, task_environment_id, repository_id,
+			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
 			position, error_message, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
-		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID,
+		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID, repo.BranchSlug,
 		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
 		repo.Position, repo.ErrorMessage, repo.CreatedAt, repo.UpdatedAt,
 	)
@@ -253,6 +270,7 @@ func (r *Repository) insertTaskEnvironmentRepoTx(ctx context.Context, tx *sql.Tx
 func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, task_environment_id, repository_id,
+			COALESCE(branch_slug, ''),
 			worktree_id, worktree_path, worktree_branch,
 			position, error_message, created_at, updated_at
 		FROM task_environment_repos
@@ -269,6 +287,7 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 		repo := &models.TaskEnvironmentRepo{}
 		if err := rows.Scan(
 			&repo.ID, &repo.TaskEnvironmentID, &repo.RepositoryID,
+			&repo.BranchSlug,
 			&repo.WorktreeID, &repo.WorktreePath, &repo.WorktreeBranch,
 			&repo.Position, &repo.ErrorMessage, &repo.CreatedAt, &repo.UpdatedAt,
 		); err != nil {
@@ -285,11 +304,12 @@ func (r *Repository) UpdateTaskEnvironmentRepo(ctx context.Context, repo *models
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos SET
+			branch_slug = ?,
 			worktree_id = ?, worktree_path = ?, worktree_branch = ?,
 			position = ?, error_message = ?, updated_at = ?
 		WHERE id = ?
 	`),
-		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
+		repo.BranchSlug, repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
 		repo.Position, repo.ErrorMessage, repo.UpdatedAt,
 		repo.ID,
 	)

@@ -25,7 +25,7 @@ import {
 import { useRequest } from "@/lib/http/use-request";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 
-type SecretFormState = {
+export type SecretFormState = {
   name: string;
   value: string;
 };
@@ -48,6 +48,8 @@ type SecretFormProps = {
   isValid: boolean;
   isBusy: boolean;
   submitLabel: string;
+  showSubmit?: boolean;
+  baselineState?: SecretFormState;
 };
 
 function SecretForm({
@@ -59,15 +61,24 @@ function SecretForm({
   isValid,
   isBusy,
   submitLabel,
+  showSubmit = true,
+  baselineState,
 }: SecretFormProps) {
+  const nameIsDirty = Boolean(baselineState) && formState.name.trim() !== baselineState?.name;
+  const valueIsDirty = Boolean(baselineState) && formState.value !== baselineState?.value;
   return (
-    <div className="rounded-lg border border-border/70 bg-background p-4 space-y-3">
+    <div
+      className="rounded-lg border border-border/70 bg-background p-4 space-y-3"
+      data-settings-dirty={nameIsDirty || valueIsDirty}
+    >
       <div className="text-sm font-medium text-foreground">{title}</div>
       <div className="space-y-2">
         <Input
           value={formState.name}
           onChange={(e) => onFormChange({ name: e.target.value })}
           placeholder="Name (e.g. OpenAI Production Key)"
+          disabled={isBusy}
+          data-settings-dirty={nameIsDirty}
         />
         <Textarea
           value={formState.value}
@@ -75,12 +86,16 @@ function SecretForm({
           placeholder="Secret value"
           rows={2}
           className="resize-y font-mono text-sm"
+          disabled={isBusy}
+          data-settings-dirty={valueIsDirty}
         />
       </div>
       <div className="flex items-center gap-2">
-        <Button onClick={onSubmit} disabled={!isValid || isBusy} className="cursor-pointer">
-          {submitLabel}
-        </Button>
+        {showSubmit && (
+          <Button onClick={onSubmit} disabled={!isValid || isBusy} className="cursor-pointer">
+            {submitLabel}
+          </Button>
+        )}
         <Button variant="ghost" onClick={onCancel} disabled={isBusy} className="cursor-pointer">
           Cancel
         </Button>
@@ -312,13 +327,13 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
     resetForm,
     isValid,
     isBusy,
-    handleCreate: () => {
+    handleCreate: async () => {
       if (!isValid || isBusy) return;
-      createRequest.run(formState).catch(() => undefined);
+      await createRequest.run(formState);
     },
-    handleUpdate: () => {
+    handleUpdate: async () => {
       if (!isValid || isBusy || !editingId) return;
-      updateRequest.run(editingId, formState).catch(() => undefined);
+      await updateRequest.run(editingId, formState);
     },
     startEditing: (secret: SecretListItem) => {
       setEditingId(secret.id);
@@ -348,11 +363,47 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
+function getSecretEditState(
+  items: SecretListItem[],
+  editingId: string | null,
+  formState: SecretFormState,
+) {
+  const editingSecret = items.find((secret) => secret.id === editingId);
+  const revision = JSON.stringify({ ...formState, name: formState.name.trim() });
+  const savedRevision = JSON.stringify({ name: editingSecret?.name ?? "", value: "" });
+  return {
+    revision,
+    isDirty: Boolean(editingId) && revision !== savedRevision,
+    baseline: { name: editingSecret?.name ?? "", value: "" },
+  };
+}
+
+export function getSecretDraftMeta(
+  items: SecretListItem[],
+  editingId: string | null,
+  showCreate: boolean,
+  formState: SecretFormState,
+) {
+  const edit = getSecretEditState(items, editingId, formState);
+  return {
+    edit,
+    isDirty: showCreate || edit.isDirty,
+    revision: `${showCreate ? "new" : (editingId ?? "none")}:${edit.revision}`,
+  };
+}
+
 export function SecretsSettings() {
   const state = useSecretsState();
   const { loaded, editingId, showCreate, formState, setFormState, deleteTarget, items } = state;
   const actions = useSecretsActions(state);
   const { isValid, isBusy } = actions;
+  const { edit, isDirty, revision } = getSecretDraftMeta(items, editingId, showCreate, formState);
+  let invalidReason: string | undefined;
+  if (isDirty && !isValid) {
+    invalidReason = showCreate
+      ? "A secret name and value are required."
+      : "A secret name is required.";
+  }
 
   const onFormChange = (patch: Partial<SecretFormState>) =>
     setFormState((prev) => ({ ...prev, ...patch }));
@@ -361,10 +412,14 @@ export function SecretsSettings() {
     <SettingsPageTemplate
       title="Secrets"
       description="Manage API keys and credentials. Secrets are encrypted at rest and injected into agent environments via executor profile env vars."
-      isDirty={false}
+      isDirty={isDirty}
       saveStatus="idle"
-      onSave={() => undefined}
-      showSaveButton={false}
+      saveId="secrets-item-draft"
+      saveRevision={revision}
+      canSave={!isDirty || isValid}
+      invalidReason={invalidReason}
+      onSave={showCreate ? actions.handleCreate : actions.handleUpdate}
+      onDiscard={actions.resetForm}
     >
       <div className="space-y-6">
         <div className="flex items-center justify-between">
@@ -388,6 +443,8 @@ export function SecretsSettings() {
             isValid={isValid}
             isBusy={isBusy}
             submitLabel="Add secret"
+            showSubmit={false}
+            baselineState={defaultFormState}
           />
         )}
 
@@ -401,6 +458,8 @@ export function SecretsSettings() {
             isValid={isValid}
             isBusy={isBusy}
             submitLabel="Save changes"
+            showSubmit={false}
+            baselineState={edit.baseline}
           />
         )}
 

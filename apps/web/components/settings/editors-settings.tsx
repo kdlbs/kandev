@@ -40,6 +40,7 @@ import {
   isCustomEditor,
   type EditorsSettingsState,
 } from "@/components/settings/editors-settings-state";
+import { isDraftEntryDirty, isEditorsSettingsDirty } from "./settings-dirty";
 
 const LSP_LANGUAGE_OPTIONS = [
   {
@@ -78,6 +79,8 @@ const LSP_LANGUAGE_OPTIONS = [
 type LspLanguageCardsProps = {
   lspAutoStartLanguages: string[];
   lspAutoInstallLanguages: string[];
+  baselineLspAutoStart: string[];
+  baselineLspAutoInstall: string[];
   toggleAutoStart: (langId: string, checked: boolean) => void;
   toggleAutoInstall: (langId: string, checked: boolean) => void;
 };
@@ -85,6 +88,8 @@ type LspLanguageCardsProps = {
 function LspLanguageCards({
   lspAutoStartLanguages,
   lspAutoInstallLanguages,
+  baselineLspAutoStart,
+  baselineLspAutoInstall,
   toggleAutoStart,
   toggleAutoInstall,
 }: LspLanguageCardsProps) {
@@ -102,46 +107,55 @@ function LspLanguageCards({
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        {LSP_LANGUAGE_OPTIONS.map((lang) => (
-          <div
-            key={lang.id}
-            className="rounded-lg border border-border/60 bg-background px-4 py-3 space-y-2.5"
-          >
-            <div>
-              <div className="text-sm font-medium text-foreground">{lang.label}</div>
-              <div className="text-xs text-muted-foreground">{lang.binary}</div>
+        {LSP_LANGUAGE_OPTIONS.map((lang) => {
+          const autoStartDirty =
+            lspAutoStartLanguages.includes(lang.id) !== baselineLspAutoStart.includes(lang.id);
+          const autoInstallDirty =
+            lspAutoInstallLanguages.includes(lang.id) !== baselineLspAutoInstall.includes(lang.id);
+          return (
+            <div
+              key={lang.id}
+              className="rounded-lg border border-border/60 bg-background px-4 py-3 space-y-2.5"
+              data-settings-dirty={autoStartDirty || autoInstallDirty}
+            >
+              <div>
+                <div className="text-sm font-medium text-foreground">{lang.label}</div>
+                <div className="text-xs text-muted-foreground">{lang.binary}</div>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Auto-start</span>
+                <Switch
+                  checked={lspAutoStartLanguages.includes(lang.id)}
+                  onCheckedChange={(checked) => toggleAutoStart(lang.id, checked === true)}
+                  data-settings-dirty={autoStartDirty}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id={`lsp-install-${lang.id}`}
+                  checked={lspAutoInstallLanguages.includes(lang.id)}
+                  onCheckedChange={(checked) => toggleAutoInstall(lang.id, checked === true)}
+                  className="h-3.5 w-3.5"
+                  data-settings-dirty={autoInstallDirty}
+                />
+                <label
+                  htmlFor={`lsp-install-${lang.id}`}
+                  className="text-xs text-muted-foreground cursor-pointer"
+                >
+                  Auto-install if not found
+                </label>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-[260px] text-xs">
+                    {lang.installHint}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Auto-start</span>
-              <Switch
-                checked={lspAutoStartLanguages.includes(lang.id)}
-                onCheckedChange={(checked) => toggleAutoStart(lang.id, checked === true)}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id={`lsp-install-${lang.id}`}
-                checked={lspAutoInstallLanguages.includes(lang.id)}
-                onCheckedChange={(checked) => toggleAutoInstall(lang.id, checked === true)}
-                className="h-3.5 w-3.5"
-              />
-              <label
-                htmlFor={`lsp-install-${lang.id}`}
-                className="text-xs text-muted-foreground cursor-pointer"
-              >
-                Auto-install if not found
-              </label>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-[260px] text-xs">
-                  {lang.installHint}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -149,6 +163,7 @@ function LspLanguageCards({
 
 type LspServerConfigSectionProps = {
   lspConfigStrings: Record<string, string>;
+  baselineLspConfigStrings: Record<string, string>;
   lspConfigErrors: Record<string, string>;
   expandedConfigLang: string | null;
   setExpandedConfigLang: (lang: string | null) => void;
@@ -157,6 +172,7 @@ type LspServerConfigSectionProps = {
 
 function LspServerConfigSection({
   lspConfigStrings,
+  baselineLspConfigStrings,
   lspConfigErrors,
   expandedConfigLang,
   setExpandedConfigLang,
@@ -178,10 +194,12 @@ function LspServerConfigSection({
         const defaultConfig = LSP_DEFAULT_CONFIGS[lang.id];
         const hasDefaults = defaultConfig && Object.keys(defaultConfig).length > 0;
         const error = lspConfigErrors[lang.id];
+        const isDirty = isDraftEntryDirty(lspConfigStrings, baselineLspConfigStrings, lang.id);
         return (
           <div
             key={lang.id}
             className="rounded-lg border border-border/60 bg-background overflow-hidden"
+            data-settings-dirty={isDirty}
           >
             <button
               type="button"
@@ -223,6 +241,7 @@ function LspServerConfigSection({
                   placeholder={hasDefaults ? JSON.stringify(defaultConfig, null, 2) : "{\n  \n}"}
                   className="font-mono text-xs min-h-[80px] resize-y"
                   rows={4}
+                  data-settings-dirty={isDirty}
                 />
                 {error && <div className="text-xs text-destructive">{error}</div>}
               </div>
@@ -279,13 +298,11 @@ function CustomEditorRow({
           title={`Edit ${editor.name}`}
           initialState={formStateFromEditor(editor)}
           onCancel={close}
-          onSave={(state) => {
-            void updateRequest.run(editor.id, state).then(() => {
-              close();
-            });
-          }}
+          onSave={(state) => updateRequest.run(editor.id, state)}
+          onSaved={close}
           submitLabel="Save changes"
           isSaving={updateRequest.isLoading}
+          coordinatedSaveId={`custom-editor:${editor.id}`}
         />
       )}
       renderPreview={({ open }) => (
@@ -356,11 +373,12 @@ function CustomEditorsList({
           title="New custom editor"
           initialState={defaultFormState()}
           onCancel={() => setIsAdding(false)}
-          onSave={(state) => {
-            void createRequest.run(state);
-          }}
+          onSave={(state) => createRequest.run(state)}
+          onSaved={() => setIsAdding(false)}
           submitLabel="Add editor"
           isSaving={createRequest.isLoading}
+          coordinatedSaveId="custom-editor:new"
+          dirtyWhenMounted
         />
       )}
       <div className="space-y-3">
@@ -387,6 +405,7 @@ function CustomEditorsList({
 type EditorsSectionProps = {
   defaultOptions: ComboboxOption[];
   defaultEditorId: string;
+  baselineDefaultId: string;
   availableEditors: EditorOption[];
   builtInEditors: EditorOption[];
   onDefaultEditorChange: (value: string) => void;
@@ -403,6 +422,7 @@ type EditorsSectionProps = {
 function EditorsSection({
   defaultOptions,
   defaultEditorId,
+  baselineDefaultId,
   availableEditors,
   builtInEditors,
   onDefaultEditorChange,
@@ -422,7 +442,10 @@ function EditorsSection({
       </div>
       <div className="space-y-2">
         <div className="text-sm font-medium text-foreground">Default</div>
-        <div className="min-w-[280px]">
+        <div
+          className="min-w-[280px] rounded-md border border-transparent"
+          data-settings-dirty={defaultEditorId !== baselineDefaultId}
+        >
           <Combobox
             options={defaultOptions}
             value={defaultEditorId}
@@ -469,31 +492,17 @@ function EditorsSection({
   );
 }
 
-function useEditorsIsDirty(state: EditorsSettingsState) {
-  const {
-    defaultEditorId,
-    baselineDefaultId,
-    lspAutoStartLanguages,
-    baselineLspAutoStart,
-    lspAutoInstallLanguages,
-    baselineLspAutoInstall,
-    lspConfigStrings,
-    baselineLspConfigStrings,
-  } = state;
-  const lspAutoStartDirty =
-    lspAutoStartLanguages.length !== baselineLspAutoStart.length ||
-    lspAutoStartLanguages.some((id) => !baselineLspAutoStart.includes(id));
-  const lspAutoInstallDirty =
-    lspAutoInstallLanguages.length !== baselineLspAutoInstall.length ||
-    lspAutoInstallLanguages.some((id) => !baselineLspAutoInstall.includes(id));
-  const lspConfigsDirty =
-    JSON.stringify(lspConfigStrings) !== JSON.stringify(baselineLspConfigStrings);
-  return (
-    defaultEditorId !== baselineDefaultId ||
-    lspAutoStartDirty ||
-    lspAutoInstallDirty ||
-    lspConfigsDirty
-  );
+function getEditorsSaveRevision(state: EditorsSettingsState): string {
+  return JSON.stringify({
+    defaultEditorId: state.defaultEditorId,
+    lspAutoStartLanguages: state.lspAutoStartLanguages,
+    lspAutoInstallLanguages: state.lspAutoInstallLanguages,
+    lspConfigStrings: state.lspConfigStrings,
+  });
+}
+
+function useSyncEditors(editors: EditorOption[], setEditors: (editors: EditorOption[]) => void) {
+  useEffect(() => setEditors(editors), [editors, setEditors]);
 }
 
 export function EditorsSettings() {
@@ -510,7 +519,9 @@ export function EditorsSettings() {
   const saveDefaultRequest = useSaveRequest(state);
   const { createRequest, updateRequest, deleteRequest } = useEditorRequests(state, applyEditors);
   const { updateLspConfigString } = useLspConfigActions(setLspConfigStrings, setLspConfigErrors);
-  const isDirty = useEditorsIsDirty(state);
+  const isDirty = isEditorsSettingsDirty(state);
+  const saveRevision = getEditorsSaveRevision(state);
+  const hasInvalidConfig = Object.keys(state.lspConfigErrors).length > 0;
 
   const toggleAutoStart = useCallback(
     (langId: string, checked: boolean) => {
@@ -540,9 +551,7 @@ export function EditorsSettings() {
     [availableEditors, state.defaultEditorId],
   );
 
-  useEffect(() => {
-    setEditors(editors);
-  }, [editors, setEditors]);
+  useSyncEditors(editors, setEditors);
 
   return (
     <SettingsPageTemplate
@@ -550,7 +559,12 @@ export function EditorsSettings() {
       description="Configure the included code editor and external editors"
       isDirty={isDirty}
       saveStatus={saveDefaultRequest.status}
-      onSave={() => void saveDefaultRequest.run()}
+      saveRevision={saveRevision}
+      canSave={!hasInvalidConfig}
+      invalidReason={
+        hasInvalidConfig ? "Fix invalid LSP server configuration before saving." : undefined
+      }
+      onSave={() => saveDefaultRequest.run()}
     >
       <div className="space-y-6">
         <div className="space-y-4">
@@ -560,11 +574,14 @@ export function EditorsSettings() {
           <LspLanguageCards
             lspAutoStartLanguages={state.lspAutoStartLanguages}
             lspAutoInstallLanguages={state.lspAutoInstallLanguages}
+            baselineLspAutoStart={state.baselineLspAutoStart}
+            baselineLspAutoInstall={state.baselineLspAutoInstall}
             toggleAutoStart={toggleAutoStart}
             toggleAutoInstall={toggleAutoInstall}
           />
           <LspServerConfigSection
             lspConfigStrings={state.lspConfigStrings}
+            baselineLspConfigStrings={state.baselineLspConfigStrings}
             lspConfigErrors={state.lspConfigErrors}
             expandedConfigLang={state.expandedConfigLang}
             setExpandedConfigLang={state.setExpandedConfigLang}
@@ -575,6 +592,7 @@ export function EditorsSettings() {
         <EditorsSection
           defaultOptions={defaultOptions}
           defaultEditorId={state.defaultEditorId}
+          baselineDefaultId={state.baselineDefaultId}
           availableEditors={availableEditors}
           builtInEditors={builtInEditors}
           onDefaultEditorChange={state.setDefaultEditorId}

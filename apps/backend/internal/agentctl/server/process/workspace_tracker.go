@@ -11,11 +11,18 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/securityutil"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 )
 
 // DefaultGitPollInterval is the default interval for polling git status
 const DefaultGitPollInterval = 3 * time.Second
+
+// workspaceGitStatusObserveTimeout bounds a shared live status observation so
+// a wedged Git process cannot retain the tracker flight indefinitely.
+const workspaceGitStatusObserveTimeout = 60 * time.Second
 
 // fileStatus constants for FileInfo.Status values.
 const (
@@ -36,6 +43,13 @@ type WorkspaceTracker struct {
 	// GitStatusUpdate / FileListUpdate so the frontend can key per-repo state.
 	// Empty for the single-repo case.
 	repositoryName string
+
+	// baseBranch is the task-specific base branch used to compute diff stats
+	// (BaseCommit, Ahead/Behind). When set, it takes precedence over the
+	// hardcoded origin/main → master fallback list in workspace_git_status.go.
+	// Sourced from task_repositories.base_branch on the kandev backend.
+	// Empty for legacy tasks or external branches with no recorded base.
+	baseBranch string
 
 	// Current state
 	currentStatus types.GitStatusUpdate
@@ -76,6 +90,16 @@ type WorkspaceTracker struct {
 	// Polling loops use TryLock (skip if busy); RefreshGitStatus uses Lock (always completes).
 	updateMu sync.Mutex
 
+	// gitStatusObserver is the expensive live repository observation. Keeping it
+	// as a dependency makes the concurrency contract deterministic to test while
+	// production uses computeGitStatus.
+	gitStatusObserver       func(context.Context) (types.GitStatusUpdate, error)
+	gitStatusObserveTimeout time.Duration
+	gitStatusGroup          singleflight.Group
+	gitStatusObserveMu      sync.Mutex
+	gitStatusObserveWG      sync.WaitGroup
+	gitStatusWaiterJoined   func() // Optional test synchronization hook; nil in production.
+
 	// Control
 	stopCh          chan struct{}
 	wg              sync.WaitGroup
@@ -103,6 +127,82 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	return newWorkspaceTracker(resolvedWorkDir, "", log)
 }
 
+// RepositoryName returns the repository name tag applied to events emitted by
+// this tracker. Empty for the bare task-root / single-repo tracker; non-empty
+// for per-repo trackers built via NewWorkspaceTrackerForRepo. Used by the
+// rescan path to decide whether a discovered subdir already has a tracker.
+func (wt *WorkspaceTracker) RepositoryName() string {
+	return wt.repositoryName
+}
+
+// SetBaseBranch records the task's stored base branch for this repository.
+// Called once after construction by the process manager; subsequent git
+// status updates use this value as the first candidate when resolving
+// BaseCommit / Ahead / Behind. Empty disables the override and falls back
+// to the hardcoded origin/main → master priority list.
+//
+// Unsafe ref names (leading "-", whitespace, shell metacharacters, ".." or
+// other format violations) are rejected at this boundary because the value
+// is interpolated into `exec.Command("git", …, baseBranch)` downstream and
+// git itself interprets leading "-" as a flag. Rejection downgrades to the
+// no-override fallback rather than erroring — keeps the tracker functional
+// when an untrusted caller supplies garbage.
+func (wt *WorkspaceTracker) SetBaseBranch(baseBranch string) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	if !IsSafeGitRef(baseBranch) {
+		wt.baseBranch = ""
+		return
+	}
+	wt.baseBranch = baseBranch
+}
+
+// IsSafeGitRef reports whether ref is safe to splice into a `git`
+// subprocess argument list. Empty input returns true so callers can treat
+// "" as "no override" without an extra branch. Delegates to the
+// `securityutil.IsValidBranchName` sanitiser that the rest of the agentctl
+// git operations (Rebase, Merge, RenameBranch, …) already use — keeps one
+// canonical allowlist across the package and inherits the CodeQL
+// taint-tracking recognition that pattern carries.
+//
+// `origin/<name>` refs are split before the underlying check because the
+// shared validator rejects "/" in the first character class.
+func IsSafeGitRef(ref string) bool {
+	if ref == "" {
+		return true
+	}
+	return SanitizeGitRef(ref) != ""
+}
+
+// SanitizeGitRef returns ref when securityutil.IsValidBranchName accepts
+// it (after handling the `origin/<name>` prefix), else the empty string.
+// Use this at the call site immediately before passing a user-controlled
+// ref name into a `git` subprocess argument so the sanitiser barrier sits
+// inline with the sink.
+func SanitizeGitRef(ref string) string {
+	if ref == "" || ref[len(ref)-1] == '/' {
+		return ""
+	}
+	if rest, ok := strings.CutPrefix(ref, "origin/"); ok {
+		if securityutil.IsValidBranchName(rest) {
+			return ref
+		}
+		return ""
+	}
+	if securityutil.IsValidBranchName(ref) {
+		return ref
+	}
+	return ""
+}
+
+// BaseBranch returns the recorded base branch override, if any. Exposed for
+// tests; production callers read it indirectly through the git-status loops.
+func (wt *WorkspaceTracker) BaseBranch() string {
+	wt.mu.RLock()
+	defer wt.mu.RUnlock()
+	return wt.baseBranch
+}
+
 // NewWorkspaceTrackerForRepo creates a tracker scoped to a specific repository
 // subdirectory. The repositoryName is stamped onto every emitted event so the
 // frontend can route updates per repo for multi-repo task roots.
@@ -126,7 +226,7 @@ func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Log
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &WorkspaceTracker{
+	tracker := &WorkspaceTracker{
 		workDir:                    resolvedWorkDir,
 		gitIndexPath:               gitIndexPath,
 		repositoryName:             repositoryName,
@@ -142,15 +242,18 @@ func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Log
 		// about to be used by someone, historically). Retained-task CPU
 		// savings still apply because those instances eventually receive a
 		// slow or paused mode push.
-		pollMode:           PollModeFast,
-		monitorModeChanged: make(chan struct{}, 1),
-		gitPollModeChanged: make(chan struct{}, 1),
-		stopCh:             make(chan struct{}),
-		initialScanDone:    make(chan struct{}),
-		tickDone:           make(chan struct{}, 1),
-		cancelCtx:          ctx,
-		cancelFunc:         cancel,
+		pollMode:                PollModeFast,
+		monitorModeChanged:      make(chan struct{}, 1),
+		gitPollModeChanged:      make(chan struct{}, 1),
+		stopCh:                  make(chan struct{}),
+		initialScanDone:         make(chan struct{}),
+		tickDone:                make(chan struct{}, 1),
+		cancelCtx:               ctx,
+		cancelFunc:              cancel,
+		gitStatusObserveTimeout: workspaceGitStatusObserveTimeout,
 	}
+	tracker.gitStatusObserver = tracker.computeGitStatus
+	return tracker
 }
 
 // preferGitRepoChildIfRootIsBare returns workDir unchanged when it's already a
@@ -203,7 +306,21 @@ func resolveGitIndexPath(workDir string) string {
 	if !workDirHasOwnGitEntry(workDir) {
 		return ""
 	}
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	// One-shot probe at workspace setup. Acquire the throttle slot first
+	// (30s budget), then start the 5s exec timer — otherwise a busy git
+	// pool would burn through the exec budget queueing and return "",
+	// which the caller treats as "not a git repo" and permanently
+	// disables polling for the workspace.
+	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelAcquire()
+	release, err := subproc.Git().Acquire(acquireCtx)
+	if err != nil {
+		return ""
+	}
+	defer release()
+	execCtx, cancelExec := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelExec()
+	cmd := exec.CommandContext(execCtx, "git", "rev-parse", "--git-dir")
 	cmd.Dir = workDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -278,12 +395,19 @@ const stopTimeout = 5 * time.Second
 // up to 5 seconds for goroutines to exit before proceeding.
 func (wt *WorkspaceTracker) Stop() {
 	wt.stopOnce.Do(func() {
-		wt.cancelFunc() // Kill in-flight git commands immediately
+		// Synchronize cancellation with shared-observation admission. Once this
+		// lock is released, no observation can Add to gitStatusObserveWG.
+		wt.gitStatusObserveMu.Lock()
+		if wt.cancelFunc != nil {
+			wt.cancelFunc() // Kill in-flight git commands immediately
+		}
+		wt.gitStatusObserveMu.Unlock()
 		close(wt.stopCh)
 
 		done := make(chan struct{})
 		go func() {
 			wt.wg.Wait()
+			wt.gitStatusObserveWG.Wait()
 			close(done)
 		}()
 		select {

@@ -450,13 +450,17 @@ func TestPrompt_Success(t *testing.T) {
 		}
 		// Verify payload
 		var payload struct {
-			Text string `json:"text"`
+			Text             string `json:"text"`
+			PromptGeneration uint64 `json:"prompt_generation"`
 		}
 		if err := msg.ParsePayload(&payload); err != nil {
 			t.Errorf("failed to parse payload: %v", err)
 		}
 		if payload.Text != "hello agent" {
 			t.Errorf("expected text 'hello agent', got %q", payload.Text)
+		}
+		if payload.PromptGeneration != 42 {
+			t.Errorf("expected prompt generation 42, got %d", payload.PromptGeneration)
 		}
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"success": true,
@@ -469,7 +473,7 @@ func TestPrompt_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := c.Prompt(ctx, "hello agent", nil)
+	err := c.Prompt(ctx, "hello agent", nil, 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -486,7 +490,7 @@ func TestPrompt_NoActiveSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := c.Prompt(ctx, "hello agent", nil)
+	err := c.Prompt(ctx, "hello agent", nil, 0)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -790,6 +794,192 @@ func TestStreamUpdates_DisconnectCleansPending(t *testing.T) {
 	c.pendingMu.Unlock()
 	if count != 0 {
 		t.Fatalf("expected 0 pending requests after disconnect, got %d", count)
+	}
+}
+
+// TestReadUpdatesStream_BlockedHandlerDoesNotStarveResponse is the regression
+// test for the production stream-reader deadlock (task 544afdae). An agent
+// event handler (handleAgentReady) blocked on the per-session cancelInFlight
+// guard, and that guard's holder — Service.CancelAgent — was itself blocked in
+// sendStreamRequest waiting for the agent.cancel response frame. Because the
+// read loop used to run handlers inline, it never looped back to deliver that
+// response, so both sides waited forever.
+//
+// This pins the fix: the read loop offloads event handling to an ordered worker
+// goroutine, so even while a handler is blocked mid-event, a concurrent
+// sendStreamRequest still receives its response frame.
+func TestReadUpdatesStream_BlockedHandlerDoesNotStarveResponse(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+
+	// The server emits an agent event first, then answers the request that the
+	// test fires while that event's handler is still blocked.
+	emitEvent := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		// Push an agent event whose handler will block on the client side.
+		<-emitEvent
+		eventData, _ := json.Marshal(AgentEvent{Type: "complete"})
+		_ = conn.WriteMessage(websocket.TextMessage, eventData)
+
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var msg ws.Message
+			if err := json.Unmarshal(message, &msg); err != nil {
+				continue
+			}
+			if msg.Type == ws.MessageTypeRequest {
+				resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+				data, _ := json.Marshal(resp)
+				_ = conn.WriteMessage(websocket.TextMessage, data)
+			}
+		}
+	}))
+	defer server.Close()
+
+	handlerEntered := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	log := newTestLogger()
+	c := &Client{
+		baseURL:         server.URL,
+		httpClient:      &http.Client{Timeout: 5 * time.Second},
+		logger:          log,
+		pendingRequests: make(map[string]chan *ws.Message),
+	}
+
+	ctx := context.Background()
+	var once sync.Once
+	if err := c.StreamUpdates(ctx, func(_ AgentEvent) {
+		// Stand in for handleAgentReady blocking on the cancelInFlight guard.
+		once.Do(func() { close(handlerEntered) })
+		<-releaseHandler
+	}, nil, nil); err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer func() {
+		close(releaseHandler)
+		c.Close()
+	}()
+
+	// Trigger the event and wait until its handler is blocked in-flight.
+	close(emitEvent)
+	select {
+	case <-handlerEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the blocking event handler to be entered")
+	}
+
+	// With the handler still blocked, a request must still get its response —
+	// the read loop is not wedged behind the handler.
+	reqCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	resp, err := c.sendStreamRequest(reqCtx, "agent.cancel", nil)
+	if err != nil {
+		t.Fatalf("sendStreamRequest was starved by the blocked event handler: %v", err)
+	}
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("expected response type, got %q", resp.Type)
+	}
+}
+
+// TestReadUpdatesStream_EventBurstDoesNotStarveResponse pins the fix for the
+// bounded-queue regression (cubic review on task 544afdae): even if the first
+// event's handler blocks on the cancelInFlight guard and a large burst of
+// further events arrives behind it, the read loop must stay free to deliver the
+// agent.cancel response frame. A fixed buffered channel would fill and
+// backpressure the read loop on send, re-wedging the cancel; the unbounded
+// reader-side queue must not.
+func TestReadUpdatesStream_EventBurstDoesNotStarveResponse(t *testing.T) {
+	const burst = 1000 // comfortably beyond the old 256 buffer
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	emitEvents := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		<-emitEvents
+		// Blast a burst of events; the first handler will block on the client
+		// side, so all of these queue up behind it.
+		for i := 0; i < burst; i++ {
+			eventData, _ := json.Marshal(AgentEvent{Type: "message_chunk"})
+			if err := conn.WriteMessage(websocket.TextMessage, eventData); err != nil {
+				return
+			}
+		}
+
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var msg ws.Message
+			if err := json.Unmarshal(message, &msg); err != nil {
+				continue
+			}
+			if msg.Type == ws.MessageTypeRequest {
+				resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+				data, _ := json.Marshal(resp)
+				_ = conn.WriteMessage(websocket.TextMessage, data)
+			}
+		}
+	}))
+	defer server.Close()
+
+	handlerEntered := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	log := newTestLogger()
+	c := &Client{
+		baseURL:         server.URL,
+		httpClient:      &http.Client{Timeout: 5 * time.Second},
+		logger:          log,
+		pendingRequests: make(map[string]chan *ws.Message),
+	}
+
+	ctx := context.Background()
+	var once sync.Once
+	if err := c.StreamUpdates(ctx, func(_ AgentEvent) {
+		// Only the first handler blocks; the rest queue up behind it.
+		once.Do(func() {
+			close(handlerEntered)
+			<-releaseHandler
+		})
+	}, nil, nil); err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer func() {
+		close(releaseHandler)
+		c.Close()
+	}()
+
+	close(emitEvents)
+	select {
+	case <-handlerEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the blocking event handler to be entered")
+	}
+
+	// With the first handler blocked and a full burst queued behind it, a
+	// request must still get its response — the read loop is not wedged behind
+	// a full event buffer.
+	reqCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	resp, err := c.sendStreamRequest(reqCtx, "agent.cancel", nil)
+	if err != nil {
+		t.Fatalf("sendStreamRequest was starved by the event burst: %v", err)
+	}
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("expected response type, got %q", resp.Type)
 	}
 }
 

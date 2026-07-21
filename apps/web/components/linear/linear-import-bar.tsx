@@ -14,7 +14,7 @@ type LinearImportBarProps = {
 };
 
 export function LinearImportBar({ workspaceId, disabled, onImport }: LinearImportBarProps) {
-  const available = useLinearAvailable();
+  const available = useLinearAvailable(workspaceId);
   if (!available || !workspaceId) return null;
 
   return (
@@ -30,7 +30,7 @@ export function LinearImportBar({ workspaceId, disabled, onImport }: LinearImpor
       placeholder="ENG-123 or paste issue URL"
       extractKey={(raw) => raw.toUpperCase().match(LINEAR_KEY_RE)?.[0] ?? null}
       validationHint="Paste a Linear issue URL or identifier (ENG-123)"
-      fetch={(key) => getLinearIssue(key)}
+      fetch={(key) => getLinearIssue(key, { workspaceId })}
       onSuccess={(_key, issue) => onImport(issue)}
       submitLabel="Import"
       submittingLabel="Loading..."

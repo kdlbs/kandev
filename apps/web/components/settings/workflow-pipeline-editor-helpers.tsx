@@ -3,13 +3,38 @@
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { WorkflowStep } from "@/lib/types/http";
+import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 
-export function HelpTip({ text }: { text: string }) {
+export const STEP_PROMPT_PLACEHOLDERS: ScriptPlaceholder[] = [
+  {
+    key: "task_prompt",
+    description: "The original task description provided by the user",
+    example: "Implement user authentication with OAuth2",
+    executor_types: [],
+  },
+];
+
+export function HelpTip({
+  text,
+  testId,
+  ariaLabel = "More information",
+}: {
+  text: string;
+  testId?: string;
+  ariaLabel?: string;
+}) {
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground/50 hover:text-muted-foreground cursor-help shrink-0" />
+          <button
+            type="button"
+            className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={ariaLabel}
+            data-testid={testId}
+          >
+            <IconInfoCircle className="h-3.5 w-3.5" />
+          </button>
         </TooltipTrigger>
         <TooltipContent className="max-w-xs">{text}</TooltipContent>
       </Tooltip>
@@ -121,6 +146,13 @@ export function getTransitionType(step: WorkflowStep): string {
 
 export function getOnTurnStartTransitionType(step: WorkflowStep): string {
   const action = step.events?.on_turn_start?.find((a) =>
+    ["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
+  );
+  return action?.type ?? "none";
+}
+
+export function getChildrenCompletedTransitionType(step: WorkflowStep): string {
+  const action = step.events?.on_children_completed?.find((a) =>
     ["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
   );
   return action?.type ?? "none";

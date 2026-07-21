@@ -14,18 +14,17 @@ function useIsMounted() {
   return useSyncExternalStore(emptySubscribe, getClientSnapshot, getServerSnapshot);
 }
 
-function getWorkspaceId(
-  sessions: { workspaceId: string }[],
+export function getWorkspaceId(
+  sessions: { sessionId: string; workspaceId: string }[],
   isOpen: boolean,
+  activeSessionId: string | null,
   activeWorkspace: string | null,
 ): string | null {
-  if (sessions.length > 0) {
-    return sessions[0].workspaceId;
-  }
-  if (isOpen) {
-    return activeWorkspace;
-  }
-  return null;
+  if (!isOpen) return null;
+  return (
+    sessions.find((session) => session.sessionId === activeSessionId)?.workspaceId ??
+    activeWorkspace
+  );
 }
 
 /**
@@ -36,14 +35,14 @@ function getWorkspaceId(
 export function QuickChatProvider({ children }: { children: React.ReactNode }) {
   const quickChatSessions = useAppStore((s) => s.quickChat.sessions);
   const isOpen = useAppStore((s) => s.quickChat.isOpen);
+  const activeSessionId = useAppStore((s) => s.quickChat.activeSessionId);
   const activeWorkspace = useAppStore((s) => s.workspaces.activeId);
   const mounted = useIsMounted();
 
   // Preload agent profiles so they're available when quick chat is opened
   useSettingsData(true);
 
-  // Get workspace ID from first session, or use active workspace if modal is open
-  const workspaceId = getWorkspaceId(quickChatSessions, isOpen, activeWorkspace);
+  const workspaceId = getWorkspaceId(quickChatSessions, isOpen, activeSessionId, activeWorkspace);
 
   return (
     <>

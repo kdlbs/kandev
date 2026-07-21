@@ -52,12 +52,32 @@ export type FileEditorComment = CommentBase & {
 export type PRFeedbackComment = CommentBase & {
   source: "pr-feedback";
   prNumber: number;
-  feedbackType: "check" | "review" | "comment";
+  feedbackType: "check" | "review" | "comment" | "conflict";
   /** Pre-formatted markdown text for display and sending */
   content: string;
 };
 
-export type Comment = DiffComment | PlanComment | FileEditorComment | PRFeedbackComment;
+export type WalkthroughComment = CommentBase & {
+  source: "walkthrough";
+  taskId: string;
+  walkthroughId?: string;
+  walkthroughTitle?: string;
+  stepIndex: number;
+  stepCount: number;
+  repo?: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  /** Markdown explanation authored by the agent for this walkthrough step. */
+  stepText: string;
+};
+
+export type Comment =
+  | DiffComment
+  | PlanComment
+  | FileEditorComment
+  | PRFeedbackComment
+  | WalkthroughComment;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -77,6 +97,10 @@ export function isFileEditorComment(c: Comment): c is FileEditorComment {
 
 export function isPRFeedbackComment(c: Comment): c is PRFeedbackComment {
   return c.source === "pr-feedback";
+}
+
+export function isWalkthroughComment(c: Comment): c is WalkthroughComment {
+  return c.source === "walkthrough";
 }
 
 // ---------------------------------------------------------------------------

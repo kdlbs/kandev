@@ -15,6 +15,12 @@ type Repository interface {
 	// or inserted (false). Honors maxPerSession when inserting.
 	AppendOrInsertTail(ctx context.Context, sessionID, taskID, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error)
 
+	// InsertOrReplaceByCoalesceKey replaces an existing queued entry with the
+	// same session, queued_by, and metadata coalesce key. If no matching entry
+	// exists, it inserts a new tail entry when allowInsert is true. Returns
+	// ErrEntryNotFound when allowInsert is false and no matching entry exists.
+	InsertOrReplaceByCoalesceKey(ctx context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error)
+
 	// ListBySession returns all entries for a session ordered by position ascending.
 	ListBySession(ctx context.Context, sessionID string) ([]QueuedMessage, error)
 
@@ -24,6 +30,14 @@ type Repository interface {
 	// TakeHead atomically returns and deletes the lowest-position entry for the
 	// session. Returns nil, nil if the queue is empty.
 	TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
+
+	// TakeByID atomically returns and deletes the entry identified by entryID
+	// for sessionID, regardless of its FIFO position. Unlike DeleteByID, it has
+	// no queued_by="agent" guard: the caller is internal orchestrator code
+	// (InterruptForPeerMessage) dispatching the specific entry that triggered
+	// its own interrupt, not a user-driven "remove queued message" request.
+	// Returns nil, nil if no entry matches (already taken or never existed).
+	TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error)
 
 	// UpdateContent replaces the content/attachments of an entry. The session
 	// scope (`AND session_id = ?`) is mandatory so a caller can't update an
@@ -48,8 +62,16 @@ type Repository interface {
 	// to newSessionID. Used on workflow session switches.
 	TransferSession(ctx context.Context, oldSessionID, newSessionID string) error
 
+	// ReplaceSession replaces a session's queued entries and pending move with
+	// the supplied snapshot, preserving queued-message identity fields.
+	ReplaceSession(ctx context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error
+
 	// SetPendingMove upserts the deferred workflow move for a session.
 	SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) error
+
+	// GetPendingMove returns the deferred move for a session without removing it.
+	// Returns nil, nil if absent.
+	GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, error)
 
 	// TakePendingMove returns and removes the deferred move for a session.
 	// Returns nil, nil if absent.

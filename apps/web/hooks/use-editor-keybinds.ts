@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
+import { markSessionPanelUserActivationIntent } from "@/components/task/session-tab-activation-intent";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
@@ -23,7 +24,9 @@ function handleTabNavigation(e: KeyboardEvent, api: DockviewApi) {
 
   const direction = e.code === "BracketLeft" ? -1 : 1;
   const nextIndex = (currentIndex + direction + panels.length) % panels.length;
-  panels[nextIndex].api.setActive();
+  const nextPanel = panels[nextIndex];
+  markSessionPanelUserActivationIntent(nextPanel.id);
+  nextPanel.api.setActive();
 }
 
 function handleTerminalToggle(
@@ -31,6 +34,7 @@ function handleTerminalToggle(
   api: DockviewApi,
   previousPanelIdRef: React.MutableRefObject<string | null>,
   getEnvironmentId: () => string | null,
+  getTaskID: () => string | null,
 ) {
   e.preventDefault();
   e.stopPropagation();
@@ -58,38 +62,18 @@ function handleTerminalToggle(
 
   const environmentId = getEnvironmentId();
   if (!environmentId) return;
+  const taskID = getTaskID();
 
-  createUserShell(environmentId)
+  createUserShell(environmentId, { taskId: taskID ?? undefined })
     .then((result) => {
-      useDockviewStore.getState().addTerminalPanel(result.terminalId, undefined, environmentId);
+      const title = result.displayName ?? result.label ?? "Terminal";
+      useDockviewStore
+        .getState()
+        .addTerminalPanel(result.terminalId, undefined, environmentId, taskID ?? undefined, title);
     })
     .catch((err) => {
       console.warn("Failed to create terminal shell:", err);
     });
-}
-
-/** Returns true if the active element is a text input or contenteditable. */
-function isEditableTarget(e: KeyboardEvent): boolean {
-  const tag = (e.target as HTMLElement)?.tagName;
-  return (
-    tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable === true
-  );
-}
-
-function handleLayoutToggle(
-  e: KeyboardEvent,
-  overrides: StoredShortcutOverrides | undefined,
-): boolean {
-  if (isEditableTarget(e)) return false;
-
-  if (matchesShortcut(e, getShortcut("TOGGLE_SIDEBAR", overrides))) {
-    e.preventDefault();
-    e.stopPropagation();
-    useDockviewStore.getState().toggleSidebar();
-    return true;
-  }
-
-  return false;
 }
 
 function handleBottomTerminal(
@@ -140,8 +124,10 @@ function handleBottomTerminal(
  * Global editor keybinds for dockview:
  * - Cmd/Ctrl+Shift+[ / ] — navigate prev/next tab in active group
  * - Ctrl+` — toggle terminal focus
- * - Cmd/Ctrl+B — toggle sidebar
  * - Cmd/Ctrl+J — toggle bottom terminal panel
+ *
+ * Note: `TOGGLE_SIDEBAR` (Cmd/Ctrl+B) is handled app-wide by `useAppShortcuts`
+ * (mounted near the root), not here, so it works on every route.
  */
 export function useEditorKeybinds() {
   const previousPanelIdRef = useRef<string | null>(null);
@@ -168,15 +154,20 @@ export function useEditorKeybinds() {
       const isTerminalToggle = e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === "Backquote";
 
       if (isTerminalToggle) {
-        handleTerminalToggle(e, api, previousPanelIdRef, () => {
-          const state = appStore.getState();
-          const sid = state.tasks.activeSessionId;
-          return sid ? (state.environmentIdBySessionId[sid] ?? null) : null;
-        });
+        handleTerminalToggle(
+          e,
+          api,
+          previousPanelIdRef,
+          () => {
+            const state = appStore.getState();
+            const sid = state.tasks.activeSessionId;
+            return sid ? (state.environmentIdBySessionId[sid] ?? null) : null;
+          },
+          () => appStore.getState().tasks?.activeTaskId ?? null,
+        );
         return;
       }
 
-      if (handleLayoutToggle(e, overrides)) return;
       handleBottomTerminal(e, appStore, previousFocusRef, overrides);
     };
 

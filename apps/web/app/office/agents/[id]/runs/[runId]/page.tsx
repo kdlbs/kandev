@@ -5,11 +5,10 @@ import { RunDetailView } from "./run-detail-view";
 type Props = { params: Promise<{ id: string; runId: string }> };
 
 /**
- * Run detail Server Component — parallel-fetches the run aggregate
- * and the recent-runs sidebar window so the page returns with both
- * the main panel and the sidebar populated. Errors bubble to the
- * Next.js error boundary; live-mode WS subscription is added by
- * Wave 2.E inside the Client Component.
+ * Run detail route loader: parallel-fetches the run aggregate and the
+ * recent-runs sidebar window so the page returns with both the main panel
+ * and the sidebar populated. Errors bubble to the route error surface;
+ * live-mode WS subscription is added by the view.
  */
 export default async function AgentRunDetailPage({ params }: Props) {
   const { id, runId } = await params;

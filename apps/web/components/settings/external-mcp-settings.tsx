@@ -67,7 +67,7 @@ export function ExternalMcpSettings() {
       <SettingsSection
         icon={<IconPlugConnected className="h-5 w-5" />}
         title="Endpoints"
-        description="Loopback-only: requests from anything other than 127.0.0.1 / ::1 are rejected. No authentication is required because the endpoint is only reachable from this machine."
+        description="Available on the same host and port as Kandev. Use localhost for same-machine agents, or the reachable Kandev URL for LAN, VPN, and reverse-proxy clients."
       >
         <Card>
           <CardHeader>

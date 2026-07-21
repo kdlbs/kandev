@@ -87,9 +87,16 @@ test.describe("Git Panel Multi-Select", () => {
 
     await session.changesBulkStageButton().click();
 
-    const stagedList = session.changes.getByTestId("staged-file-list");
-    await expect(stagedList.getByText("stage-a.ts")).toBeVisible({ timeout: 15_000 });
-    await expect(stagedList.getByText("stage-b.ts")).toBeVisible({ timeout: 15_000 });
+    const stagedSection = testPage.getByTestId("staged-files-section");
+    const unstagedSection = testPage.getByTestId("unstaged-files-section");
+    await expect(stagedSection.locator('[data-changes-file="stage-a.ts"]')).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(stagedSection.locator('[data-changes-file="stage-b.ts"]')).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(unstagedSection.locator('[data-changes-file="stage-a.ts"]')).toHaveCount(0);
+    await expect(unstagedSection.locator('[data-changes-file="stage-b.ts"]')).toHaveCount(0);
   });
 
   test("escape clears selection in git panel", async ({
@@ -125,8 +132,7 @@ test.describe("Git Panel Multi-Select", () => {
     const bulkBar = session.changesBulkActionBar("unstaged");
     await expect(bulkBar).toBeVisible({ timeout: 5_000 });
 
-    const fileList = testPage.getByTestId("unstaged-file-list");
-    await fileList.focus();
+    await fileA.focus();
     await testPage.keyboard.press("Escape");
 
     await expect(session.changesSelectedRows()).toHaveCount(0, { timeout: 5_000 });

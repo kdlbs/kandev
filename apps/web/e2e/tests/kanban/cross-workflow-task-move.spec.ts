@@ -23,8 +23,8 @@ test.describe("Cross-workflow task move from home", () => {
     await kanban.openTaskContextMenu(task.id);
     await expect(kanban.contextMoveTo()).toBeVisible();
     await expect(kanban.contextSendToWorkflow()).not.toBeVisible();
-    await kanban.contextMoveTo().hover();
-    await kanban.contextStep(targetStep.id).click();
+    await testPage.keyboard.press("Escape");
+    await kanban.moveTaskWithinWorkflow(task.id, targetStep.id);
 
     await expect(kanban.taskCardInColumn("Same Workflow Context Move", targetStep.id)).toBeVisible({
       timeout: 10_000,
@@ -101,9 +101,8 @@ test.describe("Cross-workflow task move from home", () => {
     for (const label of expectedLabels) {
       await expect(testPage.getByRole("menuitem", { name: label })).toBeVisible();
     }
-    await kanban.contextSendToWorkflow().hover();
-    await kanban.contextWorkflow(targetWorkflow.id).hover();
-    await kanban.contextStep(targetStep.id).click();
+    await testPage.keyboard.press("Escape");
+    await kanban.sendTaskToWorkflowFromActions(task.id, targetWorkflow.id, targetStep.id);
 
     await expect(kanban.taskCard(task.id)).not.toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByText(/Moved task to/i)).toBeVisible({ timeout: 10_000 });
@@ -131,7 +130,7 @@ test.describe("Cross-workflow task move from home", () => {
     await kanban.goto();
 
     await kanban.openTaskContextMenu(task.id);
-    await kanban.contextSendToWorkflow().hover();
+    await kanban.openSendToWorkflowTargets(emptyWorkflow.id);
 
     await expect(kanban.contextWorkflow(emptyWorkflow.id)).toBeVisible();
     await expect(kanban.contextWorkflow(emptyWorkflow.id)).toBeDisabled();
@@ -160,8 +159,7 @@ test.describe("Cross-workflow task move from home", () => {
     await kanban.goto();
 
     await kanban.openTaskContextMenu(task.id);
-    await kanban.contextSendToWorkflow().hover();
-    await kanban.contextWorkflow(targetWorkflow.id).hover();
+    await kanban.openSendToWorkflowStep(targetWorkflow.id, targetStep.id);
     await expect(kanban.contextAutoStartStep(targetStep.id)).toBeVisible();
   });
 });

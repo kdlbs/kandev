@@ -12,6 +12,10 @@ const (
 	OnEnterEnablePlanMode    OnEnterActionType = "enable_plan_mode"
 	OnEnterAutoStartAgent    OnEnterActionType = "auto_start_agent"
 	OnEnterResetAgentContext OnEnterActionType = "reset_agent_context"
+	// OnEnterSetSessionMode declares the agent's session permission mode (e.g.
+	// "default", "acceptEdits") for a step on entry. The target mode is carried
+	// in the action Config under the "mode" key. See issue #1183.
+	OnEnterSetSessionMode OnEnterActionType = "set_session_mode"
 
 	// Phase 2 (ADR-0004) — generic actions are also permitted on on_enter
 	// so review/approval steps can clear decisions and fan out runs to
@@ -79,6 +83,14 @@ type OnExitAction struct {
 type GenericActionType string
 
 const (
+	// GenericActionMoveToNext transitions to the next workflow step.
+	GenericActionMoveToNext GenericActionType = "move_to_next"
+	// GenericActionMoveToPrevious transitions to the previous workflow step.
+	GenericActionMoveToPrevious GenericActionType = "move_to_previous"
+	// GenericActionMoveToStep transitions to a configured workflow step.
+	GenericActionMoveToStep GenericActionType = "move_to_step"
+	// GenericActionAutoStartAgent starts the step's agent.
+	GenericActionAutoStartAgent GenericActionType = "auto_start_agent"
 	// GenericActionQueueRun queues a run on a target task/agent.
 	GenericActionQueueRun GenericActionType = "queue_run"
 	// GenericActionClearDecisions clears recorded decisions for the
@@ -161,10 +173,15 @@ type StepDefinition struct {
 	ShowInCommandPanel    bool       `json:"show_in_command_panel"`
 	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
 	AgentProfileID        string     `json:"agent_profile_id,omitempty"`
+	WIPLimit              int        `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
+	PullFromStepID        string     `json:"pull_from_step_id,omitempty" yaml:"pull_from_step_id,omitempty"`
 	// StageType mirrors WorkflowStep.StageType for templates so the office
 	// default + coordination workflows can declare their UX role
 	// ("work", "review", "approval", "custom") in YAML.
 	StageType StageType `json:"stage_type,omitempty"`
+	// AutoAdvanceRequiresSignal gates on_turn_complete transitions on an
+	// explicit `step_complete_kandev` MCP signal from the agent (ADR 0015).
+	AutoAdvanceRequiresSignal bool `json:"auto_advance_requires_signal,omitempty" yaml:"auto_advance_requires_signal,omitempty"`
 }
 
 // WorkflowStep represents a step in a workflow
@@ -181,13 +198,21 @@ type WorkflowStep struct {
 	ShowInCommandPanel    bool       `json:"show_in_command_panel"`
 	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
 	AgentProfileID        string     `json:"agent_profile_id,omitempty"`
+	WIPLimit              int        `json:"wip_limit,omitempty"`
+	PullFromStepID        string     `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend
 	// ("work", "review", "approval", "custom"). The engine does not branch
 	// on it. Stored as TEXT in workflow_steps.stage_type, defaulting to
 	// "custom" so existing rows remain unchanged.
 	StageType StageType `json:"stage_type,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// AutoAdvanceRequiresSignal gates on_turn_complete transitions on an
+	// explicit `step_complete_kandev` MCP signal from the agent (ADR 0015).
+	// When true, bare turn-end does NOT trigger the step's transition
+	// actions; instead the orchestrator waits for the agent (or a manual
+	// UI fallback) to write the pending-signal bag on TaskSession.Metadata.
+	AutoAdvanceRequiresSignal bool      `json:"auto_advance_requires_signal"`
+	CreatedAt                 time.Time `json:"created_at"`
+	UpdatedAt                 time.Time `json:"updated_at"`
 }
 
 // HasOnEnterAction checks if the step has a specific on_enter action type.
@@ -213,6 +238,18 @@ func (s *WorkflowStep) HasOnTurnCompleteAction(actionType OnTurnCompleteActionTy
 		}
 	}
 	return false
+}
+
+// RemapStepID returns the mapped workflow-step ID when id references a template
+// step alias; otherwise it returns id unchanged.
+func RemapStepID(id string, idMap map[string]string) string {
+	if id == "" {
+		return ""
+	}
+	if mapped, ok := idMap[id]; ok {
+		return mapped
+	}
+	return id
 }
 
 // StepTransitionTrigger represents how a session moved between steps
@@ -242,40 +279,53 @@ func RemapStepEvents(events StepEvents, idMap map[string]string) StepEvents {
 	result := StepEvents{}
 	result.OnEnter = append(result.OnEnter, events.OnEnter...)
 	for _, a := range events.OnTurnStart {
-		if a.Type == OnTurnStartMoveToStep && a.Config != nil {
-			if stepID, ok := a.Config["step_id"].(string); ok {
-				if newID, found := idMap[stepID]; found {
-					cfg := make(map[string]any, len(a.Config))
-					maps.Copy(cfg, a.Config)
-					cfg["step_id"] = newID
-					a.Config = cfg
-				}
-			}
+		if a.Type == OnTurnStartMoveToStep {
+			a.Config = remapActionStepID(a.Config, idMap)
 		}
 		result.OnTurnStart = append(result.OnTurnStart, a)
 	}
 	for _, a := range events.OnTurnComplete {
-		if a.Type == OnTurnCompleteMoveToStep && a.Config != nil {
-			if stepID, ok := a.Config["step_id"].(string); ok {
-				if newID, found := idMap[stepID]; found {
-					cfg := make(map[string]any, len(a.Config))
-					maps.Copy(cfg, a.Config)
-					cfg["step_id"] = newID
-					a.Config = cfg
-				}
-			}
+		if a.Type == OnTurnCompleteMoveToStep {
+			a.Config = remapActionStepID(a.Config, idMap)
 		}
 		result.OnTurnComplete = append(result.OnTurnComplete, a)
 	}
 	result.OnExit = append(result.OnExit, events.OnExit...)
-	// Phase 2 (ADR-0004) — copy generic-action lists through. None of these
-	// actions carry step_id references today, so a shallow copy suffices.
-	result.OnComment = append(result.OnComment, events.OnComment...)
-	result.OnBlockerResolved = append(result.OnBlockerResolved, events.OnBlockerResolved...)
-	result.OnChildrenCompleted = append(result.OnChildrenCompleted, events.OnChildrenCompleted...)
-	result.OnApprovalResolved = append(result.OnApprovalResolved, events.OnApprovalResolved...)
-	result.OnHeartbeat = append(result.OnHeartbeat, events.OnHeartbeat...)
-	result.OnBudgetAlert = append(result.OnBudgetAlert, events.OnBudgetAlert...)
-	result.OnAgentError = append(result.OnAgentError, events.OnAgentError...)
+	result.OnComment = remapGenericStepEvents(events.OnComment, idMap)
+	result.OnBlockerResolved = remapGenericStepEvents(events.OnBlockerResolved, idMap)
+	result.OnChildrenCompleted = remapGenericStepEvents(events.OnChildrenCompleted, idMap)
+	result.OnApprovalResolved = remapGenericStepEvents(events.OnApprovalResolved, idMap)
+	result.OnHeartbeat = remapGenericStepEvents(events.OnHeartbeat, idMap)
+	result.OnBudgetAlert = remapGenericStepEvents(events.OnBudgetAlert, idMap)
+	result.OnAgentError = remapGenericStepEvents(events.OnAgentError, idMap)
 	return result
+}
+
+func remapGenericStepEvents(actions []GenericAction, idMap map[string]string) []GenericAction {
+	result := make([]GenericAction, 0, len(actions))
+	for _, action := range actions {
+		if action.Type == GenericActionMoveToStep {
+			action.Config = remapActionStepID(action.Config, idMap)
+		}
+		result = append(result, action)
+	}
+	return result
+}
+
+func remapActionStepID(config map[string]any, idMap map[string]string) map[string]any {
+	if config == nil {
+		return nil
+	}
+	stepID, ok := config["step_id"].(string)
+	if !ok {
+		return config
+	}
+	newID, found := idMap[stepID]
+	if !found {
+		return config
+	}
+	cfg := make(map[string]any, len(config))
+	maps.Copy(cfg, config)
+	cfg["step_id"] = newID
+	return cfg
 }

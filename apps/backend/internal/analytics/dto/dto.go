@@ -33,6 +33,8 @@ type GlobalStatsDTO struct {
 	AvgTurnsPerTask      float64 `json:"avg_turns_per_task"`
 	AvgMessagesPerTask   float64 `json:"avg_messages_per_task"`
 	AvgDurationMsPerTask int64   `json:"avg_duration_ms_per_task"`
+	AvgTurnDurationMs    int64   `json:"avg_turn_duration_ms"`
+	AvgMessagesPerTurn   float64 `json:"avg_messages_per_turn"`
 }
 
 // DailyActivityDTO represents activity statistics for a single day

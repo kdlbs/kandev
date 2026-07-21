@@ -4,20 +4,27 @@ import { useState, useCallback } from "react";
 import { IconTestPipe, IconLoader2, IconCheck, IconX, IconSparkles } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { testSpritesConnection } from "@/lib/api/domains/sprites-api";
 import { useSprites } from "@/hooks/domains/settings/use-sprites";
 import { InlineSecretSelect } from "@/components/settings/profile-edit/inline-secret-select";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
+import { SettingsCard } from "@/components/settings/settings-card";
 
 type SpritesApiKeyCardProps = {
   secretId: string | null;
+  baselineSecretId?: string | null;
   onSecretIdChange: (id: string | null) => void;
   secrets: SecretListItem[];
 };
 
-export function SpritesApiKeyCard({ secretId, onSecretIdChange, secrets }: SpritesApiKeyCardProps) {
+export function SpritesApiKeyCard({
+  secretId,
+  baselineSecretId,
+  onSecretIdChange,
+  secrets,
+}: SpritesApiKeyCardProps) {
   const { status } = useSprites(secretId ?? undefined);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<SpritesTestResult | null>(null);
@@ -42,8 +49,9 @@ export function SpritesApiKeyCard({ secretId, onSecretIdChange, secrets }: Sprit
     }
   }, [secretId]);
 
+  const isDirty = baselineSecretId !== undefined && secretId !== baselineSecretId;
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
@@ -64,6 +72,7 @@ export function SpritesApiKeyCard({ secretId, onSecretIdChange, secrets }: Sprit
           onSecretIdChange={onSecretIdChange}
           secrets={secrets}
           label="Secret"
+          isDirty={isDirty}
         />
         {secretId && (
           <ConnectionDetails
@@ -74,7 +83,7 @@ export function SpritesApiKeyCard({ secretId, onSecretIdChange, secrets }: Sprit
           />
         )}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

@@ -1,6 +1,18 @@
 package process
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+)
+
+// SetAdapterForTest injects an adapter without starting a real agent process.
+// Intended for API handler tests that need to exercise adapter interactions.
+func (m *Manager) SetAdapterForTest(a adapter.AgentAdapter) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.adapter = a
+}
 
 // SetVscodeForTest injects a VscodeManager with the given status and port.
 // Intended for use in tests where starting a real code-server is not feasible.

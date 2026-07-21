@@ -9,10 +9,13 @@ let mockEnvironmentId: string | null = null;
 let mockShells: Array<{ terminalId: string; label: string; closable: boolean }> = [];
 let mockShellsLoaded = false;
 
+let mockTaskID: string | null = "task-1";
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       environmentIdBySessionId: mockEnvironmentId ? { [SESSION_ID]: mockEnvironmentId } : {},
+      tasks: { activeTaskId: mockTaskID },
     }),
 }));
 
@@ -48,6 +51,7 @@ beforeEach(() => {
   mockEnvironmentId = "env-A";
   mockShells = [];
   mockShellsLoaded = true;
+  mockTaskID = "task-1";
 });
 
 describe("useMobileTerminals auto-create", () => {
@@ -77,6 +81,18 @@ describe("useMobileTerminals auto-create", () => {
     renderHook(() => useMobileTerminals(SESSION_ID));
     renderHook(() => useMobileTerminals(SESSION_ID));
     renderHook(() => useMobileTerminals(SESSION_ID));
+    await waitFor(() => expect(addTerminalMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("waits for taskID before auto-creating — null taskID is a no-op", async () => {
+    addTerminalMock.mockResolvedValue(undefined);
+    mockTaskID = null;
+    const { rerender } = renderHook(() => useMobileTerminals(SESSION_ID));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(addTerminalMock).not.toHaveBeenCalled();
+    // Once taskID hydrates the next render fires the auto-create.
+    mockTaskID = "task-late";
+    rerender();
     await waitFor(() => expect(addTerminalMock).toHaveBeenCalledTimes(1));
   });
 

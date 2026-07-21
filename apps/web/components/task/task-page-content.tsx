@@ -1,21 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { TaskTopBar } from "@/components/task/task-top-bar";
-import { TaskLayout } from "@/components/task/task-layout";
-import { DebugOverlay } from "@/components/debug-overlay";
-import {
-  taskId as toTaskId,
-  workflowId as toWorkflowId,
-  workspaceId as toWorkspaceId,
-  type Repository,
-  type RepositoryScript,
-  type Task,
-} from "@/lib/types/http";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { IconAlertTriangle } from "@tabler/icons-react";
+import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { KanbanState } from "@/lib/state/slices";
-import { DEBUG_UI } from "@/lib/config";
-import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSessionAgent } from "@/hooks/domains/session/use-session-agent";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
@@ -27,15 +16,16 @@ import { fetchTask } from "@/lib/api";
 import { useTasks } from "@/hooks/use-tasks";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { Layout } from "react-resizable-panels";
-import { TaskArchivedProvider } from "./task-archived-context";
-import { SessionCommands } from "@/components/session-commands";
-import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
 import {
-  buildDebugEntries,
   deriveIsAgentWorking,
   buildArchivedValue,
-  resolveTaskProps,
+  hasResolvedTaskDetails,
+  resolveEffectiveTask,
+  resolveTaskContentState,
+  syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
+import { TaskPageInner } from "@/components/task/task-page-inner";
+import { GridSpinner } from "@/components/grid-spinner";
 
 type TaskPageContentProps = {
   task: Task | null;
@@ -49,63 +39,7 @@ type TaskPageContentProps = {
   officeTaskHref?: string | null;
 };
 
-function resolveEffectiveTask(
-  taskDetails: Task | null,
-  initialTask: Task | null,
-  kanbanTask: KanbanState["tasks"][number] | null,
-  effectiveTaskId: string | null,
-): Task | null {
-  const matchingTaskDetails = taskDetails?.id === effectiveTaskId ? taskDetails : null;
-  const matchingInitialTask = initialTask?.id === effectiveTaskId ? initialTask : null;
-  const baseTask = matchingTaskDetails ?? matchingInitialTask;
-
-  if (!baseTask && !kanbanTask) return null;
-  if (baseTask) return mergeBaseWithKanban(baseTask, kanbanTask);
-  if (kanbanTask) return buildTaskFromKanban(kanbanTask, taskDetails, initialTask);
-  return null;
-}
-
-function mergeBaseWithKanban(
-  baseTask: Task,
-  kanbanTask: KanbanState["tasks"][number] | null,
-): Task {
-  if (!kanbanTask) return baseTask;
-  return {
-    ...baseTask,
-    title: kanbanTask.title ?? baseTask.title,
-    description: kanbanTask.description ?? baseTask.description,
-    workflow_step_id:
-      (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
-    position: kanbanTask.position ?? baseTask.position,
-    state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
-    repositories: baseTask.repositories,
-  };
-}
-
-function buildTaskFromKanban(
-  kanbanTask: KanbanState["tasks"][number],
-  taskDetails: Task | null,
-  initialTask: Task | null,
-): Task {
-  const prevWorkspaceId = taskDetails?.workspace_id ?? initialTask?.workspace_id;
-  const prevBoardId = taskDetails?.workflow_id ?? initialTask?.workflow_id;
-  return {
-    id: toTaskId(kanbanTask.id),
-    title: kanbanTask.title,
-    description: kanbanTask.description ?? "",
-    workflow_step_id: kanbanTask.workflowStepId,
-    position: kanbanTask.position,
-    state: kanbanTask.state ?? "CREATED",
-    workspace_id: prevWorkspaceId ?? toWorkspaceId(""),
-    workflow_id: prevBoardId ?? toWorkflowId(""),
-    priority: 0,
-    repositories: [],
-    created_at: "",
-    updated_at: kanbanTask.updatedAt ?? "",
-  };
-}
-
-function useWorkflowStepsMapped() {
+export function useWorkflowStepsMapped() {
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
   return useMemo(
     () =>
@@ -124,7 +58,7 @@ function useWorkflowStepsMapped() {
   );
 }
 
-function useSessionPanelState(effectiveSessionId: string | null | undefined) {
+export function useSessionPanelState(effectiveSessionId: string | null | undefined) {
   const storeSessionState = useAppStore((state) =>
     effectiveSessionId ? (state.taskSessions.items[effectiveSessionId]?.state ?? null) : null,
   );
@@ -172,7 +106,7 @@ function useSessionPanelState(effectiveSessionId: string | null | undefined) {
   };
 }
 
-function useMergedAgentState(
+export function useMergedAgentState(
   agent: ReturnType<typeof useSessionAgent>,
   resumption: ReturnType<typeof useSessionResumption>,
   sessionPanel: ReturnType<typeof useSessionPanelState>,
@@ -198,266 +132,42 @@ function useMergedAgentState(
   return { isResuming, isResumed, taskSessionState, worktreePath, worktreeBranch, isAgentWorking };
 }
 
-type TaskPageInnerProps = {
-  task: Task | null;
-  effectiveSessionId: string | null;
-  repository: Repository | null;
-  agent: ReturnType<typeof useSessionAgent>;
-  merged: ReturnType<typeof useMergedAgentState>;
-  resumption: ReturnType<typeof useSessionResumption>;
-  sessionPanel: ReturnType<typeof useSessionPanelState>;
-  agentctlStatus: ReturnType<typeof useSessionAgentctl>;
-  connectionStatus: string;
-  workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
-  archivedValue: ReturnType<typeof buildArchivedValue>;
-  isMobile: boolean;
-  showDebugOverlay: boolean;
-  onToggleDebugOverlay: () => void;
-  initialScripts: RepositoryScript[];
-  initialTerminals?: Terminal[];
-  defaultLayouts: Record<string, Layout>;
-  initialLayout?: string | null;
-  officeTaskHref?: string | null;
-};
-
-type RemoteExecutorStatus = {
-  is_remote_executor?: boolean;
-  executor_type?: string | null;
-  executor_name?: string | null;
-  remote_name?: string | null;
-  remote_state?: string | null;
-  remote_created_at?: string | null;
-  remote_checked_at?: string | null;
-  remote_status_error?: string | null;
-};
-
-function toNullable(value: string | null | undefined): string | null {
-  return value ?? null;
-}
-
-function resolveRemoteExecutor(status?: RemoteExecutorStatus | null) {
-  const remoteExecutorName = status?.remote_name ?? status?.executor_name ?? null;
-  return {
-    isRemoteExecutor: status?.is_remote_executor ?? false,
-    remoteExecutorType: toNullable(status?.executor_type),
-    remoteExecutorName,
-    remoteState: toNullable(status?.remote_state),
-    remoteCreatedAt: toNullable(status?.remote_created_at),
-    remoteCheckedAt: toNullable(status?.remote_checked_at),
-    remoteStatusError: toNullable(status?.remote_status_error),
-  };
-}
-
-/** Pick the best step ID. Both session-level (from session.state_changed WS event) and
- * task-level (from task.updated WS event + kanban snapshot) carry the same value, but
- * session.state_changed is delivered directly while task.updated goes through the hub's
- * broadcast channel, so the session value arrives first and is less likely to be stale. */
-function resolveCurrentStepId(
-  sessionStepId: string | null,
-  taskStepId: string | null,
-): string | null {
-  return sessionStepId || taskStepId || null;
-}
-
-function buildTaskTopBarProps(params: {
-  taskProps: ReturnType<typeof resolveTaskProps>;
-  agent: ReturnType<typeof useSessionAgent>;
-  merged: ReturnType<typeof useMergedAgentState>;
-  workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
-  showDebugOverlay: boolean;
-  onToggleDebugOverlay: () => void;
-  effectiveSessionId: string | null;
-  remote: ReturnType<typeof resolveRemoteExecutor>;
-  sessionWorkflowStepId: string | null;
-  agentctlReady: boolean;
-  officeTaskHref?: string | null;
-}) {
-  const { taskProps, agent, merged, workflowSteps, showDebugOverlay, onToggleDebugOverlay } =
-    params;
-  return {
-    taskId: taskProps.taskId,
-    activeSessionId: params.effectiveSessionId,
-    taskTitle: taskProps.taskTitle,
-    onStartAgent: agent.handleStartAgent,
-    onStopAgent: agent.handleStopAgent,
-    isAgentRunning: agent.isAgentRunning || merged.isResumed,
-    isAgentLoading: agent.isAgentLoading || merged.isResuming,
-    showDebugOverlay,
-    onToggleDebugOverlay,
-    workflowSteps,
-    currentStepId: resolveCurrentStepId(params.sessionWorkflowStepId, taskProps.workflowStepId),
-    workflowId: taskProps.workflowId,
-    workspaceId: taskProps.workspaceId,
-    isArchived: taskProps.isArchived,
-    isRemoteExecutor: params.remote.isRemoteExecutor,
-    isAgentctlReady: params.agentctlReady,
-    remoteExecutorType: params.remote.remoteExecutorType,
-    officeTaskHref: params.officeTaskHref,
-  };
-}
-
-function buildTaskLayoutProps(params: {
-  taskProps: ReturnType<typeof resolveTaskProps>;
-  repository: Repository | null;
-  effectiveSessionId: string | null;
-  initialScripts: RepositoryScript[];
-  initialTerminals?: Terminal[];
-  defaultLayouts: Record<string, Layout>;
-  merged: ReturnType<typeof useMergedAgentState>;
-  remote: ReturnType<typeof resolveRemoteExecutor>;
-  initialLayout?: string | null;
-}) {
-  const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
-  return {
-    workspaceId: taskProps.workspaceId,
-    workflowId: taskProps.workflowId,
-    sessionId: effectiveSessionId,
-    repository: repository ?? null,
-    initialScripts,
-    initialTerminals,
-    defaultLayouts: params.defaultLayouts,
-    initialLayout: params.initialLayout,
-    taskTitle: taskProps.taskTitle,
-    baseBranch: taskProps.baseBranch,
-    worktreeBranch: params.merged.worktreeBranch,
-    isRemoteExecutor: params.remote.isRemoteExecutor,
-    remoteExecutorType: params.remote.remoteExecutorType,
-    remoteExecutorName: params.remote.remoteExecutorName,
-    remoteState: params.remote.remoteState,
-    remoteCreatedAt: params.remote.remoteCreatedAt,
-    remoteCheckedAt: params.remote.remoteCheckedAt,
-    remoteStatusError: params.remote.remoteStatusError,
-  };
-}
-
-function maybeBuildDebugEntries(params: {
-  isVisible: boolean;
-  connectionStatus: string;
-  task: Task | null;
-  effectiveSessionId: string | null | undefined;
-  merged: ReturnType<typeof useMergedAgentState>;
-  resumption: ReturnType<typeof useSessionResumption>;
-  sessionPanel: ReturnType<typeof useSessionPanelState>;
-  agentctlStatus: ReturnType<typeof useSessionAgentctl>;
-}) {
-  if (!params.isVisible) return null;
-  return buildDebugEntries({
-    connectionStatus: params.connectionStatus,
-    task: params.task,
-    effectiveSessionId: params.effectiveSessionId,
-    taskSessionState: params.merged.taskSessionState,
-    isAgentWorking: params.merged.isAgentWorking,
-    resumptionState: params.resumption.resumptionState,
-    resumptionError: params.resumption.error,
-    agentctlStatus: params.agentctlStatus,
-    previewOpen: params.sessionPanel.previewOpen,
-    previewStage: params.sessionPanel.previewStage,
-    previewUrl: params.sessionPanel.previewUrl,
-    devProcessId: params.sessionPanel.devProcessId,
-    devProcessStatus: params.sessionPanel.devProcessStatus,
-  });
-}
-
-function TaskPageInner({
-  task,
-  effectiveSessionId,
-  repository,
-  agent,
-  merged,
-  resumption,
-  sessionPanel,
-  agentctlStatus,
-  connectionStatus,
-  workflowSteps,
-  archivedValue,
-  isMobile,
-  showDebugOverlay,
-  onToggleDebugOverlay,
-  initialScripts,
-  initialTerminals,
-  defaultLayouts,
-  initialLayout,
-  officeTaskHref,
-}: TaskPageInnerProps) {
-  const taskProps = resolveTaskProps(task, repository);
-  const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
-  const debugEntries = maybeBuildDebugEntries({
-    isVisible: DEBUG_UI && showDebugOverlay,
-    connectionStatus,
-    task,
-    effectiveSessionId,
-    merged,
-    resumption,
-    sessionPanel,
-    agentctlStatus,
-  });
-  const topBarProps = buildTaskTopBarProps({
-    taskProps,
-    agent,
-    merged,
-    workflowSteps,
-    showDebugOverlay,
-    onToggleDebugOverlay,
-    effectiveSessionId,
-    remote,
-    sessionWorkflowStepId: sessionPanel.sessionWorkflowStepId,
-    agentctlReady: agentctlStatus.isReady,
-    officeTaskHref,
-  });
-  const layoutProps = buildTaskLayoutProps({
-    taskProps,
-    repository,
-    effectiveSessionId,
-    initialScripts,
-    initialTerminals,
-    defaultLayouts,
-    merged,
-    remote,
-    initialLayout,
-  });
-
+function TaskLoadingState() {
   return (
-    <TooltipProvider>
-      <VcsDialogsProvider
-        sessionId={effectiveSessionId}
-        baseBranch={taskProps.baseBranch}
-        taskTitle={taskProps.taskTitle}
-        displayBranch={merged.worktreeBranch}
-      >
-        <div className="h-screen w-full flex flex-col bg-background overflow-hidden">
-          <SessionCommands
-            sessionId={effectiveSessionId}
-            baseBranch={taskProps.baseBranch}
-            isAgentRunning={merged.isAgentWorking}
-            hasWorktree={Boolean(merged.worktreeBranch)}
-            isPassthrough={sessionPanel.isSessionPassthrough}
-          />
-          {debugEntries && <DebugOverlay title="Task Debug" entries={debugEntries} />}
-          {!isMobile && <TaskTopBar {...topBarProps} />}
-          <TaskArchivedProvider value={archivedValue}>
-            <TaskLayout {...layoutProps} />
-          </TaskArchivedProvider>
-        </div>
-      </VcsDialogsProvider>
-    </TooltipProvider>
+    <div
+      className="flex h-screen w-full items-center justify-center bg-background px-4"
+      data-testid="task-loading-state"
+    >
+      <div className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
+        <GridSpinner className="text-primary" />
+        <span>Loading task...</span>
+      </div>
+    </div>
   );
 }
 
-function syncActiveTaskSession(params: {
-  initialTaskId: string | undefined;
-  fallbackTaskId: string | null | undefined;
-  initialSessionId: string | null;
-  setActiveSession: (taskId: string, sessionId: string) => void;
-  setActiveTask: (taskId: string) => void;
-}) {
-  const taskId = params.initialTaskId ?? params.fallbackTaskId;
-  if (!taskId) return;
-  if (params.initialSessionId) params.setActiveSession(taskId, params.initialSessionId);
-  else params.setActiveTask(taskId);
+function TaskLoadErrorState() {
+  return (
+    <div
+      className="flex h-screen w-full items-center justify-center bg-background px-4"
+      data-testid="task-load-error-state"
+    >
+      <div className="flex min-h-24 max-w-sm min-w-0 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
+        <IconAlertTriangle className="h-5 w-5 text-destructive" aria-hidden="true" />
+        <div className="space-y-1">
+          <div className="font-medium text-foreground">Task unavailable</div>
+          <div>
+            We could not load this task. It may have been deleted or you may not have access.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
+  const [taskLoadError, setTaskLoadError] = useState<unknown | null>(null);
   const kanbanTask = useAppStore((state) =>
     activeTaskId
       ? (state.kanban.tasks.find(
@@ -470,13 +180,34 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     () => resolveEffectiveTask(taskDetails, initialTask, kanbanTask, effectiveTaskId),
     [taskDetails, initialTask, kanbanTask, effectiveTaskId],
   );
+  const hasTaskDetails = hasResolvedTaskDetails({
+    effectiveTaskId,
+    taskDetailsId: taskDetails?.id ?? null,
+    initialTaskId: initialTask?.id ?? null,
+  });
   useTasks(task?.workflow_id ?? null);
 
   useEffect(() => {
-    if (!activeTaskId || taskDetails?.id === activeTaskId) return;
+    if (!activeTaskId || taskDetails?.id === activeTaskId) {
+      setTaskLoadError(null);
+      return;
+    }
+    let cancelled = false;
+    setTaskLoadError(null);
     fetchTask(activeTaskId, { cache: "no-store" })
-      .then((response) => setTaskDetails(response))
-      .catch((error) => console.error("[TaskPageContent] Failed to load task details:", error));
+      .then((response) => {
+        if (cancelled) return;
+        setTaskDetails(response);
+        setTaskLoadError(null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("[TaskPageContent] Failed to load task details:", error);
+        setTaskLoadError(error);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [
     activeTaskId,
     taskDetails?.id,
@@ -486,7 +217,18 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     setTaskDetails,
   ]);
 
-  return { task, kanbanTask };
+  const onTaskUnarchived = useCallback((taskId: string) => {
+    setTaskDetails((current) =>
+      current?.id === taskId ? { ...current, archived_at: null } : current,
+    );
+  }, []);
+
+  return {
+    task,
+    kanbanTask,
+    taskLoadError: hasTaskDetails ? null : taskLoadError,
+    onTaskUnarchived,
+  };
 }
 
 function useTaskPageData(
@@ -496,7 +238,7 @@ function useTaskPageData(
   initialRepositories: Repository[],
 ) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const setActiveSessionAuto = useAppStore((state) => state.setActiveSessionAuto);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
 
   // Validate that activeSessionId belongs to activeTaskId to prevent showing
@@ -508,10 +250,10 @@ function useTaskPageData(
     return session?.task_id === activeTaskId ? sid : null;
   });
 
-  const { task } = useTaskDetails(activeTaskId, initialTask);
+  const { task, taskLoadError, onTaskUnarchived } = useTaskDetails(activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
-  useEnsureTaskSession(task);
+  const ensureSession = useEnsureTaskSession(task);
   const initialSessionId = sessionId ?? agent.taskSessionId ?? null;
   const effectiveSessionId = validatedActiveSessionId ?? initialSessionId;
 
@@ -520,10 +262,10 @@ function useTaskPageData(
       initialTaskId: initialTask?.id,
       fallbackTaskId,
       initialSessionId,
-      setActiveSession,
+      setActiveSessionAuto,
       setActiveTask,
     });
-  }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSession, setActiveTask]);
+  }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSessionAuto, setActiveTask]);
 
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;
@@ -535,7 +277,15 @@ function useTaskPageData(
     [effectiveRepositories, task?.repositories],
   );
 
-  return { task, agent, effectiveSessionId, repository };
+  return {
+    task,
+    taskLoadError,
+    agent,
+    effectiveSessionId,
+    repository,
+    ensureSession,
+    onTaskUnarchived,
+  };
 }
 
 export function TaskPageContent({
@@ -554,12 +304,15 @@ export function TaskPageContent({
   const { isMobile } = useResponsiveBreakpoint();
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  const { task, agent, effectiveSessionId, repository } = useTaskPageData(
-    initialTask,
-    initialTaskId,
-    sessionId,
-    initialRepositories,
-  );
+  const {
+    task,
+    taskLoadError,
+    agent,
+    effectiveSessionId,
+    repository,
+    ensureSession,
+    onTaskUnarchived,
+  } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
 
   const workflowSteps = useWorkflowStepsMapped();
   const sessionPanel = useSessionPanelState(effectiveSessionId);
@@ -575,7 +328,15 @@ export function TaskPageContent({
     queueMicrotask(() => setIsMounted(true));
   }, []);
 
-  if (!isMounted) return <div className="h-screen w-full bg-background" />;
+  const contentState = resolveTaskContentState({
+    isMounted,
+    hasTask: Boolean(task),
+    hasTaskLoadError: Boolean(taskLoadError),
+  });
+
+  if (contentState === "loading") return <TaskLoadingState />;
+  if (contentState === "error") return <TaskLoadErrorState />;
+  if (!task) return <TaskLoadErrorState />;
 
   return (
     <TaskPageInner
@@ -598,6 +359,8 @@ export function TaskPageContent({
       defaultLayouts={defaultLayouts}
       initialLayout={initialLayout}
       officeTaskHref={officeTaskHref}
+      ensureSession={ensureSession}
+      onTaskUnarchived={onTaskUnarchived}
     />
   );
 }

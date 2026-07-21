@@ -4,10 +4,164 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
+	"io"
+	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func stubGithubTarballDownload(t *testing.T, archive []byte) func() int {
+	t.Helper()
+	requestCount := 0
+	originalClient := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		requestCount++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewReader(archive)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = originalClient })
+	return func() int { return requestCount }
+}
+
+func TestGithubTarballStrategyInstallRepairsPartialInstall(t *testing.T) {
+	installDir := t.TempDir()
+	target := runtime.GOOS + "-" + runtime.GOARCH
+	binaryPath := filepath.Join(installDir, "tool-1.0.0-"+target, "bin", "tool")
+	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
+		t.Fatalf("create partial install: %v", err)
+	}
+	if err := os.WriteFile(binaryPath, []byte("partial"), 0o755); err != nil {
+		t.Fatalf("write partial binary: %v", err)
+	}
+
+	archive := tarGzWithFiles(t, map[string]string{
+		"tool-1.0.0-" + target + "/bin/tool":    "complete",
+		"tool-1.0.0-" + target + "/lib/runtime": "runtime",
+	})
+	requestCount := stubGithubTarballDownload(t, archive)
+
+	strategy := NewGithubTarballStrategy(installDir, "tool", GithubTarballConfig{
+		Owner:        "owner",
+		Repo:         "repo",
+		Version:      "1.0.0",
+		AssetPattern: "tool-{version}-{os}-{arch}.tar.gz",
+		BinaryPath:   "tool-{version}-{os}-{arch}/bin/tool",
+		Targets: map[string]string{
+			runtime.GOOS + "/" + runtime.GOARCH: target,
+		},
+	}, testLogger())
+
+	if _, err := strategy.Install(t.Context()); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if requestCount() != 1 {
+		t.Fatalf("download request count = %d, want 1", requestCount())
+	}
+	if _, err := os.Stat(filepath.Join(installDir, "tool-1.0.0-"+target, "lib", "runtime")); err != nil {
+		t.Fatalf("partial install was not repaired: %v", err)
+	}
+
+	if _, err := strategy.Install(t.Context()); err != nil {
+		t.Fatalf("second Install() error = %v", err)
+	}
+	if requestCount() != 1 {
+		t.Fatalf("download request count after completed install = %d, want 1", requestCount())
+	}
+}
+
+func TestGithubTarballStrategyInstallPreservesMissingBinaryError(t *testing.T) {
+	installDir := t.TempDir()
+	target := runtime.GOOS + "-" + runtime.GOARCH
+	archive := tarGzWithFiles(t, map[string]string{
+		"tool-1.0.0-" + target + "/lib/runtime": "runtime",
+	})
+	stubGithubTarballDownload(t, archive)
+
+	strategy := NewGithubTarballStrategy(installDir, "tool", GithubTarballConfig{
+		Owner:        "owner",
+		Repo:         "repo",
+		Version:      "1.0.0",
+		AssetPattern: "tool-{version}-{os}-{arch}.tar.gz",
+		BinaryPath:   "tool-{version}-{os}-{arch}/bin/tool",
+		Targets: map[string]string{
+			runtime.GOOS + "/" + runtime.GOARCH: target,
+		},
+	}, testLogger())
+
+	_, err := strategy.Install(t.Context())
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("Install() error = %v, want wrapped fs.ErrNotExist", err)
+	}
+}
+
+func TestGithubTarballStrategyInstallReportsCacheInspectionError(t *testing.T) {
+	installDir := t.TempDir()
+	target := runtime.GOOS + "-" + runtime.GOARCH
+	binaryPath := filepath.Join(installDir, "tool-1.0.0-"+target, "bin", "tool")
+	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
+		t.Fatalf("create install directory: %v", err)
+	}
+	if err := os.Symlink("tool", binaryPath); err != nil {
+		t.Fatalf("create symlink loop: %v", err)
+	}
+
+	strategy := NewGithubTarballStrategy(installDir, "tool", GithubTarballConfig{
+		Owner:        "owner",
+		Repo:         "repo",
+		Version:      "1.0.0",
+		AssetPattern: "tool-{version}-{os}-{arch}.tar.gz",
+		BinaryPath:   "tool-{version}-{os}-{arch}/bin/tool",
+		Targets: map[string]string{
+			runtime.GOOS + "/" + runtime.GOARCH: target,
+		},
+	}, testLogger())
+
+	_, err := strategy.Install(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "failed to inspect installed binary") {
+		t.Fatalf("Install() error = %v, want cache inspection error", err)
+	}
+}
+
+func tarGzWithFiles(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+	gzWriter := gzip.NewWriter(&buf)
+	tarWriter := tar.NewWriter(gzWriter)
+	for name, content := range files {
+		if err := tarWriter.WriteHeader(&tar.Header{
+			Name: name,
+			Mode: 0o755,
+			Size: int64(len(content)),
+		}); err != nil {
+			t.Fatalf("write tar header: %v", err)
+		}
+		if _, err := tarWriter.Write([]byte(content)); err != nil {
+			t.Fatalf("write tar content: %v", err)
+		}
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatalf("close tar writer: %v", err)
+	}
+	if err := gzWriter.Close(); err != nil {
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	return buf.Bytes()
+}
 
 func TestSanitizeTarPath(t *testing.T) {
 	destDir := "/install"

@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/shellexec"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -143,7 +144,21 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 // the workspace_path may be a worktree pointer file or a submodule, both of
 // which git resolves correctly while a manual HEAD read would not.
 func readCurrentBranchForLocal(workDir string) string {
-	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	// `git symbolic-ref` is a cheap local-only call. Acquire the throttle
+	// slot first (30s budget) and only THEN start the 5s exec timer —
+	// otherwise queue time eats the exec budget and a stale "" sentinel
+	// could fall through to a same-branch-checkout that touches the
+	// working tree.
+	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelAcquire()
+	release, err := subproc.Git().Acquire(acquireCtx)
+	if err != nil {
+		return ""
+	}
+	defer release()
+	execCtx, cancelExec := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelExec()
+	cmd := exec.CommandContext(execCtx, "git", "symbolic-ref", "--short", "HEAD")
 	cmd.Dir = workDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -159,11 +174,11 @@ func readCurrentBranchForLocal(workDir string) string {
 func checkoutBranch(ctx context.Context, workDir, branch string) (string, error) {
 	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "origin", branch)
 	fetchCmd.Dir = workDir
-	fetchCmd.Run() //nolint:errcheck // fetch failure is non-fatal, we fall back to local
+	_ = subproc.RunGit(ctx, fetchCmd) // fetch failure is non-fatal, fall back to local
 
 	cmd := exec.CommandContext(ctx, "git", "checkout", branch)
 	cmd.Dir = workDir
-	out, err := cmd.CombinedOutput()
+	out, err := subproc.RunGitCombinedOutput(ctx, cmd)
 	outStr := strings.TrimSpace(string(out))
 	if err != nil {
 		return outStr, worktree.ClassifyGitError(outStr, err)

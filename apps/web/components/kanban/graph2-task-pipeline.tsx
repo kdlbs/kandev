@@ -43,8 +43,8 @@ export type Graph2TaskPipelineProps = {
   onMoveTask: (task: Task, targetStepId: string) => void;
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
-  onDeleteTask: (task: Task) => void;
-  onArchiveTask?: (task: Task) => void;
+  onDeleteTask: (task: Task, opts?: { cascade?: boolean }) => void;
+  onArchiveTask?: (task: Task, opts?: { cascade?: boolean }) => void;
   isMoving?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
@@ -164,15 +164,19 @@ function TaskActions({
         open={showDeleteConfirm}
         onOpenChange={setShowDeleteConfirm}
         taskTitle={task.title}
+        taskId={task.id}
+        executorType={task.primaryExecutorType}
         isDeleting={isDeleting}
-        onConfirm={() => onDeleteTask(task)}
+        onConfirm={({ cascade }) => onDeleteTask(task, { cascade })}
       />
       <TaskArchiveConfirmDialog
         open={showArchiveConfirm}
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}
+        taskId={task.id}
+        executorType={task.primaryExecutorType}
         isArchiving={isArchiving}
-        onConfirm={() => onArchiveTask?.(task)}
+        onConfirm={({ cascade }) => onArchiveTask?.(task, { cascade })}
       />
     </>
   );
@@ -279,7 +283,7 @@ export function Graph2TaskPipeline({
   return (
     <div
       data-testid={`pipeline-task-${task.id}`}
-      className="flex items-center justify-center rounded-lg hover:bg-muted/30 transition-colors px-3 py-2"
+      className="flex min-w-max items-center justify-start rounded-lg hover:bg-muted/30 transition-colors px-3 py-2"
     >
       <div className="flex items-center gap-3">
         {showCheckbox && (

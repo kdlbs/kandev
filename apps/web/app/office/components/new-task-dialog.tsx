@@ -5,10 +5,10 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Textarea } from "@kandev/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@kandev/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { createTask } from "@/lib/api/domains/kanban-api";
-import type { OfficeMeta } from "@/lib/state/slices/office/types";
 import { useIssueDraft, type IssueDraft } from "./new-task-draft";
 import { NewTaskSelectorRow } from "./new-task-selector-row";
 import { NewTaskBottomBar } from "./new-task-bottom-bar";
@@ -19,26 +19,9 @@ import {
   type StagesDraft,
 } from "./new-task-stages";
 
-const FALLBACK_PRIORITY_VALUES: Record<string, number> = {
-  critical: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-  none: 0,
-};
-
-function priorityToNumber(priority: string, meta: OfficeMeta | null): number {
-  if (meta) {
-    const p = meta.priorities.find((m) => m.id === priority);
-    if (p) return p.value;
-  }
-  return FALLBACK_PRIORITY_VALUES[priority] ?? 0;
-}
-
 function buildMetadata(draft: IssueDraft): Record<string, unknown> | undefined {
   const meta: Record<string, unknown> = {};
   if (draft.assigneeId) meta.assignee_agent_profile_id = draft.assigneeId;
-  if (draft.projectId) meta.project_id = draft.projectId;
   if (draft.status && draft.status !== "todo") meta.initial_status = draft.status;
   return Object.keys(meta).length > 0 ? meta : undefined;
 }
@@ -59,7 +42,6 @@ export function NewTaskDialog({
   defaultAssigneeId,
 }: NewIssueDialogProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const meta = useAppStore((s) => s.office.meta);
   const [submitting, setSubmitting] = useState(false);
   const [stages, setStages] = useState<StagesDraft>(EMPTY_STAGES);
 
@@ -74,7 +56,7 @@ export function NewTaskDialog({
   );
 
   const handleCreate = useCallback(async () => {
-    if (!draft.title.trim() || !workspaceId) return;
+    if (!draft.title.trim() || !draft.projectId || !workspaceId) return;
     setSubmitting(true);
     try {
       const executionPolicy = buildExecutionPolicy(stages);
@@ -85,7 +67,8 @@ export function NewTaskDialog({
         title: draft.title.trim(),
         description: draft.description.trim() || undefined,
         parent_id: parentTaskId,
-        priority: priorityToNumber(draft.priority, meta),
+        priority: draft.priority,
+        project_id: draft.projectId || undefined,
         metadata: executionPolicy ? { ...metadata, execution_policy: executionPolicy } : metadata,
       });
       clearDraft();
@@ -97,7 +80,7 @@ export function NewTaskDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [draft, stages, workspaceId, parentTaskId, meta, clearDraft, onOpenChange]);
+  }, [draft, stages, workspaceId, parentTaskId, clearDraft, onOpenChange]);
 
   const handleDiscard = useCallback(() => {
     clearDraft();
@@ -106,7 +89,10 @@ export function NewTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl sm:max-w-3xl lg:max-w-4xl">
+      <DialogContent
+        data-testid="office-new-issue-dialog"
+        className="max-w-3xl sm:max-w-3xl lg:max-w-4xl"
+      >
         <NewIssueDialogBody
           draft={draft}
           updateDraft={updateDraft}
@@ -163,7 +149,7 @@ function NewIssueDialogBody({
           placeholder="Task title"
           value={draft.title}
           onChange={(e) => updateDraft({ title: e.target.value })}
-          className="text-lg font-medium border-0 resize-none p-0 focus-visible:ring-0 min-h-[40px]"
+          className="text-lg font-medium border-0 resize-none focus-visible:ring-0 min-h-[40px]"
           rows={1}
           autoFocus
         />
@@ -186,14 +172,49 @@ function NewIssueDialogBody({
         >
           Discard Draft
         </Button>
-        <Button
-          onClick={onCreate}
-          disabled={!draft.title.trim() || submitting}
-          className="cursor-pointer"
-        >
-          {submitting ? "Creating..." : "Create Task"}
-        </Button>
+        <CreateTaskButton draft={draft} submitting={submitting} onCreate={onCreate} />
       </DialogFooter>
     </>
+  );
+}
+
+export function CreateTaskButton({
+  draft,
+  submitting,
+  onCreate,
+}: {
+  draft: IssueDraft;
+  submitting: boolean;
+  onCreate: () => void;
+}) {
+  const missingTitle = !draft.title.trim();
+  const missingProject = !draft.projectId;
+  const disabled = missingTitle || missingProject || submitting;
+  let reason: string | null = null;
+  if (missingProject) reason = "Select a project to create a task";
+  else if (missingTitle) reason = "Add a title to create a task";
+
+  const button = (
+    <Button
+      onClick={onCreate}
+      disabled={disabled}
+      className="cursor-pointer"
+      data-testid="new-task-create-button"
+    >
+      {submitting ? "Creating..." : "Create Task"}
+    </Button>
+  );
+
+  if (!reason) return button;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} aria-label={reason}>
+          {button}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{reason}</TooltipContent>
+    </Tooltip>
   );
 }

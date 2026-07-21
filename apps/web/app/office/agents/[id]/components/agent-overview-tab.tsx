@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { updateAgentProfile, getAgentUtilization } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole, ProviderUsage } from "@/lib/state/slices/office/types";
-import { UtilizationBars } from "@/app/office/components/utilization-bars";
+import { UtilizationBars } from "@/components/usage/utilization-bars";
 
 type AgentOverviewTabProps = {
   agent: AgentProfile;

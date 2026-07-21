@@ -1,17 +1,39 @@
-import path from "path";
-import { defineConfig } from "vitest/config";
+import { defineConfig, mergeConfig } from "vitest/config";
 
-export default defineConfig({
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "."),
-      "@kandev/ui": path.resolve(__dirname, "../packages/ui/src"),
-      "@kandev/theme": path.resolve(__dirname, "../packages/theme/src"),
+import viteConfig from "./vite.config";
+
+if (process.env.DEBUG === "1") process.env.DEBUG = "";
+
+const configuredMaxWorkers = process.env.VITEST_MAX_WORKERS?.trim();
+const maxWorkers = resolveMaxWorkers(configuredMaxWorkers, Boolean(process.env.CI));
+
+export default mergeConfig(
+  viteConfig,
+  defineConfig({
+    test: {
+      environment: "happy-dom",
+      environmentOptions: {
+        happyDOM: {
+          settings: {
+            navigation: {
+              disableChildFrameNavigation: true,
+            },
+          },
+        },
+      },
+      setupFiles: ["./vitest.setup.ts"],
+      exclude: ["e2e/**", "node_modules/**"],
+      pool: "threads",
+      maxWorkers,
     },
-  },
-  test: {
-    environment: "happy-dom",
-    setupFiles: ["./vitest.setup.ts"],
-    exclude: ["e2e/**", "node_modules/**"],
-  },
-});
+  }),
+);
+
+function resolveMaxWorkers(value: string | undefined, isCI: boolean) {
+  if (/^[1-9]\d*%$/.test(value ?? "")) return value;
+
+  const workers = Number(value);
+  if (Number.isInteger(workers) && workers > 0) return workers;
+
+  return isCI ? undefined : "20%";
+}

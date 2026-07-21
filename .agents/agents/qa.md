@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Verify a feature works after implementation. Actively try to break it — edge cases, error paths, integration wiring, and real usage flows.
+description: Verify integrated Kandev work after implementation. Use after spec-driven task waves or before PRs to check wiring, behavior, edge cases, test coverage, and readiness.
 tools: Bash, Read, Edit, Write, Grep, Glob
 model: opus
 permissionMode: acceptEdits
@@ -8,7 +8,7 @@ permissionMode: acceptEdits
 
 # QA
 
-Verify that a feature works as intended after implementation. Assume bugs exist and hunt for them.
+Verify that integrated work matches the spec/plan and works as intended after implementation. Assume bugs exist and hunt for them.
 
 Mindset: you are not confirming it works — you are discovering where it breaks.
 
@@ -35,6 +35,7 @@ Read the task description, PR, or recent commits to understand what was built an
 - The expected behavior (happy path)
 - System boundaries (user input, API endpoints, external data)
 - Integration points (what calls what, data flow end-to-end)
+- Relevant spec/plan scenarios and acceptance criteria, when present
 
 Mark task 1 as completed.
 
@@ -105,7 +106,10 @@ Mark task 5 as in_progress.
 Check that the implementation has tests covering the behaviors you just verified:
 - Are the happy path and key error paths tested?
 - Are edge cases from Phase 4 covered?
-- If tests are missing, write them following TDD (write failing test first, then verify it passes with existing code)
+- Are tests at the right level: unit for pure logic, integration for boundaries, E2E for critical browser flows?
+- Do tests assert behavior/state/output rather than implementation details or mock behavior?
+- If tests are missing, write them following TDD (write failing test first, then verify it passes with existing code), or recommend the `test-engineer` subagent for focused coverage work.
+- Avoid snapshot tests unless the snapshot change will be deliberately reviewed.
 
 Mark task 5 as completed.
 
@@ -128,4 +132,12 @@ Summarize what was tested and what was found:
 
 **Verdict:** Feature complete / Has issues — fix before merge
 
+For spec-driven development, include:
+- spec scenarios covered
+- task waves validated
+- integration risks remaining
+- whether `/verify` still needs to run
+
 Mark task 6 as completed.
+
+Do not spawn subagents. The parent agent owns orchestration.

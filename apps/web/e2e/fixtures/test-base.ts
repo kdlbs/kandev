@@ -95,7 +95,12 @@ export const test = backendFixture.extend<
       fs.mkdirSync(repoDir, { recursive: true });
       const gitEnv = makeGitEnv(backend.tmpDir);
       execSync("git init -b main", { cwd: repoDir, env: gitEnv });
-      execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+      fs.writeFileSync(
+        path.join(repoDir, "walkthrough_base.txt"),
+        "line 1: WALKTHROUGH_UNCHANGED\nline 2: seeded on main\n",
+      );
+      execSync("git add walkthrough_base.txt", { cwd: repoDir, env: gitEnv });
+      execSync('git commit -m "init"', { cwd: repoDir, env: gitEnv });
       const repo = await apiClient.createRepository(workspace.id, repoDir);
 
       // Agent registry seeding (runInitialAgentSetup → discovery) is
@@ -155,6 +160,7 @@ export const test = backendFixture.extend<
     // previous tests in this worker. Keep the seeded workflow and the seed
     // agent profile so the worker-scoped seedData fixture remains valid.
     await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+    await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
     await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
 
     await apiClient.saveUserSettings({
@@ -162,7 +168,15 @@ export const test = backendFixture.extend<
       workflow_filter_id: seedData.workflowId,
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
+      confirm_task_archive: true,
+      mcp_task_agent_profile_default: "current_task",
       sidebar_views: [],
+      saved_layouts: [],
+      task_create_last_used: {
+        repository_id: seedData.repositoryId,
+        branch: "main",
+        agent_profile_id: seedData.agentProfileId,
+      },
       // Reset to default kanban view. Pipeline-view tests switch this to
       // "graph2", which persists per-workspace; without this reset the next
       // test renders cards with data-testid="pipeline-task-<id>" instead of
@@ -178,7 +192,7 @@ export const test = backendFixture.extend<
         console.log(`[browser:${msg.type()}]`, msg.text());
       });
     }
-    await setupPage(page, backend, seedData);
+    await setupPage(page, backend);
     await use(page);
     await context.close();
   },
@@ -193,12 +207,23 @@ export const test = backendFixture.extend<
   },
 
   integrationCleanup: [
-    async ({ apiClient }, use) => {
+    async ({ apiClient, seedData }, use) => {
+      const scoped = `workspace_id=${encodeURIComponent(seedData.workspaceId)}`;
+      await apiClient.rawRequest("DELETE", `/api/v1/jira/config?${scoped}`).catch(() => undefined);
+      await apiClient
+        .rawRequest("DELETE", `/api/v1/linear/config?${scoped}`)
+        .catch(() => undefined);
+      await apiClient.deleteAllSentryInstances(seedData.workspaceId).catch(() => undefined);
+      await apiClient
+        .rawRequest("DELETE", `/api/v1/azure-devops/config?${scoped}`)
+        .catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config`).catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/linear/config`).catch(() => undefined);
       await Promise.all([
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),
+        apiClient.mockSentryReset().catch(() => undefined),
+        apiClient.mockAzureDevOpsReset().catch(() => undefined),
       ]);
       await use();
     },
@@ -212,38 +237,35 @@ export const test = backendFixture.extend<
 // call wrote into user_settings. This is idempotent — the testPage fixture
 // also calls saveUserSettings, so tests that do use testPage are unaffected.
 test.beforeEach(async ({ apiClient, seedData }) => {
+  await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
   await apiClient.saveUserSettings({
     workspace_id: seedData.workspaceId,
     workflow_filter_id: seedData.workflowId,
     keyboard_shortcuts: {},
     enable_preview_on_click: false,
+    confirm_task_archive: true,
+    mcp_task_agent_profile_default: "current_task",
     sidebar_views: [],
+    saved_layouts: [],
     kanban_view_mode: "",
+    task_create_last_used: {
+      repository_id: seedData.repositoryId,
+      branch: "main",
+      agent_profile_id: seedData.agentProfileId,
+    },
   });
 });
 
 export { expect } from "@playwright/test";
 
-async function setupPage(page: Page, backend: BackendContext, seedData: SeedData): Promise<void> {
+async function setupPage(page: Page, backend: BackendContext): Promise<void> {
   await page.addInitScript(
-    ({
-      backendPort,
-      repositoryId,
-      agentProfileId,
-    }: {
-      backendPort: string;
-      repositoryId: string;
-      agentProfileId: string;
-    }) => {
+    ({ backendPort }: { backendPort: string }) => {
       localStorage.setItem("kandev.onboarding.completed", "true");
-      // Pre-seed dialog selections so auto-select effects resolve on their
-      // first render cycle instead of waiting for async API chains.
-      localStorage.setItem("kandev.dialog.lastRepositoryId", JSON.stringify(repositoryId));
-      localStorage.setItem("kandev.dialog.lastAgentProfileId", JSON.stringify(agentProfileId));
-      localStorage.setItem("kandev.dialog.lastBranch", JSON.stringify("main"));
       // Set the window global that getBackendConfig() reads for API/WS connections
       // (e2e tests run frontend and backend on separate ports, like dev mode)
       window.__KANDEV_API_PORT = backendPort;
+      window.__KANDEV_E2E_EXPOSE_STORE__ = true;
 
       // Replace native Notification with a capture stub so e2e runs never
       // pop OS-level toasts on the developer's machine. Tests that want to
@@ -282,8 +304,6 @@ async function setupPage(page: Page, backend: BackendContext, seedData: SeedData
     },
     {
       backendPort: String(backend.port),
-      repositoryId: seedData.repositoryId,
-      agentProfileId: seedData.agentProfileId,
     },
   );
 }

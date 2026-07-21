@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound } from "@/lib/routing/server-navigation";
 import { getRoutine, listRoutineTriggers } from "@/lib/api/domains/office-api";
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { RoutineDetailView } from "./routine-detail-view";

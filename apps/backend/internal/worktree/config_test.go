@@ -20,6 +20,10 @@ func TestSanitizeRepoDirName(t *testing.T) {
 		{"!@#$%", ""},
 		{"", ""},
 		{"under_score.dot-dash", "under_score.dot-dash"},
+		{"修复登录问题", ""},
+		{"acme/修复", "acme"},
+		{"🐛/repo", "repo"},
+		{"owner/répó", "owner-r-p"},
 	}
 	for _, c := range cases {
 		if got := SanitizeRepoDirName(c.in); got != c.want {

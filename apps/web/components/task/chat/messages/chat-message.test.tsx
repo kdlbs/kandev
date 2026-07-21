@@ -1,13 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { ChatMessage } from "./chat-message";
-import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type CustomPrompt,
+  type Message,
+  type TaskSession,
+  type Turn,
+} from "@/lib/types/http";
 
 const SENDER_TASK_ID = "task-sender";
 const SENDER_TITLE = "Fix login bug";
 const SENDER_BADGE_SELECTOR = "[data-testid='sender-task-badge']";
+const MESSAGE_TIMESTAMP = "2026-05-04T00:00:00Z";
+const TURN_MODEL = "gpt-5.6-sol";
+const PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
+const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
+const PROMPT_MENTION_TESTID = "custom-prompt-mention";
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 function userMessage(overrides: Partial<Message>): Message {
   return {
@@ -17,12 +36,23 @@ function userMessage(overrides: Partial<Message>): Message {
     author_type: "user",
     content: "hello",
     type: "message",
-    created_at: "2026-05-04T00:00:00Z",
+    created_at: MESSAGE_TIMESTAMP,
     ...overrides,
   };
 }
 
-function wrapper(tasks: Array<{ id: string; title: string }> = []) {
+function customPrompt(name: string): CustomPrompt {
+  return {
+    id: `prompt-${name}`,
+    name,
+    content: `${name} content`,
+    builtin: false,
+    created_at: MESSAGE_TIMESTAMP,
+    updated_at: MESSAGE_TIMESTAMP,
+  };
+}
+
+function wrapper(tasks: Array<{ id: string; title: string }> = [], prompts: CustomPrompt[] = []) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <StateProvider
@@ -40,6 +70,7 @@ function wrapper(tasks: Array<{ id: string; title: string }> = []) {
               parent_id: undefined,
             })),
           } as unknown as never,
+          prompts: { items: prompts, loaded: true, loading: false },
         }}
       >
         {children}
@@ -47,6 +78,85 @@ function wrapper(tasks: Array<{ id: string; title: string }> = []) {
     );
   };
 }
+
+describe("ChatMessage prompt mentions", () => {
+  it("renders saved prompt mentions as visual chips", () => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({ content: "@hello and @missing" })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    const chips = screen.getAllByTestId(PROMPT_MENTION_TESTID);
+    expect(chips).toHaveLength(1);
+    const [chip] = chips;
+    expect(chip.textContent).toBe("@hello");
+    expect(screen.getByText(/and @missing/)).not.toBeNull();
+  });
+
+  it("exposes the prompt contents on hover when the prompt is loaded", () => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
+
+    render(
+      <Wrapper>
+        <ChatMessage comment={userMessage({ content: "@hello" })} label="Message" className="" />
+      </Wrapper>,
+    );
+
+    const [chip] = screen.getAllByTestId(PROMPT_MENTION_TESTID);
+    // The chip becomes a hover-card trigger so its contents surface on hover,
+    // rather than relying on the plain browser title tooltip. `data-slot` is a
+    // shadcn/Radix implementation detail (slot-based CSS targeting), used here
+    // as a jsdom proxy for "chip is wired as a HoverCard trigger" since we
+    // can't reliably fire hover in jsdom.
+    expect(chip.getAttribute("data-slot")).toBe("hover-card-trigger");
+    expect(chip.getAttribute("title")).toBeNull();
+  });
+
+  it("falls back to a plain chip with a title when the prompt has no contents", () => {
+    // A prompt with empty content has nothing to reveal on hover, so keep the
+    // lightweight title tooltip instead of a hover card.
+    const Wrapper = wrapper([], [{ ...customPrompt("hollow"), content: "" }]);
+
+    render(
+      <Wrapper>
+        <ChatMessage comment={userMessage({ content: "@hollow" })} label="Message" className="" />
+      </Wrapper>,
+    );
+
+    const [chip] = screen.getAllByTestId(PROMPT_MENTION_TESTID);
+    expect(chip.getAttribute("data-slot")).not.toBe("hover-card-trigger");
+    expect(chip.getAttribute("title")).toBe("Custom prompt: hollow");
+  });
+
+  it("preserves GFM attributes while highlighting prompt mentions", () => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            content: "- [x] @hello\n\n| Name |\n| :---: |\n| @hello |",
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(screen.getAllByTestId(PROMPT_MENTION_TESTID)).toHaveLength(2);
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.closest("li")?.className).toContain("task-list-item");
+    expect(screen.getByRole("cell").getAttribute("style")).toContain("text-align: center");
+  });
+});
 
 function renderWithSender(
   tasks: Array<{ id: string; title: string }>,
@@ -56,6 +166,56 @@ function renderWithSender(
   return render(
     <Wrapper>
       <ChatMessage comment={userMessage({ metadata })} label="Message" className="" />
+    </Wrapper>,
+  );
+}
+
+function renderAgentMessageWithSession(
+  session: Partial<TaskSession>,
+  metadata = {},
+  turnMetadata?: Record<string, unknown>,
+) {
+  const taskSession: TaskSession = {
+    id: toSessionId("sess-1"),
+    task_id: toTaskId("task-target"),
+    state: "COMPLETED",
+    started_at: MESSAGE_TIMESTAMP,
+    updated_at: MESSAGE_TIMESTAMP,
+    ...session,
+  };
+  const turn: Turn | null =
+    turnMetadata === undefined
+      ? null
+      : {
+          id: "turn-1",
+          session_id: toSessionId("sess-1"),
+          task_id: toTaskId("task-target"),
+          started_at: MESSAGE_TIMESTAMP,
+          metadata: turnMetadata,
+          created_at: MESSAGE_TIMESTAMP,
+          updated_at: MESSAGE_TIMESTAMP,
+        };
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <StateProvider
+      initialState={{
+        taskSessions: { items: { "sess-1": taskSession } },
+        turns: {
+          bySession: { "sess-1": turn ? [turn] : [] },
+          activeBySession: { "sess-1": turn?.id ?? null },
+        },
+      }}
+    >
+      {children}
+    </StateProvider>
+  );
+
+  return render(
+    <Wrapper>
+      <ChatMessage
+        comment={userMessage({ author_type: "agent", metadata, turn_id: turn?.id })}
+        label="Message"
+        className=""
+      />
     </Wrapper>,
   );
 }
@@ -129,5 +289,214 @@ describe("ChatMessage sender badge", () => {
     const { container } = renderWithSender([], { plan_mode: true });
 
     expect(container.querySelector(SENDER_BADGE_SELECTOR)).toBeNull();
+  });
+
+  it("renders the workflow step badge when workflow metadata is present", () => {
+    const { container } = renderWithSender([], {
+      workflow_message: true,
+      workflow_step_name: "Review",
+      workflow_step_color: "bg-emerald-500",
+    });
+
+    const badge = container.querySelector("[data-testid='workflow-message-badge']");
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toContain("Review");
+    expect(container.querySelector("[data-testid='workflow-message-dot']")?.className).toContain(
+      "bg-emerald-500",
+    );
+  });
+
+  it("falls back when workflow metadata has an unknown color class", () => {
+    const { container } = renderWithSender([], {
+      workflow_message: true,
+      workflow_step_name: "Review",
+      workflow_step_color: "unknown-step-color",
+    });
+
+    expect(container.querySelector("[data-testid='workflow-message-dot']")?.className).toContain(
+      "bg-neutral-400",
+    );
+  });
+});
+
+describe("ChatMessage raw view", () => {
+  it("shows user raw_content with hidden kandev-system blocks when raw view is enabled", () => {
+    const raw = `<kandev-system>This message was sent by an agent working in task "Sender" (${SENDER_TASK_ID}).</kandev-system>
+
+@improve-task
+
+<kandev-system>EXPANDED PROMPT REFERENCES: The message above references saved prompts by @name.
+
+### @improve-task
+Review this task for durable improvements.</kandev-system>`;
+    const Wrapper = wrapper([{ id: SENDER_TASK_ID, title: SENDER_TITLE }]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            content: "@improve-task",
+            raw_content: raw,
+            metadata: {
+              sender_task_id: SENDER_TASK_ID,
+              sender_task_title: SENDER_TITLE,
+              has_hidden_prompts: true,
+            },
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByText(/EXPANDED PROMPT REFERENCES/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show raw text" }));
+
+    expect(screen.getByText(/This message was sent by an agent/)).not.toBeNull();
+    expect(screen.getByText(/EXPANDED PROMPT REFERENCES/)).not.toBeNull();
+    expect(screen.getByText(/### @improve-task/)).not.toBeNull();
+    expect(screen.getByText(/Review this task for durable improvements/)).not.toBeNull();
+  });
+
+  it("shows agent raw_content with hidden kandev-system blocks when raw view is enabled", () => {
+    const raw = `<kandev-system>Hidden agent context.</kandev-system>
+
+Visible agent response.`;
+    const Wrapper = wrapper([]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            author_type: "agent",
+            content: "Visible agent response.",
+            raw_content: raw,
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByText(/Hidden agent context/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show raw text" }));
+
+    expect(screen.getByText(/Hidden agent context/)).not.toBeNull();
+    expect(screen.getByText(/Visible agent response/)).not.toBeNull();
+  });
+});
+
+describe("ChatMessage agent session config metadata", () => {
+  it("opens markdown file links with the provided chat file opener", () => {
+    const onOpenFile = vi.fn();
+    const Wrapper = wrapper([]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            author_type: "agent",
+            content: "[spec.md](/root/.kandev/tasks/example/kandev/docs/specs/native/spec.md)",
+          })}
+          label="Message"
+          className=""
+          worktreePath="/root/.kandev/tasks/example/kandev"
+          onOpenFile={onOpenFile}
+        />
+      </Wrapper>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "spec.md" }));
+
+    expect(onOpenFile).toHaveBeenCalledWith("docs/specs/native/spec.md");
+  });
+});
+
+describe("ChatMessage agent session config metadata overrides", () => {
+  it("renders changed options from the immutable turn snapshot", () => {
+    const { container } = renderAgentMessageWithSession(
+      {
+        metadata: {
+          runtime_config: {
+            model: TURN_MODEL,
+            mode: "agent",
+            config_options: {
+              collaboration_mode: "default",
+              reasoning_effort: "low",
+            },
+          },
+        },
+      },
+      { model: TURN_MODEL },
+      {
+        runtime_config_snapshot: {
+          model: TURN_MODEL,
+          mode: "agent",
+          config_options: [
+            {
+              id: "collaboration_mode",
+              name: "Collaboration mode",
+              value: "default",
+              value_name: "Default",
+            },
+            {
+              id: "reasoning_effort",
+              name: "Reasoning effort",
+              value: "high",
+              value_name: "High",
+            },
+          ],
+          config_baseline: {
+            collaboration_mode: "default",
+            reasoning_effort: "medium",
+          },
+        },
+      },
+    );
+
+    expect(screen.getByText(`${TURN_MODEL} · Reasoning effort: High`)).not.toBeNull();
+    expect(container.textContent).not.toContain("Reasoning effort: low");
+    expect(container.textContent).not.toContain("Collaboration mode");
+    expect(container.textContent).not.toContain("Mode: agent");
+  });
+
+  it("does not borrow mutable session options for a legacy turn", () => {
+    const { container } = renderAgentMessageWithSession(
+      {
+        metadata: {
+          runtime_config: {
+            model: TURN_MODEL,
+            config_options: { reasoning_effort: "high" },
+          },
+        },
+      },
+      { model: "gpt-5.5-mini" },
+      {},
+    );
+
+    expect(screen.getByText("gpt-5.5-mini")).not.toBeNull();
+    expect(container.textContent).not.toContain("Reasoning effort");
+  });
+});
+
+describe("ChatMessage image attachments", () => {
+  it("opens image attachments in an in-app preview dialog", () => {
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    renderWithSender([], {
+      attachments: [{ type: "image", data: PNG_BASE64, mime_type: "image/png" }],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL }));
+
+    expect(openSpy).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    const preview = screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT);
+    expect(dialog.className).toContain("w-fit");
+    expect(dialog.className).toContain("max-w-[calc(100vw-1rem)]");
+    expect(preview.className).toContain("w-[min(92vw,1100px)]");
+    expect(preview.className).toContain("max-h-[calc(100dvh-5rem)]");
+    expect(preview.getAttribute("src")).toBe(`data:image/png;base64,${PNG_BASE64}`);
   });
 });

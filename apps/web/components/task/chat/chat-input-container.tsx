@@ -29,6 +29,7 @@ export type MessageAttachment = {
   data: string;
   mime_type: string;
   name?: string;
+  delivery_mode?: "prompt" | "path";
 };
 
 export type ChatInputContainerHandle = {
@@ -41,13 +42,16 @@ export type ChatInputContainerHandle = {
   getAttachments: () => MessageAttachment[];
 };
 
+export type ChatSubmitResult = void | boolean | Promise<void | boolean>;
+
 type ChatInputContainerProps = {
   onSubmit: (
     message: string,
     reviewComments?: DiffComment[],
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
-  ) => void;
+    inlineTaskMentions?: import("@/hooks/use-inline-mention").TaskMentionData[],
+  ) => ChatSubmitResult;
   sessionId: string | null;
   taskId: string | null;
   taskTitle?: string;
@@ -87,6 +91,7 @@ type ChatInputContainerProps = {
   onImplementPlan?: (fresh: boolean) => void;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
 };
@@ -249,6 +254,8 @@ type EnhancePromptExtras = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
+  onVoiceTranscript?: (text: string) => void;
+  onVoiceAutoSend?: () => void;
 };
 
 function buildEditorAreaProps(
@@ -276,7 +283,6 @@ function buildEditorAreaProps(
     onAddContextFile: p.onAddContextFile,
     onToggleContextFile: p.onToggleContextFile,
     planContextEnabled: p.planContextEnabled,
-    handleAgentCommand: s.handleAgentCommand,
     addFiles: s.addFiles,
     fileInputRef: s.fileInputRef,
     showRequestChangesTooltip: p.showRequestChangesTooltip,
@@ -294,8 +300,11 @@ function buildEditorAreaProps(
     onEnhancePrompt: extras.onEnhancePrompt,
     isEnhancingPrompt: extras.isEnhancingPrompt,
     isUtilityConfigured: extras.isUtilityConfigured,
+    onVoiceTranscript: extras.onVoiceTranscript,
+    onVoiceAutoSend: extras.onVoiceAutoSend,
     hideSessionsDropdown: p.hideSessionsDropdown,
     minimalToolbar: p.minimalToolbar,
+    hideAgentControls: p.hideAgentControls,
     hidePlanMode: p.hidePlanMode,
   };
 }
@@ -358,6 +367,34 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       });
     }, [s, enhancePrompt]);
 
+    const handleVoiceTranscript = useCallback(
+      (text: string) => {
+        const editor = s.inputRef.current;
+        if (!editor) return;
+        const trimmed = text.trim();
+        if (!trimmed) return;
+        const cursor = editor.getSelectionStart();
+        const current = editor.getValue();
+        // Prepend a space when inserting after existing non-whitespace content
+        // so transcripts flow naturally without running into the previous word.
+        const charBefore = cursor > 0 ? current.charAt(cursor - 1) : "";
+        const needsLeadingSpace = charBefore !== "" && !/\s/.test(charBefore);
+        const insert = needsLeadingSpace ? ` ${trimmed}` : trimmed;
+        editor.insertText(insert, cursor, cursor);
+      },
+      [s.inputRef],
+    );
+
+    // Auto-send fires the same submit path as the regular send button. Guards
+    // against firing while the input is in a disabled state (e.g. the agent
+    // is currently booting) — the button is hidden in that case anyway, but
+    // defence-in-depth so a stale keyboard shortcut press doesn't trigger.
+    const { submitDisabled: voiceSubmitDisabled, handleSubmitWithReset: voiceSubmit } = s;
+    const handleVoiceAutoSend = useCallback(() => {
+      if (voiceSubmitDisabled) return;
+      voiceSubmit();
+    }, [voiceSubmitDisabled, voiceSubmit]);
+
     if (p.isFailed || executorUnavailable) {
       return (
         <FailedSessionBanner
@@ -389,6 +426,8 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           onEnhancePrompt: handleEnhancePrompt,
           isEnhancingPrompt,
           isUtilityConfigured,
+          onVoiceTranscript: handleVoiceTranscript,
+          onVoiceAutoSend: handleVoiceAutoSend,
         })}
       />
     );

@@ -58,6 +58,7 @@ type fakeClient struct {
 	getTicketFn   func(key string) (*JiraTicket, error)
 	transitionFn  func(key, id string) error
 	listProjects  func() ([]JiraProject, error)
+	listStatuses  func(projectKey string) ([]JiraStatus, error)
 	searchFn      func(jql string) (*SearchResult, error)
 	transitionLog []string // "key:id"
 }
@@ -87,6 +88,12 @@ func (c *fakeClient) DoTransition(_ context.Context, key, id string) error {
 func (c *fakeClient) ListProjects(_ context.Context) ([]JiraProject, error) {
 	if c.listProjects != nil {
 		return c.listProjects()
+	}
+	return nil, nil
+}
+func (c *fakeClient) ListProjectStatuses(_ context.Context, projectKey string) ([]JiraStatus, error) {
+	if c.listStatuses != nil {
+		return c.listStatuses(projectKey)
 	}
 	return nil, nil
 }
@@ -134,10 +141,11 @@ func TestService_SetConfig_UpsertsAndStoresSecret(t *testing.T) {
 	ctx := context.Background()
 
 	cfg, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		SiteURL:    "https://acme.atlassian.net/",
-		Email:      "u@example.com",
-		AuthMethod: AuthMethodAPIToken,
-		Secret:     "tok1",
+		SiteURL:      "https://acme.atlassian.net/",
+		Email:        "u@example.com",
+		AuthMethod:   AuthMethodAPIToken,
+		InstanceType: InstanceTypeCloud,
+		Secret:       "tok1",
 	})
 	if err != nil {
 		t.Fatalf("set: %v", err)
@@ -148,7 +156,7 @@ func TestService_SetConfig_UpsertsAndStoresSecret(t *testing.T) {
 	if !cfg.HasSecret {
 		t.Error("expected HasSecret=true")
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "tok1" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("default")); got != "tok1" {
 		t.Errorf("secret stored = %q", got)
 	}
 }
@@ -160,7 +168,7 @@ func TestService_SetConfig_ProbesAuthImmediately(t *testing.T) {
 	}
 	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
 		SiteURL: "https://a.net", Email: "e",
-		AuthMethod: AuthMethodAPIToken, Secret: "tok",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "tok",
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -180,7 +188,7 @@ func TestService_SetConfig_PersistsProbeFailure(t *testing.T) {
 	}
 	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
 		SiteURL: "https://a.net", Email: "e",
-		AuthMethod: AuthMethodAPIToken, Secret: "bad",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "bad",
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -216,19 +224,19 @@ func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {
 	ctx := context.Background()
 	_, err := f.svc.SetConfig(ctx, &SetConfigRequest{
 		SiteURL: "https://a.net", Email: "e",
-		AuthMethod: AuthMethodAPIToken, Secret: "first",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "first",
 	})
 	if err != nil {
 		t.Fatalf("initial: %v", err)
 	}
 	_, err = f.svc.SetConfig(ctx, &SetConfigRequest{
 		SiteURL: "https://a.net", Email: "new@x",
-		AuthMethod: AuthMethodAPIToken, Secret: "",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "",
 	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "first" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("default")); got != "first" {
 		t.Errorf("secret should be preserved, got %q", got)
 	}
 }
@@ -238,7 +246,7 @@ func TestService_SetConfig_InvalidatesClientCache(t *testing.T) {
 	ctx := context.Background()
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
 		SiteURL: "https://a.net", Email: "e",
-		AuthMethod: AuthMethodAPIToken, Secret: "t",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "t",
 	})
 	// SetConfig spawns an async probe that also builds the client; wait for it
 	// so the rest of the test sees a stable factoryHit count.
@@ -259,7 +267,7 @@ func TestService_SetConfig_InvalidatesClientCache(t *testing.T) {
 	// race with the GetTicket assertion.
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
 		SiteURL: "https://a.net", Email: "e",
-		AuthMethod: AuthMethodAPIToken, Secret: "t2",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "t2",
 	})
 	waitForAuthProbe(t, f)
 	if _, err := f.svc.GetTicket(ctx, "A-3"); err != nil {
@@ -277,9 +285,29 @@ func TestService_Validation(t *testing.T) {
 		name string
 		req  SetConfigRequest
 	}{
-		{"missing site", SetConfigRequest{AuthMethod: AuthMethodAPIToken, Email: "e"}},
-		{"missing email api_token", SetConfigRequest{SiteURL: "x", AuthMethod: AuthMethodAPIToken}},
-		{"bad auth", SetConfigRequest{SiteURL: "x", AuthMethod: "bogus"}},
+		{"missing site", SetConfigRequest{AuthMethod: AuthMethodAPIToken, Email: "e", InstanceType: InstanceTypeCloud}},
+		{
+			"missing email api_token",
+			SetConfigRequest{SiteURL: "x", AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud},
+		},
+		{"bad auth", SetConfigRequest{SiteURL: "x", AuthMethod: "bogus", InstanceType: InstanceTypeCloud}},
+		{"bad instance", SetConfigRequest{SiteURL: "x", AuthMethod: AuthMethodPAT, InstanceType: "bogus"}},
+		{
+			"missing instanceType rejected",
+			SetConfigRequest{SiteURL: "x", AuthMethod: AuthMethodAPIToken, Email: "e"},
+		},
+		{
+			"pat on cloud rejected",
+			SetConfigRequest{SiteURL: "x", AuthMethod: AuthMethodPAT, InstanceType: InstanceTypeCloud},
+		},
+		{
+			"api_token on server rejected",
+			SetConfigRequest{SiteURL: "x", AuthMethod: AuthMethodAPIToken, Email: "e", InstanceType: InstanceTypeServer},
+		},
+		{
+			"session_cookie on server rejected",
+			SetConfigRequest{SiteURL: "x", AuthMethod: AuthMethodSessionCookie, InstanceType: InstanceTypeServer},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -287,6 +315,41 @@ func TestService_Validation(t *testing.T) {
 				t.Error("expected validation error")
 			}
 		})
+	}
+}
+
+func TestService_SetConfig_PATOnServer_Accepted(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	cfg, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+		SiteURL:      "https://jira.acme.com/",
+		AuthMethod:   AuthMethodPAT,
+		InstanceType: InstanceTypeServer,
+		Secret:       "pat-token",
+	})
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if cfg.InstanceType != InstanceTypeServer {
+		t.Errorf("instance type round-trip: got %q", cfg.InstanceType)
+	}
+	if cfg.AuthMethod != AuthMethodPAT {
+		t.Errorf("auth method round-trip: got %q", cfg.AuthMethod)
+	}
+}
+
+// TestService_SetConfig_RejectsMissingInstanceType guards the no-silent-downgrade
+// invariant: a stale client that forgets to send instanceType must not be able
+// to overwrite a saved Server config back to Cloud.
+func TestService_SetConfig_RejectsMissingInstanceType(t *testing.T) {
+	f := newSvcFixture(t)
+	_, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+		SiteURL: "https://a.atlassian.net", Email: "u@x",
+		AuthMethod: AuthMethodAPIToken, Secret: "tok",
+		// InstanceType deliberately omitted.
+	})
+	if err == nil {
+		t.Fatal("expected validation error when instanceType is missing")
 	}
 }
 
@@ -299,7 +362,7 @@ func TestService_TestConnection_InlineSecret(t *testing.T) {
 	}
 	res, err := f.svc.TestConnection(context.Background(), &SetConfigRequest{
 		SiteURL: "https://a.net", Email: "e",
-		AuthMethod: AuthMethodAPIToken, Secret: "inline",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "inline",
 	})
 	if err != nil || !called {
 		t.Fatalf("called=%v err=%v", called, err)
@@ -313,7 +376,7 @@ func TestService_TestConnection_NoStoredSecret_ReturnsFailure(t *testing.T) {
 	f := newSvcFixture(t)
 	res, err := f.svc.TestConnection(context.Background(), &SetConfigRequest{
 		SiteURL: "https://a.net", Email: "e",
-		AuthMethod: AuthMethodAPIToken,
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud,
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -328,7 +391,7 @@ func TestService_DeleteConfig_RemovesSecret(t *testing.T) {
 	ctx := context.Background()
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
 		SiteURL: "https://a.net", Email: "e",
-		AuthMethod: AuthMethodAPIToken, Secret: "t",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "t",
 	})
 	if err := f.svc.DeleteConfig(ctx); err != nil {
 		t.Fatalf("delete: %v", err)
@@ -368,12 +431,45 @@ func TestService_GetTicket_RevealError_NotConfusedWithUnconfigured(t *testing.T)
 	}
 }
 
+func TestService_ListProjectStatuses_PassThrough(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	var gotKey string
+	f.client.listStatuses = func(projectKey string) ([]JiraStatus, error) {
+		gotKey = projectKey
+		return []JiraStatus{{ID: "1", Name: "In Development", StatusCategory: "indeterminate"}}, nil
+	}
+	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
+		SiteURL: "https://a.net", Email: "e",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "t",
+	})
+	waitForAuthProbe(t, f)
+	statuses, err := f.svc.ListProjectStatuses(ctx, "CLIP")
+	if err != nil {
+		t.Fatalf("list statuses: %v", err)
+	}
+	if gotKey != "CLIP" {
+		t.Errorf("project key: got %q", gotKey)
+	}
+	if len(statuses) != 1 || statuses[0].Name != "In Development" {
+		t.Errorf("unexpected statuses: %+v", statuses)
+	}
+}
+
+func TestService_ListProjectStatuses_Unconfigured(t *testing.T) {
+	f := newSvcFixture(t)
+	_, err := f.svc.ListProjectStatuses(context.Background(), "CLIP")
+	if !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("expected ErrNotConfigured, got %v", err)
+	}
+}
+
 func TestService_DoTransition_PassThrough(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
 		SiteURL: "https://a.net", Email: "e",
-		AuthMethod: AuthMethodAPIToken, Secret: "t",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "t",
 	})
 	if err := f.svc.DoTransition(ctx, "PROJ-9", "31"); err != nil {
 		t.Fatalf("transition: %v", err)

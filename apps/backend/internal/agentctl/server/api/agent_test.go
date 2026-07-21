@@ -3,15 +3,20 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -247,6 +252,48 @@ func TestHandleWSPrompt_NoAdapter(t *testing.T) {
 	}
 }
 
+func TestHandleWSPrompt_SuppressesPromptAbandonedAfterCancel(t *testing.T) {
+	s := newTestServer(t)
+	prompted := make(chan uint64, 1)
+	s.procMgr.SetAdapterForTest(&promptErrorAdapter{
+		sessionID: "session-123",
+		err:       errors.New("prompt failed: prompt abandoned after cancel"),
+		prompted:  prompted,
+	})
+
+	msg, _ := ws.NewRequest("req-1", "agent.prompt", PromptRequest{
+		Text:             "hello",
+		PromptGeneration: 42,
+	})
+	resp := s.handleWSPrompt(context.Background(), msg)
+
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("expected response type, got %q", resp.Type)
+	}
+	var result PromptResponse
+	if err := resp.ParsePayload(&result); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !result.Success {
+		t.Fatal("expected prompt response success")
+	}
+
+	select {
+	case generation := <-prompted:
+		if generation != 42 {
+			t.Fatalf("prompt generation = %d, want 42", generation)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt was not called")
+	}
+
+	select {
+	case event := <-s.procMgr.GetUpdates():
+		t.Fatalf("expected no error event for prompt abandoned after cancel, got %+v", event)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestHandleWSCancel_NoAdapter(t *testing.T) {
 	s := newTestServer(t)
 	ctx := context.Background()
@@ -264,6 +311,78 @@ func TestHandleWSCancel_NoAdapter(t *testing.T) {
 	if !strings.Contains(errPayload.Message, "agent not running") {
 		t.Errorf("expected 'agent not running', got %q", errPayload.Message)
 	}
+}
+
+type promptErrorAdapter struct {
+	sessionID string
+	err       error
+	prompted  chan<- uint64
+}
+
+func (a *promptErrorAdapter) PrepareEnvironment() (map[string]string, error) {
+	return nil, nil
+}
+
+func (a *promptErrorAdapter) PrepareCommandArgs() []string {
+	return nil
+}
+
+func (a *promptErrorAdapter) Connect(_ io.Writer, _ io.Reader) error {
+	return nil
+}
+
+func (a *promptErrorAdapter) Initialize(_ context.Context) error {
+	return nil
+}
+
+func (a *promptErrorAdapter) GetAgentInfo() *adapter.AgentInfo {
+	return nil
+}
+
+func (a *promptErrorAdapter) NewSession(_ context.Context, _ []types.McpServer) (string, error) {
+	return a.sessionID, nil
+}
+
+func (a *promptErrorAdapter) LoadSession(_ context.Context, sessionID string, _ []types.McpServer) error {
+	a.sessionID = sessionID
+	return nil
+}
+
+func (a *promptErrorAdapter) Prompt(
+	_ context.Context,
+	_ string,
+	_ []v1.MessageAttachment,
+	promptGeneration uint64,
+) error {
+	a.prompted <- promptGeneration
+	return a.err
+}
+
+func (a *promptErrorAdapter) Cancel(_ context.Context) error {
+	return nil
+}
+
+func (a *promptErrorAdapter) Updates() <-chan adapter.AgentEvent {
+	return nil
+}
+
+func (a *promptErrorAdapter) GetSessionID() string {
+	return a.sessionID
+}
+
+func (a *promptErrorAdapter) GetOperationID() string {
+	return ""
+}
+
+func (a *promptErrorAdapter) SetPermissionHandler(_ adapter.PermissionHandler) {
+}
+
+func (a *promptErrorAdapter) Close() error {
+	return nil
+}
+
+func (a *promptErrorAdapter) RequiresProcessKill() bool {
+	return false
 }
 
 func TestHandleWSStderr_Empty(t *testing.T) {
@@ -488,5 +607,46 @@ func TestAgentStreamWS_MalformedMessage(t *testing.T) {
 	resp := sendWSRequest(t, conn, "agent.stderr", nil)
 	if resp.Type != ws.MessageTypeResponse {
 		t.Errorf("expected response after malformed message, got %q", resp.Type)
+	}
+}
+
+// --- injectKandevMcpServers ordering ---
+
+// TestInjectKandevMcpServers_HttpFirst ensures the kandev MCP HTTP entry is injected
+// before the SSE entry so that the capability-filter dedup (first surviving entry per
+// name wins) prefers the HTTP transport whenever an agent advertises both
+// mcpCapabilities.http and mcpCapabilities.sse. SSE-only agents still pick up the SSE
+// fallback.
+func TestInjectKandevMcpServers_HttpFirst(t *testing.T) {
+	srv := newTestServer(t)
+
+	got := srv.injectKandevMcpServers(nil)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 kandev entries, got %d: %+v", len(got), got)
+	}
+	if got[0].Name != kandevMcpServerName || got[0].Type != mcpTransportHTTP {
+		t.Errorf("expected first entry name=%q type=%q, got name=%q type=%q",
+			kandevMcpServerName, mcpTransportHTTP, got[0].Name, got[0].Type)
+	}
+	if got[1].Name != kandevMcpServerName || got[1].Type != mcpTransportSSE {
+		t.Errorf("expected second entry name=%q type=%q, got name=%q type=%q",
+			kandevMcpServerName, mcpTransportSSE, got[1].Name, got[1].Type)
+	}
+
+	// Upstream non-kandev entries must be preserved and appended after the injected pair;
+	// any upstream "kandev" must be filtered out.
+	upstream := []types.McpServer{
+		{Name: "other", Type: "stdio", Command: "x"},
+		{Name: kandevMcpServerName, Type: mcpTransportSSE, URL: "http://stale/sse"},
+	}
+	got = srv.injectKandevMcpServers(upstream)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 entries (http+sse+other), got %d: %+v", len(got), got)
+	}
+	if got[0].Type != mcpTransportHTTP || got[1].Type != mcpTransportSSE {
+		t.Errorf("expected injected order http,sse; got %q,%q", got[0].Type, got[1].Type)
+	}
+	if got[2].Name != "other" || got[2].Command != "x" {
+		t.Errorf("expected upstream 'other' entry last, got %+v", got[2])
 	}
 }

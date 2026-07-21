@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -389,4 +390,40 @@ func TestFilterMcpServersByCapabilities_DeduplicatesSameName(t *testing.T) {
 // newTestLoggerForMcp creates a logger for MCP tests.
 func newTestLoggerForMcp() *logger.Logger {
 	return newTestAdapter().logger
+}
+
+// --- effectiveMcpCapabilities ---
+
+func TestEffectiveMcpCapabilities_AssumeHTTPAndSSE(t *testing.T) {
+	// Agent advertises neither SSE nor HTTP.
+	base := acp.McpCapabilities{Sse: false, Http: false}
+
+	// Nil config leaves capabilities untouched.
+	if got := effectiveMcpCapabilities(base, nil); got.Sse || got.Http {
+		t.Errorf("nil cfg should not alter caps, got %+v", got)
+	}
+
+	// AssumeMcpHttp forces Http on (and an http server then survives the filter).
+	caps := effectiveMcpCapabilities(base, &shared.Config{AssumeMcpHttp: true})
+	if !caps.Http {
+		t.Fatal("AssumeMcpHttp should force caps.Http = true")
+	}
+	if caps.Sse {
+		t.Error("AssumeMcpHttp should not affect caps.Sse")
+	}
+
+	log := newTestLoggerForMcp()
+	httpServer := []types.McpServer{{Name: "remote", Type: "http", URL: "https://mcp.example.com/mcp"}}
+	if got := filterMcpServersByCapabilities(httpServer, caps, log); len(got) != 1 {
+		t.Fatalf("http server should survive when AssumeMcpHttp set, got %d servers", len(got))
+	}
+
+	// AssumeMcpSse forces Sse on independently.
+	caps = effectiveMcpCapabilities(base, &shared.Config{AssumeMcpSse: true})
+	if !caps.Sse {
+		t.Fatal("AssumeMcpSse should force caps.Sse = true")
+	}
+	if caps.Http {
+		t.Error("AssumeMcpSse should not affect caps.Http")
+	}
 }

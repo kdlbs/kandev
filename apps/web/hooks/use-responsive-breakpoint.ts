@@ -61,35 +61,54 @@ function getCurrentResponsiveBreakpoint(): ResponsiveBreakpoint {
   return buildResponsiveBreakpoint(window.innerWidth, getPointerMode());
 }
 
+const SERVER_SNAPSHOT = buildResponsiveBreakpoint(DESKTOP_BREAKPOINT, true);
+
+// Cached snapshot keeps getSnapshot referentially stable across re-renders —
+// useSyncExternalStore loops if getSnapshot returns a fresh object every
+// call. The cache is freshened only when the underlying viewport actually
+// changes (verified by deep-equal against the live readout), so listeners
+// firing without an effective change don't trigger spurious renders.
+let cachedClientSnapshot: ResponsiveBreakpoint | null = null;
+
+function breakpointsEqual(a: ResponsiveBreakpoint, b: ResponsiveBreakpoint): boolean {
+  // breakpoint + isFinePointer fully determine every other field (see
+  // buildResponsiveBreakpoint), so equality on those two is sufficient.
+  return a.breakpoint === b.breakpoint && a.isFinePointer === b.isFinePointer;
+}
+
+function getClientSnapshot(): ResponsiveBreakpoint {
+  const fresh = getCurrentResponsiveBreakpoint();
+  if (cachedClientSnapshot !== null && breakpointsEqual(cachedClientSnapshot, fresh)) {
+    return cachedClientSnapshot;
+  }
+  cachedClientSnapshot = fresh;
+  return fresh;
+}
+
+function subscribeBreakpoint(callback: () => void): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return () => {};
+  }
+  const mediaQueries = [
+    `(max-width: ${MOBILE_BREAKPOINT - 1}px)`,
+    `(min-width: ${MOBILE_BREAKPOINT}px) and (max-width: ${COMPACT_DESKTOP_BREAKPOINT - 1}px)`,
+    `(min-width: ${COMPACT_DESKTOP_BREAKPOINT}px) and (max-width: ${DESKTOP_BREAKPOINT - 1}px)`,
+    `(min-width: ${DESKTOP_BREAKPOINT}px)`,
+    "(pointer: fine)",
+  ];
+  const mediaQueryLists = mediaQueries.map((query) => window.matchMedia(query));
+  mediaQueryLists.forEach((mql) => mql.addEventListener("change", callback));
+  return () => {
+    mediaQueryLists.forEach((mql) => mql.removeEventListener("change", callback));
+  };
+}
+
+// useSyncExternalStore is React 19's canonical pattern for hooks that
+// expose browser-only state. It reads the real viewport on the first
+// client render — no useEffect lag, no desktop→tablet flash, no race
+// where heavyweight desktop-only components mount on narrow viewports
+// before the layout switches. SSR keeps the desktop default via the
+// third arg, matching the prior behavior for hydration.
 export function useResponsiveBreakpoint(): ResponsiveBreakpoint {
-  const [state, setState] = React.useState<ResponsiveBreakpoint>(() =>
-    buildResponsiveBreakpoint(DESKTOP_BREAKPOINT, true),
-  );
-
-  React.useEffect(() => {
-    const updateBreakpoint = () => {
-      setState(getCurrentResponsiveBreakpoint());
-    };
-
-    // Set initial value
-    updateBreakpoint();
-
-    // Listen for resize events
-    const mediaQueries = [
-      `(max-width: ${MOBILE_BREAKPOINT - 1}px)`,
-      `(min-width: ${MOBILE_BREAKPOINT}px) and (max-width: ${COMPACT_DESKTOP_BREAKPOINT - 1}px)`,
-      `(min-width: ${COMPACT_DESKTOP_BREAKPOINT}px) and (max-width: ${DESKTOP_BREAKPOINT - 1}px)`,
-      `(min-width: ${DESKTOP_BREAKPOINT}px)`,
-      "(pointer: fine)",
-    ];
-    const mediaQueryLists = mediaQueries.map((query) => window.matchMedia(query));
-
-    mediaQueryLists.forEach((mql) => mql.addEventListener("change", updateBreakpoint));
-
-    return () => {
-      mediaQueryLists.forEach((mql) => mql.removeEventListener("change", updateBreakpoint));
-    };
-  }, []);
-
-  return state;
+  return React.useSyncExternalStore(subscribeBreakpoint, getClientSnapshot, () => SERVER_SNAPSHOT);
 }

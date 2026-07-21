@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@kandev/ui/button";
-import type { JiraProject } from "@/lib/types/jira";
+import type { JiraProject, JiraStatus } from "@/lib/types/jira";
 import { AssigneePill, ProjectPill, StatusPill } from "./filter-pills";
 import type { FilterState } from "./filter-model";
 import { DEFAULT_FILTERS } from "./filter-model";
@@ -10,6 +10,7 @@ type FilterBarProps = {
   filters: FilterState;
   onChange: (filters: FilterState) => void;
   projects: JiraProject[];
+  statusOptions: JiraStatus[];
   hasActiveFilters: boolean;
   onClear: () => void;
 };
@@ -18,6 +19,7 @@ export function FilterBar({
   filters,
   onChange,
   projects,
+  statusOptions,
   hasActiveFilters,
   onClear,
 }: FilterBarProps) {
@@ -29,8 +31,10 @@ export function FilterBar({
         onChange={(projectKeys) => onChange({ ...filters, projectKeys })}
       />
       <StatusPill
-        value={filters.statusCategories}
-        onChange={(statusCategories) => onChange({ ...filters, statusCategories })}
+        options={statusOptions}
+        value={filters.statuses}
+        onChange={(statuses) => onChange({ ...filters, statuses })}
+        hasProjectSelected={filters.projectKeys.length > 0}
       />
       <AssigneePill
         value={filters.assignee}
@@ -53,7 +57,7 @@ export function FilterBar({
 export function hasActiveFilters(f: FilterState): boolean {
   return (
     f.projectKeys.length > 0 ||
-    f.statusCategories.length > 0 ||
+    f.statuses.length > 0 ||
     f.assignee !== DEFAULT_FILTERS.assignee ||
     f.searchText.trim().length > 0
   );

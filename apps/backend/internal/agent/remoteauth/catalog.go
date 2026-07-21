@@ -88,6 +88,7 @@ func BuildCatalogForHost(enabledAgents []agents.Agent, currentOS, homeDir string
 		spec := Spec{
 			ID:          ag.ID(),
 			DisplayName: ag.DisplayName(),
+			Methods:     []Method{}, // ensure JSON marshals as [] not null when an agent (e.g. mock) declares no methods
 		}
 
 		fileMethodIndex := 0

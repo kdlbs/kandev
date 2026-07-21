@@ -114,8 +114,8 @@ func createStep(t *testing.T, svc *Service, step *models.WorkflowStep) {
 }
 
 // TestListTemplates_FiltersHidden verifies that templates marked
-// `hidden: true` in their embedded YAML (improve-kandev) are excluded
-// from the picker shown by the create-workflow dialog and the settings UI.
+// `hidden: true` in their embedded YAML are excluded from the picker shown by
+// the create-workflow dialog and the settings UI.
 func TestListTemplates_FiltersHidden(t *testing.T) {
 	svc, _ := setupTestService(t)
 
@@ -123,8 +123,9 @@ func TestListTemplates_FiltersHidden(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, templates, "ListTemplates returned no templates; the assertion below would vacuously pass")
 
+	hiddenIDs := []string{"improve-kandev", "office-default", "routine"}
 	for _, tmpl := range templates {
-		assert.NotEqual(t, "improve-kandev", tmpl.ID, "hidden template must not be returned by ListTemplates")
+		assert.NotContains(t, hiddenIDs, tmpl.ID, "hidden template must not be returned by ListTemplates")
 	}
 }
 
@@ -269,6 +270,22 @@ func TestGetPreviousStepByPosition(t *testing.T) {
 }
 
 func TestResolveStartStep(t *testing.T) {
+	t.Run("create step keeps only the latest explicit start step", func(t *testing.T) {
+		svc, db := setupTestService(t)
+		ctx := context.Background()
+
+		insertWorkflow(t, db, "wf-1", "Test Workflow")
+
+		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "First Start", Position: 0, IsStartStep: true})
+		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "Latest Start", Position: 1, IsStartStep: true})
+		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "Done", Position: 2})
+
+		steps, err := svc.ListStepsByWorkflow(ctx, "wf-1")
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"Latest Start"}, startStepNames(steps))
+	})
+
 	t.Run("explicit is_start_step returns that step", func(t *testing.T) {
 		svc, db := setupTestService(t)
 		ctx := context.Background()
@@ -414,6 +431,30 @@ func TestCreateStepsFromTemplate_RemapsStepIDs(t *testing.T) {
 	assert.Equal(t, nameToID["In Progress"], done.Events.OnTurnStart[0].Config["step_id"])
 }
 
+func TestCreateStepsFromTemplate_NormalizesDuplicateStartSteps(t *testing.T) {
+	svc, db := setupTestService(t)
+	ctx := context.Background()
+
+	insertWorkflow(t, db, "wf-1", "Test Workflow")
+	err := svc.repo.CreateTemplate(ctx, &models.WorkflowTemplate{
+		ID:   "duplicate-starts",
+		Name: "Duplicate Starts",
+		Steps: []models.StepDefinition{
+			{ID: "first", Name: "First Start", Position: 0, Color: "gray", IsStartStep: true},
+			{ID: "second", Name: "Latest Start", Position: 1, Color: "blue", IsStartStep: true},
+			{ID: "done", Name: "Done", Position: 2, Color: "green"},
+		},
+	})
+	require.NoError(t, err)
+
+	err = svc.CreateStepsFromTemplate(ctx, "wf-1", "duplicate-starts")
+	require.NoError(t, err)
+
+	steps, err := svc.repo.ListStepsByWorkflow(ctx, "wf-1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Latest Start"}, startStepNames(steps))
+}
+
 func findStepByName(steps []*models.WorkflowStep, name string) *models.WorkflowStep {
 	for _, s := range steps {
 		if s.Name == name {
@@ -421,6 +462,16 @@ func findStepByName(steps []*models.WorkflowStep, name string) *models.WorkflowS
 		}
 	}
 	return nil
+}
+
+func startStepNames(steps []*models.WorkflowStep) []string {
+	names := make([]string, 0)
+	for _, step := range steps {
+		if step.IsStartStep {
+			names = append(names, step.Name)
+		}
+	}
+	return names
 }
 
 func setupTestServiceWithProvider(t *testing.T) (*Service, *sqlx.DB, *mockWorkflowProvider) {
@@ -492,13 +543,63 @@ func TestExportWorkflows(t *testing.T) {
 		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "Step1", Position: 0})
 		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-2", Name: "Step2", Position: 0})
 
-		export, err := svc.ExportWorkflows(ctx, "ws-1")
+		export, err := svc.ExportWorkflows(ctx, "ws-1", nil)
 		require.NoError(t, err)
 		require.Len(t, export.Workflows, 2)
 
 		names := []string{export.Workflows[0].Name, export.Workflows[1].Name}
 		assert.Contains(t, names, "Alpha")
 		assert.Contains(t, names, "Beta")
+	})
+
+	t.Run("filters to the requested workflow IDs", func(t *testing.T) {
+		svc, _, mock := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		mock.addWorkflow("wf-1", "ws-1", "Alpha")
+		mock.addWorkflow("wf-2", "ws-1", "Beta")
+		mock.addWorkflow("wf-3", "ws-1", "Gamma")
+
+		export, err := svc.ExportWorkflows(ctx, "ws-1", []string{"wf-1", "wf-3"})
+		require.NoError(t, err)
+		require.Len(t, export.Workflows, 2)
+
+		names := []string{export.Workflows[0].Name, export.Workflows[1].Name}
+		assert.Contains(t, names, "Alpha")
+		assert.Contains(t, names, "Gamma")
+		assert.NotContains(t, names, "Beta")
+	})
+
+	t.Run("empty (non-nil) ID list exports nothing", func(t *testing.T) {
+		svc, _, mock := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		mock.addWorkflow("wf-1", "ws-1", "Alpha")
+
+		export, err := svc.ExportWorkflows(ctx, "ws-1", []string{})
+		require.NoError(t, err)
+		assert.Empty(t, export.Workflows)
+	})
+
+	t.Run("nil ID list omits hidden workflows but explicit IDs include them", func(t *testing.T) {
+		svc, _, mock := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		mock.addWorkflow("wf-1", "ws-1", "Alpha")
+		mock.addWorkflow("hidden-1", "ws-1", "System Flow")
+		mock.workflows[1].Hidden = true
+
+		// Back-compat path (nil) must not leak the hidden system workflow.
+		all, err := svc.ExportWorkflows(ctx, "ws-1", nil)
+		require.NoError(t, err)
+		require.Len(t, all.Workflows, 1)
+		assert.Equal(t, "Alpha", all.Workflows[0].Name)
+
+		// Explicitly requesting a hidden workflow's ID still exports it.
+		explicit, err := svc.ExportWorkflows(ctx, "ws-1", []string{"hidden-1"})
+		require.NoError(t, err)
+		require.Len(t, explicit.Workflows, 1)
+		assert.Equal(t, "System Flow", explicit.Workflows[0].Name)
 	})
 }
 
@@ -530,6 +631,34 @@ func TestImportWorkflows(t *testing.T) {
 		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-Imported WF")
 		require.NoError(t, err)
 		assert.Len(t, steps, 2)
+	})
+
+	t.Run("normalizes duplicate start steps on import", func(t *testing.T) {
+		svc, _, _ := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		export := &models.WorkflowExport{
+			Version: models.ExportVersion,
+			Type:    models.ExportType,
+			Workflows: []models.WorkflowPortable{
+				{
+					Name: "Duplicate Starts",
+					Steps: []models.StepPortable{
+						{Name: "First Start", Position: 0, Color: "gray", IsStartStep: true},
+						{Name: "Latest Start", Position: 1, Color: "blue", IsStartStep: true},
+						{Name: "Done", Position: 2, Color: "green"},
+					},
+				},
+			},
+		}
+
+		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
+		require.NoError(t, err)
+		require.Len(t, result.Created, 1)
+
+		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-Duplicate Starts")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"Latest Start"}, startStepNames(steps))
 	})
 
 	t.Run("skips workflows that already exist by name", func(t *testing.T) {
@@ -629,6 +758,36 @@ func TestImportWorkflows(t *testing.T) {
 		assert.False(t, steps[0].ShowInCommandPanel, "Backlog should not show in command panel")
 		assert.True(t, steps[1].ShowInCommandPanel, "Active should show in command panel")
 		assert.False(t, steps[2].ShowInCommandPanel, "Done should not show in command panel")
+	})
+
+	t.Run("preserves auto_advance_requires_signal on import", func(t *testing.T) {
+		svc, _, _ := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		export := &models.WorkflowExport{
+			Version: models.ExportVersion,
+			Type:    models.ExportType,
+			Workflows: []models.WorkflowPortable{
+				{
+					Name: "Signal WF",
+					Steps: []models.StepPortable{
+						{Name: "Legacy", Position: 0, Color: "gray", AutoAdvanceRequiresSignal: false},
+						{Name: "Gated", Position: 1, Color: "blue", AutoAdvanceRequiresSignal: true},
+					},
+				},
+			},
+		}
+
+		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
+		require.NoError(t, err)
+		require.Len(t, result.Created, 1)
+
+		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-Signal WF")
+		require.NoError(t, err)
+		require.Len(t, steps, 2)
+
+		assert.False(t, steps[0].AutoAdvanceRequiresSignal, "Legacy step should not require signal")
+		assert.True(t, steps[1].AutoAdvanceRequiresSignal, "Gated step should require signal")
 	})
 
 	t.Run("rejects invalid export data", func(t *testing.T) {

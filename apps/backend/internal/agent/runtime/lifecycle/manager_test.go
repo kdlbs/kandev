@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // testAgent implements agents.Agent for use in lifecycle tests.
@@ -137,10 +139,30 @@ func (m *MockDockerClient) ListContainers(ctx context.Context, labels map[string
 // MockEventBus implements bus.EventBus for testing
 type MockEventBus struct {
 	PublishedEvents []*bus.Event
+	// Notify, when non-nil, receives a value after each Publish call appends
+	// its event — lets a test synchronize with an async publish (e.g.
+	// escalateStuckCancel's asyncPublish=true path spawns Publish on its own
+	// goroutine) via a channel receive instead of racing on unsynchronized
+	// access to PublishedEvents. The send blocks, so set it with enough
+	// buffer for however many events the test expects, or drain it promptly.
+	Notify chan struct{}
+	// OnPublish, when non-nil, runs synchronously inside Publish itself
+	// (before appending/notifying) — lets a test simulate a slow or
+	// (deliberately, for deadlock regression tests) blocking subscriber,
+	// standing in for a real queue subscription's synchronous handler
+	// (see bus.MemoryEventBus.Publish/publishToQueue's "deliver
+	// synchronously to preserve ordering" comment).
+	OnPublish func(subject string, event *bus.Event)
 }
 
 func (m *MockEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	if m.OnPublish != nil {
+		m.OnPublish(subject, event)
+	}
 	m.PublishedEvents = append(m.PublishedEvents, event)
+	if m.Notify != nil {
+		m.Notify <- struct{}{}
+	}
 	return nil
 }
 
@@ -177,6 +199,31 @@ func newTestRegistry() *registry.Registry {
 	return reg
 }
 
+var testStopChClosers sync.Map
+
+func closeStopChOnce(stopCh chan struct{}) {
+	closer, _ := testStopChClosers.LoadOrStore(stopCh, &sync.Once{})
+	closer.(*sync.Once).Do(func() { close(stopCh) })
+}
+
+func cleanupManagerStopCh(t *testing.T, mgr *Manager) {
+	t.Helper()
+	t.Cleanup(func() {
+		mgr.closeStopCh()
+		if mgr.streamManager != nil {
+			mgr.streamManager.Wait()
+		}
+	})
+}
+
+func cleanupStreamManager(t *testing.T, stopCh chan struct{}, streamMgr *StreamManager) {
+	t.Helper()
+	t.Cleanup(func() {
+		closeStopChOnce(stopCh)
+		streamMgr.Wait()
+	})
+}
+
 // MockCredentialsManager implements CredentialsManager for testing
 type MockCredentialsManager struct{}
 
@@ -197,19 +244,24 @@ func (m *MockProfileResolver) ResolveProfile(ctx context.Context, profileID stri
 	}, nil
 }
 
-// newTestManager creates a Manager for testing with mock dependencies
-func newTestManager() *Manager {
+// newTestManager creates a Manager for testing with mock dependencies.
+// Registers t.Cleanup to close stopCh and drain StreamManager goroutines so
+// goleak.VerifyTestMain stays green when tests trigger ConnectWorkspaceStream.
+func newTestManager(t *testing.T) *Manager {
+	t.Helper()
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
 	credsMgr := &MockCredentialsManager{}
 	profileResolver := &MockProfileResolver{}
 	// Pass nil for runtime - tests don't need them
-	return NewManager(reg, eventBus, nil, credsMgr, profileResolver, nil, ExecutorFallbackWarn, "", log)
+	mgr := NewManager(reg, eventBus, nil, credsMgr, profileResolver, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	return mgr
 }
 
 func TestNewManager(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	if mgr == nil {
 		t.Fatal("expected non-nil manager")
@@ -219,8 +271,15 @@ func TestNewManager(t *testing.T) {
 	}
 }
 
+func TestNewManager_WiresRemediateNpxCacheDefault(t *testing.T) {
+	m := newTestManager(t)
+	if m.remediateNpxCache == nil {
+		t.Fatal("NewManager must wire default remediateNpxCache")
+	}
+}
+
 func TestManager_GetExecution(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	// Manually add an execution for testing
 	execution := &AgentExecution{
@@ -251,7 +310,7 @@ func TestManager_GetExecution(t *testing.T) {
 }
 
 func TestManager_GetExecutionBySessionID(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	execution := &AgentExecution{
 		ID:             "test-execution-id",
@@ -282,7 +341,7 @@ func TestManager_GetExecutionBySessionID(t *testing.T) {
 }
 
 func TestManager_ListExecutions(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	// Empty list
 	list := mgr.ListExecutions()
@@ -301,7 +360,7 @@ func TestManager_ListExecutions(t *testing.T) {
 }
 
 func TestManager_UpdateStatus(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	execution := &AgentExecution{
 		ID:     "test-execution-id",
@@ -327,4 +386,23 @@ func TestManager_UpdateStatus(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for non-existent execution")
 	}
+}
+
+func TestManager_BeginPromptAlwaysAdvancesPromptGeneration(t *testing.T) {
+	mgr := newTestManager(t)
+	exec := &AgentExecution{
+		ID:        "exec-prompt-generation",
+		SessionID: "session-prompt-generation",
+		Status:    v1.AgentStatusRunning,
+	}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	_, err := mgr.BeginPrompt(exec.ID)
+	require.NoError(t, err)
+	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 1))
+	require.False(t, mgr.OwnsPromptGeneration(exec.SessionID, "other-execution", 1))
+
+	_, err = mgr.BeginPrompt(exec.ID)
+	require.NoError(t, err)
+	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 2))
 }

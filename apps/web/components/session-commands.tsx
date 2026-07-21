@@ -3,7 +3,6 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   IconPlayerStop,
-  IconFileTextSpark,
   IconGitCommit,
   IconArrowUp,
   IconArrowDown,
@@ -48,9 +47,7 @@ type PanelActions = ReturnType<typeof usePanelActions>;
 
 function buildSessionCommands(
   isAgentRunning: boolean | undefined,
-  isPassthrough: boolean | undefined,
   cancelTurn: () => void,
-  panels: PanelActions,
 ): CommandItem[] {
   const items: CommandItem[] = [];
   if (isAgentRunning)
@@ -59,17 +56,8 @@ function buildSessionCommands(
       label: "Cancel Turn",
       group: "Agent",
       icon: <IconPlayerStop className="size-3.5" />,
-      keywords: ["cancel", "stop", "turn"],
+      keywords: ["cancel", "stop", "turn", "cancel agent", "stop agent", "interrupt agent"],
       action: cancelTurn,
-    });
-  if (!isPassthrough)
-    items.push({
-      id: "session-plan-mode",
-      label: "Toggle Plan Mode",
-      group: "Agent",
-      icon: <IconFileTextSpark className="size-3.5" />,
-      keywords: ["plan", "mode", "toggle"],
-      action: () => panels.addPlan(),
     });
   return items;
 }
@@ -87,7 +75,7 @@ function buildGitCommands(
       label: "Commit Changes",
       group: "Git",
       icon: <IconGitCommit className="size-3.5" />,
-      keywords: ["commit", "git", "save"],
+      keywords: ["commit", "git", "save changes", "git commit"],
       action: openCommitDialog,
     },
     {
@@ -95,7 +83,7 @@ function buildGitCommands(
       label: "Push",
       group: "Git",
       icon: <IconArrowUp className="size-3.5" />,
-      keywords: ["push", "git", "upload"],
+      keywords: ["push", "git", "push changes", "push to remote", "upload changes"],
       action: () => runGitWithFeedback(() => git.push(), "Push"),
     },
     {
@@ -103,7 +91,7 @@ function buildGitCommands(
       label: "Pull",
       group: "Git",
       icon: <IconArrowDown className="size-3.5" />,
-      keywords: ["pull", "git", "download", "fetch"],
+      keywords: ["pull", "git", "pull changes", "download changes"],
       action: () => runGitWithFeedback(() => git.pull(), "Pull"),
     },
     {
@@ -111,7 +99,7 @@ function buildGitCommands(
       label: "Create PR",
       group: "Git",
       icon: <IconGitPullRequest className="size-3.5" />,
-      keywords: ["pull request", "pr", "git"],
+      keywords: ["pull request", "pr", "open pull request", "submit pull request", "git"],
       action: openPRDialog,
     },
     {
@@ -178,7 +166,7 @@ function buildTaskCommands(
       label: "New Agent",
       group: "Agent",
       icon: <IconMessagePlus className="size-3.5" />,
-      keywords: ["new", "agent", "session", "start"],
+      keywords: ["new", "agent", "session", "start agent", "new session"],
       action: openNewAgent,
     },
     {
@@ -186,7 +174,7 @@ function buildTaskCommands(
       label: "Create Subtask",
       group: "Tasks",
       icon: <IconSubtask className="size-3.5" />,
-      keywords: ["subtask", "create", "new", "child"],
+      keywords: ["subtask", "create", "new subtask", "new sub-task", "child task"],
       action: openSubtask,
     },
   ];
@@ -202,7 +190,7 @@ function buildPanelCommands(
       label: "Add Browser Panel",
       group: "Panels",
       icon: <IconBrowser className="size-3.5" />,
-      keywords: ["browser", "preview", "web"],
+      keywords: ["browser", "preview", "web", "open browser preview", "web preview", "app preview"],
       action: () => panels.addBrowser(),
     },
     {
@@ -210,7 +198,7 @@ function buildPanelCommands(
       label: "Add Terminal Panel",
       group: "Panels",
       icon: <IconTerminal2 className="size-3.5" />,
-      keywords: ["terminal", "shell", "console"],
+      keywords: ["terminal", "shell", "console", "new terminal", "open terminal", "command line"],
       action: () => panels.addTerminal(),
     },
   ];
@@ -220,7 +208,7 @@ function buildPanelCommands(
       label: "Add Plan Panel",
       group: "Panels",
       icon: <IconFileText className="size-3.5" />,
-      keywords: ["plan", "document"],
+      keywords: ["plan", "document", "task plan", "implementation plan", "plan details"],
       action: () => panels.addPlan(),
     });
   items.push({
@@ -228,7 +216,15 @@ function buildPanelCommands(
     label: "Add Changes Panel",
     group: "Panels",
     icon: <IconFileDiff className="size-3.5" />,
-    keywords: ["changes", "diff", "git"],
+    keywords: [
+      "changes",
+      "diff",
+      "git changes",
+      "changed files",
+      "source control",
+      "git diff",
+      "review changes",
+    ],
     action: () => panels.addChanges(),
   });
   return items;
@@ -283,7 +279,7 @@ export function SessionCommands({
   const commands = useMemo<CommandItem[]>(() => {
     if (!sessionId) return [];
     const items = [
-      ...buildSessionCommands(isAgentRunning, isPassthrough, cancelTurn, panels),
+      ...buildSessionCommands(isAgentRunning, cancelTurn),
       ...(hasWorktree
         ? buildGitCommands(git, baseBranch, openCommitDialog, openPRDialog, runGitWithFeedback)
         : []),

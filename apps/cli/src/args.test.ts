@@ -4,10 +4,9 @@ import { parseArgs, ParseError, resolvePorts } from "./args";
 
 describe("parseArgs", () => {
   it("defaults to the run command with no args", () => {
-    const { options, showHelp, deprecatedFlags } = parseArgs([]);
+    const { options, showHelp } = parseArgs([]);
     expect(options.command).toBe("run");
     expect(showHelp).toBe(false);
-    expect(deprecatedFlags).toEqual([]);
   });
 
   it("parses --port and --port=<n> as the backend port", () => {
@@ -17,24 +16,21 @@ describe("parseArgs", () => {
 
   it("parses --backend-port the same as --port (no deprecation note)", () => {
     expect(parseArgs(["--backend-port=3447"]).options.backendPort).toBe(3447);
-    expect(parseArgs(["--backend-port=3447"]).deprecatedFlags).toEqual([]);
   });
 
-  it("parses --web-internal-port without a deprecation note", () => {
-    const r = parseArgs(["--web-internal-port", "12345"]);
+  it("parses --web-internal-port for dev mode", () => {
+    const r = parseArgs(["dev", "--web-internal-port", "12345"]);
     expect(r.options.webPort).toBe(12345);
-    expect(r.deprecatedFlags).toEqual([]);
   });
 
-  it("records --web-port as deprecated", () => {
-    const r = parseArgs(["--web-port=8080"]);
-    expect(r.options.webPort).toBe(8080);
-    expect(r.deprecatedFlags).toEqual(["--web-port"]);
+  it("rejects --web-internal-port outside dev mode", () => {
+    expect(() => parseArgs(["--web-internal-port", "12345"])).toThrow(
+      /--web-internal-port only applies to dev mode/,
+    );
   });
 
-  it("dedupes deprecated flags across repeats", () => {
-    const r = parseArgs(["--web-port=1", "--web-port=2"]);
-    expect(r.deprecatedFlags).toEqual(["--web-port"]);
+  it("rejects removed --web-port", () => {
+    expect(() => parseArgs(["--web-port=8080"])).toThrow(/--web-port has been removed/);
   });
 
   it("reports --help via showHelp without exiting", () => {
@@ -130,9 +126,9 @@ describe("resolvePorts", () => {
     expect(r.webPort).toBe(8080);
   });
 
-  it("KANDEV_WEB_PORT sets the internal web port in run/start (backend stays undefined)", () => {
+  it("KANDEV_WEB_PORT is ignored outside dev", () => {
     const r = resolvePorts({ command: "run" }, { KANDEV_WEB_PORT: "8080" } as NodeJS.ProcessEnv);
-    expect(r).toEqual({ backendPort: undefined, webPort: 8080 });
+    expect(r).toEqual({ backendPort: undefined, webPort: undefined });
   });
 
   it("--port maps to backend in every command (including dev)", () => {
@@ -158,7 +154,7 @@ describe("resolvePorts", () => {
     ).toThrow(/KANDEV_PORT must be an integer between/);
   });
 
-  it.each(["KANDEV_PORT", "KANDEV_BACKEND_PORT", "KANDEV_WEB_PORT"])(
+  it.each(["KANDEV_PORT", "KANDEV_BACKEND_PORT"])(
     "throws ParseError when %s is set to empty string",
     (name) => {
       expect(() => resolvePorts({ command: "run" }, { [name]: "" } as NodeJS.ProcessEnv)).toThrow(
@@ -166,4 +162,10 @@ describe("resolvePorts", () => {
       );
     },
   );
+
+  it("throws ParseError when KANDEV_WEB_PORT is empty in dev", () => {
+    expect(() =>
+      resolvePorts({ command: "dev" }, { KANDEV_WEB_PORT: "" } as NodeJS.ProcessEnv),
+    ).toThrow(/KANDEV_WEB_PORT must be an integer/);
+  });
 });

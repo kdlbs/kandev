@@ -3,8 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+// The parent-task setup and the sidebar New Task button exercise the regular
+// task-create dialog, so run this file with the office feature disabled.
+useRegularMode();
 
 const START_AGENT_TEST_ID = "submit-start-agent";
 const START_ENABLED_TIMEOUT = 30_000;
@@ -71,19 +76,13 @@ test.describe("Subtask basics", () => {
     await session.waitForLoad();
 
     // Wait for agent to complete
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
-    // Open the Task split-button chevron and click "New Subtask"
-    const primary = testPage.getByTestId("new-task-primary");
-    const chevron = testPage.getByTestId("new-task-chevron");
-    await expect(primary).toBeVisible({ timeout: 5_000 });
-    await expect(chevron).toBeVisible({ timeout: 5_000 });
-    await expect(primary).toHaveCSS("border-top-right-radius", "0px");
-    await expect(primary).toHaveCSS("border-bottom-right-radius", "0px");
-    await expect(chevron).toHaveCSS("border-top-left-radius", "0px");
-    await expect(chevron).toHaveCSS("border-bottom-left-radius", "0px");
-    await chevron.click();
-    await testPage.getByTestId("new-subtask-button").click();
+    // Open the New Subtask dialog from the sidebar New Task row's trailing
+    // subtask affordance (shown while viewing a task).
+    const subtaskButton = testPage.getByTestId("sidebar-new-subtask");
+    await expect(subtaskButton).toBeVisible({ timeout: 5_000 });
+    await subtaskButton.click();
 
     // The compact NewSubtaskDialog should open with pre-filled title containing numeric suffix
     const titleInput = testPage.getByTestId("subtask-title-input");
@@ -138,10 +137,7 @@ test.describe("MCP subtask creation", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // 2. Click the parent task card to navigate to its session
-    const parentCard = kanban.taskCardByTitle("MCP Subtask Parent");
-    await expect(parentCard).toBeVisible({ timeout: 10_000 });
-    await parentCard.click();
+    // 2. Sidebar task creation navigates directly to the parent session.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // 3. Wait for the agent to complete — the MCP create_task call happens during execution
@@ -243,10 +239,7 @@ test.describe("MCP subtask creation", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // 2. Click the parent card to navigate to its session
-    const parentCard = kanban.taskCardByTitle("Subtask Button Parent");
-    await expect(parentCard).toBeVisible({ timeout: 10_000 });
-    await parentCard.click();
+    // 2. Sidebar task creation navigates directly to the parent session.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // 3. Wait for the agent to finish
@@ -254,9 +247,8 @@ test.describe("MCP subtask creation", () => {
     await session.waitForLoad();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    // 4. Open the Task split-button chevron and click "New Subtask"
-    await testPage.getByTestId("new-task-chevron").click();
-    await testPage.getByTestId("new-subtask-button").click();
+    // 4. Open the New Subtask dialog from the sidebar New Task subtask affordance.
+    await testPage.getByTestId("sidebar-new-subtask").click();
     const subtaskTitleInput = testPage.getByTestId("subtask-title-input");
     await expect(subtaskTitleInput).toBeVisible();
 
@@ -314,11 +306,10 @@ test.describe("MCP subtask creation", () => {
     await testPage.goto(`/t/${parentTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
-    // 3. Open the New Subtask dialog from the split-button.
-    await testPage.getByTestId("new-task-chevron").click();
-    await testPage.getByTestId("new-subtask-button").click();
+    // 3. Open the New Subtask dialog from the sidebar New Task subtask affordance.
+    await testPage.getByTestId("sidebar-new-subtask").click();
 
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
@@ -649,24 +640,34 @@ test.describe("Subtask dialog feature parity", () => {
     await testPage.goto(`/t/${parentTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Open the subtask dialog and toggle to GitHub URL mode.
-    await testPage.getByTestId("new-task-chevron").click();
-    await testPage.getByTestId("new-subtask-button").click();
+    await testPage.getByTestId("sidebar-new-subtask").click();
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
 
-    await testPage.getByTestId("toggle-github-url").click();
-    const urlInput = testPage.getByTestId("github-url-input");
+    // Switch to Remote tab. The subtask form-state runs
+    // useRemoteReposSeedEffect (shared with the create-task dialog), which
+    // auto-seeds an empty chip row on the initial toggle.
+    const remoteModeBtn = testPage.getByTestId("source-mode-remote");
+    await expect(remoteModeBtn).toBeVisible({ timeout: 5_000 });
+    await remoteModeBtn.click();
+    const chipTrigger = testPage.getByTestId("remote-repo-chip-trigger").first();
+    await expect(chipTrigger).toBeVisible({ timeout: 5_000 });
+    await chipTrigger.click();
+    const urlInput = testPage.getByTestId("remote-repo-input").last();
     await expect(urlInput).toBeVisible({ timeout: 5_000 });
     await urlInput.fill("https://github.com/subtask-owner/subtask-repo");
+    await urlInput.press("Enter");
 
     // Wait for branch list to resolve so the payload carries `base_branch`.
-    // The branch pill is disabled while branches are loading and re-enables
-    // once the resolver returns options, so this is a positive signal that
-    // the URL was parsed and branches were fetched.
-    await expect(testPage.getByTestId("branch-chip-trigger")).toBeEnabled({ timeout: 10_000 });
+    // The per-chip branch pill is disabled while branches are loading and
+    // re-enables once the resolver returns options, so this is a positive
+    // signal that the URL was parsed and branches were fetched.
+    await expect(testPage.getByTestId("remote-branch-chip-trigger").first()).toBeEnabled({
+      timeout: 10_000,
+    });
 
     // 4. Submit.
     const subtaskTitle = `Subtask GH URL ${Date.now()}`;
@@ -734,7 +735,7 @@ test.describe("Subtask dialog feature parity", () => {
     await testPage.goto(`/t/${parentTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Sanity-check via the API that backend discovery actually finds the
     //    on-disk directory. If this fails, the issue is the backend scan, not
@@ -751,14 +752,13 @@ test.describe("Subtask dialog feature parity", () => {
       `backend discovery should include ${discoveredDir}; got: ${JSON.stringify(discoverData.repositories.map((r) => r.path))}`,
     ).toBe(true);
 
-    // 4. Open the subtask dialog. The discover effect fires on mount via a
-    //    Next.js server action, so we can't await a direct backend response
-    //    here. Use poll-then-open: poll for the chip option to appear,
+    // 4. Open the subtask dialog. The discover effect fires on mount via an
+    //    action wrapper, so we can't await a direct backend response here.
+    //    Use poll-then-open: poll for the chip option to appear,
     //    reopening the popover each tick because cmdk's listbox snapshots
     //    options at open time and won't update if discovery resolves while
     //    the popover is already showing.
-    await testPage.getByTestId("new-task-chevron").click();
-    await testPage.getByTestId("new-subtask-button").click();
+    await testPage.getByTestId("sidebar-new-subtask").click();
     await expect(testPage.getByTestId("subtask-title-input")).toBeVisible({ timeout: 5_000 });
 
     const discoveredOption = testPage
@@ -817,13 +817,12 @@ test.describe("Subtask dialog feature parity", () => {
     await testPage.goto(`/t/${parentTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Open the subtask dialog. The first chip is seeded with the parent's
     //    repo. Click the "+ add repository" button to append a second chip,
     //    then point that chip at repo B.
-    await testPage.getByTestId("new-task-chevron").click();
-    await testPage.getByTestId("new-subtask-button").click();
+    await testPage.getByTestId("sidebar-new-subtask").click();
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
 

@@ -3,6 +3,7 @@ package skills_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -606,6 +607,21 @@ func TestGetSkillFile_EmptyPathReturnsSKILLMD(t *testing.T) {
 	}
 	if content != "# content" {
 		t.Errorf("content = %q", content)
+	}
+}
+
+// TestGetSkillFromConfig_MissingIDWrapsErrSkillNotFound locks in the
+// production contract: a missing skill id flows through the real lookup
+// path and surfaces an error wrapping ErrSkillNotFound, so handler.getSkill
+// can map it to a 404 via errors.Is without parsing the formatted message.
+func TestGetSkillFromConfig_MissingIDWrapsErrSkillNotFound(t *testing.T) {
+	svc := newTestSkillService(t)
+	_, err := svc.GetSkillFromConfig(context.Background(), "skill-that-does-not-exist")
+	if err == nil {
+		t.Fatal("expected GetSkillFromConfig to fail for missing id")
+	}
+	if !errors.Is(err, skills.ErrSkillNotFound) {
+		t.Errorf("missing-id error not classifiable as ErrSkillNotFound: %v", err)
 	}
 }
 

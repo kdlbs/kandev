@@ -23,6 +23,7 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
         metadata: payload.metadata,
         requests_input: payload.requests_input,
         created_at: payload.created_at,
+        updated_at: payload.updated_at,
       });
     },
     "session.message.updated": (message) => {
@@ -43,7 +44,15 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
         metadata: payload.metadata,
         requests_input: payload.requests_input,
         created_at: payload.created_at,
+        updated_at: payload.updated_at,
       });
+    },
+    "session.message.deleted": (message) => {
+      const payload = message.payload;
+      if (!payload.session_id) {
+        return;
+      }
+      store.getState().removeMessage(sessionId(payload.session_id), payload.message_id);
     },
   };
 }

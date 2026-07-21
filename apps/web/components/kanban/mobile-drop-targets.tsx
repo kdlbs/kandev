@@ -18,7 +18,7 @@ function MobileDropTarget({ step, isCurrentStep }: MobileDropTargetProps) {
     <div
       ref={setNodeRef}
       className={cn(
-        "flex items-center justify-center gap-2 px-3 py-3 rounded-lg border-2 border-dashed transition-all min-w-[100px]",
+        "flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-2 transition-all",
         (() => {
           if (isOver) return "border-primary bg-primary/10 scale-105";
           if (isCurrentStep) return "border-muted-foreground/30 bg-muted/50 opacity-50";
@@ -42,8 +42,8 @@ export function MobileDropTargets({ steps, currentStepId, isDragging }: MobileDr
   if (!isDragging) return null;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-gradient-to-t from-background via-background to-transparent">
-      <div className="flex gap-2 overflow-x-auto pb-safe scrollbar-hide">
+    <div className="fixed inset-x-0 bottom-0 z-50 bg-gradient-to-t from-background via-background to-transparent p-4">
+      <div className="mx-auto flex max-h-[50dvh] max-w-sm flex-col gap-2 overflow-y-auto overscroll-contain pb-safe">
         {steps.map((step) => (
           <MobileDropTarget key={step.id} step={step} isCurrentStep={step.id === currentStepId} />
         ))}

@@ -2,12 +2,16 @@ package worktree
 
 import (
 	"context"
+	"path/filepath"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+
+	dbutil "github.com/kandev/kandev/internal/db"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // newTestStore opens an in-memory SQLite DB and constructs a *SQLiteStore on it.
@@ -25,6 +29,28 @@ func newTestStore(t *testing.T) *SQLiteStore {
 		t.Fatalf("new store: %v", err)
 	}
 	return store
+}
+
+func TestSQLiteStore_ReinitializesSchema(t *testing.T) {
+	dbConn, err := dbutil.OpenSQLite(filepath.Join(t.TempDir(), "worktree-replay.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := tasksqlite.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("first task schema init: %v", err)
+	}
+	if _, err := NewSQLiteStore(db, db); err != nil {
+		t.Fatalf("first worktree schema init: %v", err)
+	}
+	if _, err := tasksqlite.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("second task schema init: %v", err)
+	}
+	if _, err := NewSQLiteStore(db, db); err != nil {
+		t.Fatalf("second worktree schema init: %v", err)
+	}
 }
 
 func TestSQLiteStore_ListActiveWorktreePaths(t *testing.T) {

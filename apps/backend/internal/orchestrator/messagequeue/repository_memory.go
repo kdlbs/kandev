@@ -86,6 +86,39 @@ func (r *memoryRepository) AppendOrInsertTail(_ context.Context, sessionID, task
 	return msg, false, nil
 }
 
+func (r *memoryRepository) InsertOrReplaceByCoalesceKey(_ context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, existing := range r.entries[msg.SessionID] {
+		if existing.QueuedBy != msg.QueuedBy {
+			continue
+		}
+		if metadataString(existing.Metadata, MetadataCoalesceKey) != coalesceKey {
+			continue
+		}
+		if msg.QueuedAt.IsZero() {
+			msg.QueuedAt = time.Now().UTC()
+		}
+		existing.TaskID = msg.TaskID
+		existing.Content = msg.Content
+		existing.Model = msg.Model
+		existing.PlanMode = msg.PlanMode
+		existing.Attachments = msg.Attachments
+		existing.Metadata = msg.Metadata
+		existing.QueuedAt = msg.QueuedAt
+		out := *existing
+		return &out, true, nil
+	}
+	if !allowInsert {
+		return nil, false, ErrEntryNotFound
+	}
+	if err := r.insertLocked(msg, maxPerSession); err != nil {
+		return nil, false, err
+	}
+	return msg, false, nil
+}
+
 func (r *memoryRepository) ListBySession(_ context.Context, sessionID string) ([]QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -119,6 +152,31 @@ func (r *memoryRepository) TakeHead(_ context.Context, sessionID string) (*Queue
 	}
 	out := *head
 	return &out, nil
+}
+
+// TakeByID atomically returns and deletes the entry identified by entryID,
+// regardless of its FIFO position. Unlike DeleteByID, it has no
+// QueuedByAgent guard — see the Repository interface doc comment.
+func (r *memoryRepository) TakeByID(_ context.Context, sessionID, entryID string) (*QueuedMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list, ok := r.entries[sessionID]
+	if !ok {
+		return nil, nil
+	}
+	for i, m := range list {
+		if m.ID != entryID {
+			continue
+		}
+		r.entries[sessionID] = append(list[:i], list[i+1:]...)
+		if len(r.entries[sessionID]) == 0 {
+			delete(r.entries, sessionID)
+			delete(r.nextPosition, sessionID)
+		}
+		out := *m
+		return &out, nil
+	}
+	return nil, nil
 }
 
 func (r *memoryRepository) UpdateContent(_ context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
@@ -213,6 +271,35 @@ func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newS
 	return nil
 }
 
+func (r *memoryRepository) ReplaceSession(_ context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(entries) == 0 {
+		delete(r.entries, sessionID)
+		delete(r.nextPosition, sessionID)
+	} else {
+		replaced := make([]*QueuedMessage, 0, len(entries))
+		var maxPos int64
+		for _, entry := range entries {
+			clone := entry
+			clone.SessionID = sessionID
+			if clone.Position > maxPos {
+				maxPos = clone.Position
+			}
+			replaced = append(replaced, &clone)
+		}
+		r.entries[sessionID] = replaced
+		r.nextPosition[sessionID] = maxPos
+	}
+	if pendingMove == nil {
+		delete(r.pendingMoves, sessionID)
+		return nil
+	}
+	clone := *pendingMove
+	r.pendingMoves[sessionID] = &clone
+	return nil
+}
+
 func (r *memoryRepository) SetPendingMove(_ context.Context, sessionID string, move *PendingMove) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -222,6 +309,17 @@ func (r *memoryRepository) SetPendingMove(_ context.Context, sessionID string, m
 	clone := *move
 	r.pendingMoves[sessionID] = &clone
 	return nil
+}
+
+func (r *memoryRepository) GetPendingMove(_ context.Context, sessionID string) (*PendingMove, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	move, ok := r.pendingMoves[sessionID]
+	if !ok {
+		return nil, nil
+	}
+	clone := *move
+	return &clone, nil
 }
 
 func (r *memoryRepository) TakePendingMove(_ context.Context, sessionID string) (*PendingMove, error) {

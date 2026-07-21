@@ -31,12 +31,12 @@ export type ChatInputEditorAreaProps = {
   onAddContextFile?: (file: ContextFile) => void;
   onToggleContextFile?: (file: ContextFile) => void;
   planContextEnabled: boolean;
-  handleAgentCommand: (command: string) => void;
   addFiles: (files: File[]) => Promise<void>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   showRequestChangesTooltip: boolean;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  hideAgentControls?: boolean;
   hidePlanMode?: boolean;
   isAgentBusy: boolean;
   onPlanModeChange: (enabled: boolean) => void;
@@ -48,19 +48,26 @@ export type ChatInputEditorAreaProps = {
   contextPopoverOpen: boolean;
   setContextPopoverOpen: (open: boolean) => void;
   contextFiles: ContextFile[];
+  editorClassName?: string;
   onImplementPlan?: (fresh: boolean) => void;
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
+  /** Inserts a voice transcript into the editor at the current cursor. */
+  onVoiceTranscript?: (text: string) => void;
+  /** Submit the message after a voice transcript is inserted (when auto-send is on). */
+  onVoiceAutoSend?: () => void;
 };
 
 function EditorWithTooltip({
   showTooltip,
   isEnhancingPrompt,
+  className,
   children,
 }: {
   showTooltip: boolean;
   isEnhancingPrompt?: boolean;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -70,6 +77,7 @@ function EditorWithTooltip({
           className={cn(
             "flex-1 min-h-0 transition-opacity",
             isEnhancingPrompt && "opacity-50 pointer-events-none",
+            className,
           )}
         >
           {children}
@@ -117,12 +125,14 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
   const { isDisabled, hasClarification, planModeEnabled, planModeAvailable, mcpServers } = p;
   const { submitKey, setIsInputFocused, sessionId, taskId, planContextEnabled } = p;
-  const { onAddContextFile, onToggleContextFile, handleAgentCommand, addFiles, fileInputRef } = p;
+  const { onAddContextFile, onToggleContextFile, addFiles, fileInputRef } = p;
   const { showRequestChangesTooltip, isAgentBusy, onPlanModeChange, taskTitle, taskDescription } =
     p;
   const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
   const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
-  const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hidePlanMode } = p;
+  const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hideAgentControls } = p;
+  const { hidePlanMode } = p;
+  const { onVoiceTranscript, onVoiceAutoSend } = p;
   // Exclude auto-added plan context from the count — it's always present in plan mode
   // and shouldn't by itself enable the send button.
   const userContextCount = planContextEnabled ? Math.max(0, contextCount - 1) : contextCount;
@@ -135,6 +145,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
       <EditorWithTooltip
         showTooltip={showRequestChangesTooltip}
         isEnhancingPrompt={isEnhancingPrompt}
+        className={p.editorClassName}
       >
         <TipTapInput
           ref={inputRef}
@@ -152,7 +163,6 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
           onAddContextFile={onAddContextFile}
           onToggleContextFile={onToggleContextFile}
           planContextEnabled={planContextEnabled}
-          onAgentCommand={handleAgentCommand}
           onImagePaste={addFiles}
           onPlanModeChange={onPlanModeChange}
         />
@@ -186,8 +196,11 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         isEnhancingPrompt={isEnhancingPrompt}
         isUtilityConfigured={isUtilityConfigured}
         onAttachFiles={handleAttachFiles}
+        onVoiceTranscript={onVoiceTranscript}
+        onVoiceAutoSend={onVoiceAutoSend}
         hideSessionsDropdown={hideSessionsDropdown}
         minimalToolbar={minimalToolbar}
+        hideAgentControls={hideAgentControls}
         hidePlanMode={hidePlanMode}
       />
     </div>
@@ -225,6 +238,15 @@ export type ChatInputBodyProps = {
   contextAreaProps: ChatInputContextAreaProps;
   editorAreaProps: ChatInputEditorAreaProps;
 };
+
+/** Glow class for the outer wrapper. The pulsing glow lives on the wrapper
+ * (not the inner box) because the inner box has `overflow-hidden`, which would
+ * clip a child pseudo-element's outer box-shadow. */
+function chatInputGlowClass(isAgentBusy: boolean, isStarting: boolean): string {
+  if (isAgentBusy) return "chat-input-glow-running";
+  if (isStarting) return "chat-input-glow-starting";
+  return "";
+}
 
 export function ChatInputBody({
   containerRef,
@@ -287,7 +309,7 @@ export function ChatInputBody({
   );
 
   return (
-    <div className="relative">
+    <div className={cn("relative", chatInputGlowClass(isAgentBusy, isStarting))}>
       <ResizeHandle
         planModeEnabled={planModeEnabled}
         isAgentBusy={isAgentBusy}
@@ -318,9 +340,13 @@ export function ChatInputBody({
         <div
           ref={containerRef}
           style={{ height }}
+          data-testid="chat-input-editor-shell"
           className="flex flex-col min-h-0 overflow-hidden"
         >
-          <ChatInputEditorArea {...editorAreaProps} />
+          <ChatInputEditorArea
+            {...editorAreaProps}
+            editorClassName={cn(editorAreaProps.editorClassName, showFocusHint && "pr-28")}
+          />
         </div>
       </div>
     </div>

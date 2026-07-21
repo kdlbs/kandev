@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -16,6 +17,21 @@ var claudeACPLogoLight []byte
 var claudeACPLogoDark []byte
 
 const claudeACPPkg = "@agentclientprotocol/claude-agent-acp"
+
+// claudeACPPermSettings maps the profile DangerouslySkipPermissions toggle to
+// the Claude Code CLI's --dangerously-skip-permissions flag in passthrough mode.
+// ACP (non-passthrough) Claude does not consume this flag; permission bypass
+// there goes through agentctl's auto-approve channel.
+var claudeACPPermSettings = map[string]PermissionSetting{
+	PermissionKeyDangerouslySkipPermissions: {
+		Supported:   true,
+		Default:     false,
+		Label:       "Skip permission prompts",
+		Description: "Pass --dangerously-skip-permissions so Claude Code does not prompt for tool approvals.",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
+		CLIFlag:     "--dangerously-skip-permissions",
+	},
+}
 
 var (
 	_ Agent            = (*ClaudeACP)(nil)
@@ -33,17 +49,27 @@ type ClaudeACP struct {
 func NewClaudeACP() *ClaudeACP {
 	return &ClaudeACP{
 		StandardPassthrough: StandardPassthrough{
-			PermSettings: emptyPermSettings,
+			PermSettings: claudeACPPermSettings,
 			Cfg: PassthroughConfig{
-				Supported:         true,
-				Label:             "CLI Passthrough",
-				Description:       "Show terminal directly instead of chat interface",
-				PassthroughCmd:    NewCommand("npx", "-y", "@anthropic-ai/claude-code", "--verbose"),
-				ModelFlag:         NewParam("--model", "{model}"),
-				IdleTimeout:       3 * time.Second,
-				BufferMaxBytes:    DefaultBufferMaxBytes,
-				ResumeFlag:        NewParam("-c"),
-				SessionResumeFlag: NewParam("--resume"),
+				Supported:             true,
+				Label:                 "CLI Passthrough",
+				Description:           "Show terminal directly instead of chat interface",
+				PassthroughCmd:        NewCommand("npx", "-y", "@anthropic-ai/claude-code", "--verbose"),
+				ModelFlag:             NewParam("--model", "{model}"),
+				IdleTimeout:           3 * time.Second,
+				BufferMaxBytes:        DefaultBufferMaxBytes,
+				ResumeFlag:            NewParam("-c"),
+				SessionResumeFlag:     NewParam("--resume"),
+				MCPStrategy:           mcpconfig.ClaudeStrategy{},
+				AutoInjectPrompt:      true,
+				SubmitSequence:        "\r",
+				DisableBracketedPaste: true,
+				// Claude Code's Ink TUI coalesces multi-byte stdin reads into a
+				// paste burst, absorbing trailing "\r" into the input rather than
+				// dispatching Enter. A short delay before the submit byte forces
+				// it to arrive as a discrete keystroke. 150ms is just over Ink's
+				// paste-detection window and still feels instant to the user.
+				SubmitDelay: 150 * time.Millisecond,
 			},
 		},
 	}
@@ -149,7 +175,7 @@ func (a *ClaudeACP) InstallScript() string {
 func (a *ClaudeACP) BillingType() usage.BillingType { return claudeBillingType() }
 
 func (a *ClaudeACP) PermissionSettings() map[string]PermissionSetting {
-	return emptyPermSettings
+	return claudeACPPermSettings
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.

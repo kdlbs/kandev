@@ -77,6 +77,37 @@ test.describe("agentctl kandev CLI", () => {
     expect(agents.some((a) => a.id === officeSeed.agentId)).toBe(true);
   });
 
+  test("agents list accepts a versioned API base URL", async ({
+    apiClient,
+    backend,
+    officeSeed,
+  }) => {
+    const run = await apiClient.seedRun({
+      agentProfileId: officeSeed.agentId,
+      reason: "task_assigned",
+      status: "claimed",
+    });
+    const { token } = await apiClient.mintRuntimeToken({
+      agentProfileId: officeSeed.agentId,
+      workspaceId: officeSeed.workspaceId,
+      runId: run.run_id,
+    });
+
+    const env: NodeJS.ProcessEnv = {
+      KANDEV_API_URL: `${backend.baseUrl}/api/v1`,
+      KANDEV_API_KEY: token,
+      KANDEV_WORKSPACE_ID: officeSeed.workspaceId,
+      KANDEV_AGENT_ID: officeSeed.agentId,
+      KANDEV_RUN_ID: run.run_id,
+    };
+
+    const res = runCLI(env, ["agents", "list"]);
+    expect(res.exitCode, `stderr=${res.stderr}`).toBe(0);
+    const parsed = JSON.parse(res.stdout);
+    const agents = (parsed.agents ?? []) as Array<{ id: string }>;
+    expect(agents.some((a) => a.id === officeSeed.agentId)).toBe(true);
+  });
+
   test("tasks list returns workspace tasks after one is created", async ({
     apiClient,
     backend,

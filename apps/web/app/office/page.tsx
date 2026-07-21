@@ -1,10 +1,11 @@
-import { redirect } from "next/navigation";
+import { redirect } from "@/lib/routing/server-navigation";
 import { getDashboard, getOnboardingState } from "@/lib/api/domains/office-api";
 import { getActiveWorkspaceId } from "./lib/get-active-workspace";
 import { OfficePageClient } from "./page-client";
-import type { DashboardData } from "@/lib/state/slices/office/types";
 
-export default async function OfficePage() {
+type SearchParams = Promise<{ workspaceId?: string }>;
+
+export default async function OfficePage({ searchParams }: { searchParams?: SearchParams }) {
   const onboarding = await getOnboardingState({ cache: "no-store" }).catch(() => ({
     completed: true,
   }));
@@ -12,12 +13,13 @@ export default async function OfficePage() {
     redirect("/office/setup");
   }
 
-  const workspaceId = await getActiveWorkspaceId();
-
-  let dashboard: DashboardData | null = null;
-  if (workspaceId) {
-    dashboard = await getDashboard(workspaceId, { cache: "no-store" }).catch(() => null);
+  const params = searchParams ? await searchParams : {};
+  const workspaceId = await getActiveWorkspaceId(params.workspaceId);
+  if (!workspaceId) {
+    redirect("/office/setup?mode=new");
   }
+
+  const dashboard = await getDashboard(workspaceId, { cache: "no-store" }).catch(() => null);
 
   return <OfficePageClient initialDashboard={dashboard} />;
 }

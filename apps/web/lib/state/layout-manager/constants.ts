@@ -1,10 +1,14 @@
 import type { LayoutPanel } from "./types";
 
-// Layout sizing constants (single source of truth)
+// Layout sizing constants (single source of truth).
+// Pinned column max width is computed at runtime — see ./caps.ts.
+//
+// Ratio applied to dockview width to compute initial defaults when no user
+// override exists. The left app sidebar now sits outside dockview, so the
+// right pane needs a larger dockview-relative ratio to preserve the old
+// laptop proportions after the app sidebar consumes horizontal space.
 export const LAYOUT_SIDEBAR_RATIO = 2.5 / 10;
-export const LAYOUT_RIGHT_RATIO = 2.5 / 10;
-export const LAYOUT_SIDEBAR_MAX_PX = 350;
-export const LAYOUT_RIGHT_MAX_PX = 450;
+export const LAYOUT_RIGHT_RATIO = 1 / 3;
 
 // Well-known group/panel IDs
 export const SIDEBAR_GROUP = "group-sidebar";
@@ -14,9 +18,20 @@ export const RIGHT_BOTTOM_GROUP = "group-right-bottom";
 export const TERMINAL_DEFAULT_ID = "terminal-default";
 export const SIDEBAR_LOCK = "no-drop-target" as const;
 
+/** Canonical single-instance panels supported by reusable layout profiles. */
+export const REUSABLE_PANEL_IDS = [
+  "chat",
+  "files",
+  "changes",
+  TERMINAL_DEFAULT_ID,
+  "plan",
+  "browser",
+  "vscode",
+] as const;
+export type ReusablePanelId = (typeof REUSABLE_PANEL_IDS)[number];
+
 /** Fixed panel IDs that can be saved in layout configs. */
 export const KNOWN_PANEL_IDS = new Set([
-  "sidebar",
   "chat",
   "plan",
   TERMINAL_DEFAULT_ID,
@@ -30,7 +45,6 @@ export const KNOWN_PANEL_IDS = new Set([
 /** Components whose panels are structural and should survive filterEphemeral,
  *  even when the panel ID is dynamically generated. */
 export const STRUCTURAL_COMPONENTS = new Set([
-  "sidebar",
   "chat",
   "plan",
   "changes",
@@ -43,7 +57,6 @@ export const STRUCTURAL_COMPONENTS = new Set([
 
 /** Default panel configurations for known panels. */
 export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
-  sidebar: { component: "sidebar", title: "Sidebar" },
   chat: { component: "chat", title: "Agent", tabComponent: "permanentTab" },
   plan: { component: "plan", title: "Plan", tabComponent: "planTab" },
   changes: { component: "changes", title: "Changes", tabComponent: "changesTab" },
@@ -52,6 +65,12 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
   vscode: { component: "vscode", title: "VS Code" },
   [TERMINAL_DEFAULT_ID]: {
     component: "terminal",
+    // terminalTab is the custom dockview tab that adds the `#N` badge
+    // and a right-click rename/destroy menu. The hook
+    // useEnsureDefaultTerminalOrdinary migrates the legacy
+    // `shell-default` PTY into a DB-backed ordinary terminal on
+    // session-page mount so the badge logic has a seq to display.
+    tabComponent: "terminalTab",
     title: "Terminal",
     params: { terminalId: "shell-default" },
   },

@@ -21,13 +21,16 @@ describe("features slice", () => {
       expect(value, `default of features.${name}`).toBe(false);
     }
     expect(store.getState().features.office).toBe(false);
+    expect(store.getState().features.plugins).toBe(false);
   });
 
   it("setFeatures replaces the whole flag map", () => {
     const store = makeStore();
-    store.getState().setFeatures({ office: true });
+    store.getState().setFeatures({ office: true, plugins: true });
     expect(store.getState().features.office).toBe(true);
-    store.getState().setFeatures({ office: false });
+    expect(store.getState().features.plugins).toBe(true);
+    store.getState().setFeatures({ office: false, plugins: false });
     expect(store.getState().features.office).toBe(false);
+    expect(store.getState().features.plugins).toBe(false);
   });
 });

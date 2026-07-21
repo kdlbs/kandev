@@ -1,0 +1,614 @@
+package automation
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db"
+)
+
+// Store provides SQLite persistence for automations.
+type Store struct {
+	db *sqlx.DB // writer
+	ro *sqlx.DB // reader
+}
+
+// NewStore creates a new automation store and initializes the schema.
+func NewStore(writer, reader *sqlx.DB) (*Store, error) {
+	s := &Store{db: writer, ro: reader}
+	if err := s.initSchema(); err != nil {
+		return nil, fmt.Errorf("automation schema init: %w", err)
+	}
+	return s, nil
+}
+
+const createTablesSQL = `
+	CREATE TABLE IF NOT EXISTS automations (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		description TEXT DEFAULT '',
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		agent_profile_id TEXT NOT NULL,
+		executor_profile_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
+		prompt TEXT DEFAULT '',
+		task_title_template TEXT DEFAULT '',
+		execution_mode TEXT NOT NULL DEFAULT 'task',
+		enabled BOOLEAN DEFAULT 1,
+		max_concurrent_runs INTEGER DEFAULT 1,
+		webhook_secret TEXT DEFAULT '',
+		last_triggered_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS automation_triggers (
+		id TEXT PRIMARY KEY,
+		automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+		type TEXT NOT NULL,
+		config TEXT NOT NULL DEFAULT '{}',
+		enabled BOOLEAN DEFAULT 1,
+		last_evaluated_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_automation_triggers_automation ON automation_triggers(automation_id);
+
+	CREATE TABLE IF NOT EXISTS automation_runs (
+		id TEXT PRIMARY KEY,
+		automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+		trigger_id TEXT NOT NULL,
+		trigger_type TEXT NOT NULL,
+		task_id TEXT DEFAULT '',
+		status TEXT NOT NULL,
+		dedup_key TEXT DEFAULT '',
+		trigger_data TEXT NOT NULL DEFAULT '{}',
+		error_message TEXT DEFAULT '',
+		created_at DATETIME NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id);
+	CREATE INDEX IF NOT EXISTS idx_automation_runs_dedup ON automation_runs(automation_id, dedup_key);
+`
+
+// In-branch column additions. The canonical CREATE TABLE covers fresh
+// installs; these ALTERs cover DBs already initialised from an earlier
+// commit on this branch (the original PR #406 schema). SQLite returns a
+// duplicate-column error when the column already exists, which we swallow.
+const (
+	migrateTaskTitleSQL     = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
+	migrateExecutionModeSQL = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
+	migrateRepositoryIDSQL  = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
+)
+
+func (s *Store) initSchema() error {
+	if _, err := s.db.Exec(createTablesSQL); err != nil {
+		return err
+	}
+	s.db.Exec(migrateTaskTitleSQL)     //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(migrateExecutionModeSQL) //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(migrateRepositoryIDSQL)  //nolint:errcheck // duplicate-column on existing DBs
+	return nil
+}
+
+// --- Automation CRUD ---
+
+// CreateAutomation persists a new automation.
+func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
+	if a.ID == "" {
+		a.ID = uuid.New().String()
+	}
+	if a.WebhookSecret == "" {
+		a.WebhookSecret = generateSecret()
+	}
+	now := time.Now().UTC()
+	a.CreatedAt = now
+	a.UpdatedAt = now
+	if a.ExecutionMode == "" {
+		a.ExecutionMode = ExecutionModeTask
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO automations (id, workspace_id, name, description, workflow_id, workflow_step_id,
+			agent_profile_id, executor_profile_id, repository_id,
+			prompt, task_title_template, execution_mode,
+			enabled, max_concurrent_runs,
+			webhook_secret, last_triggered_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
+		a.AgentProfileID, a.ExecutorProfileID, a.RepositoryID,
+		a.Prompt, a.TaskTitleTemplate, string(a.ExecutionMode),
+		a.Enabled, a.MaxConcurrentRuns,
+		a.WebhookSecret, a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
+	return err
+}
+
+// GetAutomation returns an automation by ID with its triggers hydrated.
+func (s *Store) GetAutomation(ctx context.Context, id string) (*Automation, error) {
+	var a Automation
+	err := s.ro.GetContext(ctx, &a, `SELECT * FROM automations WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	triggers, err := s.ListTriggers(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("hydrate triggers: %w", err)
+	}
+	a.Triggers = triggers
+	return &a, nil
+}
+
+// ListAutomations returns all automations for a workspace with triggers hydrated.
+func (s *Store) ListAutomations(ctx context.Context, workspaceID string) ([]*Automation, error) {
+	var automations []*Automation
+	err := s.ro.SelectContext(ctx, &automations,
+		`SELECT * FROM automations WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if len(automations) == 0 {
+		return automations, nil
+	}
+	// Batch-load triggers for all automations.
+	ids := make([]string, len(automations))
+	for i, a := range automations {
+		ids[i] = a.ID
+	}
+	triggersByAutomation, err := s.listTriggersForAutomations(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("hydrate triggers: %w", err)
+	}
+	for _, a := range automations {
+		a.Triggers = triggersByAutomation[a.ID]
+	}
+	return automations, nil
+}
+
+// ListAllEnabled returns all enabled automations (across workspaces).
+func (s *Store) ListAllEnabled(ctx context.Context) ([]*Automation, error) {
+	var automations []*Automation
+	err := s.ro.SelectContext(ctx, &automations,
+		`SELECT * FROM automations WHERE enabled = 1 ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	if len(automations) == 0 {
+		return automations, nil
+	}
+	ids := make([]string, len(automations))
+	for i, a := range automations {
+		ids[i] = a.ID
+	}
+	triggersByAutomation, err := s.listTriggersForAutomations(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("hydrate triggers: %w", err)
+	}
+	for _, a := range automations {
+		a.Triggers = triggersByAutomation[a.ID]
+	}
+	return automations, nil
+}
+
+// UpdateAutomation applies partial updates to an automation.
+func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAutomationRequest) error {
+	a, err := s.GetAutomation(ctx, id)
+	if err != nil {
+		return err
+	}
+	if a == nil {
+		return fmt.Errorf("automation not found: %s", id)
+	}
+	applyAutomationUpdate(a, req)
+	a.UpdatedAt = time.Now().UTC()
+	_, err = s.db.ExecContext(ctx, `
+		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
+			agent_profile_id = ?, executor_profile_id = ?, repository_id = ?,
+			prompt = ?, task_title_template = ?,
+			execution_mode = ?, enabled = ?, max_concurrent_runs = ?, updated_at = ?
+		WHERE id = ?`,
+		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
+		a.AgentProfileID, a.ExecutorProfileID, a.RepositoryID,
+		a.Prompt, a.TaskTitleTemplate,
+		string(a.ExecutionMode), a.Enabled, a.MaxConcurrentRuns, a.UpdatedAt, id)
+	return err
+}
+
+func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
+	if req.Name != nil {
+		a.Name = *req.Name
+	}
+	if req.Description != nil {
+		a.Description = *req.Description
+	}
+	if req.WorkflowID != nil {
+		a.WorkflowID = *req.WorkflowID
+	}
+	if req.WorkflowStepID != nil {
+		a.WorkflowStepID = *req.WorkflowStepID
+	}
+	if req.AgentProfileID != nil {
+		a.AgentProfileID = *req.AgentProfileID
+	}
+	if req.ExecutorProfileID != nil {
+		a.ExecutorProfileID = *req.ExecutorProfileID
+	}
+	if req.RepositoryID != nil {
+		a.RepositoryID = *req.RepositoryID
+	}
+	if req.Prompt != nil {
+		a.Prompt = *req.Prompt
+	}
+	if req.Enabled != nil {
+		a.Enabled = *req.Enabled
+	}
+	if req.MaxConcurrentRuns != nil {
+		a.MaxConcurrentRuns = *req.MaxConcurrentRuns
+	}
+	if req.TaskTitleTemplate != nil {
+		a.TaskTitleTemplate = *req.TaskTitleTemplate
+	}
+	if req.ExecutionMode != nil {
+		a.ExecutionMode = *req.ExecutionMode
+	}
+	if !a.ExecutionMode.Valid() {
+		a.ExecutionMode = ExecutionModeTask
+	}
+}
+
+// DeleteAutomation removes an automation and its triggers/runs (CASCADE).
+func (s *Store) DeleteAutomation(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM automations WHERE id = ?`, id)
+	return err
+}
+
+// UpdateLastTriggered updates the last_triggered_at timestamp.
+func (s *Store) UpdateLastTriggered(ctx context.Context, id string, t time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE automations SET last_triggered_at = ?, updated_at = ? WHERE id = ?`,
+		t, time.Now().UTC(), id)
+	return err
+}
+
+// --- Trigger CRUD ---
+
+// CreateTrigger adds a trigger to an automation.
+func (s *Store) CreateTrigger(ctx context.Context, t *AutomationTrigger) error {
+	if t.ID == "" {
+		t.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	t.CreatedAt = now
+	t.UpdatedAt = now
+	t.ConfigJSON = string(t.Config)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO automation_triggers (id, automation_id, type, config, enabled, last_evaluated_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.AutomationID, t.Type, t.ConfigJSON, t.Enabled, t.LastEvaluatedAt, t.CreatedAt, t.UpdatedAt)
+	return err
+}
+
+// ListTriggers returns all triggers for an automation.
+func (s *Store) ListTriggers(ctx context.Context, automationID string) ([]AutomationTrigger, error) {
+	var triggers []AutomationTrigger
+	err := s.ro.SelectContext(ctx, &triggers,
+		`SELECT * FROM automation_triggers WHERE automation_id = ? ORDER BY created_at`, automationID)
+	hydrateTriggers(triggers)
+	return triggers, err
+}
+
+// hydrateTriggers converts the ConfigJSON string field to the Config json.RawMessage.
+func hydrateTriggers(triggers []AutomationTrigger) {
+	for i := range triggers {
+		triggers[i].Config = json.RawMessage(triggers[i].ConfigJSON)
+	}
+}
+
+func (s *Store) listTriggersForAutomations(ctx context.Context, automationIDs []string) (map[string][]AutomationTrigger, error) {
+	if len(automationIDs) == 0 {
+		return make(map[string][]AutomationTrigger), nil
+	}
+	query, args, err := sqlx.In(
+		`SELECT * FROM automation_triggers WHERE automation_id IN (?) ORDER BY created_at`, automationIDs)
+	if err != nil {
+		return nil, err
+	}
+	query = s.ro.Rebind(query)
+	var triggers []AutomationTrigger
+	if err := s.ro.SelectContext(ctx, &triggers, query, args...); err != nil {
+		return nil, err
+	}
+	hydrateTriggers(triggers)
+	result := make(map[string][]AutomationTrigger, len(automationIDs))
+	for i := range triggers {
+		result[triggers[i].AutomationID] = append(result[triggers[i].AutomationID], triggers[i])
+	}
+	return result, nil
+}
+
+// UpdateTrigger applies partial updates to a trigger.
+func (s *Store) UpdateTrigger(ctx context.Context, id string, req *UpdateTriggerRequest) error {
+	var t AutomationTrigger
+	err := s.ro.GetContext(ctx, &t, `SELECT * FROM automation_triggers WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("trigger not found: %s", id)
+	}
+	if err != nil {
+		return err
+	}
+	if req.Config != nil {
+		t.ConfigJSON = string(*req.Config)
+	}
+	if req.Enabled != nil {
+		t.Enabled = *req.Enabled
+	}
+	t.UpdatedAt = time.Now().UTC()
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE automation_triggers SET config = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+		t.ConfigJSON, t.Enabled, t.UpdatedAt, id)
+	return err
+}
+
+// DeleteTrigger removes a trigger.
+func (s *Store) DeleteTrigger(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_triggers WHERE id = ?`, id)
+	return err
+}
+
+// UpdateTriggerEvaluatedAt sets the last_evaluated_at timestamp.
+func (s *Store) UpdateTriggerEvaluatedAt(ctx context.Context, id string, t time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE automation_triggers SET last_evaluated_at = ?, updated_at = ? WHERE id = ?`,
+		t, time.Now().UTC(), id)
+	return err
+}
+
+// ListEnabledTriggersByType returns enabled triggers of a specific type (across all enabled automations).
+func (s *Store) ListEnabledTriggersByType(ctx context.Context, triggerType TriggerType) ([]AutomationTrigger, error) {
+	var triggers []AutomationTrigger
+	err := s.ro.SelectContext(ctx, &triggers, `
+		SELECT t.* FROM automation_triggers t
+		JOIN automations a ON a.id = t.automation_id
+		WHERE t.type = ? AND t.enabled = 1 AND a.enabled = 1
+		ORDER BY t.created_at`, string(triggerType))
+	hydrateTriggers(triggers)
+	return triggers, err
+}
+
+// --- Run operations ---
+
+// CreateRun records a trigger firing.
+func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
+	if r.ID == "" {
+		r.ID = uuid.New().String()
+	}
+	r.CreatedAt = time.Now().UTC()
+	r.TriggerDataJSON = string(r.TriggerData)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO automation_runs (id, automation_id, trigger_id, trigger_type, task_id, status,
+			dedup_key, trigger_data, error_message, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status,
+		r.DedupKey, r.TriggerDataJSON, r.ErrorMessage, r.CreatedAt)
+	return err
+}
+
+// MarkRunFailedByTaskID flips the most recent task_created run for a task
+// into the failed state. Used when a downstream condition (e.g. a permission
+// prompt that a run-mode automation can't answer) makes the run effectively
+// dead. No-op if no matching run is found.
+func (s *Store) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
+	return s.updateRunTerminalStatus(ctx, taskID, RunStatusFailed, errMsg)
+}
+
+// MarkRunSucceededByTaskID flips the most recent task_created run for a task
+// into the succeeded state. Used when an automation-launched agent completes
+// without error.
+func (s *Store) MarkRunSucceededByTaskID(ctx context.Context, taskID string) error {
+	return s.updateRunTerminalStatus(ctx, taskID, RunStatusSucceeded, "")
+}
+
+// updateRunTerminalStatus is the shared implementation behind MarkRun{Failed,Succeeded}ByTaskID.
+func (s *Store) updateRunTerminalStatus(ctx context.Context, taskID string, status RunStatus, errMsg string) error {
+	if taskID == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE automation_runs SET status = ?, error_message = ?
+		WHERE id = (
+			SELECT id FROM automation_runs
+			WHERE task_id = ? AND status = ?
+			ORDER BY created_at DESC LIMIT 1
+		)`,
+		string(status), errMsg, taskID, string(RunStatusTaskCreated))
+	return err
+}
+
+// ListRuns returns recent runs for an automation. A task_created run whose
+// generated task has been archived or no longer exists is reported as
+// cancelled — the task's outcome is unknown and it's no longer outstanding
+// work — without touching runs that already reached a real terminal
+// status. Falls back to the raw stored status when the tasks table isn't
+// present (isolated automation-only tests; production always has it,
+// migrated by the task repository before automation triggers can fire).
+func (s *Store) ListRuns(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	runs, err := s.listRunsWithTaskState(ctx, automationID, limit)
+	if db.IsMissingTableError(err) {
+		runs, err = s.listRunsRaw(ctx, automationID, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range runs {
+		r.TriggerData = json.RawMessage(r.TriggerDataJSON)
+	}
+	return runs, nil
+}
+
+func (s *Store) listRunsWithTaskState(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
+	// Assumes a task_created run always carries a non-empty ar.task_id: the
+	// sole production write path (orchestrator's recordSuccessRun) sets
+	// TaskID and Status together in the same INSERT. If that's ever
+	// violated, the LEFT JOIN never matches an empty task_id against a
+	// real task row, so the run falls into the "no live task" branch below
+	// and displays as cancelled rather than its raw stored status —
+	// reachable today only through the e2e run-seeding endpoint, never in
+	// production.
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs, `
+		SELECT ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type, ar.task_id,
+			CASE
+				WHEN ar.status = ? AND (t.id IS NULL OR t.archived_at IS NOT NULL) THEN ?
+				ELSE ar.status
+			END AS status,
+			ar.dedup_key, ar.trigger_data, ar.error_message, ar.created_at
+		FROM automation_runs ar
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE ar.automation_id = ?
+		ORDER BY ar.created_at DESC LIMIT ?`,
+		string(RunStatusTaskCreated), string(RunStatusCancelled), automationID, limit)
+	return runs, err
+}
+
+func (s *Store) listRunsRaw(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs,
+		`SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY created_at DESC LIMIT ?`,
+		automationID, limit)
+	return runs, err
+}
+
+// HasRunWithDedupKey checks if a run with the given dedup key already exists.
+func (s *Store) HasRunWithDedupKey(ctx context.Context, automationID, dedupKey string) (bool, error) {
+	if dedupKey == "" {
+		return false, nil
+	}
+	var count int
+	err := s.ro.GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM automation_runs WHERE automation_id = ? AND dedup_key = ?`,
+		automationID, dedupKey)
+	return count > 0, err
+}
+
+// CountActiveRuns returns the number of runs with task_created status for
+// an automation whose generated task is still open. A task_created run
+// whose task was archived or deleted no longer represents outstanding
+// work — the user closed it out some other way — so it must not keep
+// counting against max_concurrent_runs forever. Falls back to a plain
+// count when the tasks table isn't present (isolated automation-only
+// tests; production always has it).
+func (s *Store) CountActiveRuns(ctx context.Context, automationID string) (int, error) {
+	count, err := s.countActiveRunsWithTaskState(ctx, automationID)
+	if db.IsMissingTableError(err) {
+		return s.countActiveRunsRaw(ctx, automationID)
+	}
+	return count, err
+}
+
+func (s *Store) countActiveRunsWithTaskState(ctx context.Context, automationID string) (int, error) {
+	// Same non-empty-task_id assumption as listRunsWithTaskState above: an
+	// empty ar.task_id never matches a real task row either, so such a run
+	// silently falls out of the active count below instead of erroring.
+	var count int
+	err := s.ro.GetContext(ctx, &count, `
+		SELECT COUNT(*) FROM automation_runs ar
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE ar.automation_id = ? AND ar.status = ?
+			AND t.id IS NOT NULL AND t.archived_at IS NULL`,
+		automationID, string(RunStatusTaskCreated))
+	return count, err
+}
+
+func (s *Store) countActiveRunsRaw(ctx context.Context, automationID string) (int, error) {
+	var count int
+	err := s.ro.GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM automation_runs WHERE automation_id = ? AND status = ?`,
+		automationID, string(RunStatusTaskCreated))
+	return count, err
+}
+
+// GetRun returns a single run by ID, or nil if not found.
+func (s *Store) GetRun(ctx context.Context, id string) (*AutomationRun, error) {
+	var r AutomationRun
+	err := s.ro.GetContext(ctx, &r,
+		`SELECT * FROM automation_runs WHERE id = ?`, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	r.TriggerData = json.RawMessage(r.TriggerDataJSON)
+	return &r, nil
+}
+
+// DeleteRun removes a single run row.
+func (s *Store) DeleteRun(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_runs WHERE id = ?`, id)
+	return err
+}
+
+// ListRunTaskIDs returns all non-empty task_id values for an automation's runs.
+// Used by DeleteAllRuns so the service can clean up tasks before purging rows.
+func (s *Store) ListRunTaskIDs(ctx context.Context, automationID string) ([]string, error) {
+	var ids []string
+	err := s.ro.SelectContext(ctx, &ids,
+		`SELECT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`,
+		automationID)
+	return ids, err
+}
+
+// DeleteAllRuns removes every run row for an automation.
+func (s *Store) DeleteAllRuns(ctx context.Context, automationID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_runs WHERE automation_id = ?`, automationID)
+	return err
+}
+
+// DeleteAutomationsByWorkspace removes all automations (and their triggers/runs) for a workspace.
+// Used by e2e reset.
+func (s *Store) DeleteAutomationsByWorkspace(ctx context.Context, workspaceID string) (int, error) {
+	// Get automation IDs first for cascade cleanup.
+	var ids []string
+	if err := s.ro.SelectContext(ctx, &ids,
+		`SELECT id FROM automations WHERE workspace_id = ?`, workspaceID); err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	for _, id := range ids {
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM automation_triggers WHERE automation_id = ?`, id)
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM automation_runs WHERE automation_id = ?`, id)
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM automations WHERE workspace_id = ?`, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// generateSecret creates a random hex string for webhook authentication.
+func generateSecret() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return uuid.New().String()
+	}
+	return hex.EncodeToString(b)
+}

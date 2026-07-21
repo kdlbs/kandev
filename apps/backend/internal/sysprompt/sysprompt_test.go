@@ -76,6 +76,13 @@ func TestFormatConfigContext_InjectsSessionID(t *testing.T) {
 	assert.NotContains(t, result, "{session_id}")
 }
 
+func TestConfigContext_DocumentsWorkflowStepSignalGate(t *testing.T) {
+	ctx := ConfigContext()
+	assert.Contains(t, ctx, "auto_advance_requires_signal")
+	assert.Contains(t, ctx, "create_workflow_step_kandev")
+	assert.Contains(t, ctx, "update_workflow_step_kandev")
+}
+
 func TestInjectConfigContext_WrapsInSystemTags(t *testing.T) {
 	result := InjectConfigContext(testSessionID, testConfigPrompt)
 	assert.True(t, strings.HasPrefix(result, TagStart))
@@ -93,16 +100,46 @@ func TestInjectConfigContext_SystemContentStrippable(t *testing.T) {
 
 // --- KandevContext tests (existing, verify not broken) ---
 
-func TestKandevContext_HasExactlyTwoPlaceholders(t *testing.T) {
+func TestKandevContext_HasExpectedPlaceholders(t *testing.T) {
 	ctx := KandevContext()
 	taskCount := strings.Count(ctx, "{task_id}")
 	sessionCount := strings.Count(ctx, "{session_id}")
+	stepCount := strings.Count(ctx, "{step_complete_section}")
 	assert.Equal(t, 1, taskCount, "KandevContext should have exactly 1 {task_id} placeholder")
 	assert.Equal(t, 1, sessionCount, "KandevContext should have exactly 1 {session_id} placeholder")
+	assert.Equal(t, 1, stepCount, "KandevContext should have exactly 1 {step_complete_section} placeholder")
+}
+
+func TestFormatKandevContext_OmitsStepCompleteToolByDefault(t *testing.T) {
+	result := FormatKandevContext("task-abc", "session-xyz", false)
+	assert.NotContains(t, result, "step_complete_kandev",
+		"step_complete_kandev must be hidden when the step does not require an explicit signal")
+	assert.NotContains(t, result, "{step_complete_section}")
+}
+
+func TestFormatKandevContext_IncludesStepCompleteToolWhenRequired(t *testing.T) {
+	result := FormatKandevContext("task-abc", "session-xyz", true)
+	assert.Contains(t, result, "step_complete_kandev",
+		"step_complete_kandev must be exposed when the step requires an explicit signal")
+}
+
+func TestFormatKandevContext_CoordinatorTaskControlsFollowCapability(t *testing.T) {
+	taskMode := FormatKandevContext("task-abc", "session-xyz", false)
+	assert.Contains(t, taskMode, `delivery_mode="interrupt"`)
+	assert.Contains(t, taskMode, "stop_task_kandev")
+
+	for _, mode := range []string{"office", "config"} {
+		t.Run(mode, func(t *testing.T) {
+			context := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{})
+			assert.NotContains(t, context, "delivery_mode")
+			assert.NotContains(t, context, "stop_task_kandev")
+			assert.NotContains(t, context, "{coordinator_task_control_section}")
+		})
+	}
 }
 
 func TestFormatKandevContext_InjectsIDs(t *testing.T) {
-	result := FormatKandevContext("task-abc", "session-xyz")
+	result := FormatKandevContext("task-abc", "session-xyz", false)
 	assert.Contains(t, result, "Kandev Task ID: task-abc")
 	assert.Contains(t, result, "Session ID: session-xyz")
 	assert.NotContains(t, result, "{task_id}")
@@ -110,13 +147,13 @@ func TestFormatKandevContext_InjectsIDs(t *testing.T) {
 }
 
 func TestInjectKandevContext_WrapsInSystemTags(t *testing.T) {
-	result := InjectKandevContext("task-abc", "session-xyz", "Do something")
+	result := InjectKandevContext("task-abc", "session-xyz", "Do something", false)
 	assert.True(t, strings.HasPrefix(result, TagStart))
 	assert.Contains(t, result, "Do something")
 }
 
 func TestInjectKandevContext_SystemContentStrippable(t *testing.T) {
-	result := InjectKandevContext("task-abc", "session-xyz", "Do something")
+	result := InjectKandevContext("task-abc", "session-xyz", "Do something", false)
 	stripped := StripSystemContent(result)
 	assert.Equal(t, "Do something", stripped)
 }
@@ -124,7 +161,7 @@ func TestInjectKandevContext_SystemContentStrippable(t *testing.T) {
 func TestHasKandevContext_DetectsInjectedWrap(t *testing.T) {
 	// Any prompt produced by InjectKandevContext must be detectable so call
 	// sites can make the wrap step idempotent.
-	wrapped := InjectKandevContext("task-abc", "session-xyz", "Do something")
+	wrapped := InjectKandevContext("task-abc", "session-xyz", "Do something", false)
 	assert.True(t, HasKandevContext(wrapped))
 
 	// A bare user message has no marker.
@@ -251,6 +288,25 @@ func TestInterpolatePlaceholders_NoPlaceholders(t *testing.T) {
 func TestInterpolatePlaceholders_MultiplePlaceholders(t *testing.T) {
 	result := InterpolatePlaceholders("{task_id} and {task_id}", testTaskID)
 	assert.Equal(t, "task-123 and task-123", result)
+}
+
+// --- ask_user_question schema documentation ---
+
+func TestContexts_DocumentCurrentAskUserQuestionSchema(t *testing.T) {
+	// Regression: the embedded prompt context used to document a legacy
+	// top-level `prompt` / `options` schema for ask_user_question_kandev.
+	// The real MCP tool requires a `questions` array of 1-4 question objects.
+	// Stale docs caused agents to send malformed payloads that landed in the
+	// approval layer as "0 questions" and were ultimately cancelled.
+	for name, ctx := range map[string]string{
+		"ConfigContext": ConfigContext(),
+		"KandevContext": KandevContext(),
+	} {
+		assert.Contains(t, ctx, "questions", "%s should mention the questions array param", name)
+		assert.Contains(t, ctx, "1-4 question objects", "%s should document the 1-4 question limit", name)
+		assert.NotContains(t, ctx, "Required params: prompt (string), options", "%s leaks the legacy ask_user_question schema", name)
+		assert.NotContains(t, ctx, "Required: prompt, options", "%s leaks the legacy ask_user_question schema", name)
+	}
 }
 
 // --- ConfigContext vs KandevContext distinction ---

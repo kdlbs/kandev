@@ -3,7 +3,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
 import type { editor as monacoEditor } from "monaco-editor";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import { cn } from "@/lib/utils";
 import type { FileDiffData } from "@/lib/diff/types";
 import { getMonacoLanguage } from "@/lib/editor/language-map";

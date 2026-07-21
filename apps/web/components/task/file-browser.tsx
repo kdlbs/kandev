@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
+import React, { useEffect, useMemo, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import type { FileTreeNode, OpenFileTab } from "@/lib/types/backend";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useRepository } from "@/hooks/domains/workspace/use-repository";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useAppStore } from "@/components/state-provider";
 import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useToast } from "@/components/toast-provider";
@@ -21,9 +22,10 @@ import {
   useFileBrowserSearch,
   useFileBrowserTree,
   useScrollPersistence,
-  loadNodeChildren,
+  toggleFolderExpand,
   fetchAndOpenFile,
 } from "./file-browser-hooks";
+import { resolveFileBrowserPaths } from "./file-browser-path";
 import { getVisiblePaths, moveNodesInTree, computeMoveTargets } from "./file-tree-utils";
 
 type FileBrowserHeaderProps = {
@@ -88,6 +90,7 @@ type FileBrowserProps = {
   onCreateFile?: (path: string) => Promise<boolean>;
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+  onDownloadFile?: (path: string) => Promise<boolean>;
   activeFilePath?: string | null;
 };
 
@@ -100,6 +103,15 @@ function useFileBrowserHandlers(
   const { toast } = useToast();
   const [creatingInPath, setCreatingInPath] = useState<string | null>(null);
   const [activeFolderPath, setActiveFolderPath] = useState<string>("");
+  const openFileAbortRef = useRef<AbortController | null>(null);
+
+  useLayoutEffect(
+    () => () => {
+      openFileAbortRef.current?.abort();
+      openFileAbortRef.current = null;
+    },
+    [sessionId],
+  );
 
   const handleStartCreate = useCallback(() => {
     if (activeFolderPath && !treeState.expandedPaths.has(activeFolderPath)) {
@@ -126,23 +138,23 @@ function useFileBrowserHandlers(
   );
 
   const toggleExpand = useCallback(
-    async (node: FileTreeNode) => {
-      if (!node.is_dir) return;
-      setActiveFolderPath(node.path);
-      const newExpanded = new Set(treeState.expandedPaths);
-      if (newExpanded.has(node.path)) {
-        newExpanded.delete(node.path);
-      } else {
-        await loadNodeChildren(node, sessionId, treeState);
-        newExpanded.add(node.path);
-      }
-      treeState.setExpandedPaths(newExpanded);
-    },
+    (node: FileTreeNode) => toggleFolderExpand({ node, sessionId, treeState, setActiveFolderPath }),
     [treeState, sessionId],
   );
 
   const openFileByPath = useCallback(
-    (path: string) => fetchAndOpenFile(sessionId, path, onOpenFile, toast),
+    (path: string) => {
+      openFileAbortRef.current?.abort();
+      const controller = new AbortController();
+      openFileAbortRef.current = controller;
+      return fetchAndOpenFile(sessionId, path, onOpenFile, toast, {
+        signal: controller.signal,
+      }).finally(() => {
+        if (openFileAbortRef.current === controller) {
+          openFileAbortRef.current = null;
+        }
+      });
+    },
     [sessionId, onOpenFile, toast],
   );
   const handleCancelCreate = useCallback(() => setCreatingInPath(null), []);
@@ -372,6 +384,50 @@ function useKeyboardShortcuts(
   }, [containerRef, clearSelection, selectAll]);
 }
 
+function useFileBrowserResetKey(sessionId: string, environmentId?: string | null) {
+  // Worktree count participates in the tree's reset key so an add_branch_to_task
+  // call that materializes a sibling worktree forces a fresh tree load.
+  const worktreeCount = useAppStore(
+    (state) => state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0,
+  );
+  return environmentId ? `${environmentId}:${worktreeCount}` : undefined;
+}
+
+function useFileBrowserData(sessionId: string, environmentId: string | null | undefined) {
+  const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
+  const repository = useRepository(session?.repository_id ?? null);
+  const gitStatus = useSessionGitStatus(sessionId);
+  const { open: openFolder } = useOpenSessionFolder(sessionId);
+  const { copied, copy: copyPath } = useCopyToClipboard(1000);
+  const search = useFileBrowserSearch(sessionId);
+  const resetKey = useFileBrowserResetKey(sessionId, environmentId);
+  const treeState = useFileBrowserTree(sessionId, resetKey);
+  const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
+  const fileStatuses = useMemo(
+    () =>
+      new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
+    [gitStatus?.files],
+  );
+  const paths = resolveFileBrowserPaths({
+    sessionWorktreePath: session?.worktree_path,
+    repositoryLocalPath: repository?.local_path,
+    treePath: treeState.tree?.path,
+    treeLoaded: isTreeLoaded,
+  });
+  return {
+    isSessionFailed,
+    sessionError,
+    openFolder,
+    copied,
+    copyPath,
+    search,
+    treeState,
+    isTreeLoaded,
+    fileStatuses,
+    ...paths,
+  };
+}
+
 export function FileBrowser({
   sessionId,
   environmentId,
@@ -379,29 +435,26 @@ export function FileBrowser({
   onCreateFile,
   onDeleteFile,
   onRenameFile,
+  onDownloadFile,
   activeFilePath,
 }: FileBrowserProps) {
-  const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
-  const repository = useRepository(session?.repository_id ?? null);
-  const gitStatus = useSessionGitStatus(sessionId);
-  const { open: openFolder } = useOpenSessionFolder(sessionId);
-  const { copied, copy: copyPath } = useCopyToClipboard(1000);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  const search = useFileBrowserSearch(sessionId);
-  const treeState = useFileBrowserTree(sessionId, environmentId ?? undefined);
-  const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
+  const data = useFileBrowserData(sessionId, environmentId);
+  const {
+    isSessionFailed,
+    sessionError,
+    openFolder,
+    copied,
+    copyPath,
+    search,
+    treeState,
+    isTreeLoaded,
+    fileStatuses,
+    fullPath,
+    displayPath,
+  } = data;
   useScrollPersistence(sessionId, isTreeLoaded, scrollAreaRef, treeState.tree);
-
-  const fileStatuses = useMemo(
-    () =>
-      new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
-    [gitStatus?.files],
-  );
-  const fullPath = session?.worktree_path || repository?.local_path || treeState.tree?.path || "";
-  const displayPath = fullPath.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
-
   const handlers = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, treeState);
   const { multiSelect, dnd, handleClickOutside } = useSelectionInteractions(
     treeState,
@@ -450,6 +503,7 @@ export function FileBrowser({
           onToggleExpand={handlers.toggleExpand}
           onDeleteFile={onDeleteFile}
           onRenameFile={onRenameFile}
+          onDownloadFile={onDownloadFile}
           onCreateFileSubmit={handlers.handleCreateFileSubmit}
           onCancelCreate={handlers.handleCancelCreate}
           onRetry={() => void treeState.loadTree({ resetRetry: true })}

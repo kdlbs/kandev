@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -32,6 +33,14 @@ type restartMockAgentctlServer struct {
 
 	failStop       bool
 	failSessionNew bool
+}
+
+func TestStopAgentWithReason_MissingExecutionIsClassified(t *testing.T) {
+	mgr := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger().WithFields()}
+
+	err := mgr.StopAgentWithReason(context.Background(), "missing", "cleanup", true)
+
+	require.ErrorIs(t, err, ErrExecutionNotFound)
 }
 
 func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *restartMockAgentctlServer {
@@ -112,6 +121,19 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 						"session_id": "new-session-123",
 					})
 				}
+			case "agent.session.reset":
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"success":    true,
+					"session_id": "reset-session-456",
+				})
+			case "agent.session.set_mode":
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"success": true,
+				})
+			case "agent.session.set_config_option":
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"success": true,
+				})
 			default:
 				resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "unknown action", nil)
 			}
@@ -174,7 +196,7 @@ func (m *restartMockAgentctlServer) getWSActions() []string {
 }
 
 func TestManager_RestartAgentProcess_Success(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
 
 	client := createTestClient(t, mock.server.URL)
@@ -266,7 +288,7 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 }
 
 func TestManager_RestartAgentProcess_StopErrorIsNonFatal(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, true, false)
 
 	client := createTestClient(t, mock.server.URL)
@@ -294,7 +316,7 @@ func TestManager_RestartAgentProcess_StopErrorIsNonFatal(t *testing.T) {
 }
 
 func TestManager_RestartAgentProcess_SessionInitFailure(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, true)
 
 	client := createTestClient(t, mock.server.URL)
@@ -341,6 +363,212 @@ func TestManager_RestartAgentProcess_SessionInitFailure(t *testing.T) {
 			t.Fatalf("did not expect %q event on failed restart", events.AgentContextReset)
 		}
 	}
+}
+
+// --- Session mode preservation across reset (issue #1183) ---
+
+// TestManager_RestartAgentProcess_ReappliesSessionMode is the regression test for
+// the full-process-restart path: a non-default session permission mode (auto /
+// accept-edits) chosen by the user must be re-applied to the fresh ACP session
+// after restart instead of silently reverting to the agent's default.
+func TestManager_RestartAgentProcess_ReappliesSessionMode(t *testing.T) {
+	mgr := newTestManager(t)
+	mock := newRestartMockAgentctlServer(t, false, false)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	exec := &AgentExecution{
+		ID:             "exec-mode-restart",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		ACPSessionID:   "old-session",
+		AgentCommand:   "auggie --model test",
+		Status:         v1.AgentStatusRunning,
+		WorkspacePath:  "/workspace",
+		agentctl:       client,
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+	}
+	exec.SetModeState(&CachedModeState{
+		CurrentModeID:  "acceptEdits",
+		AvailableModes: []streams.SessionModeInfo{{ID: "default"}, {ID: "acceptEdits"}},
+	})
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	require.NoError(t, mgr.RestartAgentProcess(ctx, exec.ID))
+
+	require.Contains(t, mock.getWSActions(), "agent.session.set_mode",
+		"restart must re-apply the previously-active session mode to the new session")
+	require.NotNil(t, exec.GetModeState())
+	require.Equal(t, "acceptEdits", exec.GetModeState().CurrentModeID,
+		"cached mode state must reflect the re-applied mode after restart")
+}
+
+// TestManager_ResetAgentContext_ReappliesSessionMode is the regression test for
+// the ACP fast-path (session reset without a process restart): the user's chosen
+// session permission mode must deterministically survive the reset.
+func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
+	mgr := newTestManager(t)
+	mock := newRestartMockAgentctlServer(t, false, false)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	// The ACP fast-path reuses the existing agent stream, so connect it first.
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	exec := &AgentExecution{
+		ID:                 "exec-mode-reset",
+		TaskID:             "task-1",
+		SessionID:          "session-1",
+		AgentProfileID:     "profile-1",
+		ACPSessionID:       "old-session",
+		AgentCommand:       "auggie --model test",
+		Status:             v1.AgentStatusRunning,
+		WorkspacePath:      "/workspace",
+		sessionInitialized: true,
+		agentctl:           client,
+		promptDoneCh:       make(chan PromptCompletionSignal, 1),
+	}
+	exec.SetModeState(&CachedModeState{
+		CurrentModeID:  "acceptEdits",
+		AvailableModes: []streams.SessionModeInfo{{ID: "default"}, {ID: "acceptEdits"}},
+	})
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	require.NoError(t, mgr.ResetAgentContext(ctx, exec.ID))
+
+	require.Equal(t, "reset-session-456", exec.ACPSessionID,
+		"fast-path reset should create a new ACP session, not restart the process")
+	require.Contains(t, mock.getWSActions(), "agent.session.set_mode",
+		"fast-path reset must re-apply the previously-active session mode")
+	require.NotNil(t, exec.GetModeState())
+	require.Equal(t, "acceptEdits", exec.GetModeState().CurrentModeID)
+}
+
+// TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache is the
+// regression for the ordering hazard flagged on #1188: when a set_session_mode
+// action persists a newer mode to the DB in the same on_enter batch just before
+// reset_agent_context, the in-memory modeState is still the old value (its agent
+// mode event is async). The restart must restore the persisted (DB) mode, not the
+// stale cached one.
+func TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-1": {SessionID: "session-1", SessionMode: "acceptEdits"},
+		},
+	}
+	mock := newRestartMockAgentctlServer(t, false, false)
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	exec := &AgentExecution{
+		ID:             "exec-mode-stale",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		ACPSessionID:   "old-session",
+		AgentCommand:   "auggie --model test",
+		Status:         v1.AgentStatusRunning,
+		WorkspacePath:  "/workspace",
+		agentctl:       client,
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+	}
+	// Stale in-memory cache: the previous (pre-action) mode.
+	exec.SetModeState(&CachedModeState{CurrentModeID: "default"})
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	require.NoError(t, mgr.RestartAgentProcess(ctx, exec.ID))
+
+	require.Contains(t, mock.getWSActions(), "agent.session.set_mode")
+	require.NotNil(t, exec.GetModeState())
+	require.Equal(t, "acceptEdits", exec.GetModeState().CurrentModeID,
+		"restart must restore the persisted DB mode, not the stale in-memory cache")
+}
+
+func TestManager_SetSessionConfigOptionBySessionID(t *testing.T) {
+	mgr := newTestManager(t)
+	mock := newRestartMockAgentctlServer(t, false, false)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	exec := &AgentExecution{
+		ID:                 "exec-config-option",
+		TaskID:             "task-1",
+		SessionID:          "session-1",
+		AgentProfileID:     "profile-1",
+		ACPSessionID:       "acp-session-1",
+		Status:             v1.AgentStatusRunning,
+		WorkspacePath:      "/workspace",
+		agentctl:           client,
+		sessionInitialized: true,
+	}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	require.NoError(t, mgr.SetSessionConfigOptionBySessionID(ctx, "session-1", "reasoning_effort", "high"))
+	require.Contains(t, mock.getWSActions(), "agent.session.set_config_option")
+}
+
+// --- SetSessionModel passthrough tests ---
+
+// TestManager_SetSessionModel_Passthrough_PersistsOverride is the regression test for
+// the bug where set-model returned "no agentctl client" on passthrough sessions.
+// The fix: passthrough sessions persist a model_override on the execution and
+// restart the PTY so the next launch uses the new --model.
+func TestManager_SetSessionModel_Passthrough_PersistsOverride(t *testing.T) {
+	mgr := newTestManager(t)
+	exec := &AgentExecution{
+		ID:                   "exec-pt",
+		SessionID:            "session-pt",
+		PassthroughProcessID: "pt-process-1",
+		Status:               v1.AgentStatusRunning,
+		Metadata:             map[string]interface{}{},
+		agentctl:             nil, // passthrough sessions have no agentctl client
+	}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	// SetSessionModel triggers a PTY restart. The test manager has no interactive
+	// runner registered, so the restart itself returns an error — but the override
+	// must already be persisted by the time the restart fires.
+	_ = mgr.SetSessionModel(context.Background(), exec.ID, "claude-opus-4-7")
+
+	require.Equal(t, "claude-opus-4-7", exec.Metadata[MetadataKeyModelOverride],
+		"SetSessionModel must persist model override on passthrough executions")
+}
+
+func TestEffectivePassthroughModel(t *testing.T) {
+	t.Run("returns override when set", func(t *testing.T) {
+		execution := &AgentExecution{
+			Metadata: map[string]interface{}{MetadataKeyModelOverride: "claude-opus-4-7"},
+		}
+		profile := &AgentProfileInfo{Model: "claude-sonnet-4-6"}
+		require.Equal(t, "claude-opus-4-7", effectivePassthroughModel(execution, profile))
+	})
+
+	t.Run("falls back to profile model when override empty", func(t *testing.T) {
+		execution := &AgentExecution{Metadata: map[string]interface{}{}}
+		profile := &AgentProfileInfo{Model: "claude-sonnet-4-6"}
+		require.Equal(t, "claude-sonnet-4-6", effectivePassthroughModel(execution, profile))
+	})
+
+	t.Run("handles nil execution and profile", func(t *testing.T) {
+		require.Equal(t, "", effectivePassthroughModel(nil, nil))
+	})
 }
 
 // --- IsAgentRunningForSession tests ---
@@ -514,15 +742,332 @@ func TestIsAgentRunningForSession(t *testing.T) {
 	})
 }
 
+func TestIsAgentReadyForPrompt(t *testing.T) {
+	t.Run("ACP execution requires ready status, initialized session, and update stream", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+
+		mock := newMockAgentServer(t)
+		t.Cleanup(mock.Close)
+
+		client := createTestClient(t, mock.server.URL)
+		t.Cleanup(client.Close)
+
+		store := NewExecutionStore()
+		execution := &AgentExecution{
+			ID:           "exec-acp-ready",
+			SessionID:    "session-acp-ready",
+			ACPSessionID: "acp-session-1",
+			Status:       v1.AgentStatusReady,
+			agentctl:     client,
+		}
+		err := store.Add(execution)
+		require.NoError(t, err)
+
+		mgr := &Manager{
+			executionStore: store,
+			logger:         newTestLogger().WithFields(),
+		}
+		require.False(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))
+
+		err = client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil)
+		require.NoError(t, err)
+
+		select {
+		case <-mock.wsConnected:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for updates stream")
+		}
+
+		require.False(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))
+
+		err = store.WithLock("exec-acp-ready", func(exec *AgentExecution) {
+			exec.sessionInitialized = true
+		})
+		require.NoError(t, err)
+		require.True(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))
+
+		err = store.WithLock("exec-acp-ready", func(exec *AgentExecution) {
+			exec.ACPSessionID = ""
+		})
+		require.NoError(t, err)
+		require.False(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))
+
+		err = store.WithLock("exec-acp-ready", func(exec *AgentExecution) {
+			exec.ACPSessionID = "acp-session-1"
+		})
+		require.NoError(t, err)
+
+		store.UpdateStatus("exec-acp-ready", v1.AgentStatusRunning)
+		require.False(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))
+	})
+
+	t.Run("missing execution returns false", func(t *testing.T) {
+		mgr := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger().WithFields()}
+		require.False(t, mgr.IsAgentReadyForPrompt(context.Background(), "missing"))
+	})
+}
+
+func TestRecoverAgentPromptStream(t *testing.T) {
+	t.Run("missing execution returns not found", func(t *testing.T) {
+		mgr := newTestManager(t)
+		err := mgr.RecoverAgentPromptStream(context.Background(), "missing")
+		require.ErrorIs(t, err, ErrExecutionNotFound)
+	})
+
+	t.Run("passthrough execution is a no-op", func(t *testing.T) {
+		mgr := newTestManager(t)
+		require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+			ID:                   "exec-passthrough",
+			SessionID:            "session-passthrough",
+			Status:               v1.AgentStatusFailed,
+			PassthroughProcessID: "pty-1",
+		}))
+
+		require.NoError(t, mgr.RecoverAgentPromptStream(context.Background(), "session-passthrough"))
+	})
+
+	t.Run("session initialization owns the initial stream connection", func(t *testing.T) {
+		mgr := &Manager{
+			executionStore: NewExecutionStore(),
+			logger:         newTestLogger().WithFields(),
+		}
+		client := createTestClient(t, "http://127.0.0.1:1")
+		t.Cleanup(client.Close)
+		require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+			ID:        "exec-initializing",
+			SessionID: "session-initializing",
+			Status:    v1.AgentStatusStarting,
+			agentctl:  client,
+		}))
+
+		require.NoError(t, mgr.RecoverAgentPromptStream(context.Background(), "session-initializing"))
+	})
+
+	t.Run("missing stream manager errors when stream is absent", func(t *testing.T) {
+		mgr := &Manager{
+			executionStore: NewExecutionStore(),
+			logger:         newTestLogger().WithFields(),
+		}
+		client := createTestClient(t, "http://127.0.0.1:1")
+		t.Cleanup(client.Close)
+		require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+			ID:                 "exec-no-stream-manager",
+			SessionID:          "session-no-stream-manager",
+			ACPSessionID:       "acp-session-1",
+			Status:             v1.AgentStatusFailed,
+			agentctl:           client,
+			sessionInitialized: true,
+		}))
+
+		err := mgr.RecoverAgentPromptStream(context.Background(), "session-no-stream-manager")
+		require.ErrorContains(t, err, "stream manager is not configured")
+	})
+
+	t.Run("reconnects stream and restores stale failed status", func(t *testing.T) {
+		mock := newMockAgentServer(t)
+		t.Cleanup(mock.Close)
+
+		client := createTestClient(t, mock.server.URL)
+		t.Cleanup(client.Close)
+
+		mgr := newTestManager(t)
+		exec := &AgentExecution{
+			ID:                 "exec-recover",
+			SessionID:          "session-recover",
+			ACPSessionID:       "acp-session-1",
+			Status:             v1.AgentStatusFailed,
+			agentctl:           client,
+			promptDoneCh:       make(chan PromptCompletionSignal, 1),
+			sessionInitialized: true,
+		}
+		require.NoError(t, mgr.executionStore.Add(exec))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		t.Cleanup(cancel)
+		require.NoError(t, mgr.RecoverAgentPromptStream(ctx, "session-recover"))
+
+		select {
+		case <-mock.wsConnected:
+		case <-time.After(2 * time.Second):
+			t.Fatal("mock server did not see WS connection")
+		}
+		require.True(t, client.HasAgentStream())
+		updated, ok := mgr.executionStore.Get(exec.ID)
+		require.True(t, ok)
+		require.Equal(t, v1.AgentStatusReady, updated.Status)
+
+		mockBus, ok := mgr.eventBus.(*MockEventBus)
+		require.True(t, ok)
+		var sawBootReady bool
+		for _, ev := range mockBus.PublishedEvents {
+			if ev.Type == events.AgentBootReady {
+				sawBootReady = true
+				break
+			}
+		}
+		require.True(t, sawBootReady, "expected AgentBootReady event after stream recovery")
+	})
+
+	t.Run("does not restore failed status when agent process is stopped", func(t *testing.T) {
+		mock := newMockAgentServer(t)
+		t.Cleanup(mock.Close)
+		mock.agentStatus = "stopped"
+
+		client := createTestClient(t, mock.server.URL)
+		t.Cleanup(client.Close)
+
+		mgr := newTestManager(t)
+		exec := &AgentExecution{
+			ID:                 "exec-recover-stopped",
+			SessionID:          "session-recover-stopped",
+			ACPSessionID:       "acp-session-1",
+			Status:             v1.AgentStatusFailed,
+			agentctl:           client,
+			promptDoneCh:       make(chan PromptCompletionSignal, 1),
+			sessionInitialized: true,
+		}
+		require.NoError(t, mgr.executionStore.Add(exec))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		t.Cleanup(cancel)
+		err := mgr.RecoverAgentPromptStream(ctx, "session-recover-stopped")
+		require.ErrorContains(t, err, "agent process is not running")
+
+		updated, ok := mgr.executionStore.Get(exec.ID)
+		require.True(t, ok)
+		require.Equal(t, v1.AgentStatusFailed, updated.Status)
+
+		mockBus, ok := mgr.eventBus.(*MockEventBus)
+		require.True(t, ok)
+		for _, ev := range mockBus.PublishedEvents {
+			require.NotEqual(t, events.AgentBootReady, ev.Type)
+		}
+	})
+}
+
+// TestEffectiveSessionMode covers the fresh-launch mode propagation for issue
+// #1183: a persisted session_mode (e.g. from a set_session_mode workflow step)
+// must override the profile default at ACP session init, while a missing
+// provider / lookup error / empty session mode falls back to the profile mode.
+func TestEffectiveSessionMode(t *testing.T) {
+	exec := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+
+	t.Run("session mode overrides profile mode", func(t *testing.T) {
+		mgr := newTestManager(t)
+		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{"session-1": {SessionID: "session-1", SessionMode: "acceptEdits"}},
+		}
+		require.Equal(t, "acceptEdits", mgr.effectiveSessionMode(context.Background(), exec, "default"))
+	})
+
+	t.Run("falls back to profile mode when no session mode set", func(t *testing.T) {
+		mgr := newTestManager(t)
+		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{"session-1": {SessionID: "session-1"}},
+		}
+		require.Equal(t, "default", mgr.effectiveSessionMode(context.Background(), exec, "default"))
+	})
+
+	t.Run("falls back to profile mode on provider error", func(t *testing.T) {
+		mgr := newTestManager(t)
+		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{err: fmt.Errorf("boom")}
+		require.Equal(t, "default", mgr.effectiveSessionMode(context.Background(), exec, "default"))
+	})
+
+	t.Run("falls back to profile mode when no provider wired", func(t *testing.T) {
+		mgr := newTestManager(t)
+		require.Equal(t, "default", mgr.effectiveSessionMode(context.Background(), exec, "default"))
+	})
+}
+
+func TestEffectiveSessionRuntimeConfig(t *testing.T) {
+	exec := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+	profileOptions := map[string]string{"reasoning_effort": "medium"}
+
+	t.Run("session runtime config overrides profile defaults", func(t *testing.T) {
+		provider := &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-1": {
+					SessionID:               "session-1",
+					SessionMode:             "full-access",
+					RuntimeModel:            "gpt-5.3-codex-spark",
+					RuntimeConfigOptions:    map[string]string{"reasoning_effort": "low"},
+					RuntimeConfigOptionsSet: true,
+				},
+			},
+		}
+		mgr := newTestManager(t)
+		mgr.workspaceInfoProvider = provider
+
+		model, mode, options := mgr.effectiveSessionRuntimeConfig(
+			context.Background(),
+			exec,
+			"gpt-5.5",
+			"auto",
+			profileOptions,
+		)
+
+		require.Equal(t, "gpt-5.3-codex-spark", model)
+		provider.infos["session-1"].RuntimeConfigOptions["reasoning_effort"] = "medium"
+		require.Equal(t, "low", options["reasoning_effort"], "effective config must own its map")
+		require.Equal(t, "full-access", mode)
+		require.Equal(t, map[string]string{"reasoning_effort": "low"}, options)
+		require.Equal(t, 1, provider.sessionCalls)
+	})
+
+	t.Run("model-only session runtime config keeps profile options", func(t *testing.T) {
+		provider := &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-1": {
+					SessionID:    "session-1",
+					RuntimeModel: "gpt-5.3-codex-spark",
+				},
+			},
+		}
+		mgr := newTestManager(t)
+		mgr.workspaceInfoProvider = provider
+
+		model, mode, options := mgr.effectiveSessionRuntimeConfig(
+			context.Background(),
+			exec,
+			"gpt-5.5",
+			"auto",
+			profileOptions,
+		)
+
+		require.Equal(t, "gpt-5.3-codex-spark", model)
+		require.Equal(t, "auto", mode)
+		require.Equal(t, profileOptions, options)
+	})
+
+	t.Run("falls back to profile defaults", func(t *testing.T) {
+		mgr := newTestManager(t)
+		model, mode, options := mgr.effectiveSessionRuntimeConfig(
+			context.Background(),
+			exec,
+			"gpt-5.5",
+			"auto",
+			profileOptions,
+		)
+
+		require.Equal(t, "gpt-5.5", model)
+		require.Equal(t, "auto", mode)
+		require.Equal(t, profileOptions, options)
+	})
+}
+
 // --- IsRemoteSession tests ---
 
 type mockWorkspaceInfoProvider struct {
-	infos    map[string]*WorkspaceInfo
-	envInfos map[string]*WorkspaceInfo
-	err      error
+	infos        map[string]*WorkspaceInfo
+	envInfos     map[string]*WorkspaceInfo
+	err          error
+	sessionCalls int
 }
 
 func (m *mockWorkspaceInfoProvider) GetWorkspaceInfoForSession(_ context.Context, _, sessionID string) (*WorkspaceInfo, error) {
+	m.sessionCalls++
 	if m.err != nil {
 		return nil, m.err
 	}

@@ -214,26 +214,68 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 	if policyJSON := strings.TrimSpace(profile.McpPolicy); policyJSON != "" {
 		metadata["executor_mcp_policy"] = policyJSON
 	}
-	if rulesJSON := profile.Config["sprites_network_policy_rules"]; rulesJSON != "" {
-		metadata["sprites_network_policy_rules"] = rulesJSON
+	applyProfileConfigToMetadata(profile.Config, metadata)
+}
+
+// Profile.Config / metadata keys shared with executor_credentials.go.
+// Hoisted to constants so the table below doesn't duplicate string
+// literals that exist elsewhere in the package.
+const (
+	profileKeyRemoteCredentials = "remote_credentials"
+	profileKeyRemoteAuthSecrets = "remote_auth_secrets"
+)
+
+// profileConfigPassthroughKeys are profile.Config keys copied verbatim
+// into launch metadata under the same key when non-empty. An empty
+// profile value leaves any task-supplied value in place.
+var profileConfigPassthroughKeys = []string{
+	"sprites_network_policy_rules",
+	profileKeyRemoteCredentials,
+	profileKeyRemoteAuthSecrets,
+	"remote_auth_target_home",
+	"git_user_name",
+	"git_user_email",
+}
+
+// profileConfigRenameKeys maps a profile.Config key to a different
+// metadata key when the names diverge. Same non-empty semantics as
+// profileConfigPassthroughKeys.
+var profileConfigRenameKeys = map[string]string{
+	"image_tag": "image_tag_override",
+}
+
+// profileConfigAuthoritativeKeys are profile.Config keys whose value is
+// the source of truth for launch metadata — they overwrite any
+// task-supplied value, including with an empty string. The reader-side
+// helpers (e.g. SSHExecutor.workdirRoot, sshShellFromMetadata) handle
+// the empty fall-through to a default. Without this, a task that
+// supplies ssh_workdir_root or ssh_shell in its Metadata wins when the
+// profile has no value set — that's a redirect vector (workdir target,
+// login shell that runs every remote command).
+var profileConfigAuthoritativeKeys = []string{
+	lifecycle.MetadataKeySSHWorkdirRoot,
+	lifecycle.MetadataKeySSHShell,
+}
+
+// applyProfileConfigToMetadata projects profile.Config keys into the
+// launch metadata. Pulled out so the policy (passthrough vs rename vs
+// authoritative) is declarative and testable in isolation.
+func applyProfileConfigToMetadata(profileConfig map[string]string, metadata map[string]interface{}) {
+	for _, k := range profileConfigPassthroughKeys {
+		if v := profileConfig[k]; v != "" {
+			metadata[k] = v
+		}
 	}
-	if credJSON := profile.Config["remote_credentials"]; credJSON != "" {
-		metadata["remote_credentials"] = credJSON
+	for src, dst := range profileConfigRenameKeys {
+		if v := profileConfig[src]; v != "" {
+			metadata[dst] = v
+		}
 	}
-	if authSecretsJSON := profile.Config["remote_auth_secrets"]; authSecretsJSON != "" {
-		metadata["remote_auth_secrets"] = authSecretsJSON
-	}
-	if remoteAuthHome := profile.Config["remote_auth_target_home"]; remoteAuthHome != "" {
-		metadata["remote_auth_target_home"] = remoteAuthHome
-	}
-	if gitUserName := profile.Config["git_user_name"]; gitUserName != "" {
-		metadata["git_user_name"] = gitUserName
-	}
-	if gitUserEmail := profile.Config["git_user_email"]; gitUserEmail != "" {
-		metadata["git_user_email"] = gitUserEmail
-	}
-	if imageTag := profile.Config["image_tag"]; imageTag != "" {
-		metadata["image_tag_override"] = imageTag
+	for _, k := range profileConfigAuthoritativeKeys {
+		// Unconditional set: an empty profile value overwrites any
+		// task-supplied value in metadata. The reader-side fall-through
+		// to a default handles the empty case.
+		metadata[k] = profileConfig[k]
 	}
 }
 

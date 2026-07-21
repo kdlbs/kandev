@@ -98,6 +98,42 @@ func TestWithFields_PropagatesRotator(t *testing.T) {
 	}
 }
 
+func TestLogDirectory_FileOutputReturnsDir(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "kandev.log")
+	log, err := NewLogger(LoggingConfig{Level: "info", Format: "json", OutputPath: logPath})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	defer func() { _ = log.Close() }()
+
+	if got := log.LogDirectory(); got != dir {
+		t.Errorf("LogDirectory() = %q, want %q", got, dir)
+	}
+}
+
+func TestLogDirectory_StdoutReturnsEmpty(t *testing.T) {
+	for _, path := range []string{"", "stdout", "stderr"} {
+		t.Run(path, func(t *testing.T) {
+			log, err := NewLogger(LoggingConfig{Level: "info", Format: "json", OutputPath: path})
+			if err != nil {
+				t.Fatalf("NewLogger: %v", err)
+			}
+			defer func() { _ = log.Close() }()
+			if got := log.LogDirectory(); got != "" {
+				t.Errorf("LogDirectory() = %q, want empty", got)
+			}
+		})
+	}
+}
+
+func TestLogDirectory_NilLoggerReturnsEmpty(t *testing.T) {
+	var l *Logger
+	if got := l.LogDirectory(); got != "" {
+		t.Errorf("nil LogDirectory() = %q, want empty", got)
+	}
+}
+
 func TestLoggerClose_IsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	log, err := NewLogger(LoggingConfig{

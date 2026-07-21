@@ -43,6 +43,13 @@ features:
     dev:  "true"
     e2e:  "true"
 
+  # Plugins (extensible plugin system). Off in prod until the feature
+  # is user-ready; on in dev/e2e so contributors and tests exercise it.
+  KANDEV_FEATURES_PLUGINS:
+    prod: "false"
+    dev:  "true"
+    e2e:  "true"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent
@@ -64,7 +71,7 @@ mocks:
     dev:  ""
     e2e:  "true"
 
-  # Replace the GitHub / Jira / Linear clients with in-memory fakes
+  # Replace third-party clients with in-memory fakes
   # so e2e specs don't hit live APIs (and dev doesn't need tokens).
   KANDEV_MOCK_GITHUB:
     prod: ""
@@ -75,6 +82,14 @@ mocks:
     dev:  ""
     e2e:  "true"
   KANDEV_MOCK_LINEAR:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
+  KANDEV_MOCK_SENTRY:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
+  KANDEV_MOCK_AZURE_DEVOPS:
     prod: ""
     dev:  ""
     e2e:  "true"
@@ -92,6 +107,23 @@ debug:
   # Legacy alias for KANDEV_DEBUG_DEV_MODE — kept for compatibility
   # with older deploy scripts that grep for "pprof".
   KANDEV_DEBUG_PPROF_ENABLED:
+    prod: ""
+    dev:  "true"
+    e2e:  ""
+
+  # Dump every ACP protocol frame (raw + normalized) to per-session JSONL
+  # files for offline debugging of stuck/odd sessions. Always-on in dev:
+  # the agentctl janitor caps file size (rotation), prunes by age + total
+  # count, and flushes/closes writers on shutdown, so it can't grow disk
+  # without bound. Files default to ~/.kandev/logs/acp/ (override with
+  # KANDEV_DEBUG_LOG_DIR). PRIVACY: frames carry full prompt/file/tool
+  # content — strictly local-dev; never enable in prod. When agentctl runs
+  # inside a Docker executor the files land *inside the container*, so this
+  # is meant for standalone/dev. Retention knobs (all optional):
+  #   KANDEV_DEBUG_ACP_MAX_FILES       (default 200)
+  #   KANDEV_DEBUG_ACP_RETENTION_HOURS (default 48)
+  #   KANDEV_DEBUG_ACP_MAX_FILE_BYTES  (default 8388608 = 8 MiB)
+  KANDEV_DEBUG_AGENT_MESSAGES:
     prod: ""
     dev:  "true"
     e2e:  ""

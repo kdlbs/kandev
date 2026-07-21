@@ -6,7 +6,6 @@ import {
   IconRefresh,
   IconPlus,
   IconMinus,
-  IconAlertTriangle,
   IconGitMerge,
   IconCheck,
   IconLoader2,
@@ -20,7 +19,8 @@ import { useAppStore } from "@/components/state-provider";
 import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prPanelLabel } from "@/components/github/pr-utils";
 import { usePRFeedback } from "@/hooks/domains/github/use-pr-feedback";
-import { useCommentsStore } from "@/lib/state/slices/comments";
+import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { useCommentsStore, isPRFeedbackComment } from "@/lib/state/slices/comments";
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useToast } from "@/components/toast-provider";
 import { submitPRReview } from "@/lib/api/domains/github-api";
@@ -32,6 +32,8 @@ import {
   CollapsibleSection,
   PRMarkdownBody,
 } from "./pr-shared";
+import { PRMergeButton } from "./pr-merge-button";
+import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
 import { ReviewStateBadge } from "./pr-reviews-section";
 import { ChecksSection } from "./pr-checks-section";
 import { ReviewsSection } from "./pr-reviews-section";
@@ -109,6 +111,65 @@ function useAddPRFeedbackAsContext(sessionId: string, prNumber: number) {
   return { addAsContext };
 }
 
+// Sync live feedback data back to the store so topbar/other consumers stay up to date.
+// Use primitive deps to avoid re-render loops from object reference changes.
+// Guard: never regress the store to a less-terminal state (e.g. merged → open)
+// because the feedback fetch may return stale data from before a backend poll update.
+function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
+  const setTaskPR = useAppStore((s) => s.setTaskPR);
+  const prState = taskPR.state;
+  const prMergedAt = taskPR.merged_at ?? null;
+  const prClosedAt = taskPR.closed_at ?? null;
+  const prAdditions = taskPR.additions;
+  const prDeletions = taskPR.deletions;
+  const prMergeableState = taskPR.mergeable_state;
+  const prTaskId = taskPR.task_id;
+  useEffect(() => {
+    if (!feedback) return;
+    const livePR = feedback.pr;
+    // State priority: merged > closed > open. Never regress to a less-terminal state.
+    const stateRank = (s: string) => {
+      if (s === "merged") return 2;
+      if (s === "closed") return 1;
+      return 0;
+    };
+    const effectiveState = stateRank(livePR.state) >= stateRank(prState) ? livePR.state : prState;
+    const effectiveMergedAt = effectiveState === prState ? prMergedAt : (livePR.merged_at ?? null);
+    const effectiveClosedAt = effectiveState === prState ? prClosedAt : (livePR.closed_at ?? null);
+    // Live mergeable_state is authoritative when present; otherwise keep the stored value.
+    const effectiveMergeableState = livePR.mergeable_state ?? prMergeableState;
+    if (
+      effectiveState !== prState ||
+      effectiveMergedAt !== prMergedAt ||
+      effectiveClosedAt !== prClosedAt ||
+      livePR.additions !== prAdditions ||
+      livePR.deletions !== prDeletions ||
+      effectiveMergeableState !== prMergeableState
+    ) {
+      setTaskPR(prTaskId, {
+        ...taskPR,
+        state: effectiveState as TaskPR["state"],
+        additions: livePR.additions,
+        deletions: livePR.deletions,
+        merged_at: effectiveMergedAt,
+        closed_at: effectiveClosedAt,
+        mergeable_state: effectiveMergeableState,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    feedback,
+    prState,
+    prMergedAt,
+    prClosedAt,
+    prAdditions,
+    prDeletions,
+    prMergeableState,
+    prTaskId,
+    setTaskPR,
+  ]);
+}
+
 type PRPanelMetrics = {
   reviewCount: number;
   pendingReviewCount: number;
@@ -173,7 +234,11 @@ function DescriptionSection({ body }: { body: string }) {
 }
 
 // GitHub logins are case-insensitive; normalize before comparing.
-function shouldHideApproveButton(
+// Fails closed when the current user is unknown — without that identity we
+// can't tell whether the viewer is the PR author, and GitHub rejects
+// self-approval, so the button would only ever produce a failed request.
+// Exported for unit testing.
+export function shouldHideApproveButton(
   taskPR: TaskPR,
   feedback: PRFeedback | null,
   currentUser: string | null,
@@ -181,7 +246,7 @@ function shouldHideApproveButton(
   const liveState = feedback?.pr.state ?? taskPR.state;
   if (liveState !== "open") return true;
   const normalizedUser = currentUser?.trim().toLowerCase();
-  if (!normalizedUser) return false;
+  if (!normalizedUser) return true;
   const prAuthor = feedback?.pr.author_login ?? taskPR.author_login;
   if (prAuthor?.trim().toLowerCase() === normalizedUser) return true;
   return (
@@ -202,7 +267,12 @@ function ApproveButton({
 }) {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
-  const currentUser = useAppStore((s) => s.githubStatus.status?.username ?? null);
+  // Ensures status (and thus the authenticated username) is fetched even when
+  // the PR panel is the first GitHub-aware surface the user opens; without
+  // this, currentUser is null on first render and shouldHideApproveButton has
+  // no identity to compare against the PR author.
+  const { status } = useGitHubStatus();
+  const currentUser = status?.username ?? null;
 
   if (shouldHideApproveButton(taskPR, feedback, currentUser)) return null;
 
@@ -240,50 +310,37 @@ function ApproveButton({
 export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
   const { feedback, loading, refresh } = usePRFeedback(taskPR.owner, taskPR.repo, taskPR.pr_number);
   const { addAsContext } = useAddPRFeedbackAsContext(sessionId, taskPR.pr_number);
-  const setTaskPR = useAppStore((s) => s.setTaskPR);
 
-  // Sync live feedback data back to the store so topbar/other consumers stay up to date.
-  // Use primitive deps to avoid re-render loops from object reference changes.
-  // Guard: never regress the store to a less-terminal state (e.g. merged → open)
-  // because the feedback fetch may return stale data from before a backend poll update.
-  const prState = taskPR.state;
-  const prMergedAt = taskPR.merged_at ?? null;
-  const prClosedAt = taskPR.closed_at ?? null;
-  const prAdditions = taskPR.additions;
-  const prDeletions = taskPR.deletions;
-  const prTaskId = taskPR.task_id;
-  useEffect(() => {
-    if (!feedback) return;
-    const livePR = feedback.pr;
-    // State priority: merged > closed > open. Never regress to a less-terminal state.
-    const stateRank = (s: string) => {
-      if (s === "merged") return 2;
-      if (s === "closed") return 1;
-      return 0;
-    };
-    const effectiveState = stateRank(livePR.state) >= stateRank(prState) ? livePR.state : prState;
-    const effectiveMergedAt = effectiveState === prState ? prMergedAt : (livePR.merged_at ?? null);
-    const effectiveClosedAt = effectiveState === prState ? prClosedAt : (livePR.closed_at ?? null);
-    if (
-      effectiveState !== prState ||
-      effectiveMergedAt !== prMergedAt ||
-      effectiveClosedAt !== prClosedAt ||
-      livePR.additions !== prAdditions ||
-      livePR.deletions !== prDeletions
-    ) {
-      setTaskPR(prTaskId, {
-        ...taskPR,
-        state: effectiveState as TaskPR["state"],
-        additions: livePR.additions,
-        deletions: livePR.deletions,
-        merged_at: effectiveMergedAt,
-        closed_at: effectiveClosedAt,
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feedback, prState, prMergedAt, prClosedAt, prAdditions, prDeletions, prTaskId, setTaskPR]);
+  useSyncLivePRState(taskPR, feedback);
 
   const metrics = derivePanelMetrics(taskPR, feedback);
+
+  // True once a conflict prompt for this PR is already queued — avoids piling
+  // up identical instructions if the user clicks "Resolve conflicts" again.
+  const conflictQueued = useCommentsStore((s) =>
+    s.pendingForChat.some((id) => {
+      const c = s.byId[id];
+      return (
+        !!c &&
+        isPRFeedbackComment(c) &&
+        c.feedbackType === "conflict" &&
+        c.sessionId === sessionId &&
+        c.prNumber === taskPR.pr_number
+      );
+    }),
+  );
+
+  const onResolveConflicts = useCallback(() => {
+    if (conflictQueued) return;
+    addAsContext(
+      "conflict",
+      buildConflictResolutionMessage({
+        prNumber: taskPR.pr_number,
+        headBranch: taskPR.head_branch,
+        baseBranch: taskPR.base_branch,
+      }),
+    );
+  }, [addAsContext, conflictQueued, taskPR.pr_number, taskPR.head_branch, taskPR.base_branch]);
 
   return (
     <div className="flex flex-col h-full">
@@ -293,6 +350,8 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
         metrics={metrics}
         loading={loading}
         onRefresh={refresh}
+        onResolveConflicts={onResolveConflicts}
+        conflictQueued={conflictQueued}
       />
       <Separator />
       <ScrollArea className="flex-1 overflow-hidden">
@@ -456,17 +515,23 @@ function PRHeader({
   metrics,
   loading,
   onRefresh,
+  onResolveConflicts,
+  conflictQueued,
 }: {
   taskPR: TaskPR;
   feedback: PRFeedback | null;
   metrics: PRPanelMetrics;
   loading: boolean;
   onRefresh: () => void;
+  onResolveConflicts: () => void;
+  conflictQueued: boolean;
 }) {
   const liveState = feedback?.pr.state ?? taskPR.state;
   const isDraft = feedback?.pr.draft ?? false;
   const isMergeable = feedback?.pr.mergeable ?? true;
-  const showWarnings = !isDraft && !isMergeable && liveState === "open";
+  // Prefer the live feedback state (refreshed by the panel's Refresh button);
+  // fall back to the polled store value before feedback loads.
+  const mergeableState = feedback?.pr.mergeable_state ?? taskPR.mergeable_state;
 
   return (
     <div className="p-3 space-y-2">
@@ -475,6 +540,7 @@ function PRHeader({
           <HeaderTitleRow taskPR={taskPR} loading={loading} onRefresh={onRefresh} />
         </div>
         <ApproveButton taskPR={taskPR} feedback={feedback} onRefresh={onRefresh} />
+        <PRMergeButton taskPR={taskPR} onMerged={onRefresh} />
       </div>
       <div className="flex items-center gap-1.5 flex-wrap">
         <StateBadge state={isDraft && liveState === "open" ? "draft" : liveState} />
@@ -487,14 +553,15 @@ function PRHeader({
           {taskPR.base_branch}
         </code>
       </div>
-      {showWarnings && (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="flex items-center gap-1 text-[10px] text-yellow-600 dark:text-yellow-400">
-            <IconAlertTriangle className="h-3 w-3" />
-            Not mergeable
-          </span>
-        </div>
-      )}
+      <PRMergeabilityNotice
+        state={mergeableState}
+        mergeable={isMergeable}
+        isDraft={isDraft}
+        prState={liveState}
+        baseBranch={taskPR.base_branch}
+        onResolveConflicts={onResolveConflicts}
+        resolveDisabled={conflictQueued}
+      />
       <HeaderDateLine taskPR={taskPR} />
       <HeaderStatsLine taskPR={taskPR} metrics={metrics} />
     </div>

@@ -1,18 +1,35 @@
 /**
  * E2E tests for the composable sidebar filter / sort / group system + saved views.
  *
+ * After the unified AppSidebar overhaul, the filter UI lives in the AppSidebar
+ * Tasks-section header as the `TasksViewPicker` (a view-picker dropdown +
+ * filter gear) rather than the legacy `sidebar-filter-bar`. The picker is
+ * visible whenever the Tasks section is expanded, which it is by default and on
+ * `/t/` routes. The `SidebarFilterPopoverPage` page object encapsulates the new
+ * surface (see its docstring). Saved-view chips now live inside the picker's
+ * dropdown menu instead of an always-visible chip row.
+ *
  * Coverage:
  *   - Gear popover open/close
  *   - Default "All tasks" view is seeded for new users
  *   - Filter add/remove, negation, live list update
  *   - Sort + direction toggle
  *   - Group-by (repository, state, none)
- *   - Saved views CRUD (save-as, rename, delete)
+ *   - Direct saved-view creation plus save-as, rename, and delete
  *   - Persistence across reload
  *   - Draft semantics + discard
  *   - Last-view deletion guard
+ *
+ * NOTE: Drag-to-reorder of saved views was removed by the overhaul — the views
+ * are now dropdown-menu items, not a sortable chip row. The "view ordering"
+ * tests that depended on dragging are dropped / adapted accordingly (see the
+ * "view ordering" describe block).
  */
+import path from "node:path";
+import fs from "node:fs";
+import { execSync } from "node:child_process";
 import { test, expect } from "../../fixtures/test-base";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 
@@ -58,19 +75,6 @@ async function saveTitleView(
   await filters.close();
 }
 
-async function expectStoredSidebarViewOrder(
-  apiClient: import("../../helpers/api-client").ApiClient,
-  names: string[],
-): Promise<void> {
-  await expect
-    .poll(async () => {
-      const response = await apiClient.getUserSettings();
-      const views = (response.settings.sidebar_views ?? []) as Array<{ name: string }>;
-      return views.map((view) => view.name);
-    })
-    .toEqual(names);
-}
-
 test.describe("Sidebar filter bar — popover basics", () => {
   test("gear opens popover; ESC closes it", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Basics Task"]);
@@ -86,7 +90,8 @@ test.describe("Sidebar filter bar — popover basics", () => {
     seedData,
   }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Chip Task"]);
-    const chips = filters.chipRow.getByTestId("sidebar-view-chip");
+    await filters.openViewPicker();
+    const chips = filters.chipMenu.getByTestId("sidebar-view-chip");
     await expect(chips).toHaveCount(1);
     await expect(chips.filter({ hasText: "All tasks" })).toBeVisible();
   });
@@ -102,6 +107,14 @@ test.describe("Sidebar filter bar — popover basics", () => {
     await filters.setClauseTextValue(0, "persist");
     await filters.saveAs("Persist View");
     await filters.expectActiveViewChip("Persist View");
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
+          (view) => view.name === "Persist View",
+        );
+      })
+      .toBe(true);
 
     await testPage.reload();
     const session = new SessionPage(testPage);
@@ -112,36 +125,16 @@ test.describe("Sidebar filter bar — popover basics", () => {
 });
 
 test.describe("Sidebar filter — view ordering", () => {
-  test("dragged view order persists to settings and survives reload", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const { filters } = await openWithSeed(testPage, apiClient, seedData, [
-      "Order alpha task",
-      "Order beta task",
-      "Order gamma task",
-    ]);
-    await saveTitleView(filters, "Alpha View", "alpha");
-    await saveTitleView(filters, "Beta View", "beta");
-    await saveTitleView(filters, "Gamma View", "gamma");
-    await filters.expectChipOrder(["All tasks", "Alpha View", "Beta View", "Gamma View"]);
+  // The "dragged view order persists to settings and survives reload" test was
+  // DELETED in the AppSidebar overhaul: saved views moved from a horizontal,
+  // drag-sortable `sidebar-view-chip-row` into the `TasksViewPicker` dropdown
+  // menu. Dropdown menu items are not sortable, so there is no longer a
+  // drag-to-reorder affordance to exercise. The underlying store action
+  // (reorderSidebarViews) still exists but has no UI entry point, so an E2E
+  // test would have nothing to drive. Re-add coverage if a reorder affordance
+  // returns to the picker.
 
-    await filters.dragViewBefore("Gamma View", "All tasks");
-
-    const reorderedNames = ["Gamma View", "All tasks", "Alpha View", "Beta View"];
-    await filters.expectChipOrder(reorderedNames);
-    await expectStoredSidebarViewOrder(apiClient, reorderedNames);
-
-    await testPage.reload();
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    const filters2 = new SidebarFilterPopoverPage(testPage);
-    await filters2.expectChipOrder(reorderedNames);
-    await filters2.expectActiveViewChip("Gamma View");
-  });
-
-  test("reordered views still select, delete, and append normally", async ({
+  test("appended views select, delete, and append normally", async ({
     testPage,
     apiClient,
     seedData,
@@ -154,8 +147,8 @@ test.describe("Sidebar filter — view ordering", () => {
     await saveTitleView(filters, "Alpha View", "alpha");
     await saveTitleView(filters, "Beta View", "beta");
     await saveTitleView(filters, "Gamma View", "gamma");
-    await filters.dragViewBefore("Gamma View", "All tasks");
-    await filters.expectChipOrder(["Gamma View", "All tasks", "Alpha View", "Beta View"]);
+    // Views append in creation order after the default "All tasks".
+    await filters.expectChipOrder(["All tasks", "Alpha View", "Beta View", "Gamma View"]);
 
     await filters.selectViewByName("Alpha View");
     await filters.expectActiveViewChip("Alpha View");
@@ -165,11 +158,12 @@ test.describe("Sidebar filter — view ordering", () => {
     await filters.selectViewByName("Beta View");
     await filters.open();
     await filters.deleteActiveView();
-    await filters.expectChipOrder(["Gamma View", "All tasks", "Alpha View"]);
-    await filters.expectActiveViewChip("Gamma View");
+    await filters.expectChipOrder(["All tasks", "Alpha View", "Gamma View"]);
+    // Deleting the active view falls back to the first remaining view.
+    await filters.expectActiveViewChip("All tasks");
 
     await saveTitleView(filters, "Delta View", "delta");
-    await filters.expectChipOrder(["Gamma View", "All tasks", "Alpha View", "Delta View"]);
+    await filters.expectChipOrder(["All tasks", "Alpha View", "Gamma View", "Delta View"]);
     await filters.expectActiveViewChip("Delta View");
   });
 });
@@ -258,6 +252,125 @@ test.describe("Sidebar filter — group + sort", () => {
 });
 
 test.describe("Sidebar filter — saved views CRUD", () => {
+  test("direct creation starts from canonical defaults, focuses rename, and persists", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Direct View Task"]);
+
+    // Make the active source visibly non-default before creating the blank view.
+    await filters.addFilterRow();
+    await filters.setClauseDimension(0, "Title");
+    await filters.setClauseTextValue(0, "source-only");
+    await filters.setSort("Updated", "desc");
+    await filters.setGroup("State");
+    await filters.saveAs("Custom source");
+    await filters.close();
+
+    const renameInput = await filters.beginNewView();
+    await expect(renameInput).toHaveValue("New view");
+    await expect(filters.popover.getByTestId("filter-clause-row")).toHaveCount(0);
+    await expect(filters.popover.getByTestId("sort-key-select")).toContainText("Status");
+    await expect(filters.popover.getByTestId("sort-direction-toggle")).toHaveAttribute(
+      "data-direction",
+      "asc",
+    );
+    await expect(filters.popover.getByTestId("group-key-select")).toContainText("Repository");
+
+    await renameInput.fill("Planning view");
+    await filters.popover.getByTestId("view-rename-confirm").click();
+    await expect(filters.popover).toBeVisible();
+    await expect(filters.popover.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "Planning view",
+    );
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
+          (view) => view.name === "Planning view",
+        );
+      })
+      .toBe(true);
+
+    await testPage.reload();
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await new SidebarFilterPopoverPage(testPage).expectActiveViewChip("Planning view");
+  });
+
+  test("cancelling optional rename keeps automatic names and creates the next gap", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Auto Name Task"]);
+
+    await filters.beginNewView();
+    await filters.popover.getByRole("button", { name: "Cancel" }).click();
+    await expect(filters.popover.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "New view",
+    );
+    await filters.close();
+
+    const secondName = await filters.beginNewView();
+    await expect(secondName).toHaveValue("New view 2");
+    await filters.popover.getByRole("button", { name: "Cancel" }).click();
+    await filters.close();
+    await filters.expectChipOrder(["All tasks", "New view", "New view 2"]);
+  });
+
+  test("direct creation explains dirty-draft and saved-view-limit blocks", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Blocked View Task"]);
+    await filters.addFilterRow();
+    await filters.close();
+    await filters.openViewPicker();
+    await expect(filters.newViewAction).toHaveAttribute("aria-disabled", "true");
+    await expect(filters.newViewAction).toHaveAttribute("aria-label", /save or discard changes/i);
+    await filters.closeViewPicker();
+    await filters.open();
+    await expect(filters.popover.getByTestId("sidebar-filter-dirty-indicator")).toBeVisible();
+    await filters.discard();
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        return settings.sidebar_draft ?? null;
+      })
+      .toBeNull();
+
+    const limitViews = Array.from({ length: 50 }, (_, index) => ({
+      id: `limit-view-${index}`,
+      name: `Limit view ${index + 1}`,
+      filters: [],
+      sort: { key: "state", direction: "asc" },
+      group: "repository",
+      collapsed_groups: [],
+    }));
+    const response = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      sidebar_views: limitViews,
+      sidebar_active_view_id: limitViews[0].id,
+      sidebar_draft: null,
+    });
+    expect(response.ok).toBe(true);
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        return (settings.sidebar_views as unknown[] | undefined)?.length;
+      })
+      .toBe(50);
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    const reloaded = new SidebarFilterPopoverPage(testPage);
+    await reloaded.openViewPicker();
+    await reloaded.newViewAction.scrollIntoViewIfNeeded();
+    await expect(reloaded.newViewAction).toHaveAttribute("aria-disabled", "true");
+    await expect(reloaded.newViewAction).toHaveAttribute("aria-label", /up to 50 views/i);
+  });
+
   test("save-as creates a new chip and selects it", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["View CRUD Task"]);
     await filters.addFilterRow();
@@ -267,9 +380,12 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await filters.expectActiveViewChip("My View");
 
     await testPage.reload();
+    const session2 = new SessionPage(testPage);
+    await session2.waitForLoad();
     const f2 = new SidebarFilterPopoverPage(testPage);
+    await f2.openViewPicker();
     await expect(
-      f2.chipRow.getByTestId("sidebar-view-chip").filter({ hasText: "My View" }),
+      f2.chipMenu.getByTestId("sidebar-view-chip").filter({ hasText: "My View" }),
     ).toBeVisible();
   });
 
@@ -287,9 +403,12 @@ test.describe("Sidebar filter — saved views CRUD", () => {
 
     await filters.open();
     await filters.deleteActiveView();
+    await filters.close();
+    await filters.openViewPicker();
     await expect(
-      filters.chipRow.getByTestId("sidebar-view-chip").filter({ hasText: "Ephemeral" }),
+      filters.chipMenu.getByTestId("sidebar-view-chip").filter({ hasText: "Ephemeral" }),
     ).toHaveCount(0);
+    await filters.closeViewPicker();
     await filters.expectActiveViewChip("All tasks");
   });
 
@@ -301,6 +420,67 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Last View Task"]);
     await filters.open();
     await expect(filters.popover.getByTestId("view-delete-button")).toHaveCount(0);
+  });
+});
+
+test.describe("Sidebar filter — repository dimension (#1213)", () => {
+  test("filtering by a repository keeps only that repo's tasks (not an empty board)", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    // The default seeded repo is a LOCAL repo (no GitHub provider), named
+    // "E2E Repo". Regression for #1213: a local repo's filter option value used
+    // to be its full local_path while each task carried the repo *name*, so a
+    // saved repository clause matched nothing and the board went empty.
+
+    // A second, distinct local repo so we can prove the clause keeps matches and
+    // drops non-matches.
+    const repoBName = "Second E2E Repo";
+    const repoBDir = path.join(backend.tmpDir, "repos", "e2e-repo-filter-b");
+    fs.mkdirSync(repoBDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: repoBDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoBDir, env: gitEnv });
+    const repoB = await apiClient.createRepository(seedData.workspaceId, repoBDir, "main", {
+      name: repoBName,
+    });
+
+    await apiClient.createTask(seedData.workspaceId, "Task in repo A", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await apiClient.createTask(seedData.workspaceId, "Task in repo B", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [repoB.id],
+    });
+
+    const navTask = await apiClient.createTask(seedData.workspaceId, "Repo Filter Nav", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await testPage.goto(`/t/${navTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.sidebar).toBeVisible({ timeout: 10_000 });
+    const filters = new SidebarFilterPopoverPage(testPage);
+    await expect(filters.bar).toBeVisible();
+
+    // Both tasks visible before filtering.
+    await expect(session.sidebar.getByText("Task in repo A")).toBeVisible();
+    await expect(session.sidebar.getByText("Task in repo B")).toBeVisible();
+
+    await filters.addFilterRow();
+    await filters.setClauseDimension(0, "Repository");
+    await filters.setClauseEnumValue(0, "E2E Repo");
+    await filters.close();
+
+    // Repo A's task survives (this was empty before the fix); repo B's is hidden.
+    await expect(session.sidebar.getByText("Task in repo A")).toBeVisible();
+    await expect(session.sidebar.getByText("Task in repo B")).toHaveCount(0);
   });
 });
 

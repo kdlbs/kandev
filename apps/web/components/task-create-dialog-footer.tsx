@@ -151,7 +151,6 @@ type DefaultSubmitButtonProps = {
   isCreateMode: boolean;
   isEditMode: boolean;
   hasDescription: boolean;
-  isPassthroughProfile: boolean;
   disabled: boolean;
 };
 
@@ -162,7 +161,6 @@ function DefaultSubmitButton({
   isCreateMode,
   isEditMode,
   hasDescription,
-  isPassthroughProfile,
   disabled,
 }: DefaultSubmitButtonProps) {
   const planModeStyle =
@@ -176,10 +174,7 @@ function DefaultSubmitButton({
       variant="default"
       className={`w-full h-10 cursor-pointer sm:w-auto sm:h-7 gap-1.5 ${planModeStyle}`}
       disabled={
-        disabled ||
-        isCreatingSession ||
-        isCreatingTask ||
-        (isSessionMode ? !hasDescription && !isPassthroughProfile : false)
+        disabled || isCreatingSession || isCreatingTask || (isSessionMode ? !hasDescription : false)
       }
     >
       {(() => {
@@ -211,7 +206,6 @@ export type TaskCreateDialogFooterProps = {
   isCreateMode: boolean;
   isEditMode: boolean;
   isTaskStarted: boolean;
-  isPassthroughProfile: boolean;
   isCreatingSession: boolean;
   isCreatingTask: boolean;
   hasTitle: boolean;
@@ -291,14 +285,10 @@ function baseReason(props: TaskCreateDialogFooterProps): string | null {
   return null;
 }
 
-function missingSessionDescription(props: TaskCreateDialogFooterProps): boolean {
-  return !props.hasDescription && !props.isPassthroughProfile;
-}
-
 function sessionDefaultReason(props: TaskCreateDialogFooterProps): string | null {
   if (props.noCompatibleAgent) return noCompatibleAgentReason(props.executorProfileName);
   if (!props.agentProfileId) return REASON_AGENT;
-  if (missingSessionDescription(props)) return REASON_DESCRIPTION;
+  if (!props.hasDescription) return REASON_DESCRIPTION;
   return null;
 }
 
@@ -324,7 +314,7 @@ function resolveButtonKind(props: TaskCreateDialogFooterProps, showStartTask: bo
 
 function computeFooterState(props: TaskCreateDialogFooterProps) {
   const showStartTask =
-    (props.isCreateMode && (props.hasDescription || props.isPassthroughProfile)) ||
+    (props.isCreateMode && props.hasDescription) ||
     Boolean(props.isEditMode && props.agentProfileId);
   const blocked = Boolean(props.submitBlockedReason);
   const altDisabled = computeBaseDisabled(props) || blocked;
@@ -350,7 +340,6 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
     isCreateMode,
     isEditMode,
     isTaskStarted,
-    isPassthroughProfile,
     isCreatingSession,
     isCreatingTask,
     hasTitle,
@@ -417,7 +406,6 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
                 isCreateMode={isCreateMode}
                 isEditMode={isEditMode}
                 hasDescription={hasDescription}
-                isPassthroughProfile={isPassthroughProfile}
                 disabled={defaultDisabled}
               />
             );

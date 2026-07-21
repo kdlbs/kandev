@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
+import type { Locator, Page } from "@playwright/test";
 
 const OWNER = "acme";
 const REPO = "demo";
@@ -88,6 +89,37 @@ async function associatePR(
     deletions: 5,
     ...overrides,
   });
+}
+
+function manyRunningChecks(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    name: `E2E Shard ${index + 1}/${count} / run`,
+    status: "in_progress",
+    html_url: `https://example.com/checks/${index + 1}`,
+  }));
+}
+
+async function expectScrollablePopoverWithinViewport(testPage: Page, locator: Locator) {
+  const metrics = await locator.evaluate((node) => {
+    const content = node.classList.contains("overflow-y-auto")
+      ? node
+      : node.closest(".overflow-y-auto");
+    const rect = content?.getBoundingClientRect();
+    return {
+      top: rect?.top ?? -1,
+      bottom: rect?.bottom ?? -1,
+      clientHeight: content?.clientHeight ?? 0,
+      scrollHeight: content?.scrollHeight ?? 0,
+      overflowY: content ? getComputedStyle(content).overflowY : "",
+      overscrollBehavior: content ? getComputedStyle(content).overscrollBehavior : "",
+    };
+  });
+  const viewportHeight = testPage.viewportSize()?.height ?? 0;
+  expect(metrics.top).toBeGreaterThanOrEqual(0);
+  expect(metrics.bottom).toBeLessThanOrEqual(viewportHeight);
+  expect(metrics.overflowY).toBe("auto");
+  expect(metrics.overscrollBehavior).toBe("contain");
+  expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
 }
 
 async function openTaskAndWait(
@@ -211,6 +243,38 @@ test.describe("PR top-bar CI popover", () => {
     await expect(session.prWorkflowRow("E2E")).toContainText("4/5 passed");
   });
 
+  test("desktop CI popovers scroll instead of overflowing the viewport", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Many Running Checks";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      checks_state: "pending",
+      checks_total: 30,
+      checks_passing: 0,
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: manyRunningChecks(30),
+    });
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+
+    await expect(session.prStatusChip()).toBeVisible();
+    await session.hoverPRTopbar();
+    await expectScrollablePopoverWithinViewport(testPage, session.prTopbarPopover());
+  });
+
   test("review row shows N / M required + unresolved comments count", async ({
     testPage,
     apiClient,
@@ -302,6 +366,119 @@ test.describe("PR top-bar CI popover", () => {
     await expect(session.prTopbarPopover()).toHaveCount(0, { timeout: 5_000 });
   });
 
+  test("popover survives the cursor crossing from the button onto it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Hover Bridge Topbar";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      checks_state: "failure",
+      checks_total: 1,
+      checks_passing: 0,
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        {
+          name: "Lint / check",
+          status: "completed",
+          conclusion: "failure",
+          html_url: "https://example.com/lint-run-1",
+          output: "lint failed",
+        },
+      ],
+    });
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    await session.hoverPRTopbar();
+
+    // Wait for the async CI content so the popover is at its final size/position
+    // before we cross onto it (it grows/repositions once checks load).
+    const popover = session.prTopbarPopover();
+    const openButton = session.prWorkflowOpenButton("Lint");
+    await expect(openButton).toBeVisible({ timeout: 10_000 });
+
+    // Real cursor crossing from the trigger button onto a control *inside* the
+    // popover, over the sideOffset gap. The browser fires a native mouseleave on
+    // the button (queuing the close timer) immediately followed by a mouseenter
+    // on the popover — the enter handler must cancel the pending close, else the
+    // popover vanishes before the user can reach anything inside it.
+    await openButton.hover();
+
+    // Past the 150ms close delay the popover must still be open and its buttons
+    // clickable.
+    await testPage.waitForTimeout(600);
+    await expect(popover).toBeVisible();
+    await expect(openButton).toBeVisible();
+    await expect(session.prWorkflowAddContextButton("Lint")).toBeEnabled();
+  });
+
+  test("chip popover survives the cursor crossing from the chip onto it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Hover Bridge Chip";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      checks_state: "failure",
+      checks_total: 1,
+      checks_passing: 0,
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        {
+          name: "Lint / check",
+          status: "completed",
+          conclusion: "failure",
+          html_url: "https://example.com/lint-run-1",
+          output: "lint failed",
+        },
+      ],
+    });
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    await expect(session.prStatusChip()).toBeVisible();
+    await session.hoverPRChip();
+
+    // Wait for the async CI content so the popover is at its final size/position
+    // before crossing onto it.
+    const popover = session.prChipPopover();
+    const openButton = popover.getByTestId("pr-workflow-open").first();
+    await expect(openButton).toBeVisible({ timeout: 10_000 });
+
+    // Cross from the chip onto a control inside the popover (over the sideOffset
+    // gap). The enter handler must cancel the close queued when the cursor left
+    // the chip, or the popover vanishes before its buttons can be used.
+    await openButton.hover();
+
+    // Past the 150ms close delay the popover must still be open and interactive,
+    // not merely mounted — parity with the topbar test.
+    await testPage.waitForTimeout(600);
+    await expect(popover).toBeVisible();
+    await expect(openButton).toBeVisible();
+    await expect(popover.getByTestId("pr-workflow-add-context").first()).toBeEnabled();
+  });
+
   test("failed workflow row exposes open + add-to-context buttons", async ({
     testPage,
     apiClient,
@@ -345,11 +522,7 @@ test.describe("PR top-bar CI popover", () => {
     await expect(session.prWorkflowAddContextButton("Lint")).toBeVisible();
   });
 
-  test("header external link points at the PR's GitHub /checks tab", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("header PR link points at the PR on GitHub", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
     const title = "External Link";
     const seed = await seedTask(
@@ -366,7 +539,8 @@ test.describe("PR top-bar CI popover", () => {
     });
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
     await session.hoverPRTopbar();
-    await expect(session.prPopoverExternalLink()).toHaveAttribute("href", `${PR_URL}/checks`);
+    await expect(session.prPopoverPRLink()).toHaveAttribute("href", PR_URL);
+    await expect(session.prTopbarPopover().getByLabel("View all checks on GitHub")).toHaveCount(0);
   });
 
   test("empty state when PR has no checks at all", async ({ testPage, apiClient, seedData }) => {

@@ -12,6 +12,7 @@ type StoreWorkflow = {
   name: string;
   description?: string | null;
   hidden?: boolean;
+  style?: "kanban" | "office" | "custom";
 };
 
 type MockState = { workflows: { items: StoreWorkflow[] } };
@@ -44,6 +45,29 @@ const STORE_B1: StoreWorkflow = { id: "wf-b1", workspaceId: "ws-b", name: NAME_B
 
 beforeEach(() => {
   setStore([]);
+});
+
+describe("useWorkflowSettings — store boundary filters", () => {
+  it("does not merge office-style workflows from the global store", () => {
+    // The sidebar's `useEnsureWorkspaceWorkflows` populates the store with every
+    // workflow — including office-style ones — on all routes. The settings UI
+    // is kanban-only (ADR-0004), so office workflows must be dropped at the
+    // store boundary (matching the SSR-side filter). Otherwise they land in
+    // `workflowItems`, which is what "Export All" serialises → workflow-import-
+    // export e2e regresses.
+    const officeInB: StoreWorkflow = {
+      id: "wf-b-office",
+      workspaceId: "ws-b",
+      name: "Office Only Workflow",
+      style: "office",
+    };
+    setStore([officeInB]);
+
+    const { result } = renderHook(() => useWorkflowSettings([], "ws-b"));
+
+    expect(result.current.workflowItems).toHaveLength(0);
+    expect(result.current.savedWorkflowItems).toHaveLength(0);
+  });
 });
 
 describe("useWorkflowSettings", () => {
@@ -124,6 +148,32 @@ describe("useWorkflowSettings", () => {
     expect(result.current.workflowItems[0].name).toEqual("Renamed B1");
   });
 
+  it("does not overwrite a dirty name when the store refreshes", () => {
+    const initial = [wf("wf-b1", "ws-b", NAME_B1)];
+    const { result, rerender } = renderHook(
+      ({ store }: { store: StoreWorkflow[] }) => {
+        setStore(store);
+        return useWorkflowSettings(initial, "ws-b");
+      },
+      { initialProps: { store: [STORE_B1] } },
+    );
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, name: "Unsaved local name" })),
+      );
+    });
+    act(() => {
+      rerender({ store: [{ ...STORE_B1, name: "Remote name" }] });
+    });
+
+    expect(result.current.workflowItems[0].name).toBe("Unsaved local name");
+    expect(result.current.savedWorkflowItems[0].name).toBe("Remote name");
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(true);
+  });
+});
+
+describe("useWorkflowSettings visibility", () => {
   it("excludes hidden system workflows from the settings list", () => {
     // System workflows like "Improve Kandev" live in the global store with
     // hidden=true so the kanban can resolve task references, but they must

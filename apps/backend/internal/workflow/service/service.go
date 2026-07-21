@@ -30,6 +30,7 @@ type Service struct {
 	workflowProvider WorkflowProvider
 	resolveProfile   models.AgentProfileResolver
 	matchProfile     models.AgentProfileMatcher
+	syncOps          SyncWorkflowOps
 }
 
 // SetWorkflowProvider wires the workflow provider (set during service init to break circular deps).
@@ -219,6 +220,8 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 			ShowInCommandPanel:    stepDef.ShowInCommandPanel,
 			AutoArchiveAfterHours: stepDef.AutoArchiveAfterHours,
 			AgentProfileID:        stepDef.AgentProfileID,
+			WIPLimit:              stepDef.WIPLimit,
+			PullFromStepID:        models.RemapStepID(stepDef.PullFromStepID, idMap),
 			StageType:             stepDef.StageType,
 		}
 
@@ -270,30 +273,41 @@ func (s *Service) ResolveFirstStep(ctx context.Context, workflowID string) (*mod
 
 // CreateStep creates a new workflow step.
 func (s *Service) CreateStep(ctx context.Context, step *models.WorkflowStep) error {
-	step.ID = uuid.New().String()
-	if err := s.repo.CreateStep(ctx, step); err != nil {
+	_, err := s.CreateStepWithStartStepUpdates(ctx, step)
+	return err
+}
+
+// CreateStepWithStartStepUpdates creates a new workflow step and returns any
+// other workflow steps whose start-step flag was cleared.
+func (s *Service) CreateStepWithStartStepUpdates(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
+	if step.ID == "" {
+		step.ID = uuid.New().String()
+	}
+	demoted, err := s.repo.CreateStepWithDemotedStartSteps(ctx, step)
+	if err != nil {
 		s.logger.Error("failed to create step", zap.String("workflow_id", step.WorkflowID), zap.Error(err))
-		return err
+		return nil, err
 	}
 	s.logger.Info("created workflow step", zap.String("step_id", step.ID), zap.String("workflow_id", step.WorkflowID))
-	return nil
+	return demoted, nil
 }
 
 // UpdateStep updates an existing workflow step.
 func (s *Service) UpdateStep(ctx context.Context, step *models.WorkflowStep) error {
-	// If marking as start step, clear the flag on all other steps first
-	if step.IsStartStep {
-		if err := s.repo.ClearStartStepFlag(ctx, step.WorkflowID, step.ID); err != nil {
-			s.logger.Error("failed to clear start step flag", zap.String("workflow_id", step.WorkflowID), zap.Error(err))
-			return err
-		}
-	}
-	if err := s.repo.UpdateStep(ctx, step); err != nil {
+	_, err := s.UpdateStepWithStartStepUpdates(ctx, step)
+	return err
+}
+
+// UpdateStepWithStartStepUpdates updates a workflow step and returns any other
+// workflow steps whose start-step flag was cleared.
+func (s *Service) UpdateStepWithStartStepUpdates(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
+	demoted, err := s.repo.UpdateStepWithDemotedStartSteps(ctx, step)
+	if err != nil {
 		s.logger.Error("failed to update step", zap.String("step_id", step.ID), zap.Error(err))
-		return err
+		return nil, err
 	}
 	s.logger.Info("updated workflow step", zap.String("step_id", step.ID))
-	return nil
+	return demoted, nil
 }
 
 // DeleteStep deletes a workflow step and clears any references to it from other steps.
@@ -412,11 +426,25 @@ func (s *Service) ExportWorkflow(ctx context.Context, workflowID string) (*model
 	return models.BuildWorkflowExport([]*taskmodels.Workflow{wf}, stepMap, s.resolveProfile), nil
 }
 
-// ExportWorkflows exports all workflows for a workspace.
-func (s *Service) ExportWorkflows(ctx context.Context, workspaceID string) (*models.WorkflowExport, error) {
-	workflows, err := s.workflowProvider.ListWorkflows(ctx, workspaceID, true)
+// ExportWorkflows exports workflows for a workspace. When workflowIDs is nil,
+// every (non-hidden) workflow is exported (back-compat). When workflowIDs is
+// non-nil, only workflows whose ID is in the set are exported — an empty set
+// exports nothing. Filtering is by ID membership only: the backend MUST NOT
+// branch on a workflow's style (see internal/workflow/models/phase2.go), so the
+// frontend decides which workflows (e.g. kanban-only) to include and passes
+// their IDs.
+//
+// Hidden/system workflows (e.g. improve-kandev) are only listed when the caller
+// passes explicit IDs; the back-compat "export everything" path leaves them out
+// so a bare GET of the export endpoint can't leak system flows.
+func (s *Service) ExportWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) (*models.WorkflowExport, error) {
+	includeHidden := workflowIDs != nil
+	workflows, err := s.workflowProvider.ListWorkflows(ctx, workspaceID, includeHidden)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workflows: %w", err)
+	}
+	if workflowIDs != nil {
+		workflows = filterWorkflowsByID(workflows, workflowIDs)
 	}
 	stepMap := make(map[string][]*models.WorkflowStep, len(workflows))
 	for _, wf := range workflows {
@@ -427,6 +455,22 @@ func (s *Service) ExportWorkflows(ctx context.Context, workspaceID string) (*mod
 		stepMap[wf.ID] = steps
 	}
 	return models.BuildWorkflowExport(workflows, stepMap, s.resolveProfile), nil
+}
+
+// filterWorkflowsByID returns the subset of workflows whose ID is in ids,
+// preserving the input order.
+func filterWorkflowsByID(workflows []*taskmodels.Workflow, ids []string) []*taskmodels.Workflow {
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	filtered := make([]*taskmodels.Workflow, 0, len(workflows))
+	for _, wf := range workflows {
+		if want[wf.ID] {
+			filtered = append(filtered, wf)
+		}
+	}
+	return filtered
 }
 
 // ImportWorkflows imports workflows into a workspace. Deduplicates by name.
@@ -450,7 +494,7 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 			result.Skipped = append(result.Skipped, pw.Name)
 			continue
 		}
-		if err := s.importSingleWorkflow(ctx, workspaceID, pw); err != nil {
+		if _, err := s.importSingleWorkflow(ctx, workspaceID, pw); err != nil {
 			return nil, fmt.Errorf("failed to import workflow %q: %w", pw.Name, err)
 		}
 		result.Created = append(result.Created, pw.Name)
@@ -463,10 +507,10 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 	return result, nil
 }
 
-func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, pw models.WorkflowPortable) error {
+func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, pw models.WorkflowPortable) (*taskmodels.Workflow, error) {
 	wf, err := s.workflowProvider.CreateWorkflow(ctx, workspaceID, pw.Name, pw.Description)
 	if err != nil {
-		return fmt.Errorf("create workflow: %w", err)
+		return nil, fmt.Errorf("create workflow: %w", err)
 	}
 
 	// Match workflow-level agent profile if present.
@@ -474,7 +518,7 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		if profileID := s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode); profileID != "" {
 			wf.AgentProfileID = profileID
 			if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
-				return fmt.Errorf("set workflow agent profile: %w", err)
+				return nil, fmt.Errorf("set workflow agent profile: %w", err)
 			}
 		}
 	}
@@ -487,26 +531,36 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 
 	// Create each step with remapped events.
 	for _, sp := range pw.Steps {
-		step := &models.WorkflowStep{
-			ID:                    posToID[sp.Position],
-			WorkflowID:            wf.ID,
-			Name:                  sp.Name,
-			Position:              sp.Position,
-			Color:                 sp.Color,
-			Prompt:                sp.Prompt,
-			Events:                models.ConvertPositionToStepID(sp.Events, posToID),
-			IsStartStep:           sp.IsStartStep,
-			ShowInCommandPanel:    sp.ShowInCommandPanel,
-			AllowManualMove:       sp.AllowManualMove,
-			AutoArchiveAfterHours: sp.AutoArchiveAfterHours,
-		}
-		// Match step-level agent profile if present.
-		if sp.AgentProfile != nil && s.matchProfile != nil {
-			step.AgentProfileID = s.matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode)
-		}
+		step := s.stepFromPortable(wf.ID, sp, posToID)
 		if err := s.repo.CreateStep(ctx, step); err != nil {
-			return fmt.Errorf("create step %q: %w", sp.Name, err)
+			return nil, fmt.Errorf("create step %q: %w", sp.Name, err)
 		}
 	}
-	return nil
+	return wf, nil
+}
+
+// stepFromPortable builds a WorkflowStep from its portable form, remapping
+// position-based references to the step IDs in posToID and matching the
+// step-level agent profile when a matcher is wired.
+func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, posToID map[int]string) *models.WorkflowStep {
+	step := &models.WorkflowStep{
+		ID:                        posToID[sp.Position],
+		WorkflowID:                workflowID,
+		Name:                      sp.Name,
+		Position:                  sp.Position,
+		Color:                     sp.Color,
+		Prompt:                    sp.Prompt,
+		Events:                    models.ConvertPositionToStepID(sp.Events, posToID),
+		IsStartStep:               sp.IsStartStep,
+		ShowInCommandPanel:        sp.ShowInCommandPanel,
+		AllowManualMove:           sp.AllowManualMove,
+		AutoArchiveAfterHours:     sp.AutoArchiveAfterHours,
+		AutoAdvanceRequiresSignal: sp.AutoAdvanceRequiresSignal,
+		WIPLimit:                  sp.WIPLimit,
+		PullFromStepID:            sp.PullFromStepID(posToID),
+	}
+	if sp.AgentProfile != nil && s.matchProfile != nil {
+		step.AgentProfileID = s.matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode)
+	}
+	return step
 }

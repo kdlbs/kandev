@@ -7,9 +7,7 @@ import path from "node:path";
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
 const KANDEV_BIN = path.join(BACKEND_DIR, "bin", "kandev");
-const STANDALONE_SERVER = path.join(WEB_DIR, ".next/standalone/web/server.js");
-const STANDALONE_STATIC_DIR = path.join(WEB_DIR, ".next/standalone/web/.next/static");
-const SOURCE_STATIC_DIR = path.join(WEB_DIR, ".next/static");
+const WEB_DIST_DIR = path.join(WEB_DIR, "dist");
 // Auto-derive from PID if not explicitly set — prevents port clashes between concurrent test runs
 // Modulo 30 keeps agentctl ports under 65535 (30001 + 30*1000 = 60001 max)
 const rawPortOffset = process.env.E2E_PORT_OFFSET;
@@ -18,9 +16,22 @@ if (!Number.isInteger(E2E_PORT_OFFSET) || E2E_PORT_OFFSET < 0 || E2E_PORT_OFFSET
   throw new Error(`E2E_PORT_OFFSET must be an integer 0-29, got: ${rawPortOffset}`);
 }
 const BACKEND_BASE_PORT = 18080 + E2E_PORT_OFFSET;
-const FRONTEND_BASE_PORT = 13000 + E2E_PORT_OFFSET;
 const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_MS = 250;
+
+/**
+ * Returns true when the current run is the heavyweight container-backed
+ * Playwright project (Docker executor + SSH executor tests live here). The
+ * project was renamed `docker` → `containers` when SSH e2e tests joined it;
+ * the legacy name + env var are honored as deprecated aliases for one
+ * release. See apps/web/e2e/README.md.
+ */
+function isContainerProjectActive(projectName: string): boolean {
+  if (projectName === "containers" || projectName === "docker") return true;
+  if (process.env.KANDEV_E2E_CONTAINERS === "1") return true;
+  if (process.env.KANDEV_E2E_DOCKER === "1") return true;
+  return false;
+}
 
 export type BackendContext = {
   port: number;
@@ -70,20 +81,6 @@ async function waitForHealth(url: string, timeoutMs: number, proc?: ChildProcess
   } finally {
     proc?.off("exit", onExit);
   }
-}
-
-function killProcess(proc: ChildProcess): Promise<void> {
-  return new Promise<void>((resolve) => {
-    proc.kill("SIGTERM");
-    const timeout = setTimeout(() => {
-      proc.kill("SIGKILL");
-      resolve();
-    }, 5_000);
-    proc.on("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-  });
 }
 
 /**
@@ -159,7 +156,7 @@ function spawnBackendProcess(
   debug: boolean,
   port: number,
 ): ChildProcess {
-  const proc = spawn(KANDEV_BIN, [], {
+  const proc = spawn(KANDEV_BIN, ["__backend"], {
     env: env as unknown as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
@@ -187,15 +184,16 @@ function spawnBackendProcess(
 
 /**
  * Worker-scoped fixture that spawns an isolated backend process and
- * a dedicated Next.js frontend. Each Playwright worker gets its own
+ * a Go-served SPA frontend. Each Playwright worker gets its own
  * backend on a unique port with an isolated HOME, database, and data
- * directory, plus its own frontend with SSR routed to that backend.
+ * directory. Browser traffic hits that same backend, which serves the
+ * Vite assets and route-aware boot payload.
  */
 export const backendFixture = base.extend<object, { backend: BackendContext }>({
   backend: [
-    async ({}, use, workerInfo) => {
+    async ({ browserName: _browserName }, use, workerInfo) => {
       const backendPort = BACKEND_BASE_PORT + workerInfo.workerIndex;
-      const frontendPort = FRONTEND_BASE_PORT + workerInfo.workerIndex;
+      const frontendPort = backendPort;
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), `kandev-e2e-${workerInfo.workerIndex}-`),
       );
@@ -263,14 +261,13 @@ exec git "$@"
 
       // Opt-in: Docker E2E project or KANDEV_E2E_DOCKER=1 enables real
       // container execution. Default is off so the regular suite stays fast
-      // and runs without a Docker daemon.
-      const dockerEnabled =
-        workerInfo.project.name === "docker" || process.env.KANDEV_E2E_DOCKER === "1";
+      // and runs without a Docker daemon. See e2e/README.md.
+      const dockerEnabled = isContainerProjectActive(workerInfo.project.name);
       const mockAgentLinuxBinary = path.join(BACKEND_DIR, "bin", "mock-agent-linux-amd64");
       const agentctlLinuxBinary = path.join(BACKEND_DIR, "bin", "agentctl-linux-amd64");
 
       const backendEnv = {
-        ...stripGitHubTokens(process.env as Record<string, string>),
+        ...sanitizeInheritedEnv(process.env as Record<string, string>),
         // Prepend the kandev bin dir so the host utility probe can locate
         // the `mock-agent` binary via PATH. In production that dir is the
         // same as the running kandev binary's dir, but e2e spawns via an
@@ -281,10 +278,11 @@ exec git "$@"
         HOME: tmpDir,
         KANDEV_HOME_DIR: homeDir,
         KANDEV_SERVER_PORT: String(backendPort),
+        KANDEV_WEB_DIST_DIR: WEB_DIST_DIR,
         KANDEV_DATABASE_PATH: dbPath,
         // Profile selector. KANDEV_E2E_MOCK=true tells the backend to
         // apply the `e2e:` profile from profiles.yaml at startup —
-        // which sets KANDEV_MOCK_AGENT, KANDEV_MOCK_GITHUB/JIRA/LINEAR,
+        // which sets the mock agent and third-party provider flags,
         // KANDEV_FEATURES_OFFICE, AGENTCTL_AUTO_APPROVE_PERMISSIONS,
         // KANDEV_PLAN_COALESCE_WINDOW_MS, etc. We don't re-set those
         // here. KANDEV_MOCK_PROVIDERS stays opt-in per-spec because it
@@ -313,8 +311,10 @@ exec git "$@"
         // Specs that need different values (e.g.
         // permission-approval.spec.ts setting auto-approve=false) set
         // process.env.X before spawn — that already flows through the
-        // `...stripGitHubTokens(process.env)` spread above, and the
-        // backend's ApplyProfile leaves already-set vars alone.
+        // `...sanitizeInheritedEnv(process.env)` spread above, and the
+        // backend's ApplyProfile leaves already-set vars alone. (Note:
+        // KANDEV_FEATURES_* is the exception — it's stripped from the
+        // inherited env so the profile always governs feature flags.)
         GIT_AUTHOR_NAME: "E2E Test",
         GIT_AUTHOR_EMAIL: "e2e@test.local",
         GIT_COMMITTER_NAME: "E2E Test",
@@ -332,39 +332,7 @@ exec git "$@"
       // --- Spawn backend ---
       let backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
       await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS);
-
-      // Ensure Next.js static assets are available to the standalone server.
-      // The CLI start command does this via symlink; replicate it here.
-      // Use try/catch to handle concurrent workers racing to create the same symlink.
-      if (fs.existsSync(SOURCE_STATIC_DIR) && !fs.existsSync(STANDALONE_STATIC_DIR)) {
-        fs.mkdirSync(path.dirname(STANDALONE_STATIC_DIR), { recursive: true });
-        try {
-          fs.symlinkSync(SOURCE_STATIC_DIR, STANDALONE_STATIC_DIR, "junction");
-        } catch (err: unknown) {
-          if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-        }
-      }
-
-      // --- Spawn frontend (Next.js standalone server) ---
-      const frontendProc: ChildProcess = spawn("node", [STANDALONE_SERVER], {
-        cwd: WEB_DIR,
-        env: {
-          ...(process.env as unknown as Record<string, string>),
-          KANDEV_API_BASE_URL: baseUrl,
-          NEXT_PUBLIC_KANDEV_API_PORT: String(backendPort),
-          PORT: String(frontendPort),
-          HOSTNAME: "localhost",
-          NODE_ENV: "production",
-        } as unknown as NodeJS.ProcessEnv,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-
-      frontendProc.stderr?.on("data", (chunk: Buffer) => {
-        if (debug) process.stderr.write(`[frontend:${frontendPort}] ${chunk.toString()}`);
-      });
-
-      const frontendUrl = `http://localhost:${frontendPort}`;
-      await waitForHealth(frontendUrl, HEALTH_TIMEOUT_MS);
+      const frontendUrl = baseUrl;
 
       /**
        * Kill the backend process group and respawn with the same config.
@@ -396,8 +364,7 @@ exec git "$@"
       try {
         await use({ port: backendPort, baseUrl, frontendPort, frontendUrl, tmpDir, restart });
       } finally {
-        // Shutdown frontend first (simple process), then backend (process group)
-        await killProcess(frontendProc);
+        // Shutdown the backend process group.
         await killProcessGroup(backendProc);
 
         // Cleanup temp directory — ignore errors (backend may still hold files briefly)
@@ -413,9 +380,23 @@ exec git "$@"
 });
 
 /** Strip GH_TOKEN / GITHUB_TOKEN so the mock client is used. */
-function stripGitHubTokens(env: Record<string, string>): Record<string, string> {
+// Sanitize the inherited environment before handing it to the e2e backend.
+// Two classes of vars must not leak through the `...process.env` spread:
+//   - GitHub tokens — tests must hit the mock GitHub, never a real token.
+//   - KANDEV_FEATURES_* flags — these are profile-managed (profiles.yaml `e2e:`
+//     column turns them on). When the suite is launched from inside a kandev
+//     task, the parent process exports KANDEV_FEATURES_OFFICE=false; left in
+//     place it survives the spread and, because the backend's ApplyProfile
+//     leaves already-set vars alone, disables Office (and any future feature)
+//     in the test backend → /api/v1/office/* 404s. Dropping the whole
+//     KANDEV_FEATURES_* namespace lets the e2e profile govern feature flags so
+//     the suite always exercises them, regardless of where it's launched.
+function sanitizeInheritedEnv(env: Record<string, string>): Record<string, string> {
   const cleaned = { ...env };
   delete cleaned.GH_TOKEN;
   delete cleaned.GITHUB_TOKEN;
+  for (const key of Object.keys(cleaned)) {
+    if (key.startsWith("KANDEV_FEATURES_")) delete cleaned[key];
+  }
   return cleaned;
 }

@@ -2,10 +2,12 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -19,14 +21,30 @@ type mockAgentManager struct {
 	launchAgentFunc                  func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
 	startAgentProcessFunc            func(ctx context.Context, agentExecutionID string) error
 	stopAgentFunc                    func(ctx context.Context, agentExecutionID string, force bool) error
+	stopAgentWithReasonFunc          func(ctx context.Context, agentExecutionID string, reason string, force bool) error
 	resolveAgentProfileFunc          func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
 	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
+	isAgentCommandConfiguredFunc     func(agentExecutionID string) bool
 	isAgentRunningForSessionFunc     func(ctx context.Context, sessionID string) bool
 	cleanupStaleExecutionFunc        func(ctx context.Context, sessionID string) error
+	promptAgentFunc                  func(ctx context.Context, agentExecutionID, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error)
+	isPassthroughSessionFunc         func(ctx context.Context, sessionID string) bool
+	writePassthroughStdinFunc        func(ctx context.Context, sessionID, data string) error
+	markPassthroughRunningFunc       func(sessionID string) error
+	resolvePassthroughConfigFunc     func(ctx context.Context, sessionID string) (agents.PassthroughConfig, error)
 	launchAgentCallCount             int
 	cleanupStaleExecutionCallCount   int
 	isAgentRunningForSessionCallArgs []string
+	promptAgentCallCount             int
+	writePassthroughStdinCalls       []passthroughStdinCall
+	markPassthroughRunningCalls      []string
+}
+
+// passthroughStdinCall captures one invocation of WritePassthroughStdin for assertions.
+type passthroughStdinCall struct {
+	SessionID string
+	Data      string
 }
 
 func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
@@ -63,6 +81,13 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecution
 	return nil
 }
 
+func (m *mockAgentManager) IsAgentCommandConfigured(agentExecutionID string) bool {
+	if m.isAgentCommandConfiguredFunc != nil {
+		return m.isAgentCommandConfiguredFunc(agentExecutionID)
+	}
+	return true
+}
+
 func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
 	if m.stopAgentFunc != nil {
 		return m.stopAgentFunc(ctx, agentExecutionID, force)
@@ -71,10 +96,17 @@ func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID strin
 }
 
 func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID string, reason string, force bool) error {
+	if m.stopAgentWithReasonFunc != nil {
+		return m.stopAgentWithReasonFunc(ctx, agentExecutionID, reason, force)
+	}
 	return m.StopAgent(ctx, agentExecutionID, force)
 }
 
-func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment, _ bool) (*PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error) {
+	m.promptAgentCallCount++
+	if m.promptAgentFunc != nil {
+		return m.promptAgentFunc(ctx, agentExecutionID, prompt, attachments, dispatchOnly)
+	}
 	return nil, nil
 }
 
@@ -97,6 +129,10 @@ func (m *mockAgentManager) SetSessionModelBySessionID(ctx context.Context, sessi
 	return fmt.Errorf("not supported")
 }
 
+func (m *mockAgentManager) SetSessionModeBySessionID(ctx context.Context, sessionID, modeID string) error {
+	return fmt.Errorf("not supported")
+}
+
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	m.isAgentRunningForSessionCallArgs = append(m.isAgentRunningForSessionCallArgs, sessionID)
 	if m.isAgentRunningForSessionFunc != nil {
@@ -105,17 +141,46 @@ func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, session
 	return false
 }
 
+func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {
+	return m.IsAgentRunningForSession(ctx, sessionID)
+}
+
 func (m *mockAgentManager) WasSessionInitialized(_ string) bool { return false }
 func (m *mockAgentManager) GetSessionAuthMethods(_ string) []streams.AuthMethodInfo {
 	return nil
 }
 func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
+	if m.isPassthroughSessionFunc != nil {
+		return m.isPassthroughSessionFunc(ctx, sessionID)
+	}
 	return false
 }
-func (m *mockAgentManager) WritePassthroughStdin(_ context.Context, _ string, _ string) error {
+func (m *mockAgentManager) WritePassthroughStdin(ctx context.Context, sessionID string, data string) error {
+	m.writePassthroughStdinCalls = append(m.writePassthroughStdinCalls, passthroughStdinCall{
+		SessionID: sessionID,
+		Data:      data,
+	})
+	if m.writePassthroughStdinFunc != nil {
+		return m.writePassthroughStdinFunc(ctx, sessionID, data)
+	}
 	return nil
 }
-func (m *mockAgentManager) MarkPassthroughRunning(_ string) error {
+func (m *mockAgentManager) ResolvePassthroughConfig(ctx context.Context, sessionID string) (agents.PassthroughConfig, error) {
+	if m.resolvePassthroughConfigFunc != nil {
+		return m.resolvePassthroughConfigFunc(ctx, sessionID)
+	}
+	// Default to a sensible passthrough config (SubmitSequence "\r") when the
+	// session is in passthrough mode, so most tests don't need to override.
+	if m.isPassthroughSessionFunc != nil && m.isPassthroughSessionFunc(ctx, sessionID) {
+		return agents.PassthroughConfig{Supported: true, SubmitSequence: "\r"}, nil
+	}
+	return agents.PassthroughConfig{}, nil
+}
+func (m *mockAgentManager) MarkPassthroughRunning(sessionID string) error {
+	m.markPassthroughRunningCalls = append(m.markPassthroughRunningCalls, sessionID)
+	if m.markPassthroughRunningFunc != nil {
+		return m.markPassthroughRunningFunc(sessionID)
+	}
 	return nil
 }
 
@@ -188,6 +253,7 @@ type mockRepository struct {
 	taskRepositories     map[string]*models.TaskRepository
 	repositories         map[string]*models.Repository
 	executors            map[string]*models.Executor
+	executorProfiles     map[string]*models.ExecutorProfile
 	executorsRunning     map[string]*models.ExecutorRunning
 	taskEnvironments     map[string]*models.TaskEnvironment
 	taskEnvironmentRepos map[string][]*models.TaskEnvironmentRepo // env_id → rows
@@ -195,26 +261,72 @@ type mockRepository struct {
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
-	getTaskSessionFunc func(ctx context.Context, id string) (*models.TaskSession, error)
+	getTaskSessionFunc                 func(ctx context.Context, id string) (*models.TaskSession, error)
+	createTaskSessionFunc              func(ctx context.Context, session *models.TaskSession) error
+	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
+	listActiveTaskSessionsByTaskIDFunc func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	// Optional hook invoked at the top of UpdateTaskStateIfCurrentIn, before
+	// it reads task state/archived_at. Lets tests simulate the exact TOCTOU
+	// window this CAS closes: an earlier (non-transactional) archived-state
+	// guard already passed, then an archive commits in the gap before this
+	// call — the hook mutates the task here to model that gap. If nil, the
+	// CAS runs immediately against the task as currently seeded.
+	preCASHook func(taskID string)
+	// updateTaskStateIfNotArchivedCh, when non-nil, receives a non-blocking
+	// signal every time UpdateTaskStateIfNotArchived records a call — lets
+	// tests wait via select instead of polling with time.Sleep for a
+	// background goroutine's call to land. Buffered so a signal is never
+	// lost even if the test hasn't started waiting yet.
+	updateTaskStateIfNotArchivedCh chan struct{}
 
 	// Track calls for verification
-	createTaskSessionCalls     []*models.TaskSession
-	updateTaskSessionCalls     []*models.TaskSession
-	setSessionPrimaryCalls     []string
-	createTaskEnvironmentCalls []*models.TaskEnvironment
-	updateTaskEnvironmentCalls []*models.TaskEnvironment
+	createTaskSessionCalls            []*models.TaskSession
+	updateTaskSessionCalls            []*models.TaskSession
+	setSessionMetadataKeyCalls        []setSessionMetadataKeyCall
+	setSessionPrimaryCalls            []string
+	createTaskEnvironmentCalls        []*models.TaskEnvironment
+	updateTaskEnvironmentCalls        []*models.TaskEnvironment
+	updateTaskStateIfCurrentInCalls   []updateTaskStateIfCurrentInCall
+	updateTaskStateIfNotArchivedCalls []updateTaskStateIfNotArchivedCall
+}
+
+// updateTaskStateIfCurrentInCall records one UpdateTaskStateIfCurrentIn
+// invocation so tests can assert callers route guarded REVIEW writes
+// through the archive-aware CAS instead of the unconditional
+// UpdateTaskState.
+type updateTaskStateIfCurrentInCall struct {
+	TaskID  string
+	State   v1.TaskState
+	Allowed []v1.TaskState
+}
+
+// updateTaskStateIfNotArchivedCall records one UpdateTaskStateIfNotArchived
+// invocation — the IN_PROGRESS/FAILED-writer analog of
+// updateTaskStateIfCurrentInCall, used to assert those callers route
+// through the archive-aware CAS instead of the unconditional UpdateTaskState.
+type updateTaskStateIfNotArchivedCall struct {
+	TaskID string
+	State  v1.TaskState
+}
+
+type setSessionMetadataKeyCall struct {
+	SessionID string
+	Key       string
+	Value     interface{}
 }
 
 func newMockRepository() *mockRepository {
 	return &mockRepository{
-		sessions:             make(map[string]*models.TaskSession),
-		tasks:                make(map[string]*models.Task),
-		taskRepositories:     make(map[string]*models.TaskRepository),
-		repositories:         make(map[string]*models.Repository),
-		executors:            make(map[string]*models.Executor),
-		executorsRunning:     make(map[string]*models.ExecutorRunning),
-		taskEnvironments:     make(map[string]*models.TaskEnvironment),
-		taskEnvironmentRepos: make(map[string][]*models.TaskEnvironmentRepo),
+		sessions:                       make(map[string]*models.TaskSession),
+		tasks:                          make(map[string]*models.Task),
+		taskRepositories:               make(map[string]*models.TaskRepository),
+		repositories:                   make(map[string]*models.Repository),
+		executors:                      make(map[string]*models.Executor),
+		executorProfiles:               make(map[string]*models.ExecutorProfile),
+		executorsRunning:               make(map[string]*models.ExecutorRunning),
+		taskEnvironments:               make(map[string]*models.TaskEnvironment),
+		taskEnvironmentRepos:           make(map[string][]*models.TaskEnvironmentRepo),
+		updateTaskStateIfNotArchivedCh: make(chan struct{}, 8),
 	}
 }
 
@@ -239,10 +351,15 @@ func (m *mockRepository) GetRepository(ctx context.Context, id string) (*models.
 
 func (m *mockRepository) CreateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.createTaskSessionCalls = append(m.createTaskSessionCalls, session)
-	m.sessions[session.ID] = session
-	return nil
+	fn := m.createTaskSessionFunc
+	if fn == nil {
+		m.sessions[session.ID] = session
+		m.mu.Unlock()
+		return nil
+	}
+	m.mu.Unlock()
+	return fn(ctx, session)
 }
 
 func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
@@ -255,7 +372,9 @@ func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if session, ok := m.sessions[id]; ok {
-		return session, nil
+		// SQLite scans each query into a fresh value. Match that ownership
+		// boundary so concurrent executor paths cannot share mutable rows.
+		return cloneMockTaskSession(session), nil
 	}
 	return nil, nil
 }
@@ -268,6 +387,82 @@ func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.
 	return nil
 }
 
+func (m *mockRepository) UpdateTaskSessionIfCurrentState(
+	_ context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.sessions[session.ID]
+	if !ok {
+		return false, models.ErrTaskSessionNotFound
+	}
+	if current.State != expected {
+		return false, nil
+	}
+	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
+	m.sessions[session.ID] = session
+	return true, nil
+}
+
+func cloneMockTaskSession(session *models.TaskSession) *models.TaskSession {
+	if session == nil {
+		return nil
+	}
+	clone := *session
+	clone.Metadata = cloneMockSessionMap(session.Metadata)
+	clone.AgentProfileSnapshot = cloneMockSessionMap(session.AgentProfileSnapshot)
+	clone.ExecutorSnapshot = cloneMockSessionMap(session.ExecutorSnapshot)
+	clone.EnvironmentSnapshot = cloneMockSessionMap(session.EnvironmentSnapshot)
+	clone.RepositorySnapshot = cloneMockSessionMap(session.RepositorySnapshot)
+	if session.Worktrees != nil {
+		clone.Worktrees = make([]*models.TaskSessionWorktree, len(session.Worktrees))
+		for i, worktree := range session.Worktrees {
+			if worktree == nil {
+				continue
+			}
+			worktreeClone := *worktree
+			clone.Worktrees[i] = &worktreeClone
+		}
+	}
+	if session.CompletedAt != nil {
+		completedAt := *session.CompletedAt
+		clone.CompletedAt = &completedAt
+	}
+	return &clone
+}
+
+func cloneMockSessionMap(values map[string]interface{}) map[string]interface{} {
+	if values == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		panic(fmt.Sprintf("marshal mock task session map: %v", err))
+	}
+	var clone map[string]interface{}
+	if err := json.Unmarshal(encoded, &clone); err != nil {
+		panic(fmt.Sprintf("unmarshal mock task session map: %v", err))
+	}
+	return clone
+}
+
+func (m *mockRepository) UpdateTaskSessionAgentProfileSnapshot(
+	_ context.Context,
+	sessionID string,
+	snapshot map[string]interface{},
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session, ok := m.sessions[sessionID]
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.AgentProfileSnapshot = snapshot
+	return nil
+}
+
 func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -276,6 +471,12 @@ func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string
 }
 
 func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error {
+	m.mu.Lock()
+	fn := m.updateTaskSessionStateFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, sessionID, state, errorMessage)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if session, ok := m.sessions[sessionID]; ok {
@@ -313,6 +514,80 @@ func (m *mockRepository) CreateTaskSessionWorktree(_ context.Context, worktree *
 func (m *mockRepository) UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
 	return nil
 }
+
+// UpdateTaskStateIfCurrentIn mirrors the real repository's archive-aware CAS
+// semantics (task.go's UpdateTaskStateIfCurrentIn): the write only lands when
+// the task's current state is in allowed AND the task is not archived.
+func (m *mockRepository) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (v1.TaskState, bool, error) {
+	if m.preCASHook != nil {
+		m.preCASHook(taskID)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updateTaskStateIfCurrentInCalls = append(m.updateTaskStateIfCurrentInCalls, updateTaskStateIfCurrentInCall{
+		TaskID: taskID, State: state, Allowed: allowed,
+	})
+	task, ok := m.tasks[taskID]
+	if !ok {
+		return "", false, fmt.Errorf("task not found: %s", taskID)
+	}
+	currentState := task.State
+	if task.ArchivedAt != nil {
+		return currentState, false, nil
+	}
+	for _, candidate := range allowed {
+		if currentState == candidate {
+			task.State = state
+			return currentState, true, nil
+		}
+	}
+	return currentState, false, nil
+}
+
+// UpdateTaskStateIfNotArchived mirrors the real repository's archive-aware
+// CAS semantics (task.go's UpdateTaskStateIfNotArchived): unlike
+// UpdateTaskStateIfCurrentIn, there is no "allowed" prior-state set — the
+// write lands whenever the task is not archived. Reuses preCASHook so tests
+// can model the same TOCTOU window (archive commits between an earlier
+// non-transactional guard read and this call) for IN_PROGRESS/FAILED writers.
+func (m *mockRepository) UpdateTaskStateIfNotArchived(
+	ctx context.Context, taskID string, state v1.TaskState,
+) (v1.TaskState, bool, error) {
+	if m.preCASHook != nil {
+		m.preCASHook(taskID)
+	}
+	defer m.notifyUpdateTaskStateIfNotArchived()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updateTaskStateIfNotArchivedCalls = append(m.updateTaskStateIfNotArchivedCalls, updateTaskStateIfNotArchivedCall{
+		TaskID: taskID, State: state,
+	})
+	task, ok := m.tasks[taskID]
+	if !ok {
+		return "", false, fmt.Errorf("task not found: %s", taskID)
+	}
+	currentState := task.State
+	if task.ArchivedAt != nil {
+		return currentState, false, nil
+	}
+	task.State = state
+	return currentState, true, nil
+}
+
+// notifyUpdateTaskStateIfNotArchived signals updateTaskStateIfNotArchivedCh
+// (if the test wired one) that a call just landed. Non-blocking so it never
+// stalls the caller when nothing is listening.
+func (m *mockRepository) notifyUpdateTaskStateIfNotArchived() {
+	if m.updateTaskStateIfNotArchivedCh == nil {
+		return
+	}
+	select {
+	case m.updateTaskStateIfNotArchivedCh <- struct{}{}:
+	default:
+	}
+}
 func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	return nil, nil
@@ -332,6 +607,9 @@ func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.
 	return nil
 }
 func (m *mockRepository) DeleteWorkspace(ctx context.Context, id string) error { return nil }
+func (m *mockRepository) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error) {
+	return nil, nil, m.DeleteWorkspace(ctx, id)
+}
 func (m *mockRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	return nil, nil
 }
@@ -344,12 +622,21 @@ func (m *mockRepository) GetTask(ctx context.Context, id string) (*models.Task, 
 	}
 	return nil, nil
 }
+func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	var out []*models.Task
+	for _, id := range ids {
+		if task, ok := m.tasks[id]; ok {
+			out = append(out, task)
+		}
+	}
+	return out, nil
+}
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error { return nil }
 func (m *mockRepository) DeleteTask(ctx context.Context, id string) error         { return nil }
 func (m *mockRepository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
 	return nil, 0, nil
 }
 func (m *mockRepository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
@@ -498,6 +785,12 @@ func (m *mockRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.
 	return nil, nil
 }
 func (m *mockRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	m.mu.Lock()
+	fn := m.listActiveTaskSessionsByTaskIDFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, taskID)
+	}
 	return nil, nil
 }
 func (m *mockRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
@@ -514,6 +807,9 @@ func (m *mockRepository) HasActiveTaskSessionsByEnvironment(ctx context.Context,
 }
 func (m *mockRepository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	return false, nil
+}
+func (m *mockRepository) CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error) {
+	return 0, nil
 }
 func (m *mockRepository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
 	return 0, nil
@@ -533,6 +829,9 @@ func (m *mockRepository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs 
 func (m *mockRepository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
 	return nil, nil
 }
+func (m *mockRepository) BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error {
 	return nil
 }
@@ -543,6 +842,21 @@ func (m *mockRepository) UpdateSessionMetadata(ctx context.Context, sessionID st
 	return nil
 }
 func (m *mockRepository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setSessionMetadataKeyCalls = append(m.setSessionMetadataKeyCalls, setSessionMetadataKeyCall{
+		SessionID: sessionID,
+		Key:       key,
+		Value:     value,
+	})
+	session := m.sessions[sessionID]
+	if session == nil {
+		return nil
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[key] = value
 	return nil
 }
 func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (string, error) {
@@ -551,7 +865,13 @@ func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (strin
 
 // Task Session Worktree operations
 func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
-	return nil, nil
+	var out []*models.TaskSessionWorktree
+	for _, wt := range m.sessionWorktrees {
+		if wt.SessionID == sessionID {
+			out = append(out, wt)
+		}
+	}
+	return out, nil
 }
 func (m *mockRepository) ListWorktreesBySessionIDs(_ context.Context, _ []string) (map[string][]*models.TaskSessionWorktree, error) {
 	return make(map[string][]*models.TaskSessionWorktree), nil
@@ -656,6 +976,22 @@ func (m *mockRepository) HasExecutorRunningRow(ctx context.Context, sessionID st
 	return false, nil
 }
 
+// UpdateExecutorRunningStatus mirrors the production sqlite repo: returns
+// ErrExecutorRunningNotFound when no row exists for the session. Tests that
+// exercise the "no row" warning-log path can rely on this, and tests that want
+// the status flip to land must seed m.executorsRunning[sessionID] first.
+func (m *mockRepository) UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error {
+	if m.executorsRunning == nil {
+		return models.ErrExecutorRunningNotFound
+	}
+	row, ok := m.executorsRunning[sessionID]
+	if !ok {
+		return models.ErrExecutorRunningNotFound
+	}
+	row.Status = status
+	return nil
+}
+
 // Environment operations
 func (m *mockRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {
 	return nil
@@ -712,11 +1048,29 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	return nil
 }
 func (m *mockRepository) CreateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
+	if repo.ID == "" {
+		repo.ID = repo.TaskEnvironmentID + "-repo-" + repo.RepositoryID
+		if repo.BranchSlug != "" {
+			repo.ID += "-branch-" + repo.BranchSlug
+		}
+	}
 	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(m.taskEnvironmentRepos[repo.TaskEnvironmentID], repo)
 	return nil
 }
 func (m *mockRepository) ListTaskEnvironmentRepos(_ context.Context, envID string) ([]*models.TaskEnvironmentRepo, error) {
 	return m.taskEnvironmentRepos[envID], nil
+}
+func (m *mockRepository) UpdateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
+	rows := m.taskEnvironmentRepos[repo.TaskEnvironmentID]
+	for i, row := range rows {
+		if row.ID == repo.ID {
+			rows[i] = repo
+			m.taskEnvironmentRepos[repo.TaskEnvironmentID] = rows
+			return nil
+		}
+	}
+	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(rows, repo)
+	return nil
 }
 
 // Task Plan operations
@@ -749,6 +1103,9 @@ func (m *mockRepository) CreateExecutorProfile(ctx context.Context, profile *mod
 	return nil
 }
 func (m *mockRepository) GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error) {
+	if p, ok := m.executorProfiles[id]; ok {
+		return p, nil
+	}
 	return nil, nil
 }
 func (m *mockRepository) UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {

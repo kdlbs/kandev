@@ -15,7 +15,15 @@ on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
   pull_request_target:
-    types: [opened, synchronize, ready_for_review, reopened]
+    # `labeled` is needed so a maintainer applying `safe-to-review` to a fork
+    # PR triggers a review against the current head SHA. Subsequent fork pushes
+    # (synchronize) do NOT re-trigger the label path — see claude-review-fork's
+    # if-gate and strip-safe-to-review below.
+    types: [opened, synchronize, ready_for_review, reopened, labeled]
+
+concurrency:
+  group: claude-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   claude-review-same-repo:
@@ -33,13 +41,13 @@ jobs:
 
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
 
       - name: Run Claude Code Review (App token, inline comments)
         id: claude-review
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@78a7209fd893bd50d1b2b784da9b6f240a66373a # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # No github_token: the action performs the OIDC -> installation-token
@@ -66,17 +74,54 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
             --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git rebase:*),Bash(git reset:*),Bash(gh pr edit:*),Bash(curl:*),Bash(wget:*)"
 
+  # Strip safe-to-review label on new pushes to fork PRs.
+  # Together with the `github.event.action != 'synchronize'` guard on the
+  # label path in claude-review-fork's if-gate, this gives true per-commit
+  # opt-in: the maintainer must re-apply `safe-to-review` after each push for
+  # the review job to run again. A new push on its own never re-triggers the
+  # review on the label path.
+  strip-safe-to-review:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'synchronize' &&
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'safe-to-review')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                name: 'safe-to-review',
+              });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.info('safe-to-review label already absent; nothing to remove.');
+            }
+
   claude-review-fork:
     # Fork PRs only, via pull_request_target so secrets are available.
-    # Gated by allowlist: OWNER/MEMBER/COLLABORATOR author, `safe-to-review`
-    # label (maintainer opt-in), or CLAUDE_REVIEW_ALLOWLIST repo variable
-    # (JSON array string, e.g. ["alice","bob"], in Settings -> Secrets and
-    # variables -> Actions -> Variables).
+    # Two approval paths:
+    #   - CLAUDE_REVIEW_ALLOWLIST repo variable (trusted login list, all events;
+    #     JSON array, e.g. ["alice","bob"], in Settings -> Secrets and variables
+    #     -> Actions -> Variables)
+    #   - `safe-to-review` label (maintainer opt-in, per-commit). Explicitly
+    #     blocked on `synchronize` so a contributor's push cannot re-use a
+    #     stale label — the maintainer must re-apply it after each push for
+    #     the `labeled` event to trigger a fresh review against the new SHA.
+    # Branch order matters: keep cheap/safe checks before `fromJSON(vars.*)`,
+    # which throws (and skips the whole job) if the repo variable is
+    # non-empty but unparseable JSON.
     if: >
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
-       contains(github.event.pull_request.labels.*.name, 'safe-to-review') ||
+      ((github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-review')) ||
        (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
     permissions:
@@ -86,19 +131,20 @@ jobs:
 
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # pull_request_target defaults to the base ref; explicitly check out
-          # the PR head so the review runs against the contributor's changes.
+          # the PR head through the base repository's pull ref. Keeping origin
+          # on the base repository lets claude-code-action fetch
+          # refs/pull/<number>/head during its own PR setup.
           # Safe because the workflow never executes scripts from the PR;
           # claude-code-action only reads files and posts comments.
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: refs/pull/${{ github.event.pull_request.number }}/head
           fetch-depth: 1
 
       - name: Run Claude Code Review (GITHUB_TOKEN fallback)
         id: claude-review
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@78a7209fd893bd50d1b2b784da9b6f240a66373a # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Skip the Claude GitHub App's OIDC -> installation-token exchange,
@@ -107,7 +153,7 @@ jobs:
           # enough for the action to post review comments. Author will be
           # github-actions[bot] on this path.
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          track_progress: true
+          track_progress: ${{ github.event.action != 'labeled' }}
           allowed_bots: "*"
           prompt: |
             REPO: ${{ github.repository }}

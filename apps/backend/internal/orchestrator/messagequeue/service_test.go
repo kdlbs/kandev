@@ -126,6 +126,64 @@ func TestAppendContent(t *testing.T) {
 	})
 }
 
+func TestQueueMessageWithCoalesceKey(t *testing.T) {
+	t.Run("replaces matching entry without changing FIFO position", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		first, err := svc.QueueMessage(ctx, "s", "t", "first", "", "user", false, nil)
+		require.NoError(t, err)
+		ci, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "old ci", "", QueuedByWorkflow, false, nil, map[string]interface{}{"origin": "ci"}, "ci-key", true)
+		require.NoError(t, err)
+		require.False(t, replaced)
+		_, err = svc.QueueMessage(ctx, "s", "t", "tail", "", "user", false, nil)
+		require.NoError(t, err)
+
+		updated, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "new ci", "", QueuedByWorkflow, false, nil, map[string]interface{}{"origin": "ci-new"}, "ci-key", true)
+		require.NoError(t, err)
+		require.True(t, replaced)
+		require.Equal(t, ci.ID, updated.ID)
+
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 3, status.Count)
+		assert.Equal(t, first.ID, status.Entries[0].ID)
+		assert.Equal(t, ci.ID, status.Entries[1].ID)
+		assert.Equal(t, "new ci", status.Entries[1].Content)
+		assert.Equal(t, "ci-new", status.Entries[1].Metadata["origin"])
+		assert.Equal(t, "tail", status.Entries[2].Content)
+	})
+
+	t.Run("does not mutate caller metadata or retag existing entries", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+		metadata := map[string]interface{}{"origin": "ci"}
+
+		first, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "first ci", "", QueuedByWorkflow, false, nil, metadata, "ci-key", true)
+		require.NoError(t, err)
+		require.False(t, replaced)
+		second, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "second ci", "", QueuedByWorkflow, false, nil, metadata, "other-key", true)
+		require.NoError(t, err)
+		require.False(t, replaced)
+
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 2, status.Count)
+		assert.Equal(t, first.ID, status.Entries[0].ID)
+		assert.Equal(t, second.ID, status.Entries[1].ID)
+		assert.Equal(t, "ci-key", status.Entries[0].Metadata[MetadataCoalesceKey])
+		assert.Equal(t, "other-key", status.Entries[1].Metadata[MetadataCoalesceKey])
+		assert.NotContains(t, metadata, MetadataCoalesceKey)
+	})
+
+	t.Run("returns entry not found when insert disabled and no match exists", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		_, _, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "ci", "", QueuedByWorkflow, false, nil, nil, "ci-key", false)
+		assert.ErrorIs(t, err, ErrEntryNotFound)
+		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
+	})
+}
+
 func TestTakeQueued(t *testing.T) {
 	t.Run("returns entries in FIFO order", func(t *testing.T) {
 		svc := setupService(t)
@@ -152,6 +210,116 @@ func TestTakeQueued(t *testing.T) {
 		assert.False(t, ok)
 		assert.Nil(t, msg)
 	})
+}
+
+// TestTakeQueuedEntry covers TakeQueuedEntry: out-of-FIFO-order removal,
+// takeability of agent-authored entries (unlike RemoveEntry), the
+// not-found (nil, false, nil) shape for a missing or foreign-session id,
+// and — distinctly — a genuine repository error propagating as a non-nil
+// error rather than being collapsed into the not-found shape.
+func TestTakeQueuedEntry(t *testing.T) {
+	t.Run("removes and returns the targeted entry regardless of FIFO position", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		_, err := svc.QueueMessage(ctx, "s", "t", "first", "", "u", false, nil)
+		require.NoError(t, err)
+		second, err := svc.QueueMessage(ctx, "s", "t", "second", "", "u", false, nil)
+		require.NoError(t, err)
+		_, err = svc.QueueMessage(ctx, "s", "t", "third", "", "u", false, nil)
+		require.NoError(t, err)
+
+		msg, ok, err := svc.TakeQueuedEntry(ctx, "s", second.ID)
+		require.NoError(t, err)
+		require.True(t, ok)
+		assert.Equal(t, "second", msg.Content)
+
+		// The other two entries are untouched and keep their relative order.
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 2, status.Count)
+		assert.Equal(t, "first", status.Entries[0].Content)
+		assert.Equal(t, "third", status.Entries[1].Content)
+
+		// Taking the same id again finds nothing — it's already gone.
+		_, ok, err = svc.TakeQueuedEntry(ctx, "s", second.ID)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("takes agent-authored entries unlike RemoveEntry", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		agentEntry, err := svc.QueueMessageWithMetadata(ctx, "s", "t", "agent entry", "", QueuedByAgent, false, nil, nil)
+		require.NoError(t, err)
+
+		msg, ok, err := svc.TakeQueuedEntry(ctx, "s", agentEntry.ID)
+		require.NoError(t, err)
+		require.True(t, ok)
+		assert.Equal(t, "agent entry", msg.Content)
+	})
+
+	t.Run("returns false for a missing or foreign-session id", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		victim, err := svc.QueueMessage(ctx, "s-victim", "t", "victim entry", "", "u", false, nil)
+		require.NoError(t, err)
+
+		_, ok, err := svc.TakeQueuedEntry(ctx, "s-victim", "missing-id")
+		require.NoError(t, err)
+		assert.False(t, ok)
+
+		_, ok, err = svc.TakeQueuedEntry(ctx, "s-attacker", victim.ID)
+		require.NoError(t, err)
+		assert.False(t, ok)
+
+		status := svc.GetStatus(ctx, "s-victim")
+		assert.Equal(t, 1, status.Count)
+	})
+
+	t.Run("propagates a genuine repository error instead of reporting not-found", func(t *testing.T) {
+		// A repository error (e.g. a transient DB failure) must not be
+		// collapsed into the same (nil, false) shape as a legitimate
+		// not-found — InterruptForPeerMessage treats the two differently
+		// (not-found falls back to a FIFO-head drain; an error propagates
+		// without a fallback, since the error says nothing about what is
+		// actually at the FIFO head).
+		log, err := logger.NewLogger(logger.LoggingConfig{
+			Level:      "error",
+			Format:     "console",
+			OutputPath: "stderr",
+		})
+		require.NoError(t, err)
+		wantErr := errors.New("db unavailable")
+		repo := &errInjectingRepository{Repository: NewMemoryRepository(), takeByIDErr: wantErr}
+		svc := NewService(repo, DefaultMaxPerSession, log)
+		ctx := context.Background()
+
+		msg, ok, err := svc.TakeQueuedEntry(ctx, "s", "some-id")
+		assert.Nil(t, msg)
+		assert.False(t, ok)
+		assert.ErrorIs(t, err, wantErr)
+	})
+}
+
+// errInjectingRepository wraps a Repository and returns a configured error
+// from TakeByID, letting tests exercise TakeQueuedEntry's error-propagation
+// path without needing a real repository failure.
+type errInjectingRepository struct {
+	Repository
+	takeByIDErr error
+}
+
+// TakeByID returns the configured error if set, otherwise delegates to the
+// embedded Repository so the remaining repository operations (Insert,
+// ListBySession, CountBySession, ...) still work against the real
+// underlying store.
+func (r *errInjectingRepository) TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error) {
+	if r.takeByIDErr != nil {
+		return nil, r.takeByIDErr
+	}
+	return r.Repository.TakeByID(ctx, sessionID, entryID)
 }
 
 func TestUpdateMessage(t *testing.T) {
@@ -327,6 +495,39 @@ func TestTransferSession(t *testing.T) {
 		_, ok := svc.TakeQueued(ctx, "new")
 		assert.False(t, ok)
 	})
+}
+
+func TestRestoreSession(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	original, err := svc.QueueMessageWithMetadata(ctx, "s", "task-1", "original", "model-a", "agent", true, []MessageAttachment{
+		{Type: "image", Data: "abc", MimeType: "image/png"},
+	}, map[string]interface{}{"sender": "task-a"})
+	require.NoError(t, err)
+	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-a"})
+
+	_, err = svc.QueueMessage(ctx, "s", "task-1", "mutated", "", "user", false, nil)
+	require.NoError(t, err)
+	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
+
+	require.NoError(t, svc.RestoreSession(ctx, "s", []QueuedMessage{*original}, &PendingMove{
+		TaskID:         "task-1",
+		WorkflowStepID: "step-a",
+		QueuedAt:       original.QueuedAt,
+	}))
+
+	status := svc.GetStatus(ctx, "s")
+	require.Equal(t, 1, status.Count)
+	restored := status.Entries[0]
+	assert.Equal(t, original.ID, restored.ID)
+	assert.Equal(t, original.Position, restored.Position)
+	assert.Equal(t, original.QueuedAt, restored.QueuedAt)
+	assert.Equal(t, original.Content, restored.Content)
+	assert.Equal(t, original.Metadata, restored.Metadata)
+	move, ok := svc.TakePendingMove(ctx, "s")
+	require.True(t, ok)
+	assert.Equal(t, "step-a", move.WorkflowStepID)
 }
 
 func TestPendingMove(t *testing.T) {

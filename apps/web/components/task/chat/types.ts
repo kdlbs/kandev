@@ -4,6 +4,22 @@ export type SubagentTaskPayload = {
   description?: string;
   prompt?: string;
   subagent_type?: string;
+  status?: string; // result lifecycle, e.g. "complete" | "error" | "async_launched"
+  agent_id?: string; // Claude
+  model?: string; // OpenCode, e.g. "opencode/big-pickle"
+  child_session_id?: string; // OpenCode child session
+  duration_ms?: number; // Claude (totalDurationMs) + Cursor (durationMs)
+  total_tokens?: number; // Claude
+  tool_use_count?: number; // Claude
+  // Backgrounded subagent fields (Claude Code Task with run_in_background=true):
+  // the dispatch is terminal for the Task card, but the subagent itself keeps
+  // running and writes its result to output_file out-of-band.
+  is_async?: boolean;
+  output_file?: string;
+  can_read_output_file?: boolean;
+  // Final summary returned by silent subagents (Auggie) that don't stream
+  // intermediate tool calls. Rendered inline when there are no child messages.
+  result_text?: string;
 };
 
 export type GenericPayload = {
@@ -79,10 +95,12 @@ export type ModifyFilePayload = {
   mutations?: FileMutation[];
 };
 
-export type ShellExecOutput = {
+export type ShellExecOutputSummary = {
   exit_code?: number;
-  stdout?: string;
-  stderr?: string;
+  has_output?: boolean;
+  stdout_bytes?: number;
+  stderr_bytes?: number;
+  truncated?: boolean;
 };
 
 export type ShellExecPayload = {
@@ -91,7 +109,7 @@ export type ShellExecPayload = {
   description?: string;
   timeout?: number;
   background?: boolean;
-  output?: ShellExecOutput;
+  output?: ShellExecOutputSummary;
 };
 
 export type HttpRequestPayload = {
@@ -117,7 +135,16 @@ export type ToolCallMetadata = {
   parent_tool_call_id?: string; // For subagent nesting
   tool_name?: string;
   title?: string;
-  status?: "pending" | "running" | "complete" | "error";
+  status?:
+    | "pending"
+    | "running"
+    | "in_progress"
+    | "complete"
+    | "completed"
+    | "success"
+    | "error"
+    | "failed"
+    | "cancelled";
   args?: Record<string, unknown>;
   result?: string;
   normalized?: NormalizedPayload;
@@ -130,6 +157,12 @@ export type StatusMetadata = {
   message?: string;
   variant?: "default" | "warning" | "error";
   cancelled?: boolean;
+  // Transient provider-error (529 Overloaded) retry state. Present on the
+  // yellow "retrying" status message the orchestrator emits during backoff.
+  retrying?: boolean;
+  attempt?: number;
+  max_attempts?: number;
+  retry_in_seconds?: number;
 };
 
 export type RecoveryAuthMethod = {

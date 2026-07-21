@@ -174,6 +174,129 @@ func (e *emitter) endMonitorTool(id acp.ToolCallId) {
 	})
 }
 
+// subagent meta keys/values claude-agent-acp uses under
+// `_meta.claudeCode.toolResponse`. Pulled out so goconst stays happy.
+const (
+	subagentKeyStatus       = "status"
+	subagentStatusCompleted = "completed"
+	subagentKeyDescription  = "description"
+	subagentKeyPrompt       = "prompt"
+	subagentKeySubagentType = "subagent_type"
+)
+
+// subagentClaudeMeta builds the `_meta.claudeCode.toolName=Agent` payload that
+// claude-agent-acp tags subagent (Task) tool_call notifications with. The
+// kandev ACP adapter recognizes subagents by this marker.
+func subagentClaudeMeta() any {
+	return map[string]any{"claudeCode": map[string]any{"toolName": "Agent"}}
+}
+
+// subagentResult describes the result metadata claude-agent-acp reports for a
+// finished subagent under `_meta.claudeCode.toolResponse`.
+type subagentResult struct {
+	agentID      string
+	subagentType string
+	durationMs   int64
+	totalTokens  int64
+	toolUseCount int
+}
+
+// subagentClaudeMetaWithResponse embeds a `toolResponse` block mirroring the
+// real claude-agent-acp completion frame so the kandev adapter's
+// EnrichSubagentResult populates every metric the UI renders.
+func subagentClaudeMetaWithResponse(r subagentResult) any {
+	return map[string]any{
+		"claudeCode": map[string]any{
+			"toolName": "Agent",
+			"toolResponse": map[string]any{
+				"agentId":           r.agentID,
+				"agentType":         r.subagentType,
+				subagentKeyStatus:   subagentStatusCompleted,
+				"totalDurationMs":   r.durationMs,
+				"totalTokens":       r.totalTokens,
+				"totalToolUseCount": r.toolUseCount,
+			},
+		},
+	}
+}
+
+// startSubagentTool emits the initial subagent tool_call (status=pending) in
+// claude-agent-acp's wire shape: title "Task", kind Other, the Agent meta
+// marker, and rawInput carrying description/prompt/subagent_type.
+func (e *emitter) startSubagentTool(id acp.ToolCallId, description, prompt, subagentType string) {
+	withStartMeta := func(meta any) acp.ToolCallStartOpt {
+		return func(tc *acp.SessionUpdateToolCall) { tc.Meta = toMetaMap(meta) }
+	}
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.StartToolCall(id, "Task",
+			acp.WithStartKind(acp.ToolKindOther),
+			acp.WithStartStatus(acp.ToolCallStatusPending),
+			acp.WithStartRawInput(map[string]any{
+				subagentKeyDescription:  description,
+				subagentKeyPrompt:       prompt,
+				subagentKeySubagentType: subagentType,
+			}),
+			withStartMeta(subagentClaudeMeta()),
+		),
+	})
+}
+
+// completeSubagentTool emits the terminal subagent tool_call_update with the
+// result text and the `toolResponse` metadata block.
+func (e *emitter) completeSubagentTool(id acp.ToolCallId, resultText string, r subagentResult) {
+	withUpdateMeta := func(meta any) acp.ToolCallUpdateOpt {
+		return func(tu *acp.SessionToolCallUpdate) { tu.Meta = toMetaMap(meta) }
+	}
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.UpdateToolCall(id,
+			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
+			acp.WithUpdateRawOutput(resultText),
+			withUpdateMeta(subagentClaudeMetaWithResponse(r)),
+		),
+	})
+}
+
+// subagentChildMeta tags a tool call as a subagent's internal call via
+// `_meta.claudeCode.parentToolUseId`, mirroring claude-agent-acp so the kandev
+// adapter nests it under the parent Task card.
+func subagentChildMeta(parentToolUseID acp.ToolCallId) any {
+	return map[string]any{"claudeCode": map[string]any{"parentToolUseId": string(parentToolUseID)}}
+}
+
+// startChildTool emits a tool_call attributed to a parent subagent (Task).
+func (e *emitter) startChildTool(id, parent acp.ToolCallId, title string, kind acp.ToolKind, input any) {
+	withStartMeta := func(meta any) acp.ToolCallStartOpt {
+		return func(tc *acp.SessionUpdateToolCall) { tc.Meta = toMetaMap(meta) }
+	}
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.StartToolCall(id, title,
+			acp.WithStartKind(kind),
+			acp.WithStartStatus(acp.ToolCallStatusPending),
+			acp.WithStartRawInput(input),
+			withStartMeta(subagentChildMeta(parent)),
+		),
+	})
+}
+
+// completeChildTool completes a subagent child tool call, keeping the parent
+// attribution on the terminal frame too.
+func (e *emitter) completeChildTool(id, parent acp.ToolCallId, output any) {
+	withUpdateMeta := func(meta any) acp.ToolCallUpdateOpt {
+		return func(tu *acp.SessionToolCallUpdate) { tu.Meta = toMetaMap(meta) }
+	}
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.UpdateToolCall(id,
+			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
+			acp.WithUpdateRawOutput(output),
+			withUpdateMeta(subagentChildMeta(parent)),
+		),
+	})
+}
+
 // requestPermission asks the client for permission to proceed with a tool call.
 // Returns true if permission was granted, false otherwise.
 func (e *emitter) requestPermission(toolCallID acp.ToolCallId, title string, kind acp.ToolKind, input any) bool {

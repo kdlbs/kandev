@@ -19,6 +19,10 @@ go.work
 # Dependency directories
 vendor/
 
+# Python helper caches
+__pycache__/
+*.py[cod]
+
 # IDE and editor files
 .idea/
 *.swp
@@ -40,11 +44,19 @@ Thumbs.db
 # Log files
 *.log
 logs/
+!apps/backend/internal/system/logs/
+!apps/web/app/settings/system/logs/
+!apps/web/e2e/tests/system/logs-page.spec.ts
 
 # Temporary files
 tmp/
 temp/
 /workspaces/
+
+# Verification caches belong outside Git worktrees. Ignore this legacy/local
+# fallback so a misconfigured verification run cannot flood Git status.
+/.verify-cache/
+/.tmp/
 
 # Agent session files (local development)
 .augment/
@@ -78,11 +90,20 @@ tmp/
 
 apps/backend/bin/
 
+# `make -C apps/backend e2e-plugin-package` output (packaged fixture plugin
+# tar.gz + build staging dir) — e2e tests build this on demand, not committed.
+apps/backend/.build/
+
+# Local protoc-gen-* tool binaries installed by `make -C apps/backend proto`
+apps/backend/.tools/
+
 # Go binaries (built locally)
 apps/backend/kandev
 apps/backend/agentctl
 apps/backend/mock-agent
 apps/backend/acpdbg
+apps/backend/plugin-fixture
+apps/backend/plugin-pack
 
 # acpdbg JSONL output (raw ACP wire frames from debug runs)
 apps/backend/acp-debug/
@@ -105,15 +126,19 @@ normalized-*.jsonl
 # Serena MCP
 .serena/*
 .gitnexus
-.codex
+.codex/*
+!.codex/agents/
+!.codex/agents/*.toml
+!.codex/config.toml
 
 # playwright-cli snapshots/console logs
 .playwright-cli/
 /.claude/scheduled_tasks.lock
 
-# implementation plans (reviewed locally, not committed)
-docs/specs/*/plan.md
-docs/plans/
-
 # Local worktrees (not the backend-managed tree under ~/.kandev)
 /.worktrees/
+
+# PR screenshot/asset scratch dirs — never committed; drag-and-drop into the
+# GitHub PR description instead (see apps/web/e2e/scripts/upload-pr-assets.ts).
+/.pr-screenshots/
+/apps/web/.pr-assets/

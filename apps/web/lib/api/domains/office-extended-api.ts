@@ -461,6 +461,11 @@ export type OnboardingCompletePayload = {
   taskPrefix: string;
   agentName: string;
   agentProfileId: string;
+  tier_profiles?: {
+    frontier?: string;
+    balanced?: string;
+    economy?: string;
+  };
   executorPreference: string;
   taskTitle?: string;
   taskDescription?: string;

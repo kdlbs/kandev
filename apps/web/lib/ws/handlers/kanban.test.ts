@@ -3,6 +3,16 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { registerKanbanHandlers } from "./kanban";
 
+const WORKFLOW_ID = "wf1";
+const TASK_ID = "t1";
+const STEP_ID = "s1";
+const TASK_TITLE = "T1";
+const UPDATED_TITLE = "T1 updated";
+const REPO_A_ID = "repo-a";
+const REPO_B_ID = "repo-b";
+const REPO_LINK_A_ID = "link-a";
+const FEATURE_BRANCH = "feature/x";
+
 function makeStore(initial: Partial<AppState> = {}) {
   let state = {
     kanban: { workflowId: null, steps: [], tasks: [] },
@@ -33,16 +43,43 @@ function makeUpdateMessage(workflowId: string, tasks: unknown[], steps: unknown[
 }
 
 describe("kanban.update handler — primarySessionId preservation", () => {
+  it("preserves workflow step WIP fields", () => {
+    const store = makeStore();
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+
+    handler(
+      makeUpdateMessage(
+        WORKFLOW_ID,
+        [],
+        [
+          {
+            id: STEP_ID,
+            title: "Review",
+            position: 1,
+            color: "bg-blue-500",
+            wip_limit: 2,
+            pull_from_step_id: "step-0",
+          },
+        ],
+      ),
+    );
+
+    expect(store.getState().kanban.steps[0]).toMatchObject({
+      wip_limit: 2,
+      pull_from_step_id: "step-0",
+    });
+  });
+
   it("preserves primarySessionId from existing tasks", () => {
     const store = makeStore({
       kanban: {
-        workflowId: "wf1",
+        workflowId: WORKFLOW_ID,
         steps: [],
         tasks: [
           {
-            id: "t1",
-            workflowStepId: "s1",
-            title: "T1",
+            id: TASK_ID,
+            workflowStepId: STEP_ID,
+            title: TASK_TITLE,
             position: 0,
             primarySessionId: "sess-primary",
           },
@@ -52,26 +89,32 @@ describe("kanban.update handler — primarySessionId preservation", () => {
 
     const handler = registerKanbanHandlers(store)["kanban.update"]!;
     handler(
-      makeUpdateMessage("wf1", [
-        { id: "t1", workflowStepId: "s1", title: "T1 updated", position: 0, state: "IN_PROGRESS" },
+      makeUpdateMessage(WORKFLOW_ID, [
+        {
+          id: TASK_ID,
+          workflowStepId: STEP_ID,
+          title: UPDATED_TITLE,
+          position: 0,
+          state: "IN_PROGRESS",
+        },
       ]),
     );
 
-    const task = store.getState().kanban.tasks.find((t) => t.id === "t1");
+    const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
     expect(task?.primarySessionId).toBe("sess-primary");
-    expect(task?.title).toBe("T1 updated");
+    expect(task?.title).toBe(UPDATED_TITLE);
   });
 
   it("preserves primarySessionState from existing tasks", () => {
     const store = makeStore({
       kanban: {
-        workflowId: "wf1",
+        workflowId: WORKFLOW_ID,
         steps: [],
         tasks: [
           {
-            id: "t1",
-            workflowStepId: "s1",
-            title: "T1",
+            id: TASK_ID,
+            workflowStepId: STEP_ID,
+            title: TASK_TITLE,
             position: 0,
             primarySessionId: "sess-primary",
             primarySessionState: "RUNNING",
@@ -82,28 +125,153 @@ describe("kanban.update handler — primarySessionId preservation", () => {
 
     const handler = registerKanbanHandlers(store)["kanban.update"]!;
     handler(
-      makeUpdateMessage("wf1", [{ id: "t1", workflowStepId: "s1", title: "T1", position: 0 }]),
+      makeUpdateMessage(WORKFLOW_ID, [
+        { id: TASK_ID, workflowStepId: STEP_ID, title: TASK_TITLE, position: 0 },
+      ]),
     );
 
-    const task = store.getState().kanban.tasks.find((t) => t.id === "t1");
+    const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
     expect(task?.primarySessionState).toBe("RUNNING");
   });
 
   it("new tasks start with undefined primarySessionId", () => {
     const store = makeStore({
-      kanban: { workflowId: "wf1", steps: [], tasks: [] },
+      kanban: { workflowId: WORKFLOW_ID, steps: [], tasks: [] },
     } as Partial<AppState>);
 
     const handler = registerKanbanHandlers(store)["kanban.update"]!;
     handler(
-      makeUpdateMessage("wf1", [
-        { id: "t-new", workflowStepId: "s1", title: "New Task", position: 0 },
+      makeUpdateMessage(WORKFLOW_ID, [
+        { id: "t-new", workflowStepId: STEP_ID, title: "New Task", position: 0 },
       ]),
     );
 
     const task = store.getState().kanban.tasks.find((t) => t.id === "t-new");
     expect(task).toBeDefined();
     expect(task?.primarySessionId).toBeUndefined();
+  });
+});
+
+describe("kanban.update handler — repository preservation", () => {
+  it("preserves existing repositories when kanban.update omits repo metadata", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [
+          {
+            id: TASK_ID,
+            workflowStepId: STEP_ID,
+            title: TASK_TITLE,
+            position: 0,
+            repositoryId: REPO_A_ID,
+            repositories: [
+              {
+                id: REPO_LINK_A_ID,
+                repository_id: REPO_A_ID,
+                base_branch: "main",
+                checkout_branch: FEATURE_BRANCH,
+                position: 0,
+              },
+            ],
+          },
+        ],
+      },
+    } as Partial<AppState>);
+
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+    handler(
+      makeUpdateMessage(WORKFLOW_ID, [
+        {
+          id: TASK_ID,
+          workflowStepId: STEP_ID,
+          title: UPDATED_TITLE,
+          position: 0,
+          state: "CREATED",
+        },
+      ]),
+    );
+
+    const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
+    expect(task?.repositoryId).toBe(REPO_A_ID);
+    expect(task?.repositories).toEqual([
+      {
+        id: REPO_LINK_A_ID,
+        repository_id: REPO_A_ID,
+        base_branch: "main",
+        checkout_branch: FEATURE_BRANCH,
+        position: 0,
+      },
+    ]);
+  });
+});
+
+describe("kanban.update handler — repository switch", () => {
+  it("does not restore stale snapshot repositories when repository_id changes", () => {
+    const repoA = [
+      {
+        id: REPO_LINK_A_ID,
+        repository_id: REPO_A_ID,
+        base_branch: "main",
+        checkout_branch: FEATURE_BRANCH,
+        position: 0,
+      },
+    ];
+    const store = makeStore({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [
+          {
+            id: TASK_ID,
+            workflowStepId: STEP_ID,
+            title: TASK_TITLE,
+            position: 0,
+            repositoryId: REPO_A_ID,
+            repositories: repoA,
+          },
+        ],
+      },
+      kanbanMulti: {
+        isLoading: false,
+        snapshots: {
+          [WORKFLOW_ID]: {
+            workflowId: WORKFLOW_ID,
+            workflowName: "WF1",
+            steps: [],
+            tasks: [
+              {
+                id: TASK_ID,
+                workflowStepId: STEP_ID,
+                title: TASK_TITLE,
+                position: 0,
+                repositoryId: REPO_A_ID,
+                repositories: repoA,
+              },
+            ],
+          },
+        },
+      },
+    } as Partial<AppState>);
+
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+    handler(
+      makeUpdateMessage(WORKFLOW_ID, [
+        {
+          id: TASK_ID,
+          workflowStepId: STEP_ID,
+          title: UPDATED_TITLE,
+          position: 0,
+          repository_id: REPO_B_ID,
+        },
+      ]),
+    );
+
+    const snapshotTask = store
+      .getState()
+      .kanbanMulti.snapshots[WORKFLOW_ID]?.tasks.find((t) => t.id === TASK_ID);
+    expect(snapshotTask?.repositoryId).toBe(REPO_B_ID);
+    expect(snapshotTask?.repositories).toBeUndefined();
   });
 });
 

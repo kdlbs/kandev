@@ -52,12 +52,70 @@ async function openChangesTab(testPage: Page) {
 
 /** Click the file row for expansion_test.go to open its diff view. */
 async function openExpansionFileDiff(testPage: Page) {
-  const fileRow = testPage
-    .locator("button, [role='button'], [class*='file']")
-    .filter({ hasText: "expansion_test.go" })
-    .first();
+  const fileRow = testPage.getByTestId("file-row-expansion_test.go");
   await expect(fileRow).toBeVisible({ timeout: 10_000 });
   await fileRow.click();
+}
+
+async function waitForDiffText(testPage: Page, text: string, timeout = 60_000) {
+  await expect
+    .poll(
+      () =>
+        testPage.evaluate((expected) => {
+          for (const container of document.querySelectorAll("diffs-container")) {
+            if (container.shadowRoot?.textContent?.includes(expected)) return true;
+          }
+          return false;
+        }, text),
+      { timeout },
+    )
+    .toBe(true);
+}
+
+async function readDiffOverflow(testPage: Page): Promise<string | null> {
+  return testPage.evaluate(() => {
+    const container = document.querySelector("diffs-container");
+    const shadow = container?.shadowRoot;
+    return shadow?.querySelector("pre[data-diff]")?.getAttribute("data-overflow") ?? null;
+  });
+}
+
+async function hoverUntilGutterSlotAppears(testPage: Page) {
+  const points = await testPage.evaluate(() => {
+    const container = document.querySelector("diffs-container");
+    const shadow = container?.shadowRoot;
+    if (!shadow) throw new Error("diffs-container shadow root missing");
+    const line = shadow.querySelector<HTMLElement>("[data-line]");
+    if (!line) throw new Error("no [data-line] found to hover");
+    const r = line.getBoundingClientRect();
+    const y = r.top + r.height / 2;
+    return [
+      { x: r.left + 2, y },
+      { x: r.left + 10, y },
+      { x: r.left + Math.min(40, r.width / 4), y },
+      { x: r.left + r.width / 2, y },
+    ];
+  });
+
+  for (const point of points) {
+    await testPage.mouse.move(point.x, point.y);
+    const appeared = await testPage
+      .waitForFunction(
+        () =>
+          Boolean(
+            document
+              .querySelector("diffs-container")
+              ?.shadowRoot?.querySelector("[data-gutter-utility-slot]"),
+          ),
+        null,
+        { timeout: 1_500 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    if (appeared) return;
+  }
+
+  throw new Error("gutter-utility-slot did not appear after hover");
 }
 
 test.describe("Diff expansion — Pierre Diffs provider", () => {
@@ -73,7 +131,7 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await openExpansionFileDiff(testPage);
 
     await expect(testPage.locator("diffs-container")).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
+    await waitForDiffText(testPage, "HUNK_TOP");
 
     // Pierre's <pre data-diff> uses var(--diffs-bg); our unsafeCSS overrides
     // that variable to var(--background) on :host. If the selector ever stops
@@ -112,7 +170,7 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await openChangesTab(testPage);
     await openExpansionFileDiff(testPage);
 
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
+    await waitForDiffText(testPage, "HUNK_TOP");
 
     // Pierre 1.1.22 declares [data-gutter-utility-slot] as display:flex with
     // top:0/bottom:0 but no align-items, so a fixed-size hover button pins to
@@ -147,7 +205,7 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await openChangesTab(testPage);
     await openExpansionFileDiff(testPage);
 
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
+    await waitForDiffText(testPage, "HUNK_TOP");
 
     // Pierre appends the gutter-utility slot wrapper INSIDE the line's
     // numberElement on pointer-move (InteractionManager.js: target.numberElement
@@ -157,27 +215,12 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     // calc(1ch - 1lh) on our slotted button — same trick pierre uses on its
     // built-in [data-utility-button] — to push it outside the cell into the
     // code area. Verify the button's right edge ends up past the cell's right.
-    const lineCentre = await testPage.evaluate(() => {
-      const container = document.querySelector("diffs-container");
-      const shadow = container?.shadowRoot;
-      if (!shadow) throw new Error("diffs-container shadow root missing");
-      const line = shadow.querySelector<HTMLElement>("[data-line]");
-      if (!line) throw new Error("no [data-line] found to hover");
-      const r = line.getBoundingClientRect();
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-    });
-    await testPage.mouse.move(lineCentre.x, lineCentre.y);
+    await hoverUntilGutterSlotAppears(testPage);
 
-    const geometry = await testPage.evaluate(async () => {
+    const geometry = await testPage.evaluate(() => {
       const container = document.querySelector("diffs-container")!;
       const shadow = container.shadowRoot!;
-      const deadline = Date.now() + 5_000;
-      let slotWrapper: HTMLElement | null = null;
-      while (Date.now() < deadline) {
-        slotWrapper = shadow.querySelector<HTMLElement>("[data-gutter-utility-slot]");
-        if (slotWrapper && slotWrapper.parentElement) break;
-        await new Promise((r) => setTimeout(r, 50));
-      }
+      const slotWrapper = shadow.querySelector<HTMLElement>("[data-gutter-utility-slot]");
       if (!slotWrapper) throw new Error("gutter-utility-slot did not appear after hover");
       const numberCell = slotWrapper.parentElement!;
       // The slot wrapper is appended INTO numberCell; our React-rendered button
@@ -201,6 +244,25 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     expect(geometry.buttonRight).toBeGreaterThan(geometry.cellRight);
   });
 
+  test("word wrap is enabled by default and can be toggled off", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    await waitForDiffText(testPage, "HUNK_TOP");
+    await expect.poll(() => readDiffOverflow(testPage), { timeout: 15_000 }).toBe("wrap");
+
+    const toggle = testPage.getByRole("button", { name: "Toggle word wrap" }).first();
+    await expect(toggle).toBeVisible({ timeout: 10_000 });
+    await toggle.click();
+
+    await expect.poll(() => readDiffOverflow(testPage), { timeout: 10_000 }).toBe("scroll");
+  });
+
   test("renders Pierre Diffs viewer and shows both hunks", async ({
     testPage,
     apiClient,
@@ -216,10 +278,8 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     // On cold CI runners (first test in shard, no V8 code cache), resolveLanguagesAndExecuteTask
     // triggers createJavaScriptRegexEngine() which can take 30-40s to JIT-compile.
     // diffs-container mounts immediately but content appears only after the engine is ready.
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
-    await expect(testPage.getByText("HUNK_BOTTOM", { exact: false })).toBeVisible({
-      timeout: 5_000,
-    });
+    await waitForDiffText(testPage, "HUNK_TOP");
+    await waitForDiffText(testPage, "HUNK_BOTTOM", 5_000);
 
     // Shiki renders each token as a <span style="color: #RRGGBB"> inside the
     // diff's shadow DOM. If the worker pool is broken or the @pierre/diffs ↔
@@ -253,9 +313,7 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await openChangesTab(testPage);
     await openExpansionFileDiff(testPage);
 
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "HUNK_TOP", 15_000);
 
     // Pierre Diffs renders a separator between hunks showing the hidden line count.
     // The separator contains img elements (chevron arrows) for expanding.
@@ -272,9 +330,7 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await openChangesTab(testPage);
     await openExpansionFileDiff(testPage);
 
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "HUNK_TOP", 15_000);
 
     // Wait for expand buttons to appear in the shadow DOM. They load
     // asynchronously after full file content is fetched via WebSocket.
@@ -318,9 +374,7 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await openExpansionFileDiff(testPage);
 
     // Wait for both hunks and the separator to be present
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "HUNK_TOP", 15_000);
     await expect(testPage.getByText(/\d+ unmodified lines/).first()).toBeVisible({
       timeout: 20_000,
     });

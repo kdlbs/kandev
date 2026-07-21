@@ -98,3 +98,6 @@ type staticChecker struct {
 func (c *staticChecker) Check(_ context.Context) []Issue {
 	return c.issues
 }
+
+func (c *staticChecker) Name() string     { return "Static check" }
+func (c *staticChecker) Category() string { return "system" }

@@ -4,10 +4,16 @@ import { useMemo, type ReactNode } from "react";
 import {
   IconArchive,
   IconArrowRight,
+  IconBrandSentry,
+  IconCircleDot,
+  IconGitPullRequest,
+  IconLink,
   IconLoader,
   IconLogicBuffer,
   IconPencil,
+  IconTicket,
   IconTrash,
+  IconUnlink,
 } from "@tabler/icons-react";
 import {
   ContextMenuItem,
@@ -75,9 +81,17 @@ type BuildKanbanCardMenuEntriesArgs = {
   disabled?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
+  isDetaching?: boolean;
+  parentTaskId?: string | null;
   onEdit?: () => void;
   onArchive?: () => void;
   onDelete?: () => void;
+  onDetach?: () => void;
+  onLinkPullRequest?: () => void;
+  onLinkIssue?: () => void;
+  onLinkJiraTicket?: () => void;
+  onLinkLinearIssue?: () => void;
+  onLinkSentryIssue?: () => void;
   onMoveToStep?: (stepId: string) => void;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 };
@@ -213,6 +227,98 @@ function buildSendToWorkflowSubmenu({
   };
 }
 
+function buildLinkSubmenu({
+  disabled,
+  onLinkPullRequest,
+  onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
+}: {
+  disabled?: boolean;
+  onLinkPullRequest?: () => void;
+  onLinkIssue?: () => void;
+  onLinkJiraTicket?: () => void;
+  onLinkLinearIssue?: () => void;
+  onLinkSentryIssue?: () => void;
+}): KanbanCardMenuEntry | null {
+  if (
+    !onLinkPullRequest &&
+    !onLinkIssue &&
+    !onLinkJiraTicket &&
+    !onLinkLinearIssue &&
+    !onLinkSentryIssue
+  ) {
+    return null;
+  }
+  const children: KanbanCardMenuEntry[] = [];
+  if (onLinkPullRequest) {
+    children.push({
+      kind: "item",
+      key: "link-github-pull-request",
+      testId: "task-context-link-github-pull-request",
+      icon: <IconGitPullRequest className="mr-2 h-4 w-4" />,
+      label: "GitHub Pull Request",
+      disabled,
+      onSelect: onLinkPullRequest,
+    });
+  }
+  if (onLinkIssue) {
+    children.push({
+      kind: "item",
+      key: "link-github-issue",
+      testId: "task-context-link-github-issue",
+      icon: <IconCircleDot className="mr-2 h-4 w-4" />,
+      label: "GitHub Issue",
+      disabled,
+      onSelect: onLinkIssue,
+    });
+  }
+  if (onLinkJiraTicket) {
+    children.push({
+      kind: "item",
+      key: "link-jira-ticket",
+      testId: "task-context-link-jira-ticket",
+      icon: <IconTicket className="mr-2 h-4 w-4" />,
+      label: "Jira Ticket",
+      disabled,
+      onSelect: onLinkJiraTicket,
+    });
+  }
+  if (onLinkLinearIssue) {
+    children.push({
+      kind: "item",
+      key: "link-linear-issue",
+      testId: "task-context-link-linear-issue",
+      icon: <IconCircleDot className="mr-2 h-4 w-4" />,
+      label: "Linear Issue",
+      disabled,
+      onSelect: onLinkLinearIssue,
+    });
+  }
+  if (onLinkSentryIssue) {
+    children.push({
+      kind: "item",
+      key: "link-sentry-issue",
+      testId: "task-context-link-sentry-issue",
+      icon: <IconBrandSentry className="mr-2 h-4 w-4" />,
+      label: "Sentry Issue",
+      disabled,
+      onSelect: onLinkSentryIssue,
+    });
+  }
+  return {
+    kind: "submenu",
+    key: "link",
+    testId: "task-context-link",
+    icon: <IconLink className="mr-2 h-4 w-4" />,
+    label: "Link",
+    disabled,
+    className: "w-56",
+    children,
+  };
+}
+
 export function buildKanbanCardMenuEntries({
   currentWorkflowId,
   currentStepId,
@@ -221,15 +327,23 @@ export function buildKanbanCardMenuEntries({
   disabled,
   isDeleting,
   isArchiving,
+  isDetaching,
+  parentTaskId,
   onEdit,
   onArchive,
   onDelete,
+  onDetach,
+  onLinkPullRequest,
+  onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
   onMoveToStep,
   onSendToWorkflow,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
   const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
   const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
-  const isProcessing = Boolean(disabled || isDeleting || isArchiving);
+  const isProcessing = Boolean(disabled || isDeleting || isArchiving || isDetaching);
   const entries: KanbanCardMenuEntry[] = [
     {
       kind: "item",
@@ -258,6 +372,16 @@ export function buildKanbanCardMenuEntries({
   });
   if (sendToEntry) entries.push(sendToEntry);
 
+  const linkEntry = buildLinkSubmenu({
+    disabled: isProcessing,
+    onLinkPullRequest,
+    onLinkIssue,
+    onLinkJiraTicket,
+    onLinkLinearIssue,
+    onLinkSentryIssue,
+  });
+  if (linkEntry) entries.push(linkEntry);
+
   entries.push({
     kind: "item",
     key: "archive",
@@ -270,6 +394,9 @@ export function buildKanbanCardMenuEntries({
     disabled: isProcessing || !onArchive,
     onSelect: onArchive,
   });
+
+  const detachEntry = buildDetachEntry({ parentTaskId, onDetach, isDetaching, isProcessing });
+  if (detachEntry) entries.push(detachEntry);
 
   entries.push({ kind: "separator", key: "delete-separator" });
   entries.push({
@@ -287,6 +414,30 @@ export function buildKanbanCardMenuEntries({
   });
 
   return entries;
+}
+
+function buildDetachEntry({
+  parentTaskId,
+  onDetach,
+  isDetaching,
+  isProcessing,
+}: Pick<BuildKanbanCardMenuEntriesArgs, "parentTaskId" | "onDetach" | "isDetaching"> & {
+  isProcessing: boolean;
+}): KanbanCardMenuEntry | null {
+  if (!parentTaskId || !onDetach) return null;
+  return {
+    kind: "item",
+    key: "detach",
+    testId: "task-context-detach",
+    icon: isDetaching ? (
+      <IconLoader className="mr-2 h-4 w-4 animate-spin" />
+    ) : (
+      <IconUnlink className="mr-2 h-4 w-4" />
+    ),
+    label: "Detach from parent",
+    disabled: isProcessing,
+    onSelect: onDetach,
+  };
 }
 
 export function useKanbanCardMoveTargets(

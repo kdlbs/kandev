@@ -5,7 +5,7 @@ import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-gi
 import { useSessionCommits } from "./use-session-commits";
 import { useCumulativeDiff } from "./use-cumulative-diff";
 import { useGitOperations } from "@/hooks/use-git-operations";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type {
   FileInfo,
   SessionCommit,
@@ -62,6 +62,7 @@ export type SessionGit = {
   commitsLoading: boolean;
 
   // Derived state — single source of truth for all git-dependent UI
+  statusLoaded: boolean;
   hasUnstaged: boolean;
   hasStaged: boolean;
   hasCommits: boolean;
@@ -122,7 +123,7 @@ export type SessionGit = {
   unstageAll: () => Promise<GitOperationResult>;
   discard: (paths?: string[], repo?: string) => Promise<GitOperationResult>;
   revertCommit: (commitSHA: string, repo?: string) => Promise<GitOperationResult>;
-  renameBranch: (newName: string) => Promise<GitOperationResult>;
+  renameBranch: (newName: string, repo?: string) => Promise<GitOperationResult>;
   reset: (commitSHA: string, mode: "soft" | "hard", repo?: string) => Promise<GitOperationResult>;
   createPR: (
     title: string,
@@ -600,7 +601,7 @@ function useFileDerivations(
     [statusByRepo, gitStatus],
   );
   useEffect(() => {
-    if (!IS_DEBUG) return;
+    if (!isDebug()) return;
     debugDeriv("aggregate", {
       path: statusByRepo.length > 0 ? "multi-repo" : "single-repo-fallback",
       statusByRepoEntries: statusByRepo.map((s) => ({
@@ -660,6 +661,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
   } = useFileDerivations(statusByRepo, gitStatus);
   usePerRepoPendingClear(statusByRepo, allFiles, setPendingStageFiles);
   const ahead = gitStatus?.ahead ?? 0;
+  const statusLoaded = Boolean(gitStatus || statusByRepo.length > 0);
   const hasUnstaged = unstagedFiles.length > 0;
   const hasStaged = stagedFiles.length > 0;
   const hasCommits = commits.length > 0;
@@ -694,6 +696,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     cumulativeDiff,
     commitsLoading: commitsLoading ?? false,
 
+    statusLoaded,
     hasUnstaged,
     hasStaged,
     hasCommits,

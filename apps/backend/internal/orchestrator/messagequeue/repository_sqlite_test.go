@@ -187,6 +187,30 @@ func TestSQLiteRepository_UpdateContent(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ReplaceCoalescedDetectsMissingRow(t *testing.T) {
+	repo := newTestSQLiteRepo(t).(*sqliteRepository)
+	ctx := context.Background()
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = repo.replaceCoalesced(ctx, tx,
+		&QueuedMessage{ID: "missing", SessionID: "s1", QueuedBy: QueuedByWorkflow},
+		&QueuedMessage{
+			SessionID: "s1",
+			TaskID:    "t1",
+			Content:   "new",
+			QueuedBy:  QueuedByWorkflow,
+			Metadata:  map[string]interface{}{MetadataCoalesceKey: "ci-key"},
+		},
+	)
+	if !errors.Is(err, ErrEntryNotFound) {
+		t.Fatalf("expected ErrEntryNotFound for vanished coalesced row, got %v", err)
+	}
+}
+
 func TestSQLiteRepository_DeleteByID(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
@@ -222,6 +246,79 @@ func TestSQLiteRepository_DeleteByID(t *testing.T) {
 	count, _ = repo.CountBySession(ctx, "s1")
 	if count != 1 {
 		t.Errorf("agent-authored entry should survive delete attempt, got count=%d", count)
+	}
+}
+
+// TestSQLiteRepository_TakeByID covers TakeByID's cross-session guard,
+// out-of-FIFO-order removal, idempotent re-take of an already-taken id, and
+// (unlike DeleteByID) that agent-authored entries are takeable.
+func TestSQLiteRepository_TakeByID(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	first := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "first", QueuedBy: "u"}
+	if err := repo.Insert(ctx, first, 0); err != nil {
+		t.Fatalf("insert first: %v", err)
+	}
+	second := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "second", QueuedBy: "u"}
+	if err := repo.Insert(ctx, second, 0); err != nil {
+		t.Fatalf("insert second: %v", err)
+	}
+	third := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "third", QueuedBy: "u"}
+	if err := repo.Insert(ctx, third, 0); err != nil {
+		t.Fatalf("insert third: %v", err)
+	}
+
+	// Cross-session take attempt: must not affect the row.
+	got, err := repo.TakeByID(ctx, "s-attacker", second.ID)
+	if err != nil {
+		t.Fatalf("cross-session take: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil for cross-session take, got %+v", got)
+	}
+	count, _ := repo.CountBySession(ctx, "s1")
+	if count != 3 {
+		t.Errorf("entries should survive cross-session take attempt, got count=%d", count)
+	}
+
+	// Taking the middle entry out of FIFO order must not disturb the others.
+	got, err = repo.TakeByID(ctx, "s1", second.ID)
+	if err != nil {
+		t.Fatalf("take: %v", err)
+	}
+	if got == nil || got.Content != "second" {
+		t.Fatalf("expected to take %q, got %+v", "second", got)
+	}
+	remaining, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(remaining) != 2 || remaining[0].Content != "first" || remaining[1].Content != "third" {
+		t.Fatalf("expected [first, third] to remain in order, got %+v", remaining)
+	}
+
+	// Taking the same id again finds nothing — it's already gone.
+	got, err = repo.TakeByID(ctx, "s1", second.ID)
+	if err != nil {
+		t.Fatalf("re-take: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil on re-take of already-taken id, got %+v", got)
+	}
+
+	// Unlike DeleteByID, TakeByID has no queued_by="agent" guard — the caller
+	// is internal orchestrator code dispatching its own queued entry.
+	agentMsg := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "agent", QueuedBy: QueuedByAgent}
+	if err := repo.Insert(ctx, agentMsg, 0); err != nil {
+		t.Fatalf("insert agent message: %v", err)
+	}
+	got, err = repo.TakeByID(ctx, "s1", agentMsg.ID)
+	if err != nil {
+		t.Fatalf("take agent-authored entry: %v", err)
+	}
+	if got == nil || got.Content != "agent" {
+		t.Fatalf("expected to take agent-authored entry, got %+v", got)
 	}
 }
 
@@ -277,6 +374,58 @@ func TestSQLiteRepository_TransferSession(t *testing.T) {
 	count, _ := repo.CountBySession(ctx, "s-old")
 	if count != 0 {
 		t.Errorf("source still has %d entries after transfer", count)
+	}
+}
+
+func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	original := &QueuedMessage{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "original",
+		Model:     "model-a",
+		PlanMode:  true,
+		Metadata:  map[string]interface{}{"sender": "task-a"},
+		QueuedBy:  "agent",
+	}
+	if err := repo.Insert(ctx, original, 0); err != nil {
+		t.Fatalf("insert original: %v", err)
+	}
+	if err := repo.SetPendingMove(ctx, "s1", &PendingMove{TaskID: "t1", WorkflowStepID: "step-a"}); err != nil {
+		t.Fatalf("set pending move: %v", err)
+	}
+	if err := repo.Insert(ctx, &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "mutated", QueuedBy: "user"}, 0); err != nil {
+		t.Fatalf("insert mutated: %v", err)
+	}
+
+	if err := repo.ReplaceSession(ctx, "s1", []QueuedMessage{*original}, &PendingMove{
+		TaskID:         "t1",
+		WorkflowStepID: "step-a",
+		QueuedAt:       original.QueuedAt,
+	}); err != nil {
+		t.Fatalf("replace session: %v", err)
+	}
+
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 restored entry, got %d", len(entries))
+	}
+	restored := entries[0]
+	if restored.ID != original.ID || restored.Position != original.Position || !restored.QueuedAt.Equal(original.QueuedAt) {
+		t.Fatalf("identity changed: got id=%s pos=%d queued_at=%s want id=%s pos=%d queued_at=%s",
+			restored.ID, restored.Position, restored.QueuedAt, original.ID, original.Position, original.QueuedAt)
+	}
+	move, err := repo.TakePendingMove(ctx, "s1")
+	if err != nil {
+		t.Fatalf("take pending move: %v", err)
+	}
+	if move == nil || move.WorkflowStepID != "step-a" {
+		t.Fatalf("pending move = %#v, want step-a", move)
 	}
 }
 

@@ -57,6 +57,10 @@ func Provide(
 	svc.subscribeTaskEvents()
 
 	cleanup := func() error {
+		// Stop background goroutines (currently the per-workspace
+		// stale-PR refreshes) before tearing down event subs so an
+		// in-flight refresh's DB writes don't race with shutdown.
+		svc.Stop()
 		svc.unsubscribeTaskEvents()
 		return nil
 	}

@@ -3,7 +3,7 @@
 import { memo, useMemo } from "react";
 import { DiffViewerResolved as DiffViewer } from "./diff-viewer-resolver";
 import { transformGitDiff } from "@/lib/diff";
-import type { DiffComment } from "@/lib/diff/types";
+import type { DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import type { RevertBlockInfo } from "./diff-viewer-resolver";
 
 interface FileDiffViewerProps {
@@ -14,12 +14,13 @@ interface FileDiffViewerProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;
   compact?: boolean;
   hideHeader?: boolean;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   enableAcceptReject?: boolean;
@@ -54,6 +55,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
   sessionId,
   onCommentAdd,
   onCommentDelete,
+  onCommentUpdate,
   onCommentRun,
   comments,
   className,
@@ -80,6 +82,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
       sessionId={sessionId}
       onCommentAdd={onCommentAdd}
       onCommentDelete={onCommentDelete}
+      onCommentUpdate={onCommentUpdate}
       onCommentRun={onCommentRun}
       comments={comments}
       className={className}

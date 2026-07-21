@@ -77,13 +77,16 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
 
-      const launchPromise = apiClient.launchSession({
-        task_id: task.id,
-        agent_profile_id: seedData.agentProfileId,
-        executor_profile_id: profile.id,
-        workflow_step_id: seedData.startStepId,
-        prompt: "/e2e:simple-message",
-      });
+      const launchPromise = apiClient.launchSession(
+        {
+          task_id: task.id,
+          agent_profile_id: seedData.agentProfileId,
+          executor_profile_id: profile.id,
+          workflow_step_id: seedData.startStepId,
+          prompt: "/e2e:simple-message",
+        },
+        90_000,
+      );
 
       const panel = testPage.getByTestId("prepare-progress-panel");
       await expect(panel).toBeVisible({ timeout: 15_000 });

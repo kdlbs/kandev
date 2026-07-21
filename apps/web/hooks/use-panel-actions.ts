@@ -93,18 +93,18 @@ export function usePanelActions() {
   }, [usesDesktopWorkbench, dockAddVscode]);
 
   const openFile = useCallback(
-    (filePath: string) => {
+    (filePath: string, repo?: string) => {
       if (usesDesktopWorkbench) {
-        dockOpenFile(filePath);
+        dockOpenFile(filePath, repo);
       }
     },
     [usesDesktopWorkbench, dockOpenFile],
   );
 
   const openFileInMarkdownPreview = useCallback(
-    (filePath: string) => {
+    (filePath: string, repo?: string) => {
       if (usesDesktopWorkbench) {
-        dockOpenFileInPreview(filePath);
+        dockOpenFileInPreview(filePath, repo);
       }
     },
     [usesDesktopWorkbench, dockOpenFileInPreview],

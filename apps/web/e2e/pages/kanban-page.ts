@@ -1,4 +1,4 @@
-import { type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export class KanbanPage {
   readonly board: Locator;
@@ -97,23 +97,81 @@ export class KanbanPage {
   }
 
   async moveTaskWithinWorkflow(taskId: string, stepId: string) {
-    await this.openTaskContextMenu(taskId);
-    await this.contextMoveTo().hover();
-    await this.contextStep(stepId).click();
+    await this.selectFromTaskContextMenu(taskId, async () => {
+      const step = this.contextStep(stepId);
+      await this.openSubmenu(this.contextMoveTo(), step);
+      await this.selectMenuItem(step);
+    });
   }
 
   async sendTaskToWorkflow(taskId: string, workflowId: string, stepId: string) {
-    await this.openTaskContextMenu(taskId);
-    await this.contextSendToWorkflow().hover();
-    await this.contextWorkflow(workflowId).hover();
-    await this.contextStep(stepId).click();
+    await this.selectFromTaskContextMenu(taskId, () => this.selectWorkflowStep(workflowId, stepId));
   }
 
   async sendTaskToWorkflowFromActions(taskId: string, workflowId: string, stepId: string) {
-    await this.openTaskActionsMenu(taskId);
-    await this.contextSendToWorkflow().hover();
-    await this.contextWorkflow(workflowId).hover();
-    await this.contextStep(stepId).click();
+    await this.selectFromTaskActionsMenu(taskId, () => this.selectWorkflowStep(workflowId, stepId));
+  }
+
+  async openSendToWorkflowTargets(workflowId: string) {
+    await this.openSubmenu(this.contextSendToWorkflow(), this.contextWorkflow(workflowId));
+  }
+
+  async openSendToWorkflowStep(workflowId: string, stepId: string) {
+    const workflow = this.contextWorkflow(workflowId);
+    await this.openSubmenu(this.contextSendToWorkflow(), workflow);
+    await this.openSubmenu(workflow, this.contextStep(stepId));
+  }
+
+  private async selectFromTaskContextMenu(taskId: string, select: () => Promise<void>) {
+    await this.selectFromTaskMenu(() => this.openTaskContextMenu(taskId), select);
+  }
+
+  private async selectFromTaskActionsMenu(taskId: string, select: () => Promise<void>) {
+    await this.selectFromTaskMenu(() => this.openTaskActionsMenu(taskId), select);
+  }
+
+  private async selectFromTaskMenu(openMenu: () => Promise<void>, select: () => Promise<void>) {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await openMenu();
+      try {
+        await select();
+        return;
+      } catch (error) {
+        lastError = error;
+        await this.page.keyboard.press("Escape").catch(() => {});
+      }
+    }
+    throw lastError;
+  }
+
+  private async selectWorkflowStep(workflowId: string, stepId: string) {
+    const workflow = this.contextWorkflow(workflowId);
+    const step = this.contextStep(stepId);
+    await this.openSubmenu(this.contextSendToWorkflow(), workflow);
+    await this.openSubmenu(workflow, step);
+    await this.selectMenuItem(step);
+  }
+
+  private async openSubmenu(trigger: Locator, child: Locator) {
+    await expect(trigger).toBeVisible({ timeout: 2_000 });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await trigger.focus({ timeout: 2_000 });
+      await this.page.keyboard.press("ArrowRight");
+      try {
+        await child.waitFor({ state: "visible", timeout: 1_000 });
+        return;
+      } catch {
+        // The submenu can miss focus under CI load; refocus the trigger.
+      }
+    }
+    await expect(child).toBeVisible({ timeout: 2_000 });
+  }
+
+  private async selectMenuItem(item: Locator) {
+    await expect(item).toBeVisible({ timeout: 2_000 });
+    await item.focus({ timeout: 2_000 });
+    await this.page.keyboard.press("Enter");
   }
 
   async enableMultiSelect() {
@@ -132,6 +190,37 @@ export class KanbanPage {
     await card.waitFor({ state: "visible" });
     await this.enableMultiSelect();
     await this.taskSelectCheckbox(taskId).click();
+  }
+
+  /** Cmd/Ctrl-click a card body — toggles it into the selection without the toggle button. */
+  async cmdClickCard(taskId: string) {
+    const card = this.taskCard(taskId);
+    await card.waitFor({ state: "visible" });
+    await card.click({ modifiers: ["ControlOrMeta"] });
+  }
+
+  /** Shift-click a card body — range-selects within the column. */
+  async shiftClickCard(taskId: string) {
+    const card = this.taskCard(taskId);
+    await card.waitFor({ state: "visible" });
+    await card.click({ modifiers: ["Shift"] });
+  }
+
+  /** Plain click a card body (no modifier). */
+  async plainClickCard(taskId: string) {
+    const card = this.taskCard(taskId);
+    await card.waitFor({ state: "visible" });
+    await card.click();
+  }
+
+  /** A card is part of the selection when it renders the primary ring. */
+  async expectCardSelected(taskId: string, selected = true) {
+    const card = this.taskCard(taskId);
+    if (selected) {
+      await expect(card).toHaveClass(/ring-primary/, { timeout: 5_000 });
+    } else {
+      await expect(card).not.toHaveClass(/ring-primary/, { timeout: 5_000 });
+    }
   }
 
   pipelineTask(taskId: string): Locator {

@@ -13,6 +13,8 @@ export type KeyboardShortcutOptions = {
   preventDefault?: boolean;
   /** Whether to stop event propagation (default: false) */
   stopPropagation?: boolean;
+  /** Whether to listen during capture phase (default: false) */
+  capture?: boolean;
   /** Target element (default: window) */
   target?: HTMLElement | Window | null;
 };
@@ -34,6 +36,7 @@ export function useKeyboardShortcut(
     enabled = true,
     preventDefault = true,
     stopPropagation = false,
+    capture = false,
     target = typeof window !== "undefined" ? window : null,
   } = options;
 
@@ -61,12 +64,12 @@ export function useKeyboardShortcut(
   useEffect(() => {
     if (!enabled || !target) return;
 
-    target.addEventListener("keydown", handleKeyDown as EventListener);
+    target.addEventListener("keydown", handleKeyDown as EventListener, { capture });
 
     return () => {
-      target.removeEventListener("keydown", handleKeyDown as EventListener);
+      target.removeEventListener("keydown", handleKeyDown as EventListener, { capture });
     };
-  }, [enabled, target, handleKeyDown]);
+  }, [enabled, target, handleKeyDown, capture]);
 }
 
 /**

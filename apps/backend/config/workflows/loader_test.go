@@ -3,6 +3,9 @@ package workflows
 import (
 	"fmt"
 	"testing"
+
+	"github.com/kandev/kandev/internal/workflow/models"
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadTemplates_AllValid(t *testing.T) {
@@ -23,6 +26,57 @@ func TestLoadTemplates_AllValid(t *testing.T) {
 		if len(tmpl.Steps) == 0 {
 			t.Errorf("template %q has no steps", tmpl.ID)
 		}
+	}
+}
+
+// TestConvertEvents_SetSessionMode round-trips a set_session_mode on_enter
+// action through the YAML loader: the action type passes the allow-list and its
+// "mode" config survives into the typed StepEvents. See issue #1183.
+func TestConvertEvents_SetSessionMode(t *testing.T) {
+	const yamlDoc = `
+on_enter:
+  - type: set_session_mode
+    config:
+      mode: acceptEdits
+`
+	var e stepEventsYAML
+	if err := yaml.Unmarshal([]byte(yamlDoc), &e); err != nil {
+		t.Fatalf("unmarshal yaml: %v", err)
+	}
+	events, err := convertEvents(e)
+	if err != nil {
+		t.Fatalf("convertEvents returned error: %v", err)
+	}
+	if len(events.OnEnter) != 1 {
+		t.Fatalf("expected 1 on_enter action, got %d", len(events.OnEnter))
+	}
+	if events.OnEnter[0].Type != models.OnEnterSetSessionMode {
+		t.Fatalf("unexpected action type %q", events.OnEnter[0].Type)
+	}
+	if mode, _ := events.OnEnter[0].Config["mode"].(string); mode != "acceptEdits" {
+		t.Fatalf("expected mode=acceptEdits, got %q", mode)
+	}
+}
+
+// TestConvertEvents_SetSessionModeRejectsMissingMode verifies the loader fails
+// fast when a set_session_mode action has no usable "mode" config, rather than
+// silently dropping it at compile time. See issue #1183.
+func TestConvertEvents_SetSessionModeRejectsMissingMode(t *testing.T) {
+	cases := map[string]string{
+		"no config":  "on_enter:\n  - type: set_session_mode\n",
+		"empty mode": "on_enter:\n  - type: set_session_mode\n    config:\n      mode: \"\"\n",
+		"non-string": "on_enter:\n  - type: set_session_mode\n    config:\n      mode: 3\n",
+	}
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var e stepEventsYAML
+			if err := yaml.Unmarshal([]byte(doc), &e); err != nil {
+				t.Fatalf("unmarshal yaml: %v", err)
+			}
+			if _, err := convertEvents(e); err == nil {
+				t.Fatal("expected convertEvents to reject set_session_mode with no usable mode")
+			}
+		})
 	}
 }
 
@@ -138,8 +192,8 @@ func TestLoadTemplates_ExpectedTemplateIDs(t *testing.T) {
 }
 
 // TestLoadTemplates_HiddenFlag verifies that the YAML loader propagates
-// the `hidden` field into WorkflowTemplate.Hidden. Only improve-kandev
-// is expected to be hidden; all user-facing templates must be visible.
+// the `hidden` field into WorkflowTemplate.Hidden. System-only templates
+// must be hidden while user-pickable templates remain visible.
 func TestLoadTemplates_HiddenFlag(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {
@@ -151,8 +205,10 @@ func TestLoadTemplates_HiddenFlag(t *testing.T) {
 		hiddenByID[tmpl.ID] = tmpl.Hidden
 	}
 
-	if !hiddenByID["improve-kandev"] {
-		t.Errorf("expected template %q to be hidden", "improve-kandev")
+	for _, id := range []string{"improve-kandev", "office-default", "routine"} {
+		if !hiddenByID[id] {
+			t.Errorf("expected template %q to be hidden", id)
+		}
 	}
 	for _, id := range []string{"simple", "standard", "architecture", "pr-review", "feature-dev"} {
 		if hiddenByID[id] {

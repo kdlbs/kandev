@@ -1,4 +1,4 @@
-import { type Page, expect } from "@playwright/test";
+import { type Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
@@ -30,7 +30,7 @@ export async function seedTask(
   await page.goto(`/t/${task.id}${query}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  await session.waitForChatIdle({ timeout: 30_000 });
   return { session, taskId: task.id, sessionId: task.session_id! };
 }
 

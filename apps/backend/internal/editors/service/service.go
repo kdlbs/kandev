@@ -72,6 +72,7 @@ type OpenEditorInput struct {
 	FilePath   string
 	Line       int
 	Column     int
+	WorktreeID string
 }
 
 func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string, error) {
@@ -82,9 +83,8 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 	if err != nil {
 		return "", err
 	}
-	worktreePath, err := s.resolveSessionPath(ctx, session)
-	if err != nil {
-		return "", err
+	if session == nil {
+		return "", ErrWorkspaceNotFound
 	}
 
 	settings, err := s.userSettings.GetUserSettings(ctx)
@@ -96,6 +96,17 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 	}
 
 	editor, err := s.resolveEditor(ctx, input.EditorID, input.EditorType, settings.DefaultEditorID)
+	if err != nil {
+		return "", err
+	}
+	// Opening the embedded editor at folder level only needs a valid session.
+	// Repository-less sessions still have an executor workspace where code-server
+	// can run, but they intentionally have no task worktree to resolve here.
+	if editor.Kind == editorKindInternalVscode && input.FilePath == "" {
+		return buildInternalVscodeURL("", "", input.Line, input.Column), nil
+	}
+
+	worktreePath, err := s.resolveSessionPath(ctx, session, input.WorktreeID)
 	if err != nil {
 		return "", err
 	}
@@ -183,7 +194,7 @@ func openBuiltinEditor(editor *models.Editor, absPath string, line, column int) 
 	return "", nil
 }
 
-func (s *Service) OpenFolder(ctx context.Context, sessionID string) error {
+func (s *Service) OpenFolder(ctx context.Context, sessionID, worktreeID string) error {
 	if sessionID == "" {
 		return ErrEditorConfigInvalid
 	}
@@ -191,7 +202,7 @@ func (s *Service) OpenFolder(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	worktreePath, err := s.resolveSessionPath(ctx, session)
+	worktreePath, err := s.resolveSessionPath(ctx, session, worktreeID)
 	if err != nil {
 		return err
 	}
@@ -250,9 +261,12 @@ func (s *Service) resolveEditor(ctx context.Context, editorID, editorType, fallb
 	return editor, nil
 }
 
-func (s *Service) resolveSessionPath(ctx context.Context, session *taskmodels.TaskSession) (string, error) {
+func (s *Service) resolveSessionPath(ctx context.Context, session *taskmodels.TaskSession, worktreeID string) (string, error) {
 	if session == nil {
 		return "", ErrWorkspaceNotFound
+	}
+	if worktreeID != "" {
+		return findSessionWorktreePath(session, worktreeID)
 	}
 	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreePath != "" {
 		return session.Worktrees[0].WorktreePath, nil
@@ -265,6 +279,22 @@ func (s *Service) resolveSessionPath(ctx context.Context, session *taskmodels.Ta
 		if repo != nil && repo.LocalPath != "" {
 			return repo.LocalPath, nil
 		}
+	}
+	return "", ErrWorkspaceNotFound
+}
+
+// findSessionWorktreePath returns the path of the session worktree matching
+// worktreeID. It matches both the worktree ID and the session-worktree
+// association ID, since clients may hold either.
+func findSessionWorktreePath(session *taskmodels.TaskSession, worktreeID string) (string, error) {
+	for _, worktree := range session.Worktrees {
+		if worktree == nil || (worktree.WorktreeID != worktreeID && worktree.ID != worktreeID) {
+			continue
+		}
+		if worktree.WorktreePath == "" {
+			return "", ErrWorkspaceNotFound
+		}
+		return worktree.WorktreePath, nil
 	}
 	return "", ErrWorkspaceNotFound
 }

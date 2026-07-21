@@ -62,6 +62,7 @@ function baseState(entries: QueuedMessage[]) {
     isLoading: false,
     queue: vi.fn(async () => {}),
     clearAll: vi.fn(async () => {}),
+    drainNext: vi.fn(async () => {}),
     editEntry: vi.fn(async () => {}),
     removeEntry: vi.fn(async () => {}),
     refetch: vi.fn(async () => {}),
@@ -69,6 +70,17 @@ function baseState(entries: QueuedMessage[]) {
 }
 
 const CHILD = <div data-testid="child-marker">input</div>;
+
+function pressQueueEscape(): ReturnType<typeof vi.fn> {
+  const outerEscapeHandler = vi.fn();
+  document.addEventListener("keydown", outerEscapeHandler);
+  try {
+    fireEvent.keyDown(screen.getByTestId("queue-close"), { key: "Escape" });
+  } finally {
+    document.removeEventListener("keydown", outerEscapeHandler);
+  }
+  return outerEscapeHandler;
+}
 
 beforeEach(() => {
   useQueueMock.mockReset();
@@ -129,14 +141,6 @@ describe("QueueAffordance", () => {
     expect(screen.queryByTestId(PANEL_ID)).toBeNull();
   });
 
-  it("Escape collapses an open panel", () => {
-    useQueueMock.mockReturnValue(queueState([entry()]));
-    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
-    fireEvent.click(screen.getByTestId(CHIP_ID));
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByTestId(PANEL_ID)).toBeNull();
-  });
-
   it("auto-collapses the panel when the queue drains to zero", () => {
     useQueueMock.mockReturnValue(queueState([entry()]));
     const { rerender } = render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
@@ -164,5 +168,109 @@ describe("QueueAffordance", () => {
     fireEvent.click(screen.getByTestId(CHIP_ID));
     fireEvent.click(screen.getByTestId("queue-clear-all"));
     expect(state.clearAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a run-next action when manual drain is available", () => {
+    const state = queueState([entry()]);
+    useQueueMock.mockReturnValue(state);
+    render(
+      <QueueAffordance sessionId={SESSION_ID} canDrain>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    fireEvent.click(screen.getByTestId("queue-drain-next"));
+    expect(state.drainNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the run-next action while the agent is busy", () => {
+    useQueueMock.mockReturnValue(queueState([entry()]));
+    render(
+      <QueueAffordance sessionId={SESSION_ID} canDrain={false}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    expect(screen.queryByTestId("queue-drain-next")).toBeNull();
+  });
+});
+
+describe("QueueAffordance Escape handling", () => {
+  it("collapses an open panel without reaching an outer dialog", () => {
+    useQueueMock.mockReturnValue(queueState([entry()]));
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    const outerEscapeHandler = pressQueueEscape();
+    expect(screen.queryByTestId(PANEL_ID)).toBeNull();
+    expect(screen.getByTestId(CHIP_ID)).toBeTruthy();
+    expect(outerEscapeHandler).not.toHaveBeenCalled();
+  });
+});
+
+describe("QueueAffordance — renderStatusBar prop", () => {
+  it("calls renderStatusBar with null when there are no queued entries", () => {
+    useQueueMock.mockReturnValue(queueState([]));
+    const renderStatusBar = vi.fn(() => <div data-testid="status-bar-slot" />);
+    render(
+      <QueueAffordance sessionId={SESSION_ID} renderStatusBar={renderStatusBar}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    expect(renderStatusBar).toHaveBeenCalledWith(null);
+    expect(screen.getByTestId("status-bar-slot")).toBeTruthy();
+  });
+
+  it("calls renderStatusBar with a chip node when entries exist and panel is closed", () => {
+    useQueueMock.mockReturnValue(queueState([entry()]));
+    const renderStatusBar = vi.fn((chip) => <div data-testid="status-bar-slot">{chip}</div>);
+    render(
+      <QueueAffordance sessionId={SESSION_ID} renderStatusBar={renderStatusBar}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    const callArg = renderStatusBar.mock.calls[0][0];
+    expect(callArg).not.toBeNull();
+    // The chip lives inside the caller-supplied slot, not as a separate
+    // inline element above the input.
+    const slot = screen.getByTestId("status-bar-slot");
+    expect(slot.contains(screen.getByTestId(CHIP_ID))).toBe(true);
+  });
+
+  it("calls renderStatusBar with null when entries exist and the panel is open", () => {
+    useQueueMock.mockReturnValue(queueState([entry()]));
+    const renderStatusBar = vi.fn((chip) => <div data-testid="status-bar-slot">{chip}</div>);
+    render(
+      <QueueAffordance sessionId={SESSION_ID} renderStatusBar={renderStatusBar}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    // Open the panel — the chip should drop out of the status bar.
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    expect(screen.getByTestId(PANEL_ID)).toBeTruthy();
+    const lastCall = renderStatusBar.mock.calls.at(-1);
+    expect(lastCall?.[0]).toBeNull();
+  });
+});
+
+describe("QueueAffordance — workflow entries", () => {
+  it("workflow queued entries are read-only", () => {
+    useQueueMock.mockReturnValue(
+      queueState([
+        entry({
+          queued_by: "workflow",
+          metadata: {
+            workflow_message: true,
+            workflow_step_name: "Review",
+          },
+        }),
+      ]),
+    );
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    expect(screen.getByTestId("workflow-message-badge").textContent).toContain("Review");
+    expect(screen.queryByTitle("Edit queued message")).toBeNull();
+    expect(screen.queryByTitle("Remove queued message")).toBeNull();
   });
 });

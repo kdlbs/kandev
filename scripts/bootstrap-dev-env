@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+# bootstrap-dev-env - provider-agnostic Kandev development environment setup.
+#
+# Cloud executor prepare scripts should handle provider concerns first:
+# authentication, clone/checkout, workspace placement, and agentctl startup.
+# After cloning, call this script from the repo root to install the Kandev
+# toolchain and dependencies consistently across Sprites, Daytona, Modal,
+# Codespaces, local VMs, and similar environments.
+#
+# Usage:
+#   scripts/bootstrap-dev-env [options]
+#
+# Options:
+#   --with-e2e              Install Playwright browser/system deps for E2E
+#   --without-hooks         Skip pre-commit hook wiring
+#   --without-node-modules  Skip pnpm install
+#   --without-os-packages   Skip best-effort OS package installation
+#   --without-mise-install  Require mise to already be installed
+#   --provider NAME         Record caller/provider name in logs only
+#   -h, --help              Show this help
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+WITH_E2E=0
+WITH_HOOKS=1
+WITH_NODE_MODULES=1
+WITH_OS_PACKAGES=1
+WITH_MISE_INSTALL=1
+PROVIDER="generic"
+
+usage() {
+  awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
+  exit "${1:-2}"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --with-e2e) WITH_E2E=1; shift ;;
+    --without-hooks) WITH_HOOKS=0; shift ;;
+    --without-node-modules) WITH_NODE_MODULES=0; shift ;;
+    --without-os-packages) WITH_OS_PACKAGES=0; shift ;;
+    --without-mise-install) WITH_MISE_INSTALL=0; shift ;;
+    --provider) PROVIDER="${2:?--provider requires a value}"; shift 2 ;;
+    -h|--help) usage 0 ;;
+    *) echo "bootstrap-dev-env: unknown argument '$1'" >&2; usage 2 ;;
+  esac
+done
+
+log() { printf '[bootstrap:%s] %s\n' "$PROVIDER" "$*" >&2; }
+warn() { printf '[bootstrap:%s] warning: %s\n' "$PROVIDER" "$*" >&2; }
+die() { printf '[bootstrap:%s] error: %s\n' "$PROVIDER" "$*" >&2; exit 1; }
+
+run_privileged() {
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    return 127
+  fi
+}
+
+install_os_packages() {
+  [[ "$WITH_OS_PACKAGES" -eq 1 ]] || { log "skipping OS packages"; return 0; }
+
+  if command -v apt-get >/dev/null 2>&1; then
+    log "installing OS packages with apt-get"
+    if ! run_privileged apt-get update; then
+      warn "apt-get requires root/sudo; skipping OS package installation"
+      return 0
+    fi
+    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+      bash build-essential ca-certificates curl file git gzip lsof make openssh-client \
+      pipx pkg-config python3 python3-pip rsync sqlite3 tar unzip xz-utils zip \
+      libsqlite3-dev || warn "apt-get package installation failed; continuing because packages may already be present"
+    return 0
+  fi
+
+  if command -v dnf >/dev/null 2>&1; then
+    log "installing OS packages with dnf"
+    run_privileged dnf install -y \
+      bash ca-certificates curl file gcc gcc-c++ git gzip lsof make openssh-clients \
+      pipx pkgconf-pkg-config python3 python3-pip rsync sqlite sqlite-devel tar unzip xz zip \
+      || warn "dnf package installation failed; continuing because packages may already be present"
+    return 0
+  fi
+
+  if command -v apk >/dev/null 2>&1; then
+    log "installing OS packages with apk"
+    run_privileged apk add --no-cache \
+      bash build-base ca-certificates curl file git gzip lsof make openssh-client \
+      pipx pkgconf python3 py3-pip rsync sqlite sqlite-dev tar unzip xz zip \
+      || warn "apk package installation failed; continuing because packages may already be present"
+    return 0
+  fi
+
+  if command -v brew >/dev/null 2>&1; then
+    log "installing OS packages with Homebrew"
+    brew install bash ca-certificates curl file git lsof make openssh pipx pkg-config \
+      python rsync sqlite unzip xz zip \
+      || warn "Homebrew package installation failed; continuing because packages may already be present"
+    return 0
+  fi
+
+  warn "no supported package manager found; install build tools, sqlite headers, unzip, pipx, and OpenSSH manually if needed"
+}
+
+install_mise() {
+  if command -v mise >/dev/null 2>&1; then
+    log "mise already installed: $(mise --version 2>/dev/null || true)"
+    persist_mise_activation
+    return 0
+  fi
+
+  [[ "$WITH_MISE_INSTALL" -eq 1 ]] || die "mise is not installed and --without-mise-install was passed"
+  command -v curl >/dev/null 2>&1 || die "curl is required to install mise"
+
+  log "installing mise"
+  tmp_mise_script="$(mktemp)"
+  trap 'rm -f "$tmp_mise_script"' EXIT
+  curl -fsSL https://mise.run -o "$tmp_mise_script"
+  sh "$tmp_mise_script"
+  export PATH="$HOME/.local/bin:$PATH"
+  command -v mise >/dev/null 2>&1 || die "mise install finished but mise is not on PATH"
+  persist_mise_activation
+}
+
+persist_mise_activation() {
+  [[ -n "${HOME:-}" ]] || return 0
+  local bashrc="$HOME/.bashrc"
+
+  touch "$bashrc"
+  grep -Fqx 'export PATH="$HOME/.local/bin:$PATH"' "$bashrc" 2>/dev/null \
+    || printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$bashrc"
+  grep -Fqx 'eval "$(mise activate bash)"' "$bashrc" 2>/dev/null \
+    || printf 'eval "$(mise activate bash)"\n' >> "$bashrc"
+}
+
+activate_mise() {
+  export PATH="$HOME/.local/bin:$PATH"
+  cd "$REPO_ROOT"
+
+  [[ -f "$REPO_ROOT/mise.toml" ]] || die "missing mise.toml at repo root"
+
+  log "trusting mise.toml"
+  mise trust "$REPO_ROOT/mise.toml" >/dev/null 2>&1 || mise trust >/dev/null
+
+  log "installing mise tools"
+  mise install
+
+  log "activating mise environment for bootstrap"
+  eval "$(mise activate bash)"
+}
+
+install_node_modules() {
+  [[ "$WITH_NODE_MODULES" -eq 1 ]] || { log "skipping pnpm install"; return 0; }
+  log "installing pnpm workspace dependencies"
+  cd "$REPO_ROOT/apps"
+  pnpm install --frozen-lockfile
+}
+
+install_hooks() {
+  [[ "$WITH_HOOKS" -eq 1 ]] || { log "skipping git hook setup"; return 0; }
+  log "wiring pre-commit hooks"
+  cd "$REPO_ROOT"
+  make doctor
+}
+
+install_e2e() {
+  [[ "$WITH_E2E" -eq 1 ]] || { log "skipping Playwright E2E browser setup"; return 0; }
+  log "installing Playwright Chromium browser/deps"
+  "$REPO_ROOT/scripts/install-playwright-browsers.sh"
+}
+
+main() {
+  cd "$REPO_ROOT"
+  log "bootstrapping Kandev development environment at $REPO_ROOT"
+  install_os_packages
+  install_mise
+  activate_mise
+  install_node_modules
+  install_hooks
+  install_e2e
+  log "bootstrap complete"
+}
+
+main

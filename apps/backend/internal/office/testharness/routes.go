@@ -11,6 +11,7 @@ package testharness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"time"
@@ -27,11 +28,25 @@ import (
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // EnvVar gates registration of the test routes. Must be the literal string
 // "true" to enable — matches the convention used by KANDEV_MOCK_JIRA etc.
 const EnvVar = "KANDEV_E2E_MOCK"
+
+// errInvalidJSONPrefix is the shared 400 message for malformed request bodies.
+const errInvalidJSONPrefix = "invalid JSON: "
+
+// respKeyError is the JSON key for error responses. Older handlers in this file
+// inline the literal; new code uses errJSON so the heavily-repeated key isn't
+// duplicated again.
+const respKeyError = "error"
+
+// errJSON writes a `{"error": msg}` body with the given status code.
+func errJSON(c *gin.Context, code int, msg string) {
+	c.JSON(code, gin.H{respKeyError: msg})
+}
 
 // Enabled reports whether KANDEV_E2E_MOCK is set to "true".
 func Enabled() bool {
@@ -74,8 +89,10 @@ func RegisterRoutes(
 	g.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
+	g.POST("/tasks", seedTaskHandler(repo, log))
 	g.POST("/task-sessions", seedTaskSessionHandler(repo, eventBus, log))
 	g.POST("/messages", seedMessageHandler(repo, eventBus, log))
+	g.POST("/workflows", seedWorkflowHandler(repo, log))
 	if officeRepo != nil {
 		g.POST("/comments", seedCommentHandler(officeRepo, eventBus, log))
 		g.POST("/agent-failures", seedAgentFailureHandler(officeRepo, eventBus, log))
@@ -94,13 +111,73 @@ func RegisterRoutes(
 	}
 }
 
+type seedTaskRequest struct {
+	WorkspaceID    string `json:"workspace_id"`
+	WorkflowID     string `json:"workflow_id"`
+	WorkflowStepID string `json:"workflow_step_id"`
+	Title          string `json:"title"`
+	ParentID       string `json:"parent_id"`
+	State          string `json:"state"`
+}
+
+type seedTaskResponse struct {
+	TaskID string `json:"task_id"`
+}
+
+// seedTaskHandler creates a task row directly through the repository, which
+// bypasses the service-layer subtask-depth guard (validateSubtaskDepth runs in
+// Service.CreateTask only). This lets e2e tests build arbitrary parent_id
+// chains (depth >= 2) to exercise the sidebar's multi-level tree — production
+// CreateTask rejects depth > 1 for kanban tasks.
+func seedTaskHandler(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req seedTaskRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			errJSON(c, http.StatusBadRequest, errInvalidJSONPrefix+err.Error())
+			return
+		}
+		if req.WorkspaceID == "" || req.Title == "" {
+			errJSON(c, http.StatusBadRequest, "workspace_id and title are required")
+			return
+		}
+		ctx := c.Request.Context()
+		if req.ParentID != "" {
+			if _, err := repo.GetTask(ctx, req.ParentID); err != nil {
+				errJSON(c, http.StatusBadRequest, "parent_id not found: "+req.ParentID)
+				return
+			}
+		}
+		state := req.State
+		if state == "" {
+			state = string(v1.TaskStateCreated)
+		}
+		task := &models.Task{
+			ID:             uuid.New().String(),
+			WorkspaceID:    req.WorkspaceID,
+			WorkflowID:     req.WorkflowID,
+			WorkflowStepID: req.WorkflowStepID,
+			Title:          req.Title,
+			State:          v1.TaskState(state),
+			ParentID:       req.ParentID,
+		}
+		if err := repo.CreateTask(ctx, task); err != nil {
+			log.Error("test harness: create task failed", zap.Error(err))
+			errJSON(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, seedTaskResponse{TaskID: task.ID})
+	}
+}
+
 type seedTaskSessionRequest struct {
-	TaskID         string  `json:"task_id"`
-	State          string  `json:"state"`
-	AgentProfileID string  `json:"agent_profile_id,omitempty"`
-	StartedAt      *string `json:"started_at,omitempty"`
-	CompletedAt    *string `json:"completed_at,omitempty"`
-	CommandCount   int     `json:"command_count,omitempty"`
+	TaskID         string                 `json:"task_id"`
+	SessionID      string                 `json:"session_id,omitempty"`
+	State          string                 `json:"state"`
+	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
+	StartedAt      *string                `json:"started_at,omitempty"`
+	CompletedAt    *string                `json:"completed_at,omitempty"`
+	CommandCount   int                    `json:"command_count,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type seedTaskSessionResponse struct {
@@ -133,16 +210,14 @@ func seedTaskSessionHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, 
 		// state in place. Office sessions are unique per (task, agent) per the
 		// schema's partial unique index, and tests routinely flip the same
 		// pair RUNNING → IDLE (and back) to exercise reactive UI.
-		if existing, _ := repo.GetTaskSessionByTaskAndAgent(ctx, req.TaskID, req.AgentProfileID); existing != nil {
-			existing.State = session.State
-			existing.CompletedAt = session.CompletedAt
-			existing.UpdatedAt = time.Now().UTC()
-			if err := repo.UpdateTaskSession(ctx, existing); err != nil {
+		existing := getExistingSeedSession(ctx, repo, &req)
+		if existing != nil {
+			session, err = updateSeededSession(ctx, repo, existing, session, req.TaskID)
+			if err != nil {
 				log.Error("test harness: update session failed", zap.Error(err))
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				c.JSON(statusForSeedSessionUpdateError(err), gin.H{"error": err.Error()})
 				return
 			}
-			session = existing
 		} else if err := repo.CreateTaskSession(ctx, session); err != nil {
 			log.Error("test harness: create session failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -159,6 +234,97 @@ func seedTaskSessionHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, 
 
 		publishSessionStateChanged(ctx, eventBus, session, log)
 		c.JSON(http.StatusOK, seedTaskSessionResponse{SessionID: session.ID})
+	}
+}
+
+func updateSeededSession(
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	existing *models.TaskSession,
+	session *models.TaskSession,
+	taskID string,
+) (*models.TaskSession, error) {
+	if existing.TaskID != taskID {
+		return nil, seedSessionUpdateError{message: "session does not belong to task: " + existing.ID}
+	}
+	existing.State = session.State
+	existing.CompletedAt = session.CompletedAt
+	existing.UpdatedAt = time.Now().UTC()
+	if existing.Metadata == nil {
+		existing.Metadata = map[string]interface{}{}
+	}
+	for key, value := range session.Metadata {
+		existing.Metadata[key] = value
+	}
+	if err := repo.UpdateTaskSessionWithMetadata(ctx, existing, existing.Metadata); err != nil {
+		return nil, err
+	}
+	return existing, nil
+}
+
+type seedSessionUpdateError struct {
+	message string
+}
+
+func (err seedSessionUpdateError) Error() string {
+	return err.message
+}
+
+func statusForSeedSessionUpdateError(err error) int {
+	var updateErr seedSessionUpdateError
+	if errors.As(err, &updateErr) {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
+}
+
+func getExistingSeedSession(ctx context.Context, repo *sqliterepo.Repository, req *seedTaskSessionRequest) *models.TaskSession {
+	if req.SessionID != "" {
+		existing, _ := repo.GetTaskSession(ctx, req.SessionID)
+		return existing
+	}
+	existing, _ := repo.GetTaskSessionByTaskAndAgent(ctx, req.TaskID, req.AgentProfileID)
+	return existing
+}
+
+type seedWorkflowRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	// Style is persisted as-is (kanban / office / custom). Production has no
+	// HTTP path that creates an office-style workflow — the normal create
+	// endpoint always normalises to kanban — so this seed route lets the
+	// Playwright suite stand up an office workflow to exercise the
+	// "exclude office from settings export" behaviour (issue #1109).
+	Style string `json:"style"`
+}
+
+type seedWorkflowResponse struct {
+	WorkflowID string `json:"workflow_id"`
+}
+
+func seedWorkflowHandler(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req seedWorkflowRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
+			return
+		}
+		if req.WorkspaceID == "" || req.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id and name are required"})
+			return
+		}
+		workflow := &models.Workflow{
+			ID:          uuid.New().String(),
+			WorkspaceID: req.WorkspaceID,
+			Name:        req.Name,
+			Style:       req.Style,
+		}
+		if err := repo.CreateWorkflow(c.Request.Context(), workflow); err != nil {
+			log.Error("test harness: create workflow failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, seedWorkflowResponse{WorkflowID: workflow.ID})
 	}
 }
 
@@ -194,8 +360,15 @@ func buildSeededSession(req *seedTaskSessionRequest) (*models.TaskSession, error
 		completedAt = &ts
 	}
 	metadata := map[string]interface{}{"seeded_by_e2e_mock": true}
+	for key, value := range req.Metadata {
+		metadata[key] = value
+	}
 	if req.AgentProfileID != "" {
 		metadata["agent_profile_id"] = req.AgentProfileID
+	}
+	sessionID := req.SessionID
+	if sessionID == "" {
+		sessionID = uuid.New().String()
 	}
 	// Leave AgentProfileID empty when the caller didn't supply one — that
 	// makes the seeded row a non-office (kanban / quick-chat) session, so
@@ -203,7 +376,7 @@ func buildSeededSession(req *seedTaskSessionRequest) (*models.TaskSession, error
 	// into a per-agent sibling tab. Tests that want office (per-agent)
 	// behaviour pass the agent profile id explicitly.
 	return &models.TaskSession{
-		ID:             uuid.New().String(),
+		ID:             sessionID,
 		TaskID:         req.TaskID,
 		AgentProfileID: req.AgentProfileID,
 		State:          models.TaskSessionState(req.State),
@@ -272,6 +445,7 @@ func publishSessionStateChanged(ctx context.Context, eventBus bus.EventBus, sess
 		"session_id":       session.ID,
 		"old_state":        "",
 		"new_state":        string(session.State),
+		"updated_at":       session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		"agent_profile_id": session.AgentProfileID,
 	}
 	if session.Metadata != nil {

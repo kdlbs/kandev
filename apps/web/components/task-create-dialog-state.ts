@@ -1,75 +1,33 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import type { LocalRepository, ExecutorProfile, Branch } from "@/lib/types/http";
-import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
+import type { LocalRepository } from "@/lib/types/http";
+import type {
+  TaskFormInputsHandle,
+  TaskRemoteRepoRow,
+} from "@/components/task-create-dialog-types";
+import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
+import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
-import {
-  useRepositoryOptions,
-  useBranchOptions,
-  useAgentProfileOptions,
-  useExecutorHint,
-  useExecutorProfileOptions,
-  useIsLocalExecutor,
-} from "@/components/task-create-dialog-options";
+import { useEnsureUserSettings } from "@/hooks/use-ensure-user-settings";
 import { getTaskCreateDraft, setTaskCreateDraft, removeTaskCreateDraft } from "@/lib/local-storage";
-
-/**
- * Multi-repo tasks currently only run on the git-worktree executor —
- * Docker/Sprites/etc. don't yet know how to provision N sibling repos under
- * one task root. Returning a non-null reason marks the option as disabled in
- * the executor selector and surfaces this string as a tooltip. The dialog
- * only applies this when 2+ repos are selected (see isMultiRepoSelection).
- */
-function nonWorktreeDisabledReason(profile: ExecutorProfile): string | null {
-  if ((profile.executor_type ?? "") === "worktree") return null;
-  return "Multi-repo tasks only support the git-worktree executor.";
-}
-
-/**
- * Worktree executor needs a repository to create the worktree from. Disable
- * it when the task is in no-repository mode so the picker doesn't offer an
- * unworkable choice (the backend would silently fall back to local).
- */
-function worktreeDisabledReason(profile: ExecutorProfile): string | null {
-  if ((profile.executor_type ?? "") !== "worktree") return null;
-  return "Worktree executor requires a repository.";
-}
-
-/**
- * Combines the two executor-disable rules into a single resolver:
- *   - no-repository mode → disable worktree (it needs a repo)
- *   - multi-repo selection → disable everything except worktree
- *   - otherwise → no disabling
- * The two never co-occur (no-repository implies zero repos, so multi-repo
- * cannot be true at the same time), so a simple priority order is enough.
- */
-function pickExecutorDisabledReason(
-  noRepository: boolean,
-  isMultiRepoSelection: boolean,
-): ((profile: ExecutorProfile) => string | null) | undefined {
-  if (noRepository) return worktreeDisabledReason;
-  if (isMultiRepoSelection) return nonWorktreeDisabledReason;
-  return undefined;
-}
 import type {
   StepType,
   TaskCreateDialogInitialValues,
   DialogFormState,
-  DialogComputedValues,
-  DialogComputedArgs,
   TaskRepoRow,
 } from "@/components/task-create-dialog-types";
-import { useRepositoriesState } from "@/components/task-create-dialog-repositories-state";
-import { computePassthroughProfile } from "@/components/task-create-dialog-helpers";
 import {
-  computeDialogDefaultStepId,
-  computeSingleWorkflowFallbackId,
-} from "@/components/task-create-dialog-defaults";
-import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
-import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
+  useRemoteReposSeedEffect,
+  useRemoteReposState,
+  useRepositoriesState,
+} from "@/components/task-create-dialog-repositories-state";
+import { useDialogComputed } from "@/components/task-create-dialog-computed";
+import { createDebugLogger } from "@/lib/debug/log";
+
+const stateDebug = createDebugLogger("task-create:state");
 
 export type {
   StepType,
@@ -83,7 +41,7 @@ type FormResetters = {
   setHasTitle: (v: boolean) => void;
   setHasDescription: (v: boolean) => void;
   setRepositories: (v: TaskRepoRow[]) => void;
-  setGitHubBranch: (v: string) => void;
+  setRemoteRepos: (v: TaskRemoteRepoRow[]) => void;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
   setExecutorProfileId: (v: string) => void;
@@ -91,13 +49,10 @@ type FormResetters = {
   setFetchedSteps: (v: StepType[] | null) => void;
   setDiscoveredRepositories: (v: LocalRepository[]) => void;
   setDiscoverReposLoaded: (v: boolean) => void;
-  setUseGitHubUrl: (v: boolean) => void;
-  setGitHubUrl: (v: string) => void;
+  setUseRemote: (v: boolean) => void;
   setNoRepository: (v: boolean) => void;
   setWorkspacePath: (v: string) => void;
-  setGitHubBranches: (v: Branch[]) => void;
   setGitHubUrlError: (v: string | null) => void;
-  setGitHubPrHeadBranch: (v: string | null) => void;
   setFreshBranchEnabled: (v: boolean) => void;
   setCurrentLocalBranch: (v: string) => void;
 };
@@ -137,6 +92,15 @@ function useFormResetEffects({
     setOpenCycle((c) => c + 1);
 
     const defaults = resolveFormDefaults(initialValues, workspaceId);
+    stateDebug("open-reset", {
+      workspace_id: workspaceId ?? "-",
+      workflow_id: workflowId ?? "-",
+      source: defaults.source,
+      title_present: defaults.name.trim().length > 0,
+      description_present: defaults.description.trim().length > 0,
+      initial_repository_id: initialValues?.repositoryId ?? "-",
+      initial_branch: initialValues?.branch ?? initialValues?.checkoutBranch ?? "-",
+    });
     setCurrentDefaults(defaults);
     resetTaskForm(resetters, defaults.name, defaults.description, workflowId, initialValues);
     setDraftDescription(defaults.description);
@@ -145,6 +109,11 @@ function useFormResetEffects({
 
   useEffect(() => {
     if (!open) return;
+    stateDebug("discovery-reset", {
+      workspace_id: workspaceId ?? "-",
+      github_url: initialValues?.githubUrl ?? "-",
+      seeded_remote_branch: initialValues?.checkoutBranch ?? initialValues?.branch ?? "-",
+    });
     resetDiscoveryState(resetters, initialValues);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, workspaceId]);
@@ -170,7 +139,17 @@ function resolveFormDefaults(
   return {
     name: draft?.title ?? initTitle,
     description: draft?.description ?? initDesc,
+    source: resolveDefaultsSource(Boolean(draft), initialValues),
   };
+}
+
+function resolveDefaultsSource(
+  hasDraft: boolean,
+  initialValues: TaskCreateDialogInitialValues | undefined,
+) {
+  if (hasDraft) return "draft";
+  if (hasUserContent(initialValues)) return "initial-values";
+  return "empty";
 }
 
 /** Resets task form fields to specified values */
@@ -198,7 +177,6 @@ function resetTaskForm(
   } else {
     resetters.setRepositories([]);
   }
-  resetters.setGitHubBranch(initialValues?.branch ?? "");
   resetters.setAgentProfileId("");
   resetters.setExecutorId("");
   resetters.setExecutorProfileId("");
@@ -211,11 +189,29 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   const ghUrl = iv?.githubUrl ?? "";
   resetters.setDiscoveredRepositories([]);
   resetters.setDiscoverReposLoaded(false);
-  resetters.setUseGitHubUrl(Boolean(ghUrl));
-  resetters.setGitHubUrl(ghUrl);
-  resetters.setGitHubBranches([]);
+  resetters.setUseRemote(Boolean(ghUrl));
+  // Seed remoteRepos with a single paste row when the dialog opens with a
+  // pre-filled URL (Quick-task launcher path). When `checkoutBranch` is set
+  // (PR launch flow), seed the row's branch with it so the chip pill shows
+  // the PR head immediately. Otherwise start empty — the seed effect creates
+  // an empty row on mode toggle.
+  if (ghUrl) {
+    const seededBranch = iv?.checkoutBranch ?? iv?.branch ?? "";
+    resetters.setRemoteRepos([
+      {
+        key: "remote-0",
+        url: ghUrl,
+        branch: seededBranch,
+        source: "paste",
+        prNumber: iv?.prNumber,
+        prBaseBranch: iv?.prBaseBranch,
+        prHeadBranch: iv?.checkoutBranch,
+      },
+    ]);
+  } else {
+    resetters.setRemoteRepos([]);
+  }
   resetters.setGitHubUrlError(null);
-  resetters.setGitHubPrHeadBranch(iv?.checkoutBranch ?? null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");
   // Source-mode toggle resets — without these, opening the dialog in "None"
@@ -287,35 +283,18 @@ function useFreshBranchState() {
 }
 
 function useGitHubUrlState() {
-  const [useGitHubUrl, setUseGitHubUrl] = useState(false);
-  const [githubUrl, setGitHubUrl] = useState("");
-  const [githubBranches, setGitHubBranches] = useState<Branch[]>([]);
-  const [githubBranchesLoading, setGitHubBranchesLoading] = useState(false);
+  const [useRemote, setUseRemote] = useState(false);
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
-  const [githubPrHeadBranch, setGitHubPrHeadBranch] = useState<string | null>(null);
   return {
-    useGitHubUrl,
-    setUseGitHubUrl,
-    githubUrl,
-    setGitHubUrl,
-    githubBranches,
-    setGitHubBranches,
-    githubBranchesLoading,
-    setGitHubBranchesLoading,
+    useRemote,
+    setUseRemote,
     githubUrlError,
     setGitHubUrlError,
-    githubPrHeadBranch,
-    setGitHubPrHeadBranch,
   };
 }
 
 /** Core form state declarations */
-function useFormStateValues(
-  workflowId: string | null,
-  workspaceId: string | null,
-  open: boolean,
-  initialValues?: TaskCreateDialogInitialValues,
-) {
+function useFormStateValues(workflowId: string | null) {
   // openCycle increments each time dialog opens - used in key to force TaskFormInputs remount
   const [openCycle, setOpenCycle] = useState(0);
   // Start as false so a fresh mount with open=true is detected as a rising edge
@@ -335,9 +314,6 @@ function useFormStateValues(
   const [draftDescription, setDraftDescription] = useState("");
 
   const descriptionInputRef = useRef<TaskFormInputsHandle | null>(null);
-  // GitHub URL flow has its own branch field (the per-repo branch lives on
-  // each row in `repositories`). Seed from initialValues for the URL flow only.
-  const [githubBranch, setGitHubBranch] = useState(initialValues?.branch ?? "");
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorId, setExecutorId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
@@ -360,8 +336,6 @@ function useFormStateValues(
     draftDescription,
     setDraftDescription,
     descriptionInputRef,
-    githubBranch,
-    setGitHubBranch,
     agentProfileId,
     setAgentProfileId,
     executorId,
@@ -412,12 +386,15 @@ export function useDialogFormState(
   workflowId: string | null,
   initialValues?: TaskCreateDialogInitialValues,
 ) {
-  const form = useFormStateValues(workflowId, workspaceId, open, initialValues);
+  const form = useFormStateValues(workflowId);
   const discovery = useDiscoveryState();
   const ghUrl = useGitHubUrlState();
   const wfAgent = useWorkflowAgentProfileState();
   const repos = useRepositoriesState();
+  const remoteRepos = useRemoteReposState();
   const freshBranch = useFreshBranchState();
+  const branchesByUrl = useBranchesByURL();
+  const prInfoByUrl = usePRInfoByURL();
 
   useFormResetEffects({
     open,
@@ -433,7 +410,7 @@ export function useDialogFormState(
       setHasTitle: form.setHasTitle,
       setHasDescription: form.setHasDescription,
       setRepositories: repos.setRepositories,
-      setGitHubBranch: form.setGitHubBranch,
+      setRemoteRepos: remoteRepos.setRemoteRepos,
       setAgentProfileId: form.setAgentProfileId,
       setExecutorId: form.setExecutorId,
       setExecutorProfileId: form.setExecutorProfileId,
@@ -441,16 +418,28 @@ export function useDialogFormState(
       setFetchedSteps: form.setFetchedSteps,
       setDiscoveredRepositories: discovery.setDiscoveredRepositories,
       setDiscoverReposLoaded: discovery.setDiscoverReposLoaded,
-      setUseGitHubUrl: ghUrl.setUseGitHubUrl,
-      setGitHubUrl: ghUrl.setGitHubUrl,
-      setGitHubBranches: ghUrl.setGitHubBranches,
+      setUseRemote: ghUrl.setUseRemote,
       setGitHubUrlError: ghUrl.setGitHubUrlError,
-      setGitHubPrHeadBranch: ghUrl.setGitHubPrHeadBranch,
       setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
       setNoRepository: form.setNoRepository,
       setWorkspacePath: form.setWorkspacePath,
     },
+  });
+
+  useRemoteReposSeedEffect(ghUrl.useRemote, remoteRepos.remoteRepos, remoteRepos.setRemoteRepos);
+
+  // Title autofill follows the first populated remote-repo row. Empty
+  // placeholders do not prevent a later pasted PR or issue from suggesting
+  // its title.
+  const primaryRemoteUrl = remoteRepos.remoteRepos.find((row) => row.url.trim())?.url ?? "";
+  useTitleAutofillFromPrimaryGitHubInfo({
+    open: open && ghUrl.useRemote,
+    primaryRemoteUrl,
+    prInfoByUrl,
+    taskName: form.taskName,
+    setTaskName: form.setTaskName,
+    setHasTitle: form.setHasTitle,
   });
 
   const { clearDraft } = useDraftPersistence(
@@ -461,7 +450,89 @@ export function useDialogFormState(
     form.descriptionInputRef,
   );
 
-  return { ...form, ...discovery, ...ghUrl, ...wfAgent, ...repos, ...freshBranch, clearDraft };
+  return {
+    ...form,
+    ...discovery,
+    ...ghUrl,
+    ...wfAgent,
+    ...repos,
+    ...remoteRepos,
+    ...freshBranch,
+    branchesByUrl,
+    prInfoByUrl,
+    clearDraft,
+  };
+}
+
+/**
+ * Seeds the task title from the first populated Remote row's GitHub URL info
+ * the first time it arrives, and only when the user hasn't typed a title.
+ * Subsequent info changes for the same URL don't overwrite — the
+ * lastAutoFilledRef tracks our own writes so re-pasting a different GitHub
+ * URL still works while a user-edited title is preserved.
+ */
+/** Sentinel stored in `lastAutoFilledRef` once the user clears an
+ * auto-filled title. Distinguishable from any real suggested title (which
+ * comes from the GitHub info loader) so the effect can refuse to re-apply
+ * autofill for the current URL until the URL itself changes. */
+const USER_CLEARED_SENTINEL = "\0cleared";
+
+function useTitleAutofillFromPrimaryGitHubInfo(args: {
+  open: boolean;
+  primaryRemoteUrl: string;
+  prInfoByUrl: ReturnType<typeof usePRInfoByURL>;
+  taskName: string;
+  setTaskName: (v: string) => void;
+  setHasTitle: (v: boolean) => void;
+}) {
+  const { open, primaryRemoteUrl, prInfoByUrl, taskName, setTaskName, setHasTitle } = args;
+  const lastAutoFilledRef = useRef("");
+  const lastUrlRef = useRef("");
+  // Re-read latest info on every render; cheap because the cache is memoized
+  // by URL inside the hook.
+  const suggested = primaryRemoteUrl
+    ? prInfoByUrl.info(primaryRemoteUrl)?.suggestedTitle
+    : undefined;
+
+  // Reset ownership-tracking when the URL changes — switching to a different
+  // PR URL grants a fresh autofill opportunity even if the user previously
+  // cleared an autofill on the prior URL.
+  useEffect(() => {
+    if (primaryRemoteUrl !== lastUrlRef.current) {
+      lastUrlRef.current = primaryRemoteUrl;
+      lastAutoFilledRef.current = "";
+    }
+  }, [primaryRemoteUrl]);
+
+  useEffect(() => {
+    // Detect the "user cleared an auto-filled title" transition. Once we see
+    // it, lock further autofill for the current URL (until the URL changes,
+    // which is handled by the effect above). Without this, the effect below
+    // would see `trimmed === ""` again and dutifully re-apply the suggested
+    // title that the user just removed.
+    if (
+      !taskName.trim() &&
+      lastAutoFilledRef.current &&
+      lastAutoFilledRef.current !== USER_CLEARED_SENTINEL
+    ) {
+      lastAutoFilledRef.current = USER_CLEARED_SENTINEL;
+    }
+  }, [taskName]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!suggested) return;
+    if (lastAutoFilledRef.current === USER_CLEARED_SENTINEL) return;
+    const trimmed = taskName.trim();
+    // Two writeable states: title is empty AND we haven't auto-filled yet, or
+    // title equals our last auto-fill (so a fresh PR URL replaces a previous
+    // PR's auto-filled title).
+    if (trimmed && taskName !== lastAutoFilledRef.current) return;
+    if (taskName === suggested) return;
+    lastAutoFilledRef.current = suggested;
+    setTaskName(suggested);
+    setHasTitle(true);
+  }, [open, suggested, taskName, setTaskName, setHasTitle]);
 }
 
 export type { DialogFormState } from "@/components/task-create-dialog-types";
@@ -475,167 +546,7 @@ export { useTaskCreateDialogEffects } from "@/components/task-create-dialog-effe
 // useDialogHandlers lives in ./task-create-dialog-handlers.ts
 export { useDialogHandlers } from "@/components/task-create-dialog-handlers";
 
-export function useDialogComputed({
-  fs,
-  open,
-  workspaceId,
-  workflowId,
-  defaultStepId,
-  settingsData,
-  agentProfiles,
-  workspaces,
-  executors,
-  repositories,
-  workflows,
-  snapshots,
-}: DialogComputedArgs): DialogComputedValues {
-  const singleWorkflowId = computeSingleWorkflowFallbackId(
-    fs.selectedWorkflowId,
-    workflowId,
-    workflows,
-  );
-  const effectiveWorkflowId = fs.selectedWorkflowId ?? workflowId ?? singleWorkflowId;
-  // Compute workflow agent lock directly from data — avoids effect timing issues.
-  const workflowAgentProfileId = (() => {
-    const wfId = effectiveWorkflowId;
-    if (!wfId) return "";
-    const wf = workflows.find((w) => w.id === wfId);
-    return wf?.agent_profile_id ?? "";
-  })();
-  const workflowAgentLocked = Boolean(workflowAgentProfileId);
-  // fs.agentProfileId lags behind the workflow override on dialog re-open
-  // (effect deps don't change), so fall back to the synchronous value.
-  const effectiveAgentProfileId = fs.agentProfileId || workflowAgentProfileId;
-  const isPassthroughProfile = useMemo(
-    () => computePassthroughProfile(effectiveAgentProfileId, agentProfiles),
-    [effectiveAgentProfileId, agentProfiles],
-  );
-  const effectiveDefaultStepId = computeDialogDefaultStepId({
-    selectedWorkflowId: fs.selectedWorkflowId,
-    workflowId,
-    fetchedSteps: fs.fetchedSteps,
-    defaultStepId,
-    effectiveWorkflowId,
-    snapshots,
-  });
-  const workspaceDefaults = workspaceId ? workspaces.find((ws) => ws.id === workspaceId) : null;
-  // The form has a repo selection when either: (a) any chip in the unified
-  // list has a repo set, (b) URL mode has a non-empty URL, or (c) the task
-  // is intentionally repo-less (noRepository toggle on).
-  const hasRepositorySelection = Boolean(
-    fs.noRepository ||
-    fs.repositories.some((r) => r.repositoryId || r.localPath) ||
-    (fs.useGitHubUrl && fs.githubUrl.trim()),
-  );
-  // Branch options are only used by the URL-mode flow now (the chip's branch
-  // pill loads branches per-repo). Keep the computed value but always feed it
-  // the URL branches when in URL mode.
-  const branchOptions = useBranchOptions(fs.useGitHubUrl ? fs.githubBranches : []);
-  const allExecutorProfiles = useMemo<ExecutorProfile[]>(() => {
-    return executors.flatMap((executor) =>
-      (executor.profiles ?? []).map((p) => ({
-        ...p,
-        executor_type: p.executor_type ?? executor.type,
-        executor_name: p.executor_name ?? executor.name,
-      })),
-    );
-  }, [executors]);
-  // Multi-repo tasks only run on the git-worktree executor today — Docker /
-  // Sprites / standalone don't yet know how to provision N sibling repos. Gate
-  // non-worktree options only when 2+ repos are selected; single-repo tasks
-  // keep the full executor catalogue.
-  const selectedRepoCount = fs.repositories.filter((r) => r.repositoryId || r.localPath).length;
-  const isMultiRepoSelection = selectedRepoCount > 1;
-  // `pickExecutorDisabledReason` came from main — folds two disable rules
-  // (no-repository disables worktree; multi-repo disables non-worktree) into
-  // one resolver. Plug it into our existing useExecutorProfileCompat wrapper
-  // so the downstream consumer still gets selectedExecutorProfile /
-  // noCompatibleAgent metadata.
-  // Use the effective agent ID (form value OR the workflow-locked override)
-  // so the compatibility gate catches the override case too — passing the
-  // raw fs.agentProfileId would let workflow-locked sessions slip past with
-  // an empty selection.
-  const exec = useExecutorProfileCompat(
-    allExecutorProfiles,
-    fs.executorProfileId,
-    effectiveAgentProfileId,
-    agentProfiles,
-    pickExecutorDisabledReason(fs.noRepository, isMultiRepoSelection),
-  );
-  const agentProfileOptions = useAgentProfileOptions(exec.compatibleAgentProfiles);
-  const executorHint = useExecutorHint(executors, fs.executorId, selectedRepoCount);
-  const isLocalExecutor = useIsLocalExecutor(executors, fs.executorId);
-  const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);
-  // Treat the dialog as still loading agents until BOTH the agent profiles
-  // (DB rows) AND the host-utility capability probe have resolved. The
-  // backend reconciler renames profiles ("Claude" → "Claude Sonnet 4.6") only
-  // after the probe lands, so showing the selector before then surfaces stale
-  // labels missing the model badge.
-  const agentProfilesLoading =
-    open && (!settingsData.agentsLoaded || !settingsData.capabilitiesLoaded);
-  const executorsLoading = open && !settingsData.executorsLoaded;
-  return {
-    isPassthroughProfile,
-    effectiveWorkflowId,
-    effectiveDefaultStepId,
-    workspaceDefaults,
-    hasRepositorySelection,
-    branchOptions,
-    agentProfileOptions,
-    executorProfileOptions: exec.executorProfileOptions,
-    executorHint,
-    isLocalExecutor,
-    headerRepositoryOptions,
-    agentProfilesLoading,
-    executorsLoading,
-    workflowAgentLocked,
-    workflowAgentProfileId,
-    effectiveAgentProfileId,
-    selectedExecutorProfileName: exec.selectedExecutorProfile?.name ?? null,
-    noCompatibleAgent: exec.noCompatibleAgent,
-  };
-}
-
-function useExecutorProfileCompat(
-  allExecutorProfiles: ExecutorProfile[],
-  selectedProfileId: string,
-  selectedAgentProfileId: string,
-  agentProfiles: DialogComputedArgs["agentProfiles"],
-  disabledReasonFor?: (profile: ExecutorProfile) => string | null,
-) {
-  const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles, {
-    disabledReasonFor,
-  });
-  const selectedExecutorProfile = useMemo(
-    () => allExecutorProfiles.find((p) => p.id === selectedProfileId) ?? null,
-    [allExecutorProfiles, selectedProfileId],
-  );
-  const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
-  const compatibleAgentProfiles = useMemo(() => {
-    if (!selectedExecutorProfile || !authLoaded) return agentProfiles;
-    return agentProfiles.filter((ap) =>
-      isAgentConfiguredOnExecutor(ap, selectedExecutorProfile, authSpecs),
-    );
-  }, [agentProfiles, selectedExecutorProfile, authSpecs, authLoaded]);
-  // `noCompatibleAgent` gates the submit button. It must catch BOTH cases:
-  //   1. The selected executor has no compatible agents at all.
-  //   2. The user picked an agent that isn't compatible with the executor
-  //      (e.g. switched executor after the agent was chosen).
-  // Previously this only checked case 1, so case 2 silently let the user
-  // submit with a known-incompatible combination.
-  const noCompatibleAgent = useMemo(() => {
-    if (!selectedExecutorProfile) return false;
-    if (compatibleAgentProfiles.length === 0) return true;
-    if (!selectedAgentProfileId) return false;
-    return !compatibleAgentProfiles.some((ap) => ap.id === selectedAgentProfileId);
-  }, [selectedExecutorProfile, compatibleAgentProfiles, selectedAgentProfileId]);
-  return {
-    selectedExecutorProfile,
-    compatibleAgentProfiles,
-    executorProfileOptions,
-    noCompatibleAgent,
-  };
-}
+export { useDialogComputed } from "@/components/task-create-dialog-computed";
 
 export function useSessionRepoName(isSessionMode: boolean) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -668,6 +579,7 @@ export function useTaskCreateDialogData(
   const settingsData = useAppStore((state) => state.settingsData);
   const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const taskCreateUserSettings = useEnsureUserSettings(open);
 
   useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
@@ -702,6 +614,8 @@ export function useTaskCreateDialogData(
     repositories,
     repositoriesLoading,
     branchesLoading,
+    taskCreateLastUsed: taskCreateUserSettings.userSettings.taskCreateLastUsed,
+    userSettingsLoaded: taskCreateUserSettings.loaded,
     computed,
   };
 }

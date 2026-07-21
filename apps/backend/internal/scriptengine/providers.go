@@ -20,18 +20,26 @@ func RepositoryProvider(
 	return func() map[string]string {
 		vars := make(map[string]string)
 
+		// SECURITY: repository.path/name/branch/clone_url/ssh_url are DATA that
+		// land in shell text (git clone args, etc.). shellQuote emits a fully
+		// single-quoted, self-contained shell token so a hostile value (e.g. a
+		// fork PR branch named "$(...)") is a literal string even when a
+		// template (including an OLD stored prepare_script) references the
+		// placeholder BARE, e.g. `--branch {{repository.branch}}`.
 		repoPath := getMetaString(metadata, "repository_path")
 		if repoPath != "" {
-			vars["repository.path"] = repoPath
-			vars["repository.name"] = repoNameFromPath(repoPath)
+			vars["repository.path"] = shellQuote(repoPath)
+			vars["repository.name"] = shellQuote(repoNameFromPath(repoPath))
 		}
 
 		branch := getMetaString(metadata, "base_branch")
 		if branch == "" {
 			branch = getMetaString(metadata, "repository_branch")
 		}
-		vars["repository.branch"] = branch
+		vars["repository.branch"] = shellQuote(branch)
 
+		// repository.setup_script is a script FRAGMENT (intentional multi-line
+		// shell), not data — do NOT quote it.
 		setupScript := getMetaString(metadata, "repository_setup_script")
 		vars["repository.setup_script"] = setupScript
 
@@ -39,12 +47,12 @@ func RepositoryProvider(
 		cloneURL := getMetaString(metadata, "repository_clone_url")
 		if cloneURL == "" && repoPath != "" && repoURLResolver != nil {
 			if remoteURL, err := repoURLResolver(repoPath); err == nil && remoteURL != "" {
-				vars["repository.ssh_url"] = remoteURL
+				vars["repository.ssh_url"] = shellQuote(remoteURL)
 				cloneURL = remoteURL
 			}
 		}
 		if cloneURL != "" {
-			vars["repository.clone_url"] = injectToken(cloneURL, env, tokenInjector)
+			vars["repository.clone_url"] = shellQuote(injectToken(cloneURL, env, tokenInjector))
 		}
 
 		return vars
@@ -67,23 +75,34 @@ func AgentctlProvider(agentctlPort int, workspacePath string) PlaceholderProvide
 }
 
 // WorkspaceProvider returns workspace path placeholder.
+//
+// SECURITY: workspace.path is DATA in shell text; shellQuote emits a
+// self-contained single-quoted token so it stays a literal even if it ever
+// carries metacharacters and even when referenced bare in a template.
 func WorkspaceProvider(workspacePath string) PlaceholderProvider {
 	return func() map[string]string {
 		return map[string]string{
-			"workspace.path": workspacePath,
+			"workspace.path": shellQuote(workspacePath),
 		}
 	}
 }
 
 // WorktreeProvider returns placeholders that describe the selected worktree context.
+//
+// SECURITY: worktree paths and the (untrusted, possibly fork-PR-controlled)
+// branch names are DATA that land in shell text. shellQuote emits a
+// self-contained single-quoted token so a hostile branch like "$(touch pwned)"
+// cannot inject commands even when a stored/legacy template references the
+// placeholder bare. worktree.id is a kandev-generated UUID (not shell data),
+// left as-is.
 func WorktreeProvider(basePath, path, id, branch, baseBranch string) PlaceholderProvider {
 	return func() map[string]string {
 		return map[string]string{
-			"worktree.base_path":   basePath,
-			"worktree.path":        path,
+			"worktree.base_path":   shellQuote(basePath),
+			"worktree.path":        shellQuote(path),
 			"worktree.id":          id,
-			"worktree.branch":      branch,
-			"worktree.base_branch": baseBranch,
+			"worktree.branch":      shellQuote(branch),
+			"worktree.base_branch": shellQuote(baseBranch),
 		}
 	}
 }
@@ -163,8 +182,23 @@ func AgentInstallProvider(installScripts []string) PlaceholderProvider {
 	}
 }
 
+// shellSingleQuote escapes embedded single quotes for use INSIDE an existing
+// pair of single quotes supplied by the caller/template (e.g. '%s'). It does
+// NOT add the surrounding quotes.
 func shellSingleQuote(value string) string {
 	return strings.ReplaceAll(value, "'", `'"'"'`)
+}
+
+// shellQuote returns value as a complete, self-contained single-quoted shell
+// token (surrounding quotes included, embedded quotes escaped). The result is
+// safe to drop into a script UNQUOTED — `--branch <shellQuote(v)>` cannot be
+// broken out of by shell metacharacters ($(), backticks, ;, |, whitespace).
+//
+// Prefer this over shellSingleQuote for any DATA placeholder, because stored
+// prepare_script templates (snapshotted before a template was hardened) may
+// reference the placeholder bare, so the value itself must carry its quoting.
+func shellQuote(value string) string {
+	return "'" + shellSingleQuote(value) + "'"
 }
 
 // GitHubAuthProvider returns placeholders for GitHub authentication setup.

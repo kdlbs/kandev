@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { IconX } from "@tabler/icons-react";
 
 type CloseButtonProps = {

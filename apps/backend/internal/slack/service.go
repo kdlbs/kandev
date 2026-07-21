@@ -34,7 +34,7 @@ type Service struct {
 
 	mu        sync.Mutex
 	clientFn  ClientFactory
-	client    Client // singleton, cleared on config change.
+	clients   map[string]Client
 	probeHook func()
 }
 
@@ -71,6 +71,7 @@ func NewService(
 		runner:   runner,
 		log:      log,
 		clientFn: clientFn,
+		clients:  make(map[string]Client),
 	}
 }
 
@@ -89,24 +90,45 @@ func (s *Service) Runner() AgentRunner {
 	return s.runner
 }
 
-// GetConfig returns the singleton config enriched with HasToken/HasCookie.
+// GetConfig returns the default workspace config enriched with HasToken/HasCookie.
 func (s *Service) GetConfig(ctx context.Context) (*SlackConfig, error) {
-	cfg, err := s.store.GetConfig(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.GetConfigForWorkspace(ctx, workspaceID)
+}
+
+// GetConfigForWorkspace returns a workspace config enriched with HasToken/HasCookie.
+func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string) (*SlackConfig, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil || cfg == nil {
 		return cfg, err
 	}
 	if s.secrets == nil {
 		return cfg, nil
 	}
-	cfg.HasToken = s.secretExists(ctx, SecretKeyToken, "token")
-	cfg.HasCookie = s.secretExists(ctx, SecretKeyCookie, "cookie")
+	cfg.HasToken = s.secretExists(ctx, SecretKeyForToken(workspaceID), SecretKeyToken, "token")
+	cfg.HasCookie = s.secretExists(ctx, SecretKeyForCookie(workspaceID), SecretKeyCookie, "cookie")
 	return cfg, nil
 }
 
-func (s *Service) secretExists(ctx context.Context, id, kind string) bool {
+func (s *Service) secretExists(ctx context.Context, id, legacyID, kind string) bool {
 	exists, err := s.secrets.Exists(ctx, id)
 	if err != nil {
 		s.log.Warn("slack: secret exists check failed",
+			zap.String("kind", kind), zap.Error(err))
+	}
+	if exists {
+		return true
+	}
+	exists, err = s.secrets.Exists(ctx, legacyID)
+	if err != nil {
+		s.log.Warn("slack: legacy secret exists check failed",
 			zap.String("kind", kind), zap.Error(err))
 	}
 	return exists
@@ -115,17 +137,17 @@ func (s *Service) secretExists(ctx context.Context, id, kind string) bool {
 // ErrInvalidConfig is returned by SetConfig when the request fails validation.
 var ErrInvalidConfig = errors.New("slack: invalid configuration")
 
-func (s *Service) persistSecrets(ctx context.Context, req *SetConfigRequest) error {
+func (s *Service) persistSecrets(ctx context.Context, workspaceID string, req *SetConfigRequest) error {
 	if s.secrets == nil {
 		return nil
 	}
 	if req.Token != "" {
-		if err := s.secrets.Set(ctx, SecretKeyToken, "Slack token", req.Token); err != nil {
+		if err := s.secrets.Set(ctx, SecretKeyForToken(workspaceID), "Slack token", req.Token); err != nil {
 			return fmt.Errorf("store slack token: %w", err)
 		}
 	}
 	if req.Cookie != "" {
-		if err := s.secrets.Set(ctx, SecretKeyCookie, "Slack d cookie", req.Cookie); err != nil {
+		if err := s.secrets.Set(ctx, SecretKeyForCookie(workspaceID), "Slack d cookie", req.Cookie); err != nil {
 			return fmt.Errorf("store slack cookie: %w", err)
 		}
 	}
@@ -134,6 +156,19 @@ func (s *Service) persistSecrets(ctx context.Context, req *SetConfigRequest) err
 
 // SetConfig is upsert. Empty Token/Cookie on update keeps the existing values.
 func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*SlackConfig, error) {
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.SetConfigForWorkspace(ctx, workspaceID, req)
+}
+
+// SetConfigForWorkspace is upsert. Empty Token/Cookie on update keeps existing values.
+func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string, req *SetConfigRequest) (*SlackConfig, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateConfigRequest(req); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidConfig, err.Error())
 	}
@@ -143,29 +178,42 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*SlackC
 		UtilityAgentID:      req.UtilityAgentID,
 		PollIntervalSeconds: req.PollIntervalSeconds,
 	}
-	if err := s.store.UpsertConfig(ctx, cfg); err != nil {
+	if err := s.store.UpsertConfigForWorkspace(ctx, workspaceID, cfg); err != nil {
 		return nil, fmt.Errorf("upsert slack config: %w", err)
 	}
-	if err := s.persistSecrets(ctx, req); err != nil {
+	if err := s.persistSecrets(ctx, workspaceID, req); err != nil {
 		return nil, err
 	}
-	s.invalidateClient()
+	s.invalidateClient(workspaceID)
 	go func() {
-		s.RecordAuthHealth(context.Background())
+		s.RecordAuthHealthForWorkspace(context.Background(), workspaceID)
 	}()
-	return s.GetConfig(ctx)
+	return s.GetConfigForWorkspace(ctx, workspaceID)
 }
 
 // DeleteConfig removes both the row and the stored secrets.
 func (s *Service) DeleteConfig(ctx context.Context) error {
-	if err := s.store.DeleteConfig(ctx); err != nil {
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return err
+	}
+	return s.DeleteConfigForWorkspace(ctx, workspaceID)
+}
+
+// DeleteConfigForWorkspace removes both the row and the stored secrets.
+func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.DeleteConfigForWorkspace(ctx, workspaceID); err != nil {
 		return err
 	}
 	if s.secrets != nil {
-		s.deleteSecret(ctx, SecretKeyToken, "token")
-		s.deleteSecret(ctx, SecretKeyCookie, "cookie")
+		s.deleteSecret(ctx, SecretKeyForToken(workspaceID), "token")
+		s.deleteSecret(ctx, SecretKeyForCookie(workspaceID), "cookie")
 	}
-	s.invalidateClient()
+	s.invalidateClient(workspaceID)
 	return nil
 }
 
@@ -179,7 +227,20 @@ func (s *Service) deleteSecret(ctx context.Context, id, kind string) {
 // TestConnection validates credentials either inline (from a fresh request)
 // or from the stored secrets.
 func (s *Service) TestConnection(ctx context.Context, req *SetConfigRequest) (*TestConnectionResult, error) {
-	cfg, token, cookie, err := s.resolveCredentials(ctx, req)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	return s.TestConnectionForWorkspace(ctx, workspaceID, req)
+}
+
+// TestConnectionForWorkspace validates credentials for one workspace.
+func (s *Service) TestConnectionForWorkspace(ctx context.Context, workspaceID string, req *SetConfigRequest) (*TestConnectionResult, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	cfg, token, cookie, err := s.resolveCredentials(ctx, workspaceID, req)
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
@@ -189,7 +250,20 @@ func (s *Service) TestConnection(ctx context.Context, req *SetConfigRequest) (*T
 
 // ProbeAuth validates the stored credentials.
 func (s *Service) ProbeAuth(ctx context.Context) (*TestConnectionResult, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	return s.ProbeAuthForWorkspace(ctx, workspaceID)
+}
+
+// ProbeAuthForWorkspace validates the stored credentials for one workspace.
+func (s *Service) ProbeAuthForWorkspace(ctx context.Context, workspaceID string) (*TestConnectionResult, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
@@ -216,9 +290,31 @@ func (s *Service) SetProbeHook(fn func()) {
 
 // RecordAuthHealth probes credentials and writes the outcome onto the row.
 func (s *Service) RecordAuthHealth(ctx context.Context) {
+	workspaceIDs, err := s.store.ListConfigWorkspaceIDs(ctx)
+	if err != nil {
+		s.log.Warn("slack: list config workspaces failed", zap.Error(err))
+		return
+	}
+	if len(workspaceIDs) == 0 {
+		s.fireProbeHook()
+		return
+	}
+	for _, workspaceID := range workspaceIDs {
+		s.RecordAuthHealthForWorkspace(ctx, workspaceID)
+	}
+}
+
+// RecordAuthHealthForWorkspace probes credentials and writes the outcome onto
+// one workspace row.
+func (s *Service) RecordAuthHealthForWorkspace(ctx context.Context, workspaceID string) {
+	workspaceID, normalizeErr := s.normalizeWorkspaceID(workspaceID)
+	if normalizeErr != nil {
+		s.log.Warn("slack: resolve workspace for auth health failed", zap.Error(normalizeErr))
+		return
+	}
 	probeCtx, cancel := context.WithTimeout(ctx, authProbeTimeout)
 	defer cancel()
-	res, err := s.ProbeAuth(probeCtx)
+	res, err := s.ProbeAuthForWorkspace(probeCtx, workspaceID)
 	ok := err == nil && res != nil && res.OK
 	errMsg := ""
 	switch {
@@ -234,12 +330,16 @@ func (s *Service) RecordAuthHealth(ctx context.Context) {
 	}
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
 	defer writeCancel()
-	if updateErr := s.store.UpdateAuthHealth(writeCtx, ok, errMsg, teamID, userID, time.Now().UTC()); updateErr != nil {
+	if updateErr := s.store.UpdateAuthHealthForWorkspace(writeCtx, workspaceID, ok, errMsg, teamID, userID, time.Now().UTC()); updateErr != nil {
 		s.log.Warn("slack: update auth health failed", zap.Error(updateErr))
 	}
 	if !ok {
-		s.invalidateClient()
+		s.invalidateClient(workspaceID)
 	}
+	s.fireProbeHook()
+}
+
+func (s *Service) fireProbeHook() {
 	s.mu.Lock()
 	hook := s.probeHook
 	s.mu.Unlock()
@@ -250,26 +350,42 @@ func (s *Service) RecordAuthHealth(ctx context.Context) {
 
 // Client exposes the cached client to the trigger and runtime.
 func (s *Service) Client(ctx context.Context) (Client, error) {
-	return s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.ClientForWorkspace(ctx, workspaceID)
 }
 
-func (s *Service) clientFor(ctx context.Context) (Client, error) {
+// ClientForWorkspace exposes a cached client for one workspace.
+func (s *Service) ClientForWorkspace(ctx context.Context, workspaceID string) (Client, error) {
+	return s.clientFor(ctx, workspaceID)
+}
+
+func (s *Service) clientFor(ctx context.Context, workspaceID string) (Client, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
-	if s.client != nil {
-		c := s.client
+	if s.clients == nil {
+		s.clients = make(map[string]Client)
+	}
+	if s.clients[workspaceID] != nil {
+		c := s.clients[workspaceID]
 		s.mu.Unlock()
 		return c, nil
 	}
 	s.mu.Unlock()
 
-	cfg, err := s.store.GetConfig(ctx)
+	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	if cfg == nil {
 		return nil, ErrNotConfigured
 	}
-	token, cookie, err := s.revealSecrets(ctx)
+	token, cookie, err := s.revealSecrets(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -279,35 +395,40 @@ func (s *Service) clientFor(ctx context.Context) (Client, error) {
 	client := s.clientFn(cfg, token, cookie)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.client != nil {
-		return s.client, nil
+	if s.clients == nil {
+		s.clients = make(map[string]Client)
 	}
-	s.client = client
+	if s.clients[workspaceID] != nil {
+		return s.clients[workspaceID], nil
+	}
+	s.clients[workspaceID] = client
 	return client, nil
 }
 
-func (s *Service) revealSecrets(ctx context.Context) (string, string, error) {
+func (s *Service) revealSecrets(ctx context.Context, workspaceID string) (string, string, error) {
 	if s.secrets == nil {
 		return "", "", nil
 	}
-	token, err := s.secrets.Reveal(ctx, SecretKeyToken)
+	token, err := s.revealSecret(ctx, SecretKeyForToken(workspaceID), SecretKeyToken)
 	if err != nil {
 		return "", "", fmt.Errorf("read slack token: %w", err)
 	}
-	cookie, err := s.secrets.Reveal(ctx, SecretKeyCookie)
+	cookie, err := s.revealSecret(ctx, SecretKeyForCookie(workspaceID), SecretKeyCookie)
 	if err != nil {
 		return "", "", fmt.Errorf("read slack cookie: %w", err)
 	}
 	return token, cookie, nil
 }
 
-func (s *Service) invalidateClient() {
+func (s *Service) invalidateClient(workspaceID string) {
 	s.mu.Lock()
-	s.client = nil
+	if s.clients != nil {
+		delete(s.clients, workspaceID)
+	}
 	s.mu.Unlock()
 }
 
-func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest) (*SlackConfig, string, string, error) {
+func (s *Service) resolveCredentials(ctx context.Context, workspaceID string, req *SetConfigRequest) (*SlackConfig, string, string, error) {
 	cfg := &SlackConfig{AuthMethod: req.AuthMethod}
 	token, cookie := req.Token, req.Cookie
 	if token != "" && cookie != "" {
@@ -317,7 +438,7 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 		return nil, "", "", errors.New("no secret store configured")
 	}
 	if token == "" {
-		stored, err := s.secrets.Reveal(ctx, SecretKeyToken)
+		stored, err := s.revealSecret(ctx, SecretKeyForToken(workspaceID), SecretKeyToken)
 		if err != nil {
 			s.log.Warn("slack: token reveal failed", zap.Error(err))
 			return nil, "", "", fmt.Errorf("read slack token: %w", err)
@@ -325,7 +446,7 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 		token = stored
 	}
 	if cookie == "" {
-		stored, err := s.secrets.Reveal(ctx, SecretKeyCookie)
+		stored, err := s.revealSecret(ctx, SecretKeyForCookie(workspaceID), SecretKeyCookie)
 		if err != nil {
 			s.log.Warn("slack: cookie reveal failed", zap.Error(err))
 			return nil, "", "", fmt.Errorf("read slack cookie: %w", err)
@@ -336,6 +457,32 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 		return nil, "", "", errors.New("token and cookie required — paste both to test")
 	}
 	return cfg, token, cookie, nil
+}
+
+func (s *Service) revealSecret(ctx context.Context, key, legacyKey string) (string, error) {
+	value, err := s.secrets.Reveal(ctx, key)
+	if err == nil && value != "" {
+		return value, nil
+	}
+	legacy, legacyErr := s.secrets.Reveal(ctx, legacyKey)
+	if legacyErr == nil && legacy != "" {
+		return legacy, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return "", legacyErr
+}
+
+func (s *Service) defaultWorkspaceID() (string, error) {
+	return s.store.defaultWorkspaceID()
+}
+
+func (s *Service) normalizeWorkspaceID(workspaceID string) (string, error) {
+	if workspaceID != "" {
+		return workspaceID, nil
+	}
+	return s.defaultWorkspaceID()
 }
 
 func validateConfigRequest(req *SetConfigRequest) error {

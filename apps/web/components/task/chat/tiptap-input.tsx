@@ -10,13 +10,18 @@ import {
   useMemo,
 } from "react";
 import { EditorContent } from "@tiptap/react";
+import { useShallow } from "zustand/react/shallow";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { EditorContextProvider } from "./editor-context";
 import { MentionMenu } from "./mention-menu";
+import { MessageHistorySearch } from "./message-history-search";
 import { SlashCommandMenu } from "./slash-command-menu";
+import { buildTaskMentionItems } from "./task-mention-items";
+import { extractUserHistory } from "./message-history";
+import { useDrainOlderMessages } from "./use-drain-older-messages";
 import {
   createMentionSuggestion,
   createSlashSuggestion,
@@ -26,7 +31,7 @@ import {
 } from "./tiptap-suggestion";
 import { useTipTapEditor, type TipTapInputHandle } from "./use-tiptap-editor";
 import type { MentionItem } from "@/hooks/use-inline-mention";
-import type { SlashCommand } from "@/hooks/use-inline-slash";
+import type { SlashCommand } from "./slash-command-types";
 import type { ContextFile } from "@/lib/state/context-files-store";
 
 export type { TipTapInputHandle } from "./use-tiptap-editor";
@@ -50,7 +55,6 @@ type TipTapInputProps = {
   onAddContextFile?: (file: ContextFile) => void;
   onToggleContextFile?: (file: ContextFile) => void;
   planContextEnabled?: boolean;
-  onAgentCommand?: (commandName: string) => void;
   onImagePaste?: (files: File[]) => void;
   onPlanModeChange?: (enabled: boolean) => void;
 };
@@ -102,10 +106,28 @@ function handleMenuKeyDown<T>(
 
 // ── Mention items fetcher hook ───────────────────────────────────────
 
-function useMentionItems(sessionId: string | null) {
+async function fetchFileResults(
+  sessionId: string,
+  query: string,
+  cache: { query: string; results: string[] },
+): Promise<string[]> {
+  const client = getWebSocketClient();
+  if (!client) return [];
+  const cacheKey = query || "__empty__";
+  if (cache.query === cacheKey) return cache.results;
+  const response = await searchWorkspaceFiles(client, sessionId, query || "", 20);
+  const results = response.files || [];
+  cache.query = cacheKey;
+  cache.results = results;
+  return results;
+}
+
+function useMentionItems(sessionId: string | null, taskId: string | null) {
   const { prompts } = useCustomPrompts();
+  const storeApi = useAppStoreApi();
   const promptsRef = useRef(prompts);
   const sessionIdRef = useRef(sessionId);
+  const taskIdRef = useRef(taskId);
   const lastFileSearchRef = useRef<{ query: string; results: string[] }>({
     query: "",
     results: [],
@@ -113,40 +135,33 @@ function useMentionItems(sessionId: string | null) {
   useLayoutEffect(() => {
     promptsRef.current = prompts;
     sessionIdRef.current = sessionId;
+    taskIdRef.current = taskId;
   });
 
-  return useCallback(async (query: string): Promise<MentionItem[]> => {
-    const allItems: MentionItem[] = [];
-    allItems.push({
-      id: "__plan__",
-      kind: "plan",
-      label: "Plan",
-      description: "Include the plan as context",
-      onSelect: () => {},
-    });
-    for (const p of promptsRef.current) {
+  return useCallback(
+    async (query: string): Promise<MentionItem[]> => {
+      const allItems: MentionItem[] = [];
+      allItems.push(...buildTaskMentionItems(storeApi.getState(), taskIdRef.current));
       allItems.push({
-        id: p.id,
-        kind: "prompt",
-        label: p.name,
-        description: p.content.length > 100 ? p.content.slice(0, 100) + "..." : p.content,
+        id: "__plan__",
+        kind: "plan",
+        label: "Plan",
+        description: "Include the plan as context",
         onSelect: () => {},
       });
-    }
-    const sid = sessionIdRef.current;
-    if (sid) {
-      try {
-        const client = getWebSocketClient();
-        if (client) {
-          const cacheKey = query || "__empty__";
-          let files: string[];
-          if (lastFileSearchRef.current.query === cacheKey) {
-            files = lastFileSearchRef.current.results;
-          } else {
-            const response = await searchWorkspaceFiles(client, sid, query || "", 20);
-            files = response.files || [];
-            lastFileSearchRef.current = { query: cacheKey, results: files };
-          }
+      for (const p of promptsRef.current) {
+        allItems.push({
+          id: p.id,
+          kind: "prompt",
+          label: p.name,
+          description: p.content.length > 100 ? p.content.slice(0, 100) + "..." : p.content,
+          onSelect: () => {},
+        });
+      }
+      const sid = sessionIdRef.current;
+      if (sid) {
+        try {
+          const files = await fetchFileResults(sid, query, lastFileSearchRef.current);
           for (const filePath of files) {
             allItems.push({
               id: filePath,
@@ -156,20 +171,21 @@ function useMentionItems(sessionId: string | null) {
               onSelect: () => {},
             });
           }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
       }
-    }
-    return filterItems(allItems, query);
-  }, []);
+      return filterItems(allItems, query);
+    },
+    [storeApi],
+  );
 }
 
 // ── Suggestion configs hook ──────────────────────────────────────────
 
 type SuggestionConfigsInput = {
   sessionId: string | null;
-  onAgentCommand?: (commandName: string) => void;
+  taskId: string | null;
   onMentionKeyDown: (event: KeyboardEvent) => boolean;
   onSlashKeyDown: (event: KeyboardEvent) => boolean;
   setMentionMenu: React.Dispatch<React.SetStateAction<MenuState<MentionItem>>>;
@@ -178,7 +194,7 @@ type SuggestionConfigsInput = {
 
 function useSuggestionConfigs({
   sessionId,
-  onAgentCommand,
+  taskId,
   onMentionKeyDown,
   onSlashKeyDown,
   setMentionMenu,
@@ -200,22 +216,19 @@ function useSuggestionConfigs({
       }));
   }, [agentCommands]);
 
-  const getMentionItems = useMentionItems(sessionId);
+  const getMentionItems = useMentionItems(sessionId, taskId);
   const mentionCallbacks = useMemo(
     (): MentionSuggestionCallbacks => ({ getItems: getMentionItems }),
     [getMentionItems],
   );
 
-  const onAgentCommandRef = useRef(onAgentCommand);
   const slashCommandsRef = useRef(slashCommands);
   useLayoutEffect(() => {
-    onAgentCommandRef.current = onAgentCommand;
     slashCommandsRef.current = slashCommands;
   });
   const slashCallbacks = useMemo(
     (): SlashSuggestionCallbacks => ({
       getCommands: () => slashCommandsRef.current,
-      onAgentCommand: (name) => onAgentCommandRef.current?.(name),
     }),
     [],
   );
@@ -231,7 +244,7 @@ function useSuggestionConfigs({
   );
   /* eslint-enable react-hooks/refs */
 
-  return { mentionSuggestion, slashSuggestion };
+  return { mentionSuggestion, slashSuggestion, slashCommands };
 }
 
 // ── Menu state hook ──────────────────────────────────────────────────
@@ -348,42 +361,26 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onBlur,
     sessionId,
     taskId,
-    onAgentCommand,
     onImagePaste,
   },
   ref,
 ) {
-  const {
-    mentionMenu,
-    setMentionMenu,
-    slashMenu,
-    setSlashMenu,
-    mentionSelectedIndex,
-    setMentionSelectedIndex,
-    slashSelectedIndex,
-    setSlashSelectedIndex,
-    onMentionKeyDown,
-    onSlashKeyDown,
-    handleMentionSelect,
-    handleMentionClose,
-    handleSlashSelect,
-    handleSlashClose,
-  } = useMenuHandlers();
-
-  const { mentionSuggestion, slashSuggestion } = useSuggestionConfigs({
+  const menu = useMenuHandlers();
+  const { mentionSuggestion, slashSuggestion, slashCommands } = useSuggestionConfigs({
     sessionId,
-    onAgentCommand,
-    onMentionKeyDown,
-    onSlashKeyDown,
-    setMentionMenu,
-    setSlashMenu,
+    taskId: taskId ?? null,
+    onMentionKeyDown: menu.onMentionKeyDown,
+    onSlashKeyDown: menu.onSlashKeyDown,
+    setMentionMenu: menu.setMentionMenu,
+    setSlashMenu: menu.setSlashMenu,
   });
-
   const isSuggestionMenuOpen =
-    (mentionMenu.isOpen && mentionMenu.items.length > 0) ||
-    (slashMenu.isOpen && slashMenu.items.length > 0);
-
-  const editor = useTipTapEditor({
+    (menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0) ||
+    (menu.slashMenu.isOpen && menu.slashMenu.items.length > 0);
+  const { history, getHistory } = useChatHistory(sessionId);
+  const { editorWrapperRef, ...overlay } = useReverseSearchOverlay(sessionId);
+  const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen);
+  const { editor, applyHistoryEntry } = useTipTapEditor({
     value,
     onChange,
     onSubmit,
@@ -399,38 +396,149 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onImagePaste,
     mentionSuggestion,
     slashSuggestion,
+    slashCommands,
     isSuggestionMenuOpen,
+    getHistory,
+    onOpenReverseSearch: overlay.openReverseSearch,
+    isReverseSearchOpen: overlay.isReverseSearchOpen,
     ref,
   });
-
+  const { closeReverseSearch } = overlay;
+  const handleReverseSearchSelect = useCallback(
+    (index: number) => {
+      applyHistoryEntry(index);
+      closeReverseSearch();
+      editor?.commands.focus("end");
+    },
+    [applyHistoryEntry, closeReverseSearch, editor],
+  );
   return (
     <>
-      <MentionMenu
-        isOpen={mentionMenu.isOpen}
-        isLoading={false}
-        clientRect={mentionMenu.clientRect}
-        items={mentionMenu.items}
-        query={mentionMenu.query}
-        selectedIndex={mentionSelectedIndex}
-        onSelect={handleMentionSelect}
-        onClose={handleMentionClose}
-        setSelectedIndex={setMentionSelectedIndex}
-      />
-      <SlashCommandMenu
-        isOpen={slashMenu.isOpen}
-        clientRect={slashMenu.clientRect}
-        commands={slashMenu.items}
-        selectedIndex={slashSelectedIndex}
-        onSelect={handleSlashSelect}
-        onClose={handleSlashClose}
-        setSelectedIndex={setSlashSelectedIndex}
+      <TipTapPopups
+        menu={menu}
+        overlay={overlay}
+        history={history}
+        isDraining={isDraining}
+        onReverseSearchSelect={handleReverseSearchSelect}
       />
       <EditorContextProvider value={{ sessionId, taskId: taskId ?? null }}>
-        <EditorContent
-          editor={editor}
-          className="h-full [&_.tiptap]:h-full [&_.tiptap]:outline-none"
-        />
+        <div ref={editorWrapperRef} className="h-full">
+          <EditorContent
+            editor={editor}
+            className="h-full [&_.tiptap]:h-full [&_.tiptap]:outline-none"
+          />
+        </div>
       </EditorContextProvider>
     </>
   );
 });
+
+type TipTapPopupsProps = {
+  menu: ReturnType<typeof useMenuHandlers>;
+  overlay: Omit<ReturnType<typeof useReverseSearchOverlay>, "editorWrapperRef">;
+  history: readonly string[];
+  isDraining: boolean;
+  onReverseSearchSelect: (index: number) => void;
+};
+
+function TipTapPopups({
+  menu,
+  overlay,
+  history,
+  isDraining,
+  onReverseSearchSelect,
+}: TipTapPopupsProps) {
+  return (
+    <>
+      <MentionMenu
+        isOpen={menu.mentionMenu.isOpen}
+        isLoading={false}
+        clientRect={menu.mentionMenu.clientRect}
+        items={menu.mentionMenu.items}
+        query={menu.mentionMenu.query}
+        selectedIndex={menu.mentionSelectedIndex}
+        onSelect={menu.handleMentionSelect}
+        onClose={menu.handleMentionClose}
+        setSelectedIndex={menu.setMentionSelectedIndex}
+      />
+      <SlashCommandMenu
+        isOpen={menu.slashMenu.isOpen}
+        clientRect={menu.slashMenu.clientRect}
+        commands={menu.slashMenu.items}
+        selectedIndex={menu.slashSelectedIndex}
+        onSelect={menu.handleSlashSelect}
+        onClose={menu.handleSlashClose}
+        setSelectedIndex={menu.setSlashSelectedIndex}
+      />
+      {overlay.isReverseSearchOpen && (
+        <MessageHistorySearch
+          history={history}
+          isLoadingOlder={isDraining}
+          anchorRect={overlay.reverseSearchAnchor}
+          onClose={overlay.closeReverseSearch}
+          onSelect={onReverseSearchSelect}
+        />
+      )}
+    </>
+  );
+}
+
+function useMessageHistoryForSession(sessionId: string | null): string[] {
+  // Subscribe to the *derived* user history (not the raw messages array) via a
+  // shallow comparison: agent streaming tokens churn the messages array every
+  // frame but don't change the user's sent-message history, so the rich editor
+  // only re-renders when the history list itself changes.
+  return useAppStore(
+    useShallow((s) =>
+      extractUserHistory((sessionId ? s.messages.bySession[sessionId] : undefined) ?? []),
+    ),
+  );
+}
+
+function useChatHistory(sessionId: string | null) {
+  const history = useMessageHistoryForSession(sessionId);
+  const historyRef = useRef(history);
+  useLayoutEffect(() => {
+    historyRef.current = history;
+  });
+  const getHistory = useCallback(() => historyRef.current, []);
+  return { history, getHistory };
+}
+
+function useReverseSearchOverlay(sessionId: string | null) {
+  const editorWrapperRef = useRef<HTMLDivElement>(null);
+  const [reverseSearchAnchor, setReverseSearchAnchor] = useState<DOMRect | null>(null);
+  const [isReverseSearchOpen, setIsReverseSearchOpen] = useState(false);
+  const sessionIdRef = useRef(sessionId);
+  useLayoutEffect(() => {
+    sessionIdRef.current = sessionId;
+  });
+  const openReverseSearch = useCallback(() => {
+    if (!sessionIdRef.current) return;
+    setReverseSearchAnchor(editorWrapperRef.current?.getBoundingClientRect() ?? null);
+    setIsReverseSearchOpen(true);
+  }, []);
+  const closeReverseSearch = useCallback(() => setIsReverseSearchOpen(false), []);
+  // The anchor rect is captured once at open time; dismiss on viewport
+  // changes rather than recompute, matching how the project's other
+  // fixed-position popups behave on resize/scroll. Bubbling-phase scroll
+  // only — capture-phase would also catch the overlay's own list scroll
+  // (e.g. from scrollIntoView during keyboard navigation), which would
+  // dismiss the overlay mid-browse.
+  useEffect(() => {
+    if (!isReverseSearchOpen) return;
+    window.addEventListener("resize", closeReverseSearch);
+    window.addEventListener("scroll", closeReverseSearch);
+    return () => {
+      window.removeEventListener("resize", closeReverseSearch);
+      window.removeEventListener("scroll", closeReverseSearch);
+    };
+  }, [isReverseSearchOpen, closeReverseSearch]);
+  return {
+    editorWrapperRef,
+    reverseSearchAnchor,
+    isReverseSearchOpen,
+    openReverseSearch,
+    closeReverseSearch,
+  };
+}

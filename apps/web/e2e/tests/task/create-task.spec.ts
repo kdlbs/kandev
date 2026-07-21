@@ -1,6 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+// Exercises the regular task-create dialog (New Task in the sidebar), so run
+// with the office feature disabled.
+useRegularMode();
 
 const START_AGENT_TEST_ID = "submit-start-agent";
 const START_ENABLED_TIMEOUT = 30_000;
@@ -39,7 +44,7 @@ test.describe("Task creation", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    // First: create a task so localStorage selections get persisted
+    // First: create a task so its selections are persisted to user settings.
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
@@ -144,15 +149,12 @@ test.describe("Task creation", () => {
     }
   });
 
-  test("falls back to a valid profile when localStorage holds a stale agent id", async ({
+  test("ignores a stale browser profile and selects a valid backend profile", async ({
     testPage,
   }) => {
-    // Reproduces the "No compatible agent profiles for 'Worktree'" regression
-    // that fires after a DB reset: localStorage still carries the previous
-    // run's agent profile UUID, which no longer exists in the fresh DB.
-    // The dialog must reject the stale id and fall back through the
-    // workspace default / first-profile chain instead of locking in a
-    // bogus selection that the compatibility check then rejects.
+    // A stale value from an older browser build must not participate in
+    // selection. The dialog uses backend settings and then falls back through
+    // the workspace default / first-profile chain.
     await testPage.addInitScript(() => {
       localStorage.setItem(
         "kandev.dialog.lastAgentProfileId",
@@ -216,16 +218,10 @@ test.describe("Task creation", () => {
     const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
     await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
-    // Click "Start task" — the agent starts, the dialog closes, we stay on kanban
+    // Click "Start task" — the agent starts, the dialog closes, and sidebar creation
+    // focuses the newly created task immediately.
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-
-    // The new task card appears on the kanban board (pushed via WS)
-    const card = kanban.taskCardByTitle("Start Agent Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-
-    // Clicking the card fetches the session and navigates to /t/<taskId>
-    await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
@@ -417,11 +413,6 @@ test.describe("Create task regression", () => {
     await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-
-    // Navigate to the task session
-    const card = kanban.taskCardByTitle("Regression Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);

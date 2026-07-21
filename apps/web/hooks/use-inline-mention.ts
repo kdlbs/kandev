@@ -7,11 +7,21 @@ import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { getFileName } from "@/lib/utils/file-path";
 import type { RichTextInputHandle } from "@/components/task/chat/rich-text-input";
 
+export type TaskMentionData = {
+  taskId: string;
+  title: string;
+  workflowId: string;
+  workflowStepId: string;
+  state?: string | null;
+};
+
 export type MentionItem = {
   id: string;
-  kind: "prompt" | "file" | "plan";
+  kind: "prompt" | "file" | "plan" | "task";
   label: string;
   description?: string;
+  /** Task-only payload carried for chip serialisation and prompt expansion. */
+  task?: TaskMentionData;
   /** What happens on selection. Each kind provides its own. */
   onSelect: (
     input: RichTextInputHandle,
@@ -38,7 +48,8 @@ function isValidMentionTrigger(text: string, pos: number): boolean {
   return charBefore === " " || charBefore === "\n" || charBefore === "\t";
 }
 
-function filterItems(items: MentionItem[], query: string): MentionItem[] {
+/** Exported for tests. */
+export function filterItems(items: MentionItem[], query: string): MentionItem[] {
   if (!query) return items;
   const lowerQuery = query.toLowerCase();
 
@@ -96,9 +107,21 @@ function makePlanItem(onPlanSelect: () => void): MentionItem {
   };
 }
 
-/** Build a prompt mention item that adds prompt to context store instead of inserting content. */
-function makePromptItem(
+export type PromptInsertMode = "context" | "inline";
+
+/**
+ * Build a prompt mention item.
+ *
+ * - `"context"` (default): delete the `@query` text and notify `onPromptSelect`
+ *   so the caller can attach the prompt as context (used by chat).
+ * - `"inline"`: replace the `@query` text with the prompt's full content
+ *   (used by task-create where there is no context store yet).
+ *
+ * Exported for unit tests.
+ */
+export function makePromptItem(
   prompt: { id: string; name: string; content: string },
+  mode: PromptInsertMode,
   onPromptSelect?: (id: string, name: string) => void,
 ): MentionItem {
   return {
@@ -109,6 +132,16 @@ function makePromptItem(
       prompt.content.length > 100 ? prompt.content.slice(0, 100) + "..." : prompt.content,
     onSelect: (input, value, triggerStart, onChange) => {
       const cursorPos = input.getSelectionStart();
+      if (mode === "inline") {
+        const insertion = prompt.content;
+        onChange(value.substring(0, triggerStart) + insertion + value.substring(cursorPos));
+        const caret = triggerStart + insertion.length;
+        requestAnimationFrame(() => {
+          input.setSelectionRange(caret, caret);
+          input.focus();
+        });
+        return;
+      }
       onChange(value.substring(0, triggerStart) + value.substring(cursorPos));
       onPromptSelect?.(prompt.id, prompt.name);
       requestAnimationFrame(() => {
@@ -129,8 +162,8 @@ function clearMentionState(
   setQuery("");
 }
 
-/** Detect an @-trigger in text before cursor and return the query, or null if none. */
-function detectMentionTrigger(
+/** Detect an @-trigger in text before cursor and return the query, or null if none. Exported for tests. */
+export function detectMentionTrigger(
   text: string,
   cursorPos: number,
 ): { triggerStart: number; query: string } | null {
@@ -150,6 +183,8 @@ export interface UseInlineMentionParams {
   onPlanSelect?: () => void;
   onFileSelect?: (path: string, name: string) => void;
   onPromptSelect?: (id: string, name: string) => void;
+  /** How selecting a prompt mutates the input. Defaults to `"context"`. */
+  promptInsertMode?: PromptInsertMode;
 }
 
 function useFileSearch(sessionId: string | null | undefined, isOpen: boolean, query: string) {
@@ -254,6 +289,7 @@ type MentionItemsOptions = {
   onPlanSelect?: () => void;
   onFileSelect?: (path: string, name: string) => void;
   onPromptSelect?: (id: string, name: string) => void;
+  promptInsertMode: PromptInsertMode;
 };
 
 function useMentionItems({
@@ -263,6 +299,7 @@ function useMentionItems({
   onPlanSelect,
   onFileSelect,
   onPromptSelect,
+  promptInsertMode,
 }: MentionItemsOptions) {
   const planItem = useMemo((): MentionItem | null => {
     if (!onPlanSelect) return null;
@@ -270,8 +307,8 @@ function useMentionItems({
   }, [onPlanSelect]);
 
   const promptItems = useMemo(
-    () => prompts.map((prompt) => makePromptItem(prompt, onPromptSelect)),
-    [prompts, onPromptSelect],
+    () => prompts.map((prompt) => makePromptItem(prompt, promptInsertMode, onPromptSelect)),
+    [prompts, promptInsertMode, onPromptSelect],
   );
 
   const fileItems = useMemo(
@@ -295,6 +332,7 @@ export function useInlineMention({
   onPlanSelect,
   onFileSelect,
   onPromptSelect,
+  promptInsertMode = "context",
 }: UseInlineMentionParams) {
   const [isOpen, setIsOpen] = useState(false);
   const [position, setPosition] = useState<Position | null>(null);
@@ -311,6 +349,7 @@ export function useInlineMention({
     onPlanSelect,
     onFileSelect,
     onPromptSelect,
+    promptInsertMode,
   });
 
   /* eslint-disable react-hooks/set-state-in-effect */

@@ -6,11 +6,17 @@ import {
   defaultSessionRuntimeState,
   defaultUIState,
   defaultGitHubState,
+  defaultGitLabState,
+  defaultAzureDevOpsState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
   defaultFeaturesState,
+  defaultAutomationsState,
+  defaultSystemState,
 } from "./slices";
+import { getStoredQuickChatNames } from "@/lib/local-storage";
+import { migrateView } from "./slices/ui/ui-slice";
 
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
@@ -42,6 +48,7 @@ export const defaultState = {
   pendingModel: defaultSessionState.pendingModel,
   activeModel: defaultSessionState.activeModel,
   taskPlans: defaultSessionState.taskPlans,
+  walkthroughs: defaultSessionState.walkthroughs,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
@@ -62,14 +69,29 @@ export const defaultState = {
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   githubStatus: defaultGitHubState.githubStatus,
   taskPRs: defaultGitHubState.taskPRs,
+  taskIssues: defaultGitHubState.taskIssues,
+  pendingPrUrlByTaskId: defaultGitHubState.pendingPrUrlByTaskId,
   prWatches: defaultGitHubState.prWatches,
   reviewWatches: defaultGitHubState.reviewWatches,
   issueWatches: defaultGitHubState.issueWatches,
   actionPresets: defaultGitHubState.actionPresets,
+  prFeedbackCache: defaultGitHubState.prFeedbackCache,
+  taskCIAutomation: defaultGitHubState.taskCIAutomation,
+  taskMRs: defaultGitLabState.taskMRs,
+  azureDevOpsTaskPullRequests: defaultAzureDevOpsState.azureDevOpsTaskPullRequests,
+  gitlabReviewWatches: defaultGitLabState.gitlabReviewWatches,
+  gitlabIssueWatches: defaultGitLabState.gitlabIssueWatches,
+  gitlabMRWatches: defaultGitLabState.gitlabMRWatches,
+  gitlabActionPresets: defaultGitLabState.gitlabActionPresets,
+  gitlabStats: defaultGitLabState.gitlabStats,
+  gitlabStatus: defaultGitLabState.gitlabStatus,
   jiraIssueWatches: defaultJiraState.jiraIssueWatches,
   linearIssueWatches: defaultLinearState.linearIssueWatches,
   office: defaultOfficeState.office,
   features: defaultFeaturesState.features,
+  automations: defaultAutomationsState.automations,
+  automationRuns: defaultAutomationsState.automationRuns,
+  system: defaultSystemState.system,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,
@@ -89,6 +111,92 @@ export const defaultState = {
 };
 
 export type DefaultState = typeof defaultState;
+
+function mergeCodeHostFields(
+  d: DefaultState,
+  s: Partial<DefaultState>,
+): Pick<
+  DefaultState,
+  | "taskMRs"
+  | "gitlabReviewWatches"
+  | "gitlabIssueWatches"
+  | "gitlabMRWatches"
+  | "gitlabActionPresets"
+  | "gitlabStats"
+  | "gitlabStatus"
+  | "azureDevOpsTaskPullRequests"
+> {
+  return {
+    taskMRs: { ...d.taskMRs, ...s.taskMRs },
+    gitlabReviewWatches: { ...d.gitlabReviewWatches, ...s.gitlabReviewWatches },
+    gitlabIssueWatches: { ...d.gitlabIssueWatches, ...s.gitlabIssueWatches },
+    gitlabMRWatches: { ...d.gitlabMRWatches, ...s.gitlabMRWatches },
+    gitlabActionPresets: { ...d.gitlabActionPresets, ...s.gitlabActionPresets },
+    gitlabStats: { ...d.gitlabStats, ...s.gitlabStats },
+    gitlabStatus: { ...d.gitlabStatus, ...s.gitlabStatus },
+    azureDevOpsTaskPullRequests: {
+      ...d.azureDevOpsTaskPullRequests,
+      ...s.azureDevOpsTaskPullRequests,
+    },
+  };
+}
+
+function mergeQuickChatState(initialState: Partial<DefaultState>): DefaultState["quickChat"] {
+  const quickChat = { ...defaultState.quickChat, ...initialState.quickChat };
+  if (!initialState.quickChat?.sessions) return quickChat;
+
+  const storedNames = getStoredQuickChatNames();
+  return {
+    ...quickChat,
+    sessions: initialState.quickChat.sessions.map((session) => {
+      const localName = storedNames[session.sessionId];
+      return {
+        ...session,
+        kind: session.kind ?? "chat",
+        ...(localName ? { name: localName } : {}),
+      };
+    }),
+  };
+}
+
+function mergeSidebarViewState(initialState: Partial<DefaultState>): DefaultState["sidebarViews"] {
+  const sidebarViews = { ...defaultState.sidebarViews, ...initialState.sidebarViews };
+  const userSettings = initialState.userSettings;
+  const serverViews = userSettings?.sidebarViews?.map(migrateView) ?? [];
+  if (serverViews.length > 0) sidebarViews.views = serverViews;
+
+  const activeViewId = userSettings?.sidebarActiveViewId;
+  if (activeViewId && sidebarViews.views.some((view) => view.id === activeViewId)) {
+    sidebarViews.activeViewId = activeViewId;
+  } else if (!sidebarViews.views.some((view) => view.id === sidebarViews.activeViewId)) {
+    sidebarViews.activeViewId = sidebarViews.views[0].id;
+  }
+  if (userSettings?.sidebarDraft !== undefined) sidebarViews.draft = userSettings.sidebarDraft;
+  return sidebarViews;
+}
+
+function mergeSidebarTaskPrefsState(
+  initialState: Partial<DefaultState>,
+): DefaultState["sidebarTaskPrefs"] {
+  const sidebarTaskPrefs = {
+    ...defaultState.sidebarTaskPrefs,
+    ...initialState.sidebarTaskPrefs,
+  };
+  const serverPrefs = initialState.userSettings?.sidebarTaskPrefs;
+  if (!serverPrefs) return sidebarTaskPrefs;
+
+  return {
+    ...sidebarTaskPrefs,
+    pinnedTaskIds: [...serverPrefs.pinnedTaskIds],
+    orderedTaskIds: [...serverPrefs.orderedTaskIds],
+    subtaskOrderByParentId: Object.fromEntries(
+      Object.entries(serverPrefs.subtaskOrderByParentId).map(([parentId, taskIds]) => [
+        parentId,
+        [...taskIds],
+      ]),
+    ),
+  };
+}
 
 export function mergeInitialState(initialState?: Partial<DefaultState>): DefaultState {
   if (!initialState) return defaultState;
@@ -132,6 +240,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     pendingModel: { ...defaultState.pendingModel, ...initialState.pendingModel },
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
+    walkthroughs: { ...defaultState.walkthroughs, ...initialState.walkthroughs },
     queue: { ...defaultState.queue, ...initialState.queue },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     shell: { ...defaultState.shell, ...initialState.shell },
@@ -150,10 +259,18 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     sessionPollMode: { ...defaultState.sessionPollMode, ...initialState.sessionPollMode },
     githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
     taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
+    taskIssues: { ...defaultState.taskIssues, ...initialState.taskIssues },
+    pendingPrUrlByTaskId: {
+      ...defaultState.pendingPrUrlByTaskId,
+      ...initialState.pendingPrUrlByTaskId,
+    },
     prWatches: { ...defaultState.prWatches, ...initialState.prWatches },
     reviewWatches: { ...defaultState.reviewWatches, ...initialState.reviewWatches },
     issueWatches: { ...defaultState.issueWatches, ...initialState.issueWatches },
     actionPresets: { ...defaultState.actionPresets, ...initialState.actionPresets },
+    prFeedbackCache: { ...defaultState.prFeedbackCache, ...initialState.prFeedbackCache },
+    taskCIAutomation: { ...defaultState.taskCIAutomation, ...initialState.taskCIAutomation },
+    ...mergeCodeHostFields(defaultState, initialState),
     jiraIssueWatches: { ...defaultState.jiraIssueWatches, ...initialState.jiraIssueWatches },
     linearIssueWatches: {
       ...defaultState.linearIssueWatches,
@@ -161,6 +278,9 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     },
     office: { ...defaultState.office, ...initialState.office },
     features: { ...defaultState.features, ...initialState.features },
+    automations: { ...defaultState.automations, ...initialState.automations },
+    automationRuns: { ...defaultState.automationRuns, ...initialState.automationRuns },
+    system: { ...defaultState.system, ...initialState.system },
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
@@ -170,11 +290,12 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     chatInput: { ...defaultState.chatInput, ...initialState.chatInput },
     documentPanel: { ...defaultState.documentPanel, ...initialState.documentPanel },
     systemHealth: { ...defaultState.systemHealth, ...initialState.systemHealth },
-    quickChat: { ...defaultState.quickChat, ...initialState.quickChat },
+    quickChat: mergeQuickChatState(initialState),
     sessionFailureNotification:
       initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
     bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },
-    sidebarViews: { ...defaultState.sidebarViews, ...initialState.sidebarViews },
+    sidebarViews: mergeSidebarViewState(initialState),
+    sidebarTaskPrefs: mergeSidebarTaskPrefsState(initialState),
     collapsedSubtaskParents:
       initialState.collapsedSubtaskParents ?? defaultState.collapsedSubtaskParents,
   };

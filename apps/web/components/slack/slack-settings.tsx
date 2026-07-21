@@ -1,23 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import Link from "@/components/routing/app-link";
 import { IconBrandSlack } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { useSlackEnabled } from "@/hooks/domains/slack/use-slack-enabled";
 import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
+import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { DraftedIntegrationEnabledControl } from "@/components/integrations/drafted-integration-enabled-control";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getSlackConfig,
@@ -70,20 +73,23 @@ function configToHealth(config: SlackConfig | null): IntegrationAuthHealth | nul
   };
 }
 
-function saveLabel(saving: boolean, hasConfig: boolean): string {
-  if (saving) return "Saving...";
-  return hasConfig ? "Update" : "Save";
-}
-
 type SecretFieldsProps = {
   form: FormState;
+  baseline: FormState;
   loading: boolean;
   hasSavedToken: boolean;
   hasSavedCookie: boolean;
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 };
 
-function SecretFields({ form, loading, hasSavedToken, hasSavedCookie, update }: SecretFieldsProps) {
+function SecretFields({
+  form,
+  baseline,
+  loading,
+  hasSavedToken,
+  hasSavedCookie,
+  update,
+}: SecretFieldsProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
@@ -100,6 +106,7 @@ function SecretFields({ form, loading, hasSavedToken, hasSavedCookie, update }: 
           type="password"
           placeholder={hasSavedToken ? "••••••••" : "xoxc-..."}
           value={form.token}
+          data-settings-dirty={form.token !== baseline.token}
           onChange={(e) => update("token", e.target.value)}
           disabled={loading}
         />
@@ -118,6 +125,7 @@ function SecretFields({ form, loading, hasSavedToken, hasSavedCookie, update }: 
           type="password"
           placeholder={hasSavedCookie ? "••••••••" : "xoxd-..."}
           value={form.cookie}
+          data-settings-dirty={form.cookie !== baseline.cookie}
           onChange={(e) => update("cookie", e.target.value)}
           disabled={loading}
         />
@@ -132,6 +140,7 @@ function SecretFields({ form, loading, hasSavedToken, hasSavedCookie, update }: 
 
 type UtilityAgentPickerProps = {
   form: FormState;
+  baseline: FormState;
   loading: boolean;
   agents: UtilityAgent[];
   loadingAgents: boolean;
@@ -165,6 +174,7 @@ function utilityAgentLabel(a: UtilityAgent): string {
 
 function UtilityAgentPicker({
   form,
+  baseline,
   loading,
   agents,
   loadingAgents,
@@ -178,7 +188,11 @@ function UtilityAgentPicker({
         onValueChange={(v) => update("utilityAgentId", v)}
         disabled={loading || loadingAgents || agents.length === 0}
       >
-        <SelectTrigger id="slack-utility-agent" className="w-full">
+        <SelectTrigger
+          id="slack-utility-agent"
+          className="w-full"
+          data-settings-dirty={form.utilityAgentId !== baseline.utilityAgentId}
+        >
           <SelectValue placeholder={utilityAgentPlaceholder(agents, loadingAgents)} />
         </SelectTrigger>
         <SelectContent>
@@ -212,10 +226,12 @@ function UtilityAgentPicker({
 
 function PrefixField({
   form,
+  baseline,
   loading,
   update,
 }: {
   form: FormState;
+  baseline: FormState;
   loading: boolean;
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 }) {
@@ -227,6 +243,7 @@ function PrefixField({
         type="text"
         placeholder={DEFAULT_PREFIX}
         value={form.commandPrefix}
+        data-settings-dirty={form.commandPrefix !== baseline.commandPrefix}
         onChange={(e) => update("commandPrefix", e.target.value)}
         disabled={loading}
       />
@@ -240,10 +257,12 @@ function PrefixField({
 
 function PollIntervalField({
   form,
+  baseline,
   loading,
   update,
 }: {
   form: FormState;
+  baseline: FormState;
   loading: boolean;
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 }) {
@@ -257,6 +276,7 @@ function PollIntervalField({
         max={MAX_POLL_INTERVAL_SECONDS}
         step={1}
         value={form.pollIntervalSeconds}
+        data-settings-dirty={form.pollIntervalSeconds !== baseline.pollIntervalSeconds}
         onChange={(e) => {
           const n = Number(e.target.value);
           update("pollIntervalSeconds", Number.isFinite(n) ? n : DEFAULT_POLL_INTERVAL_SECONDS);
@@ -300,28 +320,22 @@ function UnsupportedWarning() {
 }
 
 type ActionBarProps = {
-  saving: boolean;
   testing: boolean;
   deleting: boolean;
   loading: boolean;
   hasConfig: boolean;
-  disableSave: boolean;
   disableTest: boolean;
   onTest: () => void;
-  onSave: () => void;
   onDelete: () => void;
 };
 
 function ActionBar({
-  saving,
   testing,
   deleting,
   loading,
   hasConfig,
-  disableSave,
   disableTest,
   onTest,
-  onSave,
   onDelete,
 }: ActionBarProps) {
   return (
@@ -335,9 +349,6 @@ function ActionBar({
         title={disableTest ? "Paste a token and cookie to test the connection" : undefined}
       >
         {testing ? "Testing..." : "Test connection"}
-      </Button>
-      <Button type="button" onClick={onSave} disabled={disableSave} className="cursor-pointer">
-        {saveLabel(saving, hasConfig)}
       </Button>
       {hasConfig && (
         <Button
@@ -373,13 +384,20 @@ function useUtilityAgentsLoader() {
 }
 
 type SettingsActionsArgs = {
+  workspaceId: string;
   form: FormState;
   setConfig: (cfg: SlackConfig | null) => void;
-  setForm: (form: FormState) => void;
+  setForm: Dispatch<SetStateAction<FormState>>;
   setTestResult: (r: TestSlackConnectionResult | null) => void;
 };
 
-function useSettingsActions({ form, setConfig, setForm, setTestResult }: SettingsActionsArgs) {
+function useSettingsActions({
+  workspaceId,
+  form,
+  setConfig,
+  setForm,
+  setTestResult,
+}: SettingsActionsArgs) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -389,49 +407,59 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await testSlackConnection({
-        authMethod: "cookie",
-        utilityAgentId: form.utilityAgentId,
-        commandPrefix: form.commandPrefix,
-        pollIntervalSeconds: form.pollIntervalSeconds,
-        token: form.token || undefined,
-        cookie: form.cookie || undefined,
-      });
+      const res = await testSlackConnection(
+        {
+          authMethod: "cookie",
+          utilityAgentId: form.utilityAgentId,
+          commandPrefix: form.commandPrefix,
+          pollIntervalSeconds: form.pollIntervalSeconds,
+          token: form.token || undefined,
+          cookie: form.cookie || undefined,
+        },
+        { workspaceId },
+      );
       setTestResult(res);
     } catch (err) {
       setTestResult({ ok: false, error: String(err) });
     } finally {
       setTesting(false);
     }
-  }, [form, setTestResult]);
+  }, [workspaceId, form, setTestResult]);
 
   const handleSave = useCallback(async () => {
+    const submitted = form;
     setSaving(true);
     try {
-      const saved = await setSlackConfig({
-        authMethod: "cookie",
-        utilityAgentId: form.utilityAgentId,
-        commandPrefix: form.commandPrefix,
-        pollIntervalSeconds: form.pollIntervalSeconds,
-        token: form.token || undefined,
-        cookie: form.cookie || undefined,
-      });
+      const saved = await setSlackConfig(
+        {
+          authMethod: "cookie",
+          utilityAgentId: form.utilityAgentId,
+          commandPrefix: form.commandPrefix,
+          pollIntervalSeconds: form.pollIntervalSeconds,
+          token: form.token || undefined,
+          cookie: form.cookie || undefined,
+        },
+        { workspaceId },
+      );
       setConfig(saved);
-      setForm(configToForm(saved));
+      setForm((current) =>
+        JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
+      );
       setTestResult(null);
       toast({ description: "Slack configuration saved", variant: "success" });
     } catch (err) {
       toast({ description: `Save failed: ${String(err)}`, variant: "error" });
+      throw err;
     } finally {
       setSaving(false);
     }
-  }, [form, toast, setConfig, setForm, setTestResult]);
+  }, [workspaceId, form, toast, setConfig, setForm, setTestResult]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Slack configuration?")) return;
     setDeleting(true);
     try {
-      await deleteSlackConfig();
+      await deleteSlackConfig({ workspaceId });
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -441,12 +469,12 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } finally {
       setDeleting(false);
     }
-  }, [toast, setConfig, setForm, setTestResult]);
+  }, [workspaceId, toast, setConfig, setForm, setTestResult]);
 
   return { saving, testing, deleting, handleTest, handleSave, handleDelete };
 }
 
-function useSlackSettings() {
+function useSlackSettings(workspaceId: string) {
   const { toast } = useToast();
   const [config, setConfig] = useState<SlackConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -458,7 +486,7 @@ function useSlackSettings() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const cfg = await getSlackConfig();
+      const cfg = await getSlackConfig({ workspaceId });
       setConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
@@ -466,7 +494,7 @@ function useSlackSettings() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [workspaceId, toast]);
 
   useEffect(() => {
     void load();
@@ -475,22 +503,24 @@ function useSlackSettings() {
   // Background refresh so the auth-health banner picks up new probe results.
   useEffect(() => {
     const id = setInterval(() => {
-      getSlackConfig()
+      getSlackConfig({ workspaceId })
         .then((cfg) => setConfig(cfg))
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [workspaceId]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
       setForm((prev) => ({ ...prev, [key]: value })),
     [],
   );
+  const discard = useCallback(() => setForm(configToForm(config)), [config]);
 
   const { saving, testing, deleting, handleTest, handleSave, handleDelete } = useSettingsActions({
+    workspaceId,
     form,
     setConfig,
     setForm,
@@ -509,6 +539,7 @@ function useSlackSettings() {
     agents,
     loadingAgents,
     update,
+    discard,
     handleTest,
     handleSave,
     handleDelete,
@@ -517,42 +548,47 @@ function useSlackSettings() {
 
 function EnabledPill() {
   const { enabled, setEnabled } = useSlackEnabled();
-  return (
-    <div className="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1">
-      <Switch
-        id="slack-enabled"
-        checked={enabled}
-        onCheckedChange={setEnabled}
-        className="cursor-pointer"
-      />
-      <Label htmlFor="slack-enabled" className="text-xs cursor-pointer">
-        {enabled ? "Enabled" : "Disabled"}
-      </Label>
-    </div>
-  );
+  return <DraftedIntegrationEnabledControl id="slack" enabled={enabled} persist={setEnabled} />;
 }
 
-export function SlackConnectionSection() {
-  const s = useSlackSettings();
+export function SlackConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const s = useSlackSettings(workspaceId);
+  const baseline = configToForm(s.config);
   const missingSecrets =
     (!s.config?.hasToken && !s.form.token) || (!s.config?.hasCookie && !s.form.cookie);
   const missingAgent = !s.form.utilityAgentId;
   const disableSave = s.saving || missingSecrets || missingAgent;
   const disableTest = missingSecrets;
+  const revision = JSON.stringify(s.form);
+  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
+  let invalidReason: string | undefined;
+  if (missingSecrets) invalidReason = "A session token and cookie are required.";
+  else if (missingAgent) invalidReason = "A triage agent is required.";
+
+  useSettingsSaveContributor({
+    id: `slack-config:${workspaceId}`,
+    revision,
+    isDirty: dirty,
+    canSave: !disableSave,
+    invalidReason,
+    save: s.handleSave,
+    discard: s.discard,
+  });
 
   return (
     <SettingsSection
       icon={<IconBrandSlack className="h-5 w-5" />}
       title="Slack integration"
-      description="Capture Slack threads as Kandev tasks. Type !kandev <instruction> in any thread you can see and the configured utility agent picks the workspace/workflow/repo and creates the task."
+      description="Capture Slack threads as tasks for the selected workspace. Type !kandev <instruction> in any thread you can see and the configured utility agent creates the task."
       action={<EnabledPill />}
     >
-      <Card>
+      <SettingsCard isDirty={dirty}>
         <CardContent className="space-y-4 pt-6">
           <UnsupportedWarning />
           <IntegrationAuthStatusBanner health={s.health} />
           <SecretFields
             form={s.form}
+            baseline={baseline}
             loading={s.loading}
             hasSavedToken={!!s.config?.hasToken}
             hasSavedCookie={!!s.config?.hasCookie}
@@ -561,37 +597,46 @@ export function SlackConnectionSection() {
           <Separator />
           <UtilityAgentPicker
             form={s.form}
+            baseline={baseline}
             loading={s.loading}
             agents={s.agents}
             loadingAgents={s.loadingAgents}
             update={s.update}
           />
-          <PrefixField form={s.form} loading={s.loading} update={s.update} />
-          <PollIntervalField form={s.form} loading={s.loading} update={s.update} />
+          <PrefixField form={s.form} baseline={baseline} loading={s.loading} update={s.update} />
+          <PollIntervalField
+            form={s.form}
+            baseline={baseline}
+            loading={s.loading}
+            update={s.update}
+          />
           <TestResultAlert result={s.testResult} />
           <Separator />
           <ActionBar
-            saving={s.saving}
             testing={s.testing}
             deleting={s.deleting}
             loading={s.loading}
             hasConfig={!!s.config}
-            disableSave={disableSave}
             disableTest={disableTest}
             onTest={s.handleTest}
-            onSave={s.handleSave}
             onDelete={s.handleDelete}
           />
         </CardContent>
-      </Card>
+      </SettingsCard>
     </SettingsSection>
   );
 }
 
-export function SlackIntegrationPage() {
+type SlackIntegrationPageProps = {
+  workspaceId?: string;
+};
+
+export function SlackIntegrationPage({ workspaceId }: SlackIntegrationPageProps = {}) {
   return (
     <div className="space-y-8">
-      <SlackConnectionSection />
+      <WorkspaceScopedSection workspaceId={workspaceId}>
+        {(workspaceId) => <SlackConnectionSection key={workspaceId} workspaceId={workspaceId} />}
+      </WorkspaceScopedSection>
     </div>
   );
 }

@@ -36,6 +36,12 @@ type Worktree struct {
 	// RepositoryID is the ID of the repository this worktree belongs to.
 	RepositoryID string `json:"repository_id"`
 
+	// BranchSlug, when set, disambiguates two worktrees that share a
+	// (SessionID, RepositoryID) pair on different branches. Stored on
+	// task_session_worktrees so reuse lookups can scope by branch and not
+	// collapse multi-branch tasks down to a single worktree.
+	BranchSlug string `json:"branch_slug,omitempty"`
+
 	// RepositoryPath is the local filesystem path to the main repository.
 	// Stored for recreation if the worktree directory is lost.
 	RepositoryPath string `json:"repository_path"`
@@ -83,6 +89,29 @@ type Worktree struct {
 	// describing why the original branch was not used. Surfaced as collapsible
 	// detail alongside BaseBranchFallbackWarning.
 	BaseBranchFallbackDetail string `json:"base_branch_fallback_detail,omitempty"`
+
+	// SetupScriptWarning is set when the repository's setup script failed.
+	// Setup script failures are non-fatal: the worktree is kept and the agent
+	// launches normally, but the failure is surfaced as a warning so the user
+	// can fix it. Empty when the script succeeded or no script was configured.
+	SetupScriptWarning string `json:"setup_script_warning,omitempty"`
+
+	// SetupScriptWarningDetail mirrors FetchWarningDetail: a longer message
+	// describing the setup-script failure. Surfaced as collapsible detail
+	// alongside SetupScriptWarning.
+	SetupScriptWarningDetail string `json:"setup_script_warning_detail,omitempty"`
+
+	// CopiedFiles lists the relative paths of files copied from the source
+	// repo into this worktree per the repository's CopyFiles spec. Populated
+	// only on the in-memory record returned by Create — not persisted, since
+	// it describes a one-shot launch action rather than worktree state. The
+	// env preparer reads it to surface a "Copy ignored files" prepare step.
+	CopiedFiles []string `json:"-"`
+
+	// CopyFilesWarnings lists non-fatal warnings emitted while copying files
+	// (e.g. missing patterns, traversal-rejected paths). Like CopiedFiles,
+	// this is in-memory only and read by the env preparer.
+	CopyFilesWarnings []string `json:"-"`
 }
 
 // CreateRequest contains the parameters for creating a new worktree.
@@ -119,9 +148,25 @@ type CreateRequest struct {
 	// fallback branch is created using the original name with a random suffix.
 	CheckoutBranch string
 
+	// PRNumber, when > 0, identifies the GitHub PR whose head ref should be
+	// fetched into the local CheckoutBranch via the refs/pull/<N>/head refspec.
+	// Required for fork PRs, whose branches only exist on the contributor's
+	// fork — git fetch origin <branch> fails because origin (the base repo)
+	// has no such ref. GitHub mirrors every PR head under refs/pull/<N>/head
+	// on the base repo, so the refspec form works for same-repo and fork PRs
+	// uniformly without needing to add the fork as a remote.
+	PRNumber int
+
 	// WorktreeBranchPrefix is the prefix to use for the worktree branch name.
 	// If empty, the default prefix is used.
 	WorktreeBranchPrefix string
+
+	// WorktreeBranchTemplate is the template to use for the worktree branch name.
+	// If empty, the default template is used.
+	WorktreeBranchTemplate string
+
+	// WorktreeBranchTicket is the external ticket value used by branch templates.
+	WorktreeBranchTicket string
 
 	// PullBeforeWorktree indicates whether to pull from remote before creating the worktree.
 	PullBeforeWorktree bool
@@ -135,12 +180,38 @@ type CreateRequest struct {
 	// ~/.kandev/tasks/{TaskDirName}/{RepoName}/ instead of ~/.kandev/worktrees/.
 	TaskDirName string
 
+	// WorkspaceID is persisted in the task-root ownership marker used by
+	// install-wide workspace maintenance.
+	WorkspaceID string
+
 	// RepoName is the repository name used as subdirectory inside the task directory.
 	// Only used when TaskDirName is also set.
 	RepoName string
 
+	// BranchSlug, when non-empty, suffixes the per-repo sibling directory so
+	// the same repo can host multiple branches inside one task. Path becomes
+	// ~/.kandev/tasks/{TaskDirName}/{RepoName}-{BranchSlug}/ — a sibling of
+	// the primary {RepoName}/ entry, NOT nested under it (nesting would
+	// break agentctl's sibling-based multi-repo detection). Callers must
+	// derive a deterministic, filesystem-safe slug (see SanitizeBranchSlug).
+	BranchSlug string
+
+	// BranchIdentitySlug, when non-empty, is the stable branch key used for
+	// reuse lookup, cache keys, and persisted task_session_worktrees rows. It
+	// may differ from BranchSlug when the primary branch keeps the flat path.
+	BranchIdentitySlug string
+
 	// OnSyncProgress receives progress updates for pre-worktree branch sync.
 	OnSyncProgress SyncProgressCallback
+
+	// OnWorktreeCreated, when set, is invoked once the worktree directory has
+	// been created and persisted (git worktree add succeeded) but BEFORE the
+	// per-repo setup script runs. The env preparer uses it to complete the
+	// "Create worktree" UI step so the setup script renders as a distinct,
+	// subsequent step instead of overlapping it. The passed worktree already
+	// carries any base-branch fallback warning. Called synchronously on the
+	// Create goroutine; not invoked when an existing worktree is reused.
+	OnWorktreeCreated func(*Worktree)
 }
 
 // Validate validates the create request.
@@ -152,7 +223,14 @@ func (r *CreateRequest) Validate() error {
 		return ErrRepoNotGit
 	}
 	if r.BaseBranch == "" {
-		return ErrInvalidBaseBranch
+		// Defence-in-depth: prefer the explicit FallbackBaseBranch (typically
+		// the repository's default_branch carried by the caller) over an
+		// outright rejection. The manager's branchExists check still verifies
+		// the resulting ref before any git work runs.
+		if r.FallbackBaseBranch == "" {
+			return ErrInvalidBaseBranch
+		}
+		r.BaseBranch = r.FallbackBaseBranch
 	}
 	return nil
 }

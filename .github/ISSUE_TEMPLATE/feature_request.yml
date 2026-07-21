@@ -1,7 +1,7 @@
 name: Feature request
 description: Propose a Kandev improvement with clear user value.
 title: "[Feature]: "
-labels: ["enhancement", "needs-triage"]
+labels: ["enhancement"]
 body:
   - type: markdown
     attributes:

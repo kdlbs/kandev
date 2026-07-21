@@ -3,10 +3,12 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -296,6 +298,41 @@ func TestProcessOnTurnStart(t *testing.T) {
 	})
 }
 
+// TestProcessOnEnterSetSessionMode verifies the set_session_mode on_enter action
+// (issue #1183): it persists the declared mode to metadata and applies it live to
+// the running agent.
+func TestProcessOnEnterSetSessionMode(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	step := &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Implement",
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterSetSessionMode, Config: map[string]interface{}{"mode": "acceptEdits"}},
+			},
+		},
+	}
+
+	session, _ := repo.GetTaskSession(ctx, "s1")
+	svc.processOnEnter(ctx, "t1", session, step, "test task")
+
+	updated, _ := repo.GetTaskSession(ctx, "s1")
+	if got, _ := updated.Metadata[models.SessionMetaKeySessionMode].(string); got != "acceptEdits" {
+		t.Errorf("expected session_mode metadata acceptEdits, got %q", got)
+	}
+	if len(agentMgr.setSessionModeCalls) != 1 {
+		t.Fatalf("expected 1 live set-mode call, got %d", len(agentMgr.setSessionModeCalls))
+	}
+	if c := agentMgr.setSessionModeCalls[0]; c.SessionID != "s1" || c.ModeID != "acceptEdits" {
+		t.Errorf("unexpected live set-mode call: %+v", c)
+	}
+}
+
 func TestProcessOnEnter(t *testing.T) {
 	ctx := context.Background()
 
@@ -413,6 +450,16 @@ func TestProcessOnEnter(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, newMockStepGetter(), taskRepo)
+		// Seed an active-turn entry so flipStaleRunningToWaiting treats the
+		// session as genuinely mid-turn and the auto-start prompt is queued
+		// (the behavior this subtest asserts).
+		svc.activeTurns.Store("s1", "turn-1")
+		attachments := []messagequeue.MessageAttachment{
+			{Type: "image", Data: "base64-data", MimeType: "image/png"},
+		}
+		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "handoff prompt", "", "user", false, attachments); err != nil {
+			t.Fatalf("failed to seed queued handoff: %v", err)
+		}
 
 		step := &wfmodels.WorkflowStep{
 			ID: "step2", WorkflowID: "wf1", Name: "In Progress",
@@ -430,11 +477,18 @@ func TestProcessOnEnter(t *testing.T) {
 		for {
 			status := svc.messageQueue.GetStatus(ctx, "s1")
 			if status.Count > 0 {
-				if status.Entries[0].TaskID != "t1" {
-					t.Fatalf("expected queued task_id t1, got %s", status.Entries[0].TaskID)
+				entry := status.Entries[0]
+				if entry.TaskID != "t1" {
+					t.Fatalf("expected queued task_id t1, got %s", entry.TaskID)
 				}
-				if status.Entries[0].Content == "" {
+				if entry.Content == "" {
 					t.Fatal("expected queued content to be populated")
+				}
+				if !strings.Contains(entry.Content, "handoff prompt") {
+					t.Fatalf("expected queued content to include handoff prompt, got %q", entry.Content)
+				}
+				if len(entry.Attachments) != 1 || entry.Attachments[0].MimeType != "image/png" {
+					t.Fatalf("expected queued handoff attachment to be preserved, got %+v", entry.Attachments)
 				}
 				break
 			}

@@ -27,6 +27,15 @@ func TestBoolToInt(t *testing.T) {
 	}
 }
 
+func TestBlobType(t *testing.T) {
+	if BlobType(SQLite3) != "BLOB" {
+		t.Errorf("sqlite: got %q", BlobType(SQLite3))
+	}
+	if BlobType(PGX) != "BYTEA" {
+		t.Errorf("pgx: got %q", BlobType(PGX))
+	}
+}
+
 func TestJSONExtract(t *testing.T) {
 	got := JSONExtract(SQLite3, "metadata", "status")
 	if got != "json_extract(metadata, '$.status')" {
@@ -56,6 +65,17 @@ func TestJSONSet(t *testing.T) {
 	}
 	got = JSONSet(PGX, "metadata", "status", "complete")
 	if got != `jsonb_set(metadata::jsonb, '{status}', '"complete"')::text` {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestExcludeConfigModePredicate(t *testing.T) {
+	got := ExcludeConfigModePredicate(SQLite3, "metadata")
+	if got != "json_extract(metadata, '$.config_mode') IS NOT 1" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = ExcludeConfigModePredicate(PGX, "metadata")
+	if got != "COALESCE(metadata::jsonb->>'config_mode', '') NOT IN ('true', '1')" {
 		t.Errorf("pgx: got %q", got)
 	}
 }
@@ -98,6 +118,17 @@ func TestNowMinusHours(t *testing.T) {
 	}
 	got = NowMinusHours(PGX, "ws.hours")
 	if got != "NOW() - (ws.hours || ' hours')::interval" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestGreatestTimestamp(t *testing.T) {
+	got := GreatestTimestamp(SQLite3, "t.updated_at", "MAX(ts.updated_at)")
+	if got != "max(t.updated_at, MAX(ts.updated_at))" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = GreatestTimestamp(PGX, "t.updated_at", "MAX(ts.updated_at)")
+	if got != "GREATEST(t.updated_at, MAX(ts.updated_at))" {
 		t.Errorf("pgx: got %q", got)
 	}
 }

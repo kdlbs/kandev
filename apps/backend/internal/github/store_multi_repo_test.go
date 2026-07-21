@@ -20,7 +20,8 @@ func newTestStore(t *testing.T) *Store {
 		t.Fatalf("open db: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, archived_at DATETIME)`); err != nil {
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, archived_at DATETIME)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
 	store, err := NewStore(sqlxDB, sqlxDB)
@@ -82,7 +83,17 @@ func TestTaskPR_PerRepoStorage(t *testing.T) {
 	}
 }
 
-func TestTaskPR_ReplaceTaskPR_ScopedByRepository(t *testing.T) {
+// TestTaskPR_ReplaceTaskPR_PreservesSiblingsAndUpserts locks the
+// multi-branch upsert semantics of ReplaceTaskPR. The function now
+// upserts on (task_id, repository_id, pr_number) instead of wiping all
+// rows for (task, repo). Effects:
+//
+//   - Different repo (repo-b) stays untouched.
+//   - Different PR number on the same repo (repo-a, pr=1) stays as a
+//     sibling — multi-branch tasks need this so two PRs on the same repo
+//     coexist instead of one clobbering the other.
+//   - Same (task, repo, pr_number) is overwritten (the upsert).
+func TestTaskPR_ReplaceTaskPR_PreservesSiblingsAndUpserts(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
@@ -91,36 +102,40 @@ func TestTaskPR_ReplaceTaskPR_ScopedByRepository(t *testing.T) {
 		TaskID: "task-2", RepositoryID: "repo-a",
 		Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,
 	}); err != nil {
-		t.Fatalf("create A: %v", err)
+		t.Fatalf("create A#1: %v", err)
 	}
 	if err := store.CreateTaskPR(ctx, &TaskPR{
 		TaskID: "task-2", RepositoryID: "repo-b",
 		Owner: "o", Repo: "r2", PRNumber: 2, CreatedAt: now,
 	}); err != nil {
-		t.Fatalf("create B: %v", err)
+		t.Fatalf("create B#2: %v", err)
 	}
 
-	// Replace only repo-a's PR — repo-b must survive.
+	// Add a new PR #99 on repo-a — must NOT delete repo-a's PR #1
+	// (multi-branch) nor repo-b's #2 (multi-repo).
 	if err := store.ReplaceTaskPR(ctx, &TaskPR{
 		TaskID: "task-2", RepositoryID: "repo-a",
 		Owner: "o", Repo: "r", PRNumber: 99, CreatedAt: now,
 	}); err != nil {
-		t.Fatalf("replace A: %v", err)
+		t.Fatalf("replace A#99: %v", err)
 	}
 
 	all, _ := store.ListTaskPRsByTask(ctx, "task-2")
-	if len(all) != 2 {
-		t.Fatalf("expected 2 PRs after scoped replace, got %d", len(all))
+	if len(all) != 3 {
+		t.Fatalf("expected 3 PR rows (multi-branch siblings + multi-repo), got %d", len(all))
 	}
-	bySpec := map[string]int{}
-	for _, p := range all {
-		bySpec[p.RepositoryID] = p.PRNumber
+
+	// Now overwrite repo-a #99 by calling ReplaceTaskPR with the same
+	// (task, repo, pr_number) and a different field — upsert path.
+	if err := store.ReplaceTaskPR(ctx, &TaskPR{
+		TaskID: "task-2", RepositoryID: "repo-a",
+		Owner: "o", Repo: "r", PRNumber: 99, PRTitle: "updated", CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert A#99: %v", err)
 	}
-	if bySpec["repo-a"] != 99 {
-		t.Errorf("expected repo-a updated to 99, got %d", bySpec["repo-a"])
-	}
-	if bySpec["repo-b"] != 2 {
-		t.Errorf("expected repo-b unchanged at 2, got %d", bySpec["repo-b"])
+	all, _ = store.ListTaskPRsByTask(ctx, "task-2")
+	if len(all) != 3 {
+		t.Fatalf("expected 3 rows after upsert, got %d", len(all))
 	}
 }
 

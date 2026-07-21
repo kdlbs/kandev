@@ -83,7 +83,10 @@ func TestResolvePreparerSetupScript_UsesExplicitScript(t *testing.T) {
 	}
 
 	got := resolvePreparerSetupScript(req, "/tmp/my-repo")
-	if strings.TrimSpace(got) != "echo /tmp/my-repo" {
+	// Data placeholders resolve to a self-contained single-quoted shell token
+	// (security: shellQuote) — functionally identical for echo, safe if the
+	// value ever carried shell metacharacters.
+	if strings.TrimSpace(got) != "echo '/tmp/my-repo'" {
 		t.Fatalf("expected explicit script to be used and resolved, got %q", got)
 	}
 }
@@ -106,12 +109,14 @@ func TestResolvePreparerSetupScript_WorktreePlaceholders(t *testing.T) {
 	}
 
 	got := resolvePreparerSetupScript(req, "/tmp/worktrees/wt-123")
+	// Data placeholders resolve to self-contained single-quoted tokens
+	// (shellQuote); worktree.id is a kandev UUID and stays unquoted.
 	expected := []string{
-		"echo /tmp/worktrees",
-		"echo /tmp/worktrees/wt-123",
+		"echo '/tmp/worktrees'",
+		"echo '/tmp/worktrees/wt-123'",
 		"echo wt-123",
-		"echo feature/test-abc",
-		"echo main",
+		"echo 'feature/test-abc'",
+		"echo 'main'",
 	}
 	for _, want := range expected {
 		if !strings.Contains(got, want) {

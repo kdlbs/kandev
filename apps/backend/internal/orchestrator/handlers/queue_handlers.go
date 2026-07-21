@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -16,6 +17,8 @@ const (
 	// queueErrorCodeEntryNotFound is surfaced when an edit/remove targets an entry
 	// that has already been drained (atomic-take won the race).
 	queueErrorCodeEntryNotFound = "entry_not_found"
+	queueErrorCodeSessionBusy   = "session_busy"
+	queueErrorCodeNotPromptable = "session_not_promptable"
 
 	// Payload field names — extracted to satisfy goconst (≥3 occurrences).
 	fieldSessionID = "session_id"
@@ -35,17 +38,27 @@ type QueueService interface {
 	GetStatus(ctx context.Context, sessionID string) *messagequeue.QueueStatus
 }
 
+type QueueDrainer interface {
+	DrainQueuedMessage(ctx context.Context, sessionID string) (bool, error)
+}
+
 // QueueHandlers handles WebSocket message-queue operations.
 type QueueHandlers struct {
 	queueService QueueService
+	queueDrainer QueueDrainer
 	eventBus     bus.EventBus
 	logger       *logger.Logger
 }
 
 // NewQueueHandlers creates a new QueueHandlers instance.
-func NewQueueHandlers(queueService QueueService, eventBus bus.EventBus, log *logger.Logger) *QueueHandlers {
+func NewQueueHandlers(queueService QueueService, eventBus bus.EventBus, log *logger.Logger, drainer ...QueueDrainer) *QueueHandlers {
+	var queueDrainer QueueDrainer
+	if len(drainer) > 0 {
+		queueDrainer = drainer[0]
+	}
 	return &QueueHandlers{
 		queueService: queueService,
+		queueDrainer: queueDrainer,
 		eventBus:     eventBus,
 		logger:       log.WithFields(zap.String("component", "queue-handlers")),
 	}
@@ -58,6 +71,7 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMessageQueueGet, h.wsGetQueueStatus)
 	d.RegisterFunc(ws.ActionMessageQueueUpdate, h.wsUpdateMessage)
 	d.RegisterFunc(ws.ActionMessageQueueAppend, h.wsAppendToQueue)
+	d.RegisterFunc(ws.ActionMessageQueueDrain, h.wsDrainQueue)
 	d.RegisterFunc(ws.ActionMessageQueueRemove, h.wsRemoveEntry)
 }
 
@@ -85,6 +99,10 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
+	}
+	if invalid := firstInvalidDeliveryMode(req.Attachments); invalid >= 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
+			map[string]interface{}{"attachment_index": invalid})
 	}
 	if req.UserID == messagequeue.QueuedByAgent {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "user_id may not impersonate the agent identity", nil)
@@ -141,6 +159,42 @@ func (h *QueueHandlers) wsCancelAll(ctx context.Context, msg *ws.Message) (*ws.M
 	})
 }
 
+type wsDrainQueueRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsDrainQueueRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if h.queueDrainer == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue drain is unavailable", nil)
+	}
+
+	drained, err := h.queueDrainer.DrainQueuedMessage(ctx, req.SessionID)
+	if err != nil {
+		switch {
+		case errors.Is(err, orchestrator.ErrAgentPromptInProgress):
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeSessionBusy, "Session is busy", nil)
+		case errors.Is(err, orchestrator.ErrSessionNotPromptable):
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeNotPromptable, "Session is not ready for input", nil)
+		default:
+			h.logger.Error("failed to drain queued message", zap.String(fieldSessionID, req.SessionID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to drain queued message", nil)
+		}
+	}
+
+	h.publishStatus(ctx, req.SessionID)
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		fieldSessionID: req.SessionID,
+		"drained":      drained,
+	})
+}
+
 type wsGetQueueStatusRequest struct {
 	SessionID string `json:"session_id"`
 }
@@ -183,6 +237,10 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
 	}
+	if invalid := firstInvalidDeliveryMode(req.Attachments); invalid >= 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
+			map[string]interface{}{"attachment_index": invalid})
+	}
 
 	// Reject any client-supplied identity that would impersonate the agent.
 	// Without this guard a hostile WS client could send user_id="agent" to
@@ -208,6 +266,15 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 
 	h.publishStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
+}
+
+func firstInvalidDeliveryMode(attachments []messagequeue.MessageAttachment) int {
+	for i, att := range attachments {
+		if att.DeliveryMode != "" && att.DeliveryMode != "prompt" && att.DeliveryMode != "path" {
+			return i
+		}
+	}
+	return -1
 }
 
 type wsRemoveEntryRequest struct {

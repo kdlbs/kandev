@@ -40,6 +40,8 @@ import { useGitOperations } from "@/hooks/use-git-operations";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import type { FileInfo } from "@/lib/state/slices";
 import { useToast } from "@/components/toast-provider";
+import { useAppStore } from "@/components/state-provider";
+import { openExternalLink } from "@/lib/desktop/external-links";
 import {
   CommitSummary,
   MobilePRBranchSummary,
@@ -98,13 +100,13 @@ function useCommitDialogForm(
 ) {
   const [commitMessage, setCommitMessage] = useState("");
   const [commitBody, setCommitBody] = useState("");
-  const [stageAll, setStageAll] = useState(true);
+  const [stageAll, setStageAll] = useState(false);
 
   const handleOpen = (isOpen: boolean) => {
     if (isOpen) {
       setCommitMessage("");
       setCommitBody("");
-      setStageAll(true);
+      setStageAll(false);
     }
     onOpenChange(isOpen);
   };
@@ -434,6 +436,8 @@ export function useMobileGitActions(
   setPrDialogOpen: (v: boolean) => void,
 ) {
   const { toast } = useToast();
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
   // SessionGit's commit fans out per-repo for multi-repo workspaces; the raw
   // useGitOperations.commit hits the workspace root and fails on multi-repo
   // tasks. Pull from useGitOperations only what SessionGit doesn't override.
@@ -484,7 +488,12 @@ export function useMobileGitActions(
             description: result.pr_url || "PR created successfully",
             variant: "success",
           });
-          if (result.pr_url) window.open(result.pr_url, "_blank");
+          if (result.pr_url) {
+            if (activeTaskId) {
+              setPendingPrUrlForTask(activeTaskId, "", result.pr_url);
+            }
+            void openExternalLink(result.pr_url).catch(() => undefined);
+          }
         } else {
           toast({
             title: "Create PR failed",
@@ -500,7 +509,7 @@ export function useMobileGitActions(
         });
       }
     },
-    [createPR, baseBranch, toast, setPrDialogOpen],
+    [createPR, baseBranch, toast, setPrDialogOpen, activeTaskId, setPendingPrUrlForTask],
   );
 
   return {

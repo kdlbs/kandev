@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { useEffect, useRef, useState, type ComponentType } from "react";
+import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
@@ -11,17 +11,30 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconBrandGithub, IconHexagon, IconPlugConnected, IconTicket } from "@tabler/icons-react";
+import {
+  IconBrandGithub,
+  IconBrandGitlab,
+  IconHexagon,
+  IconPlugConnected,
+  IconTicket,
+} from "@tabler/icons-react";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
+import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-devops-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
+import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { resolvePluginIcon } from "@/lib/plugins/icons";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { GitHubStatus } from "@/lib/types/github";
+import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 
 type MobileIntegrationsSectionProps = {
   onNavigate: () => void;
 };
 
-type IntegrationId = "github" | "jira" | "linear";
+type IntegrationId = "azure-devops" | "github" | "gitlab" | "jira" | "linear";
 
 type IntegrationLink = {
   id: IntegrationId;
@@ -30,32 +43,42 @@ type IntegrationLink = {
 };
 
 type IntegrationAvailability = {
+  azureDevOpsAvailable?: boolean;
   githubReady: boolean;
+  gitlabReady: boolean;
   jiraAvailable: boolean;
   linearAvailable: boolean;
 };
 
 const INTEGRATION_LINKS: IntegrationLink[] = [
+  { id: "azure-devops", label: "Azure DevOps", href: "/azure-devops" },
   { id: "github", label: "GitHub", href: "/github" },
+  { id: "gitlab", label: "GitLab", href: "/gitlab" },
   { id: "jira", label: "Jira", href: "/jira" },
   { id: "linear", label: "Linear", href: "/linear" },
 ];
 
 const INTEGRATION_ICONS = {
+  "azure-devops": AzureDevOpsIcon,
   github: IconBrandGithub,
+  gitlab: IconBrandGitlab,
   jira: IconTicket,
   linear: IconHexagon,
-} satisfies Record<IntegrationId, typeof IconBrandGithub>;
+} satisfies Record<IntegrationId, ComponentType<{ className?: string }>>;
 
 const HOVER_CLOSE_DELAY_MS = 180;
 
 export function getAvailableIntegrationLinks({
+  azureDevOpsAvailable,
   githubReady,
+  gitlabReady,
   jiraAvailable,
   linearAvailable,
 }: IntegrationAvailability): IntegrationLink[] {
   return INTEGRATION_LINKS.filter((link) => {
+    if (link.id === "azure-devops") return !!azureDevOpsAvailable;
     if (link.id === "github") return githubReady;
+    if (link.id === "gitlab") return gitlabReady;
     if (link.id === "jira") return jiraAvailable;
     return linearAvailable;
   });
@@ -71,14 +94,33 @@ export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading:
   return { ready: false, label: getStatusLabel(loading) };
 }
 
-function useConfiguredIntegrationLinks(): IntegrationLink[] {
+export function useConfiguredIntegrationLinks(): IntegrationLink[] {
+  // Jira and Linear are per-workspace integrations, so their availability must
+  // be checked against the active workspace. Omitting the id makes the backend
+  // fall back to a legacy default-workspace resolver that can point at the
+  // wrong workspace, hiding a configured integration from the sidebar. GitHub
+  // and GitLab are install-wide and don't need the workspace id.
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const activeWorkspaceExists = useAppStore((s) =>
+    s.workspaces.items.some((item) => item.id === s.workspaces.activeId),
+  );
+  // Guard against a stale active id: if the active workspace was removed but
+  // activeId was not reconciled (e.g. setWorkspaces keeps a non-null id),
+  // scoping to the deleted id would return no config and hide the links even
+  // when another workspace is configured. Fall back to null so the backend's
+  // default-workspace resolution applies instead.
+  const scopedWorkspaceId = activeWorkspaceExists ? activeWorkspaceId : null;
   const { status, loading } = useGitHubStatus();
-  const jiraAvailable = useJiraAvailable();
-  const linearAvailable = useLinearAvailable();
+  const gitlabAvailable = useGitLabAvailable();
+  const jiraAvailable = useJiraAvailable(scopedWorkspaceId);
+  const linearAvailable = useLinearAvailable(scopedWorkspaceId);
+  const azureDevOpsAvailable = useAzureDevOpsAvailable(scopedWorkspaceId);
   const githubStatus = getGitHubIntegrationStatus(status, loading);
 
   return getAvailableIntegrationLinks({
+    azureDevOpsAvailable,
     githubReady: githubStatus.ready,
+    gitlabReady: gitlabAvailable,
     jiraAvailable,
     linearAvailable,
   });
@@ -180,30 +222,68 @@ export function IntegrationsTopbarLinks() {
   );
 }
 
+function MobileIntegrationRow({
+  href,
+  label,
+  icon: Icon,
+  testId,
+  onNavigate,
+}: {
+  href: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  testId?: string;
+  onNavigate: () => void;
+}) {
+  return (
+    <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
+      <Link href={href} onClick={onNavigate} data-testid={testId}>
+        <Icon className="h-4 w-4" />
+        <span className="flex-1 truncate text-left">{label}</span>
+      </Link>
+    </Button>
+  );
+}
+
+/**
+ * Mobile counterpart to the desktop sidebar Integrations section: the
+ * hamburger-sheet surface that exposes the first-party integration links plus
+ * any plugin-registered nav items targeting this section
+ * (`registerNavItem({ section: "integrations" })`). Plugin items are gated on
+ * the "plugins" feature flag, matching the desktop `IntegrationsSection`.
+ */
 export function MobileIntegrationsSection({ onNavigate }: MobileIntegrationsSectionProps) {
   const links = useConfiguredIntegrationLinks();
+  const pluginsEnabled = useFeature("plugins");
+  const registry = usePluginRegistry();
+  const pluginItems = pluginsEnabled
+    ? registry.getNavItems().filter((item) => item.section === "integrations")
+    : [];
 
-  if (links.length === 0) return null;
+  if (links.length === 0 && pluginItems.length === 0) return null;
 
   return (
     <div className="space-y-3">
       <div className="text-sm font-medium">Integrations</div>
-      {links.map((link) => {
-        const Icon = INTEGRATION_ICONS[link.id];
-        return (
-          <Button
-            key={link.id}
-            asChild
-            variant="outline"
-            className="w-full cursor-pointer justify-start gap-2"
-          >
-            <Link href={link.href} onClick={onNavigate}>
-              <Icon className="h-4 w-4" />
-              <span className="flex-1 text-left">{link.label}</span>
-            </Link>
-          </Button>
-        );
-      })}
+      {links.map((link) => (
+        <MobileIntegrationRow
+          key={link.id}
+          href={link.href}
+          label={link.label}
+          icon={INTEGRATION_ICONS[link.id]}
+          onNavigate={onNavigate}
+        />
+      ))}
+      {pluginItems.map((item) => (
+        <MobileIntegrationRow
+          key={`plugin-${item.id}`}
+          href={item.path}
+          label={item.label}
+          icon={resolvePluginIcon(item.icon)}
+          testId={`plugin-nav-item-${item.id}`}
+          onNavigate={onNavigate}
+        />
+      ))}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import type {
   CommandEntry,
   ModeEntry,
   ModelEntry,
+  CapabilityStatus,
   DynamicModelsResponse,
   ModelConfig,
 } from "@/lib/types/http";
@@ -14,6 +15,7 @@ type UseAgentCapabilitiesState = {
   commands: CommandEntry[];
   currentModelId: string | undefined;
   currentModeId: string | undefined;
+  status: CapabilityStatus | undefined;
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -38,6 +40,9 @@ export function useAgentCapabilities(
     initial.current_model_id,
   );
   const [currentModeId, setCurrentModeId] = useState<string | undefined>(initial.current_mode_id);
+  const [status, setStatus] = useState<CapabilityStatus | undefined>(initial.status);
+  const [manualRefreshAgentName, setManualRefreshAgentName] = useState<string>();
+  const hasManualRefresh = manualRefreshAgentName === agentName;
   const [isLoading, setIsLoading] = useState(supportsDynamicModels && !!agentName);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,15 +57,18 @@ export function useAgentCapabilities(
         const response: DynamicModelsResponse = await fetchDynamicModels(agentName, {
           refresh: forceRefresh,
         });
-        if (response.error) {
-          setError(response.error);
-          return;
+        setStatus(response.status);
+        setError(response.error ?? null);
+        if (forceRefresh) {
+          setManualRefreshAgentName(agentName);
         }
-        setModels(response.models ?? []);
-        setModes(response.modes ?? []);
-        setCommands(response.commands ?? []);
-        setCurrentModelId(response.current_model_id);
-        setCurrentModeId(response.current_mode_id);
+        if (response.status !== "failed") {
+          setModels(response.models ?? []);
+          setModes(response.modes ?? []);
+          setCommands(response.commands ?? []);
+          setCurrentModelId(response.current_model_id);
+          setCurrentModeId(response.current_mode_id);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to fetch capabilities");
       } finally {
@@ -71,6 +79,12 @@ export function useAgentCapabilities(
   );
 
   useEffect(() => {
+    if (!hasManualRefresh) {
+      setStatus(initial.status);
+    }
+  }, [hasManualRefresh, initial.status]);
+
+  useEffect(() => {
     if (supportsDynamicModels && agentName) {
       void fetchCaps(false);
     }
@@ -78,5 +92,15 @@ export function useAgentCapabilities(
 
   const refresh = useCallback(() => fetchCaps(true), [fetchCaps]);
 
-  return { models, modes, commands, currentModelId, currentModeId, isLoading, error, refresh };
+  return {
+    models,
+    modes,
+    commands,
+    currentModelId,
+    currentModeId,
+    status,
+    isLoading,
+    error,
+    refresh,
+  };
 }

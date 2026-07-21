@@ -60,5 +60,16 @@ func nonWorktreeTaskBranch(req *EnvPrepareRequest) string {
 	if len(suffix) > 6 {
 		suffix = suffix[:6]
 	}
+	if req.WorktreeBranchTemplate != "" {
+		if branch, err := worktree.RenderTaskBranchName(worktree.BranchNameTemplateInput{
+			Template: req.WorktreeBranchTemplate,
+			TaskID:   req.TaskID,
+			Title:    req.TaskTitle,
+			Ticket:   req.WorktreeBranchTicket,
+			Suffix:   suffix,
+		}); err == nil {
+			return branch
+		}
+	}
 	return worktree.TaskBranchNameWithSuffix(req.TaskTitle, req.TaskID, req.WorktreeBranchPrefix, suffix)
 }

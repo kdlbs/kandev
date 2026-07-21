@@ -4,10 +4,16 @@ const CI = !!process.env.CI;
 
 export default defineConfig({
   testDir: "./tests",
-  // Single worker per process — CI uses --shard to split tests across matrix
-  // runners (each gets its own 4 vCPUs). Tests run serially within the worker
-  // because the testPage fixture does e2eReset on a shared worker-scoped
-  // backend before each test.
+  // `fullyParallel: true` is required so `--shard=N/M` splits work at the test
+  // level (not the file level). With file-level sharding the suite was wildly
+  // unbalanced: largest shard ran 12 min, smallest 1.5 min, because spec files
+  // vary from 1 to 30+ tests. Test-level sharding flattens that distribution.
+  //
+  // Concurrency is still capped by `workers: 1` below — only one test runs at a
+  // time per shard process, preserving the worker-scoped backend invariant that
+  // the testPage fixture relies on (e2eReset before each test on a shared
+  // backend). `fullyParallel: true` alone does not introduce intra-shard
+  // parallelism unless workers > 1.
   //
   // Isolation strategy: office-routing-* specs are gathered into their own
   // Playwright project (see below) so the worker-scoped backend env
@@ -16,7 +22,7 @@ export default defineConfig({
   // topbar agent name. Each routing spec restarts the backend back to
   // baseline in `afterAll` (see backend.restart() — no args = revert to
   // the fixture's baseline env snapshot).
-  fullyParallel: false,
+  fullyParallel: true,
   forbidOnly: CI,
   retries: CI ? 2 : 0,
   workers: 1,
@@ -46,7 +52,15 @@ export default defineConfig({
     },
     {
       name: "chromium",
-      testIgnore: [/mobile-.*\.spec\.ts/, /docker\/.*\.spec\.ts/, /office-routing-.*\.spec\.ts/],
+      testIgnore: [
+        /mobile-.*\.spec\.ts/,
+        // Container-backed tests (Docker executor, SSH executor) live in the
+        // `containers` project and skip when Docker is not available locally.
+        // See apps/web/e2e/README.md for what runs there.
+        /docker\/.*\.spec\.ts/,
+        /ssh\/.*\.spec\.ts/,
+        /office-routing-.*\.spec\.ts/,
+      ],
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -55,13 +69,18 @@ export default defineConfig({
       use: { ...devices["Pixel 5"] },
     },
     {
-      // Real-Docker E2E. Opt-in: run with `playwright test --project=docker`.
-      // Spawns the backend with KANDEV_E2E_DOCKER=1, builds the
-      // kandev-agent:e2e image, and skips entirely on hosts without a Docker
-      // daemon. Container-bound tests are slow (~10-30s each) so they live
-      // in their own project to keep the default CI fast.
-      name: "docker",
-      testMatch: /docker\/.*\.spec\.ts/,
+      // Real-container E2E. Opt-in: run with `playwright test --project=containers`.
+      // Spawns the backend with KANDEV_E2E_CONTAINERS=1 (KANDEV_E2E_DOCKER=1
+      // is honored as a deprecated alias for one release). Builds the
+      // kandev-agent:e2e and kandev-sshd:e2e images and skips entirely on
+      // hosts without a Docker daemon — Docker is used as the runtime for
+      // both the Docker executor's own containers AND the sshd target the
+      // SSH executor connects to. Container-bound tests are slow (~10-30s
+      // each) so they live in their own project to keep the default CI fast.
+      //
+      // See apps/web/e2e/README.md for context and how to run locally.
+      name: "containers",
+      testMatch: [/docker\/.*\.spec\.ts/, /ssh\/.*\.spec\.ts/],
       use: { ...devices["Desktop Chrome"] },
       timeout: 180_000,
       // Per-test sharding: CI runs `--shard=N/6` to split this project's

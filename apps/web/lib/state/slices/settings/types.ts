@@ -10,10 +10,18 @@ import type {
   NotificationProvider,
   SavedLayout,
   ToolStatus,
+  MCPTaskAgentProfileDefault,
 } from "@/lib/types/http";
-import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
+import type {
+  VoiceInputActivationMode,
+  VoiceInputEngine,
+  WhisperWebModelSize,
+} from "@/lib/types/http-voice";
+import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
+import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
+import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -137,12 +145,16 @@ export type UserSettingsState = {
   kanbanViewMode: string | null;
   workflowId: string | null;
   repositoryIds: string[];
+  tasksListSort: TasksListSort;
+  tasksListGroup: TasksListGroup;
   preferredShell: string | null;
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;
   enablePreviewOnClick: boolean;
   chatSubmitKey: "enter" | "cmd_enter";
   reviewAutoMarkOnScroll: boolean;
+  confirmTaskArchive: boolean;
+  mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];
@@ -150,12 +162,51 @@ export type UserSettingsState = {
   lspServerConfigs: Record<string, Record<string, unknown>>;
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
+  sidebarActiveViewId: string | null;
+  sidebarDraft: SidebarViewDraft | null;
+  sidebarTaskPrefs: SidebarTaskPrefsState;
+  taskCreateLastUsed: TaskCreateLastUsedState;
+  jiraSavedViews: unknown;
+  jiraTaskPresets: unknown;
+  githubSavedPresets: unknown;
+  githubDefaultQueryPresets: unknown;
+  gitlabSavedPresets: unknown;
   defaultUtilityAgentId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminalLinkBehavior: "new_tab" | "browser_panel";
   terminalFontFamily: string | null;
   terminalFontSize: number | null;
+  changesPanelLayout: "flat" | "tree";
+  systemMetricsDisplay: { showInTopbar: boolean };
+  voiceMode: VoiceModeState;
   loaded: boolean;
+};
+
+export type TaskCreateLastUsedState = {
+  repositoryId: string | null;
+  branch: string | null;
+  agentProfileId: string | null;
+  executorProfileId: string | null;
+  synced?: boolean;
+};
+
+export type VoiceModeState = {
+  enabled: boolean;
+  engine: VoiceInputEngine;
+  language: string;
+  mode: VoiceInputActivationMode;
+  autoSend: boolean;
+  whisperWebModel: WhisperWebModelSize;
+};
+
+/** Default values used by the slice init and by SSR hydration fallback. */
+export const DEFAULT_VOICE_MODE_STATE: VoiceModeState = {
+  enabled: true,
+  engine: "auto",
+  language: "auto",
+  mode: "toggle",
+  autoSend: false,
+  whisperWebModel: "base",
 };
 
 export type SettingsSliceState = {

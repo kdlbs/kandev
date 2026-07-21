@@ -14,11 +14,11 @@ test.describe("Task switcher sidebar status", () => {
    * status until the user clicked them to trigger a fresh fetch.
    *
    * Setup:
-   *   Inbox → Working (auto_start, message+15s delay, on_turn_complete → Done) → Done
+   *   Inbox → Working (auto_start, message+4s delay, on_turn_complete → Done) → Done
    *   3 tasks in Inbox.
    *
    * The mock agent sends a message immediately (triggers RUNNING / "Running"),
-   * then delays 15s (stays in RUNNING), then completes (→ WAITING_FOR_INPUT / "Turn Finished").
+   * then delays briefly (stays in RUNNING), then completes (→ WAITING_FOR_INPUT / "Turn Finished").
    * Each task progresses through: Backlog → Running → Turn Finished.
    */
   test("sidebar reflects real-time status updates and preserves state on task switch", async ({
@@ -38,10 +38,11 @@ test.describe("Task switcher sidebar status", () => {
     const workingStep = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
     const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
 
-    // message first (triggers RUNNING), delay 15s, then complete
+    // Message first (triggers RUNNING), then a short delay that is still long
+    // enough for the sidebar to observe the background task's Running state.
     await apiClient.updateWorkflowStep(workingStep.id, {
       prompt:
-        'e2e:message("working...")\ne2e:delay(15000)\ne2e:message("task finished")\n{{task_prompt}}',
+        'e2e:message("working...")\ne2e:delay(4000)\ne2e:message("task finished")\n{{task_prompt}}',
       events: {
         on_enter: [{ type: "auto_start_agent" }],
         on_turn_complete: [{ type: "move_to_step", config: { step_id: doneStep.id } }],
@@ -118,8 +119,6 @@ test.describe("Task switcher sidebar status", () => {
     });
 
     // --- Move Gamma to Working (background task) ---
-    // Small delay to let the backend settle after Beta's completion
-    await testPage.waitForTimeout(2_000);
     await apiClient.moveTask(taskGamma.id, workflow.id, workingStep.id);
 
     // Gamma should appear in "Running" while running

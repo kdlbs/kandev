@@ -54,12 +54,12 @@ export function useBranches(source: BranchSource | null, enabled = true): UseBra
   );
   const setRepositoryBranches = useAppStore((state) => state.setRepositoryBranches);
   const setRepositoryBranchesLoading = useAppStore((state) => state.setRepositoryBranchesLoading);
-  const inFlightRef = useRef(false);
+  const inFlightKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!enabled || !source) return;
-    if (isLoaded || inFlightRef.current) return;
-    inFlightRef.current = true;
+    if (isLoaded || inFlightKeysRef.current.has(key)) return;
+    inFlightKeysRef.current.add(key);
     setRepositoryBranchesLoading(key, true);
 
     const promise =
@@ -71,7 +71,7 @@ export function useBranches(source: BranchSource | null, enabled = true): UseBra
       .then((response) => setRepositoryBranches(key, response.branches))
       .catch(() => setRepositoryBranches(key, []))
       .finally(() => {
-        inFlightRef.current = false;
+        inFlightKeysRef.current.delete(key);
         setRepositoryBranchesLoading(key, false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key encodes source identity; listing every field re-fires on every render

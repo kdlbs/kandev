@@ -2,9 +2,20 @@ import { useState, useCallback } from "react";
 
 /**
  * Fallback copy method for non-secure contexts (HTTP)
- * where navigator.clipboard is not available
+ * where navigator.clipboard is not available.
+ *
+ * Appends the temp textarea inside the nearest Radix dialog container
+ * (if the active element lives inside one) to avoid the Radix FocusScope
+ * stealing focus back to the dialog before execCommand runs.
  */
 function fallbackCopy(text: string): boolean {
+  const previousActive = document.activeElement as HTMLElement | null;
+
+  // Mount inside the dialog so Radix FocusScope doesn't steal focus away.
+  const container =
+    previousActive?.closest<HTMLElement>('[data-slot="dialog-content"], [role="dialog"]') ??
+    document.body;
+
   const textArea = document.createElement("textarea");
   textArea.value = text;
   // Avoid scrolling to bottom
@@ -12,7 +23,7 @@ function fallbackCopy(text: string): boolean {
   textArea.style.left = "0";
   textArea.style.position = "fixed";
   textArea.style.opacity = "0";
-  document.body.appendChild(textArea);
+  container.appendChild(textArea);
   textArea.focus();
   textArea.select();
 
@@ -21,9 +32,14 @@ function fallbackCopy(text: string): boolean {
     success = document.execCommand("copy");
   } catch {
     success = false;
+  } finally {
+    try {
+      container.removeChild(textArea);
+    } catch {
+      // Node may already be gone (e.g. dialog closed mid-copy); ignore.
+    }
+    previousActive?.focus();
   }
-
-  document.body.removeChild(textArea);
   return success;
 }
 

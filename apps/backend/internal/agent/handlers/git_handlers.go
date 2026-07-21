@@ -5,15 +5,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
-	"go.uber.org/zap"
 )
+
+// singleflightComputeTimeout bounds the detached context used for the
+// shared body of session.git.commits / session.cumulative_diff. The body
+// runs in a goroutine spawned by singleflight that is NOT tied to any
+// single waiter's request ctx — see wsGitCommits — so it needs its own
+// timeout floor. Generous enough to survive a slow agentctl round-trip
+// under git-pool contention, short enough that a wedged execution can't
+// pin the singleflight slot indefinitely.
+const singleflightComputeTimeout = 60 * time.Second
 
 // PRCreatedCallback is called after a PR is successfully created. `repo` is
 // the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
@@ -25,6 +37,10 @@ type PRCreatedCallback func(ctx context.Context, sessionID, taskID, prURL, branc
 // GitOperationFailedCallback is called when a git operation fails.
 // Parameters: ctx, sessionID, taskID, operation name, error output.
 type GitOperationFailedCallback func(ctx context.Context, sessionID, taskID, operation, errorOutput string)
+
+// BranchRenamedCallback is called after a branch is successfully renamed.
+// Parameters: ctx, sessionID, new branch name, repo subpath.
+type BranchRenamedCallback func(ctx context.Context, sessionID, newName, repo string)
 
 // ExecutionLookup provides access to running agent executions by session ID.
 type ExecutionLookup interface {
@@ -50,12 +66,21 @@ type SessionReader interface {
 
 // GitHandlers provides WebSocket handlers for git worktree operations.
 // Operations are executed via agentctl which runs in the worktree context.
+//
+// commitsGroup / diffGroup deduplicate concurrent identical requests
+// (same session, same params) so a frontend re-render storm doesn't fan
+// out into N agentctl HTTP calls that each spawn a git subprocess under
+// the agentctl-side throttle. Reproduced in PR #1216 trace: ~10
+// session.git.commits arrived for the same sessionID inside 30ms.
 type GitHandlers struct {
 	lifecycleMgr         ExecutionLookup
 	sessionReader        SessionReader
 	logger               *logger.Logger
 	onPRCreated          PRCreatedCallback
 	onGitOperationFailed GitOperationFailedCallback
+	onBranchRenamed      BranchRenamedCallback
+	commitsGroup         singleflight.Group
+	diffGroup            singleflight.Group
 }
 
 // NewGitHandlers creates a new GitHandlers instance.
@@ -73,9 +98,21 @@ func (h *GitHandlers) SetOnPRCreated(cb PRCreatedCallback) {
 	h.onPRCreated = cb
 }
 
+// isGitHubPRURL reports whether prURL is a GitHub pull request link. Azure Repos
+// (/pullrequest/) and GitLab (/-/merge_requests/) are excluded so onPRCreated only
+// wires GitHub TaskPR / PRWatch rows (Azure association is a separate follow-up).
+func isGitHubPRURL(prURL string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(prURL)), "/pull/")
+}
+
 // SetOnGitOperationFailed sets a callback invoked when a git operation fails.
 func (h *GitHandlers) SetOnGitOperationFailed(cb GitOperationFailedCallback) {
 	h.onGitOperationFailed = cb
+}
+
+// SetOnBranchRenamed sets a callback invoked after a branch is successfully renamed.
+func (h *GitHandlers) SetOnBranchRenamed(cb BranchRenamedCallback) {
+	h.onBranchRenamed = cb
 }
 
 // notifyGitOperationFailed fires the failure callback asynchronously if the result indicates failure.
@@ -420,6 +457,9 @@ func (h *GitHandlers) wsRenameBranch(ctx context.Context, msg *ws.Message) (*ws.
 	if err != nil {
 		return nil, fmt.Errorf("rename branch failed: %w", err)
 	}
+	if result.Success && h.onBranchRenamed != nil {
+		h.onBranchRenamed(ctx, req.SessionID, req.NewName, req.Repo)
+	}
 
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
@@ -562,7 +602,7 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 	// flows through so the orchestrator can scope the resulting TaskPR /
 	// PRWatch rows to the per-task repository_id.
 	// Use a timeout-bound context so a stuck callback doesn't leak the goroutine.
-	if result.Success && result.PRURL != "" && h.onPRCreated != nil {
+	if result.Success && result.PRURL != "" && h.onPRCreated != nil && isGitHubPRURL(result.PRURL) {
 		execution, ok := h.lifecycleMgr.GetExecutionBySessionID(req.SessionID)
 		if ok && execution.TaskID != "" {
 			sessionID := req.SessionID
@@ -679,51 +719,68 @@ type GitCommitsRequest struct {
 // The base commit SHA is always looked up from the session metadata in the database.
 // This ensures commits are filtered to only those made during the session.
 // When a target branch is available, we use dynamic merge-base calculation for accuracy.
+//
+// Concurrent identical requests (same sessionID + limit) collapse onto a
+// single in-flight computeGitCommits call via singleflight; each waiter
+// still wraps the shared payload in its own ws.Response using its own
+// msg.ID so the WS layer sees N replies for N requests.
+//
+// The shared body uses a detached, bounded context — NOT the per-request
+// ctx — so a single waiter's WS disconnect or timeout doesn't cancel the
+// in-flight computation for the other waiters. Each caller still selects
+// on its own ctx via DoChan so an individual waiter can give up without
+// blocking on the shared result.
 func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req GitCommitsRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		return nil, fmt.Errorf("invalid payload: %w", err)
 	}
-
 	if req.SessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
+	key := req.SessionID + ":" + strconv.Itoa(req.Limit)
+	ch := h.commitsGroup.DoChan(key, func() (interface{}, error) {
+		detached, cancel := context.WithTimeout(context.Background(), singleflightComputeTimeout)
+		defer cancel()
+		return h.computeGitCommits(detached, &req)
+	})
+	select {
+	case r := <-ch:
+		if r.Err != nil {
+			return nil, r.Err
+		}
+		return ws.NewResponse(msg.ID, msg.Action, r.Val)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
-	// Use GetOrEnsureExecution to recover workspace after backend restarts.
-	// This is a workspace-oriented operation that doesn't require a running agent process.
+// computeGitCommits is the singleflight body for wsGitCommits. Returns
+// a JSON-ready payload — the not-ready / agent-client-nil cases return
+// the same `{commits:[], ready:false}` envelope as before, just packaged
+// as a value so all waiters can share it.
+func (h *GitHandlers) computeGitCommits(ctx context.Context, req *GitCommitsRequest) (interface{}, error) {
 	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
 	if err != nil {
-		// Check for specific "not ready" errors that indicate the session workspace
-		// is still being prepared. For these, return ready:false so the client can retry.
+		// "Not ready" errors map to ready:false so the client retries; any
+		// other error (DB failure, etc.) propagates as a real error.
 		if errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) || isSessionNotReadyError(err) {
-			return ws.NewResponse(msg.ID, msg.Action, map[string]any{
-				"commits": []any{},
-				"ready":   false,
-			})
+			return map[string]any{"commits": []any{}, "ready": false}, nil
 		}
-		// For unexpected errors (database failures, etc.), return the error
-		// so the client can display an appropriate error message.
 		return nil, fmt.Errorf("failed to get execution for session %s: %w", req.SessionID, err)
 	}
-
 	agentClient := execution.GetAgentCtlClient()
 	if agentClient == nil {
-		return ws.NewResponse(msg.ID, msg.Action, map[string]any{
-			"commits": []any{},
-			"ready":   false,
-		})
+		return map[string]any{"commits": []any{}, "ready": false}, nil
 	}
-
-	// Look up base commit SHA and target branch from the session metadata
 	var baseCommit, targetBranch string
 	if h.sessionReader != nil {
 		baseCommit = h.sessionReader.GetSessionBaseCommit(ctx, req.SessionID)
 		targetBranch = h.sessionReader.GetSessionBaseBranch(ctx, req.SessionID)
 	}
-
-	// Fallback: if base_commit_sha is not stored in session, use git merge-base
-	// from git status. This happens for sessions created before the base commit
-	// capture feature or if the capture failed.
+	// Fallback: if base_commit_sha is not stored in the session, use the
+	// merge-base from git status. Applies to sessions created before the
+	// base-commit capture feature, or when that capture failed.
 	if baseCommit == "" {
 		status, statusErr := agentClient.GetGitStatus(ctx)
 		if statusErr == nil && status != nil && status.BaseCommit != "" {
@@ -733,15 +790,11 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 				zap.String("base_commit", baseCommit))
 		}
 	}
-
-	// Use target branch for dynamic merge-base calculation.
-	// This ensures accurate commit filtering even after rebases.
 	result, err := agentClient.GitLog(ctx, baseCommit, req.Limit, targetBranch, "")
 	if err != nil {
 		return nil, fmt.Errorf("git log failed: %w", err)
 	}
-
-	return ws.NewResponse(msg.ID, msg.Action, result)
+	return result, nil
 }
 
 // CumulativeDiffRequest for session.cumulative_diff action
@@ -749,51 +802,54 @@ type CumulativeDiffRequest struct {
 	SessionID string `json:"session_id"`
 }
 
-// wsCumulativeDiff handles session.cumulative_diff action
+// wsCumulativeDiff handles session.cumulative_diff action.
 // The base commit SHA is always looked up from the session metadata in the database.
+// Concurrent identical requests collapse via singleflight — see wsGitCommits
+// for the detached-ctx / DoChan rationale.
 func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req CumulativeDiffRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		return nil, fmt.Errorf("invalid payload: %w", err)
 	}
-
 	if req.SessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
+	ch := h.diffGroup.DoChan(req.SessionID, func() (interface{}, error) {
+		detached, cancel := context.WithTimeout(context.Background(), singleflightComputeTimeout)
+		defer cancel()
+		return h.computeCumulativeDiff(detached, &req)
+	})
+	select {
+	case r := <-ch:
+		if r.Err != nil {
+			return nil, r.Err
+		}
+		return ws.NewResponse(msg.ID, msg.Action, r.Val)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
-	// Use GetOrEnsureExecution to recover workspace after backend restarts.
-	// This is a workspace-oriented operation that doesn't require a running agent process.
+// computeCumulativeDiff is the singleflight body for wsCumulativeDiff.
+// Returns a JSON-ready payload — not-ready / no-base-commit cases keep
+// the same response envelope shape as before.
+func (h *GitHandlers) computeCumulativeDiff(ctx context.Context, req *CumulativeDiffRequest) (interface{}, error) {
 	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
 	if err != nil {
 		if errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) || isSessionNotReadyError(err) {
-			return ws.NewResponse(msg.ID, msg.Action, map[string]any{
-				"cumulative_diff": nil,
-				"ready":           false,
-			})
+			return map[string]any{"cumulative_diff": nil, "ready": false}, nil
 		}
 		return nil, fmt.Errorf("failed to get execution for session %s: %w", req.SessionID, err)
 	}
-
 	agentClient := execution.GetAgentCtlClient()
 	if agentClient == nil {
-		return ws.NewResponse(msg.ID, msg.Action, map[string]any{
-			"cumulative_diff": nil,
-			"ready":           false,
-		})
+		return map[string]any{"cumulative_diff": nil, "ready": false}, nil
 	}
-
-	// Look up base commit SHA and target branch from the session metadata.
-	// targetBranch lets agentctl recompute the base via merge-base against
-	// origin/<branch> for live divergence — same anchoring as the COMMITS
-	// panel, so the file diff doesn't include changes that came in via merges
-	// from main after the session was started.
 	var baseCommit, targetBranch string
 	if h.sessionReader != nil {
 		baseCommit = h.sessionReader.GetSessionBaseCommit(ctx, req.SessionID)
 		targetBranch = h.sessionReader.GetSessionBaseBranch(ctx, req.SessionID)
 	}
-
-	// Fallback: if base_commit_sha is not stored, use git merge-base from status
 	if baseCommit == "" {
 		status, statusErr := agentClient.GetGitStatus(ctx)
 		if statusErr == nil && status != nil && status.BaseCommit != "" {
@@ -802,22 +858,15 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 				zap.String("session_id", req.SessionID),
 				zap.String("base_commit", baseCommit))
 		} else {
-			// Repo-less tasks (no git workspace) have no base commit — return an
-			// empty diff instead of erroring so the frontend's polling doesn't
-			// spam the logs.
-			return ws.NewResponse(msg.ID, msg.Action, map[string]any{
-				"cumulative_diff": nil,
-			})
+			// Repo-less tasks (no git workspace) have no base commit — return
+			// an empty diff instead of erroring so the frontend's polling
+			// doesn't spam the logs.
+			return map[string]any{"cumulative_diff": nil}, nil
 		}
 	}
-
 	result, err := agentClient.GetCumulativeDiff(ctx, baseCommit, targetBranch)
 	if err != nil {
 		return nil, fmt.Errorf("cumulative diff failed: %w", err)
 	}
-
-	// Wrap in cumulative_diff key as expected by frontend
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"cumulative_diff": result,
-	})
+	return map[string]interface{}{"cumulative_diff": result}, nil
 }

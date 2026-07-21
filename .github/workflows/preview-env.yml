@@ -8,7 +8,16 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
   pull_request_target:
-    types: [opened, synchronize, reopened, closed]
+    # `labeled` is needed so a maintainer applying `safe-to-test` to a fork PR
+    # triggers a deploy against the current head SHA. Subsequent fork pushes
+    # (synchronize) do NOT re-trigger the label path — see deploy-fork's
+    # if-gate and strip-safe-to-test below.
+    types: [opened, synchronize, reopened, closed, labeled]
+
+concurrency:
+  group: preview-env-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  # Don't cancel cleanup on close — let it finish destroying the sprite.
+  cancel-in-progress: ${{ github.event.action != 'closed' }}
 
 jobs:
   # -----------------------------------------------------------------------
@@ -26,20 +35,20 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
           version: "9.15.9"
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "24"
 
@@ -59,17 +68,25 @@ jobs:
   # -----------------------------------------------------------------------
   # Deploy / update preview (fork PRs, gated by allowlist)
   # Uses pull_request_target so secrets are available.
-  # Gated by: OWNER/MEMBER/COLLABORATOR author_association,
-  #           `safe-to-test` label (maintainer opt-in), or
-  #           PREVIEW_ENV_ALLOWLIST repo variable (JSON array of logins).
+  # Two approval paths:
+  #   - PREVIEW_ENV_ALLOWLIST repo variable (trusted login list, all events;
+  #     JSON array of logins)
+  #   - `safe-to-test` label (maintainer opt-in, per-commit). Explicitly
+  #     blocked on `synchronize` so a contributor's push cannot re-use a
+  #     stale label — the maintainer must re-apply it after each push for
+  #     the `labeled` event to trigger a fresh deploy of the new SHA. This
+  #     matters more here than for claude-code-review.yml because deploy
+  #     actually runs the fork's `cmd/preview` code with SPRITES_API_TOKEN.
   # -----------------------------------------------------------------------
+  # Branch order matters: keep cheap/safe checks before `fromJSON(vars.*)`,
+  # which throws (and skips the whole job) if the repo variable is
+  # non-empty but unparseable JSON.
   deploy-fork:
     if: >
       github.event.action != 'closed' &&
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
-       contains(github.event.pull_request.labels.*.name, 'safe-to-test') ||
+      ((github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-test')) ||
        (vars.PREVIEW_ENV_ALLOWLIST != '' && contains(fromJSON(vars.PREVIEW_ENV_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
     permissions:
@@ -77,26 +94,26 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           # pull_request_target checks out base by default; explicitly use PR head.
           # Safe: the preview CLI only reads files to build artifacts and posts comments.
-          # NOTE: The allowlist gate (OWNER/MEMBER/COLLABORATOR, safe-to-test, PREVIEW_ENV_ALLOWLIST)
+          # NOTE: The allowlist gate (safe-to-test, PREVIEW_ENV_ALLOWLIST)
           # authorizes running the fork's cmd/preview code with SPRITES_API_TOKEN and GH_TOKEN.
           # The safe-to-test label must be re-applied after each new push (see strip-safe-to-test job).
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
           version: "9.15.9"
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "24"
 
@@ -115,8 +132,11 @@ jobs:
 
   # -----------------------------------------------------------------------
   # Strip safe-to-test label on new pushes to fork PRs.
-  # Prevents a once-approved fork from running updated (potentially malicious)
-  # code on subsequent pushes without a fresh maintainer re-approval.
+  # Together with the `github.event.action != 'synchronize'` guard on the
+  # label path in deploy-fork's if-gate, this gives true per-commit opt-in:
+  # the maintainer must re-apply `safe-to-test` after each push for the
+  # deploy job to run again. A new push on its own never re-triggers deploy
+  # on the label path.
   # -----------------------------------------------------------------------
   strip-safe-to-test:
     if: >
@@ -128,15 +148,20 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
-            await github.rest.issues.removeLabel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              name: 'safe-to-test',
-            });
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                name: 'safe-to-test',
+              });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.info('safe-to-test label already absent; nothing to remove.');
+            }
 
   # -----------------------------------------------------------------------
   # Cleanup (all closed PRs — no allowlist check)
@@ -156,9 +181,9 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum

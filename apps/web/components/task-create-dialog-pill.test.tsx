@@ -1,6 +1,47 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import type { Branch } from "@/lib/types/http";
-import { sortBranches, branchToOption, computeBranchPlaceholder } from "./task-create-dialog-pill";
+
+vi.mock("@kandev/ui/tooltip", async () => {
+  const React = await import("react");
+  return {
+    Tooltip: ({
+      open,
+      onOpenChange,
+      children,
+    }: {
+      open?: boolean;
+      onOpenChange?: (open: boolean) => void;
+      children: ReactNode;
+    }) => {
+      React.useEffect(() => {
+        onOpenChange?.(true);
+      }, [onOpenChange]);
+      return (
+        <div data-testid="tooltip-root" data-open={String(open)}>
+          {children}
+        </div>
+      );
+    },
+    TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+    TooltipContent: ({ children }: { children: ReactNode }) => (
+      <div data-testid="tooltip-content">{children}</div>
+    ),
+  };
+});
+
+import {
+  sortBranches,
+  branchToOption,
+  computeBranchPlaceholder,
+  Pill,
+} from "./task-create-dialog-pill";
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 function localBranch(name: string): Branch {
   return { name, type: "local" } as Branch;
@@ -82,5 +123,76 @@ describe("computeBranchPlaceholder", () => {
 
   it("returns 'branch' as the default with options available", () => {
     expect(computeBranchPlaceholder(true, false, 3)).toBe("branch");
+  });
+});
+
+describe("Pill tooltip", () => {
+  it("ignores tooltip open requests during the initial mount frame", async () => {
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value="kandev"
+        placeholder="repository"
+        options={[]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search repositories..."
+        emptyMessage="No repositories"
+        tooltip="Repository · ~/kandev"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("tooltip-root").getAttribute("data-open")).toBe("false");
+    });
+  });
+
+  it("makes the disabled tooltip wrapper keyboard focusable", () => {
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value=""
+        placeholder="branch"
+        options={[]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search branches..."
+        emptyMessage="No branches"
+        disabled
+        disabledReason="Select a repository first"
+      />,
+    );
+
+    const tooltipTrigger = screen.getByLabelText("Select a repository first");
+    expect(tooltipTrigger.getAttribute("tabindex")).toBe("0");
+    expect(tooltipTrigger.querySelector("[aria-hidden='true'] button")).not.toBeNull();
+  });
+});
+
+describe("Pill popover", () => {
+  it("portals selector content outside the trigger container", () => {
+    render(
+      <div data-testid="clipping-host" className="overflow-hidden">
+        <Pill
+          icon={<span aria-hidden="true" />}
+          value="kandev"
+          placeholder="repository"
+          options={[{ value: "repo-1", label: "repo-one" }]}
+          onSelect={vi.fn()}
+          searchPlaceholder="Search repositories..."
+          emptyMessage="No repositories"
+        />
+      </div>,
+    );
+
+    fireEvent.click(within(screen.getByTestId("clipping-host")).getByText("kandev"));
+
+    const content = document.body.querySelector('[data-slot="popover-content"]');
+    expect(content).not.toBeNull();
+    expect(screen.getByTestId("clipping-host").contains(content)).toBe(false);
   });
 });

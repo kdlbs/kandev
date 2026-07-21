@@ -7,7 +7,8 @@ import type {
   SuggestionKeyDownProps,
 } from "@tiptap/suggestion";
 import type { MentionItem } from "@/hooks/use-inline-mention";
-import type { SlashCommand } from "@/hooks/use-inline-slash";
+import { formatSlashCommandInsertion, type SlashCommand } from "./slash-command-types";
+import { formatSlashCommandDisplayLabel } from "./tiptap-slash-command-utils";
 
 import { getFileName } from "@/lib/utils/file-path";
 import type { MentionKind } from "./tiptap-mention-extension";
@@ -51,13 +52,22 @@ export const MentionSuggestionPluginKey = new PluginKey("mentionSuggestion");
  * `setMenuState` drives the React rendering of MentionMenu.
  * `onKeyDown` is a stable callback the parent uses to delegate keystrokes.
  */
+type MentionAttrs = {
+  id: string;
+  label: string;
+  kind: MentionKind;
+  path: string;
+  taskId?: string | null;
+  workflowId?: string | null;
+  workflowStepId?: string | null;
+  taskState?: string | null;
+};
+
 export function createMentionSuggestion(
   callbacks: MentionSuggestionCallbacks,
   setMenuState: (state: MenuState<MentionItem>) => void,
   onKeyDown: (event: KeyboardEvent) => boolean,
-): Partial<
-  SuggestionOptions<MentionItem, { id: string; label: string; kind: MentionKind; path: string }>
-> {
+): Partial<SuggestionOptions<MentionItem, MentionAttrs>> {
   return {
     char: "@",
     pluginKey: MentionSuggestionPluginKey,
@@ -120,31 +130,35 @@ export function createMentionSuggestion(
   };
 }
 
-function mentionItemToAttrs(item: MentionItem): {
-  id: string;
-  label: string;
-  kind: MentionKind;
-  path: string;
-} {
-  const name = item.kind === "file" ? getFileName(item.label) : item.label;
+function mentionItemPath(item: MentionItem): string {
+  if (item.kind === "file") return item.label;
+  if (item.kind === "prompt") return `prompt:${item.id}`;
+  if (item.kind === "task") return `task:${item.task?.taskId ?? item.id}`;
+  return "plan:context";
+}
 
-  return {
-    id: item.id,
-    label: name,
-    kind: item.kind,
-    path: (() => {
-      if (item.kind === "file") return item.label;
-      if (item.kind === "prompt") return `prompt:${item.id}`;
-      return "plan:context";
-    })(),
-  };
+function mentionItemToAttrs(item: MentionItem): MentionAttrs {
+  const name = item.kind === "file" ? getFileName(item.label) : item.label;
+  const path = mentionItemPath(item);
+  if (item.kind === "task" && item.task) {
+    return {
+      id: item.id,
+      label: name,
+      kind: item.kind,
+      path,
+      taskId: item.task.taskId,
+      workflowId: item.task.workflowId,
+      workflowStepId: item.task.workflowStepId,
+      taskState: item.task.state ?? null,
+    };
+  }
+  return { id: item.id, label: name, kind: item.kind, path };
 }
 
 // ── Slash command suggestion ────────────────────────────────────────
 
 export type SlashSuggestionCallbacks = {
   getCommands: () => SlashCommand[];
-  onAgentCommand: (commandName: string) => void;
 };
 
 export const SlashSuggestionPluginKey = new PluginKey("slashSuggestion");
@@ -181,10 +195,23 @@ export function createSlashSuggestion(
     },
 
     command: ({ editor, range, props: cmd }) => {
-      editor.chain().focus().deleteRange(range).run();
-      if (cmd.agentCommandName) {
-        callbacks.onAgentCommand(cmd.agentCommandName);
-      }
+      const label = formatSlashCommandInsertion(cmd).trim();
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(range, [
+          {
+            type: "slashCommand",
+            attrs: {
+              id: cmd.id,
+              label,
+              commandName: cmd.agentCommandName ?? formatSlashCommandDisplayLabel({ label }),
+              description: cmd.description,
+            },
+          },
+          { type: "text", text: " " },
+        ])
+        .run();
     },
 
     render: () => {

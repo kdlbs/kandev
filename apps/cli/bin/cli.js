@@ -1,3 +1,5 @@
 #!/usr/bin/env node
 
-require("../dist/cli.js");
+const { run } = require("./native-shim");
+
+process.exitCode = run(process.argv.slice(2));

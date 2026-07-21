@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/events"
@@ -11,6 +12,8 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
+	"github.com/kandev/kandev/internal/workflow/engine"
 
 	"go.uber.org/zap"
 )
@@ -67,6 +70,15 @@ func (s *DashboardService) UpdateTaskProjectID(ctx context.Context, taskID, proj
 func (s *DashboardService) UpdateTaskParentID(ctx context.Context, taskID, parentID string) error {
 	if parentID != "" && parentID == taskID {
 		return fmt.Errorf("task cannot be its own parent")
+	}
+	if parentID == "" {
+		if s.taskDetacher == nil {
+			return errors.New("task detacher is not configured")
+		}
+		if _, err := s.taskDetacher.DetachTask(ctx, taskID); err != nil {
+			return err
+		}
+		return nil
 	}
 	if err := s.repo.UpdateTaskParentID(ctx, taskID, parentID); err != nil {
 		return err
@@ -779,7 +791,7 @@ func (s *DashboardService) publishTaskStatusChanged(ctx context.Context, req Tas
 // comment is a self-comment or the task is closed; resolves @mentions.
 // Best-effort.
 func (s *DashboardService) runReactivityForComment(
-	ctx context.Context, comment *models.TaskComment,
+	ctx context.Context, comment *models.TaskComment, engineHandled bool,
 ) {
 	if s.reactivity == nil || comment == nil || comment.ID == "" {
 		return
@@ -793,6 +805,7 @@ func (s *DashboardService) runReactivityForComment(
 			AuthorType: comment.AuthorType,
 			AuthorID:   comment.AuthorID,
 		},
+		SkipAssigneeCommentWake: engineHandled,
 	}
 	if _, err := s.reactivity.ApplyTaskMutation(ctx, comment.TaskID, "", change); err != nil {
 		s.logger.Warn("reactivity pipeline failed (comment)",
@@ -800,7 +813,54 @@ func (s *DashboardService) runReactivityForComment(
 	}
 }
 
-func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *models.TaskComment) {
+func (s *DashboardService) dispatchCommentEngineTrigger(ctx context.Context, comment *models.TaskComment) bool {
+	if s.engineDispatcher == nil || comment == nil || comment.TaskID == "" || comment.ID == "" {
+		return false
+	}
+	if s.isSelfComment(ctx, comment) {
+		return false
+	}
+	handled, err := s.dispatchCommentEngineTriggerOnce(ctx, comment)
+	if err == nil {
+		return handled
+	}
+	if errors.Is(err, shared.ErrEngineNoSession) {
+		return false
+	}
+	s.logger.Warn("engine comment trigger failed",
+		zap.String("task_id", comment.TaskID),
+		zap.String("comment_id", comment.ID),
+		zap.Error(err))
+	return false
+}
+
+type handledWorkflowEngineDispatcher interface {
+	HandleTriggerHandled(ctx context.Context, taskID string, trigger engine.Trigger, payload any, operationID string) (bool, error)
+}
+
+func (s *DashboardService) dispatchCommentEngineTriggerOnce(ctx context.Context, comment *models.TaskComment) (bool, error) {
+	payload := engine.OnCommentPayload{
+		CommentID: comment.ID,
+		AuthorID:  comment.AuthorID,
+	}
+	opID := commentkeys.TaskComment(comment.ID)
+	if dispatcher, ok := s.engineDispatcher.(handledWorkflowEngineDispatcher); ok {
+		return dispatcher.HandleTriggerHandled(ctx, comment.TaskID, engine.TriggerOnComment, payload, opID)
+	}
+	err := s.engineDispatcher.HandleTrigger(ctx, comment.TaskID, engine.TriggerOnComment,
+		payload, opID)
+	return err == nil, err
+}
+
+func (s *DashboardService) isSelfComment(ctx context.Context, comment *models.TaskComment) bool {
+	if comment.AuthorType != "agent" || comment.AuthorID == "" {
+		return false
+	}
+	fields, err := s.repo.GetTaskExecutionFields(ctx, comment.TaskID)
+	return err == nil && fields != nil && fields.AssigneeAgentProfileID == comment.AuthorID
+}
+
+func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *models.TaskComment, engineHandled bool) {
 	if s.eb == nil {
 		return
 	}
@@ -809,6 +869,9 @@ func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *m
 		"comment_id":  comment.ID,
 		"author_type": comment.AuthorType,
 		"author_id":   comment.AuthorID,
+	}
+	if engineHandled {
+		data["engine_dispatched"] = commentkeys.EngineDispatchedValue
 	}
 	event := bus.NewEvent(events.OfficeCommentCreated, "office-dashboard", data)
 	if err := s.eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {

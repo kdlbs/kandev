@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 type sqliteStore struct {
@@ -29,16 +31,17 @@ func Provide(writer, reader *sqlx.DB, crypto *MasterKeyProvider) (*sqliteStore, 
 }
 
 func (s *sqliteStore) initSchema() error {
-	schema := `
+	binaryType := dialect.BlobType(s.db.DriverName())
+	schema := fmt.Sprintf(`
 	CREATE TABLE IF NOT EXISTS secrets (
 		id              TEXT PRIMARY KEY,
 		name            TEXT NOT NULL,
-		encrypted_value BLOB NOT NULL,
-		nonce           BLOB NOT NULL,
+		encrypted_value %s NOT NULL,
+		nonce           %s NOT NULL,
 		created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
-	`
+	`, binaryType, binaryType)
 	_, err := s.db.Exec(schema)
 	return err
 }
@@ -63,9 +66,9 @@ func (s *sqliteStore) Create(ctx context.Context, secret *SecretWithValue) error
 		return fmt.Errorf("encrypt secret: %w", err)
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO secrets (id, name, encrypted_value, nonce, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?)`),
 		secret.ID, secret.Name, ciphertext, nonce, now, now,
 	)
 	if err != nil {
@@ -76,12 +79,12 @@ func (s *sqliteStore) Create(ctx context.Context, secret *SecretWithValue) error
 
 func (s *sqliteStore) Get(ctx context.Context, id string) (*Secret, error) {
 	var row secretRow
-	err := s.ro.GetContext(ctx, &row, `
+	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
 		SELECT id, name, created_at, updated_at
-		FROM secrets WHERE id = ?`, id)
+		FROM secrets WHERE id = ?`), id)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("secret not found: %s", id)
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
 		}
 		return nil, fmt.Errorf("get secret: %w", err)
 	}
@@ -90,12 +93,12 @@ func (s *sqliteStore) Get(ctx context.Context, id string) (*Secret, error) {
 
 func (s *sqliteStore) Reveal(ctx context.Context, id string) (string, error) {
 	var ciphertext, nonce []byte
-	err := s.ro.QueryRowContext(ctx, `
-		SELECT encrypted_value, nonce FROM secrets WHERE id = ?`, id).
+	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
+		SELECT encrypted_value, nonce FROM secrets WHERE id = ?`), id).
 		Scan(&ciphertext, &nonce)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("secret not found: %s", id)
+			return "", fmt.Errorf("%w: %s", ErrNotFound, id)
 		}
 		return "", fmt.Errorf("reveal secret: %w", err)
 	}
@@ -124,18 +127,18 @@ func (s *sqliteStore) Update(ctx context.Context, id string, req *UpdateSecretRe
 		if err != nil {
 			return fmt.Errorf("encrypt secret: %w", err)
 		}
-		_, err = s.db.ExecContext(ctx, `
+		_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 			UPDATE secrets SET name = ?, encrypted_value = ?, nonce = ?, updated_at = ?
-			WHERE id = ?`,
+			WHERE id = ?`),
 			existing.Name, ciphertext, nonce, now, id,
 		)
 		if err != nil {
 			return fmt.Errorf("update secret: %w", err)
 		}
 	} else {
-		_, err = s.db.ExecContext(ctx, `
+		_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 			UPDATE secrets SET name = ?, updated_at = ?
-			WHERE id = ?`,
+			WHERE id = ?`),
 			existing.Name, now, id,
 		)
 		if err != nil {
@@ -146,13 +149,13 @@ func (s *sqliteStore) Update(ctx context.Context, id string, req *UpdateSecretRe
 }
 
 func (s *sqliteStore) Delete(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM secrets WHERE id = ?`, id)
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM secrets WHERE id = ?`), id)
 	if err != nil {
 		return fmt.Errorf("delete secret: %w", err)
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("secret not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 	return nil
 }

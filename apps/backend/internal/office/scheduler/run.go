@@ -38,12 +38,13 @@ var ErrRoutingNotSupported = errors.New("routing not supported by task starter")
 // preset-by-name. Per-provider permission overrides would require
 // re-modelling that surface and are deferred.
 type RouteOverride struct {
-	ProviderID string
-	Model      string
-	Tier       string
-	Mode       string
-	Flags      []string
-	Env        map[string]string
+	ExecutionProfileID string
+	ProviderID         string
+	Model              string
+	Tier               string
+	Mode               string
+	Flags              []string
+	Env                map[string]string
 }
 
 // LaunchContext is an alias for service.LaunchContext so dispatch

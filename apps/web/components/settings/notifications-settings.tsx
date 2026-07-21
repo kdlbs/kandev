@@ -1,16 +1,17 @@
 "use client";
 
-import { useMemo, useReducer, useSyncExternalStore, type FormEvent } from "react";
+import { useMemo, useReducer, useState, useSyncExternalStore, type FormEvent } from "react";
 import { IconBell, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Checkbox } from "@kandev/ui/checkbox";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
 import { Textarea } from "@kandev/ui/textarea";
+import { NotificationSoundSection } from "@/components/settings/notification-sound-section";
+import { NotificationEventsTable } from "@/components/settings/notification-events-table";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
-import { DEFAULT_NOTIFICATION_EVENTS, EVENT_LABELS } from "@/lib/notifications/events";
+import { DEFAULT_NOTIFICATION_EVENTS } from "@/lib/notifications/events";
 import type { NotificationProvider } from "@/lib/types/http";
 import {
   useNotificationsState,
@@ -106,87 +107,6 @@ function DesktopNotificationsSection({
   );
 }
 
-type NotificationEventsTableProps = {
-  tableProviders: NotificationProvider[];
-  tableEvents: string[];
-  onToggleEvent: (provider: NotificationProvider, eventType: string) => void;
-  onTestProvider: (providerId: string) => Promise<void>;
-};
-
-function NotificationEventsTable({
-  tableProviders,
-  tableEvents,
-  onToggleEvent,
-  onTestProvider,
-}: NotificationEventsTableProps) {
-  if (tableProviders.length === 0) {
-    return <p className="text-sm text-muted-foreground">No providers configured yet.</p>;
-  }
-
-  return (
-    <div className="overflow-auto rounded-lg border border-muted">
-      <table className="min-w-full text-sm">
-        <thead className="bg-muted/40">
-          <tr>
-            <th className="px-4 py-3 text-left font-medium">Notification type</th>
-            {tableProviders.map((provider) => (
-              <th key={provider.id} className="px-4 py-3 text-center font-medium">
-                <div className="flex items-center justify-center gap-1.5">
-                  <span>{provider.name}</span>
-                  {provider.type !== "local" && (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 cursor-pointer"
-                            aria-label={`Send test notification for ${provider.name}`}
-                            onClick={() => void onTestProvider(provider.id)}
-                          >
-                            <IconBell className="h-3.5 w-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Send test notification</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  )}
-                </div>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {tableEvents.map((eventType) => {
-            const meta = EVENT_LABELS[eventType] ?? {
-              title: eventType,
-              description: "Notify when this event occurs.",
-            };
-            return (
-              <tr key={eventType} className="border-t border-muted">
-                <td className="px-4 py-3">
-                  <div className="font-medium">{meta.title}</div>
-                  <div className="text-xs text-muted-foreground">{meta.description}</div>
-                </td>
-                {tableProviders.map((provider) => (
-                  <td key={provider.id} className="px-4 py-3 text-center">
-                    <div className="flex justify-center">
-                      <Checkbox
-                        checked={(provider.events ?? []).includes(eventType)}
-                        onCheckedChange={() => onToggleEvent(provider, eventType)}
-                      />
-                    </div>
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function AppriseProviderCardActions({
   provider,
   onOpenForm,
@@ -238,6 +158,7 @@ function AppriseProviderCardActions({
 
 function AppriseProviderList({
   providers,
+  baselineProviders,
   appriseFormMode,
   activeAppriseId,
   appriseName,
@@ -253,6 +174,7 @@ function AppriseProviderList({
   onTextareaInput,
 }: {
   providers: NotificationProvider[];
+  baselineProviders: NotificationProvider[];
   appriseFormMode: AppriseFormMode;
   activeAppriseId: string | null;
   appriseName: string;
@@ -263,6 +185,7 @@ function AppriseProviderList({
   onAppriseEdit: (providerId: string, value: string) => void;
   onOpenForm: (mode: AppriseFormMode, provider?: NotificationProvider) => void;
   onCloseForm: () => void;
+  onCancelForm: () => void;
   onDeleteProvider: (providerId: string) => void;
   onTestProvider: (providerId: string) => Promise<void>;
   onTextareaInput: (event: FormEvent<HTMLTextAreaElement>) => void;
@@ -271,8 +194,19 @@ function AppriseProviderList({
     <>
       {providers.map((provider) => {
         const isEditing = appriseFormMode === "edit" && activeAppriseId === provider.id;
+        const baseline = baselineProviders.find((candidate) => candidate.id === provider.id);
+        const nameIsDirty = isEditing && provider.name !== baseline?.name;
+        const urlsIsDirty =
+          isEditing &&
+          JSON.stringify(provider.config?.urls ?? []) !==
+            JSON.stringify(baseline?.config?.urls ?? []);
         return (
-          <div key={provider.id} className="rounded-lg border border-muted p-4 space-y-3">
+          <div
+            key={provider.id}
+            className="rounded-lg border border-muted p-4 space-y-3"
+            data-settings-dirty={nameIsDirty || urlsIsDirty}
+            data-settings-dirty-level="container"
+          >
             {isEditing ? (
               <AppriseProviderForm
                 mode="edit"
@@ -289,6 +223,8 @@ function AppriseProviderList({
                 onSubmit={onCloseForm}
                 onCancel={onCloseForm}
                 onInput={onTextareaInput}
+                nameIsDirty={nameIsDirty}
+                urlsIsDirty={urlsIsDirty}
               />
             ) : (
               <div className="flex items-center justify-between gap-4">
@@ -328,6 +264,7 @@ function useNotificationPermission() {
 type ExternalProvidersSectionProps = {
   appriseAvailable: boolean;
   appriseProviders: NotificationProvider[];
+  baselineProviders: NotificationProvider[];
   appriseFormMode: AppriseFormMode;
   activeAppriseId: string | null;
   appriseName: string;
@@ -339,15 +276,16 @@ type ExternalProvidersSectionProps = {
   onAppriseEdit: (id: string, v: string) => void;
   onOpenForm: (mode: AppriseFormMode, provider?: NotificationProvider) => void;
   onCloseForm: () => void;
+  onCancelForm: () => void;
   onDeleteProvider: (id: string) => void;
   onTestProvider: (id: string) => Promise<void>;
   onTextareaInput: (e: FormEvent<HTMLTextAreaElement>) => void;
-  onCreateAppriseProvider: () => Promise<void>;
 };
 
 function ExternalProvidersSection({
   appriseAvailable,
   appriseProviders,
+  baselineProviders,
   appriseFormMode,
   activeAppriseId,
   appriseName,
@@ -359,10 +297,10 @@ function ExternalProvidersSection({
   onAppriseEdit,
   onOpenForm,
   onCloseForm,
+  onCancelForm,
   onDeleteProvider,
   onTestProvider,
   onTextareaInput,
-  onCreateAppriseProvider,
 }: ExternalProvidersSectionProps) {
   return (
     <div className="space-y-4">
@@ -391,6 +329,7 @@ function ExternalProvidersSection({
       )}
       <AppriseProviderList
         providers={appriseProviders}
+        baselineProviders={baselineProviders}
         appriseFormMode={appriseFormMode}
         activeAppriseId={activeAppriseId}
         appriseName={appriseName}
@@ -401,13 +340,19 @@ function ExternalProvidersSection({
         onAppriseEdit={onAppriseEdit}
         onOpenForm={onOpenForm}
         onCloseForm={onCloseForm}
+        onCancelForm={onCancelForm}
         onDeleteProvider={onDeleteProvider}
         onTestProvider={onTestProvider}
         onTextareaInput={onTextareaInput}
       />
       {appriseAvailable && (
         <div className="space-y-3">
-          <Button variant="outline" className="cursor-pointer" onClick={() => onOpenForm("create")}>
+          <Button
+            variant="outline"
+            className="cursor-pointer"
+            onClick={() => onOpenForm("create")}
+            disabled={showAppriseForm}
+          >
             Add Apprise Provider
           </Button>
           {showAppriseForm && appriseFormMode === "create" && (
@@ -417,12 +362,13 @@ function ExternalProvidersSection({
               urls={appriseUrls}
               onNameChange={setAppriseName}
               onUrlsChange={setAppriseUrls}
-              onSubmit={async () => {
-                await onCreateAppriseProvider();
-                onCloseForm();
-              }}
-              onCancel={onCloseForm}
+              onSubmit={onCloseForm}
+              onCancel={onCancelForm}
               onInput={onTextareaInput}
+              formIsDirty
+              nameIsDirty={appriseName.length > 0}
+              urlsIsDirty={appriseUrls.length > 0}
+              showSubmit={false}
             />
           )}
         </div>
@@ -454,15 +400,49 @@ function useTableData(state: NotificationsState) {
   return { tableProviders, tableEvents };
 }
 
+function useNotificationPageSaveState(state: NotificationsState, soundIsDirty: boolean) {
+  const providerIsDirty = useIsDirty(state);
+  const creatingApprise = state.showAppriseForm && state.appriseFormMode === "create";
+  const canSave = !creatingApprise || state.appriseUrls.trim().length > 0;
+  const revision = useMemo(
+    () =>
+      JSON.stringify({
+        providers: state.providers,
+        appriseEdits: state.appriseEdits,
+        appriseNameEdits: state.appriseNameEdits,
+        pendingDeletes: [...state.pendingDeletes].sort(),
+        createDraft: creatingApprise ? { name: state.appriseName, urls: state.appriseUrls } : null,
+      }),
+    [
+      creatingApprise,
+      state.providers,
+      state.appriseEdits,
+      state.appriseNameEdits,
+      state.pendingDeletes,
+      state.appriseName,
+      state.appriseUrls,
+    ],
+  );
+  return {
+    providerIsDirty,
+    cardIsDirty: providerIsDirty || soundIsDirty,
+    canSave,
+    invalidReason: canSave ? undefined : "At least one Apprise service URL is required.",
+    revision,
+  };
+}
+
 export function NotificationsSettings() {
   const state = useNotificationsState();
   const { notificationPermission, bumpPermission } = useNotificationPermission();
   const saveRequest = useSaveRequest(state);
   const actions = useNotificationsActions(state, bumpPermission);
-  const isDirty = useIsDirty(state);
+  const [soundIsDirty, setSoundIsDirty] = useState(false);
+  const saveState = useNotificationPageSaveState(state, soundIsDirty);
   const { tableProviders, tableEvents } = useTableData(state);
   const {
     providers,
+    baselineProviders,
     appriseAvailable,
     appriseName,
     setAppriseName,
@@ -473,22 +453,18 @@ export function NotificationsSettings() {
     activeAppriseId,
   } = state;
   const appriseProviders = providers.filter((provider) => provider.type === "apprise");
-
-  const handleSave = async () => {
-    try {
-      await saveRequest.run();
-    } catch (error) {
-      console.error("[NotificationsSettings] Failed to save notifications", error);
-    }
-  };
-
   return (
     <SettingsPageTemplate
       title="Notifications"
       description="Configure providers and choose which events should alert you."
-      isDirty={isDirty}
+      isDirty={saveState.providerIsDirty}
+      cardIsDirty={saveState.cardIsDirty}
       saveStatus={saveRequest.status}
-      onSave={handleSave}
+      saveRevision={saveState.revision}
+      canSave={saveState.canSave}
+      invalidReason={saveState.invalidReason}
+      onSave={() => saveRequest.run()}
+      onDiscard={actions.discard}
     >
       <DesktopNotificationsSection
         notificationPermission={notificationPermission}
@@ -497,9 +473,12 @@ export function NotificationsSettings() {
         onTestNotification={actions.handleTestNotification}
       />
       <Separator className="my-4" />
+      <NotificationSoundSection onDirtyChange={setSoundIsDirty} />
+      <Separator className="my-4" />
       <ExternalProvidersSection
         appriseAvailable={appriseAvailable}
         appriseProviders={appriseProviders}
+        baselineProviders={baselineProviders}
         appriseFormMode={appriseFormMode}
         activeAppriseId={activeAppriseId}
         appriseName={appriseName}
@@ -511,10 +490,10 @@ export function NotificationsSettings() {
         onAppriseEdit={actions.handleAppriseEdit}
         onOpenForm={actions.openAppriseForm}
         onCloseForm={actions.closeAppriseForm}
+        onCancelForm={actions.cancelAppriseForm}
         onDeleteProvider={actions.handleDeleteProvider}
         onTestProvider={actions.handleTestProvider}
         onTextareaInput={handleTextareaInput}
-        onCreateAppriseProvider={actions.handleCreateAppriseProvider}
       />
       <Separator className="my-4" />
       <div className="space-y-4">
@@ -527,6 +506,7 @@ export function NotificationsSettings() {
         {tableProviders.length > 0 && (
           <NotificationEventsTable
             tableProviders={tableProviders}
+            baselineProviders={baselineProviders}
             tableEvents={tableEvents}
             onToggleEvent={actions.handleToggleEvent}
             onTestProvider={actions.handleTestProvider}
@@ -546,6 +526,10 @@ type AppriseProviderFormProps = {
   onSubmit: () => void | Promise<void>;
   onCancel: () => void;
   onInput: (event: FormEvent<HTMLTextAreaElement>) => void;
+  nameIsDirty?: boolean;
+  urlsIsDirty?: boolean;
+  formIsDirty?: boolean;
+  showSubmit?: boolean;
 };
 
 function AppriseProviderForm({
@@ -557,14 +541,23 @@ function AppriseProviderForm({
   onSubmit,
   onCancel,
   onInput,
+  nameIsDirty = false,
+  urlsIsDirty = false,
+  formIsDirty = nameIsDirty || urlsIsDirty,
+  showSubmit = true,
 }: AppriseProviderFormProps) {
   return (
-    <div className="rounded-lg border border-dashed border-muted p-4 space-y-3">
+    <div
+      className="rounded-lg border border-dashed border-muted p-4 space-y-3"
+      data-settings-dirty={formIsDirty}
+      data-settings-dirty-level="container"
+    >
       <div className="text-base font-medium">Apprise Provider</div>
       <Input
         value={name}
         onChange={(event) => onNameChange(event.target.value)}
         placeholder="Provider name"
+        data-settings-dirty={nameIsDirty}
       />
       <Textarea
         value={urls}
@@ -573,11 +566,14 @@ function AppriseProviderForm({
         placeholder="Service URL(s)"
         rows={1}
         className="min-h-0 h-auto"
+        data-settings-dirty={urlsIsDirty}
       />
       <div className="flex items-center gap-2">
-        <Button className="cursor-pointer" onClick={onSubmit}>
-          {mode === "create" ? "Add provider" : "Done"}
-        </Button>
+        {showSubmit && (
+          <Button className="cursor-pointer" onClick={onSubmit}>
+            {mode === "create" ? "Add provider" : "Done"}
+          </Button>
+        )}
         <Button variant="ghost" className="cursor-pointer" onClick={onCancel}>
           Cancel
         </Button>

@@ -1,6 +1,6 @@
 ---
 name: kandev-protocol
-description: How to interact with the kandev orchestrator via the CLI
+description: Follow the core Office agent protocol on wakeup, including parsing KANDEV_* context, checking blockers, commenting progress, updating status, and using the CLI safely.
 kandev:
   system: true
   version: "0.42.0"
@@ -27,6 +27,7 @@ These are injected into your session automatically. Do not hardcode them.
 | `KANDEV_WAKE_REASON` | Why you were woken (see wake reasons below) |
 | `KANDEV_WAKE_COMMENT_ID` | Comment ID that triggered the wake (if applicable) |
 | `KANDEV_WAKE_PAYLOAD_JSON` | Pre-computed task context -- parse this first |
+| `KANDEV_WAKE_PAYLOAD_PATH` | Workspace-relative JSON file path when the payload is too large for inline env |
 
 Note: `KANDEV_API_URL` and `KANDEV_API_KEY` are also set but you do not need
 to use them directly. The CLI handles authentication and run-ID headers for you.
@@ -47,8 +48,10 @@ Check `$KANDEV_WAKE_REASON`. Possible values:
 
 ### Step 2: Parse wake payload
 
-If `$KANDEV_WAKE_PAYLOAD_JSON` is set, parse it. It contains pre-computed context
-so you don't need to fetch it from the API (saves tokens):
+If `$KANDEV_WAKE_PAYLOAD_JSON` is set, parse it. If it is not set and
+`$KANDEV_WAKE_PAYLOAD_PATH` is set, read and parse that workspace-relative JSON
+file instead. The payload contains pre-computed context so you don't need to
+fetch it from the API (saves tokens):
 
 ```json
 {
@@ -82,7 +85,7 @@ If `task.blockedBy` is not empty, post a comment explaining you are blocked and 
 Never work on blocked tasks -- the orchestrator will wake you when blockers clear.
 
 ```bash
-$KANDEV_CLI kandev comment add --body "Blocked by tasks: KAN-43, KAN-44. Waiting for resolution."
+$KANDEV_CLI kandev tasks message --prompt "Blocked by tasks: KAN-43, KAN-44. Waiting for resolution."
 ```
 
 ### Step 4: Do the work
@@ -96,13 +99,13 @@ Always post a comment before changing task status. This creates an audit trail
 and keeps other agents informed.
 
 ```bash
-$KANDEV_CLI kandev comment add --body "Implemented OAuth2 login flow with Google provider. Tests pass."
+$KANDEV_CLI kandev tasks message --prompt "Implemented OAuth2 login flow with Google provider. Tests pass."
 ```
 
 For multiline comments, pipe via stdin:
 
 ```bash
-cat <<'EOF' | $KANDEV_CLI kandev comment add --body -
+cat <<'EOF' | $KANDEV_CLI kandev tasks message --prompt -
 Implementation summary:
 - Added Google OAuth2 provider with PKCE flow
 - Wrote integration tests covering token refresh
@@ -159,7 +162,8 @@ task create --title T [--parent ID]   Create a task or subtask
 ### comment
 
 ```
-comment add [--task ID] --body BODY   Post a comment (--body - reads stdin)
+tasks message [--id ID] --prompt P    Post an agent-authored comment
+comment add [--task ID] --body BODY   Simulate a user comment for fixtures
 comment list [--task ID] [--limit N]  List comments on a task
 ```
 
@@ -227,7 +231,7 @@ fi
    (missing permissions, external dependency), post a comment explaining why and
    exit. Do not set the task to done if it is not actually done.
 
-5. **Parse KANDEV_WAKE_PAYLOAD_JSON first.** It contains pre-computed context.
+5. **Parse KANDEV_WAKE_PAYLOAD_JSON first.** If it is absent, read `KANDEV_WAKE_PAYLOAD_PATH`. The payload contains pre-computed context.
    Only call the API for data not in the payload. This saves tokens.
 
 6. **Keep comments concise but informative.** Other agents and humans read them.

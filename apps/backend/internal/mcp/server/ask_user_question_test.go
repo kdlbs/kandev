@@ -1,9 +1,17 @@
 package mcp
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
@@ -243,4 +251,150 @@ func TestAskUserQuestion_RejectionPath(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, textBlock.Text, "rejected")
 	assert.Contains(t, textBlock.Text, "User skipped")
+}
+
+// TestEmitKeepAlivePings_TicksUntilStop verifies the keepalive loop fires send on
+// each interval and exits once the stop channel closes.
+func TestEmitKeepAlivePings_TicksUntilStop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stop := make(chan struct{})
+		calls := 0
+		send := func() {
+			calls++
+			if calls == 3 {
+				close(stop)
+			}
+		}
+		emitKeepAlivePings(context.Background(), stop, 20*time.Second, send)
+		assert.Equal(t, 3, calls)
+	})
+}
+
+// TestEmitKeepAlivePings_StopsOnContextCancel verifies a cancelled context tears
+// the loop down even if stop never closes.
+func TestEmitKeepAlivePings_StopsOnContextCancel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		stop := make(chan struct{})
+		defer close(stop)
+		calls := 0
+		send := func() {
+			calls++
+			if calls == 2 {
+				cancel()
+			}
+		}
+		emitKeepAlivePings(ctx, stop, 20*time.Second, send)
+		assert.Equal(t, 2, calls)
+	})
+}
+
+// TestEmitKeepAlivePings_Guards ensures the loop returns immediately for a
+// non-positive interval or a nil send without spinning or panicking.
+func TestEmitKeepAlivePings_Guards(t *testing.T) {
+	emitKeepAlivePings(context.Background(), make(chan struct{}), 0, func() {})
+	emitKeepAlivePings(context.Background(), make(chan struct{}), time.Second, nil)
+}
+
+// blockingAskBackend blocks the ask_user_question round-trip until release is
+// closed, simulating a user who takes a long time to answer.
+type blockingAskBackend struct {
+	release  <-chan struct{}
+	response map[string]interface{}
+}
+
+func (b *blockingAskBackend) RequestPayload(ctx context.Context, action string, _, result interface{}) error {
+	if action == ws.ActionMCPAskUserQuestion {
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if b.response != nil && result != nil {
+		data, _ := json.Marshal(b.response)
+		return json.Unmarshal(data, result)
+	}
+	return nil
+}
+
+// TestAskUserQuestion_StreamsKeepAliveDuringWait drives a real Streamable HTTP
+// tool call whose backend blocks until the test releases it, and asserts that
+// progress notifications stream on the in-flight POST response before the final
+// result. This is the regression guard for the agent's MCP client aborting the
+// call with "fetch failed" after its idle timeout.
+func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
+	prev := askQuestionKeepAliveInterval
+	askQuestionKeepAliveInterval = 5 * time.Millisecond
+	t.Cleanup(func() { askQuestionKeepAliveInterval = prev })
+
+	release := make(chan struct{})
+	backend := &blockingAskBackend{
+		release: release,
+		response: map[string]interface{}{
+			"answers": []interface{}{
+				map[string]interface{}{
+					"question_id":      "q1",
+					"selected_options": []interface{}{"q1_opt1"},
+				},
+			},
+		},
+	}
+
+	log := newTestLogger(t)
+	s := New(backend, "sess-keepalive", "task-keepalive", 0, log, "", false, ModeTask)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	s.RegisterRoutes(router)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	initReq := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}`
+	initResp := postJSONRPC(t, ts.URL+"/mcp", initReq, "")
+	require.Equal(t, http.StatusOK, initResp.statusCode, "init: %s", initResp.body)
+
+	callBody := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ask_user_question_kandev","arguments":{"questions":[{"id":"q1","prompt":"Which?","options":[{"label":"A","description":"a"},{"label":"B","description":"b"}]}]}}}`
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(callBody))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Mcp-Session-Id", initResp.sessionID)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	scanner := bufio.NewScanner(resp.Body)
+	released := false
+	progressSeen := 0
+	finalSeen := false
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		switch {
+		case strings.Contains(payload, "notifications/progress"):
+			progressSeen++
+			if !released {
+				close(release)
+				released = true
+			}
+		case strings.Contains(payload, `"id":2`):
+			finalSeen = true
+			assert.Contains(t, payload, "q1_opt1", "final result should carry the answer")
+		}
+		if finalSeen {
+			break
+		}
+	}
+	require.NoError(t, scanner.Err())
+	if !released {
+		close(release)
+	}
+	assert.GreaterOrEqual(t, progressSeen, 1, "expected at least one keepalive progress notification")
+	assert.True(t, finalSeen, "expected the final tool result to be delivered")
 }

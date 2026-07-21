@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,12 @@ func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.
 func (m *mockRepository) DeleteWorkspace(ctx context.Context, id string) error {
 	return nil
 }
+func (m *mockRepository) DeleteWorkspaceCascade(ctx context.Context, id string) ([]*models.Task, []*models.Workflow, error) {
+	return nil, nil, m.DeleteWorkspace(ctx, id)
+}
+func (m *mockRepository) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error) {
+	return nil, nil, m.DeleteWorkspace(ctx, id)
+}
 func (m *mockRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	return nil, nil
 }
@@ -50,6 +57,9 @@ func (m *mockRepository) CreateTask(ctx context.Context, task *models.Task) erro
 	return nil
 }
 func (m *mockRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
 	return nil, nil
 }
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error {
@@ -61,7 +71,7 @@ func (m *mockRepository) DeleteTask(ctx context.Context, id string) error {
 func (m *mockRepository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
 	return nil, 0, nil
 }
 func (m *mockRepository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
@@ -73,8 +83,28 @@ func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error {
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
+	return false, nil
+}
+func (m *mockRepository) CountOpenWatcherCreatedTasks(_ context.Context, _, _ string) (int, error) {
+	return 0, nil
+}
 func (m *mockRepository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
 	return nil
+}
+func (m *mockRepository) UpdateTaskStateIfSessionState(
+	_ context.Context, _, _ string, _ models.TaskSessionState, _ v1.TaskState,
+) (v1.TaskState, bool, error) {
+	return "", false, nil
+}
+func (m *mockRepository) UpdateTaskStateIfCurrentIn(_ context.Context, _ string, _ v1.TaskState, _ []v1.TaskState) (v1.TaskState, bool, error) {
+	return "", false, nil
+}
+func (m *mockRepository) UpdateTaskStateIfNotArchived(_ context.Context, _ string, _ v1.TaskState) (v1.TaskState, bool, error) {
+	return "", false, nil
 }
 func (m *mockRepository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, columnID string, position int) error {
 	return nil
@@ -97,6 +127,9 @@ func (m *mockRepository) ListChildren(_ context.Context, _ string) ([]*models.Ta
 func (m *mockRepository) ListChildrenIncludingArchived(_ context.Context, _ string) ([]*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) ReparentDirectChildren(_ context.Context, _, _ string) error {
+	return nil
+}
 func (m *mockRepository) ListSiblings(_ context.Context, _ string) ([]*models.Task, error) {
 	return nil, nil
 }
@@ -104,6 +137,9 @@ func (m *mockRepository) ArchiveTaskIfActive(_ context.Context, _, _ string) (bo
 	return false, nil
 }
 func (m *mockRepository) UnarchiveTaskByCascade(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
+func (m *mockRepository) UnarchiveTask(_ context.Context, _ string) (bool, error) {
 	return false, nil
 }
 func (m *mockRepository) IncrementTaskSequence(_ context.Context, _ string) (int, error) {
@@ -175,10 +211,19 @@ func (m *mockRepository) FindMessagesByPendingID(ctx context.Context, pendingID 
 func (m *mockRepository) FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error) {
 	return nil, nil
 }
+func (m *mockRepository) FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
+	return make(map[string]models.TaskPendingAction), nil
+}
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
 }
 func (m *mockRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error) {
 	return nil, nil
 }
 func (m *mockRepository) ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error) {
@@ -237,6 +282,9 @@ func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.
 func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error {
 	return nil
 }
+func (m *mockRepository) ResetTaskSessionBasesForRepository(ctx context.Context, taskID, repositoryID, baseBranch string) (int64, error) {
+	return 0, nil
+}
 func (m *mockRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return nil, nil
 }
@@ -245,6 +293,9 @@ func (m *mockRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.
 }
 func (m *mockRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return nil, nil
+}
+func (m *mockRepository) CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) (int64, error) {
+	return 0, nil
 }
 func (m *mockRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	return false, nil
@@ -260,6 +311,9 @@ func (m *mockRepository) HasActiveTaskSessionsByEnvironment(ctx context.Context,
 }
 func (m *mockRepository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	return false, nil
+}
+func (m *mockRepository) CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error) {
+	return 0, nil
 }
 func (m *mockRepository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
 	return 0, nil
@@ -344,6 +398,9 @@ func (m *mockRepository) ListExecutors(ctx context.Context) ([]*models.Executor,
 func (m *mockRepository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
 	return nil
 }
@@ -357,6 +414,12 @@ func (m *mockRepository) HasExecutorRunningRow(ctx context.Context, sessionID st
 	return false, nil
 }
 func (m *mockRepository) UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error {
+	return nil
+}
+func (m *mockRepository) UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error {
+	return nil
+}
+func (m *mockRepository) RepairExecutorRunningDead(ctx context.Context, sessionID string) error {
 	return nil
 }
 func (m *mockRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {
@@ -452,6 +515,9 @@ func (m *mockRepository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs 
 func (m *mockRepository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
 	return make(map[string]*models.TaskSession), nil
 }
+func (m *mockRepository) BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error) {
+	return make(map[string][]*models.TaskSession), nil
+}
 func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string) error {
 	return nil
 }
@@ -465,7 +531,23 @@ func (m *mockRepository) UpdateSessionMetadata(ctx context.Context, sessionID st
 	return nil
 }
 func (m *mockRepository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
+	if session := m.sessions[sessionID]; session != nil {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		if value == nil {
+			delete(session.Metadata, key)
+		} else {
+			session.Metadata[key] = value
+		}
+	}
 	return nil
+}
+func (m *mockRepository) SetSessionACPSessionID(_ context.Context, _ string, _ string) (bool, error) {
+	return false, nil
+}
+func (m *mockRepository) DismissLastAgentError(_ context.Context, _ string, _ models.LastAgentError, _ time.Time) (bool, error) {
+	return true, nil
 }
 func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (string, error) {
 	return "", nil
@@ -641,6 +723,101 @@ func TestResolveScriptCommandErrors(t *testing.T) {
 	}
 	if _, _, _, err := resolveScriptCommand(context.Background(), svc, repo, "custom", "unknown"); err == nil {
 		t.Fatal("expected error for unknown custom script")
+	}
+}
+
+func TestSetSessionRuntimeConfigOverridesPersistWithoutRunningAgent(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		body       string
+		assertions func(*testing.T, models.SessionRuntimeConfig, map[string]interface{})
+	}{
+		{
+			name: "model",
+			path: "/api/v1/task-sessions/session-idle/set-model",
+			body: `{"model_id":"claude-opus-4-8"}`,
+			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, _ map[string]interface{}) {
+				t.Helper()
+				if cfg.Model != "claude-opus-4-8" {
+					t.Fatalf("expected persisted model, got %q", cfg.Model)
+				}
+			},
+		},
+		{
+			name: "dynamic model option",
+			path: "/api/v1/task-sessions/session-idle/set-config-option",
+			body: `{"config_id":"model","value":"claude-opus-4-8"}`,
+			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, _ map[string]interface{}) {
+				t.Helper()
+				if cfg.Model != "claude-opus-4-8" || cfg.ConfigOptions["model"] != "claude-opus-4-8" {
+					t.Fatalf("expected persisted dynamic model option, got %+v", cfg)
+				}
+			},
+		},
+		{
+			name: "mode",
+			path: "/api/v1/task-sessions/session-idle/set-mode",
+			body: `{"mode_id":"acceptEdits"}`,
+			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, metadata map[string]interface{}) {
+				t.Helper()
+				if cfg.Mode != "acceptEdits" || metadata[models.SessionMetaKeySessionMode] != "acceptEdits" {
+					t.Fatalf("expected persisted mode, got config=%+v metadata=%+v", cfg, metadata)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+			if err != nil {
+				t.Fatalf("failed to create logger: %v", err)
+			}
+			session := &models.TaskSession{
+				ID:       "session-idle",
+				TaskID:   "task-1",
+				State:    models.TaskSessionStateIdle,
+				Metadata: make(map[string]interface{}),
+			}
+			repo := &mockRepository{sessions: map[string]*models.TaskSession{session.ID: session}}
+			svc := service.NewService(service.Repos{
+				Workspaces: repo, Tasks: repo, TaskRepos: repo,
+				Workflows: repo, Messages: repo, Turns: repo,
+				Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+				Executors: repo, Environments: repo, TaskEnvironments: repo,
+				Reviews: repo,
+			}, nil, log, service.RepositoryDiscoveryConfig{})
+
+			lifecycleMgr := newLifecycleManager(t, log)
+			workspaceOnlyExecution := (&lifecycle.ExecutorInstance{
+				InstanceID: "execution-workspace-only",
+				TaskID:     session.TaskID,
+				SessionID:  session.ID,
+			}).ToAgentExecution(&lifecycle.ExecutorCreateRequest{
+				InstanceID:     "execution-workspace-only",
+				TaskID:         session.TaskID,
+				SessionID:      session.ID,
+				AgentProfileID: "profile-1",
+				WorkspacePath:  "/tmp",
+			})
+			addExecution(t, lifecycleMgr, workspaceOnlyExecution)
+
+			router := newProcessStopRouter(t, svc, lifecycleMgr, log)
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusOK {
+				t.Fatalf("expected idle session update to succeed, got %d: %s", resp.Code, resp.Body.String())
+			}
+			cfg, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
+			if !ok {
+				t.Fatalf("expected persisted runtime config overrides, got %+v", session.Metadata)
+			}
+			tt.assertions(t, cfg, session.Metadata)
+		})
 	}
 }
 

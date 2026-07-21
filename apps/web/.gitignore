@@ -14,6 +14,7 @@
 /coverage
 test-results/
 playwright-report/
+blob-report/
 .pr-assets/
 
 # next.js

@@ -14,28 +14,31 @@ import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 
 // Panel components (rendered via portals, not directly by dockview)
-import { TaskSessionSidebar } from "./task-session-sidebar";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskChangesPanel } from "./task-changes-panel";
 import { ChangesPanel } from "./changes-panel";
 import { FilesPanel } from "./files-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
 import { FileEditorPanel } from "./file-editor-panel";
-import { PassthroughTerminal } from "./passthrough-terminal";
+import { PassthroughToolbar } from "./passthrough-toolbar";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { ContextMenuTab } from "./tab-context-menu";
 import { ChangesTab } from "./changes-tab";
 import { PlanTab } from "./plan-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
+import { TerminalTab } from "./terminal-tab";
 import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
+import type { OpenDiffOptions } from "./changes-diff-target";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 
-import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
+import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
+import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
 
 // ---------------------------------------------------------------------------
 // PORTAL SLOT — generic dockview component that adopts a persistent portal
@@ -72,14 +75,7 @@ import { usePortalSlot } from "@/lib/layout/panel-portal-host";
  *  - files    — uses `useEnvironmentSessionId()` for stable file tree
  *  - plan     — reads `activeTaskId` from the store
  */
-export const ENV_SCOPED_COMPONENTS = new Set([
-  "file-editor",
-  "browser",
-  "vscode",
-  "commit-detail",
-  "diff-viewer",
-  "pr-detail",
-]);
+export const ENV_SCOPED_COMPONENTS = ENV_SCOPED_DOCKVIEW_COMPONENTS;
 
 /**
  * Every entry in the dockview `components` map uses this wrapper.
@@ -105,7 +101,6 @@ function PortalSlot(props: IDockviewPanelProps) {
 // All panel types use the same PortalSlot wrapper — dockview only manages
 // layout positioning.  Actual rendering happens in PanelPortalHost below.
 export const dockviewComponents: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
-  sidebar: PortalSlot,
   chat: PortalSlot,
   "diff-viewer": PortalSlot,
   "file-editor": PortalSlot,
@@ -135,6 +130,7 @@ export const dockviewTabComponents: Record<
   changesTab: ChangesTab,
   planTab: PlanTab,
   sessionTab: SessionTab,
+  terminalTab: TerminalTab,
   previewFileTab: PreviewFileTab,
   previewDiffTab: PreviewDiffTab,
   previewCommitTab: PreviewCommitTab,
@@ -150,25 +146,13 @@ export { ContextMenuTab };
 // Each content component renders the real panel UI.  They live permanently
 // in the PanelPortalHost and survive dockview layout switches.
 
-function SidebarContent({ panelId }: { panelId: string }) {
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const workflowId = useAppStore((state) => state.workflows.activeId);
-  const workspaceName = useAppStore((state) => {
-    const ws = state.workspaces.items.find((w: { id: string }) => w.id === workspaceId);
-    return ws?.name ?? "Workspace";
-  });
-
-  useEffect(() => {
-    setPanelTitle(panelId, workspaceName);
-  }, [panelId, workspaceName]);
-
-  return <TaskSessionSidebar workspaceId={workspaceId} workflowId={workflowId} />;
-}
-
 function useChatSessionTitle(panelId: string, sessionId: string | null, isSessionTab: boolean) {
   const agentLabel = useAppStore((state) => {
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
+    // User-supplied session name wins over the derived profile label,
+    // matching the session tab title precedence (resolveSessionTabTitle).
+    if (session?.name) return session.name;
     if (!session?.agent_profile_id) return null;
     const profile = state.agentProfiles.items.find(
       (p: { id: string }) => p.id === session.agent_profile_id,
@@ -190,6 +174,12 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = paramSessionId ?? storeSessionId;
+  const taskId = useAppStore((state) => {
+    if (sessionId) {
+      return state.taskSessions.items[sessionId]?.task_id ?? state.tasks.activeTaskId;
+    }
+    return state.tasks.activeTaskId;
+  });
   const { openFile } = useFileEditors();
   const isPassthrough = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
@@ -200,7 +190,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     return (
       <PanelRoot>
         <PanelBody padding={false} scroll={false}>
-          <PassthroughTerminal sessionId={sessionId} mode="agent" />
+          <PassthroughToolbar sessionId={sessionId} taskId={taskId} />
         </PanelBody>
       </PanelRoot>
     );
@@ -208,11 +198,51 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   return (
     <TaskChatPanel
       sessionId={sessionId}
+      taskId={sessionId ? taskId : null}
       onOpenFile={openFile}
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
     />
   );
+}
+
+/**
+ * Force a fresh git-status push whenever the diff panel becomes the active
+ * dockview tab.
+ *
+ * Background: the diff panel's content is derived from `gitStatus` (the
+ * per-file `.diff` string), which only refreshes when a `session.git.event`
+ * status_update arrives from agentctl's workspace poll loop. That loop runs at
+ * 3s (fast) only while the workspace is in fast poll mode; if the focus→fast
+ * upgrade lost a race with agentctl startup the loop can sit in slow mode (30s)
+ * and the open diff shows stale content until the next slow tick.
+ *
+ * This is the diff-side analog of `useResyncOnTabActivate` in
+ * file-editor-panel.tsx (which force-syncs editor content on activation). Tab
+ * activation is a deterministic, user-driven "I'm about to look at this diff"
+ * signal, so we ask the backend for a fresh git-status snapshot via
+ * `refreshSessionData` (re-sends `session.focus`, whose handler pushes a fresh
+ * `GetGitStatusMultiFresh` result) — closing the WS-event-miss gap without
+ * depending on poll cadence. No-op when the session isn't focused.
+ */
+function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
+  useEffect(() => {
+    if (!sessionId) return;
+    const entry = panelPortalManager.get(panelId);
+    if (!entry?.api) return;
+    const refreshNow = () => {
+      const client = getWebSocketClient();
+      client?.refreshSessionData(sessionId);
+    };
+    // If the panel is already active when this effect first runs,
+    // onDidActiveChange won't fire (no transition) — refresh immediately so the
+    // initial open benefits from the same WS-event-miss recovery.
+    if (entry.api.isActive) refreshNow();
+    const disposable = entry.api.onDidActiveChange((event) => {
+      if (event.isActive) refreshNow();
+    });
+    return () => disposable.dispose();
+  }, [panelId, sessionId]);
 }
 
 function DiffViewerContent({
@@ -225,9 +255,13 @@ function DiffViewerContent({
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const panelKind = (params?.kind as string) ?? "all";
   const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
+  const selectedRepositoryName =
+    panelKind === "file" ? (params?.repositoryName as string | undefined) : undefined;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const handleClosePanel = useCallback(() => {
     const dockApi = useDockviewStore.getState().api;
     const panel = dockApi?.getPanel(panelId);
@@ -238,6 +272,7 @@ function DiffViewerContent({
     <TaskChangesPanel
       mode={panelKind as "all" | "file"}
       filePath={selectedPath}
+      fileRepositoryName={selectedRepositoryName}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
       onOpenFile={openFile}
@@ -265,13 +300,17 @@ function ChangesContent({ panelId }: { panelId: string }) {
     setPanelTitle(panelId, title);
   }, [totalCount, panelId]);
 
-  const handleEditFile = useCallback((path: string) => openFile(path), [openFile]);
+  const handleEditFile = useCallback(
+    (path: string, repo?: string) => openFile(path, repo),
+    [openFile],
+  );
   const handleOpenDiffFile = useCallback(
-    (path: string) => addFileDiffPanel(path),
+    (path: string, options?: OpenDiffOptions) =>
+      addFileDiffPanel(path, { source: options?.source, repositoryName: options?.repositoryName }),
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
-    (sha: string) => addCommitDetailPanel(sha),
+    (sha: string, repo?: string) => addCommitDetailPanel(sha, { repo }),
     [addCommitDetailPanel],
   );
   const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);
@@ -327,7 +366,7 @@ export function renderPanel(
 
   switch (resolved) {
     case "sidebar":
-      return <SidebarContent panelId={panelId} />;
+      return null;
     case "chat":
       return <ChatContent panelId={panelId} params={params} />;
     case "diff-viewer":

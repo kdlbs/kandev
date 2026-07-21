@@ -31,6 +31,9 @@ type OpenEditorRequest struct {
 	FilePath   string `json:"file_path,omitempty"`
 	Line       int    `json:"line,omitempty"`
 	Column     int    `json:"column,omitempty"`
+	// WorktreeID selects which of the session's worktrees to open
+	// (multi-repo sessions); empty falls back to the first worktree.
+	WorktreeID string `json:"worktree_id,omitempty"`
 }
 
 type OpenEditorResponse struct {
@@ -68,6 +71,12 @@ type UpdateEditorRequest struct {
 	Kind    *string         `json:"kind,omitempty"`
 	Config  json.RawMessage `json:"config,omitempty"`
 	Enabled *bool           `json:"enabled,omitempty"`
+}
+
+type OpenFolderRequest struct {
+	// WorktreeID selects which of the session's worktrees to open
+	// (multi-repo sessions); empty falls back to the first worktree.
+	WorktreeID string `json:"worktree_id,omitempty"`
 }
 
 type OpenFolderResponse struct {

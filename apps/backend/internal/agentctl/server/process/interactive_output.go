@@ -39,9 +39,24 @@ func (r *InteractiveRunner) SetDirectOutput(processID string, writer DirectOutpu
 	r.logger.Info("direct output set for process",
 		zap.String("process_id", processID),
 		zap.String("session_id", sessionID),
+		zap.Int("os_pid", proc.osPID()),
 		zap.Bool("is_user_shell", proc.isUserShell))
 
 	return nil
+}
+
+// TrackSessionWebSocket records an agent-terminal WebSocket before PTY access
+// is ready. The terminal bridge establishes PTY access after the first resize,
+// but a fast-failing resume launch can exit before that happens. Session-level
+// tracking lets the lifecycle fallback connect the same WebSocket to the fresh
+// process it starts after that fast-fail.
+func (r *InteractiveRunner) TrackSessionWebSocket(sessionID string, writer DirectOutputWriter) {
+	r.sessionWsMu.Lock()
+	r.sessionWs[sessionID] = &sessionWebSocket{writer: writer}
+	r.sessionWsMu.Unlock()
+
+	r.logger.Info("session WebSocket tracked",
+		zap.String("session_id", sessionID))
 }
 
 // ClearDirectOutput clears the direct output writer for a process.
@@ -72,7 +87,9 @@ func (r *InteractiveRunner) ClearDirectOutput(processID string) error {
 
 	r.logger.Info("direct output cleared for process",
 		zap.String("process_id", processID),
-		zap.String("session_id", sessionID))
+		zap.String("session_id", sessionID),
+		zap.Int("os_pid", proc.osPID()),
+		zap.Bool("is_user_shell", proc.isUserShell))
 
 	return nil
 }

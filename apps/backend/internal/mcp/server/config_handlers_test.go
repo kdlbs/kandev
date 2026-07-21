@@ -61,6 +61,22 @@ func callTool(t *testing.T, s *Server, toolName string, args map[string]interfac
 	return result
 }
 
+func toolInputProperties(t *testing.T, s *Server, toolName string) map[string]interface{} {
+	t.Helper()
+	toolsMap := s.mcpServer.ListTools()
+	st, ok := toolsMap[toolName]
+	require.True(t, ok, "tool %q not registered", toolName)
+
+	schema, err := json.Marshal(st.Tool.InputSchema)
+	require.NoError(t, err)
+
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(schema, &parsed))
+	props, ok := parsed["properties"].(map[string]interface{})
+	require.True(t, ok, "schema should have properties")
+	return props
+}
+
 // --- Action constant tests ---
 
 func TestActionConstants_MatchWebSocketActions(t *testing.T) {
@@ -68,6 +84,7 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	assert.Equal(t, "mcp.create_workflow", ws.ActionMCPCreateWorkflow)
 	assert.Equal(t, "mcp.update_workflow", ws.ActionMCPUpdateWorkflow)
 	assert.Equal(t, "mcp.delete_workflow", ws.ActionMCPDeleteWorkflow)
+	assert.Equal(t, "mcp.import_workflow", ws.ActionMCPImportWorkflow)
 	assert.Equal(t, "mcp.create_workflow_step", ws.ActionMCPCreateWorkflowStep)
 	assert.Equal(t, "mcp.update_workflow_step", ws.ActionMCPUpdateWorkflowStep)
 	assert.Equal(t, "mcp.delete_workflow_step", ws.ActionMCPDeleteWorkflowStep)
@@ -92,6 +109,17 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 }
 
 // --- Workflow handler tests ---
+
+func TestWorkflowStepTools_SchemaExposesAutoAdvanceRequiresSignal(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	createProps := toolInputProperties(t, s, "create_workflow_step_kandev")
+	updateProps := toolInputProperties(t, s, "update_workflow_step_kandev")
+
+	assert.Contains(t, createProps, "auto_advance_requires_signal")
+	assert.Contains(t, updateProps, "auto_advance_requires_signal")
+}
 
 func TestCreateWorkflowHandler_Success(t *testing.T) {
 	backend := &testBackend{
@@ -186,6 +214,48 @@ func TestDeleteWorkflowHandler_MissingWorkflowID(t *testing.T) {
 	assert.True(t, result.IsError)
 }
 
+func TestImportWorkflowHandler_Success(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"created": []interface{}{"Sprint Board"}, "skipped": []interface{}{}},
+	}
+	s := newTestServer(t, backend)
+
+	doc := "version: 1\ntype: kandev_workflow\nworkflows:\n  - name: Sprint Board\n    steps: []\n"
+	result := callTool(t, s, "import_workflow_kandev", map[string]interface{}{
+		"workspace_id": "ws-123",
+		"document":     doc,
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPImportWorkflow, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "ws-123", payload["workspace_id"])
+	assert.Equal(t, doc, payload["document"])
+}
+
+func TestImportWorkflowHandler_MissingWorkspaceID(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "import_workflow_kandev", map[string]interface{}{
+		"document": "version: 1",
+	})
+
+	assert.True(t, result.IsError)
+}
+
+func TestImportWorkflowHandler_MissingDocument(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "import_workflow_kandev", map[string]interface{}{
+		"workspace_id": "ws-123",
+	})
+
+	assert.True(t, result.IsError)
+}
+
 func TestCreateWorkflowStepHandler_Success(t *testing.T) {
 	backend := &testBackend{
 		response: map[string]interface{}{"step": map[string]interface{}{"id": "step-1", "name": "Review"}},
@@ -210,14 +280,15 @@ func TestCreateWorkflowStepHandler_AllFields(t *testing.T) {
 	s := newTestServer(t, backend)
 
 	result := callTool(t, s, "create_workflow_step_kandev", map[string]interface{}{
-		"workflow_id":           "wf-123",
-		"name":                  "Deploy",
-		"position":              float64(0),
-		"color":                 "#22c55e",
-		"prompt":                "Deploy prompt",
-		"is_start_step":         true,
-		"allow_manual_move":     true,
-		"show_in_command_panel": true,
+		"workflow_id":                  "wf-123",
+		"name":                         "Deploy",
+		"position":                     float64(0),
+		"color":                        "#22c55e",
+		"prompt":                       "Deploy prompt",
+		"is_start_step":                true,
+		"allow_manual_move":            true,
+		"show_in_command_panel":        true,
+		"auto_advance_requires_signal": true,
 		"events": map[string]interface{}{
 			"on_enter": []interface{}{map[string]interface{}{"type": "auto_start_agent"}},
 		},
@@ -230,6 +301,7 @@ func TestCreateWorkflowStepHandler_AllFields(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, true, payload["allow_manual_move"])
 	assert.Equal(t, true, payload["show_in_command_panel"])
+	assert.Equal(t, true, payload["auto_advance_requires_signal"])
 	assert.NotNil(t, payload["events"])
 }
 
@@ -277,12 +349,13 @@ func TestUpdateWorkflowStepHandler_AllFields(t *testing.T) {
 	s := newTestServer(t, backend)
 
 	result := callTool(t, s, "update_workflow_step_kandev", map[string]interface{}{
-		"step_id":                  "step-1",
-		"name":                     "In Review",
-		"color":                    "#3b82f6",
-		"allow_manual_move":        true,
-		"show_in_command_panel":    true,
-		"auto_archive_after_hours": float64(48),
+		"step_id":                      "step-1",
+		"name":                         "In Review",
+		"color":                        "#3b82f6",
+		"allow_manual_move":            true,
+		"show_in_command_panel":        true,
+		"auto_advance_requires_signal": false,
+		"auto_archive_after_hours":     float64(48),
 		"events": map[string]interface{}{
 			"on_enter": []interface{}{map[string]interface{}{"type": "enable_plan_mode"}},
 		},
@@ -294,6 +367,7 @@ func TestUpdateWorkflowStepHandler_AllFields(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, true, payload["allow_manual_move"])
 	assert.Equal(t, true, payload["show_in_command_panel"])
+	assert.Equal(t, false, payload["auto_advance_requires_signal"])
 	assert.Equal(t, float64(48), payload["auto_archive_after_hours"])
 	assert.NotNil(t, payload["events"])
 }

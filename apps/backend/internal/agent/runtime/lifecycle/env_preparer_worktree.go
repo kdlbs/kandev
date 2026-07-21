@@ -12,6 +12,15 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+// copyFilesStep builds the "Copy N ignored files" prepare step shown after a
+// worktree's CopyFiles spec has been applied. repoLabel is appended for
+// multi-repo prepares; empty for single-repo. Thin adapter — see
+// buildCopyFilesStep for the actual step shape (shared with the
+// remote-executor path in remote_copyfiles.go).
+func copyFilesStep(wt *worktree.Worktree, repoLabel string) PrepareStep {
+	return buildCopyFilesStep(wt.CopiedFiles, wt.CopyFilesWarnings, repoLabel)
+}
+
 // WorktreePreparer prepares a worktree-based execution environment.
 // Steps: validate repository → create worktree → checkout PR branch (if set) → run setup script (if any).
 type WorktreePreparer struct {
@@ -62,6 +71,13 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	wt, steps, stepIdx, err := p.createWorktreeWithSync(ctx, req, stepIdx, totalSteps, onProgress, steps)
 	if err != nil {
 		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: err.Error(), Duration: time.Since(start)}, nil
+	}
+
+	if len(wt.CopiedFiles) > 0 || len(wt.CopyFilesWarnings) > 0 {
+		totalSteps++
+		steps = append(steps, copyFilesStep(wt, ""))
+		reportProgress(onProgress, steps[len(steps)-1], stepIdx, totalSteps)
+		stepIdx++
 	}
 
 	workspacePath := wt.Path
@@ -165,50 +181,104 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 	step.Command = "git worktree add"
 	reportProgress(onProgress, step, stepIdx, totalSteps)
 
-	createReq := worktree.CreateRequest{
-		TaskID:               req.TaskID,
-		SessionID:            req.SessionID,
-		TaskTitle:            req.TaskTitle,
-		RepositoryID:         req.RepositoryID,
-		RepositoryPath:       req.RepositoryPath,
-		BaseBranch:           req.BaseBranch,
-		FallbackBaseBranch:   req.DefaultBranch,
-		CheckoutBranch:       req.CheckoutBranch,
-		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
-		PullBeforeWorktree:   req.PullBeforeWorktree,
-		WorktreeID:           req.WorktreeID,
-		TaskDirName:          req.TaskDirName,
-		RepoName:             req.RepoName,
-	}
+	createReq := buildWorktreeCreateRequest(req)
 	if syncStep != nil {
 		createReq.OnSyncProgress = func(event worktree.SyncProgressEvent) {
 			applySyncProgressEvent(syncStep, event)
 			reportProgress(onProgress, *syncStep, syncStepIndex, totalSteps)
 		}
 	}
+	// Complete the "Create worktree" step the moment the worktree dir is ready,
+	// before the per-repo setup script runs inside Create() — the setup script
+	// streams its own step, so this keeps the two from overlapping in the UI.
+	stepCompleted := false
+	createReq.OnWorktreeCreated = func(wt *worktree.Worktree) {
+		completeCreateWorktreeStep(&step, wt, stepIdx, totalSteps, onProgress)
+		stepCompleted = true
+	}
 
 	wt, err := p.worktreeMgr.Create(ctx, createReq)
 	steps = finalizeSyncStep(syncStep, syncStepIndex, totalSteps, onProgress, steps, err)
 	if err != nil {
-		completeStepError(&step, err.Error())
+		// If the callback already completed the step (worktree add succeeded,
+		// but a later phase like the setup script failed), leave it green — the
+		// failing phase owns its own step. Only attribute the error to "Create
+		// worktree" when it never completed (the creation itself failed).
+		if !stepCompleted {
+			completeStepError(&step, err.Error())
+			reportProgress(onProgress, step, stepIdx, totalSteps)
+		}
 		steps = append(steps, step)
-		reportProgress(onProgress, step, stepIdx, totalSteps)
 		p.logger.Error("worktree creation failed", zap.String("task_id", req.TaskID), zap.Error(err))
 		return nil, steps, stepIdx, err
 	}
 
-	completeStepSuccess(&step)
-	if wt.BaseBranchFallbackWarning != "" {
-		step.Warning = wt.BaseBranchFallbackWarning
-		step.WarningDetail = wt.BaseBranchFallbackDetail
+	// Reuse of an existing worktree skips OnWorktreeCreated, so complete the
+	// step here when the callback did not fire.
+	if !stepCompleted {
+		completeCreateWorktreeStep(&step, wt, stepIdx, totalSteps, onProgress)
+	}
+	// A failed repository setup script is non-fatal: worktree.Manager.Create
+	// keeps the worktree and records the warning, but the script runs *after*
+	// OnWorktreeCreated already completed the step — so surface the warning
+	// here, once Create has returned, rather than in completeCreateWorktreeStep.
+	if wt.SetupScriptWarning != "" {
+		// Don't clobber a base-branch fallback warning that
+		// completeCreateWorktreeStep may have already set — append instead so
+		// both "wrong branch" and "setup script failed" survive.
+		if step.Warning != "" {
+			step.Warning += "\n" + wt.SetupScriptWarning
+			step.WarningDetail += "\n" + wt.SetupScriptWarningDetail
+		} else {
+			step.Warning = wt.SetupScriptWarning
+			step.WarningDetail = wt.SetupScriptWarningDetail
+		}
+		reportProgress(onProgress, step, stepIdx, totalSteps)
 	}
 	// wt.FetchWarning is surfaced in the separate "Fetch PR branch" step
 	// rendered later in the pipeline. It can only be non-empty when
 	// req.CheckoutBranch != "" (it is set inside fetchBranchToLocal), so the
 	// two warnings always co-occur and FetchWarning is never silently dropped.
 	steps = append(steps, step)
-	reportProgress(onProgress, step, stepIdx, totalSteps)
 	return wt, steps, stepIdx + 1, nil
+}
+
+// buildWorktreeCreateRequest maps an EnvPrepareRequest onto the worktree
+// manager's CreateRequest. Progress callbacks are wired by the caller.
+func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
+	return worktree.CreateRequest{
+		TaskID:                 req.TaskID,
+		WorkspaceID:            req.WorkspaceID,
+		SessionID:              req.SessionID,
+		TaskTitle:              req.TaskTitle,
+		RepositoryID:           req.RepositoryID,
+		RepositoryPath:         req.RepositoryPath,
+		BaseBranch:             req.BaseBranch,
+		FallbackBaseBranch:     req.DefaultBranch,
+		CheckoutBranch:         req.CheckoutBranch,
+		PRNumber:               req.PRNumber,
+		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:   req.WorktreeBranchTicket,
+		PullBeforeWorktree:     req.PullBeforeWorktree,
+		WorktreeID:             req.WorktreeID,
+		TaskDirName:            req.TaskDirName,
+		RepoName:               req.RepoName,
+		BranchSlug:             req.BranchSlug,
+		BranchIdentitySlug:     req.BranchIdentitySlug,
+	}
+}
+
+// completeCreateWorktreeStep marks the "Create worktree" step successful,
+// attaches any base-branch fallback warning carried by the worktree, and
+// reports progress.
+func completeCreateWorktreeStep(step *PrepareStep, wt *worktree.Worktree, stepIdx, totalSteps int, onProgress PrepareProgressCallback) {
+	completeStepSuccess(step)
+	if wt.BaseBranchFallbackWarning != "" {
+		step.Warning = wt.BaseBranchFallbackWarning
+		step.WarningDetail = wt.BaseBranchFallbackDetail
+	}
+	reportProgress(onProgress, *step, stepIdx, totalSteps)
 }
 
 // finalizeSyncStep closes out the optional sync step after worktree.Create returns.
@@ -306,9 +376,12 @@ func (p *WorktreePreparer) prepareMultiRepo(
 				Duration:     time.Since(start),
 			}, nil
 		}
-		createdIDs = append(createdIDs, wt.ID)
+		if spec.WorktreeID == "" || wt.ID != spec.WorktreeID {
+			createdIDs = append(createdIDs, wt.ID)
+		}
 		worktrees = append(worktrees, RepoWorktreeResult{
 			RepositoryID:   spec.RepositoryID,
+			BranchSlug:     repoBranchIdentitySlug(spec),
 			WorktreeID:     wt.ID,
 			WorktreeBranch: wt.Branch,
 			WorktreePath:   wt.Path,
@@ -380,9 +453,14 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.BaseBranch = spec.BaseBranch
 	subReq.DefaultBranch = spec.DefaultBranch
 	subReq.CheckoutBranch = spec.CheckoutBranch
+	subReq.PRNumber = spec.PRNumber
 	subReq.WorktreeID = spec.WorktreeID
 	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix
+	subReq.WorktreeBranchTemplate = spec.WorktreeBranchTemplate
+	subReq.WorktreeBranchTicket = spec.WorktreeBranchTicket
 	subReq.PullBeforeWorktree = spec.PullBeforeWorktree
+	subReq.BranchSlug = spec.BranchSlug
+	subReq.BranchIdentitySlug = repoBranchIdentitySlug(spec)
 	// Strip the multi-repo list to avoid re-entering the multi-repo branch.
 	subReq.Repositories = nil
 
@@ -406,12 +484,27 @@ func (p *WorktreePreparer) prepareOneRepo(
 		stepIdx++
 	}
 
+	if len(wt.CopiedFiles) > 0 || len(wt.CopyFilesWarnings) > 0 {
+		totalSteps++
+		step := copyFilesStep(wt, repoLabel)
+		steps = append(steps, step)
+		reportProgress(onProgress, step, stepIdx, totalSteps)
+		stepIdx++
+	}
+
 	// Per-repo setup script execution is owned by the worktree manager
 	// (createInTaskDir → runWorktreeSetupScript), which streams output to a
 	// "script_execution" chat message. Running it here as well caused the
 	// script to execute twice per repo and broke non-idempotent setups.
 
 	return wt, steps, stepIdx, nil
+}
+
+func repoBranchIdentitySlug(spec RepoPrepareSpec) string {
+	if spec.BranchIdentitySlug != "" {
+		return spec.BranchIdentitySlug
+	}
+	return spec.BranchSlug
 }
 
 // rollbackWorktrees removes any worktrees created during a failed multi-repo

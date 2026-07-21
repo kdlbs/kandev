@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import dynamic from "next/dynamic";
+import dynamic from "@/lib/routing/client-dynamic";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { SessionMobileLayout, SessionTabletLayout } from "./mobile";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
@@ -36,6 +36,7 @@ type TaskLayoutProps = {
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
   initialLayout?: string | null;
+  isArchived?: boolean;
 };
 
 export const TaskLayout = memo(function TaskLayout({
@@ -57,6 +58,7 @@ export const TaskLayout = memo(function TaskLayout({
   remoteCheckedAt,
   remoteStatusError,
   initialLayout,
+  isArchived,
 }: TaskLayoutProps) {
   const { isMobile, usesDesktopWorkbench, isFullDesktop } = useResponsiveBreakpoint();
 
@@ -77,6 +79,7 @@ export const TaskLayout = memo(function TaskLayout({
         remoteCreatedAt={remoteCreatedAt}
         remoteCheckedAt={remoteCheckedAt}
         remoteStatusError={remoteStatusError}
+        isArchived={isArchived}
       />
     );
   }

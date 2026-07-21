@@ -8,17 +8,17 @@ owner: cfl
 
 ## Why
 
-Kandev has agent profiles (configuration templates: model, CLI flags, mode) but no concept of a persistent, stateful agent entity. Without agent instances, there is no hierarchy, no delegation, no budget tracking per agent, no autonomous coordination, and no operational visibility into how an agent runs over time.
+Kandev has execution profiles (configuration templates for a concrete CLI, account, model, flags, environment, and MCP setup) but also needs persistent, stateful Office agents. Without a stable Office identity, switching a provider also risks switching or copying the agent's role, instructions, skills, permissions, budget, and history.
 
-Office introduces agent instances: long-lived entities that reference an agent profile for execution config but carry their own identity, role, permissions, skills, instructions, and runtime state. They run inside a narrow capability-scoped runtime, call kandev through a structured CLI rather than raw curl, and expose per-agent dashboards with run history, costs, and per-run detail pages.
+Office therefore treats a workspace-scoped rich `agent_profiles` row as a stable Office identity and selects a separate concrete execution profile for each launch. Both row types remain in the unified table established by ADR 0005, but they have different responsibilities. Office agents run inside a narrow capability-scoped runtime, call kandev through a structured CLI rather than raw curl, and expose per-agent dashboards with run history, costs, and per-run detail pages.
 
 ## What
 
 ### Agent instances
 
-- An agent instance is a persistent entity distinct from `AgentProfile`.
-- `AgentProfile` remains unchanged: it describes how to launch a specific agent CLI (model, flags, mode).
-- An agent instance references a profile via `agent_profile_id` and adds:
+- An Office agent is a persistent `agent_profiles` row scoped by `workspace_id`; its row ID is the logical `agent_profile_id` referenced by assignments, instructions, skills, budgets, permissions, and Office history.
+- A launch separately resolves an `execution_profile_id` from the agent's effective tier and provider order. The referenced execution profile owns the concrete CLI runtime configuration.
+- The Office identity owns:
   - **Name**: human-readable label ("CEO", "Frontend Worker", "QA Bot").
   - **Role**: `ceo`, `worker`, `specialist`, `assistant`, or `reviewer`. Determines default permissions and UI treatment.
   - **Status**: `idle`, `working`, `paused`, `stopped`, plus transitional `pending_approval`.
@@ -29,7 +29,9 @@ Office introduces agent instances: long-lived entities that reference an agent p
   - **Icon**: avatar for UI display.
   - **Executor preference**: optional executor override for this agent.
   - **Channels**: optional external messaging channels (Telegram, Slack).
-- Multiple instances can share the same profile (e.g. three "Claude Sonnet" workers with different skills and budgets).
+- Multiple Office agents can use the same execution profile without sharing Office instructions, skills, permissions, budgets, or history.
+- Changing an agent's tier or provider order changes future execution-profile resolution without changing the Office identity.
+- Provider routing and failover are specified in [routing](./routing.md).
 
 ### Hierarchy
 
@@ -63,6 +65,8 @@ The executor is resolved automatically when the scheduler launches a session for
 4. **Workspace default executor**.
 
 `executor_preference` shape mirrors project executor config: `{ type, image, resource_limits, environment_id }`.
+
+When an agent creates another agent and omits `executor_preference`, the new agent inherits the creator's executor preference before defaults are applied. This keeps delegated child agents launchable in the same executor context unless the creator explicitly overrides the preference.
 
 Worktrees are automatic: when a task targets a repository, the system creates a git worktree (branch) using the existing `worktree.Manager`. Strategy (per-task or shared) comes from the project config.
 
@@ -101,9 +105,17 @@ office_agent_runtime
 
 Runtime state must survive restarts (a budget-paused agent stays paused). Not user-editable, not exported. On startup, the reconciliation service merges filesystem config with this DB state: missing runtime rows are created with `status=idle`; orphaned rows (no YAML) are deleted.
 
-### Agent profiles
+### Office identities and execution profiles
 
-Stay in the existing `agent_profiles` DB table. Referenced by `agent_profile_id` from the agent YAML. Managed via the existing settings UI (`/settings/agents/`).
+Office identities and execution profiles stay in the existing `agent_profiles` DB table, as required by ADR 0005, but launch resolution does not treat them as the same logical object:
+
+- A workspace-scoped rich row is the Office identity. Its `agent_profile_id` remains stable across provider changes and is used for hierarchy, instructions, skills, Office permissions, budgets, costs, and task/run ownership.
+- A concrete execution profile is selected per launch and recorded as `execution_profile_id`. It owns the registered CLI/provider, credentials and environment, model, mode, ACP config options, CLI flags, CLI permission behavior, passthrough mode, and MCP configuration.
+- Global shallow profiles are the normal execution-profile choices. Existing same-workspace rows may remain selectable for upgrade compatibility when they carry a valid CLI configuration.
+- An execution profile from another workspace cannot be selected.
+- Non-Office launches remain compatible: when no distinct execution profile is supplied, runtime treats `execution_profile_id = agent_profile_id`.
+
+The CLI-shaped columns on rich Office rows remain in the schema for compatibility with ADR 0005 and existing data, but they are not authoritative for routed Office launches. New Office configuration changes select tiers and provider order instead of copying CLI runtime fields into the identity row.
 
 ### Instructions
 
@@ -119,7 +131,7 @@ Before each session, instructions are written to `~/.kandev/runtime/<workspace-s
 
 ### Skills
 
-A skill is a directory containing `SKILL.md` (required: the markdown instructions the agent reads) plus optional scripts and reference files. The structure matches Claude Code's native skill discovery and other agent CLIs.
+A skill is a directory containing `SKILL.md` (required: the markdown instructions the agent reads) plus optional scripts and reference files. The structure matches Claude Code's native skill discovery and other agent CLIs. Materialized `SKILL.md` files must be valid Codex/Claude-style skill files: when stored content lacks YAML frontmatter, the runtime prepends generated `name` and `description` frontmatter from the skill slug before writing or uploading the file. Supporting files recorded in `file_inventory` are written beside `SKILL.md` so bundled skills can use progressive disclosure through `references/`. Decision: ADR-0030.
 
 `skill` DB row (workspace-scoped): `id` PK, `name`, `slug` (kebab-case, used as `kandev-<slug>` directory), `description`, `source_type` (`inline` | `local_path` | `git`), `source_locator` (path/URL), `content` (SKILL.md text for inline, null otherwise), `file_inventory` (JSON list of `{name, size}`), `workspace_id` FK, `created_by_agent_instance_id` (nullable; agents only edit skills they created), `is_system` (bool), `system_version` (kandev release).
 
@@ -127,7 +139,7 @@ System skills ship inside the kandev binary (`apps/backend/internal/office/confi
 
 System SKILL.md carries an optional `kandev:` frontmatter block with `system: true`, `version: "<release>"`, `default_for_roles: [<roles>]`. `default_for_roles` drives auto-attach: a new agent with role `R` automatically gets every system skill whose `default_for_roles` contains `R`, unless the caller passes an explicit `desired_skills`. Users can untick a default-attached system skill on any agent (role default is a soft suggestion).
 
-v1 system-skill set: `kandev-protocol` and `memory` (every role); `kandev-task-comment` (every role); `kandev-escalation` (worker, specialist, assistant, reviewer); `kandev-tasks` (ceo, worker, specialist); `kandev-team`, `kandev-hiring`, `kandev-agent-edit`, `kandev-routines`, `kandev-approvals`, `kandev-budget`, `kandev-config-export`, `kandev-config-import` (ceo).
+v1 system-skill set: `kandev-protocol`, `memory`, and `kandev-task-ops` (every role); `kandev-escalation` (worker, specialist, assistant, reviewer); `kandev-team-admin`, `kandev-routines`, `kandev-approvals`, and `kandev-config-sync` (ceo).
 
 ### Activity, runs, events
 
@@ -221,6 +233,7 @@ Injected before each agent session:
 | `KANDEV_WAKE_REASON` | Reason string | Why the agent was woken |
 | `KANDEV_WAKE_COMMENT_ID` | Comment ID (if applicable) | Which comment triggered wake |
 | `KANDEV_WAKE_PAYLOAD_JSON` | Inline JSON | Pre-computed task context |
+| `KANDEV_WAKE_PAYLOAD_PATH` | Workspace-relative JSON file path | Pre-computed task context when too large for inline env |
 | `KANDEV_CLI` | Path to agentctl | CLI binary for API operations |
 
 `KANDEV_CLI` resolves per executor:
@@ -230,7 +243,7 @@ Injected before each agent session:
 
 ### Wake payload
 
-`KANDEV_WAKE_PAYLOAD_JSON` carries pre-computed context. Fresh session: full task context (`task` object with id, identifier, title, status, priority, project, `blockedBy`, `childTasks`). Resume: only new comments since last run plus a `commentWindow` rollup (`{total, included, fetchMore}`). New comments include author, body, createdAt.
+`KANDEV_WAKE_PAYLOAD_JSON` carries pre-computed context. Fresh session: full task context (`task` object with id, identifier, title, status, priority, project, `blockedBy`, `childTasks`). Resume: only new comments since last run plus a `commentWindow` rollup (`{total, included, fetchMore}`). New comments include author, body, createdAt. If the serialized payload exceeds 64KB for inline environment delivery, Kandev writes it under the workspace and sets `KANDEV_WAKE_PAYLOAD_PATH` to that workspace-relative file path instead.
 
 ### Instructions delivery
 
@@ -254,13 +267,14 @@ Read them when referenced in these instructions.
 
 ### Skill injection
 
-Skill content is stored in the DB (source of truth). Before each session, each desired skill's `SKILL.md` is written into the agent's worktree CWD.
+Skill content is stored in the DB (source of truth). Before each session, each desired skill's `SKILL.md` is written into the agent's worktree CWD. If the stored content does not already begin with YAML frontmatter delimited by `---`, runtime materialization prepends generated `name` and `description` frontmatter from the skill slug so agent CLIs can load the file as a native skill.
 
 Each agent type defines `ProjectSkillDir` in its `RuntimeConfig`:
 
 | Agent CLI | `ProjectSkillDir` |
 |---|---|
 | `claude-acp` (Claude Code) | `.claude/skills` |
+| `grok-acp` (Grok) | `.grok/skills` |
 | `codex-acp`, `opencode-acp`, `gemini`, `copilot-acp`, `auggie`, `amp-acp` | `.agents/skills` |
 
 Default (if unset): `.agents/skills`. Skills are written to `<worktree>/<ProjectSkillDir>/kandev-<slug>/SKILL.md`. The `kandev-` prefix distinguishes injected skills from team-committed skills already in the repo.
@@ -271,6 +285,7 @@ Before writing skills, all existing `kandev-*` directories in the target path ar
 
 ```
 .claude/skills/kandev-*
+.grok/skills/kandev-*
 .agents/skills/kandev-*
 ```
 
@@ -297,7 +312,7 @@ When the scheduler processes a wakeup:
 5. Clean `kandev-*` from the skill dir; write desired skills to `<worktree>/<ProjectSkillDir>/kandev-<slug>/SKILL.md`; ensure `.git/info/exclude` has `kandev-*` patterns.
 6. Build prompt: read `AGENTS.md` content, append path directive, prepend to user-turn prompt, add wake context. For CEO heartbeat: add workspace status section.
 7. Set env vars (`KANDEV_API_KEY`, `KANDEV_TASK_ID`, `KANDEV_CLI`, etc.).
-8. Set `KANDEV_WAKE_PAYLOAD_JSON` with pre-computed task context.
+8. Set `KANDEV_WAKE_PAYLOAD_JSON` with pre-computed task context, or `KANDEV_WAKE_PAYLOAD_PATH` when the payload is too large for inline env.
 9. Launch agent via the task starter (prompt + env, CWD = worktree). Skills are cleaned up automatically when the worktree is deleted at session end.
 
 ### Default instruction templates per role
@@ -498,7 +513,8 @@ Skill list (name, description, source type, which agents use each skill), inline
 
 What survives a kandev backend restart:
 
-- **Agent identity and configuration** persist in `agent_profiles` (office rows: `workspace_id != '' AND deleted_at IS NULL`). Name, role, icon, `reports_to`, permissions JSON, budget cents, `max_concurrent_sessions`, `cooldown_sec`, `desired_skills`, `skill_ids`, `executor_preference`, and `failure_threshold` are all durable. The same row is the canonical "agent profile" — there is no longer a separate agent-profile/agent-instance split (ADR 0005 Wave G).
+- **Agent identity** persists in `agent_profiles` (Office rows: `workspace_id != '' AND deleted_at IS NULL`). Name, role, icon, `reports_to`, Office permissions, budget, concurrency/cooldown settings, skills, instructions, executor preference, and failure policy are durable on the stable identity. Startup profile reconciliation must not replace an Office agent's name with a generated model label.
+- **Execution configuration** is referenced, not copied, for Office launches. The resolved `execution_profile_id` supplies the provider CLI, account environment, model, mode, ACP config options, CLI flags and permissions, passthrough behavior, and MCP configuration. Route attempts and sessions retain that ID for audit and restart recovery.
 - **Runtime status** persists in `office_agent_runtime` (PK `agent_id`). On restart a `paused` agent stays `paused`, `pause_reason` (e.g. `"budget"`) is preserved, and `last_run_finished_at` is retained so the cooldown guard works across restarts.
 - **Reconciliation at startup**: `infra.Reconciler.ReconcileAll` (called once during boot) drops `office_agent_runtime` rows whose `agent_id` no longer exists in `agent_profiles`, deletes `office_channels` and `office_budget_policies` rows that reference removed agents/projects, and seeds default routine triggers for routines without one. Reconciliation is best-effort: any sub-step that errors is logged but does not block boot.
 - **Hire requests** persist as `pending_approval` agent rows plus an approval entry in the inbox. A restart mid-hire leaves the approval visible; the user can still approve or reject and the same activation/deletion paths run.
@@ -522,6 +538,12 @@ There are no TTLs on agent rows, runtime rows, instructions, skills, run history
 ### Agent lifecycle
 
 - **GIVEN** a workspace with no agent instances, **WHEN** the user creates a CEO instance (selecting a profile, role=ceo), **THEN** the instance appears in the agents list with status `idle` and the sidebar shows it under "Agents".
+
+- **GIVEN** an existing CLI profile with a custom mode, permission behavior, flags, config options, environment variables, and MCP setup, **WHEN** routing selects it for an Office launch, **THEN** that complete execution profile is used while the Office name, role, instructions, skills, permissions, budget, and history remain unchanged.
+
+- **GIVEN** the same Office agent later resolves from a Codex execution profile to a Claude execution profile, **WHEN** the new route launches, **THEN** the task and Office identity remain stable, Claude receives its own complete runtime configuration, and no Codex-native resume token is sent to Claude.
+
+- **GIVEN** an Office task assigned directly to an Office agent and no existing task session, **WHEN** the task session is prepared, **THEN** the assignee's stable `agent_profile_id` is used before the workspace default so the session can start.
 
 - **GIVEN** a running CEO instance, **WHEN** the CEO determines a task requires a frontend specialist and no suitable worker exists, **THEN** the CEO submits a hire request for a new worker with appropriate skills, and the request appears in the user's inbox as a pending approval.
 
@@ -555,7 +577,7 @@ There are no TTLs on agent rows, runtime rows, instructions, skills, run history
 
 - **GIVEN** a user on `/office/workspace/skills`, **WHEN** they click "Add Skill" and enter a name, description, and SKILL.md content, **THEN** the skill appears in the registry and is available for assignment.
 
-- **GIVEN** a skill assigned to a Claude Code worker, **WHEN** the worker starts a new session, **THEN** the skill's `SKILL.md` is written to `<worktree>/.claude/skills/kandev-<slug>/SKILL.md` (Claude's `ProjectSkillDir`). For non-Claude agents, the path is `<worktree>/.agents/skills/kandev-<slug>/SKILL.md`.
+- **GIVEN** a skill assigned to a Claude Code worker, **WHEN** the worker starts a new session, **THEN** the skill's `SKILL.md` is written to `<worktree>/.claude/skills/kandev-<slug>/SKILL.md` (Claude's `ProjectSkillDir`) and begins with YAML frontmatter. For non-Claude agents, the path is `<worktree>/.agents/skills/kandev-<slug>/SKILL.md`.
 
 - **GIVEN** a skill sourced from a git URL, **WHEN** the user creates the skill entry, **THEN** the repository is cloned and cached and the file inventory displays in the UI.
 

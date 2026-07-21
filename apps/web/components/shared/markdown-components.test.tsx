@@ -1,8 +1,22 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
-import { markdownComponents, normalizeMarkdown, remarkPlugins } from "./markdown-components";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const openFile = vi.hoisted(() => vi.fn());
+const appState = vi.hoisted(() => ({
+  value: {
+    tasks: { activeSessionId: "session-1" },
+    taskSessions: {
+      items: {
+        "session-1": {
+          worktree_path: "/root/.kandev/tasks/example/kandev",
+        },
+      } as Record<string, { worktree_path: string }>,
+    },
+  },
+}));
 
 vi.mock("@/components/shared/mermaid-block", () => ({
   MermaidBlock: ({ code }: { code: string }) => <div data-kind="mermaid">{code}</div>,
@@ -20,6 +34,16 @@ vi.mock("@/components/task/chat/messages/inline-code", () => ({
   InlineCode: ({ children }: { children: ReactNode }) => <code data-kind="inline">{children}</code>,
 }));
 
+vi.mock("@/hooks/use-panel-actions", () => ({
+  usePanelActions: () => ({ openFile }),
+}));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: typeof appState.value) => unknown) => selector(appState.value),
+}));
+
+import { markdownComponents, normalizeMarkdown, remarkPlugins } from "./markdown-components";
+
 function renderMarkdown(source: string): string {
   return renderToStaticMarkup(
     <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
@@ -28,7 +52,26 @@ function renderMarkdown(source: string): string {
   );
 }
 
+function Markdown({ children }: { children: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+      {children}
+    </ReactMarkdown>
+  );
+}
+
 describe("markdownComponents", () => {
+  afterEach(() => {
+    cleanup();
+    openFile.mockClear();
+    appState.value.tasks.activeSessionId = "session-1";
+    appState.value.taskSessions.items = {
+      "session-1": {
+        worktree_path: "/root/.kandev/tasks/example/kandev",
+      },
+    };
+  });
+
   it("keeps mermaid keywords in inline code as inline code", () => {
     const html = renderMarkdown("Metadata comes from `kanban`, `kanbanMulti`, repositories.");
 
@@ -51,6 +94,130 @@ describe("markdownComponents", () => {
     expect(html).toContain("language-ts");
     expect(html).toContain("const source");
     expect(html).not.toContain('data-kind="mermaid"');
+  });
+
+  it("opens absolute worktree file links in the editor", () => {
+    render(
+      <Markdown>
+        {"[spec.md](/root/.kandev/tasks/example/kandev/docs/specs/native/spec.md)"}
+      </Markdown>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "spec.md" }));
+
+    expect(openFile).toHaveBeenCalledWith("docs/specs/native/spec.md");
+  });
+
+  it("opens absolute worktree file links with line suffixes in the editor", () => {
+    render(
+      <Markdown>
+        {
+          "[workflow](/root/.kandev/tasks/example/kandev/.github/workflows/opencode-code-review.yml:1)"
+        }
+      </Markdown>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "workflow" }));
+
+    expect(openFile).toHaveBeenCalledWith(".github/workflows/opencode-code-review.yml");
+  });
+
+  it("opens relative file links in the editor", () => {
+    render(<Markdown>{"[plan.md](docs/specs/native/plan.md)"}</Markdown>);
+
+    const link = screen.getByRole("link", { name: "plan.md" });
+    expect(link.getAttribute("target")).toBe("_self");
+
+    fireEvent.click(link);
+
+    expect(openFile).toHaveBeenCalledWith("docs/specs/native/plan.md");
+  });
+
+  it("opens repo-root file links in the editor", () => {
+    render(<Markdown>{"[migration](/docs/nextjs-spa-migration.md)"}</Markdown>);
+
+    const link = screen.getByRole("link", { name: "migration" });
+    fireEvent.click(link);
+
+    expect(openFile).toHaveBeenCalledWith("docs/nextjs-spa-migration.md");
+  });
+
+  it("opens repo-root file links with line and column suffixes in the editor", () => {
+    render(<Markdown>{"[migration](/docs/nextjs-spa-migration.md:12:3)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "migration" }));
+
+    expect(openFile).toHaveBeenCalledWith("docs/nextjs-spa-migration.md");
+  });
+
+  it("opens repo-root file links when no worktree path is available", () => {
+    appState.value.taskSessions.items = {};
+
+    render(<Markdown>{"[migration](/docs/nextjs-spa-migration.md)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "migration" }));
+
+    expect(openFile).toHaveBeenCalledWith("docs/nextjs-spa-migration.md");
+  });
+
+  it("does not open host-absolute file links outside the worktree", () => {
+    render(<Markdown>{"[secret](/root/other-project/secret.md)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "secret" }));
+
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it("does not treat sibling workspace paths as repo-root file links", () => {
+    appState.value.taskSessions.items["session-1"].worktree_path = "/workspace/current-project";
+
+    render(<Markdown>{"[schema](/workspace/sibling-project/schema.prisma)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "schema" }));
+
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it("does not open Windows drive-letter absolute file links", () => {
+    render(<Markdown>{"[hosts](/C:/Windows/System32/drivers/etc/hosts)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "hosts" }));
+
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it("does not treat bare domains as relative file links", () => {
+    render(<Markdown>{"[service](api.service.com)"}</Markdown>);
+
+    const link = screen.getByRole("link", { name: "service" });
+    link.addEventListener("click", (event) => event.preventDefault());
+    fireEvent.click(link);
+
+    expect(openFile).not.toHaveBeenCalled();
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+});
+
+describe("markdownComponents omp read selectors", () => {
+  afterEach(() => {
+    cleanup();
+    openFile.mockClear();
+    appState.value.tasks.activeSessionId = "session-1";
+    appState.value.taskSessions.items = {
+      "session-1": { worktree_path: "/root/.kandev/tasks/example/kandev" },
+    };
+  });
+
+  it("opens file links with omp range selectors in the editor", () => {
+    render(<Markdown>{"[readme](docs/README.md:16-20)"}</Markdown>);
+    fireEvent.click(screen.getByRole("link", { name: "readme" }));
+    expect(openFile).toHaveBeenCalledWith("docs/README.md");
+  });
+
+  it("opens file links with omp multi-range and mode selectors in the editor", () => {
+    render(<Markdown>{"[readme](docs/README.md:5-16,960-973:raw)"}</Markdown>);
+    fireEvent.click(screen.getByRole("link", { name: "readme" }));
+    expect(openFile).toHaveBeenCalledWith("docs/README.md");
   });
 });
 

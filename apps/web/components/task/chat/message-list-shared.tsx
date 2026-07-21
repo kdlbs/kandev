@@ -1,11 +1,21 @@
 "use client";
 
+import { memo, useCallback } from "react";
+import { Button } from "@kandev/ui/button";
+import { IconAlertCircle, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
-import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
+import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
 import { PrepareProgress } from "@/components/session/prepare-progress";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { dismissLastAgentError } from "@/lib/api/domains/session-api";
+import {
+  type LastAgentError,
+  lastAgentErrorStamp,
+  readLastAgentError,
+} from "@/lib/session-last-agent-error";
 
 export type MessageListProps = {
   items: RenderItem[];
@@ -19,13 +29,17 @@ export type MessageListProps = {
   messagesLoading: boolean;
   isWorking: boolean;
   sessionState?: TaskSessionState;
-  taskState?: TaskState;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
 };
 
 export function getItemKey(item: RenderItem): string {
-  if (item.type === "turn_group" || item.type === "prepare_progress") return item.id;
+  if (
+    item.type === "turn_group" ||
+    item.type === "prepare_progress" ||
+    item.type === "agent_error_notice"
+  )
+    return item.id;
   return item.message.id;
 }
 
@@ -41,6 +55,100 @@ export function getLastTurnGroupId(items: RenderItem[]) {
   return null;
 }
 
+export function getConversationLoadingState(params: {
+  messagesLoading: boolean;
+  messagesCount: number;
+  isWorking: boolean;
+  sessionState?: TaskSessionState | null;
+}) {
+  const isInitialLoading = params.messagesLoading && params.messagesCount === 0;
+  const isNonLoadableSession =
+    !params.sessionState ||
+    params.sessionState === "CREATED" ||
+    params.sessionState === "FAILED" ||
+    params.sessionState === "COMPLETED" ||
+    params.sessionState === "CANCELLED";
+  // CREATED sessions are prepare-only: the agent hasn't been started yet, so
+  // there is no conversation to load and the "Start agent" button is the
+  // primary CTA. Suppress the spinner unconditionally to avoid a misleading
+  // overlay racing with that button (synthetic task-description counts as a
+  // message and would otherwise trip the messagesCount > 0 branch).
+  if (params.sessionState === "CREATED") {
+    return { isInitialLoading, showLoadingState: false };
+  }
+  return {
+    isInitialLoading,
+    showLoadingState:
+      params.messagesLoading &&
+      !params.isWorking &&
+      (params.messagesCount > 0 || !isNonLoadableSession),
+  };
+}
+
+// The chat banner stays visible until the user explicitly dismisses it, even
+// after the agent resumes — so the user can read the full error message at
+// their own pace. The sidebar icon, by contrast, also auto-hides once the
+// agent posts a new message (see agentErrorMessageForTask).
+export function LastAgentErrorNotice({
+  sessionId,
+  error,
+}: {
+  sessionId: string | null;
+  error: LastAgentError | null;
+}) {
+  const stamp = error ? lastAgentErrorStamp(error) : "";
+  const dismissedStamp = useAppStore((state) =>
+    sessionId ? state.dismissedAgentErrors[sessionId] : undefined,
+  );
+  const dismissAgentError = useAppStore((state) => state.dismissAgentError);
+  const setTaskSession = useAppStore((state) => state.setTaskSession);
+  const store = useAppStoreApi();
+
+  const dismiss = useCallback(() => {
+    if (!sessionId || !stamp) return;
+    void dismissLastAgentError(sessionId, stamp)
+      .then((resp) => {
+        const current = readLastAgentError(
+          store.getState().taskSessions.items[sessionId]?.metadata,
+        );
+        if (current && lastAgentErrorStamp(current) !== stamp) return;
+        dismissAgentError(sessionId, stamp);
+        setTaskSession(resp.session);
+      })
+      .catch((err: unknown) => {
+        console.error("Failed to dismiss last agent error", err);
+      });
+  }, [dismissAgentError, sessionId, stamp, setTaskSession, store]);
+
+  if (!error || dismissedStamp === stamp) return null;
+
+  return (
+    <div
+      data-testid="last-agent-error-notice"
+      className="mb-3 rounded-md border border-destructive/25 bg-destructive/10 text-destructive"
+      role="alert"
+    >
+      <div className="flex items-start gap-2 px-3 py-2">
+        <IconAlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-medium">Previous agent error</div>
+          <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-destructive/85">
+            {error.message}
+          </pre>
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-destructive/10 cursor-pointer"
+          aria-label="Hide previous agent error"
+          onClick={dismiss}
+        >
+          <IconX className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function MessageListStatus({
   isLoadingMore,
   hasMore,
@@ -48,6 +156,7 @@ export function MessageListStatus({
   messagesLoading,
   isInitialLoading,
   messagesCount,
+  onLoadMore,
 }: {
   isLoadingMore: boolean;
   hasMore: boolean;
@@ -55,6 +164,12 @@ export function MessageListStatus({
   messagesLoading: boolean;
   isInitialLoading: boolean;
   messagesCount: number;
+  /**
+   * Explicitly load the previous page of older messages. Rendered as a button so
+   * older history is always reachable even when the scroll-up IntersectionObserver
+   * fails to re-arm (e.g. pinned at the very top with the sentinel always in view).
+   */
+  onLoadMore?: () => void;
 }) {
   return (
     <>
@@ -63,10 +178,27 @@ export function MessageListStatus({
           Loading older messages...
         </div>
       )}
+      {hasMore && !isLoadingMore && onLoadMore && (
+        <div className="flex justify-center py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="cursor-pointer text-xs text-muted-foreground"
+            data-testid="load-older-messages"
+            onClick={onLoadMore}
+          >
+            Load older messages
+          </Button>
+        </div>
+      )}
       {showLoadingState && (
-        <div className="flex items-center justify-center py-8 text-muted-foreground">
+        <div
+          className="flex items-center justify-center py-8 text-muted-foreground"
+          data-testid="conversation-loading-state"
+        >
           <GridSpinner className="text-primary mr-2" />
-          <span>Loading messages...</span>
+          <span>Loading conversation...</span>
         </div>
       )}
       {!messagesLoading && !isInitialLoading && messagesCount === 0 && (
@@ -78,7 +210,7 @@ export function MessageListStatus({
   );
 }
 
-export function MessageItem({
+export const MessageItem = memo(function MessageItem({
   item,
   sessionId,
   permissionsByToolCallId,
@@ -88,9 +220,6 @@ export function MessageItem({
   onOpenFile,
   isLastGroup,
   isTurnActive,
-  messages,
-  sessionState,
-  taskState,
   onScrollToMessage,
 }: {
   item: RenderItem;
@@ -102,13 +231,13 @@ export function MessageItem({
   onOpenFile?: (path: string) => void;
   isLastGroup: boolean;
   isTurnActive: boolean;
-  messages: Message[];
-  sessionState?: TaskSessionState;
-  taskState?: TaskState;
   onScrollToMessage: (id: string) => void;
 }) {
   if (item.type === "prepare_progress") {
     return <PrepareProgress sessionId={item.sessionId} />;
+  }
+  if (item.type === "agent_error_notice") {
+    return <LastAgentErrorNotice sessionId={item.sessionId} error={item.error} />;
   }
   if (item.type === "turn_group") {
     return (
@@ -122,9 +251,6 @@ export function MessageItem({
         onOpenFile={onOpenFile}
         isLastGroup={isLastGroup}
         isTurnActive={isTurnActive}
-        allMessages={messages}
-        sessionState={sessionState}
-        taskState={taskState}
         onScrollToMessage={onScrollToMessage}
       />
     );
@@ -133,16 +259,13 @@ export function MessageItem({
     <MessageRenderer
       comment={item.message}
       isTaskDescription={item.message.id === "task-description"}
-      sessionState={sessionState}
-      taskState={taskState}
       taskId={taskId}
       permissionsByToolCallId={permissionsByToolCallId}
       childrenByParentToolCallId={childrenByParentToolCallId}
       worktreePath={worktreePath}
       sessionId={sessionId ?? undefined}
       onOpenFile={onOpenFile}
-      allMessages={messages}
       onScrollToMessage={onScrollToMessage}
     />
   );
-}
+});

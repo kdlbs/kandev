@@ -34,7 +34,7 @@ async function seedTaskWithSession(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return session;
 }
@@ -118,7 +118,10 @@ test.describe("Session layout", () => {
 
     const sessionB = new SessionPage(testPage);
     await sessionB.waitForLoad();
-    await expect(sessionB.idleInput()).toBeVisible({ timeout: 30_000 });
+    // Foreground the chat tab — after the layout restore it can land as a
+    // background tab in the right group, so the idle input isn't visible yet.
+    await sessionB.showSessionContext(30_000);
+    await sessionB.waitForChatIdle({ timeout: 30_000 });
 
     // Task B should have default (non-maximized) layout
     await sessionB.expectDefaultLayout();
@@ -150,6 +153,21 @@ test.describe("Session layout", () => {
     const terminalTab = testPage.locator(".dv-tab:has(.dv-default-tab:has-text('Terminal'))");
     const closeBtn = terminalTab.locator(".dv-default-tab-action");
     await closeBtn.click();
+
+    // Closing a terminal that looks busy MAY pop a "Close terminal?" confirmation
+    // (CloseTerminalConfirmDialog) — the typed command can trip the busy heuristic,
+    // but whether it does is timing-dependent (the shell may have gone idle). Handle
+    // both: confirm the dialog if it appears, otherwise the close already proceeded.
+    const closeTerminalDialog = testPage.getByRole("alertdialog", { name: "Close terminal?" });
+    await closeTerminalDialog
+      .waitFor({ state: "visible", timeout: 2_000 })
+      .then(async () => {
+        await closeTerminalDialog.getByRole("button", { name: "Close terminal" }).click();
+        await expect(closeTerminalDialog).not.toBeVisible({ timeout: 5_000 });
+      })
+      .catch(() => {
+        /* no confirmation shown — close proceeded directly */
+      });
 
     // Should exit maximize and restore default layout minus the closed terminal
     await expect(session.chat).toBeVisible({ timeout: 10_000 });

@@ -17,7 +17,7 @@ kandev
 npx kandev@latest
 ```
 
-Either install path resolves a platform-matched runtime (Go backend, agentctl, Next.js standalone web), launches the backend + web, and opens your browser. Data (worktrees, SQLite DB) is stored in `~/.kandev` by default.
+Either install path resolves a platform-matched runtime (Go backend, agentctl, and static Vite web assets), launches the backend, and opens your browser. Data (worktrees, SQLite DB) is stored in `~/.kandev` by default.
 
 ## Version and Updates
 
@@ -26,14 +26,6 @@ The package manager owns the runtime version. `kandev@X.Y.Z` ships with the matc
 - **Update via Homebrew**: `brew upgrade kandev`
 - **Update via npm/npx**: `npx kandev@latest` or `npm install -g kandev@latest`
 - **Print CLI version**: `kandev --version`
-
-### Advanced: pin a specific runtime tag
-
-`--runtime-version <tag>` downloads a specific GitHub release runtime instead of using the installed one. For debugging compatibility issues only:
-
-```bash
-kandev --runtime-version v0.16.0
-```
 
 ## Run as a Service
 
@@ -71,7 +63,7 @@ See [docs/run-as-a-service.md](../../docs/run-as-a-service.md) for the full guid
 
 ## Requirements
 
-- Node.js (for `npx`)
+- Node.js (only for `npx` / npm-based installs and development tooling)
 - Git
 - Docker (optional - needed for container runtimes)
 

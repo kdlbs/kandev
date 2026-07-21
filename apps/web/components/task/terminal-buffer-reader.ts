@@ -2,6 +2,7 @@ import type { Terminal } from "@xterm/xterm";
 
 type TerminalContainerWithBuffer = HTMLDivElement & {
   __xtermReadBuffer?: () => string;
+  __xtermReadViewportY?: () => number;
   __xtermGetFontFamily?: () => string;
   __xtermGetFontSize?: () => number;
 };
@@ -17,10 +18,15 @@ export function exposeBufferReader(container: HTMLDivElement, terminal: Terminal
     }
     return lines.join("\n");
   };
+  c.__xtermReadViewportY = () => terminal.buffer.active.viewportY;
   c.__xtermGetFontFamily = () => terminal.options.fontFamily ?? "";
   c.__xtermGetFontSize = () => terminal.options.fontSize ?? 13;
 }
 
 export function clearBufferReader(container: HTMLDivElement) {
-  (container as TerminalContainerWithBuffer).__xtermReadBuffer = undefined;
+  const c = container as TerminalContainerWithBuffer;
+  c.__xtermReadBuffer = undefined;
+  c.__xtermReadViewportY = undefined;
+  c.__xtermGetFontFamily = undefined;
+  c.__xtermGetFontSize = undefined;
 }

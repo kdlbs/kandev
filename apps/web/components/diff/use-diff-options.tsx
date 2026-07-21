@@ -1,5 +1,5 @@
 import { useCallback, useMemo, type ReactNode } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import type { FileDiffOptions, SelectedLineRange, FileDiffMetadata } from "@pierre/diffs";
 import { IconPlus } from "@tabler/icons-react";
 import { FONT } from "@/lib/theme/colors";
@@ -25,6 +25,8 @@ const DIFF_UNSAFE_CSS = `
     --diffs-bg-deletion-number: rgb(var(--git-deletion) / 0.15) !important;
     --diffs-bg-addition-emphasis: rgb(var(--git-addition) / 0.3) !important;
     --diffs-bg-deletion-emphasis: rgb(var(--git-deletion) / 0.3) !important;
+    --diffs-bg-selection-override: color-mix(in lab, var(--background) 74%, var(--primary)) !important;
+    --diffs-bg-selection-number-override: color-mix(in lab, var(--background) 60%, var(--primary)) !important;
     --diffs-line-height: 24px !important;
     --diffs-font-size: ${FONT.size}px !important;
     --diffs-font-family: ${FONT.mono} !important;
@@ -35,6 +37,9 @@ const DIFF_UNSAFE_CSS = `
   [data-line] {
     min-height: 24px !important;
     line-height: 24px !important;
+  }
+  [data-selected-line]:is([data-line], [data-line-annotation]) {
+    box-shadow: inset 2px 0 0 var(--primary) !important;
   }
   [data-separator='metadata'],
   [data-separator]:empty {
@@ -51,6 +56,23 @@ const DIFF_UNSAFE_CSS = `
   [data-diffs-header] {
     padding-inline: 12px !important;
     background: var(--card) !important;
+  }
+  [data-header-content] {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    min-width: 0 !important;
+  }
+  [data-title],
+  [data-prev-name] {
+    min-width: 0 !important;
+  }
+  [data-title] bdi,
+  [data-prev-name] bdi {
+    display: block !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
   }
   /* Vertically center the "Add comment" hover button in the line gutter.
      Pierre 1.1.22 declares the slot wrapper as display:flex with top:0/bottom:0
@@ -71,9 +93,11 @@ type UseDiffOptionsArgs = {
   handleLineSelectionEnd: (range: SelectedLineRange | null) => void;
   onLineEnter: (props: { lineType?: string; lineNumber?: number; annotationSide?: string }) => void;
   onLineLeave: () => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
+  /** Multi-repo subpath (repository_name) so Edit opens under the right repo. */
+  repo?: string;
   /** Enable diff expansion (requires full deletionLines/additionLines in metadata) */
   enableExpansion?: boolean;
   /** Number of lines to expand per click (default: 20) */
@@ -105,6 +129,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onOpenFile,
     onPreviewMarkdown,
     onRevert,
+    repo,
     enableExpansion = false,
     expansionLineCount = 20,
     expandUnchanged,
@@ -131,6 +156,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onOpenFile,
     onPreviewMarkdown,
     onRevert,
+    repo,
     expandUnchanged,
     onToggleExpandUnchanged,
   });

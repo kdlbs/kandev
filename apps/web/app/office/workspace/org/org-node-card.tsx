@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { AgentStatusDot } from "../../agents/components/agent-status-dot";
 import type { OrgTreeNode } from "./org-tree-layout";
 import { CARD_W } from "./org-tree-layout";

@@ -2,8 +2,10 @@ package shared
 
 import (
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -172,6 +174,157 @@ func TestSaveAttachments_MultipleAttachments(t *testing.T) {
 	}
 }
 
+func TestSaveAttachments_DuplicateNamesDoNotClobber(t *testing.T) {
+	workDir := t.TempDir()
+	mgr := NewAttachmentManager(workDir, testLogger())
+	mgr.SetSessionID("sess-dupe")
+
+	first := base64.StdEncoding.EncodeToString([]byte("first"))
+	second := base64.StdEncoding.EncodeToString([]byte("second"))
+	third := base64.StdEncoding.EncodeToString([]byte("third"))
+
+	saved, err := mgr.SaveAttachments([]v1.MessageAttachment{
+		{Type: "resource", Data: first, MimeType: "text/plain", Name: "report.txt"},
+		{Type: "resource", Data: second, MimeType: "text/plain", Name: "report.txt"},
+		{Type: "resource", Data: third, MimeType: "text/plain", Name: "report.txt"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(saved) != 3 {
+		t.Fatalf("expected 3 saved, got %d", len(saved))
+	}
+
+	wantNames := []string{"report.txt", "report-2.txt", "report-3.txt"}
+	wantContents := []string{"first", "second", "third"}
+	for i := range saved {
+		if saved[i].Name != wantNames[i] {
+			t.Errorf("saved[%d].Name = %q, want %q", i, saved[i].Name, wantNames[i])
+		}
+		data, err := os.ReadFile(saved[i].AbsPath)
+		if err != nil {
+			t.Fatalf("failed to read saved[%d]: %v", i, err)
+		}
+		if string(data) != wantContents[i] {
+			t.Errorf("saved[%d] content = %q, want %q", i, string(data), wantContents[i])
+		}
+	}
+}
+
+func TestSaveAttachments_DuplicateNamesAcrossCallsDoNotClobber(t *testing.T) {
+	workDir := t.TempDir()
+	mgr := NewAttachmentManager(workDir, testLogger())
+	mgr.SetSessionID("sess-dupe-calls")
+
+	first := base64.StdEncoding.EncodeToString([]byte("first"))
+	second := base64.StdEncoding.EncodeToString([]byte("second"))
+
+	firstSaved, err := mgr.SaveAttachments([]v1.MessageAttachment{
+		{Type: "resource", Data: first, MimeType: "text/plain", Name: "report.txt"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected first save error: %v", err)
+	}
+	secondSaved, err := mgr.SaveAttachments([]v1.MessageAttachment{
+		{Type: "resource", Data: second, MimeType: "text/plain", Name: "report.txt"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected second save error: %v", err)
+	}
+
+	if firstSaved[0].Name != "report.txt" {
+		t.Fatalf("first name = %q, want report.txt", firstSaved[0].Name)
+	}
+	if secondSaved[0].Name != "report-2.txt" {
+		t.Fatalf("second name = %q, want report-2.txt", secondSaved[0].Name)
+	}
+
+	firstData, err := os.ReadFile(firstSaved[0].AbsPath)
+	if err != nil {
+		t.Fatalf("failed to read first file: %v", err)
+	}
+	secondData, err := os.ReadFile(secondSaved[0].AbsPath)
+	if err != nil {
+		t.Fatalf("failed to read second file: %v", err)
+	}
+	if string(firstData) != "first" {
+		t.Errorf("first content = %q, want first", string(firstData))
+	}
+	if string(secondData) != "second" {
+		t.Errorf("second content = %q, want second", string(secondData))
+	}
+}
+
+func TestSaveAttachments_ConcurrentDuplicateNamesDoNotClobber(t *testing.T) {
+	workDir := t.TempDir()
+	const workers = 20
+
+	var wg sync.WaitGroup
+	savedCh := make(chan SavedAttachment, workers)
+	errCh := make(chan error, workers)
+
+	for i := 0; i < workers; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			mgr := NewAttachmentManager(workDir, testLogger())
+			mgr.SetSessionID("sess-concurrent")
+
+			content := fmt.Sprintf("payload-%02d", i)
+			saved, err := mgr.SaveAttachments([]v1.MessageAttachment{
+				{
+					Type:     "resource",
+					Data:     base64.StdEncoding.EncodeToString([]byte(content)),
+					MimeType: "text/plain",
+					Name:     "report.txt",
+				},
+			})
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if len(saved) != 1 {
+				errCh <- fmt.Errorf("saved count = %d, want 1", len(saved))
+				return
+			}
+			savedCh <- saved[0]
+		}()
+	}
+
+	wg.Wait()
+	close(savedCh)
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("unexpected save error: %v", err)
+		}
+	}
+
+	names := make(map[string]bool, workers)
+	contents := make(map[string]bool, workers)
+	for saved := range savedCh {
+		if names[saved.Name] {
+			t.Fatalf("duplicate saved name %q", saved.Name)
+		}
+		names[saved.Name] = true
+
+		data, err := os.ReadFile(saved.AbsPath)
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", saved.AbsPath, err)
+		}
+		contents[string(data)] = true
+	}
+	if len(names) != workers {
+		t.Fatalf("saved unique names = %d, want %d", len(names), workers)
+	}
+	if len(contents) != workers {
+		t.Fatalf("saved unique contents = %d, want %d", len(contents), workers)
+	}
+}
+
 func TestSaveAttachments_NoName_GeneratesFromMime(t *testing.T) {
 	workDir := t.TempDir()
 	mgr := NewAttachmentManager(workDir, testLogger())
@@ -303,26 +456,47 @@ func TestCleanup_SessionIsolation(t *testing.T) {
 }
 
 func TestBuildAttachmentPrompt_Empty(t *testing.T) {
-	result := BuildAttachmentPrompt(nil)
+	result := BuildAttachmentPrompt(nil, true)
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
 	}
 }
 
-func TestBuildAttachmentPrompt_SingleFile(t *testing.T) {
+func TestBuildAttachmentPrompt_SingleWritableFile(t *testing.T) {
 	saved := []SavedAttachment{
 		{RelPath: ".kandev/attachments/s1/report.pdf", Name: "report.pdf"},
 	}
-	result := BuildAttachmentPrompt(saved)
+	result := BuildAttachmentPrompt(saved, true)
 	if result == "" {
 		t.Fatal("expected non-empty result")
 	}
-	// Should mention the file name and path
 	if !contains(result, "report.pdf") {
 		t.Errorf("result should contain filename, got: %q", result)
 	}
 	if !contains(result, ".kandev/attachments/s1/report.pdf") {
 		t.Errorf("result should contain path, got: %q", result)
+	}
+	if !contains(result, "writable") {
+		t.Errorf("result should tell the agent the file is writable, got: %q", result)
+	}
+}
+
+func TestBuildAttachmentPrompt_SingleReadOnlyFile(t *testing.T) {
+	saved := []SavedAttachment{
+		{RelPath: ".kandev/attachments/s1/report.pdf", Name: "report.pdf"},
+	}
+	result := BuildAttachmentPrompt(saved, false)
+	if result == "" {
+		t.Fatal("expected non-empty result")
+	}
+	if contains(result, "writable") {
+		t.Errorf("read-only result should not call the file writable, got: %q", result)
+	}
+	if contains(result, "modify") {
+		t.Errorf("read-only result should not tell the agent to modify the file, got: %q", result)
+	}
+	if !contains(result, "access it") {
+		t.Errorf("read-only result should tell the agent to access the file, got: %q", result)
 	}
 }
 
@@ -331,12 +505,31 @@ func TestBuildAttachmentPrompt_MultipleFiles(t *testing.T) {
 		{RelPath: ".kandev/attachments/s1/a.pdf", Name: "a.pdf"},
 		{RelPath: ".kandev/attachments/s1/b.png", Name: "b.png"},
 	}
-	result := BuildAttachmentPrompt(saved)
+	result := BuildAttachmentPrompt(saved, true)
 	if !contains(result, "a.pdf") {
 		t.Errorf("result should contain a.pdf, got: %q", result)
 	}
 	if !contains(result, "b.png") {
 		t.Errorf("result should contain b.png, got: %q", result)
+	}
+}
+
+func TestBuildAttachmentPrompt_SanitizesPromptValues(t *testing.T) {
+	saved := []SavedAttachment{
+		{
+			RelPath: ".kandev/attachments/s1/<bad>\npath`v2`.pdf",
+			Name:    "report<one>\nplease`now`.pdf",
+		},
+	}
+	result := BuildAttachmentPrompt(saved, true)
+	if contains(result, "<") || contains(result, ">") || contains(result, "`") || contains(result, "\nplease") {
+		t.Errorf("result contains unsanitized prompt values: %q", result)
+	}
+	if !contains(result, "report(one) please'now'.pdf") {
+		t.Errorf("result should contain sanitized filename, got: %q", result)
+	}
+	if !contains(result, ".kandev/attachments/s1/(bad) path'v2'.pdf") {
+		t.Errorf("result should contain sanitized path, got: %q", result)
 	}
 }
 

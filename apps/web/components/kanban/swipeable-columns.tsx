@@ -4,6 +4,8 @@ import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { KanbanColumn, WorkflowStep } from "../kanban-column";
 import { Task } from "../kanban-card";
+import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
 
 type SwipeableColumnsProps = {
   steps: WorkflowStep[];
@@ -21,8 +23,46 @@ type SwipeableColumnsProps = {
   archivingTaskId?: string | null;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
+  externalLinkAvailability: KanbanExternalLinkAvailability;
 };
+
+/** Two-way sync between Embla's carousel position and the external activeIndex. */
+function useEmblaIndexSync(
+  emblaApi: ReturnType<typeof useEmblaCarousel>[1],
+  activeIndex: number,
+  onIndexChange: (index: number) => void,
+) {
+  const userInteracting = useRef(false);
+
+  // Sync carousel position with external activeIndex (tab clicks)
+  useEffect(() => {
+    if (emblaApi && emblaApi.selectedScrollSnap() !== activeIndex) {
+      emblaApi.scrollTo(activeIndex, true);
+    }
+  }, [emblaApi, activeIndex]);
+
+  // Sync tab state when user swipes (only on user-initiated interactions)
+  useEffect(() => {
+    if (!emblaApi) return;
+    const onPointerDown = () => {
+      userInteracting.current = true;
+    };
+    const onSelect = () => {
+      if (!userInteracting.current) return;
+      userInteracting.current = false;
+      const selectedIndex = emblaApi.selectedScrollSnap();
+      if (selectedIndex !== activeIndex) onIndexChange(selectedIndex);
+    };
+    emblaApi.on("pointerDown", onPointerDown);
+    emblaApi.on("select", onSelect);
+    return () => {
+      emblaApi.off("pointerDown", onPointerDown);
+      emblaApi.off("select", onSelect);
+    };
+  }, [emblaApi, activeIndex, onIndexChange]);
+}
 
 export function SwipeableColumns({
   steps,
@@ -40,7 +80,9 @@ export function SwipeableColumns({
   archivingTaskId,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
+  externalLinkAvailability,
 }: SwipeableColumnsProps) {
   // Stable options to avoid Embla reinitializing on every activeIndex change
   const [initialIndex] = useState(activeIndex);
@@ -54,57 +96,21 @@ export function SwipeableColumns({
     [initialIndex],
   );
   const [emblaRef, emblaApi] = useEmblaCarousel(options);
-  const userInteracting = useRef(false);
 
   const getTasksForStep = useCallback(
     (stepId: string) => {
       return tasks
         .filter((task) => task.workflowStepId === stepId)
         .map((task) => ({ ...task, position: task.position ?? 0 }))
-        .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+        .sort(compareTasksByCreatedDesc);
     },
     [tasks],
   );
 
-  // Sync carousel position with external activeIndex (tab clicks)
-  useEffect(() => {
-    if (emblaApi && emblaApi.selectedScrollSnap() !== activeIndex) {
-      emblaApi.scrollTo(activeIndex, true);
-    }
-  }, [emblaApi, activeIndex]);
+  useEmblaIndexSync(emblaApi, activeIndex, onIndexChange);
 
-  // Sync tab state when user swipes (only on user-initiated interactions)
-  useEffect(() => {
-    if (!emblaApi) return;
-
-    const onPointerDown = () => {
-      userInteracting.current = true;
-    };
-    const onSelect = () => {
-      if (!userInteracting.current) return;
-      userInteracting.current = false;
-      const selectedIndex = emblaApi.selectedScrollSnap();
-      if (selectedIndex !== activeIndex) {
-        onIndexChange(selectedIndex);
-      }
-    };
-
-    emblaApi.on("pointerDown", onPointerDown);
-    emblaApi.on("select", onSelect);
-    return () => {
-      emblaApi.off("pointerDown", onPointerDown);
-      emblaApi.off("select", onSelect);
-    };
-  }, [emblaApi, activeIndex, onIndexChange]);
-
-  // Use explicit height calculation for mobile since flex height inheritance doesn't work reliably
-  // 100dvh - header (~56px) - tabs (~44px) - safe area
   return (
-    <div
-      className="flex-1 min-h-0 overflow-hidden"
-      ref={emblaRef}
-      style={{ height: "calc(100dvh - 100px - env(safe-area-inset-bottom, 0px))" }}
-    >
+    <div className="flex-1 min-h-0 overflow-hidden" ref={emblaRef}>
       <div className="flex h-full touch-pan-y">
         {steps.map((step) => (
           <div
@@ -126,7 +132,9 @@ export function SwipeableColumns({
               archivingTaskId={archivingTaskId}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
+              onSelectRange={onSelectRange}
               isMultiSelectMode={isMultiSelectMode}
+              externalLinkAvailability={externalLinkAvailability}
               hideHeader
             />
           </div>

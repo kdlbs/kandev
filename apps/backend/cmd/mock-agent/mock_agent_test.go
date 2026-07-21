@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -107,6 +108,39 @@ func TestStripKandevSystem(t *testing.T) {
 				t.Errorf("stripKandevSystem(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsChangesWalkthroughRequest(t *testing.T) {
+	legacyPrompt := strings.Join([]string{
+		"Please create an agent-authored walkthrough of the current changes using `show_walkthrough_kandev`.",
+		"",
+		"Walkthrough requirements:",
+		"- Anchor steps to changed lines or changed line ranges whenever possible.",
+		"",
+		"Available changed files:",
+		"- src/app.ts [uncommitted]",
+	}, "\n")
+	promptReference := strings.Join([]string{
+		"@changes-walkthrough",
+		"",
+		"<kandev-system>",
+		"EXPANDED PROMPT REFERENCES",
+		"### @changes-walkthrough",
+		"Please create an agent-authored walkthrough of the current changes using `show_walkthrough_kandev`.",
+		"</kandev-system>",
+	}, "\n")
+
+	for _, prompt := range []string{legacyPrompt, promptReference} {
+		if !isChangesWalkthroughRequest(prompt) {
+			t.Fatalf("expected generated changes walkthrough prompt to be detected:\n%s", prompt)
+		}
+	}
+	if isChangesWalkthroughRequest("show_walkthrough_kandev without the generated prompt shape") {
+		t.Fatal("expected unrelated prompt not to be detected")
+	}
+	if isChangesWalkthroughRequest("what does @changes-walkthrough do?") {
+		t.Fatal("expected incidental prompt reference not to be detected")
 	}
 }
 
@@ -332,6 +366,36 @@ func TestParseResumeFromArgs(t *testing.T) {
 			got := parseResumeFromArgs(tt.args)
 			if got != tt.want {
 				t.Errorf("parseResumeFromArgs(%v) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSubtaskTitle(t *testing.T) {
+	tests := []struct {
+		name   string
+		cmd    string
+		want   string
+		isAuto bool
+	}{
+		{name: "lowercase no title", cmd: "/subtask", isAuto: true},
+		{name: "lowercase with title", cmd: "/subtask My task", want: "My task"},
+		{name: "uppercase route, mixed-case title", cmd: "/SUBTASK My Task", want: "My Task"},
+		{name: "mixed-case route preserves title casing", cmd: "/SubTask Hello World", want: "Hello World"},
+		{name: "extra whitespace trimmed", cmd: "/subtask   trimmed   ", want: "trimmed"},
+		{name: "empty mixed-case route", cmd: "/SubTask", isAuto: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseSubtaskTitle(tt.cmd)
+			if tt.isAuto {
+				if !strings.HasPrefix(got, "Mock subtask ") {
+					t.Errorf("parseSubtaskTitle(%q) = %q, want auto-generated %q-prefixed title", tt.cmd, got, "Mock subtask ")
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("parseSubtaskTitle(%q) = %q, want %q", tt.cmd, got, tt.want)
 			}
 		})
 	}

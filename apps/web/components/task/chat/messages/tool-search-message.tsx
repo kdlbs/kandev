@@ -25,6 +25,7 @@ type CodeSearchPayload = {
 
 type ToolSearchMetadata = {
   tool_call_id?: string;
+  title?: string;
   status?: "pending" | "running" | "complete" | "error";
   normalized?: { code_search?: CodeSearchPayload };
 };

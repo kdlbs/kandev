@@ -9,6 +9,15 @@ repos:
         stages: [commit-msg]
         always_run: true
 
+  # Harness guidance hooks
+  - repo: local
+    hooks:
+      - id: harness-lint
+        name: Harness file lint
+        entry: python3 .github/scripts/lint-harness-files.py
+        language: system
+        pass_filenames: true
+
   # Backend (Go) hooks
   - repo: local
     hooks:
