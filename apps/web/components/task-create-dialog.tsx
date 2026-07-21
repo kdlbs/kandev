@@ -47,6 +47,9 @@ import { resetTaskCreateLastUsedSync } from "@/components/task-create-dialog-han
 import { useAppStore } from "@/components/state-provider";
 import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
+import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
+
+const PROMPT_INSERTED_MESSAGE = "Enhanced prompt inserted.";
 
 export interface TaskCreateDialogProps {
   open: boolean;
@@ -249,19 +252,49 @@ function DialogFormBody(props: DialogFormBodyProps) {
 
 function useEnhanceForDialog(fs: DialogFormState) {
   const isConfigured = useIsUtilityConfigured();
+  const { toast } = useToast();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId: null,
     taskTitle: fs.taskName,
   });
+  const applyDescription = useCallback(
+    (value: string) => {
+      const input = fs.descriptionInputRef.current;
+      if (!input) {
+        return false;
+      }
+      input.setValue(value);
+      const applied = input.getValue() === value;
+      if (applied) {
+        fs.setHasDescription(true);
+      }
+      return applied;
+    },
+    [fs],
+  );
+  const promptDelivery = usePromptResultDelivery({
+    getCurrent: () => fs.descriptionInputRef.current?.getValue() ?? null,
+    apply: applyDescription,
+  });
   const onEnhance = useCallback(() => {
-    const current = fs.descriptionInputRef.current?.getValue()?.trim();
-    if (!current) return;
-    enhancePrompt(current, (enhanced) => {
-      fs.descriptionInputRef.current?.setValue(enhanced);
-      fs.setHasDescription(true);
+    const current = fs.descriptionInputRef.current?.getValue() ?? "";
+    if (!current.trim()) return;
+    void enhancePrompt(current, (result) => {
+      const inserted = promptDelivery.deliver(current, result);
+      if (inserted) {
+        toast({ description: PROMPT_INSERTED_MESSAGE, variant: "success" });
+      }
+      return inserted;
     });
-  }, [enhancePrompt, fs]);
-  return { onEnhance, isLoading: isEnhancingPrompt, isConfigured };
+  }, [enhancePrompt, fs.descriptionInputRef, promptDelivery, toast]);
+  return {
+    onEnhance,
+    isLoading: isEnhancingPrompt,
+    isConfigured,
+    pendingResult: promptDelivery.pendingResult,
+    onApplyPending: promptDelivery.applyPending,
+    onCopyPending: promptDelivery.copyPending,
+  };
 }
 
 function useJiraImportHandler(fs: DialogFormState) {

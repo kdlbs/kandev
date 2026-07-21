@@ -361,9 +361,14 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const handleEnhancePrompt = useCallback(() => {
       const currentValue = s.value?.trim();
       if (!currentValue) return;
-      enhancePrompt(currentValue, (enhanced) => {
+      void enhancePrompt(currentValue, (result) => {
         // Use setValue to directly update TipTap editor (handleChange only updates React state)
-        s.inputRef.current?.setValue(enhanced);
+        const input = s.inputRef.current;
+        if (!input) {
+          return false;
+        }
+        input.setValue(result.content);
+        return true;
       });
     }, [s, enhancePrompt]);
 

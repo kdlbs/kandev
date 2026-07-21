@@ -9,6 +9,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
+import { PromptResultRecovery } from "@/components/prompt-result-recovery";
+import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useAppStore } from "@/components/state-provider";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
@@ -35,6 +37,7 @@ import {
 
 const MAX_INLINE_SESSIONS = 50;
 const AUTOSCROLL_THRESHOLD_PX = 80;
+const PROMPT_INSERTED_MESSAGE = "Enhanced prompt inserted.";
 
 type TaskChatProps = {
   taskId: string;
@@ -282,6 +285,7 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputValueRef = useRef(input);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isUtilityConfigured = useIsUtilityConfigured();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
@@ -289,7 +293,19 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
     taskTitle: taskTitle ?? "",
     taskDescription: taskDescription ?? "",
   });
+  const promptDelivery = usePromptResultDelivery({
+    getCurrent: () => inputValueRef.current,
+    apply: (value) => {
+      inputValueRef.current = value;
+      setInput(value);
+      return true;
+    },
+  });
   const { handleFileSelect, handlePaste } = useChatInputHandlers(setInput);
+
+  useEffect(() => {
+    inputValueRef.current = input;
+  }, [input]);
 
   const handleSubmit = useCallback(async () => {
     if (!input.trim() || submitting) return;
@@ -306,9 +322,16 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
   }, [input, submitting, taskId, onSubmitted]);
 
   const handleEnhance = useCallback(() => {
-    if (!input.trim()) return;
-    enhancePrompt(input, (enhanced: string) => setInput(enhanced));
-  }, [input, enhancePrompt]);
+    const current = input;
+    if (!current.trim()) return;
+    void enhancePrompt(current, (result) => {
+      const inserted = promptDelivery.deliver(current, result);
+      if (inserted) {
+        toast.success(PROMPT_INSERTED_MESSAGE);
+      }
+      return inserted;
+    });
+  }, [input, enhancePrompt, promptDelivery]);
 
   return (
     <div className="mt-4 pt-4 border-t border-border">
@@ -370,6 +393,13 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
             </TooltipTrigger>
             <TooltipContent>Send comment</TooltipContent>
           </Tooltip>
+        </div>
+        <div className="px-2 pb-2">
+          <PromptResultRecovery
+            pendingResult={promptDelivery.pendingResult}
+            onApply={promptDelivery.applyPending}
+            onCopy={promptDelivery.copyPending}
+          />
         </div>
       </div>
     </div>
