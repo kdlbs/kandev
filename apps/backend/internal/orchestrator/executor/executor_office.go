@@ -87,6 +87,19 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 		updated.ExecutionProfileID = executionProfileID
 		updated.AgentProfileSnapshot = snapshot
 		updated.IsPassthrough = isPassthrough
+		// Provider-native state must not override the newly selected profile.
+		updated.Metadata = cloneMetadata(session.Metadata)
+		for _, key := range []string{
+			"acp_session_id",
+			models.SessionMetaKeySessionMode,
+			models.SessionMetaKeyRuntimeConfig,
+			models.SessionMetaKeyRuntimeConfigOverrides,
+			models.SessionMetaKeyACPConfigBaseline,
+			models.SessionMetaKeyACPModelState,
+			"context_window",
+		} {
+			delete(updated.Metadata, key)
+		}
 		changed, err := e.repo.UpdateTaskSessionIfCurrentState(ctx, &updated, expectedState)
 		if err != nil {
 			return fmt.Errorf("update office execution profile: %w", err)
