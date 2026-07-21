@@ -121,11 +121,11 @@ function messageTextNodes(root: HTMLElement): Text[] {
   return nodes;
 }
 
-function domRangeForOffsets(root: HTMLElement, start: number, end: number): Range | null {
+function domRangeForOffsets(textNodes: Text[], start: number, end: number): Range | null {
   let cursor = 0;
   let startBoundary: { node: Text; offset: number } | null = null;
   let endBoundary: { node: Text; offset: number } | null = null;
-  for (const textNode of messageTextNodes(root)) {
+  for (const textNode of textNodes) {
     const textLength = textNode.data.length;
     const nodeStart = cursor;
     const nodeEnd = cursor + textLength;
@@ -148,6 +148,7 @@ function domRangeForOffsets(root: HTMLElement, start: number, end: number): Rang
 export type MessageCommentDecoration = {
   comment: AgentMessageComment;
   range: Range;
+  highlightRects: Array<{ left: number; top: number; width: number; height: number }>;
   left: number;
   top: number;
 };
@@ -159,17 +160,25 @@ export function getMessageCommentDecorations(
 ): MessageCommentDecoration[] {
   const content = root.textContent ?? "";
   const rootRect = root.getBoundingClientRect();
+  const textNodes = messageTextNodes(root);
   const decorations: MessageCommentDecoration[] = [];
   for (const comment of comments) {
     const resolved = resolveMessageTextAnchor(comment.anchor, content);
     if (!resolved) continue;
-    const range = domRangeForOffsets(root, resolved.start, resolved.end);
+    const range = domRangeForOffsets(textNodes, resolved.start, resolved.end);
     if (!range) continue;
     const rects = Array.from(range.getClientRects());
     const rect = rects.at(-1) ?? range.getBoundingClientRect();
+    const highlightRects = (rects.length > 0 ? rects : [rect]).map((rangeRect) => ({
+      left: rangeRect.left - rootRect.left + root.scrollLeft,
+      top: rangeRect.top - rootRect.top + root.scrollTop,
+      width: rangeRect.width,
+      height: rangeRect.height,
+    }));
     decorations.push({
       comment,
       range,
+      highlightRects,
       left: rect.right - rootRect.left + root.scrollLeft,
       top: rect.top - rootRect.top + root.scrollTop,
     });

@@ -33,6 +33,7 @@ import {
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
 import { useToast } from "@/components/toast-provider";
+import { isMessageSendError } from "@/lib/chat/message-send-error";
 import type { DiffComment } from "@/lib/diff/types";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { useChatPanelState } from "./use-chat-panel-state";
@@ -117,8 +118,16 @@ function pickInputPlaceholder(a: PlaceholderArgs): string {
   );
 }
 
-function showUnknownMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>["toast"]) {
+function showMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>["toast"]) {
   console.error("Failed to send message:", error);
+  if (isMessageSendError(error)) {
+    toast({
+      title: "Message not sent",
+      description: error.message,
+      variant: "error",
+    });
+    return;
+  }
   toast({
     title: "Message send status unknown",
     description:
@@ -224,7 +233,7 @@ export function useSubmitHandler(
           }
         }
       } catch (error) {
-        showUnknownMessageSendToast(error, toast);
+        showMessageSendToast(error, toast);
         return false;
       } finally {
         setIsSending(false);

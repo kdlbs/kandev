@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import {
   createMessageTextAnchor,
@@ -157,7 +157,9 @@ describe("message-local DOM anchors", () => {
       };
     });
 
+    const createTreeWalker = vi.spyOn(document, "createTreeWalker");
     expect(getMessageCommentDecorations(root, comments)).toHaveLength(40);
+    expect(createTreeWalker).toHaveBeenCalledTimes(1);
     expect(root.querySelectorAll("mark[data-agent-message-comment-id]")).toHaveLength(0);
     expect(root.textContent).toBe(words);
   });

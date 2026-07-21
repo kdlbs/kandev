@@ -42,6 +42,7 @@ import type { Message } from "@/lib/types/http";
 import { cn, generateUUID } from "@/lib/utils";
 import {
   messageCommentDecorationAtPoint,
+  supportsCustomHighlights,
   useMessageCommentDecorations,
   useMessageCommentShortcut,
 } from "./use-message-comment-dom";
@@ -488,6 +489,36 @@ function MessageCommentBadges({
   ));
 }
 
+function MessageCommentFallbackHighlights({
+  decorations,
+}: {
+  decorations: MessageCommentDecoration[];
+}) {
+  return decorations.flatMap((decoration) =>
+    decoration.highlightRects.map((rect, index) => (
+      <span
+        key={`${decoration.comment.id}:${index}`}
+        aria-hidden="true"
+        className="agent-message-comment-fallback"
+        data-agent-message-comment-fallback="true"
+        data-comment-id={decoration.comment.id}
+        style={rect}
+      />
+    )),
+  );
+}
+
+function MessageCustomHighlightStyle({ highlightName }: { highlightName: string }) {
+  return (
+    <style>{`::highlight(${highlightName}) {
+      background-color: color-mix(in oklch, var(--accent) 70%, transparent);
+      color: inherit;
+      text-decoration: underline 2px color-mix(in oklch, var(--accent-foreground) 25%, transparent);
+      text-underline-offset: 2px;
+    }`}</style>
+  );
+}
+
 export function MessageCommentSurface({
   message,
   sessionId,
@@ -510,6 +541,7 @@ export function MessageCommentSurface({
   const actions = useMessageCommentActions({ message, sessionId, target, rootRef, close });
   const portalContainer = rootRef.current?.closest<HTMLElement>('[role="dialog"]');
   const highlightName = agentMessageCommentHighlightName(`${message.id}-${highlightInstanceId}`);
+  const hasCustomHighlightSupport = supportsCustomHighlights();
   const decorations = useMessageCommentDecorations(
     rootRef,
     pendingComments,
@@ -539,15 +571,13 @@ export function MessageCommentSurface({
         }}
       >
         {children}
+        {!hasCustomHighlightSupport ? (
+          <MessageCommentFallbackHighlights decorations={decorations} />
+        ) : null}
         <MessageCommentBadges decorations={decorations} onOpen={openExistingComment} />
       </div>
-      {pendingComments.length > 0 ? (
-        <style>{`::highlight(${highlightName}) {
-          background-color: color-mix(in oklch, var(--accent) 70%, transparent);
-          color: inherit;
-          text-decoration: underline 2px color-mix(in oklch, var(--accent-foreground) 25%, transparent);
-          text-underline-offset: 2px;
-        }`}</style>
+      {pendingComments.length > 0 && hasCustomHighlightSupport ? (
+        <MessageCustomHighlightStyle highlightName={highlightName} />
       ) : null}
       {target && !composerOpen ? (
         <SelectionCommentTrigger

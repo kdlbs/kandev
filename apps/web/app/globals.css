@@ -1246,6 +1246,14 @@
   background-color: color-mix(in oklch, var(--accent) 90%, transparent);
 }
 
+.agent-message-comment-fallback {
+  position: absolute;
+  pointer-events: none;
+  background-color: color-mix(in oklch, var(--accent) 70%, transparent);
+  border-radius: 3px;
+  border-bottom: 2px solid color-mix(in oklch, var(--accent-foreground) 25%, transparent);
+}
+
 /* Comment badge, single widget decoration at end of mark range */
 .tiptap-plan-wrapper .comment-badge,
 .agent-message-comment-body .comment-badge {

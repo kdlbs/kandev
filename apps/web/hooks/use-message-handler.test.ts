@@ -207,6 +207,10 @@ describe("sendMessageRequest", () => {
         modelToSend: undefined,
         planMode: false,
       }),
-    ).rejects.toThrow("WebSocket client unavailable");
+    ).rejects.toMatchObject({
+      name: "MessageSendError",
+      code: "connection-unavailable",
+      message: "Connection unavailable. Reconnect and try again.",
+    });
   });
 });

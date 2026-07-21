@@ -125,6 +125,26 @@ describe("useSubmitHandler", () => {
     });
   });
 
+  it("reports deterministic preflight failures as not sent", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const error = Object.assign(new Error("Connection unavailable. Reconnect and try again."), {
+      name: "MessageSendError",
+      code: "connection-unavailable",
+    });
+    handleSendMessageMock.mockRejectedValueOnce(error);
+    const { result } = renderHook(() => useSubmitHandler(panelState()));
+
+    await act(async () => {
+      await result.current.handleSubmit("hello");
+    });
+
+    expect(toastMock).toHaveBeenCalledWith({
+      title: "Message not sent",
+      description: "Connection unavailable. Reconnect and try again.",
+      variant: "error",
+    });
+  });
+
   it("keeps agent message comments pending when sending fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const markCommentsSent = vi.fn();

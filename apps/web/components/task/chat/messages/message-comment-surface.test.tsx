@@ -5,6 +5,8 @@ import { createMessageTextAnchor } from "@/lib/chat/agent-message-comments";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import { MessageCommentSurface } from "./message-comment-surface";
 
+const COMMENT_TEXT = vi.hoisted(() => "Make this concrete.");
+
 vi.mock("@/hooks/use-compact-task-chrome", () => ({ useTouchDrawer: () => false }));
 vi.mock("@/hooks/domains/comments/use-run-comment", () => ({
   useRunComment: () => ({ runComment: vi.fn() }),
@@ -27,7 +29,7 @@ vi.mock("@/components/task/plan-selection-popover", () => ({
       <button
         type="button"
         onClick={() => {
-          if (onAdd("Make this concrete.") !== false) onClose();
+          if (onAdd(COMMENT_TEXT) !== false) onClose();
         }}
       >
         Save comment
@@ -62,9 +64,25 @@ function resetComments() {
   sessionStorage.clear();
 }
 
+function addPendingComment(content: string, selectedText: string) {
+  const start = content.indexOf(selectedText);
+  useCommentsStore.getState().addComment({
+    id: "comment-1",
+    sessionId: SESSION_ID,
+    source: "agent-message",
+    messageId: "message-1",
+    selectedText,
+    text: COMMENT_TEXT,
+    createdAt: "2026-07-21T00:00:00Z",
+    status: "pending",
+    anchor: createMessageTextAnchor("message-1", content, start, start + selectedText.length),
+  });
+}
+
 afterEach(() => {
   cleanup();
   resetComments();
+  vi.unstubAllGlobals();
 });
 
 describe("MessageCommentSurface", () => {
@@ -108,18 +126,7 @@ describe("MessageCommentSurface", () => {
 
   it("keeps React-owned text nodes under their rendered parent", () => {
     const content = "A settled answer.";
-    const start = content.indexOf("settled");
-    useCommentsStore.getState().addComment({
-      id: "comment-1",
-      sessionId: SESSION_ID,
-      source: "agent-message",
-      messageId: "message-1",
-      selectedText: "settled",
-      text: "Make this concrete.",
-      createdAt: "2026-07-21T00:00:00Z",
-      status: "pending",
-      anchor: createMessageTextAnchor("message-1", content, start, start + "settled".length),
-    });
+    addPendingComment(content, "settled");
 
     render(
       <MessageCommentSurface message={message(content)} sessionId={SESSION_ID} isTurnActive={false}>
@@ -170,5 +177,24 @@ describe("MessageCommentSurface", () => {
     expect(screen.getByRole("alert").textContent).toBe(
       "The agent response changed. Select the text again.",
     );
+  });
+});
+
+describe("MessageCommentSurface fallback highlights", () => {
+  it("renders visible ranges when the CSS Highlight API is unavailable", () => {
+    vi.stubGlobal("CSS", {});
+    vi.stubGlobal("Highlight", undefined);
+    const content = "A settled answer.";
+    addPendingComment(content, "settled");
+
+    render(
+      <MessageCommentSurface message={message(content)} sessionId={SESSION_ID} isTurnActive={false}>
+        <span>{content}</span>
+      </MessageCommentSurface>,
+    );
+
+    expect(
+      document.querySelector('[data-agent-message-comment-fallback][data-comment-id="comment-1"]'),
+    ).not.toBeNull();
   });
 });

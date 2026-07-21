@@ -82,6 +82,12 @@ function highlightRegistry() {
   ).CSS?.highlights;
 }
 
+export function supportsCustomHighlights() {
+  const HighlightClass = (globalThis as typeof globalThis & { Highlight?: HighlightConstructor })
+    .Highlight;
+  return Boolean(highlightRegistry() && HighlightClass);
+}
+
 function updateCustomHighlight(name: string, ranges: Range[]) {
   const registry = highlightRegistry();
   const HighlightClass = (globalThis as typeof globalThis & { Highlight?: HighlightConstructor })
