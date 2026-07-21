@@ -70,16 +70,18 @@ type BrokerCredential struct {
 }
 
 type credentialLeaseRecord struct {
-	WorkspaceID          string
-	TaskID               string
-	SessionID            string
-	RepositoryID         string
-	Owner                string
-	Repo                 string
-	Host                 string
-	CredentialGeneration int64
-	TTL                  time.Duration
-	ExpiresAt            time.Time
+	WorkspaceID             string
+	TaskID                  string
+	SessionID               string
+	RepositoryID            string
+	Owner                   string
+	Repo                    string
+	Host                    string
+	CredentialGeneration    int64
+	AppRegistrationID       string
+	AppCredentialGeneration int64
+	TTL                     time.Duration
+	ExpiresAt               time.Time
 }
 
 // CredentialBroker exchanges opaque, task-scoped leases for renewable
@@ -133,6 +135,16 @@ func (b *CredentialBroker) Issue(ctx context.Context, req CredentialLeaseRequest
 	if connection.Status != ConnectionStatusActive {
 		return nil, ErrGitHubConnectionInvalid
 	}
+	appCredentialGeneration := int64(0)
+	if connection.Source == ConnectionSourceGitHubAppInstallation {
+		if strings.TrimSpace(connection.AppRegistrationID) == "" {
+			return nil, ErrGitHubNotConfigured
+		}
+		appCredentialGeneration, err = b.resolver.appCredentialGeneration(connection.AppRegistrationID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	ttl := req.TTL
 	if ttl <= 0 || ttl > defaultCredentialLeaseTTL {
 		ttl = defaultCredentialLeaseTTL
@@ -154,16 +166,18 @@ func (b *CredentialBroker) Issue(ctx context.Context, req CredentialLeaseRequest
 		return nil, fmt.Errorf("%w for workspace %s", ErrCredentialLeaseLimit, req.WorkspaceID)
 	}
 	b.leases[hash] = credentialLeaseRecord{
-		WorkspaceID:          req.WorkspaceID,
-		TaskID:               req.TaskID,
-		SessionID:            req.SessionID,
-		RepositoryID:         req.RepositoryID,
-		Owner:                strings.ToLower(req.Owner),
-		Repo:                 strings.ToLower(req.Repo),
-		Host:                 strings.ToLower(req.Host),
-		CredentialGeneration: connection.CredentialGeneration,
-		TTL:                  ttl,
-		ExpiresAt:            expiresAt,
+		WorkspaceID:             req.WorkspaceID,
+		TaskID:                  req.TaskID,
+		SessionID:               req.SessionID,
+		RepositoryID:            req.RepositoryID,
+		Owner:                   strings.ToLower(req.Owner),
+		Repo:                    strings.ToLower(req.Repo),
+		Host:                    strings.ToLower(req.Host),
+		CredentialGeneration:    connection.CredentialGeneration,
+		AppRegistrationID:       connection.AppRegistrationID,
+		AppCredentialGeneration: appCredentialGeneration,
+		TTL:                     ttl,
+		ExpiresAt:               expiresAt,
 	}
 	return &CredentialLease{Token: token, ExpiresAt: expiresAt}, nil
 }
@@ -187,6 +201,9 @@ func (b *CredentialBroker) Resolve(
 	}
 	credential, err := b.resolveLeaseCredential(ctx, record)
 	if err != nil {
+		return nil, err
+	}
+	if err := b.validateLeaseConnection(ctx, record); err != nil {
 		return nil, err
 	}
 	if !b.renewLease(req.Lease) {
@@ -221,13 +238,27 @@ func (b *CredentialBroker) authorizeLease(ctx context.Context, record credential
 	); err != nil {
 		return fmt.Errorf("%w: %v", ErrCredentialScopeDenied, err)
 	}
+	return b.validateLeaseConnection(ctx, record)
+}
+
+func (b *CredentialBroker) validateLeaseConnection(
+	ctx context.Context,
+	record credentialLeaseRecord,
+) error {
 	connection, err := b.connections.GetWorkspaceConnection(ctx, record.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("load GitHub workspace connection: %w", err)
 	}
 	if connection == nil || connection.Status != ConnectionStatusActive ||
-		connection.CredentialGeneration != record.CredentialGeneration {
+		connection.CredentialGeneration != record.CredentialGeneration ||
+		connection.AppRegistrationID != record.AppRegistrationID {
 		return ErrCredentialLeaseRevoked
+	}
+	if record.AppRegistrationID != "" {
+		generation, generationErr := b.resolver.appCredentialGeneration(record.AppRegistrationID)
+		if generationErr != nil || generation != record.AppCredentialGeneration {
+			return ErrCredentialLeaseRevoked
+		}
 	}
 	return nil
 }
@@ -245,7 +276,9 @@ func (b *CredentialBroker) resolveLeaseCredential(
 	if err != nil {
 		return nil, err
 	}
-	if resolved.CredentialGeneration != record.CredentialGeneration || resolved.credential == "" {
+	if resolved.CredentialGeneration != record.CredentialGeneration ||
+		resolved.AppRegistrationID != record.AppRegistrationID ||
+		resolved.AppCredentialGeneration != record.AppCredentialGeneration || resolved.credential == "" {
 		return nil, ErrCredentialLeaseRevoked
 	}
 	// Credential-helper get requests do not distinguish fetch from push. Read

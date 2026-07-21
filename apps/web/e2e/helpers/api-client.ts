@@ -100,6 +100,7 @@ export type MockGitHubWorkspaceConnection = {
   installation_id?: number;
   installation_account_login?: string;
   installation_account_type?: string;
+  app_registration_id?: string;
   capabilities?: Record<string, boolean>;
 };
 
@@ -117,18 +118,10 @@ export type MockGitHubCLIAccount = {
   state: string;
 };
 
-export type MockDeploymentGitHubAppRegistration = {
-  source: "none" | "environment" | "managed";
-  state: "unconfigured" | "registering" | "ready" | "invalid";
-  ready: boolean;
-  app_id?: number;
-  slug?: string;
-  owner_login?: string;
-  owner_type?: "User" | "Organization";
-  public_base_url?: string;
-  webhook_status?: "unverified" | "verified" | "failing";
-  unavailable_code?: string;
-  unavailable_reason?: string;
+export type MockGitHubAppRegistration = {
+  id: string;
+  display_name: string;
+  app_id: number;
 };
 
 function setIf(body: Record<string, unknown>, key: string, value: unknown) {
@@ -1088,14 +1081,12 @@ export class ApiClient {
     await this.request("PUT", "/api/v1/github/mock/cli-accounts", { accounts });
   }
 
-  async mockGitHubSetAppAvailable(available: boolean): Promise<void> {
-    await this.request("PUT", "/api/v1/github/mock/app-available", { available });
-  }
-
-  async mockGitHubSetDeploymentAppRegistration(
-    registration: MockDeploymentGitHubAppRegistration,
-  ): Promise<void> {
-    await this.request("PUT", "/api/v1/github/mock/deployment-app-registration", registration);
+  async mockGitHubSetAppRegistration(registration: MockGitHubAppRegistration) {
+    return this.request<Record<string, unknown>>(
+      "PUT",
+      `/api/v1/github/mock/app-registrations/${encodeURIComponent(registration.id)}`,
+      { display_name: registration.display_name, app_id: registration.app_id },
+    );
   }
 
   async mockGitHubAddPRs(prs: MockPR[]): Promise<void> {

@@ -20,10 +20,12 @@ const (
 
 // TokenPrincipal describes the GitHub actor behind a bearer token.
 type TokenPrincipal struct {
-	Kind           TokenCredentialKind `json:"kind"`
-	PrincipalID    string              `json:"principal_id"`
-	Login          string              `json:"login,omitempty"`
-	InstallationID int64               `json:"installation_id,omitempty"`
+	Kind                    TokenCredentialKind `json:"kind"`
+	PrincipalID             string              `json:"principal_id"`
+	Login                   string              `json:"login,omitempty"`
+	InstallationID          int64               `json:"installation_id,omitempty"`
+	AppRegistrationID       string              `json:"app_registration_id,omitempty"`
+	AppCredentialGeneration int64               `json:"app_credential_generation,omitempty"`
 }
 
 // TokenClient implements GitHub REST and GraphQL operations for any bearer

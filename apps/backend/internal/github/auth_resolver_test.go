@@ -28,6 +28,27 @@ type repoScopedInstallationProvider struct {
 	calls   int
 }
 
+type registrationInstallationProvider struct {
+	calls map[string]int
+}
+
+func (p *registrationInstallationProvider) ResolveInstallation(
+	_ context.Context,
+	connection *WorkspaceConnection,
+	_ ResolveCredentialRequest,
+) (*ResolvedCredential, error) {
+	p.calls[connection.AppRegistrationID]++
+	return &ResolvedCredential{
+		Client: NewMockClient(),
+		Principal: AuthPrincipal{
+			Kind: AuthPrincipalApp, Source: ConnectionSourceGitHubAppInstallation,
+			AppRegistrationID: connection.AppRegistrationID,
+		},
+		AppRegistrationID:       connection.AppRegistrationID,
+		AppCredentialGeneration: 7,
+	}, nil
+}
+
 type expiringInstallationProvider struct {
 	now      func() time.Time
 	lifetime time.Duration
@@ -174,6 +195,59 @@ func TestCredentialResolverNeverFallsBackForDisconnectedWorkspace(t *testing.T) 
 	}
 }
 
+func TestAuthResolverKeysAppCredentialsByRegistration(t *testing.T) {
+	installationID := int64(42)
+	connection := &WorkspaceConnection{
+		WorkspaceID: "work", Source: ConnectionSourceGitHubAppInstallation,
+		InstallationID: &installationID, AppRegistrationID: "registration-a",
+		Status: ConnectionStatusActive, CredentialGeneration: 1,
+	}
+	reader := &synchronizedConnectionReader{connection: *connection}
+	provider := &registrationInstallationProvider{calls: make(map[string]int)}
+	resolver := NewCredentialResolver(reader, nil)
+	resolver.SetInstallationProvider(provider)
+
+	first, err := resolver.Resolve(context.Background(), ResolveCredentialRequest{
+		WorkspaceID: "work", Purpose: CredentialPurposeAutomation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection.AppRegistrationID = "registration-b"
+	reader.replace(*connection)
+	second, err := resolver.Resolve(context.Background(), ResolveCredentialRequest{
+		WorkspaceID: "work", Purpose: CredentialPurposeAutomation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Principal.AppRegistrationID != "registration-a" ||
+		second.Principal.AppRegistrationID != "registration-b" {
+		t.Fatalf("principals = %+v / %+v", first.Principal, second.Principal)
+	}
+	if provider.calls["registration-a"] != 1 || provider.calls["registration-b"] != 1 {
+		t.Fatalf("provider calls = %#v", provider.calls)
+	}
+}
+
+func TestAuthResolverAppConnectionRequiresRegistrationID(t *testing.T) {
+	installationID := int64(42)
+	resolver := NewCredentialResolver(&fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
+		"work": {
+			WorkspaceID: "work", Source: ConnectionSourceGitHubAppInstallation,
+			InstallationID: &installationID, Status: ConnectionStatusActive,
+			CredentialGeneration: 1,
+		},
+	}}, nil)
+	resolver.SetInstallationProvider(&registrationInstallationProvider{calls: make(map[string]int)})
+	_, err := resolver.Resolve(context.Background(), ResolveCredentialRequest{
+		WorkspaceID: "work", Purpose: CredentialPurposeAutomation,
+	})
+	if !errors.Is(err, ErrGitHubNotConfigured) {
+		t.Fatalf("error = %v, want ErrGitHubNotConfigured", err)
+	}
+}
+
 func TestCredentialResolverUsesLegacyOnlyForMigratedSource(t *testing.T) {
 	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
 		"old": {WorkspaceID: "old", Source: ConnectionSourceLegacyShared, Status: ConnectionStatusActive, CredentialGeneration: 1},
@@ -218,7 +292,7 @@ func TestCredentialResolverNamedCLIUsesSelectedLogin(t *testing.T) {
 func TestCredentialResolverAppRequiresPersonalIdentityForMyGitHub(t *testing.T) {
 	installationID := int64(42)
 	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
-		"company": {WorkspaceID: "company", Source: ConnectionSourceGitHubAppInstallation, InstallationID: &installationID, Status: ConnectionStatusActive, CredentialGeneration: 1},
+		"company": {WorkspaceID: "company", Source: ConnectionSourceGitHubAppInstallation, InstallationID: &installationID, AppRegistrationID: "registration-test", Status: ConnectionStatusActive, CredentialGeneration: 1},
 	}}
 	resolver := NewCredentialResolver(connections, nil)
 	_, err := resolver.Resolve(context.Background(), ResolveCredentialRequest{
@@ -235,7 +309,8 @@ func TestCredentialResolverInvalidPersonalFallsBackToAppOnlyForManualWrites(t *t
 		workspaces: map[string]*WorkspaceConnection{
 			"company": {
 				WorkspaceID: "company", Source: ConnectionSourceGitHubAppInstallation,
-				InstallationID: &installationID, Status: ConnectionStatusActive, CredentialGeneration: 1,
+				InstallationID: &installationID, AppRegistrationID: "registration-test",
+				Status: ConnectionStatusActive, CredentialGeneration: 1,
 			},
 		},
 		users: map[string]*UserConnection{
@@ -292,7 +367,8 @@ func TestCredentialResolverSeparatesRepositoryScopedAppTokens(t *testing.T) {
 	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
 		"company": {
 			WorkspaceID: "company", Source: ConnectionSourceGitHubAppInstallation,
-			InstallationID: &installationID, Status: ConnectionStatusActive, CredentialGeneration: 1,
+			InstallationID: &installationID, AppRegistrationID: "registration-test",
+			Status: ConnectionStatusActive, CredentialGeneration: 1,
 		},
 	}}
 	provider := &repoScopedInstallationProvider{clients: make(map[string]Client)}
@@ -330,7 +406,8 @@ func TestCredentialResolverRefreshesCachedCredentialBeforeExpiry(t *testing.T) {
 	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
 		"company": {
 			WorkspaceID: "company", Source: ConnectionSourceGitHubAppInstallation,
-			InstallationID: &installationID, Status: ConnectionStatusActive, CredentialGeneration: 1,
+			InstallationID: &installationID, AppRegistrationID: "registration-test",
+			Status: ConnectionStatusActive, CredentialGeneration: 1,
 		},
 	}}
 	provider := &expiringInstallationProvider{now: func() time.Time { return now }, lifetime: 10 * time.Minute}
@@ -362,7 +439,8 @@ func TestCredentialResolverRejectsNewlyExpiredCredential(t *testing.T) {
 	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
 		"company": {
 			WorkspaceID: "company", Source: ConnectionSourceGitHubAppInstallation,
-			InstallationID: &installationID, Status: ConnectionStatusActive, CredentialGeneration: 1,
+			InstallationID: &installationID, AppRegistrationID: "registration-test",
+			Status: ConnectionStatusActive, CredentialGeneration: 1,
 		},
 	}}
 	provider := &expiringInstallationProvider{now: func() time.Time { return now }, lifetime: -time.Minute}
@@ -390,7 +468,8 @@ func TestCredentialResolverInvalidationRejectsInflightOldGeneration(t *testing.T
 			installationID := int64(42)
 			oldConnection := WorkspaceConnection{
 				WorkspaceID: "company", Source: ConnectionSourceGitHubAppInstallation,
-				InstallationID: &installationID, Status: ConnectionStatusActive, CredentialGeneration: 1,
+				InstallationID: &installationID, AppRegistrationID: "registration-test",
+				Status: ConnectionStatusActive, CredentialGeneration: 1,
 			}
 			newConnection := oldConnection
 			newConnection.CredentialGeneration = 2

@@ -100,7 +100,7 @@ func handleE2EReset(
 		}
 		if githubSvc != nil {
 			githubSvc.ResetMockAuth(workspaceID)
-			if err := resetGitHubDeploymentAppForE2E(ctx, githubSvc); err != nil {
+			if err := resetGitHubAppRegistrationsForE2E(ctx, githubSvc, workspaceID); err != nil {
 				log.Error("e2e reset: GitHub deployment App cleanup failed", zap.Error(err))
 				c.JSON(http.StatusInternalServerError, gin.H{errKey: "GitHub deployment App cleanup failed"})
 				return
@@ -207,11 +207,15 @@ func handleE2EReset(
 	}
 }
 
-func resetGitHubDeploymentAppForE2E(ctx context.Context, service *github.Service) error {
+func resetGitHubAppRegistrationsForE2E(
+	ctx context.Context,
+	service *github.Service,
+	workspaceID string,
+) error {
 	if service == nil {
 		return nil
 	}
-	return service.ResetDeploymentAppForE2E(ctx)
+	return service.ResetAppRegistrationsForE2E(ctx, workspaceID)
 }
 
 func deleteGitHubAuthForReset(ctx context.Context, database *sql.DB, workspaceID string) error {

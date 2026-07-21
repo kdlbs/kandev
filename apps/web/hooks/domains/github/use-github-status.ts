@@ -6,6 +6,18 @@ import { useAppStore } from "@/components/state-provider";
 import type { GitHubStatus, GitHubStatusResponse } from "@/lib/types/github";
 import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 
+const requestVersions = new Map<string, number>();
+
+function nextRequestVersion(workspaceId: string) {
+  const version = (requestVersions.get(workspaceId) ?? 0) + 1;
+  requestVersions.set(workspaceId, version);
+  return version;
+}
+
+function isCurrentRequest(workspaceId: string, version: number) {
+  return requestVersions.get(workspaceId) === version;
+}
+
 export function normalizeGitHubStatus(response: GitHubStatusResponse): GitHubStatus {
   const automation = response.automation ?? null;
   const personal = response.personal ?? null;
@@ -37,11 +49,22 @@ export function useGitHubStatus(requestedWorkspaceId?: string | null) {
 
   const doFetch = useCallback(() => {
     if (!workspaceId) return;
+    const version = nextRequestVersion(workspaceId);
     setGitHubStatusLoading(workspaceId, true);
     fetchGitHubStatus(workspaceId, { cache: "no-store" })
-      .then((response) => setGitHubStatus(workspaceId, normalizeGitHubStatus(response)))
-      .catch(() => setGitHubStatus(workspaceId, null))
-      .finally(() => setGitHubStatusLoading(workspaceId, false));
+      .then((response) => {
+        if (isCurrentRequest(workspaceId, version)) {
+          setGitHubStatus(workspaceId, normalizeGitHubStatus(response));
+        }
+      })
+      .catch(() => {
+        if (isCurrentRequest(workspaceId, version)) setGitHubStatus(workspaceId, null);
+      })
+      .finally(() => {
+        if (isCurrentRequest(workspaceId, version)) {
+          setGitHubStatusLoading(workspaceId, false);
+        }
+      });
   }, [setGitHubStatus, setGitHubStatusLoading, workspaceId]);
 
   useEffect(() => {

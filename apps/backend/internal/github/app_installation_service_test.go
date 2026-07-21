@@ -90,7 +90,7 @@ func TestAppInstallationStartBuildsStateBoundInstallURL(t *testing.T) {
 	flows := NewOAuthFlowManager(flowStore)
 	flows.random = strings.NewReader(strings.Repeat("d", oauthRandomBytes))
 	service := NewAppInstallationService(
-		AppInstallationConfig{Slug: "kandev-app", CallbackURL: "https://kandev.example/api/v1/github/app/install/callback"},
+		AppInstallationConfig{RegistrationID: "registration-test", Slug: "kandev-app", CallbackURL: "https://kandev.example/api/v1/github/app/install/callback"},
 		flows, &appInstallationMemoryStore{}, &fakeAppInstallationVerifier{}, &fakeGitHubAppOAuth{},
 	)
 
@@ -127,7 +127,7 @@ func TestAppInstallationCompleteAcceptsOAuthDuringInstallCallbackShape(t *testin
 		user:   GitHubOAuthUser{ID: 11, Login: "octocat"}, canAccess: true,
 	}
 	service := NewAppInstallationService(
-		AppInstallationConfig{Slug: "kandev-app", CallbackURL: "https://kandev.example/callback"},
+		AppInstallationConfig{RegistrationID: "registration-test", Slug: "kandev-app", CallbackURL: "https://kandev.example/callback"},
 		flows, store, verifier, oauth,
 	)
 	started, err := service.Start(context.Background(), "workspace-1", "user-1")
@@ -157,7 +157,7 @@ func TestAppInstallationCompleteRejectsSpoofedAssociation(t *testing.T) {
 	flows.random = strings.NewReader(strings.Repeat("f", oauthRandomBytes))
 	store := &appInstallationMemoryStore{}
 	service := NewAppInstallationService(
-		AppInstallationConfig{Slug: "kandev-app", CallbackURL: "https://kandev.example/callback"},
+		AppInstallationConfig{RegistrationID: "registration-test", Slug: "kandev-app", CallbackURL: "https://kandev.example/callback"},
 		flows,
 		store,
 		&fakeAppInstallationVerifier{installation: AppInstallation{ID: 42}},
@@ -184,7 +184,7 @@ func TestAppInstallationCompleteRejectsSetupURLShapeWithoutOAuthCode(t *testing.
 	flows := NewOAuthFlowManager(flowStore)
 	flows.random = strings.NewReader(strings.Repeat("g", oauthRandomBytes))
 	service := NewAppInstallationService(
-		AppInstallationConfig{Slug: "kandev-app", CallbackURL: "https://kandev.example/callback"},
+		AppInstallationConfig{RegistrationID: "registration-test", Slug: "kandev-app", CallbackURL: "https://kandev.example/callback"},
 		flows,
 		&appInstallationMemoryStore{},
 		&fakeAppInstallationVerifier{installation: AppInstallation{ID: 42}},
@@ -212,7 +212,7 @@ func TestAppInstallationCompleteCannotOverwriteNewerPAT(t *testing.T) {
 		Status: ConnectionStatusActive, CredentialGeneration: 1,
 	}}
 	service := NewAppInstallationService(
-		AppInstallationConfig{Slug: "kandev-app", CallbackURL: "https://kandev.example/callback"},
+		AppInstallationConfig{RegistrationID: "registration-test", Slug: "kandev-app", CallbackURL: "https://kandev.example/callback"},
 		flows, store,
 		&fakeAppInstallationVerifier{installation: AppInstallation{
 			ID: 42, AccountLogin: "acme", AccountType: "Organization",

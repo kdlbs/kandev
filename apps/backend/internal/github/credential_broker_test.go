@@ -18,6 +18,42 @@ type fakeBrokerInstallationProvider struct {
 	resolved *ResolvedCredential
 }
 
+type blockingBrokerInstallationProvider struct {
+	started  chan struct{}
+	release  chan struct{}
+	resolved *ResolvedCredential
+}
+
+func (p *blockingBrokerInstallationProvider) AppCredentialGeneration(
+	registrationID string,
+) (int64, bool) {
+	return p.resolved.AppCredentialGeneration,
+		p.resolved.AppRegistrationID == registrationID && p.resolved.AppCredentialGeneration > 0
+}
+
+func (p *blockingBrokerInstallationProvider) ResolveInstallation(
+	ctx context.Context,
+	_ *WorkspaceConnection,
+	_ ResolveCredentialRequest,
+) (*ResolvedCredential, error) {
+	select {
+	case p.started <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case <-p.release:
+		return p.resolved, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (f fakeBrokerInstallationProvider) AppCredentialGeneration(registrationID string) (int64, bool) {
+	return f.resolved.AppCredentialGeneration,
+		f.resolved.AppRegistrationID == registrationID && f.resolved.AppCredentialGeneration > 0
+}
+
 func (f fakeBrokerInstallationProvider) ResolveInstallation(
 	_ context.Context,
 	_ *WorkspaceConnection,
@@ -211,6 +247,89 @@ func TestCredentialBrokerGenerationChangeRevokesLease(t *testing.T) {
 	}
 }
 
+func TestCredentialBrokerAppRegistrationChangeRevokesLease(t *testing.T) {
+	installationID := int64(42)
+	connection := &WorkspaceConnection{
+		WorkspaceID: "workspace-1", Source: ConnectionSourceGitHubAppInstallation,
+		InstallationID: &installationID, AppRegistrationID: "registration-a",
+		Status: ConnectionStatusActive, CredentialGeneration: 7,
+	}
+	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
+		connection.WorkspaceID: connection,
+	}}
+	resolver := NewCredentialResolver(connections, nil)
+	resolver.SetInstallationProvider(fakeBrokerInstallationProvider{resolved: &ResolvedCredential{
+		Client: &MockClient{}, Principal: AuthPrincipal{
+			Kind: AuthPrincipalApp, Source: ConnectionSourceGitHubAppInstallation,
+			AppRegistrationID: "registration-a", AppCredentialGeneration: 3,
+		},
+		Capabilities:      map[GitHubAppCapability]bool{CapabilityGitRead: true},
+		AppRegistrationID: "registration-a", AppCredentialGeneration: 3,
+		credential: "installation-token",
+	}})
+	broker := NewCredentialBroker(connections, resolver, &fakeBrokerAuthorizer{})
+	lease, err := broker.Issue(context.Background(), brokerLeaseRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connection.AppRegistrationID = "registration-b"
+	_, err = broker.Resolve(context.Background(), brokerCredentialRequest(lease.Token))
+	if !errors.Is(err, ErrCredentialLeaseRevoked) {
+		t.Fatalf("error = %v, want revoked", err)
+	}
+}
+
+func TestCredentialBrokerDoesNotReturnCredentialAfterConcurrentAppSwitch(t *testing.T) {
+	installationID := int64(42)
+	connection := WorkspaceConnection{
+		WorkspaceID: "workspace-1", Source: ConnectionSourceGitHubAppInstallation,
+		InstallationID: &installationID, AppRegistrationID: "registration-a",
+		Status: ConnectionStatusActive, CredentialGeneration: 7,
+	}
+	connections := &synchronizedConnectionReader{connection: connection}
+	provider := &blockingBrokerInstallationProvider{
+		started: make(chan struct{}), release: make(chan struct{}),
+		resolved: &ResolvedCredential{
+			Client: &MockClient{}, Principal: AuthPrincipal{
+				Kind: AuthPrincipalApp, Source: ConnectionSourceGitHubAppInstallation,
+				AppRegistrationID: "registration-a", AppCredentialGeneration: 3,
+			},
+			Capabilities:         map[GitHubAppCapability]bool{CapabilityGitRead: true},
+			CredentialGeneration: 7, AppRegistrationID: "registration-a",
+			AppCredentialGeneration: 3, credential: "old-installation-token",
+		},
+	}
+	resolver := NewCredentialResolver(connections, nil)
+	resolver.SetInstallationProvider(provider)
+	broker := NewCredentialBroker(connections, resolver, &fakeBrokerAuthorizer{})
+	lease, err := broker.Issue(context.Background(), brokerLeaseRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := make(chan *BrokerCredential, 1)
+	errs := make(chan error, 1)
+	go func() {
+		credential, resolveErr := broker.Resolve(
+			context.Background(), brokerCredentialRequest(lease.Token),
+		)
+		result <- credential
+		errs <- resolveErr
+	}()
+	<-provider.started
+	replacement := connection
+	replacement.AppRegistrationID = "registration-b"
+	replacement.CredentialGeneration++
+	connections.replace(replacement)
+	close(provider.release)
+
+	if credential, resolveErr := <-result, <-errs; credential != nil ||
+		!errors.Is(resolveErr, ErrCredentialLeaseRevoked) {
+		t.Fatalf("Resolve() = %+v, %v; want nil, ErrCredentialLeaseRevoked", credential, resolveErr)
+	}
+}
+
 func TestCredentialBrokerExpiryAndExplicitRevocation(t *testing.T) {
 	broker, _, _ := newPATCredentialBroker(t)
 	now := time.Now().UTC()
@@ -257,7 +376,8 @@ func TestCredentialBrokerNeverReturnsPersonalCredential(t *testing.T) {
 func TestCredentialBrokerAllowsReadOnlyAppForGitTransport(t *testing.T) {
 	connection := &WorkspaceConnection{
 		WorkspaceID: "workspace-1", Source: ConnectionSourceGitHubAppInstallation,
-		Status: ConnectionStatusActive, CredentialGeneration: 7,
+		AppRegistrationID: "registration-a",
+		Status:            ConnectionStatusActive, CredentialGeneration: 7,
 	}
 	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
 		connection.WorkspaceID: connection,
@@ -266,13 +386,16 @@ func TestCredentialBrokerAllowsReadOnlyAppForGitTransport(t *testing.T) {
 	resolver.SetInstallationProvider(fakeBrokerInstallationProvider{resolved: &ResolvedCredential{
 		Client: &MockClient{}, Principal: AuthPrincipal{
 			Kind: AuthPrincipalApp, Source: ConnectionSourceGitHubAppInstallation,
-			WorkspaceID: connection.WorkspaceID,
+			WorkspaceID: connection.WorkspaceID, AppRegistrationID: "registration-a",
+			AppCredentialGeneration: 3,
 		},
 		Capabilities: map[GitHubAppCapability]bool{
 			CapabilityGitRead: true,
 		},
-		CredentialGeneration: 7,
-		credential:           "installation-token",
+		CredentialGeneration:    7,
+		AppRegistrationID:       "registration-a",
+		AppCredentialGeneration: 3,
+		credential:              "installation-token",
 	}})
 	broker := NewCredentialBroker(connections, resolver, &fakeBrokerAuthorizer{})
 	lease, err := broker.Issue(context.Background(), brokerLeaseRequest())
@@ -292,7 +415,8 @@ func TestCredentialBrokerAllowsReadOnlyAppForGitTransport(t *testing.T) {
 func TestCredentialBrokerRejectsAppWithoutGitRead(t *testing.T) {
 	connection := &WorkspaceConnection{
 		WorkspaceID: "workspace-1", Source: ConnectionSourceGitHubAppInstallation,
-		Status: ConnectionStatusActive, CredentialGeneration: 7,
+		AppRegistrationID: "registration-a",
+		Status:            ConnectionStatusActive, CredentialGeneration: 7,
 	}
 	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
 		connection.WorkspaceID: connection,
@@ -301,11 +425,14 @@ func TestCredentialBrokerRejectsAppWithoutGitRead(t *testing.T) {
 	resolver.SetInstallationProvider(fakeBrokerInstallationProvider{resolved: &ResolvedCredential{
 		Client: &MockClient{}, Principal: AuthPrincipal{
 			Kind: AuthPrincipalApp, Source: ConnectionSourceGitHubAppInstallation,
-			WorkspaceID: connection.WorkspaceID,
+			WorkspaceID: connection.WorkspaceID, AppRegistrationID: "registration-a",
+			AppCredentialGeneration: 3,
 		},
-		Capabilities:         map[GitHubAppCapability]bool{},
-		CredentialGeneration: 7,
-		credential:           "installation-token",
+		Capabilities:            map[GitHubAppCapability]bool{},
+		CredentialGeneration:    7,
+		AppRegistrationID:       "registration-a",
+		AppCredentialGeneration: 3,
+		credential:              "installation-token",
 	}})
 	broker := NewCredentialBroker(connections, resolver, &fakeBrokerAuthorizer{})
 	lease, err := broker.Issue(context.Background(), brokerLeaseRequest())

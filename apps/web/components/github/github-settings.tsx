@@ -9,6 +9,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { GitHubAutomationSettings, GitHubPersonalSettings } from "./github-status";
+import { GitHubCallbackNotice } from "./github-callback-notice";
 import { ReviewWatchTable } from "./review-watch-table";
 import { ReviewWatchDialog } from "./review-watch-dialog";
 import { IssueWatchTable } from "./issue-watch-table";
@@ -252,6 +253,7 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
         </p>
       </div>
       <Separator />
+      <GitHubCallbackNotice workspaceId={workspaceId} />
       <SettingsSection
         title="Workspace GitHub access"
         description="Credential used for repository sync, watches, and managed agent git and gh commands. Executor profile tokens take precedence."

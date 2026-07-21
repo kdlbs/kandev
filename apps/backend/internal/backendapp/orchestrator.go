@@ -187,9 +187,6 @@ func githubCredentialBrokerEndpoint(cfg *config.Config) string {
 		if publicBaseURL := strings.TrimRight(strings.TrimSpace(cfg.GitHubCredentialBroker.PublicBaseURL), "/"); publicBaseURL != "" {
 			return publicBaseURL + "/api/v1/github/credentials/resolve"
 		}
-		if publicBaseURL := strings.TrimRight(strings.TrimSpace(cfg.GitHubApp.PublicBaseURL), "/"); publicBaseURL != "" {
-			return publicBaseURL + "/api/v1/github/credentials/resolve"
-		}
 		port := cfg.Server.Port
 		if port != 0 {
 			return fmt.Sprintf("http://localhost:%d/api/v1/github/credentials/resolve", port)

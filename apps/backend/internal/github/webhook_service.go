@@ -23,14 +23,16 @@ var ErrInvalidWebhookSignature = errors.New("invalid GitHub webhook signature")
 
 type githubWebhookStore interface {
 	ClaimWebhookDelivery(context.Context, *WebhookDelivery, time.Time) (WebhookDeliveryClaim, error)
-	CompleteWebhookDelivery(context.Context, string, WebhookDeliveryStatus, string, time.Time) error
-	ListWorkspaceConnectionsByInstallation(context.Context, int64) ([]*WorkspaceConnection, error)
+	CompleteAppRegistrationWebhookDelivery(
+		context.Context, string, string, WebhookDeliveryStatus, string, time.Time,
+	) error
+	ListWorkspaceConnectionsByAppInstallation(context.Context, string, int64) ([]*WorkspaceConnection, error)
 	TransitionWorkspaceInstallationConnection(
 		context.Context,
 		*WorkspaceConnection,
 		*WorkspaceConnection,
 	) (bool, error)
-	ListUserConnectionsByGitHubUser(context.Context, int64) ([]*UserConnection, error)
+	ListUserConnectionsByAppGitHubUser(context.Context, string, int64) ([]*UserConnection, error)
 }
 
 type personalConnectionRevoker interface {
@@ -53,6 +55,7 @@ type InstallationRepository struct {
 
 type InstallationRepositoriesChange struct {
 	WorkspaceID          string
+	AppRegistrationID    string
 	InstallationID       int64
 	ConnectionSource     ConnectionSource
 	CredentialGeneration int64
@@ -72,12 +75,15 @@ type GitHubWebhookRequest struct {
 	Payload    []byte
 }
 
-func (s *Service) HandleAppWebhook(
+func (s *Service) HandleAppRegistrationWebhook(
 	ctx context.Context,
+	registrationID string,
 	request GitHubWebhookRequest,
 ) (GitHubWebhookResult, error) {
-	runtime := s.currentDeploymentAppRuntime()
-	if runtime == nil || runtime.webhookAuth == nil {
+	registrationID = strings.TrimSpace(registrationID)
+	runtime := s.currentAppRegistrationRuntime(registrationID)
+	if registrationID == "" || runtime == nil || runtime.webhookAuth == nil ||
+		runtime.webhookAuth.registrationID != registrationID {
 		return GitHubWebhookResult{}, ErrGitHubNotConfigured
 	}
 	service := runtime.webhookAuth
@@ -93,14 +99,13 @@ func (s *Service) HandleAppWebhook(
 		reason = "signed webhook processing failed"
 	}
 	observedAt := service.now().UTC()
-	if runtime.source == DeploymentAppSourceManaged && s.store != nil {
-		if healthErr := s.store.updateDeploymentAppWebhookHealth(
-			ctx, runtime.generation, status, observedAt, reason,
+	if s.store != nil {
+		if _, healthErr := s.store.updateAppRegistrationWebhookHealth(
+			ctx, registrationID, runtime.generation, status, observedAt, reason,
 		); healthErr != nil && s.logger != nil {
-			s.logger.Warn("deployment App webhook health persistence failed", zap.Error(healthErr))
+			s.logger.Warn("App registration webhook health persistence failed", zap.Error(healthErr))
 		}
 	}
-	s.updateDeploymentAppWebhookHealth(runtime, status, observedAt, reason)
 	return result, err
 }
 
@@ -130,6 +135,7 @@ type installationTransition struct {
 }
 
 type GitHubWebhookService struct {
+	registrationID     string
 	secret             []byte
 	store              githubWebhookStore
 	repos              installationRepositoryUpdater
@@ -156,6 +162,18 @@ func NewGitHubWebhookService(
 	return service
 }
 
+func NewAppRegistrationWebhookService(
+	registrationID, secret string,
+	store githubWebhookStore,
+	repositories installationRepositoryUpdater,
+	personal personalConnectionRevoker,
+	reconciliation ...GitHubWebhookReconciliation,
+) *GitHubWebhookService {
+	service := NewGitHubWebhookService(secret, store, repositories, personal, reconciliation...)
+	service.registrationID = strings.TrimSpace(registrationID)
+	return service
+}
+
 func (s *GitHubWebhookService) Authenticates(request GitHubWebhookRequest) bool {
 	return s != nil && len(s.secret) > 0 && request.DeliveryID != "" && request.Event != "" &&
 		len(request.Payload) <= maxGitHubWebhookPayloadSize &&
@@ -177,10 +195,11 @@ func (s *GitHubWebhookService) Handle(
 	}
 	now := s.now().UTC()
 	claim, err := s.store.ClaimWebhookDelivery(ctx, &WebhookDelivery{
-		DeliveryID: request.DeliveryID,
-		Event:      request.Event,
-		Status:     WebhookDeliveryStatusReceived,
-		ReceivedAt: now,
+		AppRegistrationID: s.registrationID,
+		DeliveryID:        request.DeliveryID,
+		Event:             request.Event,
+		Status:            WebhookDeliveryStatusReceived,
+		ReceivedAt:        now,
 	}, now.Add(-webhookDeliveryStaleAfter))
 	if err != nil {
 		return GitHubWebhookResult{}, fmt.Errorf("record GitHub webhook delivery: %w", err)
@@ -198,11 +217,23 @@ func (s *GitHubWebhookService) Handle(
 		status = WebhookDeliveryStatusFailed
 		result = processErr.Error()
 	}
-	completeErr := s.store.CompleteWebhookDelivery(ctx, request.DeliveryID, status, result, s.now().UTC())
+	completeErr := s.completeDelivery(ctx, request.DeliveryID, status, result, s.now().UTC())
 	if processErr != nil || completeErr != nil {
 		return GitHubWebhookResult{Status: status, Affected: affected}, errors.Join(processErr, completeErr)
 	}
 	return GitHubWebhookResult{Status: status, Affected: affected}, nil
+}
+
+func (s *GitHubWebhookService) completeDelivery(
+	ctx context.Context,
+	deliveryID string,
+	status WebhookDeliveryStatus,
+	result string,
+	processedAt time.Time,
+) error {
+	return s.store.CompleteAppRegistrationWebhookDelivery(
+		ctx, s.registrationID, deliveryID, status, result, processedAt,
+	)
 }
 
 func (s *GitHubWebhookService) process(ctx context.Context, event string, payload []byte) (int, string, error) {
@@ -233,13 +264,13 @@ func (s *GitHubWebhookService) processInstallation(
 	if !supported || event.Installation.ID <= 0 {
 		return 0, "installation action ignored", nil
 	}
-	connections, err := s.store.ListWorkspaceConnectionsByInstallation(ctx, event.Installation.ID)
+	connections, err := s.listWorkspaceConnections(ctx, event.Installation.ID)
 	if err != nil {
 		return 0, "", fmt.Errorf("load installation bindings: %w", err)
 	}
 	affected := 0
 	for _, connection := range connections {
-		if !shouldApplyInstallationTransition(connection, event, transition) {
+		if !shouldApplyInstallationTransition(s.registrationID, connection, event, transition) {
 			continue
 		}
 		updated, err := s.applyInstallationTransition(ctx, connection, transition)
@@ -252,6 +283,13 @@ func (s *GitHubWebhookService) processInstallation(
 		affected++
 	}
 	return affected, fmt.Sprintf("installation %s: %d binding(s)", event.Action, affected), nil
+}
+
+func (s *GitHubWebhookService) listWorkspaceConnections(
+	ctx context.Context,
+	installationID int64,
+) ([]*WorkspaceConnection, error) {
+	return s.store.ListWorkspaceConnectionsByAppInstallation(ctx, s.registrationID, installationID)
 }
 
 func (s *GitHubWebhookService) installationTransition(
@@ -276,11 +314,12 @@ func (s *GitHubWebhookService) installationTransition(
 }
 
 func shouldApplyInstallationTransition(
+	registrationID string,
 	connection *WorkspaceConnection,
 	event installationWebhookEvent,
 	transition installationTransition,
 ) bool {
-	if !matchesInstallation(connection, event.Installation.ID) {
+	if !matchesInstallation(connection, registrationID, event.Installation.ID) {
 		return false
 	}
 	if !transition.verified {
@@ -332,13 +371,13 @@ func (s *GitHubWebhookService) processInstallationRepositories(
 	if event.Installation.ID <= 0 || (event.Action != "added" && event.Action != "removed") {
 		return 0, "installation repositories action ignored", nil
 	}
-	connections, err := s.store.ListWorkspaceConnectionsByInstallation(ctx, event.Installation.ID)
+	connections, err := s.listWorkspaceConnections(ctx, event.Installation.ID)
 	if err != nil {
 		return 0, "", fmt.Errorf("load installation bindings: %w", err)
 	}
 	affected := 0
 	for _, connection := range connections {
-		if !matchesInstallation(connection, event.Installation.ID) {
+		if !matchesInstallation(connection, s.registrationID, event.Installation.ID) {
 			continue
 		}
 		if s.repos == nil {
@@ -346,6 +385,7 @@ func (s *GitHubWebhookService) processInstallationRepositories(
 		}
 		updated, err := s.repos.ApplyInstallationRepositories(ctx, InstallationRepositoriesChange{
 			WorkspaceID:          connection.WorkspaceID,
+			AppRegistrationID:    s.registrationID,
 			InstallationID:       event.Installation.ID,
 			ConnectionSource:     connection.Source,
 			CredentialGeneration: connection.CredentialGeneration,
@@ -379,13 +419,14 @@ func (s *GitHubWebhookService) processAuthorization(
 	if event.Action != "revoked" || event.Sender.ID <= 0 {
 		return 0, "authorization action ignored", nil
 	}
-	connections, err := s.store.ListUserConnectionsByGitHubUser(ctx, event.Sender.ID)
+	connections, err := s.store.ListUserConnectionsByAppGitHubUser(ctx, s.registrationID, event.Sender.ID)
 	if err != nil {
 		return 0, "", fmt.Errorf("load personal GitHub bindings: %w", err)
 	}
 	affected := 0
 	for _, connection := range connections {
-		if connection == nil || connection.GitHubUserID != event.Sender.ID {
+		if connection == nil || connection.AppRegistrationID != s.registrationID ||
+			connection.GitHubUserID != event.Sender.ID {
 			continue
 		}
 		if s.personalReconciler != nil {
@@ -470,7 +511,29 @@ func canApplyInstallationTransition(current ConnectionStatus, action string) boo
 	}
 }
 
-func matchesInstallation(connection *WorkspaceConnection, installationID int64) bool {
+func matchesInstallation(connection *WorkspaceConnection, registrationID string, installationID int64) bool {
 	return connection != nil && connection.Source == ConnectionSourceGitHubAppInstallation &&
+		connection.AppRegistrationID == registrationID &&
 		connection.InstallationID != nil && *connection.InstallationID == installationID
+}
+
+func (s *Store) updateAppRegistrationWebhookHealth(
+	ctx context.Context,
+	registrationID string,
+	generation int64,
+	status DeploymentAppWebhookStatus,
+	lastWebhookAt time.Time,
+	lastError string,
+) (bool, error) {
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE github_app_registrations
+		SET webhook_status = ?, last_webhook_at = ?, last_error = ?, updated_at = ?
+		WHERE id = ? AND credential_generation = ?`),
+		status, lastWebhookAt, nullString(lastError), time.Now().UTC(), registrationID, generation,
+	)
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	return count == 1, err
 }

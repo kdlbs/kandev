@@ -1,188 +1,19 @@
 package config
 
 import (
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func testGitHubAppPrivateKey(t *testing.T) string {
-	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("generate RSA key: %v", err)
-	}
-	return string(pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
-	}))
-}
-
-func completeGitHubAppConfig(t *testing.T) GitHubAppConfig {
-	t.Helper()
-	return GitHubAppConfig{
-		AppID:         123,
-		ClientID:      "Iv1.client",
-		ClientSecret:  "client-secret",
-		PrivateKey:    testGitHubAppPrivateKey(t),
-		WebhookSecret: "webhook-secret",
-		Slug:          "kandev-test",
-		PublicBaseURL: "https://kandev.example.com",
-	}
-}
-
-func TestGitHubAppConfig_AllOrNone(t *testing.T) {
-	t.Run("omitted is unavailable but valid", func(t *testing.T) {
-		cfg := minimalValidConfig()
-		if err := validate(cfg); err != nil {
-			t.Fatalf("validate omitted app: %v", err)
-		}
-		if got := cfg.GitHubApp.Availability(); got.Available || got.Configured {
-			t.Fatalf("Availability() = %+v, want unconfigured", got)
-		}
-	})
-
-	t.Run("complete is available", func(t *testing.T) {
-		cfg := minimalValidConfig()
-		cfg.GitHubApp = completeGitHubAppConfig(t)
-		if err := validate(cfg); err != nil {
-			t.Fatalf("validate complete app: %v", err)
-		}
-		got := cfg.GitHubApp.Availability()
-		if !got.Available || !got.Configured || got.Reason != "" {
-			t.Fatalf("Availability() = %+v, want available", got)
-		}
-	})
-
-	t.Run("partial is rejected without exposing values", func(t *testing.T) {
-		cfg := minimalValidConfig()
-		cfg.GitHubApp.ClientSecret = "do-not-leak"
-		err := validate(cfg)
-		if err == nil || !strings.Contains(err.Error(), "githubApp") {
-			t.Fatalf("validate partial app error = %v", err)
-		}
-		if strings.Contains(err.Error(), "do-not-leak") {
-			t.Fatalf("validation error exposed secret: %v", err)
-		}
-	})
-}
-
-func TestGitHubAppConfig_SourcePresenceAndValidation(t *testing.T) {
-	if (GitHubAppConfig{}).Configured() {
-		t.Fatal("empty GitHub App config reported configured")
-	}
-	partial := GitHubAppConfig{ClientSecret: "do-not-leak"}
-	if !partial.Configured() {
-		t.Fatal("partial GitHub App config must be authoritative")
-	}
-	if err := partial.Validate(); err == nil {
-		t.Fatal("partial GitHub App config validated")
-	} else if strings.Contains(err.Error(), partial.ClientSecret) {
-		t.Fatalf("validation error exposed secret: %v", err)
-	}
-}
-
-func TestGitHubAppConfig_PrivateKeyFileAndMultiline(t *testing.T) {
-	inline := completeGitHubAppConfig(t)
-	inlineKey, err := inline.PrivateKeyPEM()
-	if err != nil {
-		t.Fatalf("inline PrivateKeyPEM: %v", err)
-	}
-	if !strings.Contains(string(inlineKey), "BEGIN RSA PRIVATE KEY") {
-		t.Fatalf("inline key was not returned as PEM")
-	}
-
-	keyPath := filepath.Join(t.TempDir(), "app.pem")
-	if err := os.WriteFile(keyPath, inlineKey, 0o600); err != nil {
-		t.Fatalf("write key: %v", err)
-	}
-	fromFile := inline
-	fromFile.PrivateKey = ""
-	fromFile.PrivateKeyFile = keyPath
-	fileKey, err := fromFile.PrivateKeyPEM()
-	if err != nil {
-		t.Fatalf("file PrivateKeyPEM: %v", err)
-	}
-	if string(fileKey) != string(inlineKey) {
-		t.Fatalf("file key differs from inline key")
-	}
-
-	both := fromFile
-	both.PrivateKey = string(inlineKey)
-	if _, err := both.PrivateKeyPEM(); err == nil {
-		t.Fatal("expected inline and file key to be mutually exclusive")
-	}
-}
-
-func TestGitHubAppConfig_PublicBaseURLSafety(t *testing.T) {
-	tests := []struct {
-		name    string
-		baseURL string
-		wantErr bool
-	}{
-		{name: "https public", baseURL: "https://kandev.example.com"},
-		{name: "http localhost", baseURL: "http://localhost:38429"},
-		{name: "http loopback", baseURL: "http://127.0.0.1:38429"},
-		{name: "http public", baseURL: "http://kandev.example.com", wantErr: true},
-		{name: "relative", baseURL: "/callback", wantErr: true},
-		{name: "credentials", baseURL: "https://user:pass@kandev.example.com", wantErr: true},
-		{name: "query", baseURL: "https://kandev.example.com?secret=x", wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := minimalValidConfig()
-			cfg.GitHubApp = completeGitHubAppConfig(t)
-			cfg.GitHubApp.PublicBaseURL = tt.baseURL
-			err := validate(cfg)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("validate base URL %q error = %v, wantErr %v", tt.baseURL, err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestGitHubAppConfig_EnvironmentBindings(t *testing.T) {
-	app := completeGitHubAppConfig(t)
-	t.Setenv("KANDEV_GITHUB_APP_APP_ID", "123")
-	t.Setenv("KANDEV_GITHUB_APP_CLIENT_ID", app.ClientID)
-	t.Setenv("KANDEV_GITHUB_APP_CLIENT_SECRET", app.ClientSecret)
-	t.Setenv("KANDEV_GITHUB_APP_PRIVATE_KEY", strings.ReplaceAll(app.PrivateKey, "\n", "\\n"))
-	t.Setenv("KANDEV_GITHUB_APP_WEBHOOK_SECRET", app.WebhookSecret)
-	t.Setenv("KANDEV_GITHUB_APP_SLUG", app.Slug)
-	t.Setenv("KANDEV_GITHUB_APP_PUBLIC_BASE_URL", app.PublicBaseURL)
-
-	cfg, err := LoadWithPath(t.TempDir())
-	if err != nil {
-		t.Fatalf("LoadWithPath: %v", err)
-	}
-	if !cfg.GitHubApp.Availability().Available {
-		t.Fatalf("GitHubApp availability = %+v", cfg.GitHubApp.Availability())
-	}
-	key, err := cfg.GitHubApp.PrivateKeyPEM()
-	if err != nil {
-		t.Fatalf("PrivateKeyPEM: %v", err)
-	}
-	if !strings.Contains(string(key), "\n") {
-		t.Fatal("escaped environment private key was not normalized")
-	}
-}
-
-func TestGitHubCredentialBrokerConfigIsIndependentFromGitHubApp(t *testing.T) {
+func TestGitHubCredentialBrokerConfigValidation(t *testing.T) {
 	cfg := minimalValidConfig()
 	cfg.GitHubCredentialBroker.PublicBaseURL = "https://kandev.example.com"
 	if err := validate(cfg); err != nil {
 		t.Fatalf("validate broker-only config: %v", err)
 	}
-	if availability := cfg.GitHubApp.Availability(); availability.Configured || availability.Available {
-		t.Fatalf("broker URL must not configure GitHub App: %+v", availability)
-	}
-
 	cfg.GitHubCredentialBroker.PublicBaseURL = "http://kandev.example.com"
 	if err := validate(cfg); err == nil || !strings.Contains(err.Error(), "githubCredentialBroker.publicBaseUrl") {
 		t.Fatalf("validate insecure broker URL error = %v", err)

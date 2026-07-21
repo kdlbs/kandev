@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type repositoryVisibilityClient struct {
@@ -102,14 +103,18 @@ func TestCredentialCacheScopeSeparatesWorkspacePrincipalAndGeneration(t *testing
 			Kind:        AuthPrincipalHuman,
 			Login:       "octocat",
 		},
-		CredentialGeneration: 1,
+		CredentialGeneration:    1,
+		AppRegistrationID:       "registration-a",
+		AppCredentialGeneration: 7,
 	}
 	baseScope := credentialCacheScope(base, CredentialPurposePersonalRead)
 
 	variants := []*ResolvedCredential{
-		{Principal: AuthPrincipal{WorkspaceID: "workspace-b", UserID: "user-a", Source: ConnectionSourcePAT, Kind: AuthPrincipalHuman, Login: "octocat"}, CredentialGeneration: 1},
-		{Principal: AuthPrincipal{WorkspaceID: "workspace-a", UserID: "user-b", Source: ConnectionSourcePAT, Kind: AuthPrincipalHuman, Login: "octocat"}, CredentialGeneration: 1},
-		{Principal: base.Principal, CredentialGeneration: 2},
+		{Principal: AuthPrincipal{WorkspaceID: "workspace-b", UserID: "user-a", Source: ConnectionSourcePAT, Kind: AuthPrincipalHuman, Login: "octocat"}, CredentialGeneration: 1, AppRegistrationID: "registration-a", AppCredentialGeneration: 7},
+		{Principal: AuthPrincipal{WorkspaceID: "workspace-a", UserID: "user-b", Source: ConnectionSourcePAT, Kind: AuthPrincipalHuman, Login: "octocat"}, CredentialGeneration: 1, AppRegistrationID: "registration-a", AppCredentialGeneration: 7},
+		{Principal: base.Principal, CredentialGeneration: 2, AppRegistrationID: "registration-a", AppCredentialGeneration: 7},
+		{Principal: base.Principal, CredentialGeneration: 1, AppRegistrationID: "registration-b", AppCredentialGeneration: 7},
+		{Principal: base.Principal, CredentialGeneration: 1, AppRegistrationID: "registration-a", AppCredentialGeneration: 8},
 	}
 	for _, variant := range variants {
 		if got := credentialCacheScope(variant, CredentialPurposePersonalRead); got == baseScope {
@@ -201,6 +206,11 @@ func TestCheckReviewWatchDisablesAppWatchWithoutTargetBeforeProviderCall(t *test
 		t.Fatalf("seed workspace: %v", err)
 	}
 	installationID := int64(123)
+	if err := store.UpsertDeploymentAppRegistration(
+		ctx, newAppRegistration("registration-watch", 123, "Watch App", time.Now().UTC()),
+	); err != nil {
+		t.Fatalf("seed App registration: %v", err)
+	}
 	if err := store.UpsertWorkspaceConnection(ctx, &WorkspaceConnection{
 		WorkspaceID:              "workspace-app",
 		Source:                   ConnectionSourceGitHubAppInstallation,
@@ -209,6 +219,7 @@ func TestCheckReviewWatchDisablesAppWatchWithoutTargetBeforeProviderCall(t *test
 		InstallationID:           &installationID,
 		InstallationAccountLogin: "octo-org",
 		InstallationAccountType:  "Organization",
+		AppRegistrationID:        "registration-watch",
 	}); err != nil {
 		t.Fatalf("upsert workspace connection: %v", err)
 	}
@@ -407,12 +418,14 @@ func personalBoundaryTestServiceWithClients(
 		workspaces: map[string]*WorkspaceConnection{
 			"workspace-1": {
 				WorkspaceID: "workspace-1", Source: ConnectionSourceGitHubAppInstallation,
-				InstallationID: &installationID, Status: ConnectionStatusActive, CredentialGeneration: 1,
+				InstallationID: &installationID, AppRegistrationID: "registration-test",
+				Status: ConnectionStatusActive, CredentialGeneration: 1,
 			},
 		},
 		users: map[string]*UserConnection{
 			"workspace-1:user-1": {
-				WorkspaceID: "workspace-1", UserID: "user-1", Login: "octocat",
+				WorkspaceID: "workspace-1", UserID: "user-1",
+				AppRegistrationID: "registration-test", Login: "octocat",
 				Status: ConnectionStatusActive, CredentialGeneration: 1,
 			},
 		},

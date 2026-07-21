@@ -388,8 +388,11 @@ func initGitHubService(
 		// service needs the mutating one wired explicitly.
 		svc.SetSecretManager(adapter)
 		svc.SetConnectionSecretStore(secretadapter.New(secretsStore))
-		if authErr := svc.InitializeDeploymentAppRegistration(context.Background(), cfg.GitHubApp); authErr != nil {
-			log.Warn("GitHub App authentication initialization failed", zap.Error(authErr))
+		if authErr := svc.InitializeAppRegistrationLifecycle(); authErr != nil {
+			log.Warn("GitHub App registration lifecycle failed to initialize", zap.Error(authErr))
+		}
+		if authErr := svc.InitializeAppRegistrationRuntimes(context.Background()); authErr != nil {
+			log.Warn("one or more GitHub App registrations failed to initialize", zap.Error(authErr))
 		}
 	}
 	return svc

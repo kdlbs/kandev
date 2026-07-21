@@ -185,7 +185,7 @@ func TestPersonalAuthStartUsesPKCEAndWorkspaceAppBoundary(t *testing.T) {
 	flows.random = strings.NewReader(strings.Repeat("g", oauthRandomBytes*2))
 	repo := &personalAuthMemoryRepository{workspace: activeAppWorkspace("workspace-1", 42)}
 	service := NewPersonalAuthService(
-		PersonalAuthConfig{ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
+		PersonalAuthConfig{RegistrationID: "registration-test", ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
 		flows, repo, &personalOAuthRemote{},
 	)
 
@@ -220,7 +220,7 @@ func TestPersonalAuthCompleteAtomicallyStoresVerifiedIdentity(t *testing.T) {
 		user: GitHubOAuthUser{ID: 11, Login: "octocat"}, canAccess: true,
 	}}
 	service := NewPersonalAuthService(
-		PersonalAuthConfig{ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
+		PersonalAuthConfig{RegistrationID: "registration-test", ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
 		flows, repo, remote,
 	)
 	service.now = func() time.Time { return now }
@@ -252,7 +252,7 @@ func TestPersonalAuthCompleteRejectsUserOutsideWorkspaceInstallation(t *testing.
 		user:   GitHubOAuthUser{ID: 11, Login: "outsider"}, canAccess: false,
 	}}
 	service := NewPersonalAuthService(
-		PersonalAuthConfig{ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
+		PersonalAuthConfig{RegistrationID: "registration-test", ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
 		flows, repo, remote,
 	)
 	service.now = func() time.Time { return now }
@@ -282,7 +282,7 @@ func TestPersonalAuthCompleteCannotSurviveWorkspaceSwitchToPAT(t *testing.T) {
 		user: GitHubOAuthUser{ID: 11, Login: "octocat"}, canAccess: true,
 	}}
 	service := NewPersonalAuthService(
-		PersonalAuthConfig{ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
+		PersonalAuthConfig{RegistrationID: "registration-test", ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
 		flows, repo, remote,
 	)
 	service.now = func() time.Time { return now }
@@ -316,7 +316,7 @@ func TestPersonalAuthCompletionRacingPATSwitchLeavesNoPersonalConnection(t *test
 		exchangeStarted: make(chan struct{}, 1), releaseExchange: make(chan struct{}),
 	}}
 	service := NewPersonalAuthService(
-		PersonalAuthConfig{ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
+		PersonalAuthConfig{RegistrationID: "registration-test", ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
 		flows, repo, remote,
 	)
 	service.now = func() time.Time { return now }
@@ -367,7 +367,8 @@ func TestPersonalAuthCompleteCannotOverwriteNewerReconnect(t *testing.T) {
 	repo := &personalAuthMemoryRepository{
 		workspace: activeAppWorkspace("workspace-1", 42),
 		connection: &UserConnection{
-			WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 11, Login: "old",
+			WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-test",
+			GitHubUserID: 11, Login: "old",
 			Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour), CredentialGeneration: 1,
 		},
 	}
@@ -378,7 +379,7 @@ func TestPersonalAuthCompleteCannotOverwriteNewerReconnect(t *testing.T) {
 		user: GitHubOAuthUser{ID: 11, Login: "old"}, canAccess: true,
 	}}
 	service := NewPersonalAuthService(
-		PersonalAuthConfig{ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
+		PersonalAuthConfig{RegistrationID: "registration-test", ClientID: "Iv1.client", CallbackURL: "https://kandev.example/personal/callback"},
 		flows, repo, remote,
 	)
 	service.now = func() time.Time { return now }
@@ -390,7 +391,8 @@ func TestPersonalAuthCompleteCannotOverwriteNewerReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	reconnected := &UserConnection{
-		WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 11, Login: "new",
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-test",
+		GitHubUserID: 11, Login: "new",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(2 * time.Hour), CredentialGeneration: 3,
 	}
 	if err := repo.ReplacePersonalConnection(context.Background(), reconnected, GitHubOAuthTokens{
@@ -413,7 +415,8 @@ func TestPersonalAuthRefreshFailureDoesNotReplaceUsableSecrets(t *testing.T) {
 	repo := &personalAuthMemoryRepository{
 		workspace: activeAppWorkspace("workspace-1", 42),
 		connection: &UserConnection{
-			WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 11, Login: "octocat",
+			WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-test",
+			GitHubUserID: 11, Login: "octocat",
 			Status: ConnectionStatusActive, AccessExpiresAt: oldTokens.AccessExpiresAt, CredentialGeneration: 4,
 		},
 		tokens: oldTokens, replaceErr: errors.New("atomic repository commit failed"),
@@ -424,7 +427,7 @@ func TestPersonalAuthRefreshFailureDoesNotReplaceUsableSecrets(t *testing.T) {
 			AccessToken: "new-access", RefreshToken: "new-refresh", AccessExpiresAt: now.Add(8 * time.Hour),
 		},
 	}
-	service := NewPersonalAuthService(PersonalAuthConfig{}, nil, repo, remote)
+	service := NewPersonalAuthService(PersonalAuthConfig{RegistrationID: "registration-test"}, nil, repo, remote)
 	service.now = func() time.Time { return now }
 
 	_, _, err := service.ResolvePersonalToken(context.Background(), "workspace-1", "user-1")
@@ -438,7 +441,8 @@ func TestPersonalAuthRefreshRevokesEffectiveAuthWhenInstallationAccessIsLost(t *
 	repo := &personalAuthMemoryRepository{
 		workspace: activeAppWorkspace("workspace-1", 42),
 		connection: &UserConnection{
-			WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 11, Login: "octocat",
+			WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-test",
+			GitHubUserID: 11, Login: "octocat",
 			Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Minute), CredentialGeneration: 2,
 		},
 		tokens: GitHubOAuthTokens{AccessToken: "old", RefreshToken: "refresh", AccessExpiresAt: now.Add(time.Minute)},
@@ -447,7 +451,7 @@ func TestPersonalAuthRefreshRevokesEffectiveAuthWhenInstallationAccessIsLost(t *
 		fakeGitHubAppOAuth: fakeGitHubAppOAuth{user: GitHubOAuthUser{ID: 11, Login: "octocat"}, canAccess: false},
 		refreshed:          GitHubOAuthTokens{AccessToken: "new", RefreshToken: "new-refresh", AccessExpiresAt: now.Add(time.Hour)},
 	}
-	service := NewPersonalAuthService(PersonalAuthConfig{}, nil, repo, remote)
+	service := NewPersonalAuthService(PersonalAuthConfig{RegistrationID: "registration-test"}, nil, repo, remote)
 	service.now = func() time.Time { return now }
 	_, _, err := service.ResolvePersonalToken(context.Background(), "workspace-1", "user-1")
 	if !errors.Is(err, ErrInstallationAssociationUnverified) || !repo.invalidated || repo.tokens.AccessToken != "old" {
@@ -460,7 +464,8 @@ func TestPersonalAuthRefreshRejectsChangedGitHubUser(t *testing.T) {
 	repo := &personalAuthMemoryRepository{
 		workspace: activeAppWorkspace("workspace-1", 42),
 		connection: &UserConnection{
-			WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 11, Login: "octocat",
+			WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-test",
+			GitHubUserID: 11, Login: "octocat",
 			Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Minute), CredentialGeneration: 2,
 		},
 		tokens: GitHubOAuthTokens{AccessToken: "old", RefreshToken: "refresh", AccessExpiresAt: now.Add(time.Minute)},
@@ -469,7 +474,7 @@ func TestPersonalAuthRefreshRejectsChangedGitHubUser(t *testing.T) {
 		fakeGitHubAppOAuth: fakeGitHubAppOAuth{user: GitHubOAuthUser{ID: 99, Login: "attacker"}},
 		refreshed:          GitHubOAuthTokens{AccessToken: "new", RefreshToken: "new-refresh", AccessExpiresAt: now.Add(time.Hour)},
 	}
-	service := NewPersonalAuthService(PersonalAuthConfig{}, nil, repo, remote)
+	service := NewPersonalAuthService(PersonalAuthConfig{RegistrationID: "registration-test"}, nil, repo, remote)
 	service.now = func() time.Time { return now }
 	_, _, err := service.ResolvePersonalToken(context.Background(), "workspace-1", "user-1")
 	if !errors.Is(err, ErrPersonalIdentityChanged) || !repo.invalidated || repo.tokens.AccessToken != "old" {
@@ -487,7 +492,7 @@ func TestPersonalAuthRefreshCoalescesConcurrentCallers(t *testing.T) {
 		},
 		started: make(chan struct{}, 1), release: make(chan struct{}),
 	}
-	service := NewPersonalAuthService(PersonalAuthConfig{}, nil, repo, remote)
+	service := NewPersonalAuthService(PersonalAuthConfig{RegistrationID: "registration-test"}, nil, repo, remote)
 	service.now = func() time.Time { return now }
 
 	type result struct {
@@ -526,7 +531,7 @@ func TestPersonalAuthRefreshCallerCancellationDoesNotCancelSharedRotation(t *tes
 		},
 		started: make(chan struct{}, 1), release: make(chan struct{}),
 	}
-	service := NewPersonalAuthService(PersonalAuthConfig{}, nil, repo, remote)
+	service := NewPersonalAuthService(PersonalAuthConfig{RegistrationID: "registration-test"}, nil, repo, remote)
 	service.now = func() time.Time { return now }
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -550,7 +555,7 @@ func TestPersonalAuthTransientRefreshFailureDoesNotInvalidateConnection(t *testi
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	repo := expiringPersonalAuthRepository(now)
 	remote := &personalOAuthRemote{refreshErr: errors.New("temporary network failure")}
-	service := NewPersonalAuthService(PersonalAuthConfig{}, nil, repo, remote)
+	service := NewPersonalAuthService(PersonalAuthConfig{RegistrationID: "registration-test"}, nil, repo, remote)
 	service.now = func() time.Time { return now }
 
 	if _, _, err := service.ResolvePersonalToken(context.Background(), "workspace-1", "user-1"); err == nil {
@@ -565,7 +570,7 @@ func TestPersonalAuthInvalidGrantRefreshFailureInvalidatesConnection(t *testing.
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	repo := expiringPersonalAuthRepository(now)
 	remote := &personalOAuthRemote{refreshErr: &GitHubOAuthError{Code: "invalid_grant"}}
-	service := NewPersonalAuthService(PersonalAuthConfig{}, nil, repo, remote)
+	service := NewPersonalAuthService(PersonalAuthConfig{RegistrationID: "registration-test"}, nil, repo, remote)
 	service.now = func() time.Time { return now }
 
 	if _, _, err := service.ResolvePersonalToken(context.Background(), "workspace-1", "user-1"); err == nil {
@@ -586,7 +591,7 @@ func TestPersonalAuthRevokeWinsRaceWithRefresh(t *testing.T) {
 		},
 		started: make(chan struct{}, 1), release: make(chan struct{}),
 	}
-	service := NewPersonalAuthService(PersonalAuthConfig{}, nil, repo, remote)
+	service := NewPersonalAuthService(PersonalAuthConfig{RegistrationID: "registration-test"}, nil, repo, remote)
 	service.now = func() time.Time { return now }
 
 	done := make(chan error, 1)
@@ -612,7 +617,8 @@ func TestPersonalAuthRevokeWinsRaceWithRefresh(t *testing.T) {
 func TestPersonalAuthorizationLateRevokeDoesNotDeleteReconnect(t *testing.T) {
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	current := &UserConnection{
-		WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 11, Login: "octocat",
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-test",
+		GitHubUserID: 11, Login: "octocat",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour),
 		CredentialGeneration: 2, UpdatedAt: now.Add(time.Second),
 	}
@@ -623,7 +629,7 @@ func TestPersonalAuthorizationLateRevokeDoesNotDeleteReconnect(t *testing.T) {
 		},
 	}
 	service := NewPersonalAuthService(
-		PersonalAuthConfig{}, nil, repo,
+		PersonalAuthConfig{RegistrationID: "registration-test"}, nil, repo,
 		&personalOAuthRemote{fakeGitHubAppOAuth: fakeGitHubAppOAuth{
 			user: GitHubOAuthUser{ID: 11, Login: "octocat"},
 		}},
@@ -636,11 +642,26 @@ func TestPersonalAuthorizationLateRevokeDoesNotDeleteReconnect(t *testing.T) {
 	}
 }
 
+func TestPersonalConnectionVersionIncludesAppRegistration(t *testing.T) {
+	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	expected := &UserConnection{
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-work",
+		GitHubUserID: 11, CredentialGeneration: 2, UpdatedAt: now,
+	}
+	current := *expected
+	current.AppRegistrationID = "registration-personal"
+
+	if sameUserConnectionVersion(&current, expected) {
+		t.Fatal("connections from different App registrations matched")
+	}
+}
+
 func expiringPersonalAuthRepository(now time.Time) *personalAuthMemoryRepository {
 	return &personalAuthMemoryRepository{
 		workspace: activeAppWorkspace("workspace-1", 42),
 		connection: &UserConnection{
-			WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 11, Login: "octocat",
+			WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-test",
+			GitHubUserID: 11, Login: "octocat",
 			Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Minute), CredentialGeneration: 2,
 		},
 		tokens: GitHubOAuthTokens{
@@ -653,6 +674,7 @@ func activeAppWorkspace(workspaceID string, installationID int64) *WorkspaceConn
 	return &WorkspaceConnection{
 		WorkspaceID: workspaceID, Source: ConnectionSourceGitHubAppInstallation,
 		GitHubHost: defaultGitHubHost, InstallationID: &installationID,
+		AppRegistrationID:        "registration-test",
 		InstallationAccountLogin: "acme", InstallationAccountType: "Organization",
 		Status: ConnectionStatusActive, CredentialGeneration: 1,
 	}

@@ -134,16 +134,4 @@ describe("SettingsLayoutClient integrations actions", () => {
       "safe-area-inset-bottom",
     );
   });
-
-  it("preserves GitHub branding in the deployment App breadcrumb", () => {
-    pathname = "/settings/system/github-app";
-
-    render(
-      <SettingsLayoutClient>
-        <div>GitHub App settings</div>
-      </SettingsLayoutClient>,
-    );
-
-    expect(screen.getByTestId("page-topbar-title").textContent).toBe("GitHub App");
-  });
 });

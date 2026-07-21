@@ -58,7 +58,7 @@ func TestDeploymentAppManifestExactPolicyAndURLs(t *testing.T) {
 		!manifest.HookAttributes.Active {
 		t.Fatalf("manifest URLs = %+v", manifest)
 	}
-	if !manifest.Public || !manifest.RequestOAuthOnInstall || manifest.SetupOnUpdate {
+	if manifest.Public || !manifest.RequestOAuthOnInstall || manifest.SetupOnUpdate {
 		t.Fatalf("manifest flags = public:%v oauth:%v setup_on_update:%v",
 			manifest.Public, manifest.RequestOAuthOnInstall, manifest.SetupOnUpdate)
 	}
@@ -80,6 +80,56 @@ func TestDeploymentAppManifestExactPolicyAndURLs(t *testing.T) {
 	wantEvents := []string{"installation", "installation_repositories", "github_app_authorization"}
 	if !reflect.DeepEqual(manifest.DefaultEvents, wantEvents) {
 		t.Fatalf("DefaultEvents = %#v, want %#v", manifest.DefaultEvents, wantEvents)
+	}
+}
+
+func TestDeploymentAppManifestUsesPreallocatedRegistrationRoutes(t *testing.T) {
+	const registrationID = "11111111-1111-4111-8111-111111111111"
+	submission, err := BuildAppRegistrationManifest(AppRegistrationManifestRequest{
+		RegistrationID: registrationID,
+		OwnerType:      ManifestOwnerOrganization, OwnerLogin: "acme",
+		PublicBaseURL: "https://kandev.example",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrefix := "https://kandev.example/api/v1/github/app/registrations/" + registrationID
+	manifest := submission.Manifest
+	if manifest.RedirectURL != wantPrefix+"/manifest/callback" ||
+		manifest.SetupURL != wantPrefix+"/install/callback" ||
+		manifest.HookAttributes.URL != wantPrefix+"/webhook" ||
+		!reflect.DeepEqual(manifest.CallbackURLs, []string{wantPrefix + "/personal/callback"}) {
+		t.Fatalf("registration-specific manifest URLs = %+v", manifest)
+	}
+	if manifest.Public {
+		t.Fatal("manifest without explicit visibility is public")
+	}
+}
+
+func TestDeploymentAppManifestRequiresExplicitPublicVisibility(t *testing.T) {
+	request := AppRegistrationManifestRequest{
+		RegistrationID: "33333333-3333-4333-8333-333333333333",
+		OwnerType:      ManifestOwnerUser, OwnerLogin: "octocat",
+		PublicBaseURL: "https://kandev.example",
+	}
+	privateSubmission, err := BuildAppRegistrationManifest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if privateSubmission.Manifest.Public {
+		t.Fatal("default manifest visibility is public")
+	}
+	request.Visibility = AppRegistrationVisibilityPublic
+	publicSubmission, err := BuildAppRegistrationManifest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !publicSubmission.Manifest.Public {
+		t.Fatal("explicit public manifest visibility was ignored")
+	}
+	request.Visibility = "marketplace"
+	if _, err := BuildAppRegistrationManifest(request); !errors.Is(err, ErrAppRegistrationVisibilityInvalid) {
+		t.Fatalf("invalid visibility error = %v", err)
 	}
 }
 

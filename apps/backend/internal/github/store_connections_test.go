@@ -15,6 +15,7 @@ import (
 func TestStoreWorkspaceConnectionRoundTrip(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "ws-1")
+	seedStoreAppRegistration(t, store)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 	installationID := int64(12345)
@@ -25,6 +26,7 @@ func TestStoreWorkspaceConnectionRoundTrip(t *testing.T) {
 		InstallationID:           &installationID,
 		InstallationAccountLogin: "acme",
 		InstallationAccountType:  "Organization",
+		AppRegistrationID:        "registration-store-test",
 		Status:                   ConnectionStatusActive,
 		CredentialGeneration:     3,
 		CreatedAt:                now,
@@ -46,6 +48,7 @@ func TestStoreWorkspaceConnectionRoundTrip(t *testing.T) {
 	connection.InstallationID = nil
 	connection.InstallationAccountLogin = ""
 	connection.InstallationAccountType = ""
+	connection.AppRegistrationID = ""
 	connection.Login = "octocat"
 	connection.CredentialGeneration = 4
 	if err := store.UpsertWorkspaceConnection(ctx, connection); err != nil {
@@ -63,13 +66,15 @@ func TestStoreWorkspaceConnectionRoundTrip(t *testing.T) {
 func TestStoreInstallationTransitionRejectsReplacedWorkspaceConnection(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "ws-1")
+	seedStoreAppRegistration(t, store)
 	ctx := context.Background()
 	installationID := int64(12345)
 	expected := &WorkspaceConnection{
 		WorkspaceID: "ws-1", Source: ConnectionSourceGitHubAppInstallation,
 		GitHubHost: "github.com", InstallationID: &installationID,
 		InstallationAccountLogin: "acme", InstallationAccountType: "Organization",
-		Status: ConnectionStatusActive, CredentialGeneration: 2,
+		AppRegistrationID: "registration-store-test",
+		Status:            ConnectionStatusActive, CredentialGeneration: 2,
 	}
 	if err := store.UpsertWorkspaceConnection(ctx, expected); err != nil {
 		t.Fatal(err)
@@ -100,12 +105,14 @@ func TestStoreInstallationTransitionRejectsReplacedWorkspaceConnection(t *testin
 func TestStoreUserConnectionRoundTrip(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "ws-1")
+	seedStoreAppRegistration(t, store)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 	refreshExpiry := now.Add(30 * 24 * time.Hour)
 	connection := &UserConnection{
 		WorkspaceID:          "ws-1",
 		UserID:               "default-user",
+		AppRegistrationID:    "registration-store-test",
 		GitHubUserID:         42,
 		Login:                "octocat",
 		Status:               ConnectionStatusActive,
@@ -114,6 +121,15 @@ func TestStoreUserConnectionRoundTrip(t *testing.T) {
 		CredentialGeneration: 2,
 		CreatedAt:            now,
 		UpdatedAt:            now,
+	}
+	installationID := int64(12345)
+	if err := store.UpsertWorkspaceConnection(ctx, &WorkspaceConnection{
+		WorkspaceID: "ws-1", Source: ConnectionSourceGitHubAppInstallation,
+		GitHubHost: "github.com", InstallationID: &installationID,
+		InstallationAccountLogin: "acme", InstallationAccountType: "Organization",
+		AppRegistrationID: "registration-store-test", Status: ConnectionStatusActive,
+	}); err != nil {
+		t.Fatal(err)
 	}
 
 	if err := store.UpsertUserConnection(ctx, connection); err != nil {
@@ -139,6 +155,7 @@ func TestStoreUserConnectionRoundTrip(t *testing.T) {
 func TestStoreListsConnectionsByGitHubPrincipal(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "ws-1", "ws-2", "ws-other")
+	seedStoreAppRegistration(t, store)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	installationID := int64(12345)
@@ -150,7 +167,8 @@ func TestStoreListsConnectionsByGitHubPrincipal(t *testing.T) {
 			WorkspaceID: workspaceID, Source: ConnectionSourceGitHubAppInstallation,
 			GitHubHost: "github.com", InstallationID: appInstallationID,
 			InstallationAccountLogin: "acme", InstallationAccountType: "Organization",
-			Status: ConnectionStatusActive, CreatedAt: now,
+			AppRegistrationID: "registration-store-test",
+			Status:            ConnectionStatusActive, CreatedAt: now,
 		}); err != nil {
 			t.Fatalf("seed workspace connection %s: %v", workspaceID, err)
 		}
@@ -158,7 +176,8 @@ func TestStoreListsConnectionsByGitHubPrincipal(t *testing.T) {
 	for workspaceID, githubUserID := range map[string]int64{"ws-1": 42, "ws-2": 42, "ws-other": 99} {
 		if err := store.UpsertUserConnection(ctx, &UserConnection{
 			WorkspaceID: workspaceID, UserID: "default-user", GitHubUserID: githubUserID,
-			Login: "octocat", Status: ConnectionStatusActive,
+			AppRegistrationID: "registration-store-test",
+			Login:             "octocat", Status: ConnectionStatusActive,
 			AccessExpiresAt: now.Add(time.Hour), CreatedAt: now,
 		}); err != nil {
 			t.Fatalf("seed user connection %s: %v", workspaceID, err)
@@ -316,19 +335,33 @@ func TestStorePersistsWorkspaceOwnershipOnNewPRRecords(t *testing.T) {
 func TestStoreDeleteWorkspaceAuthData(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "ws-1")
+	seedStoreAppRegistration(t, store)
 	ctx := context.Background()
 	now := time.Now().UTC()
+	installationID := int64(42)
 	if err := store.UpsertWorkspaceConnection(ctx, &WorkspaceConnection{
-		WorkspaceID: "ws-1", Source: ConnectionSourcePAT, GitHubHost: "github.com", Login: "octocat",
+		WorkspaceID: "ws-1", Source: ConnectionSourceGitHubAppInstallation, GitHubHost: "github.com",
+		InstallationID: &installationID, InstallationAccountLogin: "acme",
+		InstallationAccountType: "Organization", AppRegistrationID: "registration-store-test",
 		Status: ConnectionStatusActive, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("seed workspace connection: %v", err)
 	}
 	if err := store.UpsertUserConnection(ctx, &UserConnection{
-		WorkspaceID: "ws-1", UserID: "user-1", GitHubUserID: 1, Login: "octocat",
+		WorkspaceID: "ws-1", UserID: "user-1", AppRegistrationID: "registration-store-test",
+		GitHubUserID: 1, Login: "octocat",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("seed user connection: %v", err)
+	}
+	if err := store.CreateDeploymentAppRegistrationFlow(ctx, &DeploymentAppRegistrationFlow{
+		StateHash: "registration-state", RegistrationID: "pending-registration", WorkspaceID: "ws-1",
+		UserID: "user-1", OwnerType: AppRegistrationOwnerOrganization, OwnerLogin: "acme",
+		DisplayName: "Pending", Visibility: AppRegistrationVisibilityPrivate,
+		PublicBaseURL: "https://kandev.example.com", ManifestRevision: 1,
+		ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed registration flow: %v", err)
 	}
 
 	if err := store.DeleteWorkspaceAuthData(ctx, "ws-1"); err != nil {
@@ -341,6 +374,10 @@ func TestStoreDeleteWorkspaceAuthData(t *testing.T) {
 	user, err := store.GetUserConnection(ctx, "ws-1", "user-1")
 	if err != nil || user != nil {
 		t.Fatalf("user connection after delete = %+v, err %v", user, err)
+	}
+	flow, err := store.GetDeploymentAppRegistrationFlow(ctx, "registration-state")
+	if err != nil || flow != nil {
+		t.Fatalf("registration flow after delete = %+v, err %v", flow, err)
 	}
 }
 
@@ -359,19 +396,25 @@ func TestGitHubSecretKeysAreWorkspaceAndUserScoped(t *testing.T) {
 func TestStoreAuthFlowIsSingleUse(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "ws-1")
+	seedStoreAppRegistration(t, store)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	if err := store.CreateAuthFlow(ctx, &AuthFlow{
 		StateHash: "state-hash", WorkspaceID: "ws-1", UserID: "user-1",
-		Kind: AuthFlowKindPersonal, PKCEVerifier: "verifier", ExpiresAt: now.Add(time.Minute),
+		AppRegistrationID: "registration-store-test",
+		Kind:              AuthFlowKindPersonal, PKCEVerifier: "verifier", ExpiresAt: now.Add(time.Minute),
 	}); err != nil {
 		t.Fatalf("create auth flow: %v", err)
 	}
-	flow, err := store.ConsumeAuthFlow(ctx, "state-hash", now)
+	flow, err := store.ConsumeAuthFlow(
+		ctx, "state-hash", "registration-store-test", AuthFlowKindPersonal, now,
+	)
 	if err != nil || flow == nil || flow.ConsumedAt == nil {
 		t.Fatalf("consume auth flow = %+v, err %v", flow, err)
 	}
-	if _, err := store.ConsumeAuthFlow(ctx, "state-hash", now); !errors.Is(err, ErrAuthFlowUnavailable) {
+	if _, err := store.ConsumeAuthFlow(
+		ctx, "state-hash", "registration-store-test", AuthFlowKindPersonal, now,
+	); !errors.Is(err, ErrAuthFlowUnavailable) {
 		t.Fatalf("reconsume auth flow error = %v, want %v", err, ErrAuthFlowUnavailable)
 	}
 }
@@ -399,9 +442,11 @@ func TestStoreMigratesAndPersistsAuthFlowExpectations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedStoreAppRegistration(t, store)
 	installationID := int64(42)
 	flow := &AuthFlow{
 		StateHash: "state", WorkspaceID: "ws-1", UserID: "user-1", Kind: AuthFlowKindPersonal,
+		AppRegistrationID:           "registration-store-test",
 		ExpectedWorkspaceSource:     ConnectionSourceGitHubAppInstallation,
 		ExpectedWorkspaceGeneration: 3, ExpectedInstallationID: &installationID,
 		ExpectedPersonalGeneration: 7, ExpiresAt: time.Now().UTC().Add(time.Minute),
@@ -422,8 +467,11 @@ func TestStoreMigratesAndPersistsAuthFlowExpectations(t *testing.T) {
 
 func TestStoreWebhookDeliveryDeduplicates(t *testing.T) {
 	store := newTestStore(t)
+	seedStoreAppRegistration(t, store)
 	ctx := context.Background()
-	delivery := &WebhookDelivery{DeliveryID: "delivery-1", Event: "installation"}
+	delivery := &WebhookDelivery{
+		AppRegistrationID: "registration-store-test", DeliveryID: "delivery-1", Event: "installation",
+	}
 	inserted, err := store.RecordWebhookDelivery(ctx, delivery)
 	if err != nil || !inserted {
 		t.Fatalf("record first delivery: inserted %v, err %v", inserted, err)
@@ -436,10 +484,12 @@ func TestStoreWebhookDeliveryDeduplicates(t *testing.T) {
 
 func TestStoreWebhookDeliveryClaimRetriesOnlyFailedOrStale(t *testing.T) {
 	store := newTestStore(t)
+	seedStoreAppRegistration(t, store)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	delivery := &WebhookDelivery{
-		DeliveryID: "delivery-claim", Event: "installation", Status: WebhookDeliveryStatusReceived,
+		AppRegistrationID: "registration-store-test", DeliveryID: "delivery-claim",
+		Event: "installation", Status: WebhookDeliveryStatusReceived,
 		ReceivedAt: now,
 	}
 	claim, err := store.ClaimWebhookDelivery(ctx, delivery, now.Add(-time.Minute))
@@ -511,6 +561,7 @@ func seedConnectionWorkspaces(t *testing.T, store *Store, workspaceIDs ...string
 func TestStoreWorkspaceConnectionHealthIncludesDisconnectedWorkspaces(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "ws-active", "ws-invalid", "ws-suspended", "ws-disconnected")
+	seedStoreAppRegistration(t, store)
 	ctx := context.Background()
 	installationID := int64(42)
 	for _, connection := range []*WorkspaceConnection{
@@ -518,7 +569,8 @@ func TestStoreWorkspaceConnectionHealthIncludesDisconnectedWorkspaces(t *testing
 		{WorkspaceID: "ws-invalid", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "invalid", Status: ConnectionStatusInvalid},
 		{WorkspaceID: "ws-suspended", Source: ConnectionSourceGitHubAppInstallation, GitHubHost: defaultGitHubHost,
 			InstallationID: &installationID, InstallationAccountLogin: "acme", InstallationAccountType: "Organization",
-			Status: ConnectionStatusSuspended},
+			AppRegistrationID: "registration-store-test",
+			Status:            ConnectionStatusSuspended},
 	} {
 		if err := store.UpsertWorkspaceConnection(ctx, connection); err != nil {
 			t.Fatalf("UpsertWorkspaceConnection(%s): %v", connection.WorkspaceID, err)
@@ -531,6 +583,16 @@ func TestStoreWorkspaceConnectionHealthIncludesDisconnectedWorkspaces(t *testing
 	if health.WorkspaceCount != 4 || health.Active != 1 || health.Invalid != 1 ||
 		health.Suspended != 1 || health.Disconnected != 1 || health.Revoked != 0 {
 		t.Fatalf("GetWorkspaceConnectionHealth() = %+v", health)
+	}
+}
+
+func seedStoreAppRegistration(t *testing.T, store *Store) {
+	t.Helper()
+	registration := newAppRegistration(
+		"registration-store-test", 654, "Store test", time.Now().UTC(),
+	)
+	if err := store.UpsertDeploymentAppRegistration(context.Background(), registration); err != nil {
+		t.Fatalf("seed Store App registration: %v", err)
 	}
 }
 

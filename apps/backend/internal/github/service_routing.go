@@ -79,13 +79,15 @@ func (s *Service) resolveServiceClient(
 func credentialCacheScope(resolved *ResolvedCredential, purpose CredentialPurpose) string {
 	principal := resolved.Principal
 	return fmt.Sprintf(
-		"%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d|%d|%d:%s",
+		"%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d|%d|%d:%s|%d|%d:%s",
 		len(principal.WorkspaceID), principal.WorkspaceID,
 		len(principal.UserID), principal.UserID,
 		len(principal.Source), principal.Source,
 		len(principal.Kind), principal.Kind,
 		len(principal.Login), principal.Login,
 		principal.InstallationID, resolved.CredentialGeneration,
+		len(resolved.AppRegistrationID), resolved.AppRegistrationID,
+		resolved.AppCredentialGeneration,
 		len(purpose), purpose,
 	)
 }

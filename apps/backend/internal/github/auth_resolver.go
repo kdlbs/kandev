@@ -31,6 +31,10 @@ type installationCredentialProvider interface {
 	) (*ResolvedCredential, error)
 }
 
+type appCredentialGenerationProvider interface {
+	AppCredentialGeneration(registrationID string) (int64, bool)
+}
+
 type userCredentialProvider interface {
 	ResolveUser(
 		ctx context.Context,
@@ -51,12 +55,14 @@ type legacyCredentialFactory func(ctx context.Context) (Client, string, error)
 type ghAccountTokenResolver func(ctx context.Context, host, login string) (string, error)
 
 type credentialCacheKey struct {
-	workspaceID string
-	source      ConnectionSource
-	generation  int64
-	purpose     CredentialPurpose
-	repoOwner   string
-	repoName    string
+	workspaceID             string
+	source                  ConnectionSource
+	generation              int64
+	appRegistrationID       string
+	appCredentialGeneration int64
+	purpose                 CredentialPurpose
+	repoOwner               string
+	repoName                string
 }
 
 type credentialCacheEpoch struct {
@@ -229,13 +235,25 @@ func (r *CredentialResolver) resolveAutomation(
 	if connection.Status != ConnectionStatusActive {
 		return nil, ErrGitHubConnectionInvalid
 	}
+	if connection.Source == ConnectionSourceGitHubAppInstallation &&
+		strings.TrimSpace(connection.AppRegistrationID) == "" {
+		return nil, ErrGitHubNotConfigured
+	}
 	key := credentialCacheKey{
-		workspaceID: req.WorkspaceID,
-		source:      connection.Source,
-		generation:  connection.CredentialGeneration,
-		purpose:     req.Purpose,
-		repoOwner:   strings.ToLower(strings.TrimSpace(req.RepoOwner)),
-		repoName:    strings.ToLower(strings.TrimSpace(req.RepoName)),
+		workspaceID: req.WorkspaceID, source: connection.Source,
+		generation: connection.CredentialGeneration, appRegistrationID: connection.AppRegistrationID,
+		purpose: req.Purpose, repoOwner: strings.ToLower(strings.TrimSpace(req.RepoOwner)),
+		repoName: strings.ToLower(strings.TrimSpace(req.RepoName)),
+	}
+	if connection.Source == ConnectionSourceGitHubAppInstallation {
+		provider, ok := r.app.(appCredentialGenerationProvider)
+		if !ok {
+			key.appCredentialGeneration = 0
+		} else if generation, found := provider.AppCredentialGeneration(connection.AppRegistrationID); found {
+			key.appCredentialGeneration = generation
+		} else {
+			return nil, ErrGitHubNotConfigured
+		}
 	}
 	if cached := r.cached(key); cached != nil {
 		return cached, nil
@@ -250,6 +268,20 @@ func (r *CredentialResolver) resolveAutomation(
 	}
 	resolved.Principal.WorkspaceID = req.WorkspaceID
 	resolved.CredentialGeneration = connection.CredentialGeneration
+	if connection.Source == ConnectionSourceGitHubAppInstallation {
+		if resolved.AppRegistrationID == "" {
+			resolved.AppRegistrationID = connection.AppRegistrationID
+		}
+		if resolved.Principal.AppRegistrationID == "" {
+			resolved.Principal.AppRegistrationID = resolved.AppRegistrationID
+		}
+		if resolved.Principal.AppRegistrationID != connection.AppRegistrationID ||
+			resolved.AppRegistrationID != connection.AppRegistrationID {
+			return nil, ErrGitHubNotConfigured
+		}
+		resolved.Principal.AppCredentialGeneration = resolved.AppCredentialGeneration
+		key.appCredentialGeneration = resolved.AppCredentialGeneration
+	}
 	if !resolved.ExpiresAt.IsZero() && !resolved.ExpiresAt.After(r.now()) {
 		return nil, ErrInstallationTokenExpired
 	}
@@ -443,6 +475,34 @@ func (r *CredentialResolver) InvalidateAll() {
 	defer r.mu.Unlock()
 	r.allEpoch++
 	clear(r.cache)
+}
+
+func (r *CredentialResolver) InvalidateAppRegistration(registrationID string) {
+	if strings.TrimSpace(registrationID) == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key := range r.cache {
+		if key.appRegistrationID == registrationID {
+			delete(r.cache, key)
+		}
+	}
+}
+
+func (r *CredentialResolver) appCredentialGeneration(registrationID string) (int64, error) {
+	if strings.TrimSpace(registrationID) == "" || r.app == nil {
+		return 0, ErrGitHubNotConfigured
+	}
+	provider, ok := r.app.(appCredentialGenerationProvider)
+	if !ok {
+		return 0, ErrGitHubNotConfigured
+	}
+	generation, found := provider.AppCredentialGeneration(registrationID)
+	if !found || generation <= 0 {
+		return 0, ErrGitHubNotConfigured
+	}
+	return generation, nil
 }
 
 func (r *CredentialResolver) epoch(workspaceID string) credentialCacheEpoch {

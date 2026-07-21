@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -22,6 +24,8 @@ const (
 
 var (
 	ErrDeploymentAppManifestOwnerInvalid     = errors.New("GitHub App owner is invalid")
+	ErrAppRegistrationIDInvalid              = errors.New("GitHub App registration ID is invalid")
+	ErrAppRegistrationVisibilityInvalid      = errors.New("GitHub App visibility is invalid")
 	ErrDeploymentAppManifestStateUnavailable = errors.New(
 		"GitHub App manifest state is expired, consumed, or invalid",
 	)
@@ -112,6 +116,52 @@ type DeploymentAppManifestSubmission struct {
 	Manifest        DeploymentAppManifest
 }
 
+type AppRegistrationManifestRequest struct {
+	RegistrationID string
+	OwnerType      ManifestOwnerType
+	OwnerLogin     string
+	PublicBaseURL  string
+	Visibility     AppRegistrationVisibility
+}
+
+func BuildAppRegistrationManifest(
+	request AppRegistrationManifestRequest,
+) (DeploymentAppManifestSubmission, error) {
+	registrationID, err := uuid.Parse(request.RegistrationID)
+	if err != nil || registrationID.String() != request.RegistrationID {
+		return DeploymentAppManifestSubmission{}, ErrAppRegistrationIDInvalid
+	}
+	public, err := manifestVisibility(request.Visibility)
+	if err != nil {
+		return DeploymentAppManifestSubmission{}, err
+	}
+	submission, err := BuildDeploymentAppManifest(
+		request.OwnerType, request.OwnerLogin, request.PublicBaseURL,
+	)
+	if err != nil {
+		return DeploymentAppManifestSubmission{}, err
+	}
+	baseURL := strings.TrimRight(submission.Manifest.URL, "/") +
+		"/api/v1/github/app/registrations/" + registrationID.String()
+	submission.Manifest.HookAttributes.URL = baseURL + "/webhook"
+	submission.Manifest.RedirectURL = baseURL + "/manifest/callback"
+	submission.Manifest.CallbackURLs = []string{baseURL + "/personal/callback"}
+	submission.Manifest.SetupURL = baseURL + "/install/callback"
+	submission.Manifest.Public = public
+	return submission, nil
+}
+
+func manifestVisibility(visibility AppRegistrationVisibility) (bool, error) {
+	switch visibility {
+	case "", AppRegistrationVisibilityPrivate:
+		return false, nil
+	case AppRegistrationVisibilityPublic:
+		return true, nil
+	default:
+		return false, ErrAppRegistrationVisibilityInvalid
+	}
+}
+
 type PublicGitHubBaseURLResolver interface {
 	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
 }
@@ -171,7 +221,7 @@ func BuildDeploymentAppManifest(
 			RedirectURL:  baseURL + "/api/v1/github/app/registration/callback",
 			CallbackURLs: []string{baseURL + "/api/v1/github/personal-connection/callback"},
 			SetupURL:     baseURL + "/api/v1/github/app/install/callback",
-			Public:       true,
+			Public:       false,
 			DefaultPermissions: map[string]string{
 				"actions": "read", "administration": "read", "checks": "read",
 				"contents": "write", "issues": "write", "members": "read",

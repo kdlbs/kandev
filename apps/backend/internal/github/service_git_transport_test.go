@@ -34,18 +34,24 @@ func TestResolveGitCredentialUsesWorkspacePAT(t *testing.T) {
 func TestResolveGitCredentialRejectsAppWithoutGitRead(t *testing.T) {
 	t.Parallel()
 
+	installationID := int64(42)
 	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
 		"workspace-a": {
 			WorkspaceID: "workspace-a", Source: ConnectionSourceGitHubAppInstallation,
+			InstallationID: &installationID, AppRegistrationID: "registration-test",
 			Status: ConnectionStatusActive, CredentialGeneration: 1,
 		},
 	}}
 	resolver := NewCredentialResolver(connections, nil)
 	resolver.SetAutomationProvider(staticTransportCredentialProvider{resolved: &ResolvedCredential{
-		Client:       NewMockClient(),
-		credential:   "app-token",
-		Principal:    AuthPrincipal{Kind: AuthPrincipalApp, Source: ConnectionSourceGitHubAppInstallation},
-		Capabilities: map[GitHubAppCapability]bool{},
+		Client:     NewMockClient(),
+		credential: "app-token",
+		Principal: AuthPrincipal{
+			Kind: AuthPrincipalApp, Source: ConnectionSourceGitHubAppInstallation,
+			AppRegistrationID: "registration-test",
+		},
+		AppRegistrationID: "registration-test",
+		Capabilities:      map[GitHubAppCapability]bool{},
 	}})
 	service := &Service{resolver: resolver}
 

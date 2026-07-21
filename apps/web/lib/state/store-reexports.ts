@@ -57,6 +57,7 @@ export type {
   GitHubSliceState,
   GitHubSliceActions,
   GitHubStatusState,
+  GitHubAppRegistrationsState,
   TaskPRsState,
   PRWatchesState,
   ReviewWatchesState,

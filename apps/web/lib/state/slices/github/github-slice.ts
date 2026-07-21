@@ -3,6 +3,7 @@ import type { GitHubSlice, GitHubSliceState } from "./types";
 
 export const defaultGitHubState: GitHubSliceState = {
   githubStatus: { byWorkspaceId: {} },
+  githubAppRegistrations: { byWorkspaceId: {} },
   taskPRs: { byTaskId: {} },
   taskIssues: { workspaceId: null, byTaskId: {} },
   pendingPrUrlByTaskId: { byTaskId: {} },
@@ -43,6 +44,39 @@ function createGitHubStatusActions(
           status: null,
           loaded: false,
           loading: false,
+        };
+      }),
+  };
+}
+
+function createGitHubAppRegistrationActions(
+  set: ImmerSet,
+): Pick<
+  GitHubSlice,
+  "setGitHubAppRegistrations" | "setGitHubAppRegistrationsLoading" | "resetGitHubAppRegistrations"
+> {
+  return {
+    setGitHubAppRegistrations: (workspaceId, catalog, error = null) =>
+      set((draft) => {
+        const entry = draft.githubAppRegistrations.byWorkspaceId[workspaceId];
+        if (!entry) return;
+        entry.catalog = catalog;
+        entry.error = error;
+        entry.loaded = true;
+      }),
+    setGitHubAppRegistrationsLoading: (workspaceId, loading) =>
+      set((draft) => {
+        const entry = draft.githubAppRegistrations.byWorkspaceId[workspaceId];
+        if (!entry) return;
+        entry.loading = loading;
+      }),
+    resetGitHubAppRegistrations: (workspaceId) =>
+      set((draft) => {
+        draft.githubAppRegistrations.byWorkspaceId[workspaceId] = {
+          catalog: null,
+          loaded: false,
+          loading: false,
+          error: null,
         };
       }),
   };
@@ -314,6 +348,7 @@ export const createGitHubSlice: StateCreator<
 > = (set) => ({
   ...defaultGitHubState,
   ...createGitHubStatusActions(set),
+  ...createGitHubAppRegistrationActions(set),
   ...createTaskPRActions(set),
   ...createWatchActions(set),
   ...createActionPresetActions(set),

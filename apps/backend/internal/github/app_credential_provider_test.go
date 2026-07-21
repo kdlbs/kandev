@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -80,5 +81,18 @@ func TestCachedInstallationCredentialProviderRequiresInstallationID(t *testing.T
 		ResolveCredentialRequest{},
 	); err == nil {
 		t.Fatal("expected missing installation ID error")
+	}
+}
+
+func TestCachedInstallationCredentialProviderRejectsDifferentRegistration(t *testing.T) {
+	installationID := int64(42)
+	cache := NewAppInstallationTokenCache("registration-a", 5, fixedInstallationMinter{})
+	provider := NewCachedInstallationCredentialProvider(cache)
+	_, err := provider.ResolveInstallation(context.Background(), &WorkspaceConnection{
+		Source: ConnectionSourceGitHubAppInstallation, InstallationID: &installationID,
+		AppRegistrationID: "registration-b",
+	}, ResolveCredentialRequest{})
+	if !errors.Is(err, ErrGitHubNotConfigured) {
+		t.Fatalf("error = %v, want ErrGitHubNotConfigured", err)
 	}
 }

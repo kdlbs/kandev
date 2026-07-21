@@ -9,7 +9,6 @@ import (
 	"encoding/pem"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
@@ -22,7 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 )
 
-func TestGitHubDeploymentAppBootLoadsManagedRegistrationFromEncryptedStore(t *testing.T) {
+func TestGitHubAppBootLoadsCatalogRegistrationFromEncryptedStore(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	connection, err := db.OpenSQLite(filepath.Join(dir, "kandev.db"))
@@ -50,30 +49,24 @@ func TestGitHubDeploymentAppBootLoadsManagedRegistrationFromEncryptedStore(t *te
 	}
 	t.Cleanup(func() { _ = cleanupGitHub() })
 	adapter := secretadapter.New(secretStore)
-	repository := github.NewDeploymentAppRepository(seedService.TestStore(), adapter)
-	registration := &github.DeploymentAppRegistration{
-		GitHubHost: "github.com", AppID: 123, ClientID: "Iv1.client", Slug: "kandev-acme",
+	repository := github.NewAppRegistrationRepository(seedService.TestStore(), adapter)
+	registration := &github.AppRegistration{
+		ID: "11111111-1111-4111-8111-111111111111", Source: github.AppRegistrationSourceManaged,
+		DisplayName: "Kandev Acme", GitHubHost: "github.com", AppID: 123,
+		ClientID: "Iv1.client", Slug: "kandev-acme",
 		OwnerLogin: "acme", OwnerType: github.DeploymentAppOwnerOrganization,
+		Visibility:    github.AppRegistrationVisibilityPrivate,
 		PublicBaseURL: "https://kandev.example", CredentialGeneration: 1,
-		WebhookStatus: github.DeploymentAppWebhookUnverified,
+		Status: github.AppRegistrationStatusActive, WebhookStatus: github.DeploymentAppWebhookUnverified,
 	}
 	privateKey := testGitHubDeploymentPrivateKey(t)
-	if err := repository.SaveManagedRegistration(ctx, registration, github.DeploymentAppCredentials{
+	if err := repository.SaveRegistration(ctx, registration, github.DeploymentAppCredentials{
 		PrivateKey: privateKey, ClientSecret: "client-secret",
 		WebhookSecret: "webhook-secret",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	flow := &github.DeploymentAppRegistrationFlow{
-		StateHash: "pending-flow", OperatorUserID: github.DefaultUserID,
-		OwnerType: github.DeploymentAppOwnerOrganization, OwnerLogin: "acme",
-		PublicBaseURL: "https://kandev.example", ManifestRevision: 1,
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
-	}
-	if err := seedService.TestStore().CreateDeploymentAppRegistrationFlow(ctx, flow); err != nil {
-		t.Fatal(err)
-	}
-	const orphanID = "github:deployment-app:credentials:g99:orphan"
+	const orphanID = github.AppRegistrationCredentialsSecretPrefix + "orphan:g99:secret"
 	if err := adapter.Set(ctx, orphanID, "orphan", `{"version":1}`); err != nil {
 		t.Fatal(err)
 	}
@@ -84,15 +77,10 @@ func TestGitHubDeploymentAppBootLoadsManagedRegistrationFromEncryptedStore(t *te
 	if service == nil {
 		t.Fatal("GitHub service was not initialized")
 	}
-	snapshot := service.DeploymentAppRuntimeSnapshot()
+	snapshot := service.AppRegistrationRuntimeSnapshot(registration.ID)
 	if !snapshot.Ready || snapshot.Source != github.DeploymentAppSourceManaged ||
 		snapshot.AppID != registration.AppID || snapshot.Generation != 1 {
 		t.Fatalf("boot runtime = %+v", snapshot)
-	}
-	status, err := service.DeploymentAppRegistrationStatus(ctx, github.DefaultUserID)
-	if err != nil || !status.Ready || status.Registration == nil ||
-		status.Registration.AppID != registration.AppID {
-		t.Fatalf("registration status = %+v, error = %v", status, err)
 	}
 	if exists, err := adapter.Exists(ctx, orphanID); err != nil || exists {
 		t.Fatalf("orphan credential exists = %v, error = %v", exists, err)
@@ -106,26 +94,6 @@ func TestGitHubDeploymentAppBootLoadsManagedRegistrationFromEncryptedStore(t *te
 		if bytes.Contains(encrypted, plaintext) {
 			t.Fatal("deployment credentials were stored as plaintext")
 		}
-	}
-	activeSecretID := registration.CredentialSecretID
-	if err := resetGitHubDeploymentAppForE2E(ctx, service); err != nil {
-		t.Fatalf("reset deployment App: %v", err)
-	}
-	storedRegistration, err := service.TestStore().GetDeploymentAppRegistration(ctx)
-	if err != nil || storedRegistration != nil {
-		t.Fatalf("registration after reset = %+v, error = %v", storedRegistration, err)
-	}
-	storedFlow, err := service.TestStore().GetDeploymentAppRegistrationFlow(ctx, flow.StateHash)
-	if err != nil || storedFlow != nil {
-		t.Fatalf("flow after reset = %+v, error = %v", storedFlow, err)
-	}
-	for _, secretID := range []string{activeSecretID, orphanID} {
-		if exists, err := adapter.Exists(ctx, secretID); err != nil || exists {
-			t.Fatalf("secret %q after reset exists = %v, error = %v", secretID, exists, err)
-		}
-	}
-	if snapshot := service.DeploymentAppRuntimeSnapshot(); snapshot.Ready {
-		t.Fatalf("runtime remained ready after reset: %+v", snapshot)
 	}
 }
 

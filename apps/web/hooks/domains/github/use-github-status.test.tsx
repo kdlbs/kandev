@@ -1,4 +1,4 @@
-import { act, render } from "@testing-library/react";
+import { act, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { getGitHubMutationActor } from "@/lib/github-auth";
@@ -18,6 +18,14 @@ const AUTOMATION_USER = "automation-user";
 afterEach(() => {
   fetchGitHubStatusMock.mockReset();
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
 
 describe("useGitHubStatus workspace scoping", () => {
   it("does not clear a scoped status while the active workspace is unavailable", async () => {
@@ -65,6 +73,54 @@ describe("useGitHubStatus workspace scoping", () => {
     await act(async () => Promise.resolve());
     expect(fetchGitHubStatusMock).not.toHaveBeenCalled();
   });
+
+  it("keeps the newest same-workspace refresh result", async () => {
+    const first = deferred<GitHubStatusResponse>();
+    const second = deferred<GitHubStatusResponse>();
+    fetchGitHubStatusMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <StateProvider>{children}</StateProvider>
+    );
+    const { result } = renderHook(() => useGitHubStatus(WORKSPACE_A), { wrapper });
+    await waitFor(() => expect(fetchGitHubStatusMock).toHaveBeenCalledTimes(1));
+
+    act(() => result.current.refresh());
+    await waitFor(() => expect(fetchGitHubStatusMock).toHaveBeenCalledTimes(2));
+    await act(async () =>
+      second.resolve({
+        workspace_id: WORKSPACE_A,
+        authenticated: true,
+        username: "new",
+        auth_method: "pat",
+        token_configured: true,
+        required_scopes: [],
+        effective_personal_actor: {
+          kind: "human",
+          source: "pat",
+          login: "new",
+          workspace_id: WORKSPACE_A,
+        },
+      }),
+    );
+    await waitFor(() => expect(result.current.status?.username).toBe("new"));
+    await act(async () =>
+      first.resolve({
+        workspace_id: WORKSPACE_A,
+        authenticated: true,
+        username: "old",
+        auth_method: "pat",
+        token_configured: true,
+        required_scopes: [],
+        effective_personal_actor: {
+          kind: "human",
+          source: "pat",
+          login: "old",
+          workspace_id: WORKSPACE_A,
+        },
+      }),
+    );
+    expect(result.current.status?.username).toBe("new");
+  });
 });
 
 describe("normalizeGitHubStatus for GitHub Apps", () => {
@@ -83,6 +139,7 @@ describe("normalizeGitHubStatus for GitHub Apps", () => {
         login: "alice",
         workspace_id: WORKSPACE_A,
         user_id: "user-a",
+        app_registration_id: "registration-a",
       },
       automation: {
         workspace_id: WORKSPACE_A,
@@ -96,6 +153,7 @@ describe("normalizeGitHubStatus for GitHub Apps", () => {
       personal: {
         workspace_id: WORKSPACE_A,
         user_id: "user-a",
+        app_registration_id: "registration-a",
         github_user_id: 7,
         login: "alice",
         status: "active",
@@ -202,6 +260,7 @@ describe("normalizeGitHubStatus for human automation", () => {
       personal: {
         workspace_id: WORKSPACE_A,
         user_id: "user-a",
+        app_registration_id: "registration-a",
         github_user_id: 7,
         login: "expired-user",
         status: "invalid",

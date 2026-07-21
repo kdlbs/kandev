@@ -16,12 +16,13 @@ const workspaceConnectionSelect = `
 	SELECT workspace_id, source, github_host, COALESCE(login, '') AS login,
 		installation_id, COALESCE(installation_account_login, '') AS installation_account_login,
 		COALESCE(installation_account_type, '') AS installation_account_type,
+		COALESCE(app_registration_id, '') AS app_registration_id,
 		status, credential_generation, COALESCE(last_error, '') AS last_error,
 		created_at, updated_at
 	FROM github_workspace_connections`
 
 const userConnectionSelect = `
-	SELECT workspace_id, user_id, github_user_id, login, status, access_expires_at,
+	SELECT workspace_id, user_id, app_registration_id, github_user_id, login, status, access_expires_at,
 		refresh_expires_at, credential_generation, COALESCE(last_error, '') AS last_error,
 		created_at, updated_at
 	FROM github_user_connections`
@@ -82,6 +83,19 @@ func (s *Store) ListWorkspaceConnectionsByInstallation(
 	return connections, err
 }
 
+func (s *Store) ListWorkspaceConnectionsByAppInstallation(
+	ctx context.Context,
+	registrationID string,
+	installationID int64,
+) ([]*WorkspaceConnection, error) {
+	var connections []*WorkspaceConnection
+	err := s.ro.SelectContext(ctx, &connections, s.ro.Rebind(
+		workspaceConnectionSelect+`
+		WHERE app_registration_id = ? AND installation_id = ? ORDER BY workspace_id`),
+		registrationID, installationID)
+	return connections, err
+}
+
 // UpsertWorkspaceConnection creates or replaces workspace automation metadata.
 func (s *Store) UpsertWorkspaceConnection(ctx context.Context, connection *WorkspaceConnection) error {
 	if connection == nil {
@@ -98,9 +112,9 @@ func (s *Store) UpsertWorkspaceConnection(ctx context.Context, connection *Works
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO github_workspace_connections (
 			workspace_id, source, github_host, login, installation_id,
-			installation_account_login, installation_account_type, status,
+			installation_account_login, installation_account_type, app_registration_id, status,
 			credential_generation, last_error, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			source = excluded.source,
 			github_host = excluded.github_host,
@@ -108,13 +122,14 @@ func (s *Store) UpsertWorkspaceConnection(ctx context.Context, connection *Works
 			installation_id = excluded.installation_id,
 			installation_account_login = excluded.installation_account_login,
 			installation_account_type = excluded.installation_account_type,
+			app_registration_id = excluded.app_registration_id,
 			status = excluded.status,
 			credential_generation = excluded.credential_generation,
 			last_error = excluded.last_error,
 			updated_at = excluded.updated_at`),
 		connection.WorkspaceID, connection.Source, connection.GitHubHost, nullString(connection.Login),
 		connection.InstallationID, nullString(connection.InstallationAccountLogin),
-		nullString(connection.InstallationAccountType), connection.Status,
+		nullString(connection.InstallationAccountType), nullString(connection.AppRegistrationID), connection.Status,
 		connection.CredentialGeneration, nullString(connection.LastError), connection.CreatedAt, connection.UpdatedAt)
 	return err
 }
@@ -136,11 +151,11 @@ func (s *Store) TransitionWorkspaceInstallationConnection(
 		SET installation_account_login = ?, installation_account_type = ?, status = ?,
 			credential_generation = ?, last_error = ?, updated_at = ?
 		WHERE workspace_id = ? AND source = ? AND installation_id = ?
-			AND credential_generation = ? AND status = ?`),
+			AND app_registration_id = ? AND credential_generation = ? AND status = ?`),
 		nullString(next.InstallationAccountLogin), nullString(next.InstallationAccountType), next.Status,
 		next.CredentialGeneration, nullString(next.LastError), now,
 		expected.WorkspaceID, expected.Source, *expected.InstallationID,
-		expected.CredentialGeneration, expected.Status,
+		expected.AppRegistrationID, expected.CredentialGeneration, expected.Status,
 	)
 	if err != nil {
 		return false, err
@@ -192,6 +207,19 @@ func (s *Store) ListUserConnectionsByGitHubUser(
 	return connections, err
 }
 
+func (s *Store) ListUserConnectionsByAppGitHubUser(
+	ctx context.Context,
+	registrationID string,
+	githubUserID int64,
+) ([]*UserConnection, error) {
+	var connections []*UserConnection
+	err := s.ro.SelectContext(ctx, &connections, s.ro.Rebind(
+		userConnectionSelect+`
+		WHERE app_registration_id = ? AND github_user_id = ? ORDER BY workspace_id, user_id`),
+		registrationID, githubUserID)
+	return connections, err
+}
+
 // ListUserConnectionsByWorkspace returns all personal identities owned by a workspace.
 func (s *Store) ListUserConnectionsByWorkspace(
 	ctx context.Context,
@@ -208,6 +236,14 @@ func (s *Store) UpsertUserConnection(ctx context.Context, connection *UserConnec
 	if connection == nil {
 		return fmt.Errorf("user connection is required")
 	}
+	workspace, err := s.GetWorkspaceConnection(ctx, connection.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if workspace == nil || workspace.Source != ConnectionSourceGitHubAppInstallation ||
+		workspace.AppRegistrationID == "" || workspace.AppRegistrationID != connection.AppRegistrationID {
+		return ErrOAuthFlowStale
+	}
 	now := time.Now().UTC()
 	if connection.CreatedAt.IsZero() {
 		connection.CreatedAt = now
@@ -223,10 +259,11 @@ func (s *Store) UpsertUserConnection(ctx context.Context, connection *UserConnec
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO github_user_connections (
-			workspace_id, user_id, github_user_id, login, status, access_expires_at,
+			workspace_id, user_id, app_registration_id, github_user_id, login, status, access_expires_at,
 			refresh_expires_at, credential_generation, last_error, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id, user_id) DO UPDATE SET
+			app_registration_id = excluded.app_registration_id,
 			github_user_id = excluded.github_user_id,
 			login = excluded.login,
 			status = excluded.status,
@@ -235,7 +272,8 @@ func (s *Store) UpsertUserConnection(ctx context.Context, connection *UserConnec
 			credential_generation = excluded.credential_generation,
 			last_error = excluded.last_error,
 			updated_at = excluded.updated_at`),
-		connection.WorkspaceID, connection.UserID, connection.GitHubUserID, connection.Login,
+		connection.WorkspaceID, connection.UserID, connection.AppRegistrationID,
+		connection.GitHubUserID, connection.Login,
 		connection.Status, connection.AccessExpiresAt, connection.RefreshExpiresAt,
 		connection.CredentialGeneration, nullString(connection.LastError), connection.CreatedAt, connection.UpdatedAt); err != nil {
 		return err
@@ -313,6 +351,7 @@ func (s *Store) DeleteWorkspaceAuthData(ctx context.Context, workspaceID string)
 	}
 	defer func() { _ = tx.Rollback() }()
 	for _, query := range []string{
+		`DELETE FROM github_app_registration_flows WHERE workspace_id = ?`,
 		`DELETE FROM github_auth_flows WHERE workspace_id = ?`,
 		`DELETE FROM github_user_connections WHERE workspace_id = ?`,
 		`DELETE FROM github_user_connection_versions WHERE workspace_id = ?`,
@@ -356,12 +395,13 @@ func (s *Store) CreateAuthFlow(ctx context.Context, flow *AuthFlow) error {
 	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO github_auth_flows (
-			state_hash, workspace_id, user_id, kind, pkce_verifier,
+			state_hash, workspace_id, user_id, app_registration_id, kind, pkce_verifier,
 			expected_workspace_source, expected_workspace_generation, expected_installation_id,
-			expected_personal_generation, expires_at, consumed_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		flow.StateHash, flow.WorkspaceID, flow.UserID, flow.Kind, flow.PKCEVerifier,
+			expected_workspace_app_registration_id, expected_personal_generation, expires_at, consumed_at, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		flow.StateHash, flow.WorkspaceID, flow.UserID, flow.AppRegistrationID, flow.Kind, flow.PKCEVerifier,
 		flow.ExpectedWorkspaceSource, flow.ExpectedWorkspaceGeneration, flow.ExpectedInstallationID,
+		nullString(flow.ExpectedWorkspaceAppRegistrationID),
 		flow.ExpectedPersonalGeneration,
 		flow.ExpiresAt, flow.ConsumedAt, flow.CreatedAt)
 	return err
@@ -371,8 +411,9 @@ func (s *Store) CreateAuthFlow(ctx context.Context, flow *AuthFlow) error {
 func (s *Store) GetAuthFlow(ctx context.Context, stateHash string) (*AuthFlow, error) {
 	var flow AuthFlow
 	err := s.ro.GetContext(ctx, &flow, s.ro.Rebind(`
-		SELECT state_hash, workspace_id, user_id, kind, pkce_verifier,
+		SELECT state_hash, workspace_id, user_id, app_registration_id, kind, pkce_verifier,
 			expected_workspace_source, expected_workspace_generation, expected_installation_id,
+			COALESCE(expected_workspace_app_registration_id, '') AS expected_workspace_app_registration_id,
 			expected_personal_generation, expires_at, consumed_at, created_at
 		FROM github_auth_flows WHERE state_hash = ?`), stateHash)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -382,10 +423,16 @@ func (s *Store) GetAuthFlow(ctx context.Context, stateHash string) (*AuthFlow, e
 }
 
 // ConsumeAuthFlow atomically claims one unexpired, unused flow.
-func (s *Store) ConsumeAuthFlow(ctx context.Context, stateHash string, now time.Time) (*AuthFlow, error) {
+func (s *Store) ConsumeAuthFlow(
+	ctx context.Context,
+	stateHash, registrationID string,
+	kind AuthFlowKind,
+	now time.Time,
+) (*AuthFlow, error) {
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE github_auth_flows SET consumed_at = ?
-		WHERE state_hash = ? AND consumed_at IS NULL AND expires_at > ?`), now, stateHash, now)
+		WHERE state_hash = ? AND app_registration_id = ? AND kind = ?
+			AND consumed_at IS NULL AND expires_at > ?`), now, stateHash, registrationID, kind, now)
 	if err != nil {
 		return nil, err
 	}
@@ -412,10 +459,10 @@ func (s *Store) RecordWebhookDelivery(ctx context.Context, delivery *WebhookDeli
 	}
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO github_webhook_deliveries (
-			delivery_id, event, status, result, received_at, processed_at
-		) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(delivery_id) DO NOTHING`),
-		delivery.DeliveryID, delivery.Event, delivery.Status, delivery.Result,
+			app_registration_id, delivery_id, event, status, result, received_at, processed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(app_registration_id, delivery_id) DO NOTHING`),
+		delivery.AppRegistrationID, delivery.DeliveryID, delivery.Event, delivery.Status, delivery.Result,
 		delivery.ReceivedAt, delivery.ProcessedAt)
 	if err != nil {
 		return false, err
@@ -439,9 +486,9 @@ func (s *Store) ClaimWebhookDelivery(
 	}
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO github_webhook_deliveries (
-			delivery_id, event, status, result, received_at, processed_at
-		) VALUES (?, ?, ?, '', ?, NULL)
-		ON CONFLICT(delivery_id) DO UPDATE SET
+			app_registration_id, delivery_id, event, status, result, received_at, processed_at
+		) VALUES (?, ?, ?, ?, '', ?, NULL)
+		ON CONFLICT(app_registration_id, delivery_id) DO UPDATE SET
 			event = excluded.event,
 			status = excluded.status,
 			result = '',
@@ -449,7 +496,8 @@ func (s *Store) ClaimWebhookDelivery(
 			processed_at = NULL
 		WHERE github_webhook_deliveries.status = ?
 			OR (github_webhook_deliveries.status = ? AND github_webhook_deliveries.received_at <= ?)`),
-		delivery.DeliveryID, delivery.Event, WebhookDeliveryStatusReceived, delivery.ReceivedAt,
+		delivery.AppRegistrationID, delivery.DeliveryID, delivery.Event,
+		WebhookDeliveryStatusReceived, delivery.ReceivedAt,
 		WebhookDeliveryStatusFailed, WebhookDeliveryStatusReceived, staleBefore,
 	)
 	if err != nil {
@@ -464,7 +512,9 @@ func (s *Store) ClaimWebhookDelivery(
 	}
 	var status WebhookDeliveryStatus
 	if err := s.ro.GetContext(ctx, &status, s.ro.Rebind(`
-		SELECT status FROM github_webhook_deliveries WHERE delivery_id = ?`), delivery.DeliveryID); err != nil {
+		SELECT status FROM github_webhook_deliveries
+		WHERE app_registration_id = ? AND delivery_id = ?`),
+		delivery.AppRegistrationID, delivery.DeliveryID); err != nil {
 		return WebhookDeliveryClaim{}, err
 	}
 	return WebhookDeliveryClaim{Status: status}, nil
@@ -478,10 +528,30 @@ func (s *Store) CompleteWebhookDelivery(
 	result string,
 	processedAt time.Time,
 ) error {
+	var registrationID string
+	err := s.ro.GetContext(ctx, &registrationID, s.ro.Rebind(`
+		SELECT app_registration_id FROM github_webhook_deliveries WHERE delivery_id = ?
+		GROUP BY app_registration_id HAVING COUNT(*) = 1`), deliveryID)
+	if err != nil {
+		return err
+	}
+	return s.CompleteAppRegistrationWebhookDelivery(
+		ctx, registrationID, deliveryID, status, result, processedAt,
+	)
+}
+
+func (s *Store) CompleteAppRegistrationWebhookDelivery(
+	ctx context.Context,
+	registrationID, deliveryID string,
+	status WebhookDeliveryStatus,
+	result string,
+	processedAt time.Time,
+) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE github_webhook_deliveries
 		SET status = ?, result = ?, processed_at = ?
-		WHERE delivery_id = ?`), status, result, processedAt, deliveryID)
+		WHERE app_registration_id = ? AND delivery_id = ?`),
+		status, result, processedAt, registrationID, deliveryID)
 	return err
 }
 

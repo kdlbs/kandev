@@ -67,15 +67,20 @@ func TestCopyWorkspaceSettingsToWorkspace_DoesNotCopyAuthentication(t *testing.T
 	ctx := context.Background()
 	const src, dst = "ws-src", "ws-dst"
 	seedConnectionWorkspaces(t, svc.store, src, dst)
+	seedStoreAppRegistration(t, svc.store)
 	now := time.Now().UTC()
+	installationID := int64(42)
 	if err := svc.store.UpsertWorkspaceConnection(ctx, &WorkspaceConnection{
-		WorkspaceID: src, Source: ConnectionSourceGHCLI, GitHubHost: "github.com", Login: "octocat",
+		WorkspaceID: src, Source: ConnectionSourceGitHubAppInstallation, GitHubHost: "github.com",
+		InstallationID: &installationID, InstallationAccountLogin: "acme",
+		InstallationAccountType: "Organization", AppRegistrationID: "registration-store-test",
 		Status: ConnectionStatusActive, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("seed source connection: %v", err)
 	}
 	if err := svc.store.UpsertUserConnection(ctx, &UserConnection{
-		WorkspaceID: src, UserID: "default-user", GitHubUserID: 42, Login: "octocat",
+		WorkspaceID: src, UserID: "default-user", AppRegistrationID: "registration-store-test",
+		GitHubUserID: 42, Login: "octocat",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("seed source user connection: %v", err)

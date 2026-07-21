@@ -43,8 +43,9 @@ type appInstallationStore interface {
 }
 
 type AppInstallationConfig struct {
-	Slug        string
-	CallbackURL string
+	RegistrationID string
+	Slug           string
+	CallbackURL    string
 }
 
 type AppInstallationStart struct {
@@ -102,12 +103,14 @@ func (s *AppInstallationService) Start(
 	}
 	expected := workspaceConnectionExpectation(existing)
 	flow, err := s.flows.Start(ctx, OAuthFlowRequest{
-		WorkspaceID:                 workspaceID,
-		UserID:                      userID,
-		Kind:                        AuthFlowKindAppInstallation,
-		ExpectedWorkspaceSource:     expected.Source,
-		ExpectedWorkspaceGeneration: expected.CredentialGeneration,
-		ExpectedInstallationID:      expected.InstallationID,
+		WorkspaceID:                        workspaceID,
+		UserID:                             userID,
+		AppRegistrationID:                  s.config.RegistrationID,
+		Kind:                               AuthFlowKindAppInstallation,
+		ExpectedWorkspaceSource:            expected.Source,
+		ExpectedWorkspaceGeneration:        expected.CredentialGeneration,
+		ExpectedInstallationID:             expected.InstallationID,
+		ExpectedWorkspaceAppRegistrationID: expected.AppRegistrationID,
 	})
 	if err != nil {
 		return AppInstallationStart{}, err
@@ -131,7 +134,8 @@ func (s *AppInstallationService) Complete(
 		return AppInstallationResult{}, errors.New("GitHub App installation service is not configured")
 	}
 	flow, err := consumeCallbackFlow(
-		ctx, s.flows, callback.State, callback.WorkspaceID, callback.UserID, AuthFlowKindAppInstallation,
+		ctx, s.flows, callback.State, callback.WorkspaceID, callback.UserID,
+		s.config.RegistrationID, AuthFlowKindAppInstallation,
 	)
 	if err != nil {
 		return AppInstallationResult{}, err
@@ -203,12 +207,16 @@ func (s *AppInstallationService) newInstallationConnection(
 		InstallationID:           &installation.ID,
 		InstallationAccountLogin: installation.AccountLogin,
 		InstallationAccountType:  installation.AccountType,
+		AppRegistrationID:        flow.AppRegistrationID,
 		Status:                   status,
 		CredentialGeneration:     flow.ExpectedWorkspaceGeneration + 1,
 	}
 }
 
 func validateAppInstallationConfig(config AppInstallationConfig) error {
+	if strings.TrimSpace(config.RegistrationID) == "" {
+		return errors.New("GitHub App registration ID is required")
+	}
 	if !validGitHubAppSlug(config.Slug) {
 		return errors.New("GitHub App slug is required")
 	}
@@ -242,14 +250,16 @@ func consumeCallbackFlow(
 	ctx context.Context,
 	flows *OAuthFlowManager,
 	state, workspaceID, userID string,
+	registrationID string,
 	kind AuthFlowKind,
 ) (*AuthFlow, error) {
 	if workspaceID == "" && userID == "" {
-		return flows.ConsumeBound(ctx, state, kind)
+		return flows.ConsumeBound(ctx, state, registrationID, kind)
 	}
 	return flows.Consume(ctx, state, OAuthFlowExpectation{
-		WorkspaceID: workspaceID,
-		UserID:      userID,
-		Kind:        kind,
+		WorkspaceID:       workspaceID,
+		UserID:            userID,
+		AppRegistrationID: registrationID,
+		Kind:              kind,
 	})
 }

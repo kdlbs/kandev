@@ -267,8 +267,19 @@ func (r *StorePersonalConnectionRepository) RevokeWorkspacePersonalConnections(
 	ctx context.Context,
 	workspaceID string,
 ) error {
+	return r.TransitionWorkspacePersonalConnections(ctx, workspaceID, func() error { return nil })
+}
+
+// TransitionWorkspacePersonalConnections revokes a workspace's personal App
+// identities and runs the workspace mutation under the same compensation
+// boundary. A failed mutation restores both metadata and encrypted tokens.
+func (r *StorePersonalConnectionRepository) TransitionWorkspacePersonalConnections(
+	ctx context.Context,
+	workspaceID string,
+	mutation func() error,
+) error {
 	if r == nil || r.store == nil || r.secrets == nil {
-		return nil
+		return mutation()
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -278,7 +289,7 @@ func (r *StorePersonalConnectionRepository) RevokeWorkspacePersonalConnections(
 		return err
 	}
 	if len(connections) == 0 {
-		return nil
+		return mutation()
 	}
 	snapshots, err := r.loadWorkspacePersonalSnapshots(ctx, connections)
 	if err != nil {
@@ -288,6 +299,9 @@ func (r *StorePersonalConnectionRepository) RevokeWorkspacePersonalConnections(
 		return errors.Join(err, r.restoreWorkspacePersonalSnapshots(ctx, snapshots))
 	}
 	if err := r.store.DeleteUserConnectionsByWorkspace(ctx, workspaceID); err != nil {
+		return errors.Join(err, r.restoreWorkspacePersonalSnapshots(ctx, snapshots))
+	}
+	if err := mutation(); err != nil {
 		return errors.Join(err, r.restoreWorkspacePersonalSnapshots(ctx, snapshots))
 	}
 	return nil
@@ -343,6 +357,7 @@ func (r *StorePersonalConnectionRepository) restoreWorkspacePersonalSnapshots(
 	for _, snapshot := range snapshots {
 		workspaceID, userID := snapshot.connection.WorkspaceID, snapshot.connection.UserID
 		restoreErr = errors.Join(restoreErr,
+			r.restorePersonalConnectionMetadata(ctx, snapshot.connection),
 			r.restoreSecret(ctx, UserAccessTokenSecretKey(workspaceID, userID),
 				personalAccessTokenSecretName, snapshot.access, snapshot.hadAccess),
 			r.restoreSecret(ctx, UserRefreshTokenSecretKey(workspaceID, userID),
@@ -350,6 +365,23 @@ func (r *StorePersonalConnectionRepository) restoreWorkspacePersonalSnapshots(
 		)
 	}
 	return restoreErr
+}
+
+func (r *StorePersonalConnectionRepository) restorePersonalConnectionMetadata(
+	ctx context.Context,
+	connection *UserConnection,
+) error {
+	currentGeneration, err := r.store.GetUserConnectionGeneration(
+		ctx, connection.WorkspaceID, connection.UserID,
+	)
+	if err != nil {
+		return err
+	}
+	restored := *connection
+	if currentGeneration > restored.CredentialGeneration {
+		restored.CredentialGeneration = currentGeneration
+	}
+	return r.store.UpsertUserConnection(ctx, &restored)
 }
 
 func (r *StorePersonalConnectionRepository) restoreSecret(

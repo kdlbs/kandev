@@ -22,6 +22,13 @@ type Store struct {
 	db                         *sqlx.DB // writer
 	ro                         *sqlx.DB // reader
 	deploymentAppPersistenceMu sync.Mutex
+	appLifecycleLocksMu        sync.Mutex
+	appLifecycleLocks          map[string]*appRegistrationLifecycleLock
+}
+
+type appRegistrationLifecycleLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 type taskIssueMetadataRow struct {
@@ -32,13 +39,38 @@ type taskIssueMetadataRow struct {
 
 // NewStore creates a new GitHub store and initializes the schema.
 func NewStore(writer, reader *sqlx.DB) (*Store, error) {
-	s := &Store{db: writer, ro: reader}
+	s := &Store{
+		db: writer, ro: reader,
+		appLifecycleLocks: make(map[string]*appRegistrationLifecycleLock),
+	}
 	legacyUpgrade := s.tableExists("github_workspace_settings") &&
 		!s.tableExists("github_workspace_connections")
 	if err := s.initSchema(legacyUpgrade); err != nil {
 		return nil, fmt.Errorf("github schema init: %w", err)
 	}
 	return s, nil
+}
+
+func (s *Store) lockAppRegistrationLifecycle(registrationID string) func() {
+	s.appLifecycleLocksMu.Lock()
+	lock := s.appLifecycleLocks[registrationID]
+	if lock == nil {
+		lock = &appRegistrationLifecycleLock{}
+		s.appLifecycleLocks[registrationID] = lock
+	}
+	lock.refs++
+	s.appLifecycleLocksMu.Unlock()
+
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		s.appLifecycleLocksMu.Lock()
+		lock.refs--
+		if lock.refs == 0 {
+			delete(s.appLifecycleLocks, registrationID)
+		}
+		s.appLifecycleLocksMu.Unlock()
+	}
 }
 
 // createTablesSQL holds the DDL for all GitHub integration tables.
@@ -198,24 +230,27 @@ const createTablesSQL = `
 		installation_account_type TEXT CHECK (
 			installation_account_type IS NULL OR installation_account_type IN ('User', 'Organization')
 		),
+		app_registration_id TEXT,
 		status TEXT NOT NULL CHECK (status IN ('active', 'invalid', 'suspended', 'revoked')),
 		credential_generation BIGINT NOT NULL DEFAULT 1 CHECK (credential_generation > 0),
 		last_error TEXT,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		CHECK (
-			(source = 'legacy_shared' AND login IS NULL AND installation_id IS NULL) OR
-			(source IN ('pat', 'gh_cli') AND login IS NOT NULL AND login <> '' AND installation_id IS NULL) OR
+			(source = 'legacy_shared' AND login IS NULL AND installation_id IS NULL AND app_registration_id IS NULL) OR
+			(source IN ('pat', 'gh_cli') AND login IS NOT NULL AND login <> '' AND installation_id IS NULL AND app_registration_id IS NULL) OR
 			(source = 'github_app_installation' AND installation_id IS NOT NULL AND installation_id > 0 AND
 			 installation_account_login IS NOT NULL AND installation_account_login <> '' AND
-			 installation_account_type IS NOT NULL)
+			 installation_account_type IS NOT NULL AND app_registration_id IS NOT NULL)
 		),
-		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+		FOREIGN KEY (app_registration_id) REFERENCES github_app_registrations(id) ON DELETE RESTRICT
 	);
 
 	CREATE TABLE IF NOT EXISTS github_user_connections (
 		workspace_id TEXT NOT NULL,
 		user_id TEXT NOT NULL,
+		app_registration_id TEXT NOT NULL,
 		github_user_id BIGINT NOT NULL CHECK (github_user_id > 0),
 		login TEXT NOT NULL CHECK (login <> ''),
 		status TEXT NOT NULL CHECK (status IN ('active', 'invalid', 'revoked')),
@@ -226,8 +261,54 @@ const createTablesSQL = `
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		PRIMARY KEY (workspace_id, user_id),
-		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+		FOREIGN KEY (app_registration_id) REFERENCES github_app_registrations(id) ON DELETE RESTRICT
 	);
+
+	CREATE TRIGGER IF NOT EXISTS github_user_connections_registration_insert
+	BEFORE INSERT ON github_user_connections
+	BEGIN
+		SELECT CASE WHEN NOT EXISTS (
+			SELECT 1 FROM github_workspace_connections workspace
+			WHERE workspace.workspace_id = NEW.workspace_id
+				AND workspace.source = 'github_app_installation'
+				AND workspace.app_registration_id = NEW.app_registration_id
+		) THEN RAISE(ABORT, 'personal GitHub App registration must match workspace') END;
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS github_user_connections_registration_update
+	BEFORE UPDATE OF workspace_id, app_registration_id ON github_user_connections
+	BEGIN
+		SELECT CASE WHEN NOT EXISTS (
+			SELECT 1 FROM github_workspace_connections workspace
+			WHERE workspace.workspace_id = NEW.workspace_id
+				AND workspace.source = 'github_app_installation'
+				AND workspace.app_registration_id = NEW.app_registration_id
+		) THEN RAISE(ABORT, 'personal GitHub App registration must match workspace') END;
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS github_workspace_connections_registration_update
+	BEFORE UPDATE OF source, app_registration_id ON github_workspace_connections
+	BEGIN
+		SELECT CASE WHEN EXISTS (
+			SELECT 1 FROM github_user_connections personal
+			WHERE personal.workspace_id = OLD.workspace_id
+				AND (
+					NEW.source <> 'github_app_installation' OR
+					NEW.app_registration_id IS NULL OR
+					personal.app_registration_id <> NEW.app_registration_id
+				)
+		) THEN RAISE(ABORT, 'workspace GitHub App registration must match personal connections') END;
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS github_workspace_connections_registration_delete
+	BEFORE DELETE ON github_workspace_connections
+	BEGIN
+		SELECT CASE WHEN EXISTS (
+			SELECT 1 FROM github_user_connections personal
+			WHERE personal.workspace_id = OLD.workspace_id
+		) THEN RAISE(ABORT, 'workspace GitHub App connection still has personal connections') END;
+	END;
 
 	CREATE TABLE IF NOT EXISTS github_user_connection_versions (
 		workspace_id TEXT NOT NULL,
@@ -242,25 +323,31 @@ const createTablesSQL = `
 		state_hash TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,
 		user_id TEXT NOT NULL,
+		app_registration_id TEXT NOT NULL,
 		kind TEXT NOT NULL CHECK (kind IN ('app_installation', 'personal')),
 		pkce_verifier TEXT NOT NULL DEFAULT '',
 		expected_workspace_source TEXT NOT NULL DEFAULT '',
 		expected_workspace_generation BIGINT NOT NULL DEFAULT 0,
 		expected_installation_id BIGINT,
+		expected_workspace_app_registration_id TEXT,
 		expected_personal_generation BIGINT NOT NULL DEFAULT 0,
 		expires_at TIMESTAMP NOT NULL,
 		consumed_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
-		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+		FOREIGN KEY (app_registration_id) REFERENCES github_app_registrations(id) ON DELETE RESTRICT
 	);
 
 	CREATE TABLE IF NOT EXISTS github_webhook_deliveries (
-		delivery_id TEXT PRIMARY KEY,
+		app_registration_id TEXT NOT NULL,
+		delivery_id TEXT NOT NULL,
 		event TEXT NOT NULL,
 		status TEXT NOT NULL CHECK (status IN ('received', 'processed', 'ignored', 'failed')),
 		result TEXT NOT NULL DEFAULT '',
 		received_at TIMESTAMP NOT NULL,
-		processed_at TIMESTAMP
+		processed_at TIMESTAMP,
+		PRIMARY KEY (app_registration_id, delivery_id),
+		FOREIGN KEY (app_registration_id) REFERENCES github_app_registrations(id) ON DELETE RESTRICT
 	);
 
 	CREATE TABLE IF NOT EXISTS github_task_ci_options (
@@ -291,45 +378,64 @@ const createTablesSQL = `
 	);
 `
 
-const deploymentAppTablesSQL = `
-	CREATE TABLE IF NOT EXISTS github_app_registration (
-		singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+const appRegistrationTablesSQL = `
+	CREATE TABLE IF NOT EXISTS github_app_registrations (
+		id TEXT PRIMARY KEY CHECK (id <> ''),
+		source TEXT NOT NULL CHECK (source IN ('managed', 'imported')),
+		display_name TEXT NOT NULL CHECK (display_name <> ''),
 		github_host TEXT NOT NULL CHECK (github_host <> ''),
 		app_id BIGINT NOT NULL CHECK (app_id > 0),
 		client_id TEXT NOT NULL CHECK (client_id <> ''),
 		slug TEXT NOT NULL CHECK (slug <> ''),
 		owner_login TEXT NOT NULL CHECK (owner_login <> ''),
 		owner_type TEXT NOT NULL CHECK (owner_type IN ('User', 'Organization')),
+		visibility TEXT NOT NULL CHECK (visibility IN ('private', 'public')),
 		public_base_url TEXT NOT NULL CHECK (public_base_url <> ''),
+		created_for_workspace_id TEXT,
 		credential_generation BIGINT NOT NULL CHECK (credential_generation > 0),
 		credential_secret_id TEXT NOT NULL CHECK (credential_secret_id <> ''),
+		status TEXT NOT NULL CHECK (status IN ('active', 'invalid')),
 		webhook_status TEXT NOT NULL CHECK (webhook_status IN ('unverified', 'verified', 'failing')),
 		last_webhook_at TIMESTAMP,
 		last_error TEXT,
 		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL
+		updated_at TIMESTAMP NOT NULL,
+		UNIQUE (github_host, app_id)
 	);
 
 	CREATE TABLE IF NOT EXISTS github_app_registration_flows (
 		state_hash TEXT PRIMARY KEY,
-		operator_user_id TEXT NOT NULL CHECK (operator_user_id <> ''),
+		registration_id TEXT NOT NULL CHECK (registration_id <> ''),
+		workspace_id TEXT NOT NULL CHECK (workspace_id <> ''),
+		user_id TEXT NOT NULL CHECK (user_id <> ''),
 		owner_type TEXT NOT NULL CHECK (owner_type IN ('User', 'Organization')),
 		owner_login TEXT NOT NULL CHECK (owner_login <> ''),
+		display_name TEXT NOT NULL CHECK (display_name <> ''),
+		visibility TEXT NOT NULL CHECK (visibility IN ('private', 'public')),
 		public_base_url TEXT NOT NULL CHECK (public_base_url <> ''),
 		manifest_revision INTEGER NOT NULL CHECK (manifest_revision > 0),
 		expires_at TIMESTAMP NOT NULL,
 		consumed_at TIMESTAMP,
-		created_at TIMESTAMP NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 	);
 
-	CREATE TABLE IF NOT EXISTS github_app_registration_flow_head (
-		singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
-		state_hash TEXT NOT NULL CHECK (state_hash <> ''),
-		updated_at TIMESTAMP NOT NULL
+	CREATE TABLE IF NOT EXISTS github_app_import_preparations (
+		registration_id TEXT PRIMARY KEY CHECK (registration_id <> ''),
+		workspace_id TEXT NOT NULL CHECK (workspace_id <> ''),
+		user_id TEXT NOT NULL CHECK (user_id <> ''),
+		public_base_url TEXT NOT NULL CHECK (public_base_url <> ''),
+		expires_at TIMESTAMP NOT NULL,
+		consumed_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 	);
 `
 
 func (s *Store) initSchema(legacyUpgrade bool) error {
+	if err := s.resetUnpublishedGitHubAuthSchema(); err != nil {
+		return err
+	}
 	if err := s.initCoreSchema(); err != nil {
 		return err
 	}
@@ -376,6 +482,9 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 	if err := s.addGitHubAuthFlowExpectationColumns(); err != nil {
 		return err
 	}
+	if err := s.addAppRegistrationReferenceColumns(); err != nil {
+		return err
+	}
 	if err := s.backfillGitHubUserConnectionVersions(); err != nil {
 		return err
 	}
@@ -407,34 +516,110 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 	return nil
 }
 
-func (s *Store) initCoreSchema() error {
-	if _, err := s.db.Exec(createTablesSQL); err != nil {
+func (s *Store) resetUnpublishedGitHubAuthSchema() error {
+	reset, err := s.unpublishedGitHubAuthSchemaNeedsReset()
+	if err != nil || !reset {
 		return err
 	}
-	if err := s.initDeploymentAppSchema(); err != nil {
+	tx, err := s.db.Begin()
+	if err != nil {
 		return err
 	}
-	return s.addDeploymentAppCredentialSecretID()
+	defer func() { _ = tx.Rollback() }()
+	for _, object := range []string{
+		"github_user_connections_registration_insert",
+		"github_user_connections_registration_update",
+		"github_workspace_connections_registration_update",
+		"github_workspace_connections_registration_delete",
+	} {
+		if _, err := tx.Exec(`DROP TRIGGER IF EXISTS ` + object); err != nil {
+			return err
+		}
+	}
+	for _, table := range []string{
+		"github_webhook_deliveries",
+		"github_auth_flows",
+		"github_user_connection_versions",
+		"github_user_connections",
+		"github_workspace_connections",
+		"github_app_import_preparations",
+		"github_app_registration_flows",
+		"github_app_registrations",
+		"github_app_registration_flow_head",
+		"github_app_registration",
+	} {
+		if _, err := tx.Exec(`DROP TABLE IF EXISTS ` + table); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
-func (s *Store) initDeploymentAppSchema() error {
-	if _, err := s.db.Exec(deploymentAppTablesSQL); err != nil {
-		return fmt.Errorf("initialize deployment GitHub App schema: %w", err)
+func (s *Store) unpublishedGitHubAuthSchemaNeedsReset() (bool, error) {
+	for _, singleton := range []string{"github_app_registration", "github_app_registration_flow_head"} {
+		if s.tableExists(singleton) {
+			return true, nil
+		}
+	}
+	required := map[string][]string{
+		"github_app_registrations":     {"display_name TEXT NOT NULL", "UNIQUE (github_host, app_id)"},
+		"github_workspace_connections": {"FOREIGN KEY (app_registration_id)", "source = 'github_app_installation'"},
+		"github_user_connections":      {"app_registration_id TEXT NOT NULL", "FOREIGN KEY (app_registration_id)"},
+		"github_auth_flows":            {"app_registration_id TEXT NOT NULL", "expected_workspace_app_registration_id TEXT"},
+		"github_webhook_deliveries":    {"PRIMARY KEY (app_registration_id, delivery_id)"},
+	}
+	for table, fragments := range required {
+		var schema string
+		err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&schema)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		for _, fragment := range fragments {
+			if !strings.Contains(schema, fragment) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func (s *Store) addAppRegistrationReferenceColumns() error {
+	for _, migration := range []struct {
+		table     string
+		statement string
+	}{
+		{"github_workspace_connections", `ALTER TABLE github_workspace_connections ADD COLUMN app_registration_id TEXT`},
+		{"github_user_connections", `ALTER TABLE github_user_connections ADD COLUMN app_registration_id TEXT`},
+		{"github_auth_flows", `ALTER TABLE github_auth_flows ADD COLUMN app_registration_id TEXT`},
+	} {
+		columns, err := s.tableColumns(migration.table)
+		if err != nil {
+			return fmt.Errorf("read %s columns: %w", migration.table, err)
+		}
+		if _, exists := columns["app_registration_id"]; exists {
+			continue
+		}
+		if _, err := s.db.Exec(migration.statement); err != nil {
+			return fmt.Errorf("add %s.app_registration_id: %w", migration.table, err)
+		}
 	}
 	return nil
 }
 
-func (s *Store) addDeploymentAppCredentialSecretID() error {
-	columns, err := s.tableColumns("github_app_registration")
-	if err != nil {
-		return fmt.Errorf("read github_app_registration columns: %w", err)
+func (s *Store) initCoreSchema() error {
+	if err := s.initAppRegistrationSchema(); err != nil {
+		return err
 	}
-	if _, ok := columns["credential_secret_id"]; ok {
-		return nil
-	}
-	_, err = s.db.Exec(`ALTER TABLE github_app_registration ADD COLUMN credential_secret_id TEXT NOT NULL DEFAULT 'github:deployment-app:credentials'`)
-	if err != nil {
-		return fmt.Errorf("add github_app_registration.credential_secret_id: %w", err)
+	_, err := s.db.Exec(createTablesSQL)
+	return err
+}
+
+func (s *Store) initAppRegistrationSchema() error {
+	if _, err := s.db.Exec(appRegistrationTablesSQL); err != nil {
+		return fmt.Errorf("initialize GitHub App registration schema: %w", err)
 	}
 	return nil
 }
@@ -464,10 +649,11 @@ func (s *Store) addGitHubAuthFlowExpectationColumns() error {
 		return fmt.Errorf("read github_auth_flows columns: %w", err)
 	}
 	for name, statement := range map[string]string{
-		"expected_workspace_source":     `ALTER TABLE github_auth_flows ADD COLUMN expected_workspace_source TEXT NOT NULL DEFAULT ''`,
-		"expected_workspace_generation": `ALTER TABLE github_auth_flows ADD COLUMN expected_workspace_generation BIGINT NOT NULL DEFAULT 0`,
-		"expected_installation_id":      `ALTER TABLE github_auth_flows ADD COLUMN expected_installation_id BIGINT`,
-		"expected_personal_generation":  `ALTER TABLE github_auth_flows ADD COLUMN expected_personal_generation BIGINT NOT NULL DEFAULT 0`,
+		"expected_workspace_source":              `ALTER TABLE github_auth_flows ADD COLUMN expected_workspace_source TEXT NOT NULL DEFAULT ''`,
+		"expected_workspace_generation":          `ALTER TABLE github_auth_flows ADD COLUMN expected_workspace_generation BIGINT NOT NULL DEFAULT 0`,
+		"expected_installation_id":               `ALTER TABLE github_auth_flows ADD COLUMN expected_installation_id BIGINT`,
+		"expected_workspace_app_registration_id": `ALTER TABLE github_auth_flows ADD COLUMN expected_workspace_app_registration_id TEXT`,
+		"expected_personal_generation":           `ALTER TABLE github_auth_flows ADD COLUMN expected_personal_generation BIGINT NOT NULL DEFAULT 0`,
 	} {
 		if _, ok := columns[name]; ok {
 			continue

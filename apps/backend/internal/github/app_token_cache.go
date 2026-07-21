@@ -28,9 +28,12 @@ type InstallationTokenMinter interface {
 }
 
 type installationTokenCacheKey struct {
-	installationID int64
-	permissions    string
-	repositories   string
+	appRegistrationID       string
+	appCredentialGeneration int64
+	workspaceID             string
+	installationID          int64
+	permissions             string
+	repositories            string
 }
 
 type installationTokenCacheEntry struct {
@@ -40,7 +43,9 @@ type installationTokenCacheEntry struct {
 // InstallationTokenCache keeps GitHub's short-lived installation tokens in
 // memory and coalesces concurrent refreshes for the same installation/scope.
 type InstallationTokenCache struct {
-	minter InstallationTokenMinter
+	registrationID       string
+	credentialGeneration int64
+	minter               InstallationTokenMinter
 
 	mu          sync.RWMutex
 	entries     map[installationTokenCacheKey]installationTokenCacheEntry
@@ -50,8 +55,16 @@ type InstallationTokenCache struct {
 }
 
 func NewInstallationTokenCache(minter InstallationTokenMinter) *InstallationTokenCache {
+	return NewAppInstallationTokenCache("", 0, minter)
+}
+
+func NewAppInstallationTokenCache(
+	registrationID string,
+	credentialGeneration int64,
+	minter InstallationTokenMinter,
+) *InstallationTokenCache {
 	return &InstallationTokenCache{
-		minter:      minter,
+		registrationID: registrationID, credentialGeneration: credentialGeneration, minter: minter,
 		entries:     make(map[installationTokenCacheKey]installationTokenCacheEntry),
 		generations: make(map[int64]uint64),
 		now:         time.Now,
@@ -66,21 +79,36 @@ func (c *InstallationTokenCache) Get(
 	permissions InstallationPermissions,
 	repositories []string,
 ) (InstallationToken, error) {
+	return c.GetForWorkspace(ctx, "", installationID, permissions, repositories)
+}
+
+func (c *InstallationTokenCache) GetForWorkspace(
+	ctx context.Context,
+	workspaceID string,
+	installationID int64,
+	permissions InstallationPermissions,
+	repositories []string,
+) (InstallationToken, error) {
 	if c == nil || c.minter == nil {
 		return InstallationToken{}, errors.New("GitHub App installation token minter is not configured")
 	}
 	permissions = clonePermissions(permissions)
 	repositories = canonicalRepositories(repositories)
 	key := installationTokenCacheKey{
-		installationID: installationID,
-		permissions:    canonicalPermissions(permissions), repositories: strings.Join(repositories, ","),
+		appRegistrationID: c.registrationID, appCredentialGeneration: c.credentialGeneration,
+		workspaceID: workspaceID, installationID: installationID,
+		permissions: canonicalPermissions(permissions), repositories: strings.Join(repositories, ","),
 	}
 	if token, ok := c.cached(key, installationTokenRefreshMargin); ok {
 		return token, nil
 	}
 
 	generation := c.generation(installationID)
-	flightKey := fmt.Sprintf("%d:%d:%s:%s", installationID, generation, key.permissions, key.repositories)
+	flightKey := fmt.Sprintf(
+		"%s:%d:%s:%d:%d:%s:%s",
+		c.registrationID, c.credentialGeneration, workspaceID, installationID, generation,
+		key.permissions, key.repositories,
+	)
 	result := c.refresh(flightKey, ctx, key, installationID, generation, permissions, repositories)
 	select {
 	case <-ctx.Done():
@@ -114,6 +142,8 @@ func (c *InstallationTokenCache) refresh(
 		if token.Token == "" || !token.ExpiresAt.After(c.now()) {
 			return InstallationToken{}, ErrInstallationTokenExpired
 		}
+		token.Principal.AppRegistrationID = c.registrationID
+		token.Principal.AppCredentialGeneration = c.credentialGeneration
 
 		c.mu.Lock()
 		defer c.mu.Unlock()

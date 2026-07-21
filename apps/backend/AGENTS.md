@@ -120,6 +120,16 @@ apps/backend/
 
 **Watcher Dispatch Coordinator** (`internal/orchestrator/watcher_dispatch.go`) is the single pipeline that turns a freshly-observed external issue (Linear, Jira, future) into a Kandev task. Bus subscribers for each integration forward the event to `WatcherDispatchCoordinator.Dispatch` with a per-integration `WatcherSource` implementation (`source_linear.go`, `source_jira.go`). Source methods carry the integration-specific bits (reserve dedup, build task request, attach task ID, release, auto-start params); the coordinator owns the cross-cutting pipeline (create task, decide auto-start, error/release handling). Add a new watcher = implement `WatcherSource` + register a one-line bus subscriber. Do NOT add another `createXIssueTask` mirror.
 
+**GitHub App registration catalog** (`internal/github/`) stores zero or more managed/imported App
+registrations; none is a global default. Workspace App connections must carry both registration ID
+and installation ID. Runtime clients, token caches, broker leases, OAuth state, webhook delivery,
+and service cache scopes must retain registration identity and credential generation. Reusing a
+registration intentionally shares root App credentials and bot identity; installation grants and
+workspace credentials remain isolated. Registration create/import/select/install belongs to the
+workspace GitHub settings flow, and backend startup configuration is not an App credential source.
+Registration-specific callback and webhook routes select one candidate registration but never
+replace state verification, installation association, or HMAC verification.
+
 **Workflow Engine** (`internal/workflow/engine/`) provides typed state-machine evaluation:
 - `Engine.HandleTrigger()` evaluates step actions for triggers (on_enter, on_turn_start, on_turn_complete, on_exit)
 - `TransitionStore` interface abstracts persistence (implemented by `orchestrator.workflowStore`)

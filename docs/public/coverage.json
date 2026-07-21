@@ -189,8 +189,8 @@
       "audiences": ["user", "operator"],
       "stability": "stable",
       "docs": ["integrations", "configuration"],
-      "sources": ["apps/web/components/app-sidebar/sections/integrations-section.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope.go", "apps/backend/internal/azuredevops/service.go", "apps/web/app/azure-devops/azure-devops-page-client.tsx"],
-      "tests": ["apps/web/components/app-sidebar/sections/integrations-section.test.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope_test.go", "apps/backend/internal/azuredevops/service_test.go", "apps/web/e2e/tests/integrations/azure-devops.spec.ts"],
+      "sources": ["apps/web/components/app-sidebar/sections/integrations-section.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope.go", "apps/backend/internal/azuredevops/service.go", "apps/web/app/azure-devops/azure-devops-page-client.tsx", "apps/backend/internal/github/app_registration_lifecycle_service.go", "apps/backend/internal/github/app_registration_import.go", "apps/web/lib/api/domains/github-auth-api.ts"],
+      "tests": ["apps/web/components/app-sidebar/sections/integrations-section.test.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope_test.go", "apps/backend/internal/azuredevops/service_test.go", "apps/web/e2e/tests/integrations/azure-devops.spec.ts", "apps/backend/internal/github/controller_app_registration_test.go", "apps/backend/internal/github/app_registration_import_test.go", "apps/web/e2e/tests/settings/github-app-registration.spec.ts"],
       "settingsRoutes": [
         "/settings/integrations",
         "/settings/integrations/azure-devops",
@@ -199,8 +199,7 @@
         "/settings/integrations/jira",
         "/settings/integrations/linear",
         "/settings/integrations/sentry",
-        "/settings/integrations/slack",
-        "/settings/system/github-app"
+        "/settings/integrations/slack"
       ]
     },
     {

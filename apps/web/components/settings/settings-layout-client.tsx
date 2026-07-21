@@ -21,7 +21,6 @@ import { SettingsSaveProvider } from "@/components/settings/settings-save-provid
 const SEGMENT_LABEL_OVERRIDES: Record<string, string> = {
   "azure-devops": "Azure DevOps",
   github: "GitHub",
-  "github-app": "GitHub App",
   jira: "Jira",
   linear: "Linear",
   slack: "Slack",

@@ -84,7 +84,7 @@ PAT and named-CLI automation tokens cannot be cryptographically reduced after re
 lease matching prevents accidental cross-repository redemption, but the trusted agent subprocess
 receives a bearer token with all scopes and repositories granted by GitHub. An explicit profile
 `GITHUB_TOKEN` or `GH_TOKEN` bypasses managed broker selection entirely and is the operator's
-unmanaged grant. Personal GitHub tokens and the deployment App private key never enter executors.
+unmanaged grant. Personal GitHub tokens and App registration private keys never enter executors.
 
 Managed Docker, Sprites, and SSH launches probe the exact credential-resolution route from inside
 the executor before clone or agent startup and require its `204 No Content` readiness response.

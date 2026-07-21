@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -25,20 +26,47 @@ func (s *githubWebhookMemoryStore) ClaimWebhookDelivery(
 	if s.deliveries == nil {
 		s.deliveries = make(map[string]*WebhookDelivery)
 	}
-	existing, exists := s.deliveries[delivery.DeliveryID]
+	key := delivery.AppRegistrationID + ":" + delivery.DeliveryID
+	existing, exists := s.deliveries[key]
 	if exists && existing.Status != WebhookDeliveryStatusFailed &&
 		(existing.Status != WebhookDeliveryStatusReceived || existing.ReceivedAt.After(staleBefore)) {
 		return WebhookDeliveryClaim{Status: existing.Status}, nil
 	}
 	copy := *delivery
-	s.deliveries[delivery.DeliveryID] = &copy
+	s.deliveries[key] = &copy
 	return WebhookDeliveryClaim{Acquired: true, Status: WebhookDeliveryStatusReceived}, nil
 }
 
 func (s *githubWebhookMemoryStore) CompleteWebhookDelivery(
 	_ context.Context, deliveryID string, status WebhookDeliveryStatus, result string, processedAt time.Time,
 ) error {
-	delivery := s.deliveries[deliveryID]
+	var delivery *WebhookDelivery
+	for _, candidate := range s.deliveries {
+		if candidate.DeliveryID == deliveryID {
+			delivery = candidate
+			break
+		}
+	}
+	if delivery == nil {
+		return errors.New("delivery not found")
+	}
+	delivery.Status = status
+	delivery.Result = result
+	delivery.ProcessedAt = &processedAt
+	return nil
+}
+
+func (s *githubWebhookMemoryStore) CompleteAppRegistrationWebhookDelivery(
+	_ context.Context,
+	registrationID, deliveryID string,
+	status WebhookDeliveryStatus,
+	result string,
+	processedAt time.Time,
+) error {
+	delivery := s.deliveries[registrationID+":"+deliveryID]
+	if delivery == nil {
+		return errors.New("delivery not found")
+	}
 	delivery.Status = status
 	delivery.Result = result
 	delivery.ProcessedAt = &processedAt
@@ -49,6 +77,19 @@ func (s *githubWebhookMemoryStore) ListWorkspaceConnectionsByInstallation(
 	_ context.Context, installationID int64,
 ) ([]*WorkspaceConnection, error) {
 	return s.workspaces[installationID], nil
+}
+
+func (s *githubWebhookMemoryStore) ListWorkspaceConnectionsByAppInstallation(
+	_ context.Context, registrationID string, installationID int64,
+) ([]*WorkspaceConnection, error) {
+	connections := s.workspaces[installationID]
+	matched := make([]*WorkspaceConnection, 0, len(connections))
+	for _, connection := range connections {
+		if connection != nil && connection.AppRegistrationID == registrationID {
+			matched = append(matched, connection)
+		}
+	}
+	return matched, nil
 }
 
 func (s *githubWebhookMemoryStore) TransitionWorkspaceInstallationConnection(
@@ -64,21 +105,40 @@ func (s *githubWebhookMemoryStore) TransitionWorkspaceInstallationConnection(
 		s.updateErr = nil
 		return false, err
 	}
-	current := s.workspaces[*expected.InstallationID][0]
-	if current.Source != expected.Source || current.InstallationID == nil ||
-		*current.InstallationID != *expected.InstallationID ||
-		current.CredentialGeneration != expected.CredentialGeneration || current.Status != expected.Status {
-		return false, nil
+	for _, current := range s.workspaces[*expected.InstallationID] {
+		if current.WorkspaceID != expected.WorkspaceID {
+			continue
+		}
+		if current.Source != expected.Source || current.InstallationID == nil ||
+			*current.InstallationID != *expected.InstallationID ||
+			current.AppRegistrationID != expected.AppRegistrationID ||
+			current.CredentialGeneration != expected.CredentialGeneration || current.Status != expected.Status {
+			return false, nil
+		}
+		*current = *next
+		s.updates++
+		return true, nil
 	}
-	*current = *next
-	s.updates++
-	return true, nil
+	return false, nil
 }
 
 func (s *githubWebhookMemoryStore) ListUserConnectionsByGitHubUser(
 	_ context.Context, githubUserID int64,
 ) ([]*UserConnection, error) {
 	return s.users[githubUserID], nil
+}
+
+func (s *githubWebhookMemoryStore) ListUserConnectionsByAppGitHubUser(
+	_ context.Context, registrationID string, githubUserID int64,
+) ([]*UserConnection, error) {
+	connections := s.users[githubUserID]
+	matched := make([]*UserConnection, 0, len(connections))
+	for _, connection := range connections {
+		if connection != nil && connection.AppRegistrationID == registrationID {
+			matched = append(matched, connection)
+		}
+	}
+	return matched, nil
 }
 
 type webhookPersonalRevoker struct {
@@ -120,6 +180,66 @@ type webhookRepoUpdater struct {
 	err     error
 }
 
+func newRegistrationWebhookService(
+	registrationID, secret string,
+	store githubWebhookStore,
+	repositories installationRepositoryUpdater,
+	personal personalConnectionRevoker,
+	reconciliation ...GitHubWebhookReconciliation,
+) *GitHubWebhookService {
+	return NewAppRegistrationWebhookService(
+		registrationID, secret, store, repositories, personal, reconciliation...,
+	)
+}
+
+func TestGitHubWebhookDeliveryIdentityIncludesRegistration(t *testing.T) {
+	store := &githubWebhookMemoryStore{}
+	payload := []byte(`{}`)
+	request := signedWebhookRequest("shared-secret", "delivery-1", "ping", payload)
+
+	for _, registrationID := range []string{"registration-a", "registration-b"} {
+		service := newRegistrationWebhookService(registrationID, "shared-secret", store, nil, nil)
+		result, err := service.Handle(context.Background(), request)
+		if err != nil || result.Duplicate {
+			t.Fatalf("registration %s Handle() = %+v, err %v", registrationID, result, err)
+		}
+	}
+	if len(store.deliveries) != 2 {
+		t.Fatalf("deliveries = %#v, want one per registration", store.deliveries)
+	}
+}
+
+func TestGitHubWebhookOnlyMutatesMatchingRegistrationInstallation(t *testing.T) {
+	installationID := int64(42)
+	work := &WorkspaceConnection{
+		WorkspaceID: "work", AppRegistrationID: "registration-work",
+		Source: ConnectionSourceGitHubAppInstallation, InstallationID: &installationID,
+		Status: ConnectionStatusActive, CredentialGeneration: 1,
+	}
+	personal := &WorkspaceConnection{
+		WorkspaceID: "personal", AppRegistrationID: "registration-personal",
+		Source: ConnectionSourceGitHubAppInstallation, InstallationID: &installationID,
+		Status: ConnectionStatusActive, CredentialGeneration: 1,
+	}
+	store := &githubWebhookMemoryStore{workspaces: map[int64][]*WorkspaceConnection{
+		installationID: {work, personal},
+	}}
+	service := newRegistrationWebhookService("registration-work", "work-secret", store, nil, nil)
+	request := signedWebhookRequest(
+		"work-secret", "delivery-1", "installation",
+		[]byte(`{"action":"suspend","installation":{"id":42}}`),
+	)
+
+	result, err := service.Handle(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if result.Affected != 1 || work.Status != ConnectionStatusSuspended ||
+		personal.Status != ConnectionStatusActive {
+		t.Fatalf("result=%+v work=%+v personal=%+v", result, work, personal)
+	}
+}
+
 func (u *webhookRepoUpdater) ApplyInstallationRepositories(
 	_ context.Context, change InstallationRepositoriesChange,
 ) (bool, error) {
@@ -134,13 +254,133 @@ func (u *webhookRepoUpdater) ApplyInstallationRepositories(
 
 func TestGitHubWebhookRejectsInvalidSignatureBeforeDedupe(t *testing.T) {
 	store := &githubWebhookMemoryStore{}
-	service := NewGitHubWebhookService("webhook-secret", store, nil, nil)
-	_, err := service.Handle(context.Background(), GitHubWebhookRequest{
-		DeliveryID: "delivery-1", Event: "installation", Signature: "sha256=invalid",
-		Payload: []byte(`{"action":"suspend","installation":{"id":42}}`),
-	})
+	service := newRegistrationWebhookService("registration-b", "registration-b-secret", store, nil, nil)
+	wrongRouteRequest := signedWebhookRequest(
+		"registration-a-secret", "delivery-1", "installation", []byte(`{"action":`),
+	)
+	_, err := service.Handle(context.Background(), wrongRouteRequest)
 	if !errors.Is(err, ErrInvalidWebhookSignature) || len(store.deliveries) != 0 {
 		t.Fatalf("Handle() error = %v, deliveries = %v", err, store.deliveries)
+	}
+}
+
+func TestGitHubWebhookAuthorizationRevocationOnlyMatchesRegistration(t *testing.T) {
+	store := &githubWebhookMemoryStore{users: map[int64][]*UserConnection{11: {
+		{WorkspaceID: "work", UserID: "user-1", AppRegistrationID: "registration-work", GitHubUserID: 11},
+		{WorkspaceID: "personal", UserID: "user-1", AppRegistrationID: "registration-personal", GitHubUserID: 11},
+	}}}
+	revoker := &webhookPersonalRevoker{}
+	service := newRegistrationWebhookService("registration-work", "work-secret", store, nil, revoker)
+	request := signedWebhookRequest(
+		"work-secret", "delivery-authorization", "github_app_authorization",
+		[]byte(`{"action":"revoked","sender":{"id":11}}`),
+	)
+
+	result, err := service.Handle(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if result.Affected != 1 || len(revoker.revoked) != 1 || revoker.revoked[0] != "work:user-1" {
+		t.Fatalf("result=%+v revoked=%v", result, revoker.revoked)
+	}
+}
+
+func TestAppRegistrationWebhookHealthUpdateIsRegistrationLocal(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, registration := range []*AppRegistration{
+		newAppRegistration("registration-work", 101, "Work", now),
+		newAppRegistration("registration-personal", 202, "Personal", now),
+	} {
+		if err := store.UpsertDeploymentAppRegistration(ctx, registration); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	updated, err := store.updateAppRegistrationWebhookHealth(
+		ctx, "registration-work", 1, DeploymentAppWebhookVerified, now, "",
+	)
+	if err != nil || !updated {
+		t.Fatalf("update work health = %v, err %v", updated, err)
+	}
+	work, err := store.GetAppRegistration(ctx, "registration-work")
+	if err != nil || work.WebhookStatus != DeploymentAppWebhookVerified || work.LastWebhookAt == nil {
+		t.Fatalf("work registration = %+v, err %v", work, err)
+	}
+	personal, err := store.GetAppRegistration(ctx, "registration-personal")
+	if err != nil || personal.WebhookStatus != DeploymentAppWebhookUnverified || personal.LastWebhookAt != nil {
+		t.Fatalf("personal registration = %+v, err %v", personal, err)
+	}
+
+	updated, err = store.updateAppRegistrationWebhookHealth(
+		ctx, "registration-work", 0, DeploymentAppWebhookFailing, now, "stale",
+	)
+	if err != nil || updated {
+		t.Fatalf("stale generation update = %v, err %v", updated, err)
+	}
+}
+
+func TestGitHubWebhookConcurrentDeliveryIsProcessedOncePerRegistration(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	seedConnectionWorkspaces(t, store, "workspace-1")
+	if err := store.UpsertDeploymentAppRegistration(
+		ctx, newAppRegistration("registration-work", 101, "Work", now),
+	); err != nil {
+		t.Fatal(err)
+	}
+	installationID := int64(42)
+	if err := store.UpsertWorkspaceConnection(ctx, &WorkspaceConnection{
+		WorkspaceID: "workspace-1", AppRegistrationID: "registration-work",
+		Source: ConnectionSourceGitHubAppInstallation, GitHubHost: "github.com",
+		InstallationID: &installationID, InstallationAccountLogin: "acme",
+		InstallationAccountType: "Organization", Status: ConnectionStatusActive,
+		CredentialGeneration: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewAppRegistrationWebhookService(
+		"registration-work", "work-secret", store, nil, nil,
+	)
+	request := signedWebhookRequest(
+		"work-secret", "delivery-concurrent", "installation",
+		[]byte(`{"action":"suspend","installation":{"id":42}}`),
+	)
+
+	type outcome struct {
+		result GitHubWebhookResult
+		err    error
+	}
+	ready := sync.WaitGroup{}
+	ready.Add(2)
+	start := make(chan struct{})
+	outcomes := make(chan outcome, 2)
+	for range 2 {
+		go func() {
+			ready.Done()
+			<-start
+			result, err := service.Handle(ctx, request)
+			outcomes <- outcome{result: result, err: err}
+		}()
+	}
+	ready.Wait()
+	close(start)
+
+	affected, duplicates := 0, 0
+	for range 2 {
+		outcome := <-outcomes
+		if outcome.err != nil {
+			t.Fatalf("Handle() error = %v", outcome.err)
+		}
+		affected += outcome.result.Affected
+		if outcome.result.Duplicate {
+			duplicates++
+		}
+	}
+	if affected != 1 || duplicates != 1 {
+		t.Fatalf("affected=%d duplicates=%d", affected, duplicates)
 	}
 }
 
@@ -302,10 +542,11 @@ func TestGitHubWebhookAppliesRepositoryChangesOnlyToKnownBindings(t *testing.T) 
 	installationID := int64(42)
 	store := &githubWebhookMemoryStore{workspaces: map[int64][]*WorkspaceConnection{42: {{
 		WorkspaceID: "workspace-1", Source: ConnectionSourceGitHubAppInstallation,
-		InstallationID: &installationID, Status: ConnectionStatusActive, CredentialGeneration: 3,
+		AppRegistrationID: "registration-work", InstallationID: &installationID,
+		Status: ConnectionStatusActive, CredentialGeneration: 3,
 	}}}}
 	repos := &webhookRepoUpdater{}
-	service := NewGitHubWebhookService("webhook-secret", store, repos, nil)
+	service := newRegistrationWebhookService("registration-work", "webhook-secret", store, repos, nil)
 	payload := []byte(`{
 		"action":"added","installation":{"id":42},
 		"repositories_added":[{"id":7,"full_name":"acme/repo"}],"repositories_removed":[]
@@ -317,6 +558,7 @@ func TestGitHubWebhookAppliesRepositoryChangesOnlyToKnownBindings(t *testing.T) 
 		t.Fatalf("Handle() error = %v", err)
 	}
 	if result.Affected != 1 || len(repos.updates) != 1 || repos.updates[0].WorkspaceID != "workspace-1" ||
+		repos.updates[0].AppRegistrationID != "registration-work" ||
 		repos.updates[0].CredentialGeneration != 3 || len(repos.updates[0].Added) != 1 ||
 		repos.updates[0].Added[0].FullName != "acme/repo" {
 		t.Fatalf("Handle() = %+v, repository updates = %+v", result, repos.updates)
@@ -419,7 +661,7 @@ func TestGitHubWebhookRetriesFailedDelivery(t *testing.T) {
 	if _, err := service.Handle(context.Background(), request); err == nil {
 		t.Fatal("first Handle() unexpectedly succeeded")
 	}
-	if got := store.deliveries[request.DeliveryID].Status; got != WebhookDeliveryStatusFailed {
+	if got := store.deliveries[":"+request.DeliveryID].Status; got != WebhookDeliveryStatusFailed {
 		t.Fatalf("failed delivery status = %q", got)
 	}
 	result, err := service.Handle(context.Background(), request)
@@ -427,15 +669,18 @@ func TestGitHubWebhookRetriesFailedDelivery(t *testing.T) {
 		t.Fatalf("retry Handle() error = %v", err)
 	}
 	if result.Duplicate || result.Affected != 1 || len(repos.updates) != 1 ||
-		store.deliveries[request.DeliveryID].Status != WebhookDeliveryStatusProcessed {
-		t.Fatalf("retry result=%+v updates=%d delivery=%+v", result, len(repos.updates), store.deliveries[request.DeliveryID])
+		store.deliveries[":"+request.DeliveryID].Status != WebhookDeliveryStatusProcessed {
+		t.Fatalf(
+			"retry result=%+v updates=%d delivery=%+v",
+			result, len(repos.updates), store.deliveries[":"+request.DeliveryID],
+		)
 	}
 }
 
 func TestGitHubWebhookReclaimsStaleReceivedDelivery(t *testing.T) {
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	store := &githubWebhookMemoryStore{deliveries: map[string]*WebhookDelivery{
-		"delivery-stale": {
+		":delivery-stale": {
 			DeliveryID: "delivery-stale", Event: "installation", Status: WebhookDeliveryStatusReceived,
 			ReceivedAt: now.Add(-webhookDeliveryStaleAfter - time.Second),
 		},

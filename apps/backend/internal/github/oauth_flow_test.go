@@ -26,9 +26,15 @@ func (s *oauthFlowMemoryStore) CreateAuthFlow(_ context.Context, flow *AuthFlow)
 	return nil
 }
 
-func (s *oauthFlowMemoryStore) ConsumeAuthFlow(_ context.Context, stateHash string, now time.Time) (*AuthFlow, error) {
+func (s *oauthFlowMemoryStore) ConsumeAuthFlow(
+	_ context.Context,
+	stateHash, registrationID string,
+	kind AuthFlowKind,
+	now time.Time,
+) (*AuthFlow, error) {
 	flow := s.flows[stateHash]
-	if flow == nil || flow.ConsumedAt != nil || !flow.ExpiresAt.After(now) {
+	if flow == nil || flow.AppRegistrationID != registrationID || flow.Kind != kind ||
+		flow.ConsumedAt != nil || !flow.ExpiresAt.After(now) {
 		return nil, ErrAuthFlowUnavailable
 	}
 	copy := *flow
@@ -45,13 +51,15 @@ func TestOAuthFlowStartPersistsOnlyStateDigestAndPKCEVerifier(t *testing.T) {
 
 	installationID := int64(42)
 	started, err := manager.Start(context.Background(), OAuthFlowRequest{
-		WorkspaceID:                 "workspace-1",
-		UserID:                      "user-1",
-		Kind:                        AuthFlowKindPersonal,
-		ExpectedWorkspaceSource:     ConnectionSourceGitHubAppInstallation,
-		ExpectedWorkspaceGeneration: 3,
-		ExpectedInstallationID:      &installationID,
-		ExpectedPersonalGeneration:  7,
+		WorkspaceID:                        "workspace-1",
+		UserID:                             "user-1",
+		AppRegistrationID:                  "registration-test",
+		Kind:                               AuthFlowKindPersonal,
+		ExpectedWorkspaceSource:            ConnectionSourceGitHubAppInstallation,
+		ExpectedWorkspaceGeneration:        3,
+		ExpectedInstallationID:             &installationID,
+		ExpectedWorkspaceAppRegistrationID: "registration-test",
+		ExpectedPersonalGeneration:         7,
 	})
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -84,19 +92,22 @@ func TestOAuthFlowConsumeRejectsMismatchAndReplay(t *testing.T) {
 	manager.random = io.LimitReader(strings.NewReader(strings.Repeat("b", oauthRandomBytes)), oauthRandomBytes)
 
 	started, err := manager.Start(context.Background(), OAuthFlowRequest{
-		WorkspaceID: "workspace-1", UserID: "user-1", Kind: AuthFlowKindAppInstallation,
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-test",
+		Kind: AuthFlowKindAppInstallation,
 	})
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	_, err = manager.Consume(context.Background(), started.State, OAuthFlowExpectation{
-		WorkspaceID: "other-workspace", UserID: "user-1", Kind: AuthFlowKindAppInstallation,
+		WorkspaceID: "other-workspace", UserID: "user-1", AppRegistrationID: "registration-test",
+		Kind: AuthFlowKindAppInstallation,
 	})
 	if !errors.Is(err, ErrOAuthStateMismatch) {
 		t.Fatalf("Consume() mismatch error = %v, want %v", err, ErrOAuthStateMismatch)
 	}
 	_, err = manager.Consume(context.Background(), started.State, OAuthFlowExpectation{
-		WorkspaceID: "workspace-1", UserID: "user-1", Kind: AuthFlowKindAppInstallation,
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-test",
+		Kind: AuthFlowKindAppInstallation,
 	})
 	if !errors.Is(err, ErrOAuthStateInvalid) {
 		t.Fatalf("Consume() replay error = %v, want %v", err, ErrOAuthStateInvalid)
@@ -110,14 +121,16 @@ func TestOAuthFlowConsumeRejectsExpiredState(t *testing.T) {
 	manager.now = func() time.Time { return now }
 	manager.random = strings.NewReader(strings.Repeat("c", oauthRandomBytes))
 	started, err := manager.Start(context.Background(), OAuthFlowRequest{
-		WorkspaceID: "workspace-1", UserID: "user-1", Kind: AuthFlowKindAppInstallation,
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-test",
+		Kind: AuthFlowKindAppInstallation,
 	})
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	manager.now = func() time.Time { return now.Add(appInstallationStateTTL + time.Second) }
 	_, err = manager.Consume(context.Background(), started.State, OAuthFlowExpectation{
-		WorkspaceID: "workspace-1", UserID: "user-1", Kind: AuthFlowKindAppInstallation,
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-test",
+		Kind: AuthFlowKindAppInstallation,
 	})
 	if !errors.Is(err, ErrOAuthStateInvalid) {
 		t.Fatalf("Consume() expired error = %v, want %v", err, ErrOAuthStateInvalid)

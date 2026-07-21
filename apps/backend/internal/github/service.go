@@ -96,32 +96,23 @@ type PromptResolver interface {
 
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu                         sync.Mutex
-	deploymentAppMutationMu    sync.Mutex
-	connectionMutationLocks    [64]sync.Mutex
-	client                     Client
-	authMethod                 string
-	secrets                    SecretProvider
-	secretManager              SecretManager
-	connectionSecrets          ConnectionSecretStore
-	personalConnections        *StorePersonalConnectionRepository
-	resolver                   *CredentialResolver
-	appClient                  *AppClient
-	installationTokens         *InstallationTokenCache
-	appInstallationAuth        *AppInstallationService
-	personalAuth               *PersonalAuthService
-	webhookAuth                *GitHubWebhookService
-	appAvailable               bool
-	deploymentAppRuntime       *githubAppRuntime
-	deploymentAppRegistration  *DeploymentAppRegistrationService
-	mockDeploymentAppStatus    *DeploymentAppRegistrationStatus
-	deploymentAppWebhookHealth deploymentAppWebhookHealth
-	credentialBroker           *CredentialBroker
-	store                      *Store
-	eventBus                   bus.EventBus
-	logger                     *logger.Logger
-	taskDeleter                TaskDeleter
-	taskIssueStore             TaskIssueStore
+	mu                       sync.Mutex
+	connectionMutationLocks  [64]sync.Mutex
+	client                   Client
+	authMethod               string
+	secrets                  SecretProvider
+	secretManager            SecretManager
+	connectionSecrets        ConnectionSecretStore
+	personalConnections      *StorePersonalConnectionRepository
+	resolver                 *CredentialResolver
+	appRegistrationRuntimes  map[string]*githubAppRuntime
+	appRegistrationLifecycle *AppRegistrationLifecycleService
+	credentialBroker         *CredentialBroker
+	store                    *Store
+	eventBus                 bus.EventBus
+	logger                   *logger.Logger
+	taskDeleter              TaskDeleter
+	taskIssueStore           TaskIssueStore
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
 	// watch reset flow. It is distinct from taskDeleter (which only deletes
 	// a single task by ID) because reset must walk the task tree and clean
@@ -176,25 +167,26 @@ type Service struct {
 func NewService(client Client, authMethod string, secrets SecretProvider, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
 	stopCtx, stopCancel := context.WithCancel(context.Background())
 	service := &Service{
-		client:               client,
-		authMethod:           authMethod,
-		secrets:              secrets,
-		store:                store,
-		eventBus:             eventBus,
-		logger:               log,
-		searchCache:          newTTLCache(),
-		prStatusCache:        newTTLCache(),
-		prFeedbackCache:      newPRFeedbackCache(),
-		mergeMethodsCache:    newMergeMethodsCache(),
-		accessibleReposCache: newAccessibleReposCache(),
-		repoErrorCache:       newRepoErrorCache(),
-		protectionCache:      newBranchProtectionCache(),
-		rateTracker:          NewRateTracker(eventBus, log),
-		tokenClientFactory:   func(token string) Client { return NewPATClient(token) },
-		ghAccountLister:      ListGHAccounts,
-		cleanupFailureCounts: make(map[string]int),
-		stopCtx:              stopCtx,
-		stopCancel:           stopCancel,
+		client:                  client,
+		authMethod:              authMethod,
+		secrets:                 secrets,
+		store:                   store,
+		eventBus:                eventBus,
+		logger:                  log,
+		searchCache:             newTTLCache(),
+		prStatusCache:           newTTLCache(),
+		prFeedbackCache:         newPRFeedbackCache(),
+		mergeMethodsCache:       newMergeMethodsCache(),
+		accessibleReposCache:    newAccessibleReposCache(),
+		repoErrorCache:          newRepoErrorCache(),
+		protectionCache:         newBranchProtectionCache(),
+		rateTracker:             NewRateTracker(eventBus, log),
+		tokenClientFactory:      func(token string) Client { return NewPATClient(token) },
+		ghAccountLister:         ListGHAccounts,
+		cleanupFailureCounts:    make(map[string]int),
+		appRegistrationRuntimes: make(map[string]*githubAppRuntime),
+		stopCtx:                 stopCtx,
+		stopCancel:              stopCancel,
 	}
 	if store != nil {
 		service.resolver = NewCredentialResolver(store, secrets)
@@ -289,34 +281,10 @@ func (s *Service) SetConnectionSecretStore(store ConnectionSecretStore) {
 	}
 }
 
-// SetGitHubAppClient enables installation-backed workspace credentials. The
-// App private key remains encapsulated by AppClient and is never exposed by
-// the service or credential resolver.
-func (s *Service) SetGitHubAppClient(client *AppClient) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.appClient = client
-	if client == nil {
-		s.installationTokens = nil
-		if s.resolver != nil {
-			s.resolver.SetInstallationProvider(nil)
-		}
-		return
-	}
-	s.installationTokens = NewInstallationTokenCache(client)
-	if s.resolver != nil {
-		s.resolver.SetInstallationProvider(NewCachedInstallationCredentialProvider(s.installationTokens))
-	}
-}
-
-// InvalidateInstallationCredentials revokes cached installation tokens after
-// disconnect, suspension, replacement, or a corresponding GitHub webhook.
-func (s *Service) InvalidateInstallationCredentials(installationID int64) {
-	s.mu.Lock()
-	tokens := s.installationTokens
-	s.mu.Unlock()
-	if tokens != nil {
-		tokens.Invalidate(installationID)
+func (s *Service) InvalidateAppInstallationCredentials(registrationID string, installationID int64) {
+	runtime := s.currentAppRegistrationRuntime(registrationID)
+	if runtime != nil && runtime.installationTokens != nil {
+		runtime.installationTokens.Invalidate(installationID)
 	}
 }
 

@@ -1,9 +1,9 @@
 # 0047 — Separate GitHub deployment, workspace automation, and personal identities
 
 > Amended by
-> [ADR-2026-07-20-managed-github-app-registration](2026-07-20-managed-github-app-registration.md):
-> deployment App registration may be environment-managed or created through Kandev's runtime App
-> Manifest onboarding flow; workspace and personal ownership boundaries are unchanged.
+> [ADR-2026-07-21-workspace-selectable-github-app-registrations](2026-07-21-workspace-selectable-github-app-registrations.md):
+> Kandev stores multiple App registrations and every workspace explicitly selects one registration
+> and installation. The automation and personal identity boundaries remain unchanged.
 
 - Status: accepted
 - Date: 2026-07-19
@@ -32,9 +32,12 @@ to let them mint replacements.
 
 GitHub authentication has three ownership layers and is resolved by purpose:
 
-1. **Deployment-owned App registration.** A deployment may configure one GitHub App registration.
-   The App ID, client ID, private key, client secret, webhook secret, slug, and public callback URL
-   are operator configuration. Workspace and user APIs never read or return this secret material.
+1. **Deployment App registration catalog.** A deployment may store multiple GitHub App
+   registrations, but none is globally active. Each workspace explicitly selects a registration
+   and verified installation. The App ID, client ID, private key, client secret, webhook secret,
+   slug, and public callback URL remain registration-manager configuration. Workspace and user APIs
+   never read or return secret material. Reusing a registration is an explicit sharing choice;
+   creating separate registrations provides independent root credentials and bot identities.
 2. **Workspace-owned automation connection.** Each workspace selects exactly one automation source:
    PAT, a named `gh` CLI host/login, a verified App installation, or the temporary
    `legacy_shared` migration source. Background work and agents always use this identity.
@@ -87,8 +90,9 @@ old globally named token secret; managed workspace connections do not use ambien
 
 ## Consequences
 
-- A different primary GitHub account requires a different workspace. Kandev does not add arbitrary
-  N-account routing inside a workspace.
+- A different primary GitHub account requires a different workspace. Each workspace still has one
+  automation identity; multiple App registrations do not add arbitrary N-account routing inside a
+  workspace.
 - A hosted workspace can use an App for organization-controlled automation and a personal user
   token for `My GitHub` and human-attributed actions.
 - An App-only workspace can still create PRs, review, merge, and run watches when permissions allow,

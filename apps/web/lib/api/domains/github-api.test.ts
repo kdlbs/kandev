@@ -9,11 +9,12 @@ import {
   configureGitHubToken,
   copyGitHubWorkspaceSettings,
   createTaskPR,
-  disconnectGitHubAppInstallation,
+  deleteGitHubAppRegistration,
   disconnectGitHubPersonal,
   disconnectGitHubWorkspace,
   fetchAccessibleRepos,
   fetchGitHubCLIAccounts,
+  fetchGitHubAppRegistrations,
   fetchGitHubStatus,
   fetchIssueInfo,
   fetchPRInfo,
@@ -24,13 +25,17 @@ import {
   getRepoMergeMethods,
   getTaskCIAutomationOptions,
   GitHubUnavailableError,
+  importGitHubAppRegistration,
   linkTaskIssue,
   listUserOrgs,
   listWorkspaceTaskIssues,
   mergePR,
+  prepareGitHubAppImport,
+  renameGitHubAppRegistration,
   searchOrgRepos,
   setGitHubWorkspaceConnection,
   startGitHubAppInstall,
+  startGitHubAppManifest,
   startGitHubPersonalConnect,
   submitPRReview,
   unlinkTaskIssue,
@@ -38,6 +43,10 @@ import {
   type AccessibleRepo,
 } from "./github-api";
 import * as githubAuthApi from "./github-auth-api";
+
+const workspaceID = "ws/1";
+const appRegistrationID = "registration/one";
+const publicKandevURL = "https://kandev.example";
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -113,7 +122,7 @@ describe("workspace GitHub authentication", () => {
       }),
     );
 
-    await expect(fetchGitHubCLIAccounts("ws/1")).resolves.toHaveLength(2);
+    await expect(fetchGitHubCLIAccounts(workspaceID)).resolves.toHaveLength(2);
     expect(lastCallUrl()).toBe(
       "http://api.test/api/v1/github/auth/gh-cli/accounts?workspace_id=ws%2F1",
     );
@@ -129,24 +138,23 @@ describe("workspace GitHub authentication", () => {
       .mockResolvedValueOnce(jsonResponse({ disconnected: true }))
       .mockResolvedValueOnce(jsonResponse({ disconnected: true }));
 
-    await startGitHubAppInstall("ws/1");
-    await startGitHubPersonalConnect("ws/1");
-    await disconnectGitHubAppInstallation("ws/1");
-    await disconnectGitHubPersonal("ws/1");
-    await disconnectGitHubWorkspace("ws/1");
+    await startGitHubAppInstall(workspaceID, appRegistrationID);
+    await startGitHubPersonalConnect(workspaceID);
+    await disconnectGitHubPersonal(workspaceID);
+    await disconnectGitHubWorkspace(workspaceID);
 
     expect(fetchSpy.mock.calls.map((call) => [String(call[0]), call[1]?.method])).toEqual([
       ["http://api.test/api/v1/github/app/install/start", "POST"],
       ["http://api.test/api/v1/github/personal-connection/start", "POST"],
-      ["http://api.test/api/v1/github/app/installation?workspace_id=ws%2F1", "DELETE"],
       ["http://api.test/api/v1/github/personal-connection?workspace_id=ws%2F1", "DELETE"],
       ["http://api.test/api/v1/github/workspace-connection?workspace_id=ws%2F1", "DELETE"],
     ]);
     expect(JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body))).toEqual({
-      workspace_id: "ws/1",
+      workspace_id: workspaceID,
+      app_registration_id: appRegistrationID,
     });
     expect(JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body))).toEqual({
-      workspace_id: "ws/1",
+      workspace_id: workspaceID,
     });
   });
 
@@ -155,8 +163,8 @@ describe("workspace GitHub authentication", () => {
       .mockResolvedValueOnce(jsonResponse({ configured: true }))
       .mockResolvedValueOnce(jsonResponse({ cleared: true }));
 
-    await configureGitHubToken("ws/1", "github_pat_test");
-    await clearGitHubToken("ws/1");
+    await configureGitHubToken(workspaceID, "github_pat_test");
+    await clearGitHubToken(workspaceID);
 
     expect(fetchSpy.mock.calls.map((call) => [String(call[0]), call[1]?.method])).toEqual([
       ["http://api.test/api/v1/github/token?workspace_id=ws%2F1", "POST"],
@@ -165,22 +173,25 @@ describe("workspace GitHub authentication", () => {
   });
 });
 
-describe("deployment GitHub App registration", () => {
-  it("exposes the deployment registration API", () => {
+describe("workspace GitHub App registrations", () => {
+  it("exposes the registration catalog API", () => {
     expect(githubAuthApi).toMatchObject({
-      fetchDeploymentAppRegistration: expect.any(Function),
-      startDeploymentAppRegistration: expect.any(Function),
-      deleteDeploymentAppRegistration: expect.any(Function),
+      fetchGitHubAppRegistrations: expect.any(Function),
+      startGitHubAppManifest: expect.any(Function),
+      prepareGitHubAppImport: expect.any(Function),
+      importGitHubAppRegistration: expect.any(Function),
+      renameGitHubAppRegistration: expect.any(Function),
+      deleteGitHubAppRegistration: expect.any(Function),
     });
   });
 
-  it("uses the system-level registration routes", async () => {
+  it("uses workspace-scoped catalog and registration lifecycle routes", async () => {
     fetchSpy
-      .mockResolvedValueOnce(
-        jsonResponse({ source: "none", state: "unconfigured", ready: false, read_only: false }),
-      )
+      .mockResolvedValueOnce(jsonResponse({ workspace_id: workspaceID, registrations: [] }))
       .mockResolvedValueOnce(
         jsonResponse({
+          registration_id: appRegistrationID,
+          workspace_id: workspaceID,
           state: "state",
           expires_at: "2026-07-20T22:00:00Z",
           revision: 1,
@@ -188,26 +199,72 @@ describe("deployment GitHub App registration", () => {
           manifest: { name: "Kandev acme" },
         }),
       )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          registration_id: appRegistrationID,
+          public_base_url: publicKandevURL,
+          webhook_url: "https://kandev.example/webhook",
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: appRegistrationID }))
+      .mockResolvedValueOnce(jsonResponse({ id: appRegistrationID, display_name: "Renamed" }))
       .mockResolvedValueOnce(jsonResponse({ deleted: true }));
 
-    await githubAuthApi.fetchDeploymentAppRegistration();
-    await githubAuthApi.startDeploymentAppRegistration({
+    await fetchGitHubAppRegistrations(workspaceID);
+    await startGitHubAppManifest({
+      workspace_id: workspaceID,
+      display_name: "Work App",
       owner_type: "organization",
       owner_login: "acme",
-      public_base_url: "https://kandev.example",
+      visibility: "private",
+      public_base_url: publicKandevURL,
     });
-    await githubAuthApi.deleteDeploymentAppRegistration();
+    await prepareGitHubAppImport({
+      workspace_id: workspaceID,
+      public_base_url: publicKandevURL,
+    });
+    await importGitHubAppRegistration({
+      registration_id: "registration-1",
+      workspace_id: workspaceID,
+      display_name: "Existing App",
+      github_host: "github.com",
+      app_id: 42,
+      client_id: "Iv1.client",
+      client_secret: "client-secret",
+      private_key: "private-key",
+      webhook_secret: "webhook-secret",
+      slug: "existing-app",
+      owner_login: "acme",
+      owner_type: "Organization",
+      visibility: "private",
+      public_base_url: publicKandevURL,
+    });
+    await renameGitHubAppRegistration(appRegistrationID, "Renamed");
+    await deleteGitHubAppRegistration(appRegistrationID);
 
     expect(fetchSpy.mock.calls.map((call) => [String(call[0]), call[1]?.method])).toEqual([
-      ["http://api.test/api/v1/github/app/registration", undefined],
-      ["http://api.test/api/v1/github/app/registration/start", "POST"],
-      ["http://api.test/api/v1/github/app/registration", "DELETE"],
+      ["http://api.test/api/v1/github/app/registrations?workspace_id=ws%2F1", undefined],
+      ["http://api.test/api/v1/github/app/registrations/manifest/start", "POST"],
+      ["http://api.test/api/v1/github/app/registrations/import/prepare", "POST"],
+      ["http://api.test/api/v1/github/app/registrations/import", "POST"],
+      ["http://api.test/api/v1/github/app/registrations/registration%2Fone", "PATCH"],
+      ["http://api.test/api/v1/github/app/registrations/registration%2Fone", "DELETE"],
     ]);
     expect(fetchSpy.mock.calls[0]?.[1]?.cache).toBe("no-store");
     expect(JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body))).toEqual({
+      workspace_id: workspaceID,
+      display_name: "Work App",
       owner_type: "organization",
       owner_login: "acme",
-      public_base_url: "https://kandev.example",
+      visibility: "private",
+      public_base_url: publicKandevURL,
+    });
+    expect(JSON.parse(String(fetchSpy.mock.calls[2]?.[1]?.body))).toEqual({
+      workspace_id: workspaceID,
+      public_base_url: publicKandevURL,
+    });
+    expect(JSON.parse(String(fetchSpy.mock.calls[4]?.[1]?.body))).toEqual({
+      display_name: "Renamed",
     });
   });
 });
@@ -216,14 +273,14 @@ describe("workspace-scoped GitHub operations", () => {
   it("scopes PR reads, review, merge, and repository metadata", async () => {
     fetchSpy.mockImplementation(async () => jsonResponse({}));
 
-    await getPRFeedback("ws/1", "acme", "site", 42);
-    await getPRStatus("ws/1", "acme", "site", 42);
-    await getPRStatusesBatch("ws/1", [{ owner: "acme", repo: "site", number: 42 }]);
-    await submitPRReview("ws/1", { owner: "acme", repo: "site", number: 42 }, "APPROVE");
-    await mergePR("ws/1", "acme", "site", 42, "squash");
-    await getRepoMergeMethods("ws/1", "acme", "site");
-    await listUserOrgs("ws/1");
-    await searchOrgRepos("ws/1", "acme", "site");
+    await getPRFeedback(workspaceID, "acme", "site", 42);
+    await getPRStatus(workspaceID, "acme", "site", 42);
+    await getPRStatusesBatch(workspaceID, [{ owner: "acme", repo: "site", number: 42 }]);
+    await submitPRReview(workspaceID, { owner: "acme", repo: "site", number: 42 }, "APPROVE");
+    await mergePR(workspaceID, "acme", "site", 42, "squash");
+    await getRepoMergeMethods(workspaceID, "acme", "site");
+    await listUserOrgs(workspaceID);
+    await searchOrgRepos(workspaceID, "acme", "site");
 
     expect(fetchSpy.mock.calls.map((call) => String(call[0]))).toEqual([
       "http://api.test/api/v1/github/prs/acme/site/42?workspace_id=ws%2F1",
@@ -236,7 +293,7 @@ describe("workspace-scoped GitHub operations", () => {
       "http://api.test/api/v1/github/repos/search?workspace_id=ws%2F1&org=acme&q=site",
     ]);
     expect(JSON.parse(String(fetchSpy.mock.calls[2]?.[1]?.body))).toEqual({
-      workspace_id: "ws/1",
+      workspace_id: workspaceID,
       refs: [{ owner: "acme", repo: "site", number: 42 }],
     });
   });
@@ -247,7 +304,7 @@ describe("remote repository reads", () => {
     fetchSpy.mockRejectedValueOnce(new TypeError("fetch failed"));
     fetchSpy.mockResolvedValueOnce(jsonResponse({ branches: [{ name: "main" }] }));
 
-    await expect(fetchRepoBranches("ws/1", "acme", "site")).resolves.toEqual({
+    await expect(fetchRepoBranches(workspaceID, "acme", "site")).resolves.toEqual({
       branches: [{ name: "main" }],
     });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
@@ -257,7 +314,7 @@ describe("remote repository reads", () => {
     fetchSpy.mockRejectedValueOnce(new TypeError("fetch failed"));
     fetchSpy.mockResolvedValueOnce(jsonResponse({ number: 42, title: "Recovered" }));
 
-    await expect(fetchPRInfo("ws/1", "acme", "site", 42)).resolves.toMatchObject({
+    await expect(fetchPRInfo(workspaceID, "acme", "site", 42)).resolves.toMatchObject({
       number: 42,
       title: "Recovered",
     });
@@ -269,7 +326,7 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
   it("builds the correct URL with both q and limit", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ repos: [] }));
 
-    await fetchAccessibleRepos({ workspaceId: "ws/1", q: "next", limit: 25 });
+    await fetchAccessibleRepos({ workspaceId: workspaceID, q: "next", limit: 25 });
 
     const url = lastCallUrl();
     expect(url).toContain("/api/v1/github/repos");
@@ -281,7 +338,7 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
   it("omits empty query and missing limit from the URL", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ repos: [] }));
 
-    await fetchAccessibleRepos({ workspaceId: "ws/1" });
+    await fetchAccessibleRepos({ workspaceId: workspaceID });
 
     const url = lastCallUrl();
     expect(url).toContain("/api/v1/github/repos");
@@ -313,7 +370,7 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
       }),
     );
 
-    const repos: AccessibleRepo[] = await fetchAccessibleRepos({ workspaceId: "ws/1" });
+    const repos: AccessibleRepo[] = await fetchAccessibleRepos({ workspaceId: workspaceID });
 
     expect(repos).toHaveLength(2);
     expect(repos[0]).toMatchObject({

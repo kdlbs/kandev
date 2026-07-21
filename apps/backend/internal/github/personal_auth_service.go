@@ -52,8 +52,9 @@ type PersonalConnectionRepository interface {
 }
 
 type PersonalAuthConfig struct {
-	ClientID    string
-	CallbackURL string
+	RegistrationID string
+	ClientID       string
+	CallbackURL    string
 }
 
 type PersonalAuthStart struct {
@@ -119,13 +120,15 @@ func (s *PersonalAuthService) Start(
 	}
 	expected := workspaceConnectionExpectation(workspace)
 	flow, err := s.flows.Start(ctx, OAuthFlowRequest{
-		WorkspaceID:                 workspaceID,
-		UserID:                      userID,
-		Kind:                        AuthFlowKindPersonal,
-		ExpectedWorkspaceSource:     expected.Source,
-		ExpectedWorkspaceGeneration: expected.CredentialGeneration,
-		ExpectedInstallationID:      expected.InstallationID,
-		ExpectedPersonalGeneration:  personalGeneration,
+		WorkspaceID:                        workspaceID,
+		UserID:                             userID,
+		AppRegistrationID:                  s.config.RegistrationID,
+		Kind:                               AuthFlowKindPersonal,
+		ExpectedWorkspaceSource:            expected.Source,
+		ExpectedWorkspaceGeneration:        expected.CredentialGeneration,
+		ExpectedInstallationID:             expected.InstallationID,
+		ExpectedWorkspaceAppRegistrationID: expected.AppRegistrationID,
+		ExpectedPersonalGeneration:         personalGeneration,
 	})
 	if err != nil {
 		return PersonalAuthStart{}, err
@@ -149,7 +152,8 @@ func (s *PersonalAuthService) Complete(
 		return PersonalAuthResult{}, errors.New("personal GitHub authentication is not configured")
 	}
 	flow, err := consumeCallbackFlow(
-		ctx, s.flows, callback.State, callback.WorkspaceID, callback.UserID, AuthFlowKindPersonal,
+		ctx, s.flows, callback.State, callback.WorkspaceID, callback.UserID,
+		s.config.RegistrationID, AuthFlowKindPersonal,
 	)
 	if err != nil {
 		return PersonalAuthResult{}, err
@@ -221,7 +225,9 @@ func (s *PersonalAuthService) savePersonalConnection(
 	if err != nil {
 		return UserConnection{}, fmt.Errorf("load personal GitHub generation: %w", err)
 	}
-	connection := newUserConnection(flow.WorkspaceID, flow.UserID, user, tokens, existing)
+	connection := newUserConnection(
+		flow.WorkspaceID, flow.UserID, flow.AppRegistrationID, user, tokens, existing,
+	)
 	connection.CredentialGeneration = flow.ExpectedPersonalGeneration + 1
 	if currentGeneration != flow.ExpectedPersonalGeneration {
 		return UserConnection{}, ErrOAuthFlowStale
@@ -270,7 +276,11 @@ func (s *PersonalAuthService) coalescedPersonalTokenRefresh(
 	workspaceID, userID string,
 	installationID int64,
 ) (string, *UserConnection, error) {
-	key := fmt.Sprintf("%d:%s|%d:%s", len(workspaceID), workspaceID, len(userID), userID)
+	key := fmt.Sprintf(
+		"%d:%s|%d:%s|%d:%s",
+		len(s.config.RegistrationID), s.config.RegistrationID,
+		len(workspaceID), workspaceID, len(userID), userID,
+	)
 	resultChannel := s.refresh.DoChan(key, func() (any, error) {
 		refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), personalTokenRefreshTimeout)
 		defer cancel()
@@ -313,6 +323,9 @@ func (s *PersonalAuthService) loadPersonalConnection(
 	if connection == nil || connection.Status != ConnectionStatusActive {
 		return nil, GitHubOAuthTokens{}, ErrGitHubPersonalRequired
 	}
+	if connection.AppRegistrationID != s.config.RegistrationID {
+		return nil, GitHubOAuthTokens{}, ErrGitHubPersonalRequired
+	}
 	tokens, err := s.repo.GetPersonalTokens(ctx, workspaceID, userID)
 	if err != nil {
 		return nil, GitHubOAuthTokens{}, fmt.Errorf("load personal GitHub tokens: %w", err)
@@ -348,7 +361,9 @@ func (s *PersonalAuthService) refreshPersonalToken(
 	if err != nil {
 		return "", nil, err
 	}
-	replacement := newUserConnection(workspaceID, userID, user, refreshed, connection)
+	replacement := newUserConnection(
+		workspaceID, userID, s.config.RegistrationID, user, refreshed, connection,
+	)
 	if err := s.repo.ReplacePersonalConnection(
 		ctx, &replacement, refreshed, connection.CredentialGeneration,
 	); err != nil {
@@ -456,7 +471,8 @@ func (s *PersonalAuthService) requireActiveAppWorkspace(
 		return nil, fmt.Errorf("load GitHub workspace connection: %w", err)
 	}
 	if connection == nil || connection.Source != ConnectionSourceGitHubAppInstallation ||
-		connection.Status != ConnectionStatusActive || connection.InstallationID == nil {
+		connection.Status != ConnectionStatusActive || connection.InstallationID == nil ||
+		connection.AppRegistrationID != s.config.RegistrationID {
 		return nil, ErrGitHubPersonalRequired
 	}
 	return connection, nil
@@ -481,13 +497,14 @@ func personalConnectionGeneration(connection *UserConnection) int64 {
 func sameUserConnectionVersion(current, expected *UserConnection) bool {
 	return current != nil && expected != nil &&
 		current.WorkspaceID == expected.WorkspaceID && current.UserID == expected.UserID &&
+		current.AppRegistrationID == expected.AppRegistrationID &&
 		current.GitHubUserID == expected.GitHubUserID &&
 		current.CredentialGeneration == expected.CredentialGeneration &&
 		current.UpdatedAt.Equal(expected.UpdatedAt)
 }
 
 func newUserConnection(
-	workspaceID, userID string,
+	workspaceID, userID, registrationID string,
 	user GitHubOAuthUser,
 	tokens GitHubOAuthTokens,
 	existing *UserConnection,
@@ -501,6 +518,7 @@ func newUserConnection(
 	return UserConnection{
 		WorkspaceID:          workspaceID,
 		UserID:               userID,
+		AppRegistrationID:    registrationID,
 		GitHubUserID:         user.ID,
 		Login:                user.Login,
 		Status:               ConnectionStatusActive,
@@ -522,6 +540,9 @@ func validatePersonalTokens(tokens GitHubOAuthTokens, now time.Time) error {
 }
 
 func validatePersonalAuthConfig(config PersonalAuthConfig) error {
+	if strings.TrimSpace(config.RegistrationID) == "" {
+		return errors.New("GitHub App registration ID is required")
+	}
 	if strings.TrimSpace(config.ClientID) == "" {
 		return errors.New("GitHub App client ID is required")
 	}

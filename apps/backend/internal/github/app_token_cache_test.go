@@ -239,3 +239,39 @@ func TestInstallationTokenCache_ReturnedPermissionsCannotMutateCache(t *testing.
 		t.Fatalf("cached permissions mutated to %q", second.Permissions["contents"])
 	}
 }
+
+func TestInstallationTokenCacheCarriesRegistrationIdentity(t *testing.T) {
+	now := time.Now()
+	minter := &stubInstallationTokenMinter{}
+	minter.mint = func(context.Context, int64, InstallationPermissions, []string) (InstallationToken, error) {
+		return InstallationToken{Token: "token", ExpiresAt: now.Add(time.Hour)}, nil
+	}
+	cache := NewAppInstallationTokenCache("registration-a", 9, minter)
+	cache.now = func() time.Time { return now }
+	token, err := cache.Get(context.Background(), 42, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.Principal.AppRegistrationID != "registration-a" ||
+		token.Principal.AppCredentialGeneration != 9 {
+		t.Fatalf("token principal = %+v", token.Principal)
+	}
+}
+
+func TestInstallationTokenCacheSeparatesWorkspacesReusingRegistration(t *testing.T) {
+	now := time.Now()
+	minter := &stubInstallationTokenMinter{}
+	minter.mint = func(context.Context, int64, InstallationPermissions, []string) (InstallationToken, error) {
+		return InstallationToken{Token: "token", ExpiresAt: now.Add(time.Hour)}, nil
+	}
+	cache := NewAppInstallationTokenCache("registration-a", 9, minter)
+	cache.now = func() time.Time { return now }
+	for _, workspaceID := range []string{"workspace-a", "workspace-b"} {
+		if _, err := cache.GetForWorkspace(context.Background(), workspaceID, 42, nil, []string{"repo"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := minter.calls.Load(); got != 2 {
+		t.Fatalf("mint calls = %d, want one isolated token per workspace", got)
+	}
+}

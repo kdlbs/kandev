@@ -7,11 +7,39 @@ import (
 	"time"
 )
 
-type DeploymentAppOwnerType string
+type AppRegistrationOwnerType string
 
 const (
-	DeploymentAppOwnerUser         DeploymentAppOwnerType = "User"
-	DeploymentAppOwnerOrganization DeploymentAppOwnerType = "Organization"
+	AppRegistrationOwnerUser         AppRegistrationOwnerType = "User"
+	AppRegistrationOwnerOrganization AppRegistrationOwnerType = "Organization"
+)
+
+type DeploymentAppOwnerType = AppRegistrationOwnerType
+
+const (
+	DeploymentAppOwnerUser         = AppRegistrationOwnerUser
+	DeploymentAppOwnerOrganization = AppRegistrationOwnerOrganization
+)
+
+type AppRegistrationSource string
+
+const (
+	AppRegistrationSourceManaged  AppRegistrationSource = "managed"
+	AppRegistrationSourceImported AppRegistrationSource = "imported"
+)
+
+type AppRegistrationVisibility string
+
+const (
+	AppRegistrationVisibilityPrivate AppRegistrationVisibility = "private"
+	AppRegistrationVisibilityPublic  AppRegistrationVisibility = "public"
+)
+
+type AppRegistrationStatus string
+
+const (
+	AppRegistrationStatusActive  AppRegistrationStatus = "active"
+	AppRegistrationStatusInvalid AppRegistrationStatus = "invalid"
 )
 
 type DeploymentAppWebhookStatus string
@@ -22,36 +50,60 @@ const (
 	DeploymentAppWebhookFailing    DeploymentAppWebhookStatus = "failing"
 )
 
-// DeploymentAppRegistration is the non-secret metadata for the singleton
-// GitHub App registration managed by this Kandev deployment.
-type DeploymentAppRegistration struct {
-	GitHubHost           string                     `json:"github_host" db:"github_host"`
-	AppID                int64                      `json:"app_id" db:"app_id"`
-	ClientID             string                     `json:"client_id" db:"client_id"`
-	Slug                 string                     `json:"slug" db:"slug"`
-	OwnerLogin           string                     `json:"owner_login" db:"owner_login"`
-	OwnerType            DeploymentAppOwnerType     `json:"owner_type" db:"owner_type"`
-	PublicBaseURL        string                     `json:"public_base_url" db:"public_base_url"`
-	CredentialGeneration int64                      `json:"credential_generation" db:"credential_generation"`
-	CredentialSecretID   string                     `json:"-" db:"credential_secret_id"`
-	WebhookStatus        DeploymentAppWebhookStatus `json:"webhook_status" db:"webhook_status"`
-	LastWebhookAt        *time.Time                 `json:"last_webhook_at,omitempty" db:"last_webhook_at"`
-	LastError            string                     `json:"last_error,omitempty" db:"last_error"`
-	CreatedAt            time.Time                  `json:"created_at" db:"created_at"`
-	UpdatedAt            time.Time                  `json:"updated_at" db:"updated_at"`
+// AppRegistration is non-secret metadata for one GitHub App in the deployment catalog.
+type AppRegistration struct {
+	ID                    string                     `json:"id" db:"id"`
+	Source                AppRegistrationSource      `json:"source" db:"source"`
+	DisplayName           string                     `json:"display_name" db:"display_name"`
+	GitHubHost            string                     `json:"github_host" db:"github_host"`
+	AppID                 int64                      `json:"app_id" db:"app_id"`
+	ClientID              string                     `json:"client_id" db:"client_id"`
+	Slug                  string                     `json:"slug" db:"slug"`
+	OwnerLogin            string                     `json:"owner_login" db:"owner_login"`
+	OwnerType             AppRegistrationOwnerType   `json:"owner_type" db:"owner_type"`
+	Visibility            AppRegistrationVisibility  `json:"visibility" db:"visibility"`
+	PublicBaseURL         string                     `json:"public_base_url" db:"public_base_url"`
+	CreatedForWorkspaceID string                     `json:"created_for_workspace_id,omitempty" db:"created_for_workspace_id"`
+	CredentialGeneration  int64                      `json:"credential_generation" db:"credential_generation"`
+	CredentialSecretID    string                     `json:"-" db:"credential_secret_id"`
+	Status                AppRegistrationStatus      `json:"status" db:"status"`
+	WebhookStatus         DeploymentAppWebhookStatus `json:"webhook_status" db:"webhook_status"`
+	LastWebhookAt         *time.Time                 `json:"last_webhook_at,omitempty" db:"last_webhook_at"`
+	LastError             string                     `json:"last_error,omitempty" db:"last_error"`
+	CreatedAt             time.Time                  `json:"created_at" db:"created_at"`
+	UpdatedAt             time.Time                  `json:"updated_at" db:"updated_at"`
 }
+
+type DeploymentAppRegistration = AppRegistration
 
 // DeploymentAppRegistrationFlow binds one manifest callback to its initiating operator.
 type DeploymentAppRegistrationFlow struct {
-	StateHash        string                 `json:"-" db:"state_hash"`
-	OperatorUserID   string                 `json:"-" db:"operator_user_id"`
-	OwnerType        DeploymentAppOwnerType `json:"owner_type" db:"owner_type"`
-	OwnerLogin       string                 `json:"owner_login" db:"owner_login"`
-	PublicBaseURL    string                 `json:"public_base_url" db:"public_base_url"`
-	ManifestRevision int                    `json:"manifest_revision" db:"manifest_revision"`
-	ExpiresAt        time.Time              `json:"expires_at" db:"expires_at"`
-	ConsumedAt       *time.Time             `json:"-" db:"consumed_at"`
-	CreatedAt        time.Time              `json:"created_at" db:"created_at"`
+	StateHash        string                    `json:"-" db:"state_hash"`
+	RegistrationID   string                    `json:"registration_id" db:"registration_id"`
+	WorkspaceID      string                    `json:"workspace_id" db:"workspace_id"`
+	UserID           string                    `json:"-" db:"user_id"`
+	OperatorUserID   string                    `json:"-" db:"operator_user_id"`
+	OwnerType        DeploymentAppOwnerType    `json:"owner_type" db:"owner_type"`
+	OwnerLogin       string                    `json:"owner_login" db:"owner_login"`
+	DisplayName      string                    `json:"display_name" db:"display_name"`
+	Visibility       AppRegistrationVisibility `json:"visibility" db:"visibility"`
+	PublicBaseURL    string                    `json:"public_base_url" db:"public_base_url"`
+	ManifestRevision int                       `json:"manifest_revision" db:"manifest_revision"`
+	ExpiresAt        time.Time                 `json:"expires_at" db:"expires_at"`
+	ConsumedAt       *time.Time                `json:"-" db:"consumed_at"`
+	CreatedAt        time.Time                 `json:"created_at" db:"created_at"`
+}
+
+// AppRegistrationImportPreparation reserves one server-generated registration
+// identity for a short-lived, single-use existing-App import.
+type AppRegistrationImportPreparation struct {
+	RegistrationID string     `json:"registration_id" db:"registration_id"`
+	WorkspaceID    string     `json:"workspace_id" db:"workspace_id"`
+	UserID         string     `json:"-" db:"user_id"`
+	PublicBaseURL  string     `json:"public_base_url" db:"public_base_url"`
+	ExpiresAt      time.Time  `json:"expires_at" db:"expires_at"`
+	ConsumedAt     *time.Time `json:"-" db:"consumed_at"`
+	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
 }
 
 // ConnectionSource identifies the credential source selected for workspace
@@ -89,6 +141,7 @@ type WorkspaceConnection struct {
 	InstallationID           *int64           `json:"installation_id,omitempty" db:"installation_id"`
 	InstallationAccountLogin string           `json:"installation_account_login,omitempty" db:"installation_account_login"`
 	InstallationAccountType  string           `json:"installation_account_type,omitempty" db:"installation_account_type"`
+	AppRegistrationID        string           `json:"app_registration_id,omitempty" db:"app_registration_id"`
 	Status                   ConnectionStatus `json:"status" db:"status"`
 	CredentialGeneration     int64            `json:"credential_generation" db:"credential_generation"`
 	LastError                string           `json:"last_error,omitempty" db:"last_error"`
@@ -102,6 +155,7 @@ type WorkspaceConnection struct {
 type UserConnection struct {
 	WorkspaceID          string           `json:"workspace_id" db:"workspace_id"`
 	UserID               string           `json:"user_id" db:"user_id"`
+	AppRegistrationID    string           `json:"app_registration_id" db:"app_registration_id"`
 	GitHubUserID         int64            `json:"github_user_id" db:"github_user_id"`
 	Login                string           `json:"login" db:"login"`
 	Status               ConnectionStatus `json:"status" db:"status"`
@@ -123,24 +177,27 @@ const (
 // AuthFlow stores one short-lived, single-use GitHub authorization attempt.
 // StateHash stores a digest rather than the bearer state returned to a browser.
 type AuthFlow struct {
-	StateHash                   string           `json:"-" db:"state_hash"`
-	WorkspaceID                 string           `json:"workspace_id" db:"workspace_id"`
-	UserID                      string           `json:"user_id" db:"user_id"`
-	Kind                        AuthFlowKind     `json:"kind" db:"kind"`
-	PKCEVerifier                string           `json:"-" db:"pkce_verifier"`
-	ExpectedWorkspaceSource     ConnectionSource `json:"-" db:"expected_workspace_source"`
-	ExpectedWorkspaceGeneration int64            `json:"-" db:"expected_workspace_generation"`
-	ExpectedInstallationID      *int64           `json:"-" db:"expected_installation_id"`
-	ExpectedPersonalGeneration  int64            `json:"-" db:"expected_personal_generation"`
-	ExpiresAt                   time.Time        `json:"expires_at" db:"expires_at"`
-	ConsumedAt                  *time.Time       `json:"consumed_at,omitempty" db:"consumed_at"`
-	CreatedAt                   time.Time        `json:"created_at" db:"created_at"`
+	StateHash                          string           `json:"-" db:"state_hash"`
+	WorkspaceID                        string           `json:"workspace_id" db:"workspace_id"`
+	UserID                             string           `json:"user_id" db:"user_id"`
+	AppRegistrationID                  string           `json:"app_registration_id" db:"app_registration_id"`
+	Kind                               AuthFlowKind     `json:"kind" db:"kind"`
+	PKCEVerifier                       string           `json:"-" db:"pkce_verifier"`
+	ExpectedWorkspaceSource            ConnectionSource `json:"-" db:"expected_workspace_source"`
+	ExpectedWorkspaceGeneration        int64            `json:"-" db:"expected_workspace_generation"`
+	ExpectedInstallationID             *int64           `json:"-" db:"expected_installation_id"`
+	ExpectedWorkspaceAppRegistrationID string           `json:"-" db:"expected_workspace_app_registration_id"`
+	ExpectedPersonalGeneration         int64            `json:"-" db:"expected_personal_generation"`
+	ExpiresAt                          time.Time        `json:"expires_at" db:"expires_at"`
+	ConsumedAt                         *time.Time       `json:"consumed_at,omitempty" db:"consumed_at"`
+	CreatedAt                          time.Time        `json:"created_at" db:"created_at"`
 }
 
 type WorkspaceConnectionExpectation struct {
 	Source               ConnectionSource
 	CredentialGeneration int64
 	InstallationID       *int64
+	AppRegistrationID    string
 }
 
 type WebhookDeliveryStatus string
@@ -155,12 +212,13 @@ const (
 // WebhookDelivery records GitHub delivery IDs so webhook state transitions are
 // idempotent without persisting payloads or authentication material.
 type WebhookDelivery struct {
-	DeliveryID  string                `json:"delivery_id" db:"delivery_id"`
-	Event       string                `json:"event" db:"event"`
-	Status      WebhookDeliveryStatus `json:"status" db:"status"`
-	Result      string                `json:"result,omitempty" db:"result"`
-	ReceivedAt  time.Time             `json:"received_at" db:"received_at"`
-	ProcessedAt *time.Time            `json:"processed_at,omitempty" db:"processed_at"`
+	AppRegistrationID string                `json:"app_registration_id" db:"app_registration_id"`
+	DeliveryID        string                `json:"delivery_id" db:"delivery_id"`
+	Event             string                `json:"event" db:"event"`
+	Status            WebhookDeliveryStatus `json:"status" db:"status"`
+	Result            string                `json:"result,omitempty" db:"result"`
+	ReceivedAt        time.Time             `json:"received_at" db:"received_at"`
+	ProcessedAt       *time.Time            `json:"processed_at,omitempty" db:"processed_at"`
 }
 
 type WebhookDeliveryClaim struct {

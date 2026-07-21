@@ -15,11 +15,10 @@ import { Spinner } from "@kandev/ui/spinner";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useToast } from "@/components/toast-provider";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { useGitHubAppRegistrations } from "@/hooks/domains/github/use-github-app-registrations";
 import {
-  disconnectGitHubAppInstallation,
   disconnectGitHubPersonal,
   disconnectGitHubWorkspace,
-  startGitHubAppInstall,
   startGitHubPersonalConnect,
 } from "@/lib/api/domains/github-api";
 import { getGitHubPersonalIdentityState } from "@/lib/github-auth";
@@ -27,6 +26,7 @@ import type {
   GitHubConnectionSource,
   GitHubConnectionState,
   GitHubStatus,
+  GitHubAppRegistrationCatalogItem,
 } from "@/lib/types/github";
 import { GitHubConnectionDialog } from "./github-connection-dialog";
 import { GitHubPermissionsDialog } from "./github-permissions-dialog";
@@ -96,29 +96,79 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-function AutomationStatusSummary({ status }: { status: GitHubStatus }) {
+function AutomationStatusSummary({
+  status,
+  app,
+}: {
+  status: GitHubStatus;
+  app?: GitHubAppRegistrationCatalogItem;
+}) {
   const appAutomation = status.automation?.source === "github_app_installation";
-  const actor = status.automation?.actor?.login;
   return (
     <div className="min-w-0 space-y-1">
       <StatusLine status={status} />
-      {status.authenticated && actor && (
-        <p className="text-xs text-muted-foreground">
-          {appAutomation
-            ? `Kandev-managed operations use the GitHub App installed for ${actor}.`
-            : `Kandev-managed operations act as ${actor}.`}
-        </p>
-      )}
-      {!appAutomation && status.effective_personal_actor?.kind === "human" && (
-        <p className="text-xs text-muted-foreground">
-          This account also powers My GitHub and user-triggered actions.
-        </p>
-      )}
-      {status.automation?.last_error && (
-        <p className="text-xs text-destructive">{status.automation.last_error}</p>
-      )}
+      <AutomationActorExplanation status={status} appAutomation={appAutomation} />
+      {appAutomation && <AppRegistrationDetails app={app} />}
+      {!appAutomation && <HumanIdentityExplanation status={status} />}
+      <AutomationError status={status} />
     </div>
   );
+}
+
+function AutomationActorExplanation({
+  status,
+  appAutomation,
+}: {
+  status: GitHubStatus;
+  appAutomation: boolean;
+}) {
+  const actor = status.automation?.actor?.login;
+  if (!status.authenticated || !actor) return null;
+  return (
+    <p className="text-xs text-muted-foreground">
+      {appAutomation
+        ? `Kandev-managed operations use the GitHub App installed for ${actor}.`
+        : `Kandev-managed operations act as ${actor}.`}
+    </p>
+  );
+}
+
+function AppRegistrationDetails({ app }: { app?: GitHubAppRegistrationCatalogItem }) {
+  if (!app) return null;
+  return (
+    <>
+      <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span className="break-words">{app.display_name}</span>
+        <Badge variant="outline" className="capitalize">
+          {app.visibility}
+        </Badge>
+        <Badge variant="outline" className="capitalize">
+          Webhook {app.webhook_status}
+        </Badge>
+        <span>{app.source === "managed" ? "Created by Kandev" : "Imported"}</span>
+      </div>
+      {app.shared && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          This App registration is shared by {app.workspace_binding_count} workspaces. Registration
+          changes affect every workspace using it; installation access remains workspace-specific.
+        </p>
+      )}
+    </>
+  );
+}
+
+function HumanIdentityExplanation({ status }: { status: GitHubStatus }) {
+  if (status.effective_personal_actor?.kind !== "human") return null;
+  return (
+    <p className="text-xs text-muted-foreground">
+      This account also powers My GitHub and user-triggered actions.
+    </p>
+  );
+}
+
+function AutomationError({ status }: { status: GitHubStatus }) {
+  if (!status.automation?.last_error) return null;
+  return <p className="text-xs text-destructive">{status.automation.last_error}</p>;
 }
 
 function AutomationActions({
@@ -127,25 +177,17 @@ function AutomationActions({
   busy,
   onDisconnect,
   onRefresh,
-  onAppInstall,
 }: {
   status: GitHubStatus;
   workspaceId: string;
   busy: boolean;
   onDisconnect: () => void;
   onRefresh: () => void;
-  onAppInstall: () => void;
 }) {
   return (
     <div className="flex flex-wrap gap-2">
       <GitHubPermissionsDialog status={status} />
-      <GitHubConnectionDialog
-        status={status}
-        workspaceId={workspaceId}
-        busy={busy}
-        onSaved={onRefresh}
-        onAppInstall={onAppInstall}
-      />
+      <GitHubConnectionDialog status={status} workspaceId={workspaceId} onSaved={onRefresh} />
       <Button
         variant="outline"
         size="icon"
@@ -172,16 +214,13 @@ function AutomationActions({
 
 export function GitHubAutomationSettings({ workspaceId }: { workspaceId: string }) {
   const { status, loaded, loading, refresh } = useGitHubStatus(workspaceId);
+  const appRegistrations = useGitHubAppRegistrations(workspaceId);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
   const disconnect = useCallback(async () => {
     setBusy(true);
     try {
-      if (status?.automation?.source === "github_app_installation") {
-        await disconnectGitHubAppInstallation(workspaceId);
-      } else {
-        await disconnectGitHubWorkspace(workspaceId);
-      }
+      await disconnectGitHubWorkspace(workspaceId);
       toast({ description: "Workspace GitHub connection removed", variant: "success" });
       refresh();
     } catch (error) {
@@ -192,30 +231,23 @@ export function GitHubAutomationSettings({ workspaceId }: { workspaceId: string 
     } finally {
       setBusy(false);
     }
-  }, [refresh, status?.automation?.source, toast, workspaceId]);
-  const installApp = useCallback(() => {
-    void redirectFrom(() => startGitHubAppInstall(workspaceId)).catch((error: unknown) =>
-      toast({
-        description: errorMessage(error, "App installation failed"),
-        variant: "error",
-      }),
-    );
-  }, [toast, workspaceId]);
-
+  }, [refresh, toast, workspaceId]);
   if (!loaded || loading || !status) return <LoadingStatus />;
+  const activeRegistrationId =
+    status.app_registration?.id ?? status.automation?.app_registration_id;
+  const activeApp = appRegistrations.registrations.find((item) => item.id === activeRegistrationId);
   return (
     <div
       className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
       data-testid="github-workspace-automation"
     >
-      <AutomationStatusSummary status={status} />
+      <AutomationStatusSummary status={status} app={activeApp} />
       <AutomationActions
         status={status}
         workspaceId={workspaceId}
         busy={busy}
         onDisconnect={disconnect}
         onRefresh={refresh}
-        onAppInstall={installApp}
       />
     </div>
   );
@@ -297,15 +329,31 @@ export function GitHubPersonalSettings({ workspaceId }: { workspaceId: string })
   if (!loaded || loading || !status) {
     return (
       <SettingsSection
-        title="Personal GitHub identity"
+        title="My GitHub identity"
         description="Connect your GitHub user for My GitHub and human-attributed actions. Without it, automation continues as the App."
       >
         <LoadingStatus />
       </SettingsSection>
     );
   }
-  if (status.automation?.source !== "github_app_installation") return null;
   const view = personalIdentityView(status);
+  const appAutomation = status.automation?.source === "github_app_installation";
+  if (!status.automation) return null;
+  if (!appAutomation) {
+    return (
+      <SettingsSection
+        title="My GitHub identity"
+        description="My GitHub and human-attributed actions use the same human account selected for workspace access. Choose a different PAT or GitHub CLI account by changing the workspace connection."
+      >
+        <div className="space-y-2" data-testid="github-personal-identity">
+          <PersonalIdentityStatus view={view} />
+          <p className="text-xs text-muted-foreground">
+            A separate personal identity is only needed when workspace automation uses a GitHub App.
+          </p>
+        </div>
+      </SettingsSection>
+    );
+  }
   const disconnect = async () => {
     setBusy(true);
     try {
@@ -331,8 +379,8 @@ export function GitHubPersonalSettings({ workspaceId }: { workspaceId: string })
   };
   return (
     <SettingsSection
-      title="Personal GitHub identity"
-      description="Connect your GitHub user for My GitHub and human-attributed actions. Without it, automation continues as the App."
+      title="My GitHub identity"
+      description="Optionally connect your GitHub user for My GitHub and human-attributed actions. This identity is never given to managed agents; workspace automation continues as the App."
     >
       <div className="space-y-4" data-testid="github-personal-identity">
         <PersonalIdentityStatus view={view} />

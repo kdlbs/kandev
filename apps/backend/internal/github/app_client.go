@@ -22,6 +22,8 @@ import (
 
 const maxGitHubAppResponseSize = 4 * 1024 * 1024
 
+var ErrGitHubAppResponseTooLarge = errors.New("GitHub App response exceeds the allowed size")
+
 // PermissionLevel is a GitHub App repository permission access level.
 type PermissionLevel string
 
@@ -70,6 +72,24 @@ type AppInstallation struct {
 	AccountType  string
 	Permissions  InstallationPermissions
 	SuspendedAt  *time.Time
+}
+
+type AuthenticatedApp struct {
+	ID          int64
+	ClientID    string
+	Slug        string
+	Name        string
+	OwnerLogin  string
+	OwnerType   string
+	ExternalURL string
+	Permissions map[string]string
+	Events      []string
+}
+
+type AppWebhookConfig struct {
+	URL         string
+	ContentType string
+	InsecureSSL string
 }
 
 // AppClient authenticates as the deployment GitHub App.
@@ -169,6 +189,46 @@ func (c *AppClient) GetInstallation(ctx context.Context, installationID int64) (
 	}, nil
 }
 
+func (c *AppClient) GetAuthenticatedApp(ctx context.Context) (AuthenticatedApp, error) {
+	var response struct {
+		ID       int64  `json:"id"`
+		ClientID string `json:"client_id"`
+		Slug     string `json:"slug"`
+		Name     string `json:"name"`
+		Owner    struct {
+			Login string `json:"login"`
+			Type  string `json:"type"`
+		} `json:"owner"`
+		ExternalURL string            `json:"external_url"`
+		Permissions map[string]string `json:"permissions"`
+		Events      []string          `json:"events"`
+	}
+	if err := c.appRequest(ctx, http.MethodGet, "/app", nil, &response); err != nil {
+		return AuthenticatedApp{}, err
+	}
+	return AuthenticatedApp{
+		ID: response.ID, ClientID: response.ClientID, Slug: response.Slug, Name: response.Name,
+		OwnerLogin: response.Owner.Login, OwnerType: response.Owner.Type,
+		ExternalURL: response.ExternalURL,
+		Permissions: response.Permissions, Events: response.Events,
+	}, nil
+}
+
+func (c *AppClient) GetWebhookConfig(ctx context.Context) (AppWebhookConfig, error) {
+	var response struct {
+		URL         string `json:"url"`
+		ContentType string `json:"content_type"`
+		InsecureSSL any    `json:"insecure_ssl"`
+	}
+	if err := c.appRequest(ctx, http.MethodGet, "/app/hook/config", nil, &response); err != nil {
+		return AppWebhookConfig{}, err
+	}
+	return AppWebhookConfig{
+		URL: response.URL, ContentType: response.ContentType,
+		InsecureSSL: fmt.Sprint(response.InsecureSSL),
+	}, nil
+}
+
 // MintInstallationToken requests a permission-scoped installation token.
 func (c *AppClient) MintInstallationToken(
 	ctx context.Context,
@@ -243,9 +303,12 @@ func (c *AppClient) appRequest(ctx context.Context, method, path string, body, o
 		return fmt.Errorf("GitHub App request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxGitHubAppResponseSize))
+	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxGitHubAppResponseSize+1))
 	if readErr != nil {
 		return fmt.Errorf("read GitHub App response: %w", readErr)
+	}
+	if len(responseBody) > maxGitHubAppResponseSize {
+		return ErrGitHubAppResponseTooLarge
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: path, Body: string(responseBody)}

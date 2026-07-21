@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { expectElementsNotToIntersect } from "../../helpers/layout-assertions";
+import { GitHubAuthSettingsPage } from "../../pages/github-auth-settings-page";
 
 const settingsPath = (workspaceId: string) =>
   `/settings/workspace/${workspaceId}/integrations/github`;
@@ -47,9 +48,9 @@ test.describe("GitHub workspace authentication", () => {
     ).toBeVisible();
 
     await automation.getByRole("button", { name: "Change connection" }).click();
-    const connectionDialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });
-    await connectionDialog.getByRole("combobox", { name: "Connection method" }).click();
-    await testPage.getByRole("option", { name: "GitHub CLI", exact: true }).click();
+    const githubSettings = new GitHubAuthSettingsPage(testPage);
+    const connectionDialog = githubSettings.connectionSurface();
+    await githubSettings.chooseMethod("GitHub CLI account");
     await connectionDialog.getByRole("combobox", { name: "GitHub CLI account" }).click();
     await expect(testPage.getByRole("option", { name: "bob-cli (github.com)" })).toBeVisible();
     await testPage.keyboard.press("Escape");
@@ -88,15 +89,17 @@ test.describe("GitHub workspace authentication", () => {
     });
     await automation.getByRole("button", { name: "Change connection" }).click();
     const workspaceBDialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });
-    await expect(
-      workspaceBDialog.getByRole("combobox", { name: "Connection method" }),
-    ).toContainText("GitHub CLI");
+    await expect(workspaceBDialog.locator("#github-method-cli")).toHaveAttribute(
+      "data-state",
+      "checked",
+    );
     await expect(
       workspaceBDialog.getByRole("combobox", { name: "GitHub CLI account" }),
     ).toContainText("bob-cli");
-    await expect(testPage.getByRole("heading", { name: "Personal GitHub identity" })).toHaveCount(
-      0,
-    );
+    await expect(testPage.getByText("My GitHub identity", { exact: true })).toBeVisible();
+    await expect(
+      testPage.getByText(/same human account selected for workspace access/),
+    ).toBeVisible();
 
     await testPage.screenshot({
       path: testInfo.outputPath("github-workspace-isolation-desktop.png"),
@@ -140,10 +143,15 @@ test.describe("GitHub workspace authentication", () => {
     apiClient,
     seedData,
   }, testInfo) => {
-    await apiClient.mockGitHubSetAppAvailable(true);
+    await apiClient.mockGitHubSetAppRegistration({
+      id: "registration-acme",
+      display_name: "Acme automation",
+      app_id: 4242,
+    });
     await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
       source: "github_app_installation",
       status: "active",
+      app_registration_id: "registration-acme",
       installation_id: 42,
       installation_account_login: "acme",
       installation_account_type: "Organization",
@@ -215,7 +223,7 @@ test.describe("GitHub workspace authentication", () => {
   test("rejects invalid App and personal callback state", async ({ apiClient }) => {
     const appResponse = await apiClient.rawRequest(
       "GET",
-      "/api/v1/github/app/install/callback?state=invalid&code=secret-code&installation_id=42",
+      "/api/v1/github/app/registrations/registration-test/install/callback?state=invalid&code=secret-code&installation_id=42",
       undefined,
       { redirect: "manual" },
     );
@@ -224,7 +232,7 @@ test.describe("GitHub workspace authentication", () => {
 
     const personalResponse = await apiClient.rawRequest(
       "GET",
-      "/api/v1/github/personal-connection/callback?state=invalid&code=secret-code",
+      "/api/v1/github/app/registrations/registration-test/personal/callback?state=invalid&code=secret-code",
       undefined,
       { redirect: "manual" },
     );

@@ -7,6 +7,7 @@ import {
 } from "./github-auth";
 
 const githubHost = "github.com";
+const registrationID = "registration-1";
 
 function status(overrides: Partial<GitHubStatus>): GitHubStatus {
   return {
@@ -33,6 +34,7 @@ describe("resolved GitHub actors", () => {
       personal: {
         workspace_id: "ws-1",
         user_id: "user-1",
+        app_registration_id: registrationID,
         github_user_id: 7,
         login: "alice",
         status: "active",
@@ -53,6 +55,7 @@ describe("resolved GitHub actors", () => {
         login: "alice",
         workspace_id: "ws-1",
         user_id: "user-1",
+        app_registration_id: registrationID,
       },
       effective_manual_mutation_actor: {
         kind: "app",
@@ -103,6 +106,7 @@ describe("GitHub personal identity state", () => {
       personal: {
         workspace_id: "ws-1",
         user_id: "user-1",
+        app_registration_id: registrationID,
         github_user_id: 7,
         login: "alice",
         status: "active",
@@ -165,6 +169,7 @@ describe("GitHub personal identity state", () => {
       personal: {
         workspace_id: "ws-1",
         user_id: "user-1",
+        app_registration_id: registrationID,
         github_user_id: 7,
         login: "alice",
         status: "active",

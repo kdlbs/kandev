@@ -9,11 +9,12 @@ import (
 )
 
 type fakeConnectionSecrets struct {
-	values       map[string]string
-	setErr       error
-	setErrKey    string
-	deleteErr    error
-	deleteErrKey string
+	values          map[string]string
+	setErr          error
+	setErrKey       string
+	deleteErr       error
+	deleteErrKey    string
+	deleteThenError bool
 }
 
 func newFakeConnectionSecrets() *fakeConnectionSecrets {
@@ -38,6 +39,9 @@ func (f *fakeConnectionSecrets) Set(_ context.Context, id, _ string, value strin
 
 func (f *fakeConnectionSecrets) Delete(_ context.Context, id string) error {
 	if f.deleteErr != nil && (f.deleteErrKey == "" || f.deleteErrKey == id) {
+		if f.deleteThenError {
+			delete(f.values, id)
+		}
 		return f.deleteErr
 	}
 	delete(f.values, id)
@@ -69,6 +73,10 @@ func newWorkspaceConnectionService(t *testing.T, login string) (*Service, *fakeC
 	service := NewService(nil, AuthMethodNone, nil, store, nil, testLogger(t))
 	secrets := newFakeConnectionSecrets()
 	service.SetConnectionSecretStore(secrets)
+	if err := store.UpsertDeploymentAppRegistration(context.Background(),
+		newAppRegistration("registration-test", 101, "Test App", time.Now().UTC())); err != nil {
+		t.Fatalf("seed App registration: %v", err)
+	}
 	service.tokenClientFactory = func(string) Client {
 		client := NewMockClient()
 		client.SetUser(login)
@@ -217,7 +225,8 @@ func TestSetWorkspaceConnectionPATRevokesPersonalAppConnections(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	personal := &UserConnection{
-		WorkspaceID: "ws-1", UserID: "user-1", GitHubUserID: 7, Login: "human",
+		WorkspaceID: "ws-1", UserID: "user-1", AppRegistrationID: "registration-test",
+		GitHubUserID: 7, Login: "human",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour), CredentialGeneration: 1,
 	}
 	if err := service.personalConnections.ReplacePersonalConnection(context.Background(), personal, GitHubOAuthTokens{
@@ -251,7 +260,8 @@ func TestDeleteWorkspaceAppConnectionRevokesPersonalConnections(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	personal := &UserConnection{
-		WorkspaceID: "ws-1", UserID: "user-1", GitHubUserID: 7, Login: "human",
+		WorkspaceID: "ws-1", UserID: "user-1", AppRegistrationID: "registration-test",
+		GitHubUserID: 7, Login: "human",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour), CredentialGeneration: 1,
 	}
 	if err := service.personalConnections.ReplacePersonalConnection(context.Background(), personal, GitHubOAuthTokens{
@@ -269,6 +279,47 @@ func TestDeleteWorkspaceAppConnectionRevokesPersonalConnections(t *testing.T) {
 	}
 }
 
+func TestFailedWorkspaceAppTransitionRestoresPersonalConnection(t *testing.T) {
+	service, secrets := newWorkspaceConnectionService(t, "octocat")
+	ctx := context.Background()
+	installationID := int64(42)
+	if err := service.store.UpsertWorkspaceConnection(ctx, activeAppWorkspace("ws-1", installationID)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	personal := &UserConnection{
+		WorkspaceID: "ws-1", UserID: "user-1", AppRegistrationID: "registration-test",
+		GitHubUserID: 7, Login: "human", Status: ConnectionStatusActive,
+		AccessExpiresAt: now.Add(time.Hour), CredentialGeneration: 1,
+	}
+	if err := service.personalConnections.ReplacePersonalConnection(ctx, personal, GitHubOAuthTokens{
+		AccessToken: "personal-access", RefreshToken: "personal-refresh",
+		AccessExpiresAt: personal.AccessExpiresAt,
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	err := (&serviceAppConnectionStore{service: service}).UpsertWorkspaceConnection(ctx, &WorkspaceConnection{
+		WorkspaceID: "ws-1", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost,
+		Status: ConnectionStatusActive,
+	})
+	if err == nil {
+		t.Fatal("invalid workspace transition unexpectedly succeeded")
+	}
+	workspace, getErr := service.store.GetWorkspaceConnection(ctx, "ws-1")
+	if getErr != nil || workspace == nil || workspace.AppRegistrationID != "registration-test" {
+		t.Fatalf("workspace after failed transition = %+v, err %v", workspace, getErr)
+	}
+	stored, getErr := service.store.GetUserConnection(ctx, "ws-1", "user-1")
+	if getErr != nil || stored == nil || stored.AppRegistrationID != "registration-test" {
+		t.Fatalf("personal connection after failed transition = %+v, err %v", stored, getErr)
+	}
+	if secrets.values[UserAccessTokenSecretKey("ws-1", "user-1")] != "personal-access" ||
+		secrets.values[UserRefreshTokenSecretKey("ws-1", "user-1")] != "personal-refresh" {
+		t.Fatalf("personal secrets after failed transition = %#v", secrets.values)
+	}
+}
+
 func TestDeleteWorkspaceAppConnectionCompensatesPersonalRevokeFailure(t *testing.T) {
 	service, secrets := newWorkspaceConnectionService(t, "octocat")
 	installationID := int64(42)
@@ -277,7 +328,8 @@ func TestDeleteWorkspaceAppConnectionCompensatesPersonalRevokeFailure(t *testing
 	}
 	now := time.Now().UTC()
 	personal := &UserConnection{
-		WorkspaceID: "ws-1", UserID: "user-1", GitHubUserID: 7, Login: "human",
+		WorkspaceID: "ws-1", UserID: "user-1", AppRegistrationID: "registration-test",
+		GitHubUserID: 7, Login: "human",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour), CredentialGeneration: 1,
 	}
 	if err := service.personalConnections.ReplacePersonalConnection(context.Background(), personal, GitHubOAuthTokens{
@@ -310,7 +362,8 @@ func TestDifferentAppInstallationRequiresPersonalConnectionRevocation(t *testing
 	}
 	now := time.Now().UTC()
 	personal := &UserConnection{
-		WorkspaceID: "ws-1", UserID: "user-1", GitHubUserID: 7, Login: "human",
+		WorkspaceID: "ws-1", UserID: "user-1", AppRegistrationID: "registration-test",
+		GitHubUserID: 7, Login: "human",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour), CredentialGeneration: 1,
 	}
 	if err := service.personalConnections.ReplacePersonalConnection(context.Background(), personal, GitHubOAuthTokens{

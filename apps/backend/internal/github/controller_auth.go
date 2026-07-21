@@ -1,6 +1,7 @@
 package github
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -85,12 +86,21 @@ func (c *Controller) httpDeleteWorkspaceConnection(ctx *gin.Context) {
 }
 
 func (c *Controller) httpStartAppInstallation(ctx *gin.Context) {
-	workspaceID, ok := setupWorkspaceID(ctx)
-	if !ok {
+	var request struct {
+		WorkspaceID       string `json:"workspace_id"`
+		AppRegistrationID string `json:"app_registration_id"`
+	}
+	if err := ctx.ShouldBindJSON(&request); err != nil ||
+		strings.TrimSpace(request.WorkspaceID) == "" ||
+		strings.TrimSpace(request.AppRegistrationID) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"code": "github_app_invalid_request", "error": "workspace and App registration are required",
+		})
 		return
 	}
 	result, err := c.service.StartAppInstallation(
-		ctx.Request.Context(), workspaceID, currentGitHubUserID(ctx),
+		ctx.Request.Context(), strings.TrimSpace(request.WorkspaceID), currentGitHubUserID(ctx),
+		strings.TrimSpace(request.AppRegistrationID),
 	)
 	if err != nil {
 		writeGitHubAuthError(ctx, err)
@@ -104,19 +114,21 @@ func (c *Controller) httpCompleteAppInstallation(ctx *gin.Context) {
 		redirectGitHubCallback(ctx, "", "github_invalid_callback")
 		return
 	}
+	workspaceID := c.authFlowWorkspace(ctx, ctx.Query("state"))
 	installationID, err := strconv.ParseInt(ctx.Query("installation_id"), 10, 64)
 	if err != nil {
-		redirectGitHubCallback(ctx, "", "github_invalid_callback")
+		redirectGitHubCallback(ctx, workspaceID, "github_invalid_callback")
 		return
 	}
-	result, err := c.service.CompleteAppInstallation(ctx.Request.Context(), AppInstallationCallback{
-		State:          ctx.Query("state"),
-		Code:           ctx.Query("code"),
-		SetupAction:    ctx.Query("setup_action"),
-		InstallationID: installationID,
-	})
+	result, err := c.service.CompleteAppInstallation(
+		ctx.Request.Context(), ctx.Param("registrationId"), AppInstallationCallback{
+			State:          ctx.Query("state"),
+			Code:           ctx.Query("code"),
+			SetupAction:    ctx.Query("setup_action"),
+			InstallationID: installationID,
+		})
 	if err != nil {
-		redirectGitHubCallback(ctx, "", githubAuthErrorCode(err))
+		redirectGitHubCallback(ctx, workspaceID, githubAuthErrorCode(err))
 		return
 	}
 	redirectGitHubCallback(ctx, result.WorkspaceID, "app_connected")
@@ -142,15 +154,29 @@ func (c *Controller) httpCompletePersonalAuth(ctx *gin.Context) {
 		redirectGitHubCallback(ctx, "", "github_invalid_callback")
 		return
 	}
-	result, err := c.service.CompletePersonalAuth(ctx.Request.Context(), PersonalAuthCallback{
-		State: ctx.Query("state"),
-		Code:  ctx.Query("code"),
-	})
+	workspaceID := c.authFlowWorkspace(ctx, ctx.Query("state"))
+	result, err := c.service.CompletePersonalAuth(
+		ctx.Request.Context(), ctx.Param("registrationId"), PersonalAuthCallback{
+			State: ctx.Query("state"),
+			Code:  ctx.Query("code"),
+		})
 	if err != nil {
-		redirectGitHubCallback(ctx, "", githubAuthErrorCode(err))
+		redirectGitHubCallback(ctx, workspaceID, githubAuthErrorCode(err))
 		return
 	}
 	redirectGitHubCallback(ctx, result.WorkspaceID, "personal_connected")
+}
+
+func (c *Controller) authFlowWorkspace(ctx *gin.Context, state string) string {
+	if c == nil || c.service == nil || c.service.store == nil {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(strings.TrimSpace(state)))
+	flow, err := c.service.store.GetAuthFlow(ctx.Request.Context(), stateDigestString(digest))
+	if err != nil || flow == nil {
+		return ""
+	}
+	return flow.WorkspaceID
 }
 
 func validGitHubCallbackState(state string) bool {
@@ -178,12 +204,13 @@ func (c *Controller) httpGitHubAppWebhook(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": "github_invalid_webhook", "error": "invalid webhook payload"})
 		return
 	}
-	result, err := c.service.HandleAppWebhook(ctx.Request.Context(), GitHubWebhookRequest{
-		DeliveryID: ctx.GetHeader("X-GitHub-Delivery"),
-		Event:      ctx.GetHeader("X-GitHub-Event"),
-		Signature:  ctx.GetHeader("X-Hub-Signature-256"),
-		Payload:    payload,
-	})
+	result, err := c.service.HandleAppRegistrationWebhook(
+		ctx.Request.Context(), ctx.Param("registrationId"), GitHubWebhookRequest{
+			DeliveryID: ctx.GetHeader("X-GitHub-Delivery"),
+			Event:      ctx.GetHeader("X-GitHub-Event"),
+			Signature:  ctx.GetHeader("X-Hub-Signature-256"),
+			Payload:    payload,
+		})
 	if err != nil {
 		writeGitHubAuthError(ctx, err)
 		return
@@ -229,7 +256,17 @@ func (c *Controller) httpCredentialBrokerReady(ctx *gin.Context) {
 func writeGitHubAuthError(ctx *gin.Context, err error) {
 	status, code := githubAuthErrorResponse(err)
 	message := strings.TrimSpace(err.Error())
-	ctx.JSON(status, gin.H{"code": code, "error": message})
+	payload := gin.H{"code": code, "error": message}
+	var importError *AppRegistrationImportError
+	if errors.As(err, &importError) {
+		if importError.ExistingRegistrationID != "" {
+			payload["existing_registration_id"] = importError.ExistingRegistrationID
+		}
+		if len(importError.Problems) > 0 {
+			payload["problems"] = importError.Problems
+		}
+	}
+	ctx.JSON(status, payload)
 }
 
 func githubAuthErrorCode(err error) string {
@@ -324,5 +361,7 @@ func redirectGitHubCallback(ctx *gin.Context, workspaceID, result string) {
 	if workspaceID != "" {
 		query.Set("workspace_id", workspaceID)
 	}
+	ctx.Header("Cache-Control", "no-store")
+	ctx.Header("Referrer-Policy", "no-referrer")
 	ctx.Redirect(http.StatusSeeOther, "/settings/integrations/github?"+query.Encode())
 }

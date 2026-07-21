@@ -10,12 +10,14 @@ import (
 func TestStorePersonalConnectionRepositoryRoundTripAndRevoke(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "workspace-1")
+	seedPersonalAppConnection(t, store, "workspace-1")
 	secrets := newFakeConnectionSecrets()
 	repo := NewStorePersonalConnectionRepository(store, secrets)
 	now := time.Now().UTC()
 	refreshExpiry := now.Add(30 * 24 * time.Hour)
 	connection := &UserConnection{
-		WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 42, Login: "octocat",
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-personal-test",
+		GitHubUserID: 42, Login: "octocat",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(8 * time.Hour),
 		RefreshExpiresAt: &refreshExpiry, CredentialGeneration: 1,
 	}
@@ -48,11 +50,13 @@ func TestStorePersonalConnectionRepositoryRoundTripAndRevoke(t *testing.T) {
 func TestStorePersonalConnectionRepositoryCompensatesPartialSecretRotation(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "workspace-1")
+	seedPersonalAppConnection(t, store, "workspace-1")
 	secrets := newFakeConnectionSecrets()
 	repo := NewStorePersonalConnectionRepository(store, secrets)
 	now := time.Now().UTC()
 	oldConnection := &UserConnection{
-		WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 42, Login: "old",
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-personal-test",
+		GitHubUserID: 42, Login: "old",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour), CredentialGeneration: 1,
 	}
 	if err := repo.ReplacePersonalConnection(context.Background(), oldConnection, GitHubOAuthTokens{
@@ -82,11 +86,13 @@ func TestStorePersonalConnectionRepositoryCompensatesPartialSecretRotation(t *te
 func TestStorePersonalConnectionRepositoryRejectsStaleReplacementAfterRevoke(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "workspace-1")
+	seedPersonalAppConnection(t, store, "workspace-1")
 	secrets := newFakeConnectionSecrets()
 	repo := NewStorePersonalConnectionRepository(store, secrets)
 	now := time.Now().UTC()
 	connection := &UserConnection{
-		WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 42, Login: "octocat",
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-personal-test",
+		GitHubUserID: 42, Login: "octocat",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Minute), CredentialGeneration: 1,
 	}
 	oldTokens := GitHubOAuthTokens{
@@ -114,11 +120,13 @@ func TestStorePersonalConnectionRepositoryRejectsStaleReplacementAfterRevoke(t *
 func TestStorePersonalConnectionRepositoryLateRevokePreservesReplacement(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "workspace-1")
+	seedPersonalAppConnection(t, store, "workspace-1")
 	secrets := newFakeConnectionSecrets()
 	repo := NewStorePersonalConnectionRepository(store, secrets)
 	now := time.Now().UTC()
 	first := &UserConnection{
-		WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 42, Login: "octocat",
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-personal-test",
+		GitHubUserID: 42, Login: "octocat",
 		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour), CredentialGeneration: 1,
 	}
 	if err := repo.ReplacePersonalConnection(context.Background(), first, GitHubOAuthTokens{
@@ -154,12 +162,14 @@ func TestStorePersonalConnectionRepositoryLateRevokePreservesReplacement(t *test
 func TestStorePersonalConnectionRepositoryBulkRevokeCompensatesSecretDeleteFailure(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "workspace-1")
+	seedPersonalAppConnection(t, store, "workspace-1")
 	secrets := newFakeConnectionSecrets()
 	repo := NewStorePersonalConnectionRepository(store, secrets)
 	now := time.Now().UTC()
 	for index, userID := range []string{"user-1", "user-2"} {
 		connection := &UserConnection{
-			WorkspaceID: "workspace-1", UserID: userID, GitHubUserID: int64(index + 1), Login: userID,
+			WorkspaceID: "workspace-1", UserID: userID, AppRegistrationID: "registration-personal-test",
+			GitHubUserID: int64(index + 1), Login: userID,
 			Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour), CredentialGeneration: 1,
 		}
 		if err := repo.ReplacePersonalConnection(context.Background(), connection, GitHubOAuthTokens{
@@ -186,5 +196,76 @@ func TestStorePersonalConnectionRepositoryBulkRevokeCompensatesSecretDeleteFailu
 		if got := secrets.values[UserRefreshTokenSecretKey("workspace-1", userID)]; got != "refresh-"+userID {
 			t.Fatalf("refresh secret for %s after compensation = %q", userID, got)
 		}
+	}
+}
+
+func TestStorePersonalConnectionRepositoryFailedTransitionAllowsLaterRotation(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "workspace-1")
+	seedPersonalAppConnection(t, store, "workspace-1")
+	secrets := newFakeConnectionSecrets()
+	repo := NewStorePersonalConnectionRepository(store, secrets)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	connection := &UserConnection{
+		WorkspaceID: "workspace-1", UserID: "user-1", AppRegistrationID: "registration-personal-test",
+		GitHubUserID: 42, Login: "octocat", Status: ConnectionStatusActive,
+		AccessExpiresAt: now.Add(time.Hour), CredentialGeneration: 1,
+	}
+	if err := repo.ReplacePersonalConnection(ctx, connection, GitHubOAuthTokens{
+		AccessToken: "old-access", RefreshToken: "old-refresh", AccessExpiresAt: connection.AccessExpiresAt,
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	transitionErr := errors.New("workspace credential transition failed")
+	if err := repo.TransitionWorkspacePersonalConnections(ctx, "workspace-1", func() error {
+		return transitionErr
+	}); !errors.Is(err, transitionErr) {
+		t.Fatalf("TransitionWorkspacePersonalConnections() error = %v, want %v", err, transitionErr)
+	}
+	restored, err := repo.GetUserConnection(ctx, "workspace-1", "user-1")
+	if err != nil || restored == nil {
+		t.Fatalf("restored connection = %+v, err %v", restored, err)
+	}
+	currentGeneration, err := repo.GetPersonalConnectionGeneration(ctx, "workspace-1", "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.CredentialGeneration != currentGeneration {
+		t.Fatalf("restored generation = %d, current generation = %d", restored.CredentialGeneration, currentGeneration)
+	}
+
+	replacement := *restored
+	replacement.CredentialGeneration++
+	replacement.AccessExpiresAt = now.Add(2 * time.Hour)
+	if err := repo.ReplacePersonalConnection(ctx, &replacement, GitHubOAuthTokens{
+		AccessToken: "new-access", RefreshToken: "new-refresh", AccessExpiresAt: replacement.AccessExpiresAt,
+	}, restored.CredentialGeneration); err != nil {
+		t.Fatalf("ReplacePersonalConnection() after compensated transition: %v", err)
+	}
+	tokens, err := repo.GetPersonalTokens(ctx, "workspace-1", "user-1")
+	if err != nil || tokens.AccessToken != "new-access" || tokens.RefreshToken != "new-refresh" {
+		t.Fatalf("rotated tokens = %+v, err %v", tokens, err)
+	}
+}
+
+func seedPersonalAppConnection(t *testing.T, store *Store, workspaceID string) {
+	t.Helper()
+	ctx := context.Background()
+	registration := newAppRegistration(
+		"registration-personal-test", 987, "Personal test", time.Now().UTC(),
+	)
+	if err := store.UpsertDeploymentAppRegistration(ctx, registration); err != nil {
+		t.Fatalf("seed App registration: %v", err)
+	}
+	installationID := int64(42)
+	if err := store.UpsertWorkspaceConnection(ctx, &WorkspaceConnection{
+		WorkspaceID: workspaceID, Source: ConnectionSourceGitHubAppInstallation,
+		GitHubHost: "github.com", InstallationID: &installationID,
+		InstallationAccountLogin: "acme", InstallationAccountType: "Organization",
+		AppRegistrationID: registration.ID, Status: ConnectionStatusActive,
+	}); err != nil {
+		t.Fatalf("seed workspace App connection: %v", err)
 	}
 }

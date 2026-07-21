@@ -187,6 +187,21 @@ repository but does not cryptographically narrow a PAT or CLI token. Agent subpr
 therefore trusted with the workspace automation grant. Only migration-only `legacy_shared`
 connections may resolve ambient backend `gh`, `GITHUB_TOKEN`, or `GH_TOKEN` authentication.
 
+GitHub App root credentials live in a deployment catalog of registrations, but no registration is
+globally active. A workspace App connection names both one registration and one verified
+installation. Related workspaces may deliberately reuse a registration, sharing its bot identity,
+root credentials, permission policy, and root-credential revocation boundary; separate
+registrations provide independent work, personal, or organization trust boundaries. Installation
+tokens, repository grants, workspace generations, personal OAuth tokens, and broker leases remain
+workspace-scoped even when a registration is shared.
+
+Manifest creation, existing-App import, installation, and personal authorization start from the
+workspace GitHub settings flow. Runtime clients and caches are keyed by registration ID and
+credential generation. Public callbacks and webhooks use
+`/api/v1/github/app/registrations/{registrationId}/...`; the route ID selects one candidate App,
+while single-use state or webhook HMAC still provides authorization. App credentials are persisted
+as versioned encrypted bundles and are never sourced from backend startup configuration.
+
 ---
 
 ## Data Flow Examples

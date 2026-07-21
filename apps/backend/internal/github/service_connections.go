@@ -129,19 +129,14 @@ func (s *Service) commitWorkspacePAT(
 	if err := s.connectionSecrets.Set(ctx, secretKey, workspacePATSecretName, token); err != nil {
 		return nil, fmt.Errorf("store workspace PAT: %w", err)
 	}
-	if err := s.store.UpsertWorkspaceConnection(ctx, connection); err != nil {
+	if err := s.applyAutomationTransition(ctx, existing, connection, func() error {
+		return s.store.UpsertWorkspaceConnection(ctx, connection)
+	}); err != nil {
 		s.compensatePATWrite(ctx, secretKey, previous, hadPrevious)
-		return nil, fmt.Errorf("store workspace connection: %w", err)
-	}
-	if err := s.revokePersonalForAutomationTransition(ctx, existing, connection); err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("revoke personal GitHub connections: %w", err),
-			restoreWorkspaceConnection(ctx, s.store, existing, workspaceID),
-			s.restorePATAfterFailedTransition(ctx, secretKey, previous, hadPrevious),
-		)
+		return nil, fmt.Errorf("replace workspace GitHub connection: %w", err)
 	}
 	if existing != nil && existing.InstallationID != nil {
-		s.InvalidateInstallationCredentials(*existing.InstallationID)
+		s.InvalidateAppInstallationCredentials(existing.AppRegistrationID, *existing.InstallationID)
 	}
 	s.invalidateWorkspaceCredential(connection.WorkspaceID)
 	return connection, nil
@@ -196,14 +191,10 @@ func (s *Service) commitWorkspaceGHCLI(
 	connection := s.newWorkspaceConnection(workspaceID, ConnectionSourceGHCLI, existing)
 	connection.GitHubHost = host
 	connection.Login = login
-	if err := s.store.UpsertWorkspaceConnection(ctx, connection); err != nil {
-		return nil, fmt.Errorf("store workspace connection: %w", err)
-	}
-	if err := s.revokePersonalForAutomationTransition(ctx, existing, connection); err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("revoke personal GitHub connections: %w", err),
-			restoreWorkspaceConnection(ctx, s.store, existing, workspaceID),
-		)
+	if err := s.applyAutomationTransition(ctx, existing, connection, func() error {
+		return s.store.UpsertWorkspaceConnection(ctx, connection)
+	}); err != nil {
+		return nil, fmt.Errorf("replace workspace GitHub connection: %w", err)
 	}
 	if existing != nil && existing.Source == ConnectionSourcePAT {
 		if err := deleteOptionalSecret(ctx, s.connectionSecrets, WorkspacePATSecretKey(workspaceID)); err != nil {
@@ -211,7 +202,7 @@ func (s *Service) commitWorkspaceGHCLI(
 		}
 	}
 	if existing != nil && existing.InstallationID != nil {
-		s.InvalidateInstallationCredentials(*existing.InstallationID)
+		s.InvalidateAppInstallationCredentials(existing.AppRegistrationID, *existing.InstallationID)
 	}
 	s.invalidateWorkspaceCredential(connection.WorkspaceID)
 	return connection, nil
@@ -236,6 +227,7 @@ func (s *Service) revokePersonalForAutomationTransition(
 		return nil
 	}
 	if replacement != nil && replacement.Source == ConnectionSourceGitHubAppInstallation &&
+		existing.AppRegistrationID == replacement.AppRegistrationID &&
 		equalInstallationID(existing.InstallationID, replacement.InstallationID) {
 		return nil
 	}
@@ -243,6 +235,23 @@ func (s *Service) revokePersonalForAutomationTransition(
 		return errors.New("personal GitHub connection repository is not configured")
 	}
 	return s.personalConnections.RevokeWorkspacePersonalConnections(ctx, existing.WorkspaceID)
+}
+
+func (s *Service) applyAutomationTransition(
+	ctx context.Context,
+	existing, replacement *WorkspaceConnection,
+	mutation func() error,
+) error {
+	if existing == nil || existing.Source != ConnectionSourceGitHubAppInstallation ||
+		(replacement != nil && replacement.Source == ConnectionSourceGitHubAppInstallation &&
+			existing.AppRegistrationID == replacement.AppRegistrationID &&
+			equalInstallationID(existing.InstallationID, replacement.InstallationID)) {
+		return mutation()
+	}
+	if s.personalConnections == nil {
+		return errors.New("personal GitHub connection repository is not configured")
+	}
+	return s.personalConnections.TransitionWorkspacePersonalConnections(ctx, existing.WorkspaceID, mutation)
 }
 
 func equalInstallationID(left, right *int64) bool {
@@ -306,7 +315,7 @@ func (s *Service) DeleteWorkspaceConnection(ctx context.Context, workspaceID str
 		return err
 	}
 	if connection != nil && connection.InstallationID != nil {
-		s.InvalidateInstallationCredentials(*connection.InstallationID)
+		s.InvalidateAppInstallationCredentials(connection.AppRegistrationID, *connection.InstallationID)
 	}
 	s.invalidateWorkspaceCredential(workspaceID)
 	return nil
@@ -332,13 +341,9 @@ func (s *Service) deleteWorkspacePATConnection(ctx context.Context, workspaceID 
 func (s *Service) deleteWorkspaceConnectionMetadata(
 	ctx context.Context, workspaceID string, connection *WorkspaceConnection,
 ) error {
-	if err := s.store.DeleteWorkspaceConnection(ctx, workspaceID); err != nil {
-		return err
-	}
-	if err := s.revokePersonalForAutomationTransition(ctx, connection, nil); err != nil {
-		return errors.Join(err, restoreWorkspaceConnection(ctx, s.store, connection, workspaceID))
-	}
-	return nil
+	return s.applyAutomationTransition(ctx, connection, nil, func() error {
+		return s.store.DeleteWorkspaceConnection(ctx, workspaceID)
+	})
 }
 
 func (s *Service) workspaceConnectionMutationLock(workspaceID string) *sync.Mutex {

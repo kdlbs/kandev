@@ -37,9 +37,15 @@ func serveMockJSON(t *testing.T, router *gin.Engine, method, path, body string) 
 
 func TestMockControllerWorkspaceConnectionsResolveIsolatedPrincipals(t *testing.T) {
 	router, svc, _ := setupWorkspaceAuthMockController(t)
+	registration := serveMockJSON(t, router, http.MethodPut,
+		"/api/v1/github/mock/app-registrations/registration-work",
+		`{"display_name":"Work App","app_id":101}`)
+	if registration.Code != http.StatusOK {
+		t.Fatalf("seed App registration: %d %s", registration.Code, registration.Body.String())
+	}
 	first := serveMockJSON(t, router, http.MethodPut,
 		"/api/v1/github/mock/workspace-connections/workspace-1",
-		`{"source":"github_app_installation","status":"active","installation_id":42,"installation_account_login":"acme","installation_account_type":"Organization","capabilities":{"pull_request_read":true}}`)
+		`{"source":"github_app_installation","status":"active","app_registration_id":"registration-work","installation_id":42,"installation_account_login":"acme","installation_account_type":"Organization","capabilities":{"pull_request_read":true}}`)
 	if first.Code != http.StatusOK {
 		t.Fatalf("seed app connection: %d %s", first.Code, first.Body.String())
 	}
@@ -67,9 +73,15 @@ func TestMockControllerWorkspaceConnectionsResolveIsolatedPrincipals(t *testing.
 
 func TestMockControllerPersonalCLIAvailabilityTransitionsAndReset(t *testing.T) {
 	router, svc, store := setupWorkspaceAuthMockController(t)
+	registration := serveMockJSON(t, router, http.MethodPut,
+		"/api/v1/github/mock/app-registrations/registration-work",
+		`{"display_name":"Work App","app_id":101}`)
+	if registration.Code != http.StatusOK {
+		t.Fatalf("seed App registration: %d %s", registration.Code, registration.Body.String())
+	}
 	seed := serveMockJSON(t, router, http.MethodPut,
 		"/api/v1/github/mock/workspace-connections/workspace-1",
-		`{"source":"github_app_installation","status":"active","installation_id":42,"installation_account_login":"acme"}`)
+		`{"source":"github_app_installation","status":"active","app_registration_id":"registration-work","installation_id":42,"installation_account_login":"acme"}`)
 	if seed.Code != http.StatusOK {
 		t.Fatalf("seed workspace: %d %s", seed.Code, seed.Body.String())
 	}
@@ -84,11 +96,6 @@ func TestMockControllerPersonalCLIAvailabilityTransitionsAndReset(t *testing.T) 
 	if accounts.Code != http.StatusOK {
 		t.Fatalf("seed CLI accounts: %d %s", accounts.Code, accounts.Body.String())
 	}
-	available := serveMockJSON(t, router, http.MethodPut, "/api/v1/github/mock/app-available", `{"available":true}`)
-	if available.Code != http.StatusOK {
-		t.Fatalf("set App availability: %d %s", available.Code, available.Body.String())
-	}
-
 	status, err := svc.GetWorkspaceAuthStatus(context.Background(), "workspace-1", DefaultUserID)
 	if err != nil || status.EffectivePersonalActor == nil || status.EffectivePersonalActor.Login != "bob" ||
 		!status.GitHubAppAvailable {
@@ -144,72 +151,21 @@ func TestMockControllerPersonalCLIAvailabilityTransitionsAndReset(t *testing.T) 
 	}
 }
 
-func TestMockControllerResetRemovesBoundDeploymentApp(t *testing.T) {
-	router, service, store := setupWorkspaceAuthMockController(t)
-	repository := NewDeploymentAppRepository(store, service.connectionSecrets)
-	registration := testDeploymentAppRegistration(1)
-	if err := repository.SaveManagedRegistration(context.Background(), registration,
-		DeploymentAppCredentials{
-			PrivateKey: "key", ClientSecret: "client", WebhookSecret: "webhook",
-		}); err != nil {
-		t.Fatal(err)
-	}
-	service.SetDeploymentAppRegistrationService(NewDeploymentAppRegistrationService(
-		DeploymentAppRegistrationConfig{
-			Repository: repository,
-			Store:      store,
-			Runtime:    service,
-		},
-	))
-	service.deploymentAppRuntime = &githubAppRuntime{
-		source: DeploymentAppSourceManaged, appID: registration.AppID, generation: 1,
-	}
-	flow := &DeploymentAppRegistrationFlow{
-		StateHash: "pending-reset-flow", OperatorUserID: DefaultUserID,
-		OwnerType: DeploymentAppOwnerOrganization, OwnerLogin: "acme",
-		PublicBaseURL: "https://kandev.example", ManifestRevision: DeploymentAppManifestRevision,
-		ExpiresAt: time.Now().UTC().Add(time.Hour), CreatedAt: time.Now().UTC(),
-	}
-	if err := store.CreateDeploymentAppRegistrationFlow(context.Background(), flow); err != nil {
-		t.Fatal(err)
-	}
-	seed := serveMockJSON(t, router, http.MethodPut,
-		"/api/v1/github/mock/workspace-connections/workspace-1",
-		`{"source":"github_app_installation","status":"active","installation_id":42,"installation_account_login":"acme"}`)
-	if seed.Code != http.StatusOK {
-		t.Fatalf("seed App binding: %d %s", seed.Code, seed.Body.String())
-	}
-
-	reset := serveMockJSON(t, router, http.MethodDelete, "/api/v1/github/mock/reset", "")
-	if reset.Code != http.StatusOK {
-		t.Fatalf("reset: %d %s", reset.Code, reset.Body.String())
-	}
-	connection, err := store.GetWorkspaceConnection(context.Background(), "workspace-1")
-	if err != nil || connection != nil {
-		t.Fatalf("connection after reset = %+v, error = %v", connection, err)
-	}
-	stored, _, err := repository.LoadManagedRegistration(context.Background())
-	if err != nil || stored != nil || service.DeploymentAppRuntimeSnapshot().Ready {
-		t.Fatalf("deployment App after reset = %+v, runtime = %+v, error = %v",
-			stored, service.DeploymentAppRuntimeSnapshot(), err)
-	}
-	storedFlow, err := store.GetDeploymentAppRegistrationFlow(
-		context.Background(), flow.StateHash,
-	)
-	if err != nil || storedFlow != nil {
-		t.Fatalf("deployment App flow after reset = %+v, error = %v", storedFlow, err)
-	}
-}
-
 func TestMockControllerDeletesWorkspaceAndPersonalConnections(t *testing.T) {
 	router, _, store := setupWorkspaceAuthMockController(t)
+	registration := serveMockJSON(t, router, http.MethodPut,
+		"/api/v1/github/mock/app-registrations/registration-work",
+		`{"display_name":"Work App","app_id":101}`)
+	if registration.Code != http.StatusOK {
+		t.Fatalf("seed App registration: %d %s", registration.Code, registration.Body.String())
+	}
 	for _, seed := range []struct {
 		path string
 		body string
 	}{
 		{
 			path: "/api/v1/github/mock/workspace-connections/workspace-1",
-			body: `{"source":"github_app_installation","status":"active","installation_id":42,"installation_account_login":"acme"}`,
+			body: `{"source":"github_app_installation","status":"active","app_registration_id":"registration-work","installation_id":42,"installation_account_login":"acme"}`,
 		},
 		{
 			path: "/api/v1/github/mock/personal-connections/workspace-1",

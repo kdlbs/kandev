@@ -1,11 +1,15 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
-  DeploymentGitHubAppStatus,
   GitHubAutomationConnection,
+  GitHubAppRegistration,
+  GitHubAppRegistrationCatalog,
   GitHubCLIAccount,
   GitHubStatusResponse,
-  StartDeploymentGitHubAppRequest,
-  StartDeploymentGitHubAppResponse,
+  ImportGitHubAppRegistrationRequest,
+  PrepareGitHubAppImportRequest,
+  PrepareGitHubAppImportResponse,
+  StartGitHubAppManifestRequest,
+  StartGitHubAppManifestResponse,
 } from "@/lib/types/github";
 
 export async function fetchGitHubStatus(workspaceId: string, options?: ApiRequestOptions) {
@@ -48,16 +52,15 @@ export async function disconnectGitHubWorkspace(workspaceId: string) {
 
 export type GitHubAuthStartResponse = { url?: string; URL?: string };
 
-export async function startGitHubAppInstall(workspaceId: string) {
+export async function startGitHubAppInstall(workspaceId: string, appRegistrationId: string) {
   return fetchJson<GitHubAuthStartResponse>("/api/v1/github/app/install/start", {
-    init: { method: "POST", body: JSON.stringify({ workspace_id: workspaceId }) },
-  });
-}
-
-export async function disconnectGitHubAppInstallation(workspaceId: string) {
-  const query = new URLSearchParams({ workspace_id: workspaceId });
-  return fetchJson<{ disconnected: boolean }>(`/api/v1/github/app/installation?${query}`, {
-    init: { method: "DELETE" },
+    init: {
+      method: "POST",
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        app_registration_id: appRegistrationId,
+      }),
+    },
   });
 }
 
@@ -74,21 +77,55 @@ export async function disconnectGitHubPersonal(workspaceId: string) {
   });
 }
 
-export async function fetchDeploymentAppRegistration(options?: ApiRequestOptions) {
-  return fetchJson<DeploymentGitHubAppStatus>("/api/v1/github/app/registration", {
+export async function fetchGitHubAppRegistrations(
+  workspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<GitHubAppRegistrationCatalog>(`/api/v1/github/app/registrations?${query}`, {
     ...options,
     cache: options?.cache ?? "no-store",
   });
 }
 
-export async function startDeploymentAppRegistration(request: StartDeploymentGitHubAppRequest) {
-  return fetchJson<StartDeploymentGitHubAppResponse>("/api/v1/github/app/registration/start", {
+export async function startGitHubAppManifest(request: StartGitHubAppManifestRequest) {
+  return fetchJson<StartGitHubAppManifestResponse>(
+    "/api/v1/github/app/registrations/manifest/start",
+    {
+      init: { method: "POST", body: JSON.stringify(request) },
+    },
+  );
+}
+
+export async function importGitHubAppRegistration(request: ImportGitHubAppRegistrationRequest) {
+  return fetchJson<GitHubAppRegistration>("/api/v1/github/app/registrations/import", {
     init: { method: "POST", body: JSON.stringify(request) },
   });
 }
 
-export async function deleteDeploymentAppRegistration() {
-  return fetchJson<{ deleted: boolean }>("/api/v1/github/app/registration", {
-    init: { method: "DELETE" },
-  });
+export async function prepareGitHubAppImport(request: PrepareGitHubAppImportRequest) {
+  return fetchJson<PrepareGitHubAppImportResponse>(
+    "/api/v1/github/app/registrations/import/prepare",
+    {
+      init: { method: "POST", body: JSON.stringify(request) },
+    },
+  );
+}
+
+export async function renameGitHubAppRegistration(registrationId: string, displayName: string) {
+  return fetchJson<GitHubAppRegistration>(
+    `/api/v1/github/app/registrations/${encodeURIComponent(registrationId)}`,
+    {
+      init: { method: "PATCH", body: JSON.stringify({ display_name: displayName }) },
+    },
+  );
+}
+
+export async function deleteGitHubAppRegistration(registrationId: string) {
+  return fetchJson<{ deleted: boolean }>(
+    `/api/v1/github/app/registrations/${encodeURIComponent(registrationId)}`,
+    {
+      init: { method: "DELETE" },
+    },
+  );
 }

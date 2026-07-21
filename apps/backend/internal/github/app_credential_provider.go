@@ -26,11 +26,16 @@ func (p *CachedInstallationCredentialProvider) ResolveInstallation(
 	if connection == nil || connection.InstallationID == nil || *connection.InstallationID <= 0 {
 		return nil, errors.New("GitHub App installation connection is missing an installation ID")
 	}
+	if p.tokens.registrationID != "" && connection.AppRegistrationID != p.tokens.registrationID {
+		return nil, ErrGitHubNotConfigured
+	}
 	var repositories []string
 	if req.RepoName != "" {
 		repositories = []string{req.RepoName}
 	}
-	token, err := p.tokens.Get(ctx, *connection.InstallationID, nil, repositories)
+	token, err := p.tokens.GetForWorkspace(
+		ctx, connection.WorkspaceID, *connection.InstallationID, nil, repositories,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -39,14 +44,14 @@ func (p *CachedInstallationCredentialProvider) ResolveInstallation(
 	return &ResolvedCredential{
 		Client: client,
 		Principal: AuthPrincipal{
-			Kind:           AuthPrincipalApp,
-			Source:         ConnectionSourceGitHubAppInstallation,
-			Login:          connection.InstallationAccountLogin,
-			InstallationID: *connection.InstallationID,
+			Kind: AuthPrincipalApp, Source: ConnectionSourceGitHubAppInstallation,
+			Login: connection.InstallationAccountLogin, InstallationID: *connection.InstallationID,
+			AppRegistrationID:       p.tokens.registrationID,
+			AppCredentialGeneration: p.tokens.credentialGeneration,
 		},
-		Capabilities: CapabilitiesForPermissions(token.Permissions),
-		ExpiresAt:    token.ExpiresAt,
-		RateTracker:  tracker,
-		credential:   token.Token,
+		Capabilities: CapabilitiesForPermissions(token.Permissions), ExpiresAt: token.ExpiresAt,
+		AppRegistrationID:       p.tokens.registrationID,
+		AppCredentialGeneration: p.tokens.credentialGeneration,
+		RateTracker:             tracker, credential: token.Token,
 	}, nil
 }

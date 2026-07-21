@@ -36,6 +36,7 @@ func workspaceConnectionExpectation(connection *WorkspaceConnection) WorkspaceCo
 		Source:               connection.Source,
 		CredentialGeneration: connection.CredentialGeneration,
 		InstallationID:       cloneInt64Pointer(connection.InstallationID),
+		AppRegistrationID:    connection.AppRegistrationID,
 	}
 }
 
@@ -47,6 +48,7 @@ func authFlowWorkspaceExpectation(flow *AuthFlow) WorkspaceConnectionExpectation
 		Source:               flow.ExpectedWorkspaceSource,
 		CredentialGeneration: flow.ExpectedWorkspaceGeneration,
 		InstallationID:       cloneInt64Pointer(flow.ExpectedInstallationID),
+		AppRegistrationID:    flow.ExpectedWorkspaceAppRegistrationID,
 	}
 }
 
@@ -55,11 +57,13 @@ func matchesWorkspaceConnectionExpectation(
 	expected WorkspaceConnectionExpectation,
 ) bool {
 	if connection == nil {
-		return expected.Source == "" && expected.CredentialGeneration == 0 && expected.InstallationID == nil
+		return expected.Source == "" && expected.CredentialGeneration == 0 &&
+			expected.InstallationID == nil && expected.AppRegistrationID == ""
 	}
 	return connection.Source == expected.Source &&
 		connection.CredentialGeneration == expected.CredentialGeneration &&
-		equalInt64Pointers(connection.InstallationID, expected.InstallationID)
+		equalInt64Pointers(connection.InstallationID, expected.InstallationID) &&
+		connection.AppRegistrationID == expected.AppRegistrationID
 }
 
 func cloneInt64Pointer(value *int64) *int64 {
@@ -89,17 +93,19 @@ func (e *GitHubOAuthError) Error() string {
 
 type oauthFlowStore interface {
 	CreateAuthFlow(context.Context, *AuthFlow) error
-	ConsumeAuthFlow(context.Context, string, time.Time) (*AuthFlow, error)
+	ConsumeAuthFlow(context.Context, string, string, AuthFlowKind, time.Time) (*AuthFlow, error)
 }
 
 type OAuthFlowRequest struct {
-	WorkspaceID                 string
-	UserID                      string
-	Kind                        AuthFlowKind
-	ExpectedWorkspaceSource     ConnectionSource
-	ExpectedWorkspaceGeneration int64
-	ExpectedInstallationID      *int64
-	ExpectedPersonalGeneration  int64
+	WorkspaceID                        string
+	UserID                             string
+	AppRegistrationID                  string
+	Kind                               AuthFlowKind
+	ExpectedWorkspaceSource            ConnectionSource
+	ExpectedWorkspaceGeneration        int64
+	ExpectedInstallationID             *int64
+	ExpectedWorkspaceAppRegistrationID string
+	ExpectedPersonalGeneration         int64
 }
 
 type OAuthFlowExpectation = OAuthFlowRequest
@@ -124,8 +130,8 @@ func (m *OAuthFlowManager) Start(ctx context.Context, request OAuthFlowRequest) 
 	if m == nil || m.store == nil {
 		return OAuthFlowStart{}, errors.New("GitHub OAuth flow store is not configured")
 	}
-	if request.WorkspaceID == "" || request.UserID == "" {
-		return OAuthFlowStart{}, errors.New("workspace and user are required for GitHub OAuth")
+	if request.WorkspaceID == "" || request.UserID == "" || request.AppRegistrationID == "" {
+		return OAuthFlowStart{}, errors.New("workspace, user, and App registration are required for GitHub OAuth")
 	}
 	ttl, err := oauthFlowTTL(request.Kind)
 	if err != nil {
@@ -149,17 +155,19 @@ func (m *OAuthFlowManager) Start(ctx context.Context, request OAuthFlowRequest) 
 	now := m.now().UTC()
 	stateDigest := sha256.Sum256([]byte(state))
 	flow := &AuthFlow{
-		StateHash:                   stateDigestString(stateDigest),
-		WorkspaceID:                 request.WorkspaceID,
-		UserID:                      request.UserID,
-		Kind:                        request.Kind,
-		PKCEVerifier:                verifier,
-		ExpectedWorkspaceSource:     request.ExpectedWorkspaceSource,
-		ExpectedWorkspaceGeneration: request.ExpectedWorkspaceGeneration,
-		ExpectedInstallationID:      request.ExpectedInstallationID,
-		ExpectedPersonalGeneration:  request.ExpectedPersonalGeneration,
-		ExpiresAt:                   now.Add(ttl),
-		CreatedAt:                   now,
+		StateHash:                          stateDigestString(stateDigest),
+		WorkspaceID:                        request.WorkspaceID,
+		UserID:                             request.UserID,
+		AppRegistrationID:                  request.AppRegistrationID,
+		Kind:                               request.Kind,
+		PKCEVerifier:                       verifier,
+		ExpectedWorkspaceSource:            request.ExpectedWorkspaceSource,
+		ExpectedWorkspaceGeneration:        request.ExpectedWorkspaceGeneration,
+		ExpectedInstallationID:             request.ExpectedInstallationID,
+		ExpectedWorkspaceAppRegistrationID: request.ExpectedWorkspaceAppRegistrationID,
+		ExpectedPersonalGeneration:         request.ExpectedPersonalGeneration,
+		ExpiresAt:                          now.Add(ttl),
+		CreatedAt:                          now,
 	}
 	if err := m.store.CreateAuthFlow(ctx, flow); err != nil {
 		return OAuthFlowStart{}, fmt.Errorf("persist GitHub OAuth flow: %w", err)
@@ -172,7 +180,7 @@ func (m *OAuthFlowManager) Consume(
 	state string,
 	expected OAuthFlowExpectation,
 ) (*AuthFlow, error) {
-	flow, err := m.ConsumeBound(ctx, state, expected.Kind)
+	flow, err := m.ConsumeBound(ctx, state, expected.AppRegistrationID, expected.Kind)
 	if err != nil {
 		return nil, err
 	}
@@ -188,20 +196,23 @@ func (m *OAuthFlowManager) Consume(
 func (m *OAuthFlowManager) ConsumeBound(
 	ctx context.Context,
 	state string,
+	registrationID string,
 	expectedKind AuthFlowKind,
 ) (*AuthFlow, error) {
 	if m == nil || m.store == nil || state == "" {
 		return nil, ErrOAuthStateInvalid
 	}
 	digest := sha256.Sum256([]byte(state))
-	flow, err := m.store.ConsumeAuthFlow(ctx, stateDigestString(digest), m.now().UTC())
+	flow, err := m.store.ConsumeAuthFlow(
+		ctx, stateDigestString(digest), registrationID, expectedKind, m.now().UTC(),
+	)
 	if err != nil {
 		if errors.Is(err, ErrAuthFlowUnavailable) {
 			return nil, ErrOAuthStateInvalid
 		}
 		return nil, fmt.Errorf("consume GitHub OAuth flow: %w", err)
 	}
-	if flow == nil || flow.Kind != expectedKind {
+	if flow == nil || flow.Kind != expectedKind || flow.AppRegistrationID != registrationID {
 		return nil, ErrOAuthStateMismatch
 	}
 	return flow, nil
