@@ -293,6 +293,7 @@ describe("useUserMessageNavigation boundaries and cancellation", () => {
   });
 
   it("stops when a non-empty page leaves the cursor unchanged", async () => {
+    vi.useFakeTimers();
     let resolvePage!: (count: number) => void;
     const loadOlder = vi.fn(() => new Promise<number>((resolve) => (resolvePage = resolve)));
     const hook = renderNavigation([messageItem("u1", "user")], {
@@ -314,10 +315,12 @@ describe("useUserMessageNavigation boundaries and cancellation", () => {
     });
 
     await act(async () => resolvePage(20));
+    await act(async () => vi.runAllTimersAsync());
     await act(() => navigation);
 
     expect(loadOlder).toHaveBeenCalledTimes(1);
     expect(hook.result.current.hasPrevious).toBe(true);
+    vi.useRealTimers();
   });
 
   it("discards a pending navigation when the active session changes", async () => {
