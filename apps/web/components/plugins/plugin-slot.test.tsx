@@ -56,35 +56,29 @@ describe("PluginSlot", () => {
     expect(screen.getByTestId("slot-a").textContent).toBe("hello");
   });
 
-  it("renders the plugin-settings slot and forwards slotProps.pluginId to gate per plugin", () => {
-    // The "plugin-settings" slot renders on every plugin's detail page, so a
-    // registered component early-returns unless slotProps.pluginId is its own id.
-    const ProviderUsageCard = ({ slotProps }: { slotProps?: unknown }) => {
-      const { pluginId } = (slotProps as { pluginId: string }) ?? { pluginId: "" };
-      if (pluginId !== "provider-usage") return null;
-      return <div data-testid="provider-usage-card">status card for {pluginId}</div>;
-    };
-    pluginRegistry.forPlugin("plugin-a").registerComponent("plugin-settings", ProviderUsageCard);
+  it("renders only the owning plugin's component when ownerPluginId is set", () => {
+    // "plugin-settings" is owner-scoped: the host isolates by owner, so a
+    // registered component never has to gate on the current plugin id itself.
+    const Card = ({ slotProps }: { slotProps?: unknown }) => (
+      <div data-testid="settings-card">
+        card for {String((slotProps as { pluginId: string })?.pluginId)}
+      </div>
+    );
+    pluginRegistry.forPlugin("plugin-a").registerComponent("plugin-settings", Card);
+    pluginRegistry.forPlugin("plugin-b").registerComponent("plugin-settings", Card);
 
-    // Viewing a different plugin's page: the card gates itself out.
-    const { rerender } = render(
+    // Viewing plugin-b's page: only plugin-b's component renders, with its id.
+    render(
       <PluginSlot
         name="plugin-settings"
-        slotProps={{ pluginId: "other-plugin", status: "active" }}
+        ownerPluginId="plugin-b"
+        slotProps={{ pluginId: "plugin-b", status: "active" }}
       />,
     );
-    expect(screen.queryByTestId("provider-usage-card")).toBeNull();
 
-    // Viewing its own plugin's page: the card renders with the forwarded id.
-    rerender(
-      <PluginSlot
-        name="plugin-settings"
-        slotProps={{ pluginId: "provider-usage", status: "active" }}
-      />,
-    );
-    expect(screen.getByTestId("provider-usage-card").textContent).toBe(
-      "status card for provider-usage",
-    );
+    const cards = screen.getAllByTestId("settings-card");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.textContent).toBe("card for plugin-b");
   });
 
   it("isolates a throwing slot component so a sibling still renders", () => {

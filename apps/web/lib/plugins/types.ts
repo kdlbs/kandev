@@ -79,10 +79,10 @@ export interface PluginRouteOptions {
  * sessionIds }`), and "plugin-settings" (inline UI on a plugin's own settings
  * page, Settings > Plugins > <plugin>, between the settings form and the
  * manifest card — receives `{ pluginId: string; status: PluginStatus }` as
- * `slotProps`). Because "plugin-settings" renders on *every* plugin's detail
- * page, a registered component must early-return `null` unless
- * `slotProps.pluginId` matches its own plugin id. Not a closed union — hosts
- * may register additional slot names.
+ * `slotProps`). "plugin-settings" is owner-scoped: the host renders only the
+ * component registered by the plugin being viewed, so a plugin never appears on
+ * another plugin's page and authors don't gate on the current id themselves.
+ * Not a closed union — hosts may register additional slot names.
  */
 export type PluginSlotName = string;
 

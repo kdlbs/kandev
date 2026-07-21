@@ -138,10 +138,10 @@ interface PluginRegistry {
   // "plugin-settings" renders inline on a plugin's own settings page
   // (Settings > Plugins > <plugin>, between the schema-driven settings form and
   // the manifest card) and forwards `{ pluginId: string, status: PluginStatus }`
-  // as `slotProps`. This slot renders on *every* plugin's detail page, so a
-  // registered component MUST early-return null unless
-  // `slotProps.pluginId === "<its own plugin id>"` — otherwise plugin A's card
-  // would show on plugin B's settings page.
+  // as `slotProps`. It is owner-scoped: the host renders only the component
+  // registered by the plugin currently being viewed, so your card appears on
+  // your own settings page and never on another plugin's — no per-id gating
+  // needed in your component.
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
 
   // WS action handler. Bridged into the existing lib/ws dispatch; called with the
