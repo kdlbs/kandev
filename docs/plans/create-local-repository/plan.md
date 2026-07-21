@@ -141,16 +141,18 @@ one behavior and edit overlapping files. E2E follows the integrated product path
 
 ```bash
 make fmt
-cd apps/backend && go test ./internal/task/service ./internal/task/handlers
-cd apps && pnpm --filter @kandev/web test -- --run \
+make typecheck
+(cd apps/backend && go test ./internal/task/service ./internal/task/handlers)
+(cd apps && pnpm --filter @kandev/web test -- --run \
   components/create-local-repository-surface.test.tsx \
   components/task-create-dialog-pill.test.tsx \
   components/task-create-dialog-repo-chips.test.tsx \
-  components/task-create-dialog-handlers.test.ts
-cd apps/web && pnpm e2e:run tests/task/create-task-new-local-repository.spec.ts
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome \
-  tests/task/mobile-create-task-new-local-repository.spec.ts
-make typecheck test lint
+  components/task-create-dialog-handlers.test.ts)
+(cd apps/web && pnpm e2e:run tests/task/create-task-new-local-repository.spec.ts)
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome \
+  tests/task/mobile-create-task-new-local-repository.spec.ts)
+make test
+make lint
 ```
 
 ## Risks

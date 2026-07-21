@@ -23,11 +23,13 @@ spec: "../../specs/create-local-repository/spec.md"
 ## Verification
 
 ```bash
-cd apps/web && pnpm e2e:run tests/task/create-task-new-local-repository.spec.ts
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome \
-  tests/task/mobile-create-task-new-local-repository.spec.ts
 make fmt
-make typecheck test lint
+make typecheck
+(cd apps/web && pnpm e2e:run tests/task/create-task-new-local-repository.spec.ts)
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome \
+  tests/task/mobile-create-task-new-local-repository.spec.ts)
+make test
+make lint
 ```
 
 ## Files Likely Touched

@@ -37,7 +37,7 @@ async function openCreateTask(page: Page): Promise<void> {
 }
 
 async function openRepositoryCreation(page: Page): Promise<void> {
-  await page.getByTestId("repo-chip-trigger").first().click();
+  await page.getByTestId("repo-chip-trigger").click();
   const action = page.getByRole("option", { name: "Create new repository" });
   await expect(action).toBeVisible();
   await action.click();
@@ -59,9 +59,9 @@ function expectUnbornMainRepository(repositoryPath: string): void {
       encoding: "utf8",
     }).trim(),
   ).toBe("main");
-  expect(
-    spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: repositoryPath }).status,
-  ).not.toBe(0);
+  const head = spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: repositoryPath });
+  expect(head.error).toBeUndefined();
+  expect(head.status).not.toBe(0);
 }
 
 function taskIdFromUrl(page: Page): string {
@@ -102,7 +102,7 @@ test.describe("Create task with a new local repository", () => {
     );
     await createRepository(testPage, repositoryName, repositoryPath);
 
-    await expect(testPage.getByTestId("repo-chip-trigger").first()).toContainText(repositoryName);
+    await expect(testPage.getByTestId("repo-chip-trigger")).toContainText(repositoryName);
     await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main");
     await expect(testPage.getByTestId("executor-profile-selector")).toContainText(
       directExecutor!.name,
@@ -168,7 +168,7 @@ test.describe("Create task with a new local repository", () => {
 
     await nameInput.fill(retryName);
     await createRepository(testPage, retryName, retryPath);
-    await expect(testPage.getByTestId("repo-chip-trigger").first()).toContainText(retryName);
+    await expect(testPage.getByTestId("repo-chip-trigger")).toContainText(retryName);
     expectUnbornMainRepository(retryPath);
   });
 });

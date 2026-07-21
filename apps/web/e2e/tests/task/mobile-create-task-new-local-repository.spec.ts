@@ -33,7 +33,7 @@ async function openCreateTask(page: Page): Promise<void> {
 }
 
 async function openCreationDrawer(page: Page): Promise<Locator> {
-  const trigger = page.getByTestId("repo-chip-trigger").first();
+  const trigger = page.getByTestId("repo-chip-trigger");
   await trigger.click();
   const action = page.getByRole("option", { name: "Create new repository" });
   await expect(action).toBeVisible();
@@ -92,6 +92,20 @@ async function expectDrawerGeometry(page: Page, drawer: Locator): Promise<void> 
   ).toBe(false);
 }
 
+function expectUnbornMainRepository(repositoryPath: string): void {
+  const symbolicRef = spawnSync("git", ["symbolic-ref", "--short", "HEAD"], {
+    cwd: repositoryPath,
+    encoding: "utf8",
+  });
+  expect(symbolicRef.error).toBeUndefined();
+  expect(symbolicRef.status).toBe(0);
+  expect(String(symbolicRef.stdout).trim()).toBe("main");
+
+  const head = spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: repositoryPath });
+  expect(head.error).toBeUndefined();
+  expect(head.status).not.toBe(0);
+}
+
 test.describe("Create task with a new local repository on mobile", () => {
   test("creates and selects the repository in a contained, scrollable drawer", async ({
     testPage,
@@ -122,7 +136,7 @@ test.describe("Create task with a new local repository on mobile", () => {
     await testPage.getByRole("textbox", { name: "Repository name" }).fill("dismissed-name");
     await testPage.keyboard.press("Escape");
     await expect(drawer).not.toBeVisible();
-    await expect(testPage.getByTestId("repo-chip-trigger").first()).toBeFocused();
+    await expect(testPage.getByTestId("repo-chip-trigger")).toBeFocused();
     expect(fs.existsSync(path.join(backend.tmpDir, "dismissed-name"))).toBe(false);
     await expect(testPage.getByTestId("task-title-input")).toHaveValue(
       "Mobile task on a new repository",
@@ -136,7 +150,7 @@ test.describe("Create task with a new local repository on mobile", () => {
     await drawer.getByRole("button", { name: "Create repository" }).click();
     await expect(drawer).not.toBeVisible();
 
-    await expect(testPage.getByTestId("repo-chip-trigger").first()).toContainText(repositoryName);
+    await expect(testPage.getByTestId("repo-chip-trigger")).toContainText(repositoryName);
     await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main");
     await expect(testPage.getByTestId("executor-profile-selector")).toContainText(
       directExecutor!.name,
@@ -165,8 +179,6 @@ test.describe("Create task with a new local repository on mobile", () => {
         executor_profile_id: directProfile!.id,
       });
     expect(fs.statSync(path.join(repositoryPath, ".git")).isDirectory()).toBe(true);
-    expect(
-      spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: repositoryPath }).status,
-    ).not.toBe(0);
+    expectUnbornMainRepository(repositoryPath);
   });
 });

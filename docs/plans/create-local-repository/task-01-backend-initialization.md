@@ -22,7 +22,7 @@ spec: "../../specs/create-local-repository/spec.md"
 
 ```bash
 make -C apps/backend fmt
-cd apps/backend && go test ./internal/task/service ./internal/task/handlers
+(cd apps/backend && go test ./internal/task/service ./internal/task/handlers)
 make -C apps/backend lint
 ```
 

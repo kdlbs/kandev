@@ -49,6 +49,7 @@ export const createWorkspaceSlice: StateCreator<
   upsertRepository: (workspaceId, repository) =>
     set((draft) => {
       const repositories = draft.repositories.itemsByWorkspaceId[workspaceId] ?? [];
+      const loaded = draft.repositories.loadedByWorkspaceId[workspaceId];
       const existingIndex = repositories.findIndex((candidate) => candidate.id === repository.id);
       if (existingIndex === -1) {
         repositories.push(repository);
@@ -56,7 +57,9 @@ export const createWorkspaceSlice: StateCreator<
         repositories[existingIndex] = repository;
       }
       draft.repositories.itemsByWorkspaceId[workspaceId] = repositories;
-      draft.repositories.loadedByWorkspaceId[workspaceId] = true;
+      if (loaded !== undefined) {
+        draft.repositories.loadedByWorkspaceId[workspaceId] = loaded;
+      }
     }),
   setRepositoriesLoading: (workspaceId, loading) =>
     set((draft) => {

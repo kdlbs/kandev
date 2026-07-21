@@ -25,12 +25,14 @@ spec: "../../specs/create-local-repository/spec.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run \
+make fmt
+make typecheck
+(cd apps && pnpm --filter @kandev/web test -- --run \
   components/create-local-repository-surface.test.tsx \
   components/task-create-dialog-pill.test.tsx \
   components/task-create-dialog-repo-chips.test.tsx \
-  components/task-create-dialog-handlers.test.ts
-cd apps/web && pnpm run typecheck && pnpm run lint
+  components/task-create-dialog-handlers.test.ts)
+(cd apps/web && pnpm run lint)
 ```
 
 ## Files Likely Touched

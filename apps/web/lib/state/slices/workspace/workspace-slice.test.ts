@@ -13,6 +13,7 @@ function makeStore() {
 }
 
 const REPO = "repo-1";
+const CREATED_REPOSITORY = "repo-created";
 const BRANCHES: Branch[] = [{ name: "main", type: "local" }];
 const FETCHED_AT = "2026-04-30T10:00:00Z";
 
@@ -21,6 +22,17 @@ function repository(id: string): Repository {
 }
 
 describe("upsertRepository", () => {
+  it("preserves an unloaded cache so a later fetch includes existing repositories", () => {
+    const s = makeStore();
+
+    s.getState().upsertRepository("ws-1", repository(CREATED_REPOSITORY));
+
+    expect(s.getState().repositories.loadedByWorkspaceId["ws-1"]).toBeUndefined();
+    expect(s.getState().repositories.itemsByWorkspaceId["ws-1"]).toEqual([
+      repository(CREATED_REPOSITORY),
+    ]);
+  });
+
   it("merges against the current store state without dropping concurrent repositories", () => {
     const s = makeStore();
     s.getState().setRepositories("ws-1", [repository("repo-before")]);
@@ -29,12 +41,12 @@ describe("upsertRepository", () => {
       repository("repo-concurrent"),
     ]);
 
-    s.getState().upsertRepository("ws-1", repository("repo-created"));
+    s.getState().upsertRepository("ws-1", repository(CREATED_REPOSITORY));
 
     expect(s.getState().repositories.itemsByWorkspaceId["ws-1"].map((repo) => repo.id)).toEqual([
       "repo-before",
       "repo-concurrent",
-      "repo-created",
+      CREATED_REPOSITORY,
     ]);
   });
 });
