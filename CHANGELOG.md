@@ -2,6 +2,29 @@
 
 All notable changes to Kandev.
 
+## 0.81.0 - 2026-07-21
+
+### Features
+
+- render plugin-settings slot at top of settings page ([#1838](https://github.com/kdlbs/kandev/pull/1838))
+- add agent message comments ([#1835](https://github.com/kdlbs/kandev/pull/1835))
+- add owner-scoped plugin-settings slot for inline plugin UI ([#1836](https://github.com/kdlbs/kandev/pull/1836))
+- add Azure DevOps integration ([#1778](https://github.com/kdlbs/kandev/pull/1778))
+- add chat-top-bar plugin slot ([#1827](https://github.com/kdlbs/kandev/pull/1827))
+
+### Bug Fixes
+
+- refresh opencode model cache ([#1830](https://github.com/kdlbs/kandev/pull/1830))
+- keep plugin row action buttons pinned to the header ([#1833](https://github.com/kdlbs/kandev/pull/1833))
+- allow explicit paths outside discovery roots ([#1825](https://github.com/kdlbs/kandev/pull/1825))
+- preserve authoritative archived task state ([#1826](https://github.com/kdlbs/kandev/pull/1826))
+- refresh walkthrough ranges on Monaco model changes ([#1822](https://github.com/kdlbs/kandev/pull/1822))
+
+### Documentation
+
+- add plugin authoring skill ([#1828](https://github.com/kdlbs/kandev/pull/1828))
+- define Kandev mobile UI language ([#1820](https://github.com/kdlbs/kandev/pull/1820))
+
 ## 0.80.0 - 2026-07-20
 
 ### Features
@@ -42,6 +65,7 @@ All notable changes to Kandev.
 
 ### Bug Fixes
 
+- clear stale archived state when unarchiving from task detail top bar ([#1816](https://github.com/kdlbs/kandev/pull/1816)) by @dk-blackfuel
 - show github review and issue watches after strictmode remount ([#1823](https://github.com/kdlbs/kandev/pull/1823))
 - preserve shared worktrees during task cleanup ([#1819](https://github.com/kdlbs/kandev/pull/1819))
 - serialize empty sync-result arrays instead of null ([#1817](https://github.com/kdlbs/kandev/pull/1817))
