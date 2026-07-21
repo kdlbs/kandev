@@ -23,39 +23,17 @@ const INSERT_FAILURE_MESSAGE = "Enhanced prompt was generated but could not be i
 const COPY_SUCCESS_MESSAGE = "Enhanced prompt copied to clipboard.";
 const COPY_FAILURE_MESSAGE = "Enhanced prompt could not be copied.";
 
-function fallbackCopy(text: string): boolean {
-  if (typeof document === "undefined") {
-    return false;
-  }
-
-  const textArea = document.createElement("textarea");
-  textArea.value = text;
-  textArea.style.position = "fixed";
-  textArea.style.opacity = "0";
-  document.body.appendChild(textArea);
-  textArea.focus();
-  textArea.select();
-
-  try {
-    return document.execCommand("copy");
-  } catch {
-    return false;
-  } finally {
-    document.body.removeChild(textArea);
-  }
-}
-
 async function copyText(text: string): Promise<boolean> {
   if (navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
-      return fallbackCopy(text);
+      return false;
     }
   }
 
-  return fallbackCopy(text);
+  return false;
 }
 
 export function usePromptResultDelivery({

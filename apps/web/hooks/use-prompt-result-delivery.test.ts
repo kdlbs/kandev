@@ -130,6 +130,8 @@ it("copyPending reports clipboard failure without clearing the result", async ()
     configurable: true,
     value: { writeText },
   });
+  const appendChild = vi.spyOn(document.body, "appendChild");
+  const createElement = vi.spyOn(document, "createElement");
   const { result } = renderHook(() =>
     usePromptResultDelivery({ getCurrent: () => "edited", apply: vi.fn(() => true) }),
   );
@@ -151,6 +153,39 @@ it("copyPending reports clipboard failure without clearing the result", async ()
     }),
   );
   expect(result.current.pendingResult).toEqual(GENERATED_RESULT);
+  expect(appendChild).not.toHaveBeenCalled();
+  expect(createElement).not.toHaveBeenCalledWith("textarea");
+});
+
+it("copyPending reports failure without DOM fallback when clipboard is unavailable", async () => {
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: undefined,
+  });
+  const appendChild = vi.spyOn(document.body, "appendChild");
+  const createElement = vi.spyOn(document, "createElement");
+  const { result } = renderHook(() =>
+    usePromptResultDelivery({ getCurrent: () => "edited", apply: vi.fn(() => true) }),
+  );
+
+  act(() => {
+    result.current.deliver("original", GENERATED_RESULT);
+  });
+  vi.clearAllMocks();
+
+  await act(async () => {
+    await result.current.copyPending();
+  });
+
+  expect(mockToast).toHaveBeenCalledWith(
+    expect.objectContaining({
+      description: "Enhanced prompt could not be copied.",
+      variant: "error",
+    }),
+  );
+  expect(result.current.pendingResult).toEqual(GENERATED_RESULT);
+  expect(appendChild).not.toHaveBeenCalled();
+  expect(createElement).not.toHaveBeenCalledWith("textarea");
 });
 
 it("dismissPending clears the retained result", () => {
