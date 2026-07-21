@@ -19,17 +19,14 @@ vi.mock("@/app/office/tasks/[id]/advanced-panels/chat-panel", () => ({
   ),
 }));
 
-const {
-  enhancePromptMock,
-  toastSuccessMock,
-  toastErrorMock,
-  deliveryToastMock,
-} = vi.hoisted(() => ({
-  enhancePromptMock: vi.fn(),
-  toastSuccessMock: vi.fn(),
-  toastErrorMock: vi.fn(),
-  deliveryToastMock: vi.fn(),
-}));
+const { enhancePromptMock, toastSuccessMock, toastErrorMock, deliveryToastMock } = vi.hoisted(
+  () => ({
+    enhancePromptMock: vi.fn(),
+    toastSuccessMock: vi.fn(),
+    toastErrorMock: vi.fn(),
+    deliveryToastMock: vi.fn(),
+  }),
+);
 
 vi.mock("sonner", () => ({
   toast: {
@@ -127,6 +124,10 @@ beforeEach(() => {
 const T_10 = "2026-05-01T10:00:00Z";
 const T_11 = "2026-05-01T11:00:00Z";
 const T_AGENT_A1 = "2026-05-01T10:30:00Z";
+const ORIGINAL_PROMPT = "Original prompt";
+const IMPROVED_PROMPT = "Improved prompt";
+const USER_EDIT = "User edit";
+const COMMENT_PLACEHOLDER = "Add a comment...";
 
 function makeComment(id: string, createdAt: string, content = `c-${id}`): TaskComment {
   return {
@@ -227,12 +228,12 @@ describe("TaskChat unified timeline", () => {
 
   it("renders the input area when not read-only", () => {
     render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={[]} />));
-    expect(screen.getByPlaceholderText("Add a comment...")).toBeTruthy();
+    expect(screen.getByPlaceholderText(COMMENT_PLACEHOLDER)).toBeTruthy();
   });
 
   it("hides the input area when read-only", () => {
     render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={[]} readOnly />));
-    expect(screen.queryByPlaceholderText("Add a comment...")).toBeNull();
+    expect(screen.queryByPlaceholderText(COMMENT_PLACEHOLDER)).toBeNull();
   });
 });
 
@@ -339,9 +340,7 @@ describe("TaskChat decisions in timeline", () => {
 
 describe("TaskChat prompt enhancement", () => {
   it("applies the enhanced prompt immediately when the input is unchanged", async () => {
-    let deliver:
-      | ((result: { content: string }) => boolean | Promise<boolean>)
-      | undefined;
+    let deliver: ((result: { content: string }) => boolean | Promise<boolean>) | undefined;
     enhancePromptMock.mockImplementation(
       (_source: string, onSuccess: (result: { content: string }) => boolean | Promise<boolean>) => {
         deliver = onSuccess;
@@ -350,25 +349,23 @@ describe("TaskChat prompt enhancement", () => {
 
     render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={[]} />));
 
-    const textarea = screen.getByPlaceholderText("Add a comment...") as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: "Original prompt" } });
+    const textarea = screen.getByPlaceholderText(COMMENT_PLACEHOLDER) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ORIGINAL_PROMPT } });
     fireEvent.click(screen.getByTestId("enhance-prompt-button"));
 
-    expect(enhancePromptMock).toHaveBeenCalledWith("Original prompt", expect.any(Function));
+    expect(enhancePromptMock).toHaveBeenCalledWith(ORIGINAL_PROMPT, expect.any(Function));
 
     await act(async () => {
-      await deliver?.({ content: "Improved prompt" });
+      await deliver?.({ content: IMPROVED_PROMPT });
     });
 
-    await waitFor(() => expect(textarea.value).toBe("Improved prompt"));
+    await waitFor(() => expect(textarea.value).toBe(IMPROVED_PROMPT));
     expect(screen.queryByTestId("prompt-result-recovery")).toBeNull();
     expect(toastSuccessMock).toHaveBeenCalledWith("Enhanced prompt inserted.");
   });
 
   it("retains a user edit and offers recovery until Apply is clicked", async () => {
-    let deliver:
-      | ((result: { content: string }) => boolean | Promise<boolean>)
-      | undefined;
+    let deliver: ((result: { content: string }) => boolean | Promise<boolean>) | undefined;
     enhancePromptMock.mockImplementation(
       (_source: string, onSuccess: (result: { content: string }) => boolean | Promise<boolean>) => {
         deliver = onSuccess;
@@ -377,21 +374,21 @@ describe("TaskChat prompt enhancement", () => {
 
     render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={[]} />));
 
-    const textarea = screen.getByPlaceholderText("Add a comment...") as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: "Original prompt" } });
+    const textarea = screen.getByPlaceholderText(COMMENT_PLACEHOLDER) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ORIGINAL_PROMPT } });
     fireEvent.click(screen.getByTestId("enhance-prompt-button"));
-    fireEvent.change(textarea, { target: { value: "User edit" } });
+    fireEvent.change(textarea, { target: { value: USER_EDIT } });
 
     await act(async () => {
-      await deliver?.({ content: "Improved prompt" });
+      await deliver?.({ content: IMPROVED_PROMPT });
     });
 
-    await waitFor(() => expect(textarea.value).toBe("User edit"));
+    await waitFor(() => expect(textarea.value).toBe(USER_EDIT));
     expect(screen.getByTestId("prompt-result-recovery")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
-    await waitFor(() => expect(textarea.value).toBe("Improved prompt"));
+    await waitFor(() => expect(textarea.value).toBe(IMPROVED_PROMPT));
     expect(screen.queryByTestId("prompt-result-recovery")).toBeNull();
   });
 });

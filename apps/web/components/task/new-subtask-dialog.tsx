@@ -358,6 +358,8 @@ function NewSubtaskForm({
         setPromptValue(value);
         setHasPrompt(value.trim().length > 0);
       },
+      onApplyPending: promptZone.applyPending,
+      onCopyPending: promptZone.copyPending,
       onSubmitShortcut: handleSubmit,
     },
     isCreating,

@@ -8,6 +8,10 @@ import type { DialogFormState, TaskFormInputsHandle } from "./task-create-dialog
 const enhancePromptMock = vi.fn();
 const toastMock = vi.fn();
 const setHasDescriptionMock = vi.fn();
+const ORIGINAL_PROMPT = "Original prompt";
+const IMPROVED_PROMPT = "Improved prompt";
+const USER_EDIT = "User edit";
+const PROMPT_RESULT_RECOVERY_TEST_ID = "prompt-result-recovery";
 
 let allowProgrammaticSet = true;
 let mockFs: DialogFormState;
@@ -26,7 +30,9 @@ vi.mock("@kandev/ui/button", () => ({
 }));
 
 vi.mock("@/components/routing/app-link", () => ({
-  default: ({ children, href }: { children: ReactNode; href: string }) => <a href={href}>{children}</a>,
+  default: ({ children, href }: { children: ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
 }));
 
 vi.mock("@/components/workflow-selector-row", () => ({
@@ -77,7 +83,9 @@ vi.mock("@/components/task-create-dialog-repo-chips", () => ({
 }));
 
 vi.mock("@/hooks/use-task-create-dialog-popover-container", () => ({
-  TaskCreateDialogPopoverContainerProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TaskCreateDialogPopoverContainerProvider: ({ children }: { children: ReactNode }) => (
+    <>{children}</>
+  ),
 }));
 
 vi.mock("@/components/task-create-dialog-handlers", () => ({
@@ -219,7 +227,7 @@ vi.mock("@/components/task-create-dialog-state", () => ({
   computeIsTaskStarted: () => false,
 }));
 
-function buildMockFs(initialDescription = "Original prompt"): DialogFormState {
+function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   return {
     taskName: "Task title",
     setTaskName: () => undefined,
@@ -320,9 +328,7 @@ beforeEach(() => {
 
 describe("TaskCreateDialog prompt enhancement", () => {
   it("applies the enhanced prompt immediately when the description is unchanged", async () => {
-    let deliver:
-      | ((result: { content: string }) => boolean | Promise<boolean>)
-      | undefined;
+    let deliver: ((result: { content: string }) => boolean | Promise<boolean>) | undefined;
     enhancePromptMock.mockImplementation(
       (_source: string, onSuccess: (result: { content: string }) => boolean | Promise<boolean>) => {
         deliver = onSuccess;
@@ -334,21 +340,19 @@ describe("TaskCreateDialog prompt enhancement", () => {
     const textarea = screen.getByTestId("task-description-input") as HTMLTextAreaElement;
     fireEvent.click(screen.getByTestId("enhance-prompt-button"));
 
-    expect(enhancePromptMock).toHaveBeenCalledWith("Original prompt", expect.any(Function));
+    expect(enhancePromptMock).toHaveBeenCalledWith(ORIGINAL_PROMPT, expect.any(Function));
 
     await act(async () => {
-      await deliver?.({ content: "Improved prompt" });
+      await deliver?.({ content: IMPROVED_PROMPT });
     });
 
-    await waitFor(() => expect(textarea.value).toBe("Improved prompt"));
+    await waitFor(() => expect(textarea.value).toBe(IMPROVED_PROMPT));
     expect(setHasDescriptionMock).toHaveBeenCalledWith(true);
-    expect(screen.queryByTestId("prompt-result-recovery")).toBeNull();
+    expect(screen.queryByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeNull();
   });
 
   it("keeps the user's edited description and offers recovery", async () => {
-    let deliver:
-      | ((result: { content: string }) => boolean | Promise<boolean>)
-      | undefined;
+    let deliver: ((result: { content: string }) => boolean | Promise<boolean>) | undefined;
     enhancePromptMock.mockImplementation(
       (_source: string, onSuccess: (result: { content: string }) => boolean | Promise<boolean>) => {
         deliver = onSuccess;
@@ -359,25 +363,23 @@ describe("TaskCreateDialog prompt enhancement", () => {
 
     const textarea = screen.getByTestId("task-description-input") as HTMLTextAreaElement;
     fireEvent.click(screen.getByTestId("enhance-prompt-button"));
-    fireEvent.change(textarea, { target: { value: "User edit" } });
+    fireEvent.change(textarea, { target: { value: USER_EDIT } });
 
     await act(async () => {
-      await deliver?.({ content: "Improved prompt" });
+      await deliver?.({ content: IMPROVED_PROMPT });
     });
 
-    await waitFor(() => expect(textarea.value).toBe("User edit"));
-    expect(screen.getByTestId("prompt-result-recovery")).toBeTruthy();
+    await waitFor(() => expect(textarea.value).toBe(USER_EDIT));
+    expect(screen.getByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
-    await waitFor(() => expect(textarea.value).toBe("Improved prompt"));
-    expect(screen.queryByTestId("prompt-result-recovery")).toBeNull();
+    await waitFor(() => expect(textarea.value).toBe(IMPROVED_PROMPT));
+    expect(screen.queryByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeNull();
   });
 
   it("keeps the generated result behind recovery when the editor handle is gone", async () => {
-    let deliver:
-      | ((result: { content: string }) => boolean | Promise<boolean>)
-      | undefined;
+    let deliver: ((result: { content: string }) => boolean | Promise<boolean>) | undefined;
     enhancePromptMock.mockImplementation(
       (_source: string, onSuccess: (result: { content: string }) => boolean | Promise<boolean>) => {
         deliver = onSuccess;
@@ -390,9 +392,9 @@ describe("TaskCreateDialog prompt enhancement", () => {
     mockFs.descriptionInputRef.current = null;
 
     await act(async () => {
-      await deliver?.({ content: "Improved prompt" });
+      await deliver?.({ content: IMPROVED_PROMPT });
     });
 
-    expect(screen.getByTestId("prompt-result-recovery")).toBeTruthy();
+    expect(screen.getByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeTruthy();
   });
 });

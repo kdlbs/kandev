@@ -407,18 +407,8 @@ function NewSessionForm({
     selectedProfileId,
     setSelectedProfileId,
   });
-  const {
-    handleEnhancePrompt,
-    isEnhancingPrompt,
-    pendingResult,
-    applyPending,
-    copyPending,
-  } = useSessionPromptController(
-    promptRef,
-    promptValue,
-    setPromptValue,
-    setHasPrompt,
-  );
+  const { handleEnhancePrompt, isEnhancingPrompt, pendingResult, applyPending, copyPending } =
+    useSessionPromptController(promptRef, promptValue, setPromptValue, setHasPrompt);
   const handleContextChange = useSessionContextChange({
     promptRef: controlledPromptRef,
     initialPrompt,

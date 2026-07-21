@@ -32,7 +32,9 @@ it.each([
   ["original", null, false, "retains result after target disappears"],
 ])("%s", (source, current, expectedApplied, _label) => {
   const apply = vi.fn(() => true);
-  const { result } = renderHook(() => usePromptResultDelivery({ getCurrent: () => current, apply }));
+  const { result } = renderHook(() =>
+    usePromptResultDelivery({ getCurrent: () => current, apply }),
+  );
 
   let delivered = false;
   act(() => {
@@ -75,7 +77,9 @@ it("retains the result when insertion rejects unchanged input", () => {
 
 it("applyPending clears only after apply succeeds", () => {
   const apply = vi.fn(() => false);
-  const { result } = renderHook(() => usePromptResultDelivery({ getCurrent: () => "edited", apply }));
+  const { result } = renderHook(() =>
+    usePromptResultDelivery({ getCurrent: () => "edited", apply }),
+  );
 
   act(() => {
     result.current.deliver("original", GENERATED_RESULT);

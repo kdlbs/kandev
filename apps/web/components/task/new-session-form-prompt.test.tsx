@@ -44,10 +44,17 @@ const GENERATED_RESULT = {
 } satisfies UtilityGenerationResult;
 
 function useSessionPromptHarness(initialPrompt = "original prompt") {
-  const promptRef = useRef<HTMLTextAreaElement | null>({ value: initialPrompt } as HTMLTextAreaElement);
+  const promptRef = useRef<HTMLTextAreaElement | null>({
+    value: initialPrompt,
+  } as HTMLTextAreaElement);
   const [promptValue, setPromptValue] = useState(initialPrompt);
   const [hasPrompt, setHasPrompt] = useState(Boolean(initialPrompt.trim()));
-  const controller = useSessionPromptController(promptRef, promptValue, setPromptValue, setHasPrompt);
+  const controller = useSessionPromptController(
+    promptRef,
+    promptValue,
+    setPromptValue,
+    setHasPrompt,
+  );
 
   return {
     ...controller,

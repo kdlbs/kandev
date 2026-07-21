@@ -37,7 +37,11 @@ describe("useUtilityAgentGenerator enhancePrompt", () => {
     let pending!: Promise<void>;
     act(() => {
       pending = result.current.enhancePrompt("original", async (value) => {
-        expect(value).toEqual({ content: "improved prompt", callId: "call-123", durationMs: 80_000 });
+        expect(value).toEqual({
+          content: "improved prompt",
+          callId: "call-123",
+          durationMs: 80_000,
+        });
         expect(result.current.isEnhancingPrompt).toBe(true);
         return delivered;
       });

@@ -27,7 +27,12 @@ export function PromptResultRecovery({
     >
       <p className="text-sm text-muted-foreground">An enhanced prompt is available.</p>
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="outline" className="cursor-pointer" onClick={() => void onCopy()}>
+        <Button
+          type="button"
+          variant="outline"
+          className="cursor-pointer"
+          onClick={() => void onCopy()}
+        >
           Copy
         </Button>
         <Button type="button" className="cursor-pointer" onClick={onApply}>
