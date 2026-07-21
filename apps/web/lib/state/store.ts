@@ -325,6 +325,7 @@ export type AppState = {
   appendInstallOutput: (agentName: string, chunk: string) => void;
   clearInstallJob: (agentName: string) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
+  upsertRepository: (workspaceId: string, repository: Repository) => void;
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
   setRepositoryBranches: (
     repositoryId: string,

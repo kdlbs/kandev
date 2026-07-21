@@ -195,4 +195,48 @@ describe("Pill popover", () => {
     expect(content).not.toBeNull();
     expect(screen.getByTestId("clipping-host").contains(content)).toBe(false);
   });
+
+  it("activates an optional command action with a pointer", () => {
+    const onAction = vi.fn();
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value=""
+        placeholder="repository"
+        options={[]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search repositories..."
+        emptyMessage="No repositories"
+        action={{ label: "Create new repository", onSelect: onAction }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("repository"));
+    fireEvent.click(screen.getByText("Create new repository"));
+
+    expect(onAction).toHaveBeenCalledOnce();
+  });
+
+  it("activates an optional command action from the keyboard", () => {
+    const onAction = vi.fn();
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value=""
+        placeholder="repository"
+        options={[]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search repositories..."
+        emptyMessage="No repositories"
+        action={{ label: "Create new repository", onSelect: onAction }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("repository"));
+    const search = screen.getByPlaceholderText("Search repositories...");
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(onAction).toHaveBeenCalledOnce();
+  });
 });

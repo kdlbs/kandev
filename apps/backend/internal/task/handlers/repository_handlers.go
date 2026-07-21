@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -38,6 +39,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workspaces/:id/repositories", h.httpListRepositories)
 	api.POST("/workspaces/:id/repositories", h.httpCreateRepository)
+	api.POST("/workspaces/:id/repositories/initialize-local", h.httpInitializeLocalRepository)
 	api.GET("/workspaces/:id/repositories/discover", h.httpDiscoverRepositories)
 	// Unified branch listing — accepts either ?repository_id= for an imported
 	// workspace repo, or ?path= for an on-machine folder discovered but not
@@ -276,6 +278,39 @@ type httpCreateRepositoryRequest struct {
 	CleanupScript          string `json:"cleanup_script"`
 	DevScript              string `json:"dev_script"`
 	CopyFiles              string `json:"copy_files"`
+}
+
+type httpInitializeLocalRepositoryRequest struct {
+	Name       string `json:"name"`
+	ParentPath string `json:"parent_path"`
+}
+
+func (h *RepositoryHandlers) httpInitializeLocalRepository(c *gin.Context) {
+	var body httpInitializeLocalRepositoryRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	initialized, err := h.service.InitializeLocalRepository(c.Request.Context(), &service.InitializeLocalRepositoryRequest{
+		WorkspaceID: c.Param("id"),
+		Name:        body.Name,
+		ParentPath:  body.ParentPath,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidLocalRepositoryInitialization):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, repository.ErrWorkspaceNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		case errors.Is(err, service.ErrLocalRepositoryTargetExists):
+			c.JSON(http.StatusConflict, gin.H{"error": "repository target already exists"})
+		default:
+			h.logger.Error("failed to initialize local repository", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to initialize local repository"})
+		}
+		return
+	}
+	c.JSON(http.StatusCreated, dto.FromRepository(initialized))
 }
 
 func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {

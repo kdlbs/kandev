@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createWorkspaceSlice } from "./workspace-slice";
 import type { WorkspaceSlice } from "./types";
-import type { Branch } from "@/lib/types/http";
+import type { Branch, Repository } from "@/lib/types/http";
 
 function makeStore() {
   return create<WorkspaceSlice>()(
@@ -15,6 +15,29 @@ function makeStore() {
 const REPO = "repo-1";
 const BRANCHES: Branch[] = [{ name: "main", type: "local" }];
 const FETCHED_AT = "2026-04-30T10:00:00Z";
+
+function repository(id: string): Repository {
+  return { id, name: id, workspace_id: "ws-1" } as Repository;
+}
+
+describe("upsertRepository", () => {
+  it("merges against the current store state without dropping concurrent repositories", () => {
+    const s = makeStore();
+    s.getState().setRepositories("ws-1", [repository("repo-before")]);
+    s.getState().setRepositories("ws-1", [
+      repository("repo-before"),
+      repository("repo-concurrent"),
+    ]);
+
+    s.getState().upsertRepository("ws-1", repository("repo-created"));
+
+    expect(s.getState().repositories.itemsByWorkspaceId["ws-1"].map((repo) => repo.id)).toEqual([
+      "repo-before",
+      "repo-concurrent",
+      "repo-created",
+    ]);
+  });
+});
 
 describe("setRepositoryBranches", () => {
   it("stores branches and marks loaded without meta", () => {

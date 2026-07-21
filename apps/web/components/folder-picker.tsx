@@ -64,12 +64,11 @@ export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps
         sideOffset={4}
         data-testid="folder-picker-popover"
       >
-        <Breadcrumb path={listing?.path ?? ""} onNavigate={(p) => void load(p)} />
-        <Entries
+        <DirectoryBrowserBody
           listing={listing}
           loading={loading}
           error={error}
-          onDescend={(p) => void load(p)}
+          onNavigate={(p) => void load(p)}
         />
         <Footer
           choosable={!!listing?.path}
@@ -95,7 +94,7 @@ function leafName(path: string): string {
   return idx === -1 ? trimmed : trimmed.slice(idx + 1) || "/";
 }
 
-function useDirectoryListing(open: boolean, value: string) {
+export function useDirectoryListing(open: boolean, value: string) {
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -141,10 +140,18 @@ function pathSegments(path: string): Array<{ name: string; path: string }> {
   return segs;
 }
 
-function Breadcrumb({ path, onNavigate }: { path: string; onNavigate: (p: string) => void }) {
+function Breadcrumb({
+  path,
+  onNavigate,
+  touchRows = false,
+}: {
+  path: string;
+  onNavigate: (p: string) => void;
+  touchRows?: boolean;
+}) {
   const segs = pathSegments(path);
   return (
-    <div className="flex items-center gap-0.5 border-b border-border bg-muted/30 px-2 py-1.5 overflow-x-auto">
+    <div className="flex items-center gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border bg-muted/30 px-2 py-1.5">
       {segs.length === 0 && (
         <span className="text-[11px] text-muted-foreground italic">Loading…</span>
       )}
@@ -161,6 +168,7 @@ function Breadcrumb({ path, onNavigate }: { path: string; onNavigate: (p: string
               disabled={last}
               className={cn(
                 "rounded px-1.5 py-0.5 text-[11px] font-mono whitespace-nowrap",
+                touchRows && "min-h-12",
                 last
                   ? "text-foreground cursor-default"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer",
@@ -175,16 +183,50 @@ function Breadcrumb({ path, onNavigate }: { path: string; onNavigate: (p: string
   );
 }
 
+export function DirectoryBrowserBody({
+  listing,
+  loading,
+  error,
+  onNavigate,
+  touchRows = false,
+  fillAvailableHeight = false,
+}: {
+  listing: DirectoryListing | null;
+  loading: boolean;
+  error: string | null;
+  onNavigate: (path: string) => void;
+  touchRows?: boolean;
+  fillAvailableHeight?: boolean;
+}) {
+  return (
+    <div className={cn("flex min-h-0 flex-col", fillAvailableHeight && "flex-1")}>
+      <Breadcrumb path={listing?.path ?? ""} onNavigate={onNavigate} touchRows={touchRows} />
+      <Entries
+        listing={listing}
+        loading={loading}
+        error={error}
+        onDescend={onNavigate}
+        touchRows={touchRows}
+        fillAvailableHeight={fillAvailableHeight}
+      />
+    </div>
+  );
+}
+
 function Entries({
   listing,
   loading,
   error,
   onDescend,
+  touchRows,
+  fillAvailableHeight,
 }: {
   listing: DirectoryListing | null;
   loading: boolean;
   error: string | null;
   onDescend: (path: string) => void;
+  touchRows?: boolean;
+  fillAvailableHeight?: boolean;
 }) {
   if (loading) return <EmptyRow text="Loading…" />;
   if (error) return <EmptyRow text={error} variant="error" testId="folder-picker-error" />;
@@ -193,7 +235,10 @@ function Entries({
   }
   return (
     <div
-      className="max-h-[280px] overflow-y-auto overscroll-contain py-1"
+      className={cn(
+        "overflow-y-auto overscroll-contain py-1",
+        fillAvailableHeight ? "min-h-0 flex-1" : "max-h-[280px]",
+      )}
       onWheel={(e) => e.stopPropagation()}
     >
       {listing.entries.map((entry) => (
@@ -201,7 +246,10 @@ function Entries({
           key={entry.path}
           type="button"
           onClick={() => onDescend(entry.path)}
-          className="group flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-accent cursor-pointer"
+          className={cn(
+            "group flex w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent cursor-pointer",
+            touchRows ? "min-h-12 py-2" : "py-1.5",
+          )}
           data-testid="folder-picker-entry"
         >
           <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground group-hover:text-foreground" />

@@ -132,6 +132,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     repositories,
     freshBranchAvailable,
     isLocalExecutor,
+    localRepositoryCreation,
   } = props;
   const showTaskName = shouldShowTaskTitleField(isCreateMode, isEditMode, isTaskStarted);
   const taskNameAutoFocus = !isEditMode && !fs.useRemote;
@@ -153,6 +154,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         userSettingsLoaded={props.userSettingsLoaded}
         onToggleNoRepository={props.onToggleNoRepository}
         onWorkspacePathChange={props.onWorkspacePathChange}
+        localRepositoryCreation={localRepositoryCreation}
       />
       {showTaskName && (
         <InlineTaskName
@@ -392,6 +394,7 @@ export function useTaskCreateDialogSetup(
   const isCreateMode = mode === "create";
   const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
   const fs = useDialogFormState(open, workspaceId, workflowId, initialValues);
+  const upsertWorkspaceRepository = useAppStore((state) => state.upsertRepository);
   const { toast } = useToast();
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const {
@@ -428,7 +431,11 @@ export function useTaskCreateDialogSetup(
     preserveBranch: initialValues?.checkoutBranch || initialValues?.branch,
   });
   useLockedFieldSync(open, workflowId, initialValues, fs);
-  const handlers = useDialogHandlers(fs, repositories);
+  const handlers = useDialogHandlers(fs, repositories, {
+    workspaceId,
+    executors,
+    upsertWorkspaceRepository,
+  });
   const submitHandlers = useSubmitHandlersWiring({
     props,
     fs,

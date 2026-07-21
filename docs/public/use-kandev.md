@@ -83,14 +83,14 @@ Remote repository and issue/PR URLs are not added from this settings page. Use t
 
 Detected capabilities come from the installed CLI and can change after an agent upgrade or login. A model or mode shown in documentation is not guaranteed for every account. If no built-in adapter fits, **Add TUI Agent** creates a passthrough integration; passthrough has a different resume, usage, and MCP contract from an ACP-capable agent.
 
-For the first task, keep the seeded **Worktree** executor profile. It creates a separate Git checkout so concurrent Kandev tasks do not edit the same working tree. A worktree is Git isolation, not operating-system isolation. Choose **Local** only when direct edits in the selected checkout are intentional. See [Agents and profiles](agents-and-profiles.md) and [Executors](executors.md) before using Docker, SSH, Sprites, custom scripts, or shared infrastructure.
+For the first task on an existing repository, keep the seeded **Worktree** executor profile. It creates a separate Git checkout so concurrent Kandev tasks do not edit the same working tree. A worktree is Git isolation, not operating-system isolation. Choose **Local** only when direct edits in the selected checkout are intentional. A repository initialized from **New Task** is the exception: it has no commit to support a worktree, so Kandev switches that task to a direct Local profile. See [Agents and profiles](agents-and-profiles.md) and [Executors](executors.md) before using Docker, SSH, Sprites, custom scripts, or shared infrastructure.
 
 ## Create and start the first task
 
 1. Select **New Task** from the sidebar or task board.
 2. Enter a specific title and a description with the expected outcome, constraints, and validation. A non-empty description enables the normal start and create-only actions.
-3. Under **Repo**, select the workspace repository and base branch. Select **None** only for work that genuinely needs a plain workspace directory.
-4. Choose the Development workflow, an agent profile, and the Worktree executor profile. Kandev remembers compatible recent choices, so re-check them after changing repository, agent, or trust boundary.
+3. Under **Repo**, select the workspace repository and base branch. To start a new project, open the repository selector, choose **Create new repository**, enter one folder name, and select its parent folder. Kandev creates an empty `main` repository with no initial commit. Select **None** only for work that genuinely needs a plain workspace directory.
+4. Choose the Development workflow and an agent profile. For an existing repository, choose the Worktree executor profile. For a newly initialized repository, keep the Local profile that Kandev selects automatically. Kandev remembers compatible recent choices, so re-check them after changing repository, agent, or trust boundary.
 5. Select **Start task**. Its menu also offers **Start task in plan mode** and **Create without starting agent**. On an empty description, the primary action is **Start Plan Mode**.
 
 Starting creates the task and its initial session. Workflow step configuration determines whether entry actions or later transitions start another session, inject a prompt, or stop at a human gate. With a structured ACP profile, create-only prepares the session/workspace without starting an agent turn. A passthrough/TUI profile is the exception: the backend upgrades prepare-only to a full launch because the native PTY must exist.
@@ -98,6 +98,7 @@ Starting creates the task and its initial session. Workflow step configuration d
 The dialog also supports multiple repositories, remote GitHub rows, and a single-repository **Fork a new branch** option when the Local executor is selected. Important boundaries:
 
 - Multi-repository tasks require the Worktree executor in the current task-create path.
+- Creating an empty repository is available only for a single repository row and switches the task to a direct Local profile.
 - No-repository tasks cannot use the Worktree executor.
 - The local fork option is off by default and requires explicit consent before Kandev discards dirty source-checkout changes.
 - Agent and executor choices can be disabled when their remote credential requirements are incompatible.

@@ -46,6 +46,18 @@ export const createWorkspaceSlice: StateCreator<
       draft.repositories.loadingByWorkspaceId[workspaceId] = false;
       draft.repositories.loadedByWorkspaceId[workspaceId] = true;
     }),
+  upsertRepository: (workspaceId, repository) =>
+    set((draft) => {
+      const repositories = draft.repositories.itemsByWorkspaceId[workspaceId] ?? [];
+      const existingIndex = repositories.findIndex((candidate) => candidate.id === repository.id);
+      if (existingIndex === -1) {
+        repositories.push(repository);
+      } else {
+        repositories[existingIndex] = repository;
+      }
+      draft.repositories.itemsByWorkspaceId[workspaceId] = repositories;
+      draft.repositories.loadedByWorkspaceId[workspaceId] = true;
+    }),
   setRepositoriesLoading: (workspaceId, loading) =>
     set((draft) => {
       draft.repositories.loadingByWorkspaceId[workspaceId] = loading;

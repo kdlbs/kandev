@@ -23,6 +23,10 @@ export function computeHasAllBranches(fs: DialogFormState): boolean {
   return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
 }
 
+export function localRepositoryCreationEnabled(isCreateMode: boolean, repoLocked: boolean) {
+  return isCreateMode && !repoLocked;
+}
+
 export function buildDialogFormBodyProps(
   setup: ReturnType<typeof useTaskCreateDialogSetup>,
   props: TaskCreateDialogProps,
@@ -59,6 +63,12 @@ export function buildDialogFormBodyProps(
     onToggleFreshBranch: handlers.handleToggleFreshBranch,
     onToggleNoRepository: repoLocked ? undefined : handlers.handleToggleNoRepository,
     onWorkspacePathChange: handlers.handleWorkspacePathChange,
+    localRepositoryCreation: localRepositoryCreationEnabled(setup.isCreateMode, repoLocked)
+      ? {
+          executorSelection: handlers.directLocalExecutorSelection,
+          onCreated: handlers.handleLocalRepositoryCreated,
+        }
+      : undefined,
     enhance: setup.enhance,
     workflowAgentLocked: computed.workflowAgentLocked,
     repositories: setup.repositories,

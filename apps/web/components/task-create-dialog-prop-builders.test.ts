@@ -1,83 +1,87 @@
 import { describe, expect, it } from "vitest";
-import { computeHasAllBranches } from "./task-create-dialog-prop-builders";
-import type { DialogFormState } from "@/components/task-create-dialog-types";
+import type { DialogFormState } from "./task-create-dialog-types";
+import {
+  computeHasAllBranches,
+  localRepositoryCreationEnabled,
+} from "./task-create-dialog-prop-builders";
 
-const URL_AB = "github.com/a/b";
-
-// Minimal fs stub for computeHasAllBranches. The function only reads
-// `noRepository`, `useRemote`, `remoteRepos`, and `repositories[].branch`,
-// so we cast a partial through `unknown` to avoid having to materialise the
-// full DialogFormState surface in tests.
-function fsStub(overrides: {
-  noRepository?: boolean;
-  useRemote?: boolean;
-  remoteRepos?: Array<{ url?: string; branch?: string }>;
-  repositories?: Array<{ branch?: string }>;
-}): DialogFormState {
+function formState(overrides: Partial<DialogFormState>): DialogFormState {
   return {
     noRepository: false,
     useRemote: false,
-    remoteRepos: [],
     repositories: [],
+    remoteRepos: [],
     ...overrides,
-  } as unknown as DialogFormState;
+  } as DialogFormState;
 }
 
 describe("computeHasAllBranches", () => {
-  it("returns true when the task is in no-repository mode (short-circuits the rest)", () => {
-    // noRepository mode doesn't need a branch — the backend skips the
-    // worktree/clone step entirely, so it always satisfies hasAllBranches.
-    expect(computeHasAllBranches(fsStub({ noRepository: true, repositories: [] }))).toBe(true);
+  it("accepts no-repository tasks", () => {
+    expect(computeHasAllBranches(formState({ noRepository: true }))).toBe(true);
   });
 
-  it("Remote mode: every non-empty row needs a branch", () => {
-    // Empty rows (URL not yet filled in) are skipped — the user can leave a
-    // half-filled chip without blocking submit, mirroring the workspace path.
-    expect(computeHasAllBranches(fsStub({ useRemote: true, remoteRepos: [] }))).toBe(false);
+  it("requires a branch on every populated remote row", () => {
     expect(
       computeHasAllBranches(
-        fsStub({ useRemote: true, remoteRepos: [{ url: URL_AB, branch: "" }] }),
-      ),
-    ).toBe(false);
-    expect(
-      computeHasAllBranches(
-        fsStub({ useRemote: true, remoteRepos: [{ url: URL_AB, branch: "main" }] }),
-      ),
-    ).toBe(true);
-    expect(
-      computeHasAllBranches(
-        fsStub({
+        formState({
           useRemote: true,
           remoteRepos: [
-            { url: URL_AB, branch: "main" },
-            { url: "", branch: "" },
-          ],
-        }),
-      ),
-    ).toBe(true);
-    expect(
-      computeHasAllBranches(
-        fsStub({
-          useRemote: true,
-          remoteRepos: [
-            { url: URL_AB, branch: "main" },
-            { url: "github.com/c/d", branch: "" },
+            { key: "one", url: "https://example.com/one.git", branch: "main", source: "paste" },
+            { key: "two", url: "https://example.com/two.git", branch: "", source: "paste" },
           ],
         }),
       ),
     ).toBe(false);
   });
 
-  it("requires every selected repository row to carry a branch", () => {
-    expect(computeHasAllBranches(fsStub({ repositories: [] }))).toBe(false);
-    expect(computeHasAllBranches(fsStub({ repositories: [{ branch: "main" }] }))).toBe(true);
-    expect(
-      computeHasAllBranches(fsStub({ repositories: [{ branch: "main" }, { branch: "" }] })),
-    ).toBe(false);
+  it("rejects remote mode without a populated row", () => {
+    expect(computeHasAllBranches(formState({ useRemote: true }))).toBe(false);
+  });
+
+  it("accepts a branched remote row and ignores an empty trailing row", () => {
     expect(
       computeHasAllBranches(
-        fsStub({ repositories: [{ branch: "main" }, { branch: "feature/x" }] }),
+        formState({
+          useRemote: true,
+          remoteRepos: [
+            { key: "one", url: "https://example.com/one.git", branch: "main", source: "paste" },
+            { key: "two", url: "", branch: "", source: "paste" },
+          ],
+        }),
       ),
     ).toBe(true);
+  });
+
+  it("rejects local mode without a repository row", () => {
+    expect(computeHasAllBranches(formState({}))).toBe(false);
+  });
+
+  it("rejects a local repository row without a branch", () => {
+    expect(
+      computeHasAllBranches(
+        formState({ repositories: [{ key: "one", repositoryId: "repo-one", branch: "" }] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("requires a branch on every local repository row", () => {
+    expect(
+      computeHasAllBranches(
+        formState({
+          repositories: [
+            { key: "one", repositoryId: "repo-one", branch: "main" },
+            { key: "two", repositoryId: "repo-two", branch: "develop" },
+          ],
+        }),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("localRepositoryCreationEnabled", () => {
+  it("allows repository creation only for an unlocked new-task form", () => {
+    expect(localRepositoryCreationEnabled(true, false)).toBe(true);
+    expect(localRepositoryCreationEnabled(false, false)).toBe(false);
+    expect(localRepositoryCreationEnabled(true, true)).toBe(false);
   });
 });

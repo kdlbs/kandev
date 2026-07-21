@@ -25,6 +25,12 @@ export type PillOption = {
   renderLabel?: () => React.ReactNode;
 };
 
+export type PillAction = {
+  label: string;
+  icon?: React.ReactNode;
+  onSelect: () => void;
+};
+
 /**
  * `Pill` wraps cmdk's `Command` / `CommandInput` / `CommandList`. Its popover
  * body only supports cmdk children (`CommandItem`, etc.) — keyboard nav and
@@ -66,6 +72,8 @@ type PillProps = {
    * base) without depending on the user reading a tooltip.
    */
   prefix?: string;
+  /** Optional cmdk-native action shown above the selectable values. */
+  action?: PillAction;
 };
 
 /** Returns the active-state hover classes for the pill trigger button. */
@@ -79,15 +87,33 @@ function PillCommandList({
   onSelect,
   setOpen,
   emptyMessage,
+  action,
 }: {
   options: PillOption[];
   onSelect: (value: string) => void;
   setOpen: (open: boolean) => void;
   emptyMessage: string;
+  action?: PillAction;
 }) {
   return (
     <CommandList>
       <CommandEmpty>{emptyMessage}</CommandEmpty>
+      {action ? (
+        <CommandGroup>
+          <CommandItem
+            forceMount
+            value={action.label}
+            className="min-h-12 cursor-pointer"
+            onSelect={() => {
+              action.onSelect();
+              setOpen(false);
+            }}
+          >
+            {action.icon}
+            {action.label}
+          </CommandItem>
+        </CommandGroup>
+      ) : null}
       <CommandGroup>
         {options.map((option) => (
           <CommandItem
@@ -155,6 +181,7 @@ function PillPopoverContent({
   setOpen,
   emptyMessage,
   portalContainer,
+  action,
 }: {
   filter?: PillProps["filter"];
   searchPlaceholder: string;
@@ -165,6 +192,7 @@ function PillPopoverContent({
   setOpen: (open: boolean) => void;
   emptyMessage: string;
   portalContainer: HTMLElement | null;
+  action?: PillAction;
 }) {
   return (
     <PopoverContent className="w-[360px] p-0" align="start" portalContainer={portalContainer}>
@@ -178,6 +206,7 @@ function PillPopoverContent({
           onSelect={onSelect}
           setOpen={setOpen}
           emptyMessage={emptyMessage}
+          action={action}
         />
       </Command>
     </PopoverContent>
@@ -235,6 +264,7 @@ export function Pill({
   filter,
   tooltip,
   prefix,
+  action,
 }: PillProps) {
   const [open, setOpenState] = useState(false);
   const { tooltipOpenState, handleTooltipOpenChange, closeTooltip } = useTooltipMountGate();
@@ -307,6 +337,7 @@ export function Pill({
         setOpen={setOpen}
         emptyMessage={emptyMessage}
         portalContainer={portalContainer}
+        action={action}
       />
     </Popover>
   );

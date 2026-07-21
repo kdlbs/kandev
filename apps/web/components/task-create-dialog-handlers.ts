@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import type { Repository } from "@/lib/types/http";
+import type { Executor, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
@@ -23,6 +23,73 @@ type TaskCreateLastUsedPayload = {
   agent_profile_id?: string;
   executor_profile_id?: string;
 };
+
+export type DirectLocalExecutorSelection = {
+  executorId: string;
+  executorProfileId: string;
+  executorProfileName: string;
+  requiresSwitch: boolean;
+};
+
+function isDirectLocalExecutorType(type: string | undefined): boolean {
+  return type === "local" || type === "local_pc";
+}
+
+export function findDirectLocalExecutorProfile(
+  executors: Executor[],
+  currentProfileId: string,
+): DirectLocalExecutorSelection | null {
+  const candidates = executors.flatMap((executor) =>
+    (executor.profiles ?? [])
+      .filter((profile) => isDirectLocalExecutorType(profile.executor_type ?? executor.type))
+      .map((profile) => ({
+        executorId: executor.id,
+        executorProfileId: profile.id,
+        executorProfileName: profile.name,
+        requiresSwitch: profile.id !== currentProfileId,
+      })),
+  );
+  return (
+    candidates.find((candidate) => candidate.executorProfileId === currentProfileId) ??
+    candidates[0] ??
+    null
+  );
+}
+
+type CreatedLocalRepositoryForm = Pick<
+  DialogFormState,
+  "updateRepository" | "setExecutorId" | "setExecutorProfileId"
+>;
+
+export function applyCreatedLocalRepository({
+  fs,
+  rowKey,
+  repository,
+  workspaceId,
+  upsertWorkspaceRepository,
+  executorSelection,
+}: {
+  fs: CreatedLocalRepositoryForm;
+  rowKey: string;
+  repository: Repository;
+  workspaceId: string;
+  upsertWorkspaceRepository: (workspaceId: string, repository: Repository) => void;
+  executorSelection: DirectLocalExecutorSelection;
+}) {
+  fs.updateRepository(rowKey, {
+    repositoryId: repository.id,
+    localPath: undefined,
+    branch: "main",
+  });
+  fs.setExecutorId(executorSelection.executorId);
+  fs.setExecutorProfileId(executorSelection.executorProfileId);
+  upsertWorkspaceRepository(workspaceId, repository);
+  syncTaskCreateLastUsed({
+    repository_id: repository.id,
+    branch: "main",
+    executor_profile_id: executorSelection.executorProfileId,
+  });
+}
 
 let lastQueuedLastUsed: Partial<TaskCreateLastUsedState> = {};
 const lastUsedDebug = createDebugLogger("task-create:last-used");
@@ -292,13 +359,42 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   };
 }
 
-export function useDialogHandlers(fs: DialogFormState, repositories: Repository[]) {
+export function useDialogHandlers(
+  fs: DialogFormState,
+  repositories: Repository[],
+  context?: {
+    workspaceId: string | null;
+    executors: Executor[];
+    upsertWorkspaceRepository: (workspaceId: string, repository: Repository) => void;
+  },
+) {
   const repo = useRepositoryHandlers(fs, repositories);
   const profile = useProfileAndNameHandlers(fs);
   const gh = useGitHubAndFreshBranchHandlers(fs);
+  const directLocalExecutorSelection = findDirectLocalExecutorProfile(
+    context?.executors ?? [],
+    fs.executorProfileId,
+  );
+  const handleLocalRepositoryCreated = useCallback(
+    (rowKey: string, repository: Repository) => {
+      if (!context?.workspaceId || !directLocalExecutorSelection) return;
+      applyCreatedLocalRepository({
+        fs,
+        rowKey,
+        repository,
+        workspaceId: context.workspaceId,
+        upsertWorkspaceRepository: context.upsertWorkspaceRepository,
+        executorSelection: directLocalExecutorSelection,
+      });
+      clearFreshBranch(fs);
+    },
+    [context, directLocalExecutorSelection, fs, repositories],
+  );
   return {
     ...repo,
     ...profile,
     ...gh,
+    directLocalExecutorSelection,
+    handleLocalRepositoryCreated,
   };
 }

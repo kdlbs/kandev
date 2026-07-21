@@ -142,6 +142,13 @@ type CreateRepositoryRequest struct {
 	CopyFiles              string `json:"copy_files"`
 }
 
+// InitializeLocalRepositoryRequest contains the data for creating and registering a new local repository.
+type InitializeLocalRepositoryRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	ParentPath  string `json:"parent_path"`
+}
+
 // UpdateRepositoryRequest contains the data for updating a repository
 type UpdateRepositoryRequest struct {
 	Name                   *string `json:"name,omitempty"`

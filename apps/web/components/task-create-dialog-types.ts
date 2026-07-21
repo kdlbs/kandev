@@ -423,6 +423,12 @@ export type DialogFormBodyProps = {
   onToggleFreshBranch: (enabled: boolean) => void;
   onToggleNoRepository?: () => void;
   onWorkspacePathChange: (value: string) => void;
+  localRepositoryCreation?: {
+    executorSelection:
+      | import("@/components/task-create-dialog-handlers").DirectLocalExecutorSelection
+      | null;
+    onCreated: (rowKey: string, repository: Repository) => void;
+  };
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
   workflowAgentLocked: boolean;
   /** Workspace repositories — driven into the chip row for repo + branch picks. */

@@ -585,6 +585,22 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 	if err != nil {
 		return nil, err
 	}
+	return s.createRepository(ctx, req, localPath, true)
+}
+
+func (s *Service) createRepositoryWithCanonicalPath(
+	ctx context.Context,
+	req *CreateRepositoryRequest,
+) (*models.Repository, error) {
+	return s.createRepository(ctx, req, req.LocalPath, false)
+}
+
+func (s *Service) createRepository(
+	ctx context.Context,
+	req *CreateRepositoryRequest,
+	localPath string,
+	resolveProvider bool,
+) (*models.Repository, error) {
 	sourceType := req.SourceType
 	if sourceType == "" {
 		sourceType = sourceTypeLocal
@@ -629,7 +645,7 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 	}
 
 	// Auto-detect GitHub provider info from git remote if not provided
-	if repository.Provider == "" && repository.LocalPath != "" {
+	if resolveProvider && repository.Provider == "" && repository.LocalPath != "" {
 		if p, o, n := ResolveGitRemoteProvider(repository.LocalPath); p != "" {
 			repository.Provider = p
 			repository.ProviderOwner = o
