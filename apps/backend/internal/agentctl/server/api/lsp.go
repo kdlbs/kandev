@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +27,10 @@ const (
 	lspCloseBinaryNotFound = 4001
 	lspCloseInstallFailed  = 4003
 
+	lspLanguageTypeScript   = "typescript"
+	lspLanguagePython       = "python"
+	lspLanguageGo           = "go"
+	lspLanguageRust         = "rust"
 	lspLanguageKey          = "language"
 	lspStatusKey            = "status"
 	lspStatusInstalling     = "installing"
@@ -49,27 +54,65 @@ type lspInstallerRegistry interface {
 	StrategyFor(language string) (tools.Strategy, error)
 }
 
-type lspInstallGate struct {
-	token chan struct{}
+type lspInstallCoordinator struct {
+	mu     sync.Mutex
+	active map[string]chan struct{}
 }
 
-func newLSPInstallGate() *lspInstallGate {
-	token := make(chan struct{}, 1)
-	token <- struct{}{}
-	return &lspInstallGate{token: token}
+func newLSPInstallCoordinator() *lspInstallCoordinator {
+	return &lspInstallCoordinator{active: make(map[string]chan struct{})}
 }
 
-func (g *lspInstallGate) run(ctx context.Context, install func() (string, error)) (string, error) {
-	select {
-	case <-g.token:
-		defer func() { g.token <- struct{}{} }()
-		return install()
-	case <-ctx.Done():
-		return "", ctx.Err()
+func (c *lspInstallCoordinator) run(ctx context.Context, key string, install func() (string, error)) (string, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		c.mu.Lock()
+		wait, busy := c.active[key]
+		if !busy {
+			wait = make(chan struct{})
+			c.active[key] = wait
+			c.mu.Unlock()
+			defer c.release(key, wait)
+			return install()
+		}
+		c.mu.Unlock()
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
 	}
 }
 
-var sharedLSPInstallGate = newLSPInstallGate()
+func (c *lspInstallCoordinator) release(key string, completed chan struct{}) {
+	c.mu.Lock()
+	if c.active[key] == completed {
+		delete(c.active, key)
+		close(completed)
+	}
+	c.mu.Unlock()
+}
+
+// lspInstallMutationKey groups installers by the files they can rewrite.
+// npm updates prefix-wide metadata, while Go and release installs only
+// collide when they publish the same binary target.
+func lspInstallMutationKey(language string) string {
+	binary, _ := installer.LspCommand(language)
+	switch language {
+	case lspLanguageTypeScript, lspLanguagePython:
+		return "npm-prefix"
+	case lspLanguageGo:
+		return "go:" + binary
+	case lspLanguageRust:
+		return "release:" + binary
+	default:
+		return "language:" + language
+	}
+}
+
+var sharedLSPInstallCoordinator = newLSPInstallCoordinator()
 
 func (s *Server) handleLSPStreamWS(c *gin.Context) {
 	language := c.Query("language")
@@ -272,6 +315,7 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 
 	go func() {
 		defer close(done)
+		defer func() { _ = conn.Close() }()
 		reader := bufio.NewReader(server.stdout)
 		for {
 			msg, err := protocol.ReadMessage(reader)
@@ -280,7 +324,6 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 					s.logger.Debug("LSP stdout read error", zap.String("language", language), zap.Error(err))
 				}
 				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "language server exited"))
-				_ = conn.Close()
 				return
 			}
 			if wErr := conn.WriteMessage(websocket.TextMessage, msg); wErr != nil {
@@ -321,7 +364,7 @@ func (s *Server) awaitOrInstallLSP(ctx context.Context, language string) (string
 	}
 	defer release()
 
-	return sharedLSPInstallGate.run(installCtx, func() (string, error) {
+	return sharedLSPInstallCoordinator.run(installCtx, lspInstallMutationKey(language), func() (string, error) {
 		if binaryPath, err := s.lspInstaller.BinaryPath(language); err == nil {
 			return binaryPath, nil
 		}
