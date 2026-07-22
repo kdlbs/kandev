@@ -198,6 +198,10 @@ describe("shouldBlockChangesForPR", () => {
     expect(shouldBlockChangesForPR("all", [file("local.ts", "uncommitted")])).toBe(false);
   });
 
+  it("blocks an all-source view when only PR files are visible", () => {
+    expect(shouldBlockChangesForPR("all", [file("pr.ts", "pr")])).toBe(true);
+  });
+
   it("blocks a PR-only view until the selected PR is ready", () => {
     expect(shouldBlockChangesForPR("pr", [])).toBe(true);
   });
@@ -213,6 +217,12 @@ describe("resolveSelectedFileRepositoryName", () => {
         "widgets-feature-second",
       ),
     ).toBe("widgets-feature-second");
+  });
+
+  it("falls back to the router repository name for non-PR source views", () => {
+    expect(resolveSelectedFileRepositoryName("uncommitted", undefined, "backend", "widgets")).toBe(
+      "backend",
+    );
   });
 });
 

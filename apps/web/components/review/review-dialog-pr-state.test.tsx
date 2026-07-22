@@ -31,6 +31,22 @@ describe("ReviewPRDiffBoundary", () => {
     ).toBe(false);
   });
 
+  it("blocks expanded Review when only PR files are visible", () => {
+    expect(
+      shouldBlockReviewForPR([
+        {
+          path: "src/pr.ts",
+          diff: "@@ -1 +1 @@",
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+          staged: false,
+          source: "pr",
+        },
+      ]),
+    ).toBe(true);
+  });
+
   it("retries a failed selected PR without rendering stale children", () => {
     const onRetry = vi.fn();
     render(
