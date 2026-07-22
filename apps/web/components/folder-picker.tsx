@@ -59,7 +59,7 @@ export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps
         )}
       </PopoverTrigger>
       <PopoverContent
-        className="w-[440px] gap-0 p-0 overflow-hidden"
+        className="w-[440px] max-w-[calc(100vw-2rem)] gap-0 p-0 overflow-hidden"
         align="start"
         sideOffset={4}
         data-testid="folder-picker-popover"
