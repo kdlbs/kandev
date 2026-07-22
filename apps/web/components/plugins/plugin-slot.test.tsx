@@ -11,12 +11,12 @@ function cleanupPlugins(...pluginIds: string[]) {
   pluginIds.forEach((id) => pluginRegistry.unregisterPlugin(id));
 }
 
-describe("PluginSlot", () => {
-  afterEach(() => {
-    cleanup();
-    cleanupPlugins("plugin-a", "plugin-b", "plugin-c");
-  });
+afterEach(() => {
+  cleanup();
+  cleanupPlugins("plugin-a", "plugin-b", "plugin-c");
+});
 
+describe("PluginSlot", () => {
   it("renders nothing when no plugin has registered a component for the slot", () => {
     const { container } = render(<PluginSlot name={SLOT} />);
     expect(container.innerHTML).toBe("");
@@ -102,7 +102,9 @@ describe("PluginSlot", () => {
     expect(screen.getByTestId("slot-b")).not.toBeNull();
     consoleError.mockRestore();
   });
+});
 
+describe("PluginSlot registration identity", () => {
   it("isolates a throwing slot component so a sibling still renders", () => {
     // eslint-disable-next-line no-console -- expected error boundary log, assert + silence it
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
