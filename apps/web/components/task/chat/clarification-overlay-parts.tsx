@@ -245,11 +245,20 @@ export function ClarificationCustomInput({
     <div
       data-testid="clarification-custom-input"
       data-active={active ? "true" : "false"}
+      onMouseDown={(event) => {
+        if (isSubmitting) return;
+        const target = event.target as HTMLElement;
+        if (target.closest("textarea, button")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        textareaRef.current?.focus({ preventScroll: true });
+      }}
       className={cn(
-        "mt-2.5 flex items-start gap-2 px-3 py-2 rounded-lg border transition-colors",
+        "mt-2.5 flex min-h-11 items-start gap-2 px-3 py-2 rounded-lg border transition-colors",
         active
           ? "bg-blue-500/15 border-blue-500/50 text-foreground"
           : "border-dashed border-border/70 bg-muted/30",
+        isSubmitting ? "cursor-not-allowed" : "cursor-text",
       )}
     >
       <span

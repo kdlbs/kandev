@@ -100,7 +100,7 @@ test.describe("Clarification flow", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
-  test("timeout detaches clarification but keeps overlay for deferred answer", async ({
+  test("timeout detaches clarification and accepts a custom deferred answer", async ({
     testPage,
     apiClient,
     seedData,
@@ -154,9 +154,17 @@ test.describe("Clarification flow", () => {
     );
     expect(primarySession?.state).toBe("WAITING_FOR_INPUT");
 
-    // Agent moved on; a late answer goes through the event fallback as a new prompt.
-    await session.clarificationOption("PostgreSQL").click();
+    // Agent moved on; a late custom answer remains editable and goes through
+    // the event fallback as a new prompt.
+    const input = session.clarificationInput();
+    await expect(input).toBeEnabled();
+    await session.clarificationCustomInput().click({ position: { x: 4, y: 4 } });
+    await expect(input).toBeFocused();
+    await input.pressSequentially("Use the embedded database for this task");
+    await expect(input).toHaveValue("Use the embedded database for this task");
+    await input.press("Enter");
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("Use the embedded database for this task");
   });
 
   test("options render label and description on separate rows", async ({

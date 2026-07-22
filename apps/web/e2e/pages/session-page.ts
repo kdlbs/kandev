@@ -354,6 +354,11 @@ export class SessionPage {
     return this.page.getByTestId("clarification-input");
   }
 
+  /** Apparent custom-answer row surrounding the textarea. */
+  clarificationCustomInput(): Locator {
+    return this.page.getByTestId("clarification-custom-input");
+  }
+
   /** Inline Send button shown next to the custom input on touch devices. */
   clarificationCustomSubmit(): Locator {
     return this.page.getByTestId("clarification-custom-submit");
