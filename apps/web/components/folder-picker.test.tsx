@@ -48,6 +48,12 @@ afterEach(() => {
 });
 
 describe("FolderPicker", () => {
+  it("preserves the separator when displaying the POSIX root", () => {
+    render(<FolderPicker value="/" onChange={vi.fn()} placeholder="Pick a folder" />);
+
+    expect(screen.getByTestId(TRIGGER_TEST_ID).textContent).toBe("/");
+  });
+
   it("preserves the separator when displaying a Windows drive root", () => {
     render(<FolderPicker value="C:\\" onChange={vi.fn()} />);
 
