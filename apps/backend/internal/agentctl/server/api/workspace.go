@@ -154,7 +154,13 @@ func (s *Server) handleFileContentAtRef(c *gin.Context) {
 		return
 	}
 
-	tracker, err := s.procMgr.GetWorkspaceTrackerFor(c.Query("repo"))
+	repo := c.Query("repo")
+	if repo == "" && len(s.procMgr.RepoSubpaths()) > 0 {
+		c.JSON(400, types.FileContentResponse{Path: path, Error: "repo is required for multi-repo workspace"})
+		return
+	}
+
+	tracker, err := s.procMgr.GetWorkspaceTrackerFor(repo)
 	if err != nil {
 		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error()})
 		return

@@ -98,6 +98,23 @@ func TestMultiRepoReviewEndpointsUseStoredBaseBranches(t *testing.T) {
 		}
 	}
 
+	missingRepoResponse := httptest.NewRecorder()
+	srv.Router().ServeHTTP(
+		missingRepoResponse,
+		httptest.NewRequest(
+			http.MethodGet,
+			"/api/v1/workspace/file/content-at-ref?path=README.md&ref=HEAD",
+			nil,
+		),
+	)
+	if !strings.Contains(missingRepoResponse.Body.String(), "repo is required for multi-repo workspace") {
+		t.Fatalf(
+			"repo-less file content response = %d: %s",
+			missingRepoResponse.Code,
+			missingRepoResponse.Body.String(),
+		)
+	}
+
 	for repo, baseBranch := range bases {
 		contentResponse := httptest.NewRecorder()
 		path := "/api/v1/workspace/file/content-at-ref?repo=" + repo +

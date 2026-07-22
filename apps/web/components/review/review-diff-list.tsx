@@ -390,8 +390,8 @@ function useScrollIntoViewOnSelect(
  *
  *  - uncommitted rows: diff is working-tree-vs-HEAD, so baseRef="HEAD".
  *  - committed rows: diff is base-vs-HEAD, so baseRef is the exact old-side
- *    commit carried by the file. Legacy payloads fall back to the repo's base
- *    branch. HEAD already contains the commits, so expanding against it
+ *    commit carried by the file; payloads without that ref fall back to the
+ *    repo's base branch. HEAD already contains the commits, so expanding against it
  *    pairs identical old/new content and yields no controls (the bug behind
  *    "expansion stopped working in the review screen"). With no known base
  *    branch we can't fetch the pre-change content, so expansion is disabled
