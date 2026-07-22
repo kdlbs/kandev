@@ -74,7 +74,7 @@ export function ReviewPRSelector({
       <DropdownMenuContent
         align="start"
         data-testid={`${testIdPrefix}-menu`}
-        className="w-80 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain sm:max-h-80"
+        className="max-h-[calc(100dvh-1rem)] w-80 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain sm:max-h-80"
       >
         <DropdownMenuLabel>Review pull request</DropdownMenuLabel>
         <DropdownMenuSeparator />

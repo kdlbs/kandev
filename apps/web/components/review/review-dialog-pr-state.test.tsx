@@ -1,7 +1,11 @@
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskPR } from "@/lib/types/github";
-import { ReviewPRDiffBoundary, useReviewDialogTransientState } from "./review-dialog-pr-state";
+import {
+  ReviewPRDiffBoundary,
+  shouldBlockReviewForPR,
+  useReviewDialogTransientState,
+} from "./review-dialog-pr-state";
 
 afterEach(cleanup);
 
@@ -11,6 +15,22 @@ const selectedPR = {
 } as TaskPR;
 
 describe("ReviewPRDiffBoundary", () => {
+  it("keeps expanded Review usable when local files exist during a PR failure", () => {
+    expect(
+      shouldBlockReviewForPR([
+        {
+          path: "src/local.ts",
+          diff: "@@ -1 +1 @@",
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+          staged: false,
+          source: "uncommitted",
+        },
+      ]),
+    ).toBe(false);
+  });
+
   it("retries a failed selected PR without rendering stale children", () => {
     const onRetry = vi.fn();
     render(

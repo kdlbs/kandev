@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import type { TaskPR } from "@/lib/types/github";
+import type { ReviewFile } from "./types";
 
 type AutoCloseReviewDialogInput = {
   open: boolean;
@@ -53,6 +54,10 @@ export type ReviewTransientState = {
 
 export function reviewDialogSourceKey(sessionId: string, selectedPRKey: string | null): string {
   return `${sessionId}\u0000${selectedPRKey ?? "review-without-pr"}`;
+}
+
+export function shouldBlockReviewForPR(files: ReviewFile[]): boolean {
+  return !files.some((file) => file.source !== "pr");
 }
 
 export function resolveReviewTransientState(

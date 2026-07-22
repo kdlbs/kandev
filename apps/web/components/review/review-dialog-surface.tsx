@@ -7,7 +7,7 @@ import type { TaskPR } from "@/lib/types/github";
 import type { ReviewDialogViewState } from "./review-dialog";
 import { ReviewDiffList } from "./review-diff-list";
 import { ReviewFileTree } from "./review-file-tree";
-import { ReviewPRDiffBoundary } from "./review-dialog-pr-state";
+import { ReviewPRDiffBoundary, shouldBlockReviewForPR } from "./review-dialog-pr-state";
 import { ReviewTopBar } from "./review-top-bar";
 
 type ReviewDialogSurfaceProps = {
@@ -44,11 +44,12 @@ function ReviewDialogDiffContent({
   | "onRetryPRDiff"
   | "state"
 >) {
+  const blockReviewForPR = shouldBlockReviewForPR(state.allFiles);
   return (
     <ReviewPRDiffBoundary
-      selectedPR={selectedPR}
-      loading={prDiffLoading}
-      error={prDiffError}
+      selectedPR={blockReviewForPR ? selectedPR : null}
+      loading={blockReviewForPR && prDiffLoading}
+      error={blockReviewForPR ? prDiffError : null}
       onRetry={onRetryPRDiff}
     >
       {state.filteredFiles.length > 0 ? (
