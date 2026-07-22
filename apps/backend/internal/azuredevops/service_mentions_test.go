@@ -47,7 +47,14 @@ func (c *mentionClient) QueryWIQL(_ context.Context, projectID, wiql string, top
 func (c *mentionClient) ListPullRequests(_ context.Context, filter PullRequestFilter) (*PullRequestPage, error) {
 	c.prCalls = append(c.prCalls, filter)
 	items := append([]PullRequest(nil), c.pullRequests[filter.ProjectID]...)
-	return &PullRequestPage{Items: items, Count: len(items), Top: filter.Top}, nil
+	if filter.Skip >= len(items) {
+		return &PullRequestPage{Skip: filter.Skip, Top: filter.Top}, nil
+	}
+	items = items[filter.Skip:]
+	if filter.Top > 0 && len(items) > filter.Top {
+		items = items[:filter.Top]
+	}
+	return &PullRequestPage{Items: items, Count: len(items), Skip: filter.Skip, Top: filter.Top}, nil
 }
 
 func TestServiceMentionSearchBuildsSafeWIQLAndProjectLevelPRQuery(t *testing.T) {
@@ -125,6 +132,41 @@ func TestServiceMentionSearchBoundsProjectDiscovery(t *testing.T) {
 	}
 	if len(items) != maxMentionProjects || items[0].ProjectID != "project-1" {
 		t.Fatalf("items = %#v", items)
+	}
+}
+
+func TestServiceMentionPullRequestSearchPaginatesUntilMatch(t *testing.T) {
+	pullRequests := make([]PullRequest, mentionPRFetchLimit+1)
+	for index := range pullRequests {
+		pullRequests[index] = PullRequest{
+			ID: index + 1, Title: "Unrelated", Status: activePullRequestState,
+			ProjectID: "project-1", ProjectName: "Platform",
+			RepositoryID: "repo-1", RepositoryName: "widgets",
+		}
+	}
+	pullRequests[mentionPRFetchLimit].Title = "Needle after first page"
+	client := &mentionClient{
+		invalidClient: &invalidClient{},
+		pullRequests:  map[string][]PullRequest{"project-1": pullRequests},
+	}
+	service, _, _ := newTestService(t, func(*Config, string) Client { return client })
+	if _, err := service.SetConfigForWorkspace(t.Context(), "workspace-1", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme", DefaultProjectID: "project-1",
+		DefaultProjectName: "Platform", PAT: "secret",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	items, err := service.SearchMentionPullRequestsForWorkspace(t.Context(), "workspace-1", "needle", 1)
+	if err != nil {
+		t.Fatalf("search pull requests: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != mentionPRFetchLimit+1 {
+		t.Fatalf("items = %#v, want matching pull request after first page", items)
+	}
+	if len(client.prCalls) != 2 || client.prCalls[0].Skip != 0 || client.prCalls[0].Top != mentionPRFetchLimit ||
+		client.prCalls[1].Skip != mentionPRFetchLimit || client.prCalls[1].Top != mentionPRFetchLimit {
+		t.Fatalf("PR calls = %#v", client.prCalls)
 	}
 }
 

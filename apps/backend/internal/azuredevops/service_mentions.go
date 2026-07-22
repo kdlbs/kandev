@@ -116,30 +116,36 @@ func (s *Service) SearchMentionPullRequestsForWorkspace(
 	query = strings.ToLower(query)
 	items := make([]MentionPullRequest, 0, limit)
 	for _, project := range projects {
-		result, searchErr := client.ListPullRequests(ctx, PullRequestFilter{
-			ProjectID: project.ID,
-			Status:    activePullRequestState,
-			Top:       mentionPRFetchLimit,
-		})
-		if searchErr != nil {
-			return nil, searchErr
-		}
-		if result == nil {
-			continue
-		}
-		for _, item := range result.Items {
-			if item.ID <= 0 || strings.TrimSpace(item.RepositoryID) == "" ||
-				strings.TrimSpace(item.RepositoryName) == "" ||
-				!strings.Contains(strings.ToLower(item.Title), query) {
-				continue
-			}
-			items = append(items, MentionPullRequest{
-				ID: item.ID, Title: item.Title, OrganizationURL: cfg.OrganizationURL,
-				ProjectID: project.ID, ProjectName: project.Name,
-				RepositoryID: item.RepositoryID, RepositoryName: item.RepositoryName,
+		for skip := 0; ; skip += mentionPRFetchLimit {
+			result, searchErr := client.ListPullRequests(ctx, PullRequestFilter{
+				ProjectID: project.ID,
+				Status:    activePullRequestState,
+				Skip:      skip,
+				Top:       mentionPRFetchLimit,
 			})
-			if len(items) == limit {
-				return items, nil
+			if searchErr != nil {
+				return nil, searchErr
+			}
+			if result == nil {
+				break
+			}
+			for _, item := range result.Items {
+				if item.ID <= 0 || strings.TrimSpace(item.RepositoryID) == "" ||
+					strings.TrimSpace(item.RepositoryName) == "" ||
+					!strings.Contains(strings.ToLower(item.Title), query) {
+					continue
+				}
+				items = append(items, MentionPullRequest{
+					ID: item.ID, Title: item.Title, OrganizationURL: cfg.OrganizationURL,
+					ProjectID: project.ID, ProjectName: project.Name,
+					RepositoryID: item.RepositoryID, RepositoryName: item.RepositoryName,
+				})
+				if len(items) == limit {
+					return items, nil
+				}
+			}
+			if len(result.Items) < mentionPRFetchLimit {
+				break
 			}
 		}
 	}

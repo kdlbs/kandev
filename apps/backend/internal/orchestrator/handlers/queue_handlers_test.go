@@ -464,13 +464,14 @@ func TestWsUpdateMessage(t *testing.T) {
 		assert.Equal(t, "edited", svc.GetStatus(ctx, "s").Entries[0].Content)
 	})
 
-	t.Run("omitted references clear stale metadata and preserve unrelated keys", func(t *testing.T) {
+	t.Run("omitted references preserve existing metadata", func(t *testing.T) {
 		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
+		references := []interface{}{"existing"}
 		queued, err := svc.QueueMessageWithMetadata(
 			ctx, "s", "t", "original", "", "u", false, nil,
 			map[string]interface{}{
-				"entity_references": []interface{}{"stale"},
+				"entity_references": references,
 				"origin":            "inter-task",
 			},
 		)
@@ -489,8 +490,37 @@ func TestWsUpdateMessage(t *testing.T) {
 		entries := svc.GetStatus(ctx, "s").Entries
 		require.Len(t, entries, 1)
 		assert.Equal(t, "inter-task", entries[0].Metadata["origin"])
+		assert.Equal(t, references, entries[0].Metadata["entity_references"])
+	})
+
+	t.Run("explicit empty references clear existing metadata", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+		queued, err := svc.QueueMessageWithMetadata(
+			ctx, "s", "t", "original", "", "u", false, nil,
+			map[string]interface{}{
+				"entity_references": []interface{}{"existing"},
+				"origin":            "inter-task",
+			},
+		)
+		require.NoError(t, err)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id":        "s",
+				"entry_id":          queued.ID,
+				"content":           "edited",
+				"user_id":           "u",
+				"entity_references": []v1.EntityReference{},
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+
+		entries := svc.GetStatus(ctx, "s").Entries
+		require.Len(t, entries, 1)
+		assert.Equal(t, "inter-task", entries[0].Metadata["origin"])
 		_, exists := entries[0].Metadata["entity_references"]
-		assert.False(t, exists, "omitted update must remove stale references")
+		assert.False(t, exists, "explicit empty references must clear existing metadata")
 	})
 
 	t.Run("rejects references before editing when validator is unavailable", func(t *testing.T) {

@@ -269,6 +269,7 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	if req.UserID == messagequeue.QueuedByAgent {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "user_id may not impersonate the agent identity", nil)
 	}
+	referencesProvided := req.EntityReferences != nil
 	references, err := h.validateSubmittedReferences(ctx, req.SessionID, "", req.EntityReferences)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, queueInvalidReferences, nil)
@@ -281,11 +282,14 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	if queuedBy == "" {
 		queuedBy = messagequeue.QueuedByUser
 	}
-	var referenceMetadata interface{}
-	if len(req.EntityReferences) > 0 {
-		referenceMetadata = req.EntityReferences
+	var metadataUpdates map[string]interface{}
+	if referencesProvided {
+		var referenceMetadata interface{}
+		if len(req.EntityReferences) > 0 {
+			referenceMetadata = req.EntityReferences
+		}
+		metadataUpdates = map[string]interface{}{messagequeue.MetadataEntityReferences: referenceMetadata}
 	}
-	metadataUpdates := map[string]interface{}{messagequeue.MetadataEntityReferences: referenceMetadata}
 	if err := h.queueService.UpdateMessageWithMetadata(ctx, req.SessionID, req.EntryID, req.Content, req.Attachments, metadataUpdates, queuedBy); err != nil {
 		if errors.Is(err, messagequeue.ErrEntryNotFound) {
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)

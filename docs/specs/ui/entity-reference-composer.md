@@ -24,7 +24,7 @@ Users discuss external work items in agent chat, but plain ticket keys and pull-
 - Results respect the provider configuration and scope owned by the active workspace. Kandev tasks are excluded even if a stale or misbehaving search response contains a `kandev_tasks` group.
 - Results are grouped by provider and work-item kind. Provider order and ordering within each group are deterministic; Kandev does not present unrelated provider scores as globally comparable relevance. Sources that are not configured or cannot search the active workspace are omitted from the menu rather than rendered as empty unavailable sections.
 - Search groups carry provider-neutral display descriptors. Composer, message, and queue code use normalized fields and a generic fallback rather than exhaustive switches over native integrations, so a future plugin bridge can supply the same contract.
-- Search is debounced, cancels or ignores stale requests, and caps work per provider. One disconnected, slow, rate-limited, or failing provider never hides successful results from other providers.
+- Search is debounced, cancels or ignores stale requests, and caps work per provider and configured workspace/project scope. Each connected provider continues examining available in-scope results until it finds the requested number of matches, has no more results, reaches a search bound, or the request is canceled. One disconnected, slow, rate-limited, or failing provider never hides successful results from other providers.
 - Arrow Up and Arrow Down move the active result. Tab or Enter selects it. Pointer or touch selection has the same behavior. Escape closes the menu without changing or sending the draft.
 - Selection replaces only the active `#query` range with an inline reference chip, appends a trailing space, keeps focus in the composer, and never submits or queues the message.
 - A chip displays a stable key when one exists (for example `#ENG-123` or `#123`) and otherwise a concise title. It retains a title snapshot and source label for disambiguation.
@@ -105,7 +105,7 @@ The editor's `entityReference` atom stores the same presentation and identity fi
 
 ### Message submission
 
-The existing `message.add`, `message.queue.add`, and `message.queue.update` payloads accept optional `entity_references: EntityReference[]`. Queue update replaces the reference array; deleting a link from edited queue text cannot leave stale reference metadata behind.
+The existing `message.add`, `message.queue.add`, and `message.queue.update` payloads accept optional `entity_references: EntityReference[]`. For `message.queue.update`, omitting `entity_references` preserves existing reference metadata, an explicit empty array clears it, and a non-empty array replaces it after validation. Deleting a link from edited queue text cannot leave stale reference metadata behind when the update supplies the replacement array.
 
 Message responses and queue entries expose the validated array through `metadata.entity_references`. Queue drain copies it to the created user message unchanged apart from canonical validation and deduplication.
 
@@ -151,9 +151,13 @@ Typing updates Primed/Searching/Results/Empty. Escape, moving outside the trigge
 - **GIVEN** the menu is open on a phone viewport, **WHEN** the user taps a result, **THEN** the same chip is inserted and every required row is touch reachable without horizontal document overflow.
 - **GIVEN** GitHub times out while Jira returns hits, **WHEN** search finishes, **THEN** Jira results remain selectable and GitHub exposes only a safe timeout state.
 - **GIVEN** the user types another character before an earlier request returns, **WHEN** the older response arrives last, **THEN** only results for the newest query are displayed.
+- **GIVEN** a connected provider's first available results do not match the query but later in-scope results do, **WHEN** the user searches, **THEN** matching results are returned up to the requested per-source limit unless the provider has no more results, a workspace/project search bound is reached, or the request is canceled.
 - **GIVEN** a selected external reference followed by ordinary text, **WHEN** the user explicitly sends, **THEN** the visible message contains a clickable chip/Markdown fallback and its stable identity is stored in message metadata and supplied to the agent as sanitized reference context.
 - **GIVEN** the agent is busy, **WHEN** the user queues a message containing two references, **THEN** both references survive queue display, backend restart, drain, and sent-message rendering.
 - **GIVEN** the user edits a queued message and removes one generated reference link, **WHEN** the edit is saved, **THEN** metadata no longer contains the removed reference.
+- **GIVEN** a queued message already has reference metadata, **WHEN** an update omits `entity_references`, **THEN** the existing metadata is preserved.
+- **GIVEN** a queued message already has reference metadata, **WHEN** an update supplies an empty `entity_references` array, **THEN** the existing metadata is cleared.
+- **GIVEN** a queued message already has reference metadata, **WHEN** an update supplies a valid non-empty `entity_references` array, **THEN** the validated array replaces the existing metadata.
 - **GIVEN** a sent reference, **WHEN** the user recalls the message into an empty composer, **THEN** generated reference Markdown becomes an editable reference chip with the same identity.
 - **GIVEN** task chat with a sibling Kandev task, **WHEN** the user types `@` and searches its title, **THEN** the existing task suggestion remains available and sends through the established task-context behavior.
 - **GIVEN** passthrough mode, task creation, or a comment textarea, **WHEN** the user types `#auth`, **THEN** the text remains literal and no entity-reference search opens.
@@ -165,6 +169,6 @@ Typing updates Primed/Searching/Results/Empty. Escape, moving outside the trigge
 - Slack message search; Slack has no issue-like reference contract in this release.
 - Task creation, comments, plan editing, Office text inputs, passthrough, and terminal inputs.
 - Creating, importing, transitioning, closing, or otherwise mutating a selected work item.
-- Raw provider query-language syntax, advanced filters, pagination, or a full-screen global search page.
+- Raw provider query-language syntax, advanced filters, user-controlled result pagination, or a full-screen global search page.
 - Implementing the plugin manifest contribution, workspace permission/grant, Kandev-to-plugin search RPC, or loading plugin-provided sources in this release. The normalized registry and DTO MUST remain transport-neutral so a later plugin bridge can implement the same provider contract without changing composer/message formats. Search-provider contribution is distinct from the plugin-to-Kandev Host data API and its `api_read` capabilities.
 - Cross-workspace search.
