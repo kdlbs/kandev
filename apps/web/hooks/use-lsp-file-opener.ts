@@ -55,7 +55,7 @@ export function useLspFileOpener() {
       // For new files: consumed by handleEditorDidMount when the editor mounts.
       // For already-open files: consumed by scrollEditorIfMounted below.
       if (line) {
-        setPendingCursorPosition(location.path, line, column ?? 1, location.repo);
+        setPendingCursorPosition(location.path, line, column ?? 1, location.repo, activeSessionId);
       }
 
       await openFile(location.path, location.repo);

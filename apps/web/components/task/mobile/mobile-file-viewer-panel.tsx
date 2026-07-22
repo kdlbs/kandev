@@ -95,7 +95,12 @@ export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileVi
                 onTogglePreview={() => setMarkdownPreview((current) => !current)}
               />
             ) : (
-              <FileViewerContent path={file.path} repo={file.repo} content={content} />
+              <FileViewerContent
+                path={file.path}
+                repo={file.repo}
+                content={content}
+                sessionId={sessionId ?? undefined}
+              />
             ))}
         </div>
       </PanelBody>

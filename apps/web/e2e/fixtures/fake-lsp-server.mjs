@@ -8,7 +8,7 @@ const logPath = process.env.KANDEV_LSP_E2E_LOG ?? path.join(os.homedir(), "lsp-e
 const crashOnOpenPath = path.join(os.homedir(), "lsp-e2e-crash-on-open");
 let input = Buffer.alloc(0);
 let nextServerRequestId = 10_000;
-let openDocumentUri = null;
+const openDocumentUris = new Set();
 const definitionTargetFile = "nested/references/Definition Target # query? 100%.kt";
 
 function log(event, details = {}) {
@@ -64,8 +64,15 @@ function siblingFileUri(uri, fileName) {
   return `${uri.slice(0, directoryEnd)}${encodedPath}`;
 }
 
+function requestDocumentUri(message) {
+  const uri = message.params?.textDocument?.uri;
+  if (uri) return uri;
+  if (openDocumentUris.size !== 1) return null;
+  return openDocumentUris.values().next().value ?? null;
+}
+
 function handleRequest(message) {
-  const uri = message.params?.textDocument?.uri ?? openDocumentUri;
+  const uri = requestDocumentUri(message);
   switch (message.method) {
     case "initialize":
       send({
@@ -112,10 +119,13 @@ function handleRequest(message) {
       });
       return;
     case "textDocument/definition":
-      send({ id: message.id, result: location(siblingFileUri(uri, definitionTargetFile)) });
+      send({
+        id: message.id,
+        result: uri ? location(siblingFileUri(uri, definitionTargetFile)) : null,
+      });
       return;
     case "textDocument/references":
-      send({ id: message.id, result: [location(uri), location(uri, 3)] });
+      send({ id: message.id, result: uri ? [location(uri), location(uri, 3)] : [] });
       return;
     case "textDocument/signatureHelp":
       send({
@@ -144,6 +154,35 @@ function handleRequest(message) {
   }
 }
 
+function handleDidOpen(message) {
+  const uri = message.params?.textDocument?.uri;
+  if (uri) {
+    openDocumentUris.add(uri);
+    diagnostic(uri, "Fake Kotlin diagnostic");
+  }
+  if (fs.existsSync(crashOnOpenPath)) {
+    log("crashing", { reason: "didOpen" });
+    process.exit(23);
+  }
+}
+
+function handleDidChange(message) {
+  const uri = message.params?.textDocument?.uri;
+  if (uri && openDocumentUris.has(uri)) {
+    diagnostic(uri, "Fake Kotlin diagnostic after edit");
+  }
+}
+
+function handleDidClose(message) {
+  const uri = message.params?.textDocument?.uri;
+  if (!uri) return;
+  send({
+    method: "textDocument/publishDiagnostics",
+    params: { uri, diagnostics: [] },
+  });
+  openDocumentUris.delete(uri);
+}
+
 function handleNotification(message) {
   switch (message.method) {
     case "initialized": {
@@ -157,24 +196,13 @@ function handleNotification(message) {
       return;
     }
     case "textDocument/didOpen":
-      openDocumentUri = message.params?.textDocument?.uri ?? null;
-      if (openDocumentUri) diagnostic(openDocumentUri, "Fake Kotlin diagnostic");
-      if (fs.existsSync(crashOnOpenPath)) {
-        log("crashing", { reason: "didOpen" });
-        process.exit(23);
-      }
+      handleDidOpen(message);
       return;
     case "textDocument/didChange":
-      if (openDocumentUri) diagnostic(openDocumentUri, "Fake Kotlin diagnostic after edit");
+      handleDidChange(message);
       return;
     case "textDocument/didClose":
-      if (openDocumentUri) {
-        send({
-          method: "textDocument/publishDiagnostics",
-          params: { uri: openDocumentUri, diagnostics: [] },
-        });
-      }
-      openDocumentUri = null;
+      handleDidClose(message);
       return;
     case "exit":
       log("exit");

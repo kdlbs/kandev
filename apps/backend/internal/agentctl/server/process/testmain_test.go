@@ -41,6 +41,7 @@ func TestMain(m *testing.M) {
 //	sleep <secs>                   — sleep for <secs> seconds
 //	echo <args...>                 — print args joined by spaces, plus newline
 //	cat                            — copy stdin to stdout until EOF
+//	write-both <stdout> <stderr>   — write exact strings to both output streams
 //	echo-then-sleep <msg> <secs>   — print msg, then sleep <secs>
 //	delay-then-child <pidfile> <delay-ms> <secs>
 //	                               — wait, spawn a sleeping child, write its PID, then sleep
@@ -69,6 +70,13 @@ func runFixture(spec string) {
 		fmt.Println(strings.Join(parts[1:], " "))
 	case "cat":
 		_, _ = io.Copy(os.Stdout, os.Stdin)
+	case "write-both":
+		if len(parts) != 3 {
+			fmt.Fprintln(os.Stderr, "fixture: write-both takes 2 args")
+			os.Exit(2)
+		}
+		_, _ = fmt.Fprint(os.Stdout, parts[1])
+		_, _ = fmt.Fprint(os.Stderr, parts[2])
 	case "echo-then-sleep":
 		if len(parts) != 3 {
 			fmt.Fprintln(os.Stderr, "fixture: echo-then-sleep takes 2 args")

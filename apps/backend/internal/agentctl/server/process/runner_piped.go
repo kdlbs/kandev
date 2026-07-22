@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -62,22 +63,31 @@ func (r *ProcessRunner) StartPiped(req PipedStartRequest) (*PipedProcess, error)
 	cmd.Env = mergeEnv(req.Env)
 	setManagedProcGroup(cmd)
 
-	stdin, stdout, stderr, err := pipedCommandStreams(cmd)
+	streams, err := newPipedCommandStreams(cmd)
 	if err != nil {
 		return nil, err
 	}
-	proc := r.newPipedCommandProcess(id, req, cmd, stdin)
+	defer streams.closeChildEnds()
+	proc := r.newPipedCommandProcess(id, req, cmd, streams.stdinWriter)
 	r.mu.Lock()
 	r.processes[id] = proc
 	r.mu.Unlock()
 	r.publishStatus(proc)
 
-	if err := r.startAndActivate(proc, cmd, id, stdout, stderr, false, !req.PipeStderr); err != nil {
+	if err := r.startAndActivate(
+		proc, cmd, id, streams.stdoutReader, streams.stderrReader, false, !req.PipeStderr,
+	); err != nil {
 		return nil, err
 	}
-	piped := &PipedProcess{ID: id, Stdin: stdin, Stdout: stdout, Done: proc.done, process: proc}
+	piped := &PipedProcess{
+		ID:      id,
+		Stdin:   streams.stdinWriter,
+		Stdout:  streams.stdoutReader,
+		Done:    proc.done,
+		process: proc,
+	}
 	if req.PipeStderr {
-		piped.Stderr = stderr
+		piped.Stderr = streams.stderrReader
 	}
 	return piped, nil
 }
@@ -95,23 +105,45 @@ func (r *ProcessRunner) validatePipedStart(req PipedStartRequest) error {
 	return nil
 }
 
-func pipedCommandStreams(cmd *exec.Cmd) (io.WriteCloser, io.ReadCloser, io.ReadCloser, error) {
-	stdin, err := cmd.StdinPipe()
+type pipedCommandStreams struct {
+	stdinWriter  *os.File
+	stdoutReader *os.File
+	stderrReader *os.File
+	childEnds    []*os.File
+}
+
+func newPipedCommandStreams(cmd *exec.Cmd) (*pipedCommandStreams, error) {
+	childStdin, stdin, err := os.Pipe()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to attach stdin: %w", err)
+		return nil, fmt.Errorf("failed to attach stdin: %w", err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	stdout, childStdout, err := os.Pipe()
 	if err != nil {
-		_ = stdin.Close()
-		return nil, nil, nil, fmt.Errorf("failed to attach stdout: %w", err)
+		closePipedFiles(childStdin, stdin)
+		return nil, fmt.Errorf("failed to attach stdout: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
+	stderr, childStderr, err := os.Pipe()
 	if err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		return nil, nil, nil, fmt.Errorf("failed to attach stderr: %w", err)
+		closePipedFiles(childStdin, stdin, stdout, childStdout)
+		return nil, fmt.Errorf("failed to attach stderr: %w", err)
 	}
-	return stdin, stdout, stderr, nil
+	cmd.Stdin = childStdin
+	cmd.Stdout = childStdout
+	cmd.Stderr = childStderr
+	return &pipedCommandStreams{
+		stdinWriter: stdin, stdoutReader: stdout, stderrReader: stderr,
+		childEnds: []*os.File{childStdin, childStdout, childStderr},
+	}, nil
+}
+
+func (s *pipedCommandStreams) closeChildEnds() {
+	closePipedFiles(s.childEnds...)
+}
+
+func closePipedFiles(files ...*os.File) {
+	for _, file := range files {
+		_ = file.Close()
+	}
 }
 
 func (r *ProcessRunner) newPipedCommandProcess(

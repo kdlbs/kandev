@@ -166,6 +166,7 @@ const adapters: MessageAdapter[] = [
       <ToolEditMessage
         comment={comment}
         worktreePath={ctx.worktreePath}
+        sessionId={ctx.sessionId}
         onOpenFile={ctx.onOpenFile}
       />
     ),

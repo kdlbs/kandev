@@ -110,7 +110,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       setEditorInstance(editor);
       decorationsRef.current = editor.createDecorationsCollection([]);
       diffDecorationsRef.current = editor.createDecorationsCollection([]);
-      const pendingPos = consumePendingCursorPosition(path, repo);
+      const pendingPos = consumePendingCursorPosition(path, repo, sessionId);
       if (pendingPos) {
         editor.setPosition({ lineNumber: pendingPos.line, column: pendingPos.column });
         editor.revealLineInCenter(pendingPos.line);

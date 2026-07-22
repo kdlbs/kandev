@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -34,11 +35,53 @@ func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	log := newTestLogger()
 	cfg := &config.InstanceConfig{
-		Port:    0,
-		WorkDir: "/tmp/test",
+		Port:          0,
+		WorkDir:       "/tmp/test",
+		VscodeCommand: os.Args[0],
 	}
 	procMgr := process.NewManager(cfg, log)
 	return NewServer(cfg, procMgr, nil, nil, log)
+}
+
+func prepareVscodeTestServer(t *testing.T, server *Server) func() {
+	t.Helper()
+	// Keep VS Code handler tests local and deterministic: a spawned copy of
+	// this test binary listens in TestMain instead of auto-installing code-server.
+	t.Setenv(apiTestVscodeFixtureEnv, "1")
+	stop := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.procMgr.StopForTeardown(ctx); err != nil {
+			t.Errorf("StopForTeardown() error = %v", err)
+		}
+		if status := server.procMgr.VscodeInfo().Status; status != process.VscodeStatusStopped {
+			t.Errorf("VS Code status after teardown = %q, want stopped", status)
+		}
+	}
+	t.Cleanup(stop)
+	return stop
+}
+
+func waitForVscodeStatus(t *testing.T, server *Server, want process.VscodeStatus) {
+	t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		status := server.procMgr.VscodeInfo()
+		if status.Status == want {
+			return
+		}
+		if status.Status == process.VscodeStatusError || status.Status == process.VscodeStatusStopped {
+			t.Fatalf("VS Code reached %q while waiting for %q: %s", status.Status, want, status.Error)
+		}
+		select {
+		case <-ticker.C:
+		case <-timer.C:
+			t.Fatalf("VS Code status = %q, want %q", status.Status, want)
+		}
+	}
 }
 
 // dialTestWS connects a WebSocket client to the test server's /api/v1/agent/stream endpoint.

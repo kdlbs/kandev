@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -16,6 +18,154 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 )
+
+type orderedLSPReadCloser struct {
+	readStarted     chan struct{}
+	releaseRead     chan struct{}
+	readReturned    chan struct{}
+	closedAfterRead chan bool
+	readOnce        sync.Once
+	releaseOnce     sync.Once
+	closeOnce       sync.Once
+}
+
+func newOrderedLSPReadCloser() *orderedLSPReadCloser {
+	return &orderedLSPReadCloser{
+		readStarted:     make(chan struct{}),
+		releaseRead:     make(chan struct{}),
+		readReturned:    make(chan struct{}),
+		closedAfterRead: make(chan bool, 1),
+	}
+}
+
+func (r *orderedLSPReadCloser) Read([]byte) (int, error) {
+	r.readOnce.Do(func() { close(r.readStarted) })
+	<-r.releaseRead
+	select {
+	case <-r.readReturned:
+	default:
+		close(r.readReturned)
+	}
+	return 0, io.EOF
+}
+
+func (r *orderedLSPReadCloser) Close() error {
+	r.closeOnce.Do(func() {
+		select {
+		case <-r.readReturned:
+			r.closedAfterRead <- true
+		default:
+			r.closedAfterRead <- false
+		}
+		r.release()
+	})
+	return nil
+}
+
+func (r *orderedLSPReadCloser) release() {
+	r.releaseOnce.Do(func() { close(r.releaseRead) })
+}
+
+type discardLSPWriteCloser struct{}
+
+func (discardLSPWriteCloser) Write(data []byte) (int, error) { return len(data), nil }
+func (discardLSPWriteCloser) Close() error                   { return nil }
+
+func TestRunLSPBridgeClosesStdoutAfterForwarderReturns(t *testing.T) {
+	server := newTestServer(t)
+	stdout := newOrderedLSPReadCloser()
+	t.Cleanup(stdout.release)
+	processDone := make(chan struct{})
+	close(processDone)
+	lspProcess := &lspServerProcess{
+		id: "already-stopped", stdin: discardLSPWriteCloser{}, stdout: stdout, done: processDone,
+	}
+	handlerDone := make(chan error, 1)
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		conn, err := server.upgrader.Upgrade(writer, request, nil)
+		if err == nil {
+			server.runLSPBridge(conn, "kotlin", lspProcess)
+		}
+		handlerDone <- err
+	}))
+	t.Cleanup(func() {
+		stdout.release()
+		httpServer.Close()
+	})
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial bridge: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	select {
+	case <-stdout.readStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stdout forwarder did not start")
+	}
+	_ = conn.Close()
+	stdout.release()
+	select {
+	case err := <-handlerDone:
+		if err != nil {
+			t.Fatalf("bridge handler: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("bridge handler did not return")
+	}
+	select {
+	case closedAfterRead := <-stdout.closedAfterRead:
+		if !closedAfterRead {
+			t.Fatal("stdout closed before its active forwarder returned")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stdout was not closed after its forwarder returned")
+	}
+}
+
+func TestStopLSPServerTimeoutClosesStdoutBeforeJoiningForwarder(t *testing.T) {
+	server := newTestServer(t)
+	stdout := newOrderedLSPReadCloser()
+	forwarderDone := make(chan struct{})
+	go func() {
+		defer close(forwarderDone)
+		_, _ = stdout.Read(nil)
+	}()
+	<-stdout.readStarted
+
+	processDone := make(chan struct{})
+	lspProcess := &lspServerProcess{
+		id:            "timed-out-process",
+		stdin:         discardLSPWriteCloser{},
+		stdout:        stdout,
+		done:          processDone,
+		forwarderDone: forwarderDone,
+	}
+	stopReturned := make(chan struct{})
+	t.Cleanup(func() {
+		stdout.release()
+		select {
+		case <-stopReturned:
+		case <-time.After(2 * time.Second):
+			t.Error("timed-out stop did not return during cleanup")
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	go func() {
+		server.stopLSPServerWithContext(ctx, lspProcess)
+		close(stopReturned)
+	}()
+
+	select {
+	case <-stopReturned:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed-out stop remained blocked on the stdout forwarder")
+	}
+	if closedAfterRead := <-stdout.closedAfterRead; closedAfterRead {
+		t.Fatal("timed-out stop waited for the reader instead of closing stdout to unblock it")
+	}
+}
 
 func TestWorkspaceFileURI(t *testing.T) {
 	t.Parallel()
