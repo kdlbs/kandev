@@ -690,10 +690,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// "hello". Use the session snapshot, not a live profile lookup, so a
 	// mid-run profile edit cannot change wrap behavior. Looked up once here and
 	// reused below so we don't hit GetTaskSession twice for the same fact.
-	isPassthrough := false
-	if launchSession, sessErr := s.repo.GetTaskSession(ctx, sessionID); sessErr == nil {
-		isPassthrough = launchSession.IsPassthrough
-	}
+	// If the lookup fails, resolveIsPassthroughForLaunch fails safe by
+	// treating the session as passthrough: skipping the wrap/expansion is
+	// strictly less harmful than leaking hidden <kandev-system> content into
+	// a real passthrough session's PTY.
+	isPassthrough := s.resolveIsPassthroughForLaunch(ctx, sessionID)
 
 	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode, task.IsEphemeral, isPassthrough)
 
@@ -797,6 +798,23 @@ func (s *Service) prepareSessionForStart(
 	}
 	s.propagateInheritedEnvironment(ctx, task, sessionID)
 	return sessionID, nil
+}
+
+// resolveIsPassthroughForLaunch reloads the session snapshot to decide
+// whether this launch is a passthrough session (skip the Kandev MCP wrap and
+// the "@name" prompt-reference expansion). If the reload fails, this fails
+// safe by treating the session as passthrough: skipping the wrap/expansion is
+// strictly less harmful than leaking hidden <kandev-system> content into a
+// real passthrough session's PTY.
+func (s *Service) resolveIsPassthroughForLaunch(ctx context.Context, sessionID string) bool {
+	launchSession, sessErr := s.repo.GetTaskSession(ctx, sessionID)
+	if sessErr != nil {
+		s.logger.Warn("failed to reload session for passthrough check; defaulting to passthrough (skip hidden-content injection) as the safer failure mode",
+			zap.String("session_id", sessionID),
+			zap.Error(sessErr))
+		return true
+	}
+	return launchSession.IsPassthrough
 }
 
 // createStartSession picks the right session-creation path for the task:
