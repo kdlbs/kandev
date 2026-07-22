@@ -72,7 +72,7 @@ describe("buildAllFiles (review dialog)", () => {
   });
 });
 
-describe("buildAllFiles cumulative diff composition", () => {
+describe("buildAllFiles", () => {
   // Multi-repo: `mergeCumulativeFiles` uses a `<repo>\x00<path>` composite map
   // key and stamps the clean repo-relative path on `file.path`. The displayed
   // path must come from the stamped value, never from the composite key.
