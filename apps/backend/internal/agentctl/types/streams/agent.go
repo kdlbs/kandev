@@ -99,6 +99,10 @@ type AgentEvent struct {
 	// Text contains streaming text content from the agent.
 	Text string `json:"text,omitempty"`
 
+	// ProtocolMessageID identifies the source-protocol message this chunk belongs to.
+	// It is distinct from the Kandev message record ID used by downstream streaming.
+	ProtocolMessageID string `json:"protocol_message_id,omitempty"`
+
 	// --- Reasoning fields (for "reasoning" type) ---
 
 	// ReasoningText contains full reasoning/chain-of-thought content.

@@ -123,6 +123,38 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	})
 }
 
+func TestBuildAgentCommand_PreservesPinnedACPBridgeSpecs(t *testing.T) {
+	mgr := newTestManager(t)
+	tests := []struct {
+		name  string
+		agent agents.Agent
+		want  string
+	}{
+		{
+			name:  "claude",
+			agent: agents.NewClaudeACP(),
+			want:  "npx -y @agentclientprotocol/claude-agent-acp@0.61.0",
+		},
+		{
+			name:  "codex",
+			agent: agents.NewCodexACP(),
+			want:  "npx -y @agentclientprotocol/codex-acp@1.1.5",
+		},
+		{
+			name:  "opencode",
+			agent: agents.NewOpenCodeACP(),
+			want:  "opencode acp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmds := mgr.buildAgentCommand(&LaunchRequest{}, nil, tt.agent, false)
+			require.Equal(t, tt.want, cmds.initial)
+		})
+	}
+}
+
 // cliFlagTestAgent is a minimal BuildCommand that produces a stable prefix
 // so tests can assert CLI flag tokens are appended after the agent's own
 // argv by CommandBuilder.BuildCommand (not by the agent itself).

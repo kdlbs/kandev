@@ -56,6 +56,9 @@ func (f *concurrencyFakeAgent) Cancel(_ context.Context, _ acp.CancelNotificatio
 func (f *concurrencyFakeAgent) CloseSession(_ context.Context, _ acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
 	return acp.CloseSessionResponse{}, nil
 }
+func (f *concurrencyFakeAgent) DeleteSession(_ context.Context, _ acp.DeleteSessionRequest) (acp.DeleteSessionResponse, error) {
+	return acp.DeleteSessionResponse{}, acp.NewMethodNotFound(acp.AgentMethodSessionDelete)
+}
 func (f *concurrencyFakeAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
 	return acp.ListSessionsResponse{}, nil
 }

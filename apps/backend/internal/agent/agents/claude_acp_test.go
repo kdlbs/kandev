@@ -1,9 +1,29 @@
 package agents
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestClaudeACPUsesPinnedBridge(t *testing.T) {
+	a := NewClaudeACP()
+	want := []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp@0.61.0"}
+
+	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
+		t.Fatalf("BuildCommand = %#v, want %#v", got, want)
+	}
+	if got := a.Runtime().Cmd.Args(); !slices.Equal(got, want) {
+		t.Fatalf("Runtime Cmd = %#v, want %#v", got, want)
+	}
+	if got := a.InferenceConfig().Command.Args(); !slices.Equal(got, want) {
+		t.Fatalf("Inference Command = %#v, want %#v", got, want)
+	}
+	wantInstall := "npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp@0.61.0"
+	if got := a.InstallScript(); got != wantInstall {
+		t.Fatalf("InstallScript = %q, want %q", got, wantInstall)
+	}
+}
 
 func TestClaudeACPPermissionSettingsSkipPermissions(t *testing.T) {
 	settings := NewClaudeACP().PermissionSettings()

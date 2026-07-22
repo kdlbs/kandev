@@ -10,7 +10,7 @@ Kandev's `codex-acp` agent previously launched `@zed-industries/codex-acp`. That
 
 ## Decision
 
-Kandev's `codex-acp` agent launches `npx -y @agentclientprotocol/codex-acp` for ACP chat and one-shot inference sessions. The install script still installs `@openai/codex` for `codex login`, then installs the ACP bridge package for Kandev sessions.
+Kandev's `codex-acp` agent launches `npx -y @agentclientprotocol/codex-acp@1.1.5` for ACP chat and one-shot inference sessions. The install script still installs `@openai/codex` for `codex login`, then installs the same pinned ACP bridge package for Kandev sessions.
 
 No product spec update is required: the user-facing agent remains `codex-acp`; only the package that supplies the ACP bridge changes.
 

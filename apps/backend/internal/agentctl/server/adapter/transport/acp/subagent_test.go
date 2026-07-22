@@ -2,9 +2,11 @@ package acp
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
+	acp "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
@@ -268,6 +270,460 @@ func TestNormalizeToolCall_CursorSubagent(t *testing.T) {
 	if payload.Kind() != streams.ToolKindSubagentTask {
 		t.Fatalf("Kind = %q, want subagent_task", payload.Kind())
 	}
+}
+
+func TestNormalizeToolCall_CodexSpawnSubagent(t *testing.T) {
+	n := NewNormalizer(codexAgentID)
+	payload := n.NormalizeToolCall("other", map[string]any{
+		"kind": toolTypeGeneric,
+		"meta": codexCollaborationMeta(codexCollaborationSpawnAgent, []any{"thread-child"}),
+		"raw_input": map[string]any{
+			"prompt": "Audit the ACP adapter",
+			"model":  "gpt-5.2-codex",
+			"agentsStates": map[string]any{
+				"thread-child": map[string]any{"status": "running"},
+			},
+		},
+	})
+	if payload.Kind() != streams.ToolKindSubagentTask {
+		t.Fatalf("Kind = %q, want subagent_task", payload.Kind())
+	}
+	sa := payload.SubagentTask()
+	if sa.ChildSessionID != "thread-child" || sa.Prompt != "Audit the ACP adapter" {
+		t.Errorf("child/prompt = %q/%q", sa.ChildSessionID, sa.Prompt)
+	}
+	if sa.Model != "gpt-5.2-codex" || sa.Status != "running" {
+		t.Errorf("model/status = %q/%q", sa.Model, sa.Status)
+	}
+}
+
+func TestNormalizeToolCall_CodexStartedActivity(t *testing.T) {
+	n := NewNormalizer(codexAgentID)
+	payload := n.NormalizeToolCall("other", map[string]any{
+		"kind": toolTypeGeneric,
+		"meta": codexActivityMeta(codexSubagentStarted),
+	})
+	if payload.Kind() != streams.ToolKindSubagentTask {
+		t.Fatalf("Kind = %q, want subagent_task", payload.Kind())
+	}
+	sa := payload.SubagentTask()
+	if sa.ChildSessionID != "thread-child" || sa.Status != "started" {
+		t.Errorf("child/status = %q/%q", sa.ChildSessionID, sa.Status)
+	}
+}
+
+func TestNormalizeToolCall_CodexControlsStayGeneric(t *testing.T) {
+	for _, tool := range []string{"interact", "wait", "close"} {
+		t.Run(tool, func(t *testing.T) {
+			n := NewNormalizer(codexAgentID)
+			payload := n.NormalizeToolCall("other", map[string]any{
+				"kind": toolTypeGeneric,
+				"meta": codexCollaborationMeta(tool, []any{"thread-child"}),
+			})
+			if payload.Kind() != streams.ToolKindGeneric {
+				t.Fatalf("Kind = %q, want generic", payload.Kind())
+			}
+		})
+	}
+}
+
+func TestNormalizeToolCall_CodexMetaIsDialectScoped(t *testing.T) {
+	payload := NewNormalizer("cursor-acp").NormalizeToolCall("other", map[string]any{
+		"kind": toolTypeGeneric,
+		"meta": codexCollaborationMeta(codexCollaborationSpawnAgent, []any{"thread-child"}),
+	})
+	if payload.Kind() != streams.ToolKindGeneric {
+		t.Fatalf("Kind = %q, want generic for a non-Codex agent", payload.Kind())
+	}
+}
+
+func TestCodexSubagentSequenceUsesImmutableSnapshots(t *testing.T) {
+	a := newTestAdapter()
+	a.agentID = codexAgentID
+	a.normalizer = NewNormalizer(codexAgentID)
+	meta := codexCollaborationMeta(codexCollaborationSpawnAgent, []any{"thread-child"})
+	start := &acp.SessionUpdateToolCall{
+		ToolCallId: "call-spawn",
+		Kind:       "other",
+		Title:      codexCollaborationSpawnAgent,
+		Status:     toolStatusInProgress,
+		RawInput: map[string]any{
+			"prompt": "Audit the adapter",
+			"agentsStates": map[string]any{
+				"thread-child": map[string]any{"status": "running"},
+			},
+		},
+		Meta: meta,
+	}
+	startEvent := a.convertToolCallUpdate("session-1", start)
+	if startEvent.NormalizedPayload.Kind() != streams.ToolKindSubagentTask {
+		t.Fatalf("start kind = %q", startEvent.NormalizedPayload.Kind())
+	}
+	startSnapshot := startEvent.NormalizedPayload
+
+	completeStatus := acp.ToolCallStatus(toolStatusCompleted)
+	complete := &acp.SessionToolCallUpdate{
+		ToolCallId: "call-spawn",
+		Status:     &completeStatus,
+		RawInput: map[string]any{
+			"prompt": "Audit the adapter",
+			"model":  "gpt-5.2-codex",
+			"agentsStates": map[string]any{
+				"thread-child": map[string]any{"status": "completed"},
+			},
+		},
+		Meta: meta,
+	}
+	completeEvent := a.convertToolCallResultUpdate("session-1", complete)
+	if completeEvent.ToolCallID != startEvent.ToolCallID {
+		t.Fatalf("tool call IDs differ: %q/%q", startEvent.ToolCallID, completeEvent.ToolCallID)
+	}
+	sa := completeEvent.NormalizedPayload.SubagentTask()
+	if sa.Status != "completed" || sa.Model != "gpt-5.2-codex" {
+		t.Errorf("status/model = %q/%q", sa.Status, sa.Model)
+	}
+	if got := startSnapshot.SubagentTask(); got.Status != "running" || got.Model != "" {
+		t.Errorf("start event snapshot mutated after completion: status/model = %q/%q", got.Status, got.Model)
+	}
+	if _, active := a.activeToolCalls["call-spawn"]; active {
+		t.Error("terminal completion must remove the active tool call")
+	}
+
+	// codex-acp may deliver the matching started activity after the terminal
+	// collaboration update. It must update the existing card, not create a
+	// second one or regress the terminal state back to running.
+	activityEvent := a.convertToolCallUpdate("session-1", codexStartedActivityToolCall("call-spawn"))
+	if activityEvent.Type != streams.EventTypeToolUpdate {
+		t.Fatalf("reordered activity type = %q, want tool_update", activityEvent.Type)
+	}
+	if activityEvent.ToolStatus != toolStatusComplete || activityEvent.NormalizedPayload.SubagentTask().Status != "completed" {
+		t.Errorf("reordered activity regressed status: event=%q payload=%q", activityEvent.ToolStatus, activityEvent.NormalizedPayload.SubagentTask().Status)
+	}
+	if got := completeEvent.NormalizedPayload.SubagentTask(); got.SubagentType != "" {
+		t.Errorf("completion event snapshot mutated after activity: subagent_type = %q", got.SubagentType)
+	}
+	if got := activityEvent.NormalizedPayload.SubagentTask(); got.SubagentType != "review_agent" {
+		t.Errorf("activity snapshot subagent_type = %q, want review_agent", got.SubagentType)
+	}
+}
+
+func TestCloneSubagentPayloadDeepCopiesMutableFields(t *testing.T) {
+	payload := streams.NewSubagentTask("description", "prompt", "reviewer")
+	count := 7
+	source := payload.SubagentTask()
+	source.Status = "completed"
+	source.AgentID = "agent-1"
+	source.Model = "gpt-5.2-codex"
+	source.ChildSessionID = "child-1"
+	source.DurationMs = 123
+	source.TotalTokens = 456
+	source.ToolUseCount = &count
+	source.ResultText = "done"
+	source.IsAsync = true
+	source.OutputFile = "/tmp/result"
+	source.CanReadOutputFile = true
+	source.SetIsAuggie(true)
+
+	clone := cloneSubagentPayload(payload).SubagentTask()
+	source.Description = "mutated"
+	*source.ToolUseCount = 99
+	if clone.Description != "description" || clone.ToolUseCount == nil || *clone.ToolUseCount != 7 {
+		t.Fatalf("clone changed with source: description/count = %q/%v", clone.Description, clone.ToolUseCount)
+	}
+	if !clone.IsAuggie() || !clone.IsAsync || clone.OutputFile != "/tmp/result" || !clone.CanReadOutputFile {
+		t.Fatalf("clone lost adapter fields: %+v", clone)
+	}
+}
+
+func TestCodexSubagentActivityDeduplicatesWhileRunning(t *testing.T) {
+	a := newTestAdapter()
+	a.agentID = codexAgentID
+	a.normalizer = NewNormalizer(codexAgentID)
+	meta := codexCollaborationMeta(codexCollaborationSpawnAgent, []any{"thread-child"})
+	start := &acp.SessionUpdateToolCall{
+		ToolCallId: "call-spawn",
+		Kind:       "other",
+		Title:      codexCollaborationSpawnAgent,
+		Status:     toolStatusInProgress,
+		RawInput: map[string]any{
+			"prompt": "Audit the adapter",
+			"agentsStates": map[string]any{
+				"thread-child": map[string]any{"status": "running"},
+			},
+		},
+		Meta: meta,
+	}
+	startEvent := a.convertToolCallUpdate("session-1", start)
+	activityEvent := a.convertToolCallUpdate("session-1", codexStartedActivityToolCall("call-spawn"))
+	if startEvent.Type != streams.EventTypeToolCall || activityEvent.Type != streams.EventTypeToolUpdate {
+		t.Fatalf("event types = %q/%q, want tool_call/tool_update", startEvent.Type, activityEvent.Type)
+	}
+	if activityEvent.ToolStatus != toolStatusInProgress {
+		t.Errorf("activity ToolStatus = %q, want in_progress", activityEvent.ToolStatus)
+	}
+	if got := activityEvent.NormalizedPayload.SubagentTask().Status; got != "running" {
+		t.Errorf("payload status = %q, want running (started must not downgrade it)", got)
+	}
+	if got := startEvent.NormalizedPayload.SubagentTask().SubagentType; got != "" {
+		t.Errorf("start event snapshot mutated after activity: subagent_type = %q", got)
+	}
+	if got := activityEvent.NormalizedPayload.SubagentTask().SubagentType; got != "review_agent" {
+		t.Errorf("activity subagent_type = %q, want review_agent", got)
+	}
+}
+
+func TestCodexSubagentCorrelationPressureRetainsDelayedMatch(t *testing.T) {
+	a := newTestAdapter()
+	a.agentID = codexAgentID
+	a.normalizer = NewNormalizer(codexAgentID)
+	delayed := codexCollaborationToolCall("delayed", "delayed-child", "running")
+	if event := a.convertToolCallUpdate("session-1", delayed); event.Type != streams.EventTypeToolCall {
+		t.Fatalf("delayed first event type = %q", event.Type)
+	}
+	for i := 0; i < maxCodexSubagentCorrelations+20; i++ {
+		id := "paired-" + strconv.Itoa(i)
+		a.convertToolCallUpdate("session-1", codexCollaborationToolCall(id, "child-"+strconv.Itoa(i), "running"))
+		a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild(id, "child-"+strconv.Itoa(i)))
+	}
+	if got := len(a.codexSubagentCorrelations); got != maxCodexSubagentCorrelations {
+		t.Fatalf("correlation count = %d, want bounded %d", got, maxCodexSubagentCorrelations)
+	}
+	delayedEvent := a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild("delayed", "delayed-child"))
+	if delayedEvent.Type != streams.EventTypeToolUpdate {
+		t.Fatalf("delayed matching event type = %q, want tool_update after cache pressure", delayedEvent.Type)
+	}
+	key := codexSubagentCorrelationKey{
+		sessionID:      "session-1",
+		toolCallID:     "delayed",
+		childSessionID: "delayed-child",
+	}
+	correlation := a.codexSubagentCorrelations[key]
+	if correlation == nil || !correlation.collaborationSeen || !correlation.activitySeen {
+		t.Fatalf("delayed correlation signal state = %+v", correlation)
+	}
+}
+
+func TestCodexCorrelationSameToolIDDifferentChildCreatesNewCard(t *testing.T) {
+	a := newCodexCorrelationTestAdapter()
+	first := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("reused", "child-a", "running"))
+	firstActivity := a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild("reused", "child-a"))
+	second := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("reused", "child-b", "running"))
+	if first.Type != streams.EventTypeToolCall || firstActivity.Type != streams.EventTypeToolUpdate {
+		t.Fatalf("first child event types = %q/%q", first.Type, firstActivity.Type)
+	}
+	if second.Type != streams.EventTypeToolCall {
+		t.Fatalf("different child event type = %q, want tool_call", second.Type)
+	}
+	if got := second.NormalizedPayload.SubagentTask().ChildSessionID; got != "child-b" {
+		t.Fatalf("different child ID = %q", got)
+	}
+
+	lateFirst := a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild("reused", "child-a"))
+	if lateFirst.Type != streams.EventTypeToolUpdate {
+		t.Fatalf("same-child replay type = %q, want tool_update", lateFirst.Type)
+	}
+	if active := a.activeToolCalls["reused"]; codexSubagentChildID(active) != "child-b" {
+		t.Fatalf("late child-a replay replaced active child: %q", codexSubagentChildID(active))
+	}
+	if got := a.codexCorrelationSiblingCountLocked("session-1", "reused"); got != 2 {
+		t.Fatalf("correlation sibling count = %d, want 2", got)
+	}
+}
+
+func TestCodexCorrelationMissingChildFallbackIsUnambiguousOnly(t *testing.T) {
+	a := newCodexCorrelationTestAdapter()
+	a.convertToolCallUpdate("session-1", codexCollaborationToolCall("fallback", "child-a", "running"))
+	missingActivity := a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild("fallback", ""))
+	if missingActivity.Type != streams.EventTypeToolUpdate {
+		t.Fatalf("single incomplete fallback type = %q, want tool_update", missingActivity.Type)
+	}
+	if got := missingActivity.NormalizedPayload.SubagentTask().ChildSessionID; got != "child-a" {
+		t.Fatalf("fallback lost known child ID: %q", got)
+	}
+
+	// The correlation is now fully matched. A later child-less spawn with the
+	// same tool ID is unsafe to attach and must create a new card.
+	newUnknown := a.convertToolCallUpdate("session-1", codexChildlessCollaborationToolCall("fallback"))
+	if newUnknown.Type != streams.EventTypeToolCall {
+		t.Fatalf("child-less frame after completed tombstone = %q, want tool_call", newUnknown.Type)
+	}
+
+	// The reverse ordering is also safe: a sole incomplete child-less spawn
+	// adopts the child identity from its matching activity and is re-keyed.
+	a.convertToolCallUpdate("session-1", codexChildlessCollaborationToolCall("reverse"))
+	reverse := a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild("reverse", "child-c"))
+	if reverse.Type != streams.EventTypeToolUpdate {
+		t.Fatalf("reverse fallback type = %q, want tool_update", reverse.Type)
+	}
+	knownKey := codexSubagentCorrelationKey{
+		sessionID:      "session-1",
+		toolCallID:     "reverse",
+		childSessionID: "child-c",
+	}
+	if a.codexSubagentCorrelations[knownKey] == nil {
+		t.Fatal("reverse fallback was not re-keyed to the discovered child")
+	}
+}
+
+func TestCodexCorrelationMissingChildDoesNotChooseAmongChildren(t *testing.T) {
+	a := newCodexCorrelationTestAdapter()
+	a.convertToolCallUpdate("session-1", codexCollaborationToolCall("ambiguous", "child-a", "running"))
+	second := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("ambiguous", "child-b", "running"))
+	if second.Type != streams.EventTypeToolCall {
+		t.Fatalf("second known child type = %q, want tool_call", second.Type)
+	}
+	missing := a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild("ambiguous", ""))
+	if missing.Type != streams.EventTypeToolCall {
+		t.Fatalf("ambiguous child-less activity type = %q, want tool_call", missing.Type)
+	}
+	if got := a.codexCorrelationSiblingCountLocked("session-1", "ambiguous"); got != 3 {
+		t.Fatalf("ambiguous correlation count = %d, want 3", got)
+	}
+}
+
+func TestCodexSubagentCorrelationCleanup(t *testing.T) {
+	a := newTestAdapter()
+	a.agentID = codexAgentID
+	a.normalizer = NewNormalizer(codexAgentID)
+	a.convertToolCallUpdate("session-1", codexCollaborationToolCall("first", "child-1", "running"))
+
+	a.convertToolCallUpdate("session-2", &acp.SessionUpdateToolCall{
+		ToolCallId: "other-session",
+		Kind:       "other",
+		Status:     toolStatusInProgress,
+		Meta:       codexCollaborationMeta(codexCollaborationSpawnAgent, []any{"other-child"}),
+	})
+	a.mu.Lock()
+	a.clearCodexSubagentCorrelationsLocked("session-1")
+	remaining := len(a.codexSubagentCorrelations)
+	a.mu.Unlock()
+	if remaining != 1 {
+		t.Fatalf("session cleanup left %d entries, want only the other session", remaining)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if got := len(a.codexSubagentCorrelations); got != 0 {
+		t.Fatalf("Close left %d correlation entries", got)
+	}
+}
+
+func TestCodexEmittedPayloadIsImmutableDuringQueuedSerialization(t *testing.T) {
+	a := newTestAdapter()
+	a.agentID = codexAgentID
+	a.normalizer = NewNormalizer(codexAgentID)
+	first := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("call-race", "child", "running"))
+	before, err := json.Marshal(first.NormalizedPayload)
+	if err != nil {
+		t.Fatalf("marshal before updates: %v", err)
+	}
+
+	errs := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 2000; i++ {
+			if _, marshalErr := json.Marshal(first.NormalizedPayload); marshalErr != nil {
+				errs <- marshalErr
+				return
+			}
+		}
+	}()
+	for i := 0; i < 2000; i++ {
+		status := "completed"
+		if i%2 == 0 {
+			status = "errored"
+		}
+		a.convertToolCallUpdate("session-1", codexCollaborationToolCall("call-race", "child", status))
+	}
+	<-done
+	select {
+	case marshalErr := <-errs:
+		t.Fatalf("concurrent marshal: %v", marshalErr)
+	default:
+	}
+	after, err := json.Marshal(first.NormalizedPayload)
+	if err != nil {
+		t.Fatalf("marshal after updates: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("queued event payload mutated:\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
+func TestCodexCorrelationDoesNotChangeOtherAgents(t *testing.T) {
+	a := newTestAdapter()
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: "same-id",
+		Kind:       "other",
+		Status:     toolStatusInProgress,
+		Meta:       codexCollaborationMeta(codexCollaborationSpawnAgent, []any{"child"}),
+	}
+	first := a.convertToolCallUpdate("session-1", tc)
+	second := a.convertToolCallUpdate("session-1", tc)
+	if first.Type != streams.EventTypeToolCall || second.Type != streams.EventTypeToolCall {
+		t.Fatalf("non-Codex event types = %q/%q, want unchanged tool_call behavior", first.Type, second.Type)
+	}
+	if len(a.codexSubagentCorrelations) != 0 {
+		t.Fatal("non-Codex tool calls must not populate Codex correlation state")
+	}
+}
+
+func codexStartedActivityToolCall(toolCallID string) *acp.SessionUpdateToolCall {
+	return codexStartedActivityToolCallForChild(toolCallID, "thread-child")
+}
+
+func codexStartedActivityToolCallForChild(toolCallID, childID string) *acp.SessionUpdateToolCall {
+	return &acp.SessionUpdateToolCall{
+		ToolCallId: acp.ToolCallId(toolCallID),
+		Kind:       "other",
+		Title:      "Start subagent review_agent",
+		Status:     toolStatusCompleted,
+		RawInput: map[string]any{
+			"agentThreadId": childID,
+			"agentPath":     "/root/review_agent",
+			"activityKind":  codexSubagentStarted,
+		},
+		Meta: map[string]any{"codex": map[string]any{"subagent": map[string]any{
+			"threadId": childID,
+			"path":     "/root/review_agent",
+			"activity": codexSubagentStarted,
+		}}},
+	}
+}
+
+func codexCollaborationToolCall(toolCallID, childID, status string) *acp.SessionUpdateToolCall {
+	return &acp.SessionUpdateToolCall{
+		ToolCallId: acp.ToolCallId(toolCallID),
+		Kind:       "other",
+		Title:      codexCollaborationSpawnAgent,
+		Status:     toolStatusInProgress,
+		RawInput: map[string]any{
+			"prompt": "Audit the adapter",
+			"agentsStates": map[string]any{
+				childID: map[string]any{"status": status},
+			},
+		},
+		Meta: codexCollaborationMeta(codexCollaborationSpawnAgent, []any{childID}),
+	}
+}
+
+func codexChildlessCollaborationToolCall(toolCallID string) *acp.SessionUpdateToolCall {
+	return &acp.SessionUpdateToolCall{
+		ToolCallId: acp.ToolCallId(toolCallID),
+		Kind:       "other",
+		Title:      codexCollaborationSpawnAgent,
+		Status:     toolStatusInProgress,
+		RawInput:   map[string]any{"prompt": "Unknown child"},
+		Meta:       codexCollaborationMeta(codexCollaborationSpawnAgent, nil),
+	}
+}
+
+func newCodexCorrelationTestAdapter() *Adapter {
+	a := newTestAdapter()
+	a.agentID = codexAgentID
+	a.normalizer = NewNormalizer(codexAgentID)
+	return a
 }
 
 func TestNormalizeToolCall_PlainBashNotSubagent(t *testing.T) {

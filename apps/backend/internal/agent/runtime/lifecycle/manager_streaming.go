@@ -8,6 +8,159 @@ import (
 	"go.uber.org/zap"
 )
 
+const thinkingStreamingEventType = "thinking_streaming"
+
+func (e *AgentExecution) clearProtocolMessageCorrelationLocked() {
+	e.protocolMessageIDs = nil
+	e.protocolThinkingIDs = nil
+}
+
+func (e *AgentExecution) resetStreamingStateLocked() {
+	e.messageBuffer.Reset()
+	e.thinkingBuffer.Reset()
+	e.assistantHistoryBuffer.Reset()
+	e.currentMessageID = ""
+	e.currentThinkingID = ""
+	e.clearProtocolMessageCorrelationLocked()
+}
+
+func protocolRecordID(ids *map[string]string, protocolMessageID string) (string, bool) {
+	if *ids == nil {
+		*ids = make(map[string]string)
+	}
+	if messageID, ok := (*ids)[protocolMessageID]; ok {
+		return messageID, true
+	}
+	messageID := uuid.New().String()
+	(*ids)[protocolMessageID] = messageID
+	return messageID, false
+}
+
+func (m *Manager) publishProtocolMessage(
+	execution *AgentExecution,
+	protocolMessageID string,
+	content string,
+) {
+	execution.messageMu.Lock()
+	messageID, isAppend := protocolRecordID(&execution.protocolMessageIDs, protocolMessageID)
+	execution.messageMu.Unlock()
+
+	m.publishStreamingContent(execution, "message_streaming", messageID, content, isAppend)
+}
+
+func (m *Manager) appendAssistantHistoryChunk(execution *AgentExecution, content string) {
+	execution.messageMu.Lock()
+	execution.assistantHistoryBuffer.WriteString(content)
+	execution.messageMu.Unlock()
+}
+
+// flushAssistantHistory persists the assistant text observed since the prior
+// history boundary. It is independent from visible-stream flushing so a
+// subagent tool can retain UI nesting while history still follows wire order.
+func (m *Manager) flushAssistantHistory(execution *AgentExecution) {
+	execution.messageMu.Lock()
+	content := execution.assistantHistoryBuffer.String()
+	execution.assistantHistoryBuffer.Reset()
+	execution.messageMu.Unlock()
+
+	if content == "" || m.historyManager == nil || !execution.historyEnabled || execution.SessionID == "" {
+		return
+	}
+	if err := m.historyManager.AppendAgentMessage(execution.SessionID, content); err != nil {
+		m.logger.Warn("failed to store agent message to history", zap.Error(err))
+	}
+}
+
+// flushPendingLegacyMessage closes only the ID-less assistant stream. It is
+// used when an explicit protocol message begins so buffered legacy content is
+// published first and a later ID-less chunk cannot append across that boundary.
+func (m *Manager) flushPendingLegacyMessage(execution *AgentExecution) {
+	execution.messageMu.Lock()
+	content := execution.messageBuffer.String()
+	execution.messageBuffer.Reset()
+	messageID := execution.currentMessageID
+	execution.currentMessageID = ""
+	execution.messageMu.Unlock()
+
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return
+	}
+	if messageID != "" {
+		m.publishStreamingMessageFinal(execution, messageID, trimmed)
+		return
+	}
+	m.publishStreamingMessage(execution, trimmed)
+	execution.messageMu.Lock()
+	execution.currentMessageID = ""
+	execution.messageMu.Unlock()
+}
+
+// flushPendingLegacyThinking is the reasoning-stream counterpart of
+// flushPendingLegacyMessage.
+func (m *Manager) flushPendingLegacyThinking(execution *AgentExecution) {
+	execution.messageMu.Lock()
+	content := execution.thinkingBuffer.String()
+	execution.thinkingBuffer.Reset()
+	messageID := execution.currentThinkingID
+	execution.currentThinkingID = ""
+	execution.messageMu.Unlock()
+
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return
+	}
+	if messageID != "" {
+		m.publishStreamingThinkingFinal(execution, messageID, trimmed)
+		return
+	}
+	m.publishStreamingThinking(execution, trimmed)
+	execution.messageMu.Lock()
+	execution.currentThinkingID = ""
+	execution.messageMu.Unlock()
+}
+
+func (m *Manager) publishProtocolThinking(
+	execution *AgentExecution,
+	protocolMessageID string,
+	content string,
+) {
+	execution.messageMu.Lock()
+	messageID, isAppend := protocolRecordID(&execution.protocolThinkingIDs, protocolMessageID)
+	execution.messageMu.Unlock()
+
+	m.publishStreamingContent(execution, thinkingStreamingEventType, messageID, content, isAppend)
+}
+
+func (m *Manager) publishStreamingContent(
+	execution *AgentExecution,
+	eventType string,
+	messageID string,
+	content string,
+	isAppend bool,
+) {
+	event := AgentStreamEventData{
+		Type:      eventType,
+		Text:      content,
+		MessageID: messageID,
+		IsAppend:  isAppend,
+	}
+	if eventType == thinkingStreamingEventType {
+		event.MessageType = "thinking"
+	}
+
+	payload := &AgentStreamEventPayload{
+		Type:        "agent/event",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:     execution.ID,
+		ExecutionID: execution.ID,
+		TaskID:      execution.TaskID,
+		SessionID:   execution.SessionID,
+		Data:        &event,
+	}
+	m.eventPublisher.PublishAgentStreamEventPayload(payload)
+}
+
 // publishStreamingMessage publishes a streaming message event for real-time text updates.
 // It creates a new message on first call (currentMessageID empty) or appends to existing.
 // The message ID is generated and set synchronously to avoid race conditions.
@@ -153,7 +306,7 @@ func (m *Manager) publishStreamingThinking(execution *AgentExecution, content st
 	execution.messageMu.Unlock()
 
 	event := AgentStreamEventData{
-		Type:        "thinking_streaming",
+		Type:        thinkingStreamingEventType,
 		Text:        content,
 		MessageID:   thinkingID,
 		IsAppend:    isAppend,
@@ -179,7 +332,7 @@ func (m *Manager) publishStreamingThinking(execution *AgentExecution, content st
 // This is called during flush to append any remaining buffered thinking content.
 func (m *Manager) publishStreamingThinkingFinal(execution *AgentExecution, thinkingID, content string) {
 	event := AgentStreamEventData{
-		Type:        "thinking_streaming",
+		Type:        thinkingStreamingEventType,
 		Text:        content,
 		MessageID:   thinkingID,
 		IsAppend:    true,

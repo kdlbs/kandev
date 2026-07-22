@@ -24,6 +24,7 @@ type acpDialect struct {
 	suppressNotification func(acp.SessionNotification) bool
 	contextWindow        func(map[string]any, []modelInfo, []streams.ConfigOption) (contextWindowSample, bool)
 	normalizePromptUsage func(*streams.PromptUsage, map[string]any) *streams.PromptUsage
+	subagentFrame        func(map[string]any, string, any) (subagentFrame, bool)
 }
 
 type dialectConfigChange struct {
@@ -45,10 +46,20 @@ type contextWindowSample struct {
 }
 
 func newACPDialect(agentID string) acpDialect {
-	if agentID == grokAgentID {
+	switch agentID {
+	case grokAgentID:
 		return newGrokACPDialect()
+	case codexAgentID:
+		return newCodexACPDialect()
 	}
 	return acpDialect{}
+}
+
+func (d acpDialect) parseSubagentFrame(meta map[string]any, title string, rawInput any) (subagentFrame, bool) {
+	if d.subagentFrame == nil {
+		return subagentFrame{}, false
+	}
+	return d.subagentFrame(meta, title, rawInput)
 }
 
 func (d acpDialect) sessionConfigOptions(

@@ -7,6 +7,24 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	maxCodexSubagentCorrelations = 256
+	codexSubagentRunningStatus   = "running"
+)
+
+type codexSubagentCorrelationKey struct {
+	sessionID      string
+	toolCallID     string
+	childSessionID string
+}
+
+type codexSubagentCorrelation struct {
+	payload           *streams.NormalizedPayload
+	collaborationSeen bool
+	activitySeen      bool
+	lastSeen          uint64
+}
+
 // convertToolCallContents converts ACP ToolCallContent items to our protocol-agnostic type.
 func (a *Adapter) convertToolCallContents(contents []acp.ToolCallContent) []streams.ToolCallContentItem {
 	if len(contents) == 0 {
@@ -33,7 +51,7 @@ func (a *Adapter) convertToolCallContents(contents []acp.ToolCallContent) []stre
 		case c.Terminal != nil:
 			items = append(items, streams.ToolCallContentItem{
 				Type:       "terminal",
-				TerminalID: c.Terminal.TerminalId,
+				TerminalID: string(c.Terminal.TerminalId),
 			})
 		}
 	}
@@ -106,9 +124,13 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	normalizedPayload := a.normalizer.NormalizeToolCall(toolKind, args)
 
 	toolCallID := string(tc.ToolCallId)
-	a.mu.Lock()
-	a.activeToolCalls[toolCallID] = normalizedPayload
-	a.mu.Unlock()
+	normalizedPayload, eventType, codexSignal := a.trackToolCallPayload(
+		sessionID,
+		toolCallID,
+		normalizedPayload,
+		tc.Meta,
+		string(tc.Status),
+	)
 
 	// ScheduleWakeup tracking: meta carries `_meta.claudeCode.toolName`
 	// on the initial tool_call; rawInput is usually empty here but record
@@ -123,9 +145,12 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	if status == "" {
 		status = toolStatusInProgress
 	}
+	if codexSignal == codexSubagentSignalActivity {
+		status = codexActivityToolStatus(normalizedPayload)
+	}
 
 	return &AgentEvent{
-		Type:              streams.EventTypeToolCall,
+		Type:              eventType,
 		SessionID:         sessionID,
 		ToolCallID:        toolCallID,
 		ParentToolCallID:  parentToolUseID(tc.Meta),
@@ -135,6 +160,274 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 		NormalizedPayload: normalizedPayload,
 		ToolCallContents:  a.convertToolCallContents(tc.Content),
 	}
+}
+
+func (a *Adapter) trackToolCallPayload(
+	sessionID string,
+	toolCallID string,
+	payload *streams.NormalizedPayload,
+	meta map[string]any,
+	status string,
+) (*streams.NormalizedPayload, string, codexSubagentSignal) {
+	eventType := streams.EventTypeToolCall
+	signal := codexSubagentSignalNone
+	if a.agentID == codexAgentID {
+		signal = codexSubagentSignalFromMeta(meta)
+	}
+	if signal == codexSubagentSignalCollaboration && payload != nil && payload.SubagentTask() != nil && payload.SubagentTask().Status == "" {
+		fillCodexStatus(payload.SubagentTask(), status)
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if signal == codexSubagentSignalNone {
+		a.activeToolCalls[toolCallID] = payload
+		return payload, eventType, signal
+	}
+
+	correlated, duplicate := a.correlateCodexSubagentToolCallLocked(sessionID, toolCallID, payload, signal)
+	if !duplicate {
+		a.activeToolCalls[toolCallID] = correlated
+		return cloneSubagentPayload(correlated), eventType, signal
+	}
+	if active := a.activeToolCalls[toolCallID]; sameCodexSubagentChild(active, correlated) {
+		a.activeToolCalls[toolCallID] = correlated
+	}
+	return cloneSubagentPayload(correlated), streams.EventTypeToolUpdate, signal
+}
+
+func (a *Adapter) correlateCodexSubagentToolCallLocked(
+	sessionID string,
+	toolCallID string,
+	candidate *streams.NormalizedPayload,
+	signal codexSubagentSignal,
+) (*streams.NormalizedPayload, bool) {
+	if a.codexSubagentCorrelations == nil {
+		a.codexSubagentCorrelations = make(map[codexSubagentCorrelationKey]*codexSubagentCorrelation)
+	}
+	childSessionID := codexSubagentChildID(candidate)
+	key, correlation, found := a.findCodexSubagentCorrelationLocked(sessionID, toolCallID, childSessionID)
+	if found {
+		mergeCodexSubagentPayload(correlation.payload, candidate)
+		a.touchCodexSubagentCorrelationLocked(correlation, signal)
+		if childSessionID != "" && key.childSessionID == "" {
+			delete(a.codexSubagentCorrelations, key)
+			key.childSessionID = childSessionID
+			a.codexSubagentCorrelations[key] = correlation
+		}
+		return correlation.payload, true
+	}
+	if len(a.codexSubagentCorrelations) >= maxCodexSubagentCorrelations {
+		a.evictCodexSubagentCorrelationLocked()
+	}
+	key = codexSubagentCorrelationKey{
+		sessionID:      sessionID,
+		toolCallID:     toolCallID,
+		childSessionID: childSessionID,
+	}
+	// A completed child-less tombstone cannot safely identify a later
+	// child-less frame. Replace it and emit a new card instead of merging two
+	// potentially unrelated children.
+	delete(a.codexSubagentCorrelations, key)
+	correlation = &codexSubagentCorrelation{payload: cloneSubagentPayload(candidate)}
+	a.touchCodexSubagentCorrelationLocked(correlation, signal)
+	a.codexSubagentCorrelations[key] = correlation
+	return correlation.payload, false
+}
+
+func (a *Adapter) findCodexSubagentCorrelationLocked(
+	sessionID string,
+	toolCallID string,
+	childSessionID string,
+) (codexSubagentCorrelationKey, *codexSubagentCorrelation, bool) {
+	exactKey := codexSubagentCorrelationKey{
+		sessionID:      sessionID,
+		toolCallID:     toolCallID,
+		childSessionID: childSessionID,
+	}
+	if exact, ok := a.codexSubagentCorrelations[exactKey]; ok {
+		if childSessionID != "" {
+			return exactKey, exact, true
+		}
+		if !codexCorrelationComplete(exact) && a.codexCorrelationSiblingCountLocked(sessionID, toolCallID) == 1 {
+			return exactKey, exact, true
+		}
+		return codexSubagentCorrelationKey{}, nil, false
+	}
+
+	// A frame with a known child may adopt one earlier child-less frame only
+	// when it is the sole, incomplete correlation for this tool ID. Likewise,
+	// a child-less frame may adopt one known-child correlation under the same
+	// condition. Any completed or additional sibling makes the identity
+	// ambiguous, so the caller creates a new card.
+	var candidateKey codexSubagentCorrelationKey
+	var candidate *codexSubagentCorrelation
+	count := 0
+	for key, correlation := range a.codexSubagentCorrelations {
+		if key.sessionID != sessionID || key.toolCallID != toolCallID {
+			continue
+		}
+		count++
+		candidateKey = key
+		candidate = correlation
+	}
+	if count == 1 && !codexCorrelationComplete(candidate) &&
+		(childSessionID == "" || candidateKey.childSessionID == "") {
+		return candidateKey, candidate, true
+	}
+	return codexSubagentCorrelationKey{}, nil, false
+}
+
+func (a *Adapter) codexCorrelationSiblingCountLocked(sessionID, toolCallID string) int {
+	count := 0
+	for key := range a.codexSubagentCorrelations {
+		if key.sessionID == sessionID && key.toolCallID == toolCallID {
+			count++
+		}
+	}
+	return count
+}
+
+func codexCorrelationComplete(correlation *codexSubagentCorrelation) bool {
+	return correlation != nil && correlation.collaborationSeen && correlation.activitySeen
+}
+
+func codexSubagentChildID(payload *streams.NormalizedPayload) string {
+	if payload == nil || payload.SubagentTask() == nil {
+		return ""
+	}
+	return payload.SubagentTask().ChildSessionID
+}
+
+func sameCodexSubagentChild(left, right *streams.NormalizedPayload) bool {
+	leftID, rightID := codexSubagentChildID(left), codexSubagentChildID(right)
+	return left != nil && right != nil && leftID == rightID
+}
+
+func (a *Adapter) touchCodexSubagentCorrelationLocked(
+	correlation *codexSubagentCorrelation,
+	signal codexSubagentSignal,
+) {
+	a.codexSubagentSequence++
+	correlation.lastSeen = a.codexSubagentSequence
+	switch signal {
+	case codexSubagentSignalCollaboration:
+		correlation.collaborationSeen = true
+	case codexSubagentSignalActivity:
+		correlation.activitySeen = true
+	}
+}
+
+func (a *Adapter) evictCodexSubagentCorrelationLocked() {
+	key, found := a.oldestCodexSubagentCorrelationLocked(true)
+	if !found {
+		key, found = a.oldestCodexSubagentCorrelationLocked(false)
+	}
+	if found {
+		delete(a.codexSubagentCorrelations, key)
+	}
+}
+
+func (a *Adapter) oldestCodexSubagentCorrelationLocked(
+	fullyCorrelatedOnly bool,
+) (codexSubagentCorrelationKey, bool) {
+	var oldestKey codexSubagentCorrelationKey
+	var oldestSequence uint64
+	found := false
+	for key, correlation := range a.codexSubagentCorrelations {
+		fullyCorrelated := codexCorrelationComplete(correlation)
+		if fullyCorrelatedOnly && !fullyCorrelated {
+			continue
+		}
+		if !found || correlation.lastSeen < oldestSequence {
+			oldestKey = key
+			oldestSequence = correlation.lastSeen
+			found = true
+		}
+	}
+	return oldestKey, found
+}
+
+func (a *Adapter) clearCodexSubagentCorrelationsLocked(sessionID string) {
+	if sessionID == "" {
+		a.codexSubagentCorrelations = make(map[codexSubagentCorrelationKey]*codexSubagentCorrelation)
+		a.codexSubagentSequence = 0
+		return
+	}
+	for key := range a.codexSubagentCorrelations {
+		if key.sessionID == sessionID {
+			delete(a.codexSubagentCorrelations, key)
+		}
+	}
+}
+
+func cloneSubagentPayload(payload *streams.NormalizedPayload) *streams.NormalizedPayload {
+	if payload == nil || payload.SubagentTask() == nil {
+		return payload
+	}
+	src := payload.SubagentTask()
+	clone := streams.NewSubagentTask(src.Description, src.Prompt, src.SubagentType)
+	dst := clone.SubagentTask()
+	dst.Status = src.Status
+	dst.AgentID = src.AgentID
+	dst.Model = src.Model
+	dst.ChildSessionID = src.ChildSessionID
+	dst.DurationMs = src.DurationMs
+	dst.TotalTokens = src.TotalTokens
+	if src.ToolUseCount != nil {
+		count := *src.ToolUseCount
+		dst.ToolUseCount = &count
+	}
+	dst.ResultText = src.ResultText
+	dst.IsAsync = src.IsAsync
+	dst.OutputFile = src.OutputFile
+	dst.CanReadOutputFile = src.CanReadOutputFile
+	dst.SetIsAuggie(src.IsAuggie())
+	return clone
+}
+
+func mergeCodexSubagentPayload(current, candidate *streams.NormalizedPayload) {
+	if current == nil || candidate == nil {
+		return
+	}
+	dst, src := current.SubagentTask(), candidate.SubagentTask()
+	if dst == nil || src == nil {
+		return
+	}
+	fillIfEmpty(&dst.Description, src.Description)
+	fillIfEmpty(&dst.Prompt, src.Prompt)
+	fillIfEmpty(&dst.SubagentType, src.SubagentType)
+	fillIfEmpty(&dst.Model, src.Model)
+	fillIfEmpty(&dst.ChildSessionID, src.ChildSessionID)
+	if codexSubagentStatusRank(src.Status) >= codexSubagentStatusRank(dst.Status) {
+		fillCodexStatus(dst, src.Status)
+	}
+}
+
+func fillCodexStatus(payload *streams.SubagentTaskPayload, status string) {
+	if status != "" {
+		payload.Status = status
+	}
+}
+
+func codexSubagentStatusRank(status string) int {
+	switch status {
+	case toolStatusCompleted, toolStatusComplete, "errored", "error", "interrupted", "shutdown", "notFound", toolStatusCancelled:
+		return 3
+	case codexSubagentRunningStatus, "inProgress", toolStatusInProgress:
+		return 2
+	case codexSubagentStarted, "pendingInit":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func codexActivityToolStatus(payload *streams.NormalizedPayload) string {
+	if payload != nil && payload.SubagentTask() != nil && codexSubagentStatusRank(payload.SubagentTask().Status) == 3 {
+		return toolStatusComplete
+	}
+	return toolStatusInProgress
 }
 
 // convertToolCallResultUpdate converts a ToolCallUpdate notification to an AgentEvent.
@@ -283,6 +576,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 			a.dropMonitorByToolCallIDLocked(sessionID, toolCallID)
 		}
 	}
+	emittedPayload := cloneSubagentPayload(payload)
 	a.mu.Unlock()
 
 	// ScheduleWakeup tracking: tool_call_update is where rawInput.prompt and
@@ -333,7 +627,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		ParentToolCallID:  parentToolUseID(tcu.Meta),
 		ToolTitle:         title,
 		ToolStatus:        status,
-		NormalizedPayload: payload,
+		NormalizedPayload: emittedPayload,
 		ToolCallContents:  convertedContents,
 	}
 }

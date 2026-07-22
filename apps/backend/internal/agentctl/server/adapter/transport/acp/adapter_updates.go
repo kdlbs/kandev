@@ -10,14 +10,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// notifWork is the item type carried on notifQueue. Exactly one of the two
-// fields is populated: notif for a real SDK notification (the common case),
-// sync for a barrier posted by syncNotifQueue. The worker closes sync when
-// it pops the barrier off the queue, releasing the waiter once everything
-// queued ahead of it has been processed.
+// notifWork is the item type carried on notifQueue. notif is populated for a
+// real SDK notification (the common case); sync identifies a barrier and may
+// carry afterBarrier state finalization. The worker closes sync after the
+// callback, releasing the waiter once everything queued ahead has completed.
 type notifWork struct {
-	notif acp.SessionNotification
-	sync  chan struct{}
+	notif        acp.SessionNotification
+	sync         chan struct{}
+	afterBarrier func()
 }
 
 // enqueueACPUpdate is the SDK-facing notification handler. It pushes the
@@ -56,16 +56,25 @@ func (a *Adapter) enqueueACPUpdate(n acp.SessionNotification) {
 // reintroduce the very race this primitive exists to prevent (sweeps and
 // EventTypeComplete running while the worker still has queued frames).
 // Only adapter shutdown via lifetimeCtx can release the wait early.
-func (a *Adapter) syncNotifQueue() {
+func (a *Adapter) syncNotifQueue() bool {
+	return a.syncNotifQueueThen(nil)
+}
+
+// syncNotifQueueThen runs afterBarrier on the update worker at the FIFO
+// barrier boundary. This is useful when state must be finalized after all
+// preceding notifications but before the worker can process later ones.
+func (a *Adapter) syncNotifQueueThen(afterBarrier func()) bool {
 	ch := make(chan struct{})
 	select {
 	case <-a.lifetimeCtx.Done():
-		return
-	case a.notifQueue <- notifWork{sync: ch}:
+		return false
+	case a.notifQueue <- notifWork{sync: ch, afterBarrier: afterBarrier}:
 	}
 	select {
 	case <-a.lifetimeCtx.Done():
+		return false
 	case <-ch:
+		return true
 	}
 }
 
@@ -92,6 +101,9 @@ func (a *Adapter) runUpdateWorker() {
 			return
 		case item := <-a.notifQueue:
 			if item.sync != nil {
+				if item.afterBarrier != nil && a.lifetimeCtx.Err() == nil {
+					item.afterBarrier()
+				}
 				close(item.sync)
 				continue
 			}
@@ -154,10 +166,6 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 	var event *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
-	}
-	if event == nil && !suppressed {
-		// Try untyped updates not yet supported by the ACP SDK.
-		event = a.tryConvertUntypedUpdate(rawData, sessionID)
 	}
 	if event != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, event)
@@ -223,17 +231,28 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 
 	switch {
 	case u.AgentMessageChunk != nil:
-		return a.convertMessageChunk(sessionID, u.AgentMessageChunk.Content, "assistant")
+		return a.convertMessageChunkWithProtocolID(
+			sessionID,
+			u.AgentMessageChunk.Content,
+			"assistant",
+			derefStr(u.AgentMessageChunk.MessageId),
+		)
 
 	case u.UserMessageChunk != nil:
-		return a.convertMessageChunk(sessionID, u.UserMessageChunk.Content, "user")
+		return a.convertMessageChunkWithProtocolID(
+			sessionID,
+			u.UserMessageChunk.Content,
+			"user",
+			derefStr(u.UserMessageChunk.MessageId),
+		)
 
 	case u.AgentThoughtChunk != nil:
 		if u.AgentThoughtChunk.Content.Text != nil {
 			return &AgentEvent{
-				Type:          streams.EventTypeReasoning,
-				SessionID:     sessionID,
-				ReasoningText: u.AgentThoughtChunk.Content.Text.Text,
+				Type:              streams.EventTypeReasoning,
+				SessionID:         sessionID,
+				ProtocolMessageID: derefStr(u.AgentThoughtChunk.MessageId),
+				ReasoningText:     u.AgentThoughtChunk.Content.Text.Text,
 			}
 		}
 
@@ -288,46 +307,32 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 				Data:           map[string]any{"config_options_source": "provider_update"},
 			}
 		}
+
+	case u.SessionInfoUpdate != nil:
+		return &AgentEvent{
+			Type:             streams.EventTypeSessionInfo,
+			SessionID:        sessionID,
+			SessionTitle:     derefStr(u.SessionInfoUpdate.Title),
+			SessionUpdatedAt: derefStr(u.SessionInfoUpdate.UpdatedAt),
+			SessionMeta:      u.SessionInfoUpdate.Meta,
+		}
+
+	case u.UsageUpdate != nil:
+		return a.convertUsageUpdate(sessionID, u.UsageUpdate)
 	}
 
 	return nil
 }
 
-// acpUsageUpdate represents the ACP "usage_update" session notification.
-// TODO: Replace with acp.SessionUsageUpdate when the ACP SDK adds native support.
-type acpUsageUpdate struct {
-	SessionUpdate string `json:"sessionUpdate"`
-	Size          int64  `json:"size"`
-	Used          int64  `json:"used"`
-	Cost          *struct {
-		Amount   float64 `json:"amount"`
-		Currency string  `json:"currency"`
-	} `json:"cost,omitempty"`
-}
-
-// acpSessionInfoUpdate represents the ACP "session_info_update" notification.
-// TODO: Replace with the SDK type when acp-go-sdk exposes it.
-type acpSessionInfoUpdate struct {
-	SessionUpdate string         `json:"sessionUpdate"`
-	Title         string         `json:"title,omitempty"`
-	UpdatedAt     string         `json:"updatedAt,omitempty"`
-	Meta          map[string]any `json:"_meta,omitempty"`
-}
-
-// usageTracker carries the running cumulative usage state for one ACP
-// session — used to infer codex-acp's per-turn deltas. Reset when the
-// prompt-complete handler consumes it; lastUsed sticks so subsequent
-// updates compute deltas from the new baseline.
-//
-// lastCostSubcents is the most recent USD cost (Layer A from spec) in
-// hundredths of a cent; pumped through to PromptUsage.
-// ProviderReportedCostSubcents at consume time. The actual claude-acp
-// frames carry a cumulative number, but we treat the most-recent value
-// as the per-turn cost because claude-code already emits one cost
-// snapshot per session/prompt cycle.
+// usageTracker carries the latest cumulative ACP usage sample and the sample
+// consumed at the previous prompt boundary. `used` is current context
+// occupancy, so its nonnegative growth is only an estimate of turn input. Cost
+// is cumulative session cost and is converted to a true per-turn delta.
 type usageTracker struct {
-	lastUsed         int64
-	lastCostSubcents int64
+	latestUsed           int64
+	consumedUsed         int64
+	latestCostSubcents   int64
+	consumedCostSubcents int64
 	// maxSize is the largest context-window size reported for this session.
 	// claude-acp's default model emits a 200K turn-start frame and a 1M
 	// turn-end frame; sticky-max prevents the stale 200K from shrinking
@@ -346,20 +351,49 @@ func (a *Adapter) ensureUsageTracker(sessionID string) *usageTracker {
 	return tr
 }
 
+func (a *Adapter) clearUsageTrackers() {
+	a.mu.Lock()
+	clear(a.usageBySession)
+	a.mu.Unlock()
+}
+
+// retainConsumedUsageBaselineLocked drops stale session trackers while
+// retaining the new session's sticky context size and latest sample. The
+// retained sample is marked consumed so session-creation telemetry is not
+// attributed to the first prompt. The caller must hold a.mu for writing.
+func (a *Adapter) retainConsumedUsageBaselineLocked(sessionID string) {
+	tracker := a.usageBySession[sessionID]
+	clear(a.usageBySession)
+	if tracker == nil {
+		return
+	}
+	a.usageBySession[sessionID] = tracker
+	tracker.consumedUsed = tracker.latestUsed
+	tracker.consumedCostSubcents = tracker.latestCostSubcents
+}
+
 // recordUsageAndMaxSize updates per-session usage/cost tracking and returns
-// the sticky-max context window size for the session.
-func (a *Adapter) recordUsageAndMaxSize(sessionID string, size, used, costSubcents int64) int64 {
+// the sticky-max context window size for the session. A decreasing cumulative
+// value means compaction or a provider-side reset; advance both baselines so a
+// later consume never emits a negative or stale delta.
+func (a *Adapter) recordUsageAndMaxSize(sessionID string, size, used int64, cost *acp.Cost) int64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	tr := a.ensureUsageTracker(sessionID)
 	if size > tr.maxSize {
 		tr.maxSize = size
 	}
-	if used > tr.lastUsed {
-		tr.lastUsed = used
+	used = max(used, 0)
+	if used < tr.latestUsed {
+		tr.consumedUsed = used
 	}
-	if costSubcents > 0 {
-		tr.lastCostSubcents = costSubcents
+	tr.latestUsed = used
+	if cost != nil && strings.EqualFold(cost.Currency, "USD") {
+		costSubcents := max(int64(cost.Amount*10000), 0)
+		if costSubcents < tr.latestCostSubcents {
+			tr.consumedCostSubcents = costSubcents
+		}
+		tr.latestCostSubcents = costSubcents
 	}
 	return tr.maxSize
 }
@@ -375,9 +409,9 @@ func (a *Adapter) resetContextWindowMaxSize(sessionID string) {
 	delete(a.contextSamples, sessionID)
 }
 
-// consumeUsageDelta returns the delta of cumulative `used` since the
-// last consumption + the most recent USD cost (subcents). Both fields
-// are reset to zero after read so the next turn starts fresh.
+// consumeUsageDelta returns nonnegative growth in context occupancy since the
+// previous prompt boundary and the delta in cumulative USD session cost. Both
+// consumed baselines advance to the latest observed sample.
 func (a *Adapter) consumeUsageDelta(sessionID string) (int64, int64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -385,64 +419,38 @@ func (a *Adapter) consumeUsageDelta(sessionID string) (int64, int64) {
 	if tr == nil {
 		return 0, 0
 	}
-	delta := tr.lastUsed
-	cost := tr.lastCostSubcents
-	tr.lastUsed = 0
-	tr.lastCostSubcents = 0
+	delta := max(tr.latestUsed-tr.consumedUsed, 0)
+	cost := max(tr.latestCostSubcents-tr.consumedCostSubcents, 0)
+	tr.consumedUsed = tr.latestUsed
+	tr.consumedCostSubcents = tr.latestCostSubcents
 	return delta, cost
 }
 
-// tryConvertUntypedUpdate handles ACP session update types not yet supported by the SDK.
-// When the SDK adds native support, move the handling into convertNotification and delete this.
-func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID string) *AgentEvent {
-	var envelope struct {
-		Update json.RawMessage `json:"update"`
+// consumeUsageBaselineLocked marks replayed usage and cost as historical so
+// the first prompt after session/load starts from the restored cumulative
+// sample. The caller must hold a.mu for writing.
+func (a *Adapter) consumeUsageBaselineLocked(sessionID string) {
+	if tr := a.usageBySession[sessionID]; tr != nil {
+		tr.consumedUsed = tr.latestUsed
+		tr.consumedCostSubcents = tr.latestCostSubcents
 	}
-	if err := json.Unmarshal(rawNotification, &envelope); err != nil {
+}
+
+func (a *Adapter) convertUsageUpdate(sessionID string, usage *acp.SessionUsageUpdate) *AgentEvent {
+	if usage == nil || usage.Size <= 0 {
 		return nil
 	}
-
-	var sessionInfo acpSessionInfoUpdate
-	if err := json.Unmarshal(envelope.Update, &sessionInfo); err == nil &&
-		sessionInfo.SessionUpdate == "session_info_update" {
-		return &AgentEvent{
-			Type:             streams.EventTypeSessionInfo,
-			SessionID:        sessionID,
-			SessionTitle:     sessionInfo.Title,
-			SessionUpdatedAt: sessionInfo.UpdatedAt,
-			SessionMeta:      sessionInfo.Meta,
-		}
-	}
-
-	var usage acpUsageUpdate
-	if err := json.Unmarshal(envelope.Update, &usage); err != nil {
-		return nil
-	}
-	if usage.SessionUpdate != "usage_update" || usage.Size <= 0 {
-		return nil
-	}
-
-	// Forward usage_update.cost to the prompt-complete handler via the
-	// per-session tracker. claude-acp emits a USD float; we convert to
-	// hundredths-of-a-cent (subcents). The actual cost frame might be
-	// "cumulative-this-session"; the prompt-complete handler currently
-	// treats the value as the turn's cost — close enough for the
-	// budget+display surface today and revisited if claude-acp's
-	// semantics change.
-	var costSubcents int64
-	if usage.Cost != nil {
-		costSubcents = int64(usage.Cost.Amount * 10000)
-	}
-	effectiveSize := a.recordUsageAndMaxSize(sessionID, usage.Size, usage.Used, costSubcents)
-
-	remaining := max(effectiveSize-usage.Used, 0)
+	size := int64(usage.Size)
+	used := max(int64(usage.Used), 0)
+	effectiveSize := a.recordUsageAndMaxSize(sessionID, size, used, usage.Cost)
+	remaining := max(effectiveSize-used, 0)
 	return &AgentEvent{
 		Type:                   streams.EventTypeContextWindow,
 		SessionID:              sessionID,
 		ContextWindowSize:      effectiveSize,
-		ContextWindowUsed:      usage.Used,
+		ContextWindowUsed:      used,
 		ContextWindowRemaining: remaining,
-		ContextEfficiency:      float64(usage.Used) / float64(effectiveSize) * 100,
+		ContextEfficiency:      float64(used) / float64(effectiveSize) * 100,
 	}
 }
 
@@ -452,9 +460,19 @@ func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID stri
 //
 //nolint:nestif // pre-existing complexity preserved from adapter.go file split
 func (a *Adapter) convertMessageChunk(sessionID string, content acp.ContentBlock, role string) *AgentEvent {
+	return a.convertMessageChunkWithProtocolID(sessionID, content, role, "")
+}
+
+func (a *Adapter) convertMessageChunkWithProtocolID(
+	sessionID string,
+	content acp.ContentBlock,
+	role string,
+	protocolMessageID string,
+) *AgentEvent {
 	event := &AgentEvent{
-		Type:      streams.EventTypeMessageChunk,
-		SessionID: sessionID,
+		Type:              streams.EventTypeMessageChunk,
+		SessionID:         sessionID,
+		ProtocolMessageID: protocolMessageID,
 	}
 
 	// Only set Role for user messages (assistant is the default)

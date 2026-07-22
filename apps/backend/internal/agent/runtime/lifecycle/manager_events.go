@@ -24,6 +24,12 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	if event.Role == "user" || event.Text == "" {
 		return
 	}
+	m.appendAssistantHistoryChunk(execution, event.Text)
+	if event.ProtocolMessageID != "" {
+		m.flushPendingLegacyMessage(execution)
+		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text)
+		return
+	}
 	execution.messageMu.Lock()
 	execution.messageBuffer.WriteString(event.Text)
 	bufferLenAfterWrite := execution.messageBuffer.Len()
@@ -53,6 +59,11 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 // handleReasoningEvent handles a "reasoning" agent event, accumulating and flushing on newlines.
 func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.ReasoningText == "" {
+		return
+	}
+	if event.ProtocolMessageID != "" {
+		m.flushPendingLegacyThinking(execution)
+		m.publishProtocolThinking(execution, event.ProtocolMessageID, event.ReasoningText)
 		return
 	}
 	execution.messageMu.Lock()
@@ -296,14 +307,13 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 
 	// Flush the message buffer to publish any remaining content as a streaming message.
 	flushedText := m.flushMessageBuffer(execution)
+	execution.messageMu.Lock()
+	execution.clearProtocolMessageCorrelationLocked()
+	execution.messageMu.Unlock()
 	if flushedText != "" {
 		event.Text = flushedText
-		if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
-			if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
-				m.logger.Warn("failed to store final agent message to history", zap.Error(err))
-			}
-		}
 	}
+	m.flushAssistantHistory(execution)
 
 	m.logger.Info("complete event processed",
 		zap.String("execution_id", execution.ID),
@@ -334,6 +344,7 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 		// the streaming path itself and always returns "".
 		m.flushMessageBuffer(execution)
 	}
+	m.flushAssistantHistory(execution)
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 		if err := m.historyManager.AppendToolCall(execution.SessionID, event); err != nil {
 			m.logger.Warn("failed to store tool call to history", zap.Error(err))
@@ -349,6 +360,7 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 // handleToolUpdateEvent stores completed tool results in session history.
 func (m *Manager) handleToolUpdateEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" && event.ToolStatus == toolStatusComplete {
+		m.flushAssistantHistory(execution)
 		if err := m.historyManager.AppendToolResult(execution.SessionID, event); err != nil {
 			m.logger.Warn("failed to store tool result to history", zap.Error(err))
 		}

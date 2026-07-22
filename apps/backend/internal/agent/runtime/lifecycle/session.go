@@ -694,10 +694,7 @@ func (sm *SessionManager) SendPrompt(
 	// Clear buffers and streaming state before starting prompt
 	// This ensures each prompt starts fresh and doesn't append to previous message
 	execution.messageMu.Lock()
-	execution.messageBuffer.Reset()
-	execution.thinkingBuffer.Reset()
-	execution.currentMessageID = ""  // Clear streaming message ID for new turn
-	execution.currentThinkingID = "" // Clear streaming thinking ID for new turn
+	execution.resetStreamingStateLocked()
 	execution.messageMu.Unlock()
 
 	// Apply resume context injection if needed (first prompt after resume)

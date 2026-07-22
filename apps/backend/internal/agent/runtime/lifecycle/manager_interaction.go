@@ -452,10 +452,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		exec.resumeContextInjected = false
 
 		exec.messageMu.Lock()
-		exec.messageBuffer.Reset()
-		exec.thinkingBuffer.Reset()
-		exec.currentMessageID = ""
-		exec.currentThinkingID = ""
+		exec.resetStreamingStateLocked()
 		exec.messageMu.Unlock()
 
 		// Drain any stale prompt completion signal
@@ -670,10 +667,7 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		exec.ContinueCommand = freshContinueCmd
 
 		exec.messageMu.Lock()
-		exec.messageBuffer.Reset()
-		exec.thinkingBuffer.Reset()
-		exec.currentMessageID = ""
-		exec.currentThinkingID = ""
+		exec.resetStreamingStateLocked()
 		exec.messageMu.Unlock()
 
 		// Drain any stale prompt completion signal

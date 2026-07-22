@@ -80,12 +80,13 @@ func DetectToolOperationType(toolKind string, args map[string]any) string {
 // Normalizer converts ACP protocol tool data to NormalizedPayload.
 type Normalizer struct {
 	agentID string
+	dialect acpDialect
 }
 
 // NewNormalizer creates a new ACP normalizer. agentID selects per-agent enrichers
 // (e.g. "codex-acp"); pass "" for common-layer-only normalization in tests.
 func NewNormalizer(agentID string) *Normalizer {
-	return &Normalizer{agentID: agentID}
+	return &Normalizer{agentID: agentID, dialect: newACPDialect(agentID)}
 }
 
 // NormalizeToolCall converts ACP tool call data to NormalizedPayload.
@@ -374,7 +375,28 @@ func (n *Normalizer) EnrichFromToolCallUpdate(
 	rawInput any,
 	supplemental map[string]any,
 ) {
+	n.enrichDialectSubagent(payload, meta, rawInput)
 	applyAgentEnrichment(n.agentID, payload, enrichFrameFromUpdate(title, meta, rawInput, supplemental))
+}
+
+func (n *Normalizer) enrichDialectSubagent(
+	payload *streams.NormalizedPayload,
+	meta map[string]any,
+	rawInput any,
+) {
+	if payload == nil || payload.Kind() != streams.ToolKindSubagentTask {
+		return
+	}
+	frame, ok := n.dialect.parseSubagentFrame(meta, "", rawInput)
+	if !ok {
+		return
+	}
+	updateSubagentTaskInput(payload.SubagentTask(), map[string]any{
+		subagentKeyDescription:  frame.description,
+		subagentKeyPrompt:       frame.prompt,
+		subagentKeySubagentType: frame.subagentType,
+	})
+	applySubagentResult(payload.SubagentTask(), frame.result)
 }
 
 // normalizeEdit converts ACP edit tool data.
@@ -531,6 +553,11 @@ func (n *Normalizer) normalizeSubagent(args map[string]any) (*streams.Normalized
 	meta, _ := args[argKeyMeta].(map[string]any)
 	title, _ := args[argKeyTitle].(string)
 	rawInput := args["raw_input"]
+	if frame, ok := n.dialect.parseSubagentFrame(meta, title, rawInput); ok {
+		payload := streams.NewSubagentTask(frame.description, frame.prompt, frame.subagentType)
+		applySubagentResult(payload.SubagentTask(), frame.result)
+		return payload, true
+	}
 	desc, prompt, subagentType, ok := recognizeSubagent(meta, title, rawInput)
 	if !ok {
 		return nil, false
