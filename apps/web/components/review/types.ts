@@ -19,6 +19,8 @@ export type ReviewFile = {
   repository_id?: string;
   /** Human-readable repo name for tree node labels (e.g. "frontend"). */
   repository_name?: string;
+  /** Exact git ref used as the old side when this committed patch was built. */
+  base_ref?: string;
 };
 
 /**

@@ -42,23 +42,26 @@ describe("buildReviewSources", () => {
   });
 
   it("tags committed files from cumulativeDiff", () => {
+    const cumulativeDiff = {
+      base_commit: "single-repo-base-sha",
+      files: {
+        "src/b.ts": {
+          diff: "@@ -1 +1 @@\n-x\n+y\n",
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+        },
+      },
+    };
     const result = buildReviewSources({
       gitStatus: undefined,
       statusByRepo: undefined,
-      cumulativeDiff: {
-        files: {
-          "src/b.ts": {
-            diff: "@@ -1 +1 @@\n-x\n+y\n",
-            status: "modified",
-            additions: 1,
-            deletions: 1,
-          },
-        },
-      },
+      cumulativeDiff,
       prDiffFiles: undefined,
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("committed");
+    expect(result.allFiles[0]).toMatchObject({ base_ref: "single-repo-base-sha" });
     expect(result.sourceCounts).toEqual({ uncommitted: 0, committed: 1, pr: 0 });
   });
 
@@ -553,27 +556,30 @@ describe("buildReviewSources", () => {
   // the dedup key was `<repo>:<repo>\x00<path>` (mismatched against any
   // other source). Verify we now use `file.path` when present.
   it("multi-repo cumulative: NUL-composite map key + stamped path renders clean path", () => {
+    const cumulativeDiff = {
+      files: {
+        "frontend\u0000src/x.ts": {
+          diff: "@@x@@",
+          status: "modified",
+          additions: 1,
+          deletions: 0,
+          repository_name: "frontend",
+          path: "src/x.ts",
+          base_ref: "frontend-base-sha",
+        },
+      },
+    };
     const result = buildReviewSources({
       gitStatus: undefined,
       statusByRepo: undefined,
-      cumulativeDiff: {
-        files: {
-          "frontend\u0000src/x.ts": {
-            diff: "@@x@@",
-            status: "modified",
-            additions: 1,
-            deletions: 0,
-            repository_name: "frontend",
-            path: "src/x.ts",
-          },
-        },
-      },
+      cumulativeDiff,
       prDiffFiles: undefined,
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].path).toBe("src/x.ts");
     expect(result.allFiles[0].repository_name).toBe("frontend");
     expect(result.allFiles[0].source).toBe("committed");
+    expect(result.allFiles[0]).toMatchObject({ base_ref: "frontend-base-sha" });
   });
 
   it("sorts files by repository_name then path", () => {

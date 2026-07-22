@@ -21,6 +21,8 @@ vi.mock("@/lib/ws/workspace-files", () => ({
 type UseExpandableDiffFn = typeof import("./use-expandable-diff").useExpandableDiff;
 
 let useExpandableDiff: UseExpandableDiffFn;
+const FILE_PATH = "src/foo.ts";
+
 beforeEach(async () => {
   vi.resetModules();
   processFileMock.mockReset();
@@ -33,7 +35,7 @@ beforeEach(async () => {
 /** Build a minimal FileDiffMetadata where the trailing-context counts match. */
 function consistentMeta(overrides: Partial<FileDiffMetadata> = {}): FileDiffMetadata {
   return {
-    name: "src/foo.ts",
+    name: FILE_PATH,
     type: "modified" as FileDiffMetadata["type"],
     hunks: [
       {
@@ -71,7 +73,7 @@ const PARTIAL = consistentMeta({ isPartial: true });
 
 const baseProps = {
   sessionId: "sess-1",
-  filePath: "src/foo.ts",
+  filePath: FILE_PATH,
   baseRef: "HEAD",
   diff: "diff --git a/src/foo.ts b/src/foo.ts\n--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n",
   enableExpansion: true,
@@ -103,6 +105,31 @@ describe("useExpandableDiff", () => {
     );
     await loadAndSettle(result.current.loadContent);
     expect(result.current.metadata).toBe(reparsed);
+  });
+
+  it("scopes both content requests to the file repository", async () => {
+    requestFileContentMock.mockResolvedValue({ content: "new", is_binary: false });
+    requestFileContentAtRefMock.mockResolvedValue({ content: "old", is_binary: false });
+    processFileMock.mockReturnValue(consistentMeta());
+
+    const { result } = renderHook(() =>
+      useExpandableDiff({ ...baseProps, fileDiffMetadata: PARTIAL, repo: "frontend" }),
+    );
+    await loadAndSettle(result.current.loadContent);
+
+    expect(requestFileContentMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "sess-1",
+      FILE_PATH,
+      "frontend",
+    );
+    expect(requestFileContentAtRefMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "sess-1",
+      FILE_PATH,
+      "HEAD",
+      "frontend",
+    );
   });
 
   it("falls back to the partial metadata when the reparse is inconsistent", async () => {

@@ -63,8 +63,16 @@ describe("buildAllFiles (review dialog)", () => {
     expect(paths).toEqual(["src/a.ts", "src/b.ts"]);
     expect(result.every((f) => f.source === "committed")).toBe(true);
     expect(result.every((f) => !f.repository_name)).toBe(true);
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "src/a.ts", base_ref: "abc" }),
+        expect.objectContaining({ path: "src/b.ts", base_ref: "abc" }),
+      ]),
+    );
   });
+});
 
+describe("buildAllFiles", () => {
   // Multi-repo: `mergeCumulativeFiles` uses a `<repo>\x00<path>` composite map
   // key and stamps the clean repo-relative path on `file.path`. The displayed
   // path must come from the stamped value, never from the composite key.
@@ -83,6 +91,7 @@ describe("buildAllFiles (review dialog)", () => {
           diff: "@@ -1 +1 @@\n-x\n+y\n",
           repository_name: "frontend",
           path: "src/app.tsx",
+          base_ref: "frontend-base-sha",
         },
         "backend\u0000main.go": {
           status: "modified",
@@ -92,6 +101,7 @@ describe("buildAllFiles (review dialog)", () => {
           diff: "@@ -1 +1,3 @@\n+a\n+b\n+c\n",
           repository_name: "backend",
           path: "main.go",
+          base_ref: "backend-base-sha",
         },
       },
     } as unknown as CumulativeDiff;
@@ -101,6 +111,8 @@ describe("buildAllFiles (review dialog)", () => {
     const byRepo = Object.fromEntries(result.map((f) => [f.repository_name, f]));
     expect(byRepo["frontend"]?.path).toBe("src/app.tsx");
     expect(byRepo["backend"]?.path).toBe("main.go");
+    expect(byRepo["frontend"]).toMatchObject({ base_ref: "frontend-base-sha" });
+    expect(byRepo["backend"]).toMatchObject({ base_ref: "backend-base-sha" });
     // No NUL or composite-key leakage into displayed paths.
     expect(result.every((f) => !f.path.includes("\u0000"))).toBe(true);
   });

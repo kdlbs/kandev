@@ -44,6 +44,7 @@ function addCumulativeDiffFiles(
   fileMap: Map<string, ReviewFile>,
   files: CumulativeDiff["files"],
   useRepositoryKeys: boolean,
+  defaultBaseRef?: string,
 ) {
   // Multi-repo: backend stamps each per-file payload with `repository_name`
   // + the repo-relative `path`, and uses a NUL-composite `<repo>\x00<path>`
@@ -70,6 +71,7 @@ function addCumulativeDiffFiles(
       old_path: file.old_path,
       diff_skip_reason: file.diff_skip_reason,
       repository_name: repoName,
+      base_ref: file.base_ref ?? defaultBaseRef,
     });
   }
 }
@@ -136,7 +138,12 @@ export function buildAllFiles(
   // content even though the cumulative-diff hook was successfully refetching.
   if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
   if (cumulativeDiff?.files) {
-    addCumulativeDiffFiles(fileMap, cumulativeDiff.files, useRepositoryKeys);
+    addCumulativeDiffFiles(
+      fileMap,
+      cumulativeDiff.files,
+      useRepositoryKeys,
+      cumulativeDiff.base_commit,
+    );
   }
   if (prDiffFiles) addPRFiles(fileMap, prDiffFiles, prRepoName);
   return Array.from(fileMap.values()).sort((a, b) => {

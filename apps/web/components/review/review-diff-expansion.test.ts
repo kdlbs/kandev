@@ -45,6 +45,17 @@ describe("resolveDiffExpansion", () => {
     });
   });
 
+  it("prefers the exact cumulative-diff base ref for a committed branch worktree", () => {
+    const f = {
+      ...file({ source: "committed", repository_name: "backend-feature-x" }),
+      base_ref: "4f5c2f7",
+    } as ReviewFile;
+    expect(resolveDiffExpansion(f, MULTI_REPO_BASES, "main")).toEqual({
+      enableExpansion: true,
+      baseRef: "4f5c2f7",
+    });
+  });
+
   // Multi-repo guard: a committed file whose repo isn't in the map must NOT
   // borrow the single-repo fallback (another repo's base branch) — that would
   // fetch the wrong "old" content and silently drop expansion. Disable instead.
