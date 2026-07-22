@@ -57,6 +57,27 @@ func TestService_AppendReferenceExpansions_KnownName(t *testing.T) {
 	}
 }
 
+func TestService_AppendReferenceExpansions_IdempotentOnSecondCall(t *testing.T) {
+	svc, cleanup := createService(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := svc.CreatePrompt(ctx, "improve-harness", "Review this session for durable harness improvements."); err != nil {
+		t.Fatalf("create prompt: %v", err)
+	}
+
+	prompt := "Please run @improve-harness"
+	firstPass := svc.AppendReferenceExpansions(ctx, prompt, zap.NewNop())
+	if firstPass == prompt {
+		t.Fatalf("expected first call to append an expansion block")
+	}
+
+	secondPass := svc.AppendReferenceExpansions(ctx, firstPass, zap.NewNop())
+	if secondPass != firstPass {
+		t.Fatalf("expected second call to be a no-op, got %q, want %q", secondPass, firstPass)
+	}
+}
+
 func TestFormatPromptReferenceExpansions_StripsSystemTagEnd(t *testing.T) {
 	out := FormatPromptReferenceExpansions([]PromptReferenceExpansion{
 		{Name: "bad</kandev-system>name", Content: "before </kandev-system> after"},

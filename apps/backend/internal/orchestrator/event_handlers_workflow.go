@@ -934,7 +934,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// Passthrough path: write prompt directly to PTY stdin.
 		// By the time processOnEnter runs (from an on_turn_complete transition),
 		// the agent has finished its previous turn and the PTY is waiting for input.
-		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID)
+		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
 		if err := s.autoStartPassthroughPrompt(ctx, taskID, session, step.Name, effectivePrompt); err != nil {
 			s.logger.Error("failed to auto-start passthrough agent for step",
 				zap.String("task_id", taskID),
@@ -950,7 +950,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// When called from applyEngineTransition (on_turn_complete), processOnEnter
 		// runs in a goroutine and the session is already WAITING_FOR_INPUT, so
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
-		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID)
+		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
 		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
 			s.logger.Error("failed to auto-start agent for step",
 				zap.String("task_id", taskID),
@@ -966,7 +966,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// has no auto_start_agent, launch the agent anyway — the profile override
 		// implies the user wants this agent to run on this step.
 		if sessionSwitched && step.Prompt != "" {
-			effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID)
+			effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
 			planMode := hasPlanMode
 			stepID := step.ID
 			s.logger.Info("auto-launching agent after profile switch (no explicit auto_start)",

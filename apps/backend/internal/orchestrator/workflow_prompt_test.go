@@ -37,7 +37,7 @@ func TestBuildWorkflowPrompt_ReplacesTaskPromptPlaceholder(t *testing.T) {
 		Prompt: "Implement this exactly:\n\n{{task_prompt}}",
 	}
 
-	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1")
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
 
 	want := "Implement this exactly:\n\nMigrate Atlantis datasource."
 	if got != want {
@@ -52,7 +52,7 @@ func TestBuildWorkflowPrompt_UsesStepPromptOnlyWithoutTaskPromptPlaceholder(t *t
 		Prompt: "Commit the changes, push and create a draft PR.",
 	}
 
-	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1")
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
 
 	want := "Commit the changes, push and create a draft PR."
 	if got != want {
@@ -67,7 +67,7 @@ func TestBuildWorkflowPrompt_NoExpanderLeavesReferenceUnexpanded(t *testing.T) {
 		Prompt: "Use @my-prompt for context.",
 	}
 
-	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1")
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
 
 	want := "Use @my-prompt for context."
 	if got != want {
@@ -84,13 +84,33 @@ func TestBuildWorkflowPrompt_ExpandsStepPromptReference(t *testing.T) {
 		Prompt: "Use @my-prompt for context.",
 	}
 
-	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1")
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
 
 	if !strings.Contains(got, "Use @my-prompt for context.") {
 		t.Fatalf("expected original prompt text preserved, got %q", got)
 	}
 	if !strings.Contains(got, "<kandev-system>EXPANDED:Use @my-prompt for context.</kandev-system>") {
 		t.Fatalf("expected hidden expansion block appended, got %q", got)
+	}
+}
+
+func TestBuildWorkflowPrompt_PassthroughSkipsReferenceExpansion(t *testing.T) {
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	expander := &fakePromptReferenceExpander{}
+	svc.promptExpander = expander
+	step := &wfmodels.WorkflowStep{
+		ID:     "step-1",
+		Prompt: "Use @my-prompt for context.",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", true)
+
+	want := "Use @my-prompt for context."
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() for passthrough session = %q, want unchanged %q", got, want)
+	}
+	if len(expander.calls) != 0 {
+		t.Fatalf("expected expander not to be invoked for a passthrough session, got %d calls", len(expander.calls))
 	}
 }
 
@@ -103,7 +123,7 @@ func TestBuildWorkflowPrompt_ExpandsBasePromptReference(t *testing.T) {
 		Prompt: "Implement this exactly:\n\n{{task_prompt}}",
 	}
 
-	got := svc.buildWorkflowPrompt(context.Background(), "Migrate @my-prompt datasource.", step, "task-1", "session-1")
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate @my-prompt datasource.", step, "task-1", "session-1", false)
 
 	want := "Implement this exactly:\n\nMigrate @my-prompt datasource."
 	if !strings.Contains(got, want) {
@@ -123,7 +143,7 @@ func TestBuildWorkflowPrompt_InterpolatesPlaceholdersBeforeExpansion(t *testing.
 		Prompt: "Task {task_id}: {{task_prompt}} @my-prompt",
 	}
 
-	svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1")
+	svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
 
 	if len(expander.calls) != 1 {
 		t.Fatalf("expected expander to be invoked exactly once, got %d calls", len(expander.calls))
@@ -157,6 +177,7 @@ func TestApplyWorkflowAndPlanMode_KeepsWorkflowPromptVisibleWhenStepEnablesPlanM
 		"step-1",
 		false,
 		false, // isEphemeral
+		false, // isPassthrough
 	)
 
 	if !planModeActive {
@@ -170,5 +191,36 @@ func TestApplyWorkflowAndPlanMode_KeepsWorkflowPromptVisibleWhenStepEnablesPlanM
 	}
 	if strings.Contains(got, "<kandev-system>") {
 		t.Fatalf("expected workflow prompt to remain visible without hidden system wrapping, got %q", got)
+	}
+}
+
+func TestApplyWorkflowAndPlanMode_PassthroughSkipsReferenceExpansion(t *testing.T) {
+	repo := setupTestRepo(t)
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-1"] = &wfmodels.WorkflowStep{
+		ID:     "step-1",
+		Prompt: "Use @my-prompt for context.",
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+	expander := &fakePromptReferenceExpander{}
+	svc.promptExpander = expander
+
+	got, _ := svc.applyWorkflowAndPlanMode(
+		context.Background(),
+		"Migrate Atlantis datasource.",
+		"task-1",
+		"session-1",
+		"step-1",
+		false,
+		false, // isEphemeral
+		true,  // isPassthrough
+	)
+
+	want := "Use @my-prompt for context."
+	if got != want {
+		t.Fatalf("applyWorkflowAndPlanMode() for passthrough session = %q, want unchanged %q", got, want)
+	}
+	if len(expander.calls) != 0 {
+		t.Fatalf("expected expander not to be invoked for a passthrough session, got %d calls", len(expander.calls))
 	}
 }

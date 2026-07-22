@@ -190,7 +190,6 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	}
 	allowNewRound := !ciAutomationFixRoundsExhausted(state)
 	prompt := ciAutomationRenderPrompt(options.EffectiveAutoFixPrompt, pr, delta)
-	prompt = s.expandPromptReferences(ctx, prompt)
 	session, err := s.resolveCIAutoFixSession(ctx, pr.TaskID, state)
 	if err != nil || session == nil {
 		if !allowNewRound {
@@ -200,6 +199,10 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 		s.recordCIAutomationError(ctx, pr, "no promptable task session for CI auto-fix")
 		return true
 	}
+	// Passthrough CI-fix sessions skip "@name" expansion: the prompt is typed
+	// straight into the agent CLI's TTY with no <kandev-system> stripping, so a
+	// hidden expansion block would leak into the terminal verbatim.
+	prompt = s.expandPromptReferences(ctx, prompt, session.IsPassthrough)
 	result, err := s.dispatchCIAutomationPromptForPR(ctx, session, pr, prompt, signature, allowNewRound)
 	if errors.Is(err, errCIAutoFixRoundCapReached) {
 		s.markCIAutoFixExhausted(ctx, pr)

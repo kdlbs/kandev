@@ -425,6 +425,69 @@ func TestHandleTaskPRCIAutomationAutoFixNoExpanderLeavesReferenceUnexpanded(t *t
 	}
 }
 
+// TestHandleTaskPRCIAutomationAutoFixPassthroughSkipsReferenceExpansion
+// verifies that a passthrough CI-fix session (prompt written raw to a PTY,
+// with no <kandev-system> stripping step) skips "@name" expansion entirely,
+// mirroring the guard already covered for workflow-step prompts. The queued
+// prompt must contain the literal "@my-prompt" text with no appended hidden
+// expansion block.
+func TestHandleTaskPRCIAutomationAutoFixPassthroughSkipsReferenceExpansion(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("failed to load seeded session: %v", err)
+	}
+	session.IsPassthrough = true
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to mark session passthrough: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	expander := &fakePromptReferenceExpander{}
+	svc.promptExpander = expander
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		ChecksState:  "failure",
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR using @my-prompt\n\n{{pr.feedback}}",
+		},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 {
+		t.Fatalf("expected one queued CI fix prompt, got %+v", status)
+	}
+	queued := status.Entries[0].Content
+	if !strings.Contains(queued, "Fix the PR using @my-prompt") {
+		t.Fatalf("expected original prompt text preserved verbatim, got %q", queued)
+	}
+	if strings.Contains(queued, "<kandev-system>EXPANDED:") {
+		t.Fatalf("expected no expansion for a passthrough session, got %q", queued)
+	}
+	if len(expander.calls) != 0 {
+		t.Fatalf("expected expander not to be invoked for a passthrough session, got %d calls", len(expander.calls))
+	}
+}
+
 func TestHandleTaskPRCIAutomationAutoFixUsesFreshSyncAndFullFeedback(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
