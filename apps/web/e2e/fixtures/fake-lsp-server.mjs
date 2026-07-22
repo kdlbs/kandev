@@ -9,7 +9,7 @@ const crashOnOpenPath = path.join(os.homedir(), "lsp-e2e-crash-on-open");
 let input = Buffer.alloc(0);
 let nextServerRequestId = 10_000;
 let openDocumentUri = null;
-const definitionTargetFile = "Definition Target # query? 100%.kt";
+const definitionTargetFile = "nested/references/Definition Target # query? 100%.kt";
 
 function log(event, details = {}) {
   fs.appendFileSync(
@@ -57,7 +57,11 @@ function location(uri, line = 2) {
 
 function siblingFileUri(uri, fileName) {
   const directoryEnd = uri.lastIndexOf("/") + 1;
-  return `${uri.slice(0, directoryEnd)}${encodeURIComponent(fileName)}`;
+  const encodedPath = fileName
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${uri.slice(0, directoryEnd)}${encodedPath}`;
 }
 
 function handleRequest(message) {

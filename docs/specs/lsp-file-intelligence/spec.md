@@ -35,11 +35,11 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
 
 Existing user-setting fields are the durable global policy:
 
-| JSON field | Type | Meaning |
-|---|---|---|
-| `lsp_auto_start_languages` | `string[]` | Languages that connect when a matching file opens. |
+| JSON field                   | Type       | Meaning                                                                                                                       |
+| ---------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `lsp_auto_start_languages`   | `string[]` | Languages that connect when a matching file opens.                                                                            |
 | `lsp_auto_install_languages` | `string[]` | Languages Kandev may install when their server binary is missing. Kotlin is rejected because it requires manual installation. |
-| `lsp_server_configs` | `object` | Per-language JSON returned to the server through `workspace/configuration`. |
+| `lsp_server_configs`         | `object`   | Per-language JSON returned to the server through `workspace/configuration`.                                                   |
 
 There is no durable per-task or per-session LSP policy in V1. Manual toolbar state is browser-local and does not override another browser window.
 
@@ -68,13 +68,13 @@ Before JSON-RPC traffic begins, the task-host stream can emit:
 
 Application close codes are:
 
-| Code | Meaning |
-|---|---|
+| Code   | Meaning                                                            |
+| ------ | ------------------------------------------------------------------ |
 | `4001` | Server binary missing and auto-install is unavailable or disabled. |
-| `4002` | Session, execution, or agentctl stream unavailable. |
-| `4003` | Auto-install failed. |
-| `4004` | Executor unsupported in V1. |
-| `4005` | Active LSP connection cap reached. |
+| `4002` | Session, execution, or agentctl stream unavailable.                |
+| `4003` | Auto-install failed.                                               |
+| `4004` | Executor unsupported in V1.                                        |
+| `4005` | Active LSP connection cap reached.                                 |
 
 ## State and persistence
 
@@ -106,6 +106,7 @@ Application close codes are:
 - **GIVEN** two sessions expose the same task-host file URI (for example two Docker tasks rooted at `/workspace`), **WHEN** both files are open, **THEN** Monaco keeps session-scoped models and content while both language servers receive the clean task-host URI.
 - **GIVEN** a connection is replaced for the same session and language, **WHEN** callbacks from the old connection arrive late, **THEN** they cannot close, initialize, or clean up the replacement generation.
 - **GIVEN** session workspace metadata hydrates after the LSP connection, **WHEN** the client opens or navigates to a document, **THEN** it uses the canonical workspace URI and repository subpaths from the task-host ready handshake, including after that LSP connection stops.
+- **GIVEN** a definition or reference target is nested beneath unloaded folders, **WHEN** Monaco navigates to that file, **THEN** the Files tree loads and expands every ancestor and marks the target as active.
 - **GIVEN** an LSP server has spawned descendants, **WHEN** the task stops, **THEN** agentctl reaps the full process tree.
 - **GIVEN** auto-install is downloading or running npm/Go, **WHEN** the agentctl instance is torn down, **THEN** the install is canceled and drained without publishing a partial binary or leaving descendants.
 - **GIVEN** a repository contains `.kandev/lsp-servers/kotlin-lsp`, **WHEN** Kotlin LSP starts, **THEN** Kandev ignores that project-controlled executable.

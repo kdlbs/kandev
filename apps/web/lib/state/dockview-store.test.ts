@@ -43,6 +43,7 @@ describe("dockview-store resolveFilePath (via onDidActivePanelChange)", () => {
     captured.active?.({ id: "file:src/foo.ts" });
 
     expect(useDockviewStore.getState().activeFilePath).toBe("src/foo.ts");
+    expect(useDockviewStore.getState().activeFileRepo).toBeNull();
   });
 
   it("resolves pinned diff:file: panel id to its path", () => {
@@ -52,28 +53,34 @@ describe("dockview-store resolveFilePath (via onDidActivePanelChange)", () => {
     captured.active?.({ id: "diff:file:src/bar.ts" });
 
     expect(useDockviewStore.getState().activeFilePath).toBe("src/bar.ts");
+    expect(useDockviewStore.getState().activeFileRepo).toBeNull();
   });
 
   it("resolves preview:file-editor panel via params.path", () => {
     const { api, captured } = makeApi([
-      { id: "preview:file-editor", params: { path: "src/baz.ts" } },
+      { id: "preview:file-editor", params: { path: "src/baz.ts", repo: "backend" } },
     ]);
     useDockviewStore.getState().setApi(api);
 
     captured.active?.({ id: "preview:file-editor" });
 
     expect(useDockviewStore.getState().activeFilePath).toBe("src/baz.ts");
+    expect(useDockviewStore.getState().activeFileRepo).toBe("backend");
   });
 
   it("resolves preview:file-diff panel via params.path", () => {
     const { api, captured } = makeApi([
-      { id: "preview:file-diff", params: { path: "src/diff.ts" } },
+      {
+        id: "preview:file-diff",
+        params: { path: "src/diff.ts", repositoryName: "frontend" },
+      },
     ]);
     useDockviewStore.getState().setApi(api);
 
     captured.active?.({ id: "preview:file-diff" });
 
     expect(useDockviewStore.getState().activeFilePath).toBe("src/diff.ts");
+    expect(useDockviewStore.getState().activeFileRepo).toBe("frontend");
   });
 
   it("clears activeFilePath when a non-file panel becomes active", () => {
@@ -85,6 +92,7 @@ describe("dockview-store resolveFilePath (via onDidActivePanelChange)", () => {
 
     captured.active?.({ id: "chat" });
     expect(useDockviewStore.getState().activeFilePath).toBeNull();
+    expect(useDockviewStore.getState().activeFileRepo).toBeNull();
   });
 
   it("clears activeFilePath when active-panel-change fires with no panel", () => {
@@ -96,6 +104,7 @@ describe("dockview-store resolveFilePath (via onDidActivePanelChange)", () => {
 
     captured.active?.(undefined);
     expect(useDockviewStore.getState().activeFilePath).toBeNull();
+    expect(useDockviewStore.getState().activeFileRepo).toBeNull();
   });
 });
 
