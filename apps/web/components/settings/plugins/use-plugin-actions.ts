@@ -26,7 +26,20 @@ function withStatus(plugin: PluginRecord, status: PluginStatus): PluginRecord {
   return { ...plugin, status };
 }
 
-/** Loads a plugin's UI bundle into the running app, if it declares one. */
+/**
+ * Loads a plugin's UI bundle into the running app, if it declares one.
+ * Unloads any previous version's registrations first — install and update
+ * share this path (the backend install endpoint is also how an update is
+ * applied), so without this an update would leave the prior version's
+ * nav/route/slot registrations in place alongside the new ones (e.g. a
+ * duplicated top-bar widget). A first-time install is a safe no-op through
+ * `unloadPlugin` since nothing is registered yet.
+ *
+ * Passes `evictCache: true` so an update also drops the cached bundle
+ * registration from the prior version (see `unloadPlugin`'s doc) — without
+ * this, `loadPlugins` would skip re-importing the bundle and re-run the old
+ * version's `initialize()` against the new registry entry.
+ */
 async function loadIfActive(
   record: PluginRecord,
   storeApi: StoreApi<AppState>,
@@ -35,6 +48,7 @@ async function loadIfActive(
   if (record.status !== "active") return;
   const active = toActivePlugin(record);
   if (!active) return;
+  unloadPlugin(record.id, { evictCache: true });
   await loadPlugins([active], (pluginId) => buildHostApi(pluginId, storeApi, theme));
 }
 
