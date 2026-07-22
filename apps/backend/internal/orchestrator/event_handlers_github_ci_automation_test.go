@@ -326,6 +326,105 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	}
 }
 
+// TestHandleTaskPRCIAutomationAutoFixExpandsPromptReferences verifies that a
+// "@name" saved-prompt reference embedded in the (potentially per-task
+// override) ci-auto-fix prompt template gets expanded via the configured
+// PromptReferenceExpander before being queued for the agent, mirroring the
+// expansion contract already covered for workflow-step prompts.
+func TestHandleTaskPRCIAutomationAutoFixExpandsPromptReferences(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	expander := &fakePromptReferenceExpander{}
+	svc.promptExpander = expander
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		ChecksState:  "failure",
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR using @my-prompt\n\n{{pr.feedback}}",
+		},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 {
+		t.Fatalf("expected one queued CI fix prompt, got %+v", status)
+	}
+	queued := status.Entries[0].Content
+	if !strings.Contains(queued, "Fix the PR using @my-prompt") {
+		t.Fatalf("expected original prompt text preserved, got %q", queued)
+	}
+	if !strings.Contains(queued, "<kandev-system>EXPANDED:") {
+		t.Fatalf("expected saved-prompt reference to be expanded, got %q", queued)
+	}
+}
+
+// TestHandleTaskPRCIAutomationAutoFixNoExpanderLeavesReferenceUnexpanded is
+// the regression-safety counterpart: with no PromptReferenceExpander set
+// (the default fixture used by other tests in this file), a "@name" token in
+// the ci-auto-fix prompt is queued verbatim.
+func TestHandleTaskPRCIAutomationAutoFixNoExpanderLeavesReferenceUnexpanded(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		ChecksState:  "failure",
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR using @my-prompt\n\n{{pr.feedback}}",
+		},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 {
+		t.Fatalf("expected one queued CI fix prompt, got %+v", status)
+	}
+	queued := status.Entries[0].Content
+	if !strings.Contains(queued, "Fix the PR using @my-prompt") {
+		t.Fatalf("expected original prompt text preserved, got %q", queued)
+	}
+	if strings.Contains(queued, "<kandev-system>EXPANDED:") {
+		t.Fatalf("expected no expansion when no expander is set, got %q", queued)
+	}
+}
+
 func TestHandleTaskPRCIAutomationAutoFixUsesFreshSyncAndFullFeedback(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -1802,6 +1802,12 @@ func (h *Handlers) resolveExplicitTargetSession(ctx context.Context, msg *ws.Mes
 	return session, nil
 }
 
+// appendPromptReferenceExpansionContext expands "@name" saved-prompt
+// references found in prompt via h.promptResolver. The formatting logic
+// lives in promptservice.FormatPromptReferenceExpansions (shared with
+// promptservice.Service.AppendReferenceExpansions) so this stays a thin
+// wiring layer over the resolver interface, which in tests may be a fake
+// that only implements ResolvePromptReferences.
 func (h *Handlers) appendPromptReferenceExpansionContext(ctx context.Context, prompt string) string {
 	if h.promptResolver == nil {
 		return prompt
@@ -1820,21 +1826,10 @@ func (h *Handlers) appendPromptReferenceExpansionContext(ctx context.Context, pr
 	return prompt + "\n\n" + sysprompt.Wrap(formatPromptReferenceExpansions(expansions))
 }
 
+// formatPromptReferenceExpansions delegates to the shared formatter in
+// prompts/service so the rendered block stays byte-identical across callers.
 func formatPromptReferenceExpansions(expansions []promptservice.PromptReferenceExpansion) string {
-	var b strings.Builder
-	b.WriteString("EXPANDED PROMPT REFERENCES: The message above references saved prompts by @name. ")
-	b.WriteString("Use these expansions as hidden context while preserving the original @mentions.")
-	for _, expansion := range expansions {
-		b.WriteString("\n\n### @")
-		b.WriteString(sanitizePromptExpansionSystemText(expansion.Name))
-		b.WriteString("\n")
-		b.WriteString(sanitizePromptExpansionSystemText(expansion.Content))
-	}
-	return b.String()
-}
-
-func sanitizePromptExpansionSystemText(value string) string {
-	return strings.ReplaceAll(value, sysprompt.TagEnd, "")
+	return promptservice.FormatPromptReferenceExpansions(expansions)
 }
 
 // handleGetTaskConversation returns paginated conversation history for a task.

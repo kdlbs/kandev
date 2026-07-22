@@ -190,6 +190,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	}
 	allowNewRound := !ciAutomationFixRoundsExhausted(state)
 	prompt := ciAutomationRenderPrompt(options.EffectiveAutoFixPrompt, pr, delta)
+	prompt = s.expandPromptReferences(ctx, prompt)
 	session, err := s.resolveCIAutoFixSession(ctx, pr.TaskID, state)
 	if err != nil || session == nil {
 		if !allowNewRound {

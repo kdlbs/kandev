@@ -947,7 +947,7 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 				zap.Error(err))
 		} else {
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-			effectivePrompt = s.buildWorkflowPrompt(effectivePrompt, step, taskID, sessionID)
+			effectivePrompt = s.buildWorkflowPrompt(ctx, effectivePrompt, step, taskID, sessionID)
 		}
 	}
 
@@ -1009,7 +1009,7 @@ func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, p
 // Otherwise, step.Prompt fully replaces the base prompt.
 // If the step has enable_plan_mode in on_enter events, plan mode prefix is also prepended.
 // Only true internal instructions are wrapped in <kandev-system> tags so they can be stripped from the visible chat.
-func (s *Service) buildWorkflowPrompt(basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string) string {
+func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string) string {
 	_ = sessionID
 	var parts []string
 
@@ -1029,7 +1029,22 @@ func (s *Service) buildWorkflowPrompt(basePrompt string, step *wfmodels.Workflow
 		parts = append(parts, basePrompt)
 	}
 
-	return strings.Join(parts, "\n\n")
+	joined := strings.Join(parts, "\n\n")
+	return s.expandPromptReferences(ctx, joined)
+}
+
+// expandPromptReferences resolves "@name" saved-prompt references in prompt
+// via the configured PromptReferenceExpander. When no expander is set, prompt
+// is returned unchanged.
+func (s *Service) expandPromptReferences(ctx context.Context, prompt string) string {
+	if s.promptExpander == nil {
+		return prompt
+	}
+	var zapLogger *zap.Logger
+	if s.logger != nil {
+		zapLogger = s.logger.Zap()
+	}
+	return s.promptExpander.AppendReferenceExpansions(ctx, prompt, zapLogger)
 }
 
 // ResumeTaskSession restarts a specific task session using its stored worktree.
@@ -1278,7 +1293,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 
 	s.advanceTaskWorkflowStep(ctx, dbTask, workflowStepID, session)
 
-	effectivePrompt := s.buildWorkflowPrompt(dbTask.Description, step, taskID, sessionID)
+	effectivePrompt := s.buildWorkflowPrompt(ctx, dbTask.Description, step, taskID, sessionID)
 
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		return err

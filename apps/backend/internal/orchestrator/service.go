@@ -120,6 +120,13 @@ type WorkflowStepGetter interface {
 	GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error)
 }
 
+// PromptReferenceExpander resolves "@name" saved-prompt references embedded in
+// an effective prompt and appends a hidden expansion block. Implemented by
+// promptservice.Service.
+type PromptReferenceExpander interface {
+	AppendReferenceExpansions(ctx context.Context, prompt string, log *zap.Logger) string
+}
+
 // repoStore is the repository interface accepted by NewService.
 // It covers both the orchestrator's own needs (sessionExecutorStore) and
 // the executor package's needs (executor.executorStore).
@@ -249,6 +256,11 @@ type Service struct {
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
+
+	// Prompt reference expander for resolving "@name" saved-prompt
+	// references in the effective workflow-step prompt. Nil-safe: when
+	// unset, buildWorkflowPrompt leaves the prompt unchanged.
+	promptExpander PromptReferenceExpander
 
 	// Workflow engine for typed state-machine evaluation of step transitions
 	workflowEngine *engine.Engine
@@ -776,6 +788,15 @@ func (s *Service) WorkflowStepRequiresCompletionSignal(ctx context.Context, step
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
 	s.initWorkflowEngine()
+}
+
+// SetPromptReferenceExpander sets the collaborator used to resolve "@name"
+// saved-prompt references embedded in workflow-step prompts.
+//
+// If not set: buildWorkflowPrompt leaves any "@name" references in the
+// effective prompt unexpanded.
+func (s *Service) SetPromptReferenceExpander(e PromptReferenceExpander) {
+	s.promptExpander = e
 }
 
 // ClarificationCanceller detaches in-memory clarification waiters when an agent's
