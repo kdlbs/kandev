@@ -33,6 +33,7 @@ type ToolEditMetadata = {
 type ToolEditMessageProps = {
   comment: Message;
   worktreePath?: string;
+  sessionId?: string;
   onOpenFile?: (path: string) => void;
 };
 
@@ -160,6 +161,7 @@ function parseEditMetadata(comment: Message) {
 export const ToolEditMessage = memo(function ToolEditMessage({
   comment,
   worktreePath,
+  sessionId,
   onOpenFile,
 }: ToolEditMessageProps) {
   const {
@@ -191,7 +193,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({
     }
   };
 
-  const handleOpenFile = useOpenFileAtLine(onOpenFile, startLine, worktreePath);
+  const handleOpenFile = useOpenFileAtLine(onOpenFile, startLine, worktreePath, sessionId);
 
   return (
     <ExpandableRow

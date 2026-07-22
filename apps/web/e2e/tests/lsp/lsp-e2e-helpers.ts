@@ -357,3 +357,41 @@ export async function expectFakeLspMarkerCount(
     )
     .toBe(expectedCount);
 }
+
+export async function expectFakeLspMarkerMessages(
+  page: Page,
+  modelUri: string,
+  expectedMessages: string[],
+  timeout = 15_000,
+): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate((targetModelUri) => {
+          const monaco = (
+            window as typeof window & {
+              monaco?: {
+                editor: {
+                  getModelMarkers: (filter: Record<string, never>) => Array<{
+                    message: string;
+                    resource: { toString: () => string };
+                    source?: string;
+                  }>;
+                };
+              };
+            }
+          ).monaco;
+          return (monaco?.editor.getModelMarkers({}) ?? [])
+            .filter(
+              (marker) =>
+                marker.source === "kandev-e2e" && marker.resource.toString() === targetModelUri,
+            )
+            .map((marker) => marker.message);
+        }, modelUri),
+      {
+        message: `waiting for fake LSP Monaco markers on ${modelUri}`,
+        timeout,
+      },
+    )
+    .toEqual(expectedMessages);
+}

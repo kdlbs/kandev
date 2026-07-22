@@ -362,14 +362,14 @@ function useCodeMirrorCodeEditorSetup(props: FileEditorContentProps) {
     repo,
   });
   useEffect(() => {
-    if (editorView) revealPendingCodeMirrorCursor(editorView, path, repo);
+    if (editorView) revealPendingCodeMirrorCursor(editorView, path, repo, sessionId);
   });
   useEffect(() => {
     if (!editorView) return;
-    return registerCodeMirrorCursorRevealer(path, repo, (line, column) =>
+    return registerCodeMirrorCursorRevealer(path, repo, sessionId, (line, column) =>
       revealCodeMirrorCursor(editorView, line, column),
     );
-  }, [editorView, path, repo]);
+  }, [editorView, path, repo, sessionId]);
   const handleCreateEditor = useCallback((view: EditorView) => setEditorView(view), []);
   return { wrapperRef, editorAreaRef, editorRef, state, walkthroughRange, handleCreateEditor };
 }

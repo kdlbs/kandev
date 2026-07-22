@@ -183,3 +183,33 @@ func TestHandleLSPStreamStopsProcessWhenForwardingToWebSocketFails(t *testing.T)
 		t.Fatalf("LSP process remains tracked after forwarder exit: %v", processes)
 	}
 }
+
+func TestStopLSPServerClosesCallerOwnedStdoutWithoutForwarder(t *testing.T) {
+	serverPath := filepath.Join(t.TempDir(), "kotlin-lsp")
+	if err := os.WriteFile(serverPath, []byte("#!/bin/sh\nexec /bin/cat\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "session-close-stdout"}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = procMgr.StopForTeardown(ctx)
+	})
+	server := NewServer(cfg, procMgr, nil, nil, log)
+	lspProcess, err := server.startLSPServer("kotlin", serverPath)
+	if err != nil {
+		t.Fatalf("startLSPServer() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = lspProcess.stdin.Close()
+		_ = lspProcess.stdout.Close()
+	})
+
+	server.stopLSPServer(lspProcess)
+	if err := lspProcess.stdout.Close(); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("stdout.Close() after stop = %v, want already closed", err)
+	}
+}

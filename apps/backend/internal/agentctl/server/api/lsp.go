@@ -47,6 +47,8 @@ type lspServerProcess struct {
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 	done   <-chan struct{}
+	// forwarderDone keeps caller-owned stdout open until its sole reader exits.
+	forwarderDone <-chan struct{}
 }
 
 type lspInstallerRegistry interface {
@@ -297,21 +299,37 @@ func (s *Server) startLSPServer(language, binaryPath string) (*lspServerProcess,
 }
 
 func (s *Server) stopLSPServer(server *lspServerProcess) {
-	_ = server.stdin.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	s.stopLSPServerWithContext(ctx, server)
+}
+
+func (s *Server) stopLSPServerWithContext(ctx context.Context, server *lspServerProcess) {
+	_ = server.stdin.Close()
 	if err := s.procMgr.StopProcess(ctx, process.StopProcessRequest{ProcessID: server.id}); err != nil {
 		s.logger.Debug("LSP process already stopped", zap.String("process_id", server.id), zap.Error(err))
 	}
+	timedOut := false
 	select {
 	case <-server.done:
 	case <-ctx.Done():
+		timedOut = true
 		s.logger.Warn("timed out waiting for LSP process teardown", zap.String("process_id", server.id))
+	}
+	if timedOut {
+		_ = server.stdout.Close()
+	}
+	if server.forwarderDone != nil {
+		<-server.forwarderDone
+	}
+	if !timedOut {
+		_ = server.stdout.Close()
 	}
 }
 
 func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lspServerProcess) {
 	done := make(chan struct{})
+	server.forwarderDone = done
 
 	go func() {
 		defer close(done)
@@ -354,7 +372,6 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 	}
 
 	s.stopLSPServer(server)
-	<-done
 }
 
 func (s *Server) awaitOrInstallLSP(ctx context.Context, language string) (string, error) {

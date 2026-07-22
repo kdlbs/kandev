@@ -53,6 +53,8 @@ import { CodeMirrorCodeEditor } from "./codemirror-code-editor";
 const FILE_PATH = "src/app.ts";
 const FRONTEND_REPO = "frontend";
 const BACKEND_REPO = "backend";
+const FIRST_SESSION_ID = "first-session";
+const SECOND_SESSION_ID = "second-session";
 const CONTENT = "alpha\nbravo\ncharlie";
 
 const baseProps = {
@@ -93,6 +95,8 @@ afterEach(() => {
   consumePendingCursorPosition(FILE_PATH);
   consumePendingCursorPosition(FILE_PATH, FRONTEND_REPO);
   consumePendingCursorPosition(FILE_PATH, BACKEND_REPO);
+  consumePendingCursorPosition(FILE_PATH, FRONTEND_REPO, FIRST_SESSION_ID);
+  consumePendingCursorPosition(FILE_PATH, FRONTEND_REPO, SECOND_SESSION_ID);
 });
 
 describe("CodeMirrorCodeEditor pending cursor navigation", () => {
@@ -124,6 +128,27 @@ describe("CodeMirrorCodeEditor pending cursor navigation", () => {
       effects: expect.anything(),
     });
     expect(consumePendingCursorPosition(FILE_PATH, BACKEND_REPO)).toEqual({
+      line: 3,
+      column: 2,
+    });
+  });
+
+  it("consumes only the pending cursor for its task session", () => {
+    setPendingCursorPosition(FILE_PATH, 2, 3, FRONTEND_REPO, FIRST_SESSION_ID);
+    setPendingCursorPosition(FILE_PATH, 3, 2, FRONTEND_REPO, SECOND_SESSION_ID);
+    const view = createEditorView();
+
+    renderEditor({ ...baseProps, sessionId: FIRST_SESSION_ID });
+    mountEditorView(view);
+
+    expect(view.dispatch).toHaveBeenCalledWith({
+      selection: { anchor: 8 },
+      effects: expect.anything(),
+    });
+    expect(
+      consumePendingCursorPosition(FILE_PATH, FRONTEND_REPO, FIRST_SESSION_ID),
+    ).toBeUndefined();
+    expect(consumePendingCursorPosition(FILE_PATH, FRONTEND_REPO, SECOND_SESSION_ID)).toEqual({
       line: 3,
       column: 2,
     });
@@ -214,6 +239,25 @@ describe("CodeMirrorCodeEditor mounted cursor broker", () => {
     expect(consumePendingCursorPosition(FILE_PATH, BACKEND_REPO)).toEqual({
       line: 3,
       column: 2,
+    });
+  });
+
+  it("does not reveal a mounted editor owned by another task session", () => {
+    const view = createEditorView();
+    renderEditor({ ...baseProps, sessionId: FIRST_SESSION_ID });
+    mountEditorView(view);
+    setPendingCursorPosition(FILE_PATH, 2, 3, FRONTEND_REPO, SECOND_SESSION_ID);
+
+    const revealed = scrollEditorIfMounted(FILE_PATH, null, 2, 3, {
+      repo: FRONTEND_REPO,
+      sessionId: SECOND_SESSION_ID,
+    });
+
+    expect(revealed).toBe(false);
+    expect(view.dispatch).not.toHaveBeenCalled();
+    expect(consumePendingCursorPosition(FILE_PATH, FRONTEND_REPO, SECOND_SESSION_ID)).toEqual({
+      line: 2,
+      column: 3,
     });
   });
 });

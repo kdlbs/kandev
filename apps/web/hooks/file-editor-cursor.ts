@@ -10,12 +10,21 @@ import {
   joinFileUri,
 } from "@/lib/lsp/file-uri";
 
-const pendingCursorPositions = new Map<string, { line: number; column: number }>();
+type CursorPosition = { line: number; column: number };
 type CodeMirrorCursorRevealer = (line: number, column: number) => boolean;
+
+const pendingCursorPositions = new Map<string, CursorPosition>();
 const codeMirrorCursorRevealers = new Map<string, Set<CodeMirrorCursorRevealer>>();
 
-function pendingCursorKey(path: string, repo?: string): string {
-  return buildRepoScopedItemId(path, repo);
+function pendingCursorKey(path: string, repo?: string, sessionId?: string): string {
+  const fileKey = buildRepoScopedItemId(path, repo);
+  return sessionId === undefined ? fileKey : JSON.stringify([sessionId, fileKey]);
+}
+
+function takePendingCursor(key: string): CursorPosition | undefined {
+  const position = pendingCursorPositions.get(key);
+  if (position) pendingCursorPositions.delete(key);
+  return position;
 }
 
 export function setPendingCursorPosition(
@@ -23,26 +32,28 @@ export function setPendingCursorPosition(
   line: number,
   column: number,
   repo?: string,
+  sessionId?: string,
 ) {
-  pendingCursorPositions.set(pendingCursorKey(path, repo), { line, column });
+  pendingCursorPositions.set(pendingCursorKey(path, repo, sessionId), { line, column });
 }
 
 export function consumePendingCursorPosition(
   path: string,
   repo?: string,
-): { line: number; column: number } | undefined {
-  const key = pendingCursorKey(path, repo);
-  const pos = pendingCursorPositions.get(key);
-  if (pos) pendingCursorPositions.delete(key);
-  return pos;
+  sessionId?: string,
+): CursorPosition | undefined {
+  const scopedPosition = takePendingCursor(pendingCursorKey(path, repo, sessionId));
+  if (scopedPosition || sessionId === undefined) return scopedPosition;
+  return takePendingCursor(pendingCursorKey(path, repo));
 }
 
 export function registerCodeMirrorCursorRevealer(
   path: string,
   repo: string | undefined,
+  sessionId: string | undefined,
   reveal: CodeMirrorCursorRevealer,
 ): () => void {
-  const key = pendingCursorKey(path, repo);
+  const key = pendingCursorKey(path, repo, sessionId);
   const revealers = codeMirrorCursorRevealers.get(key) ?? new Set();
   revealers.add(reveal);
   codeMirrorCursorRevealers.set(key, revealers);
@@ -56,15 +67,16 @@ export function registerCodeMirrorCursorRevealer(
 function revealMountedCodeMirror(
   path: string,
   repo: string | undefined,
+  sessionId: string | undefined,
   line: number,
   column: number,
 ): boolean {
-  const revealers = codeMirrorCursorRevealers.get(pendingCursorKey(path, repo));
+  const revealers = codeMirrorCursorRevealers.get(pendingCursorKey(path, repo, sessionId));
   if (!revealers) return false;
 
   for (const reveal of [...revealers].reverse()) {
     if (!reveal(line, column)) continue;
-    consumePendingCursorPosition(path, repo);
+    consumePendingCursorPosition(path, repo, sessionId);
     return true;
   }
   return false;
@@ -139,7 +151,7 @@ export function scrollEditorIfMounted(
       const model = editor.getModel();
       if (!model) continue;
       if (editorModelMatchesTarget(model, { targetUri, monacoPath, path, ...scope })) {
-        consumePendingCursorPosition(path, repo);
+        consumePendingCursorPosition(path, repo, scope.sessionId);
         editor.setPosition({ lineNumber: line, column });
         editor.revealLineInCenter(line);
         editor.focus();
@@ -147,5 +159,5 @@ export function scrollEditorIfMounted(
       }
     }
   }
-  return revealMountedCodeMirror(path, repo, line, column);
+  return revealMountedCodeMirror(path, repo, scope.sessionId, line, column);
 }

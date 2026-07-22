@@ -10,6 +10,7 @@ import {
   expectedMonacoModelUri,
   expectFakeLspEvent,
   expectFakeLspMarkerCount,
+  expectFakeLspMarkerMessages,
   installAdditionalFakeLspBinary,
   installFakeKotlinLsp,
   openDesktopFile,
@@ -349,6 +350,20 @@ test.describe("LSP file intelligence", () => {
       "custom workspace configuration response",
     );
 
+    const started = await expectFakeLspEvent(
+      backend,
+      (event) => event.event === "started",
+      "shared task-host process start",
+    );
+    const firstDocumentUri = pathToFileURL(path.join(started.cwd!, task.filePaths[0])).href;
+    const secondDocumentUri = pathToFileURL(path.join(started.cwd!, task.filePaths[1])).href;
+    const firstModelUri = expectedMonacoModelUri(firstDocumentUri, task.sessionId);
+    const secondModelUri = expectedMonacoModelUri(secondDocumentUri, task.sessionId);
+    await expectFakeLspMarkerMessages(testPage, firstModelUri, ["Fake Kotlin diagnostic"]);
+    const firstPreview = testPage.getByTestId("preview-tab-file-editor");
+    await firstPreview.dblclick();
+    await expect(firstPreview).not.toHaveAttribute("title", "Double-click to keep this tab open");
+
     await openDesktopFile(testPage, task.session, task.filePaths[1]);
     await expectFakeLspEvent(
       backend,
@@ -358,8 +373,58 @@ test.describe("LSP file intelligence", () => {
         JSON.stringify(event.params).includes(task.filePaths[1]),
       "didOpen for the second file",
     );
+    await expectFakeLspMarkerMessages(testPage, secondModelUri, ["Fake Kotlin diagnostic"]);
     expect(readFakeLspEvents(backend).filter((event) => event.event === "started")).toHaveLength(1);
     expect(lspSockets).toHaveLength(1);
+
+    await expectFakeLspMarkerMessages(testPage, firstModelUri, ["Fake Kotlin diagnostic"]);
+    await expectFakeLspMarkerMessages(testPage, secondModelUri, ["Fake Kotlin diagnostic"]);
+    await testPage.locator(".monaco-editor:visible").click();
+    await testPage.keyboard.press("Control+End");
+    await testPage.keyboard.insertText("\n// second document edit");
+    const didChange = await expectFakeLspEvent(
+      backend,
+      (event) => event.event === "message" && event.method === "textDocument/didChange",
+      "document change",
+    );
+    expect(didChange.params?.textDocument).toMatchObject({ uri: secondDocumentUri });
+    await expectFakeLspMarkerMessages(testPage, secondModelUri, [
+      "Fake Kotlin diagnostic after edit",
+    ]);
+    await expectFakeLspMarkerMessages(testPage, firstModelUri, ["Fake Kotlin diagnostic"]);
+    const firstTab = testPage.locator(".dv-default-tab", {
+      hasText: path.basename(task.filePaths[0]),
+    });
+    await expect(firstTab).toHaveCount(1);
+
+    const closeCountBefore = readFakeLspEvents(backend).filter(
+      (event) =>
+        event.event === "message" &&
+        event.method === "textDocument/didClose" &&
+        (event.params?.textDocument as { uri?: string } | undefined)?.uri === secondDocumentUri,
+    ).length;
+    const secondTab = testPage.locator(".dv-default-tab", {
+      hasText: path.basename(task.filePaths[1]),
+    });
+    await secondTab.hover();
+    await secondTab.locator(".dv-default-tab-action").click();
+    await expect(secondTab).toHaveCount(0);
+    await expect(firstTab).toHaveCount(1);
+    await expect
+      .poll(
+        () =>
+          readFakeLspEvents(backend).filter(
+            (event) =>
+              event.event === "message" &&
+              event.method === "textDocument/didClose" &&
+              (event.params?.textDocument as { uri?: string } | undefined)?.uri ===
+                secondDocumentUri,
+          ).length,
+        { message: "waiting for didClose for the second file" },
+      )
+      .toBe(closeCountBefore + 1);
+    await expectFakeLspMarkerMessages(testPage, secondModelUri, []);
+    await expectFakeLspMarkerMessages(testPage, firstModelUri, ["Fake Kotlin diagnostic"]);
 
     const activeStatus = testPage.locator('[data-testid="lsp-status-button"]:visible');
     await activeStatus.click();
