@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useNestTask } from "./use-nest-task";
 
 const updateTaskMock = vi.hoisted(() => vi.fn());
+const detachTaskMock = vi.hoisted(() => vi.fn());
 const setWorkflowSnapshotMock = vi.hoisted(() => vi.fn());
 const store = vi.hoisted(() => ({ state: {} as Record<string, unknown> }));
 
-vi.mock("@/lib/api", () => ({ updateTask: updateTaskMock }));
+vi.mock("@/lib/api", () => ({ updateTask: updateTaskMock, detachTask: detachTaskMock }));
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({ getState: () => store.state }),
 }));
@@ -15,6 +16,7 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 describe("useNestTask", () => {
   beforeEach(() => {
     updateTaskMock.mockReset().mockResolvedValue(undefined);
+    detachTaskMock.mockReset().mockResolvedValue(undefined);
     setWorkflowSnapshotMock.mockReset();
   });
 
@@ -32,7 +34,7 @@ describe("useNestTask", () => {
     expect(setWorkflowSnapshotMock).not.toHaveBeenCalled();
   });
 
-  it("clears the parent by sending an empty parent_id (un-nest)", async () => {
+  it("un-nests through the detach endpoint so workspace mode is normalized", async () => {
     store.state = { kanbanMulti: { snapshots: {} }, setWorkflowSnapshot: setWorkflowSnapshotMock };
     const { result } = renderHook(() => useNestTask());
 
@@ -40,7 +42,10 @@ describe("useNestTask", () => {
       await result.current("task-1", "wf-1", null);
     });
 
-    expect(updateTaskMock).toHaveBeenCalledWith("task-1", { parent_id: "" });
+    // Detach (not a plain parent_id clear) also resets an inherit_parent
+    // subtask's workspace mode to shared_group and emits the Office event.
+    expect(detachTaskMock).toHaveBeenCalledWith("task-1");
+    expect(updateTaskMock).not.toHaveBeenCalled();
   });
 
   it("is a no-op when the parent is unchanged and the snapshot is present", async () => {

@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { toast } from "sonner";
-import { updateTask } from "@/lib/api";
+import { detachTask, updateTask } from "@/lib/api";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
@@ -81,8 +81,16 @@ export function useNestTask() {
       applyOptimistic(op);
 
       try {
-        // Empty string clears the parent on the backend.
-        await updateTask(taskId, { parent_id: parentId ?? "" });
+        if (parentId === null) {
+          // Un-nesting goes through the dedicated detach endpoint: unlike a
+          // plain parent_id clear, it also normalizes an inherit_parent
+          // subtask's workspace mode back to shared_group and emits the Office
+          // task-update event, so the promoted root isn't left marked as
+          // parent-inherited.
+          await detachTask(taskId);
+        } else {
+          await updateTask(taskId, { parent_id: parentId });
+        }
       } catch (error) {
         rollbackParent(op);
         toast.error(error instanceof Error ? error.message : "Failed to nest task");

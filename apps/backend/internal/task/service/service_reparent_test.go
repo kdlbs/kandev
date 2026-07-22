@@ -227,6 +227,85 @@ func TestService_UpdateTask_RejectsCycle(t *testing.T) {
 	}
 }
 
+func TestService_UpdateTask_RejectsNestingUnderSubtask(t *testing.T) {
+	svc, _, _, create := reparentFixture(t)
+	ctx := context.Background()
+	root := create("Root")
+	child := create("Child")
+	other := create("Other")
+	// child nested under root — child is now a subtask.
+	if _, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr(root.ID)}); err != nil {
+		t.Fatalf("nest child under root: %v", err)
+	}
+
+	// Nesting other under child would create root -> child -> other (depth 2),
+	// which the create path also forbids for kanban tasks.
+	_, err := svc.UpdateTask(ctx, other.ID, &UpdateTaskRequest{ParentID: strptr(child.ID)})
+	if err == nil {
+		t.Fatalf("expected subtask-depth error, got nil")
+	}
+	if !errors.Is(err, ErrInvalidParent) {
+		t.Errorf("depth error should wrap ErrInvalidParent (maps to HTTP 400), got %v", err)
+	}
+	if !errors.Is(err, ErrSubtaskDepthExceeded) {
+		t.Errorf("depth error should wrap ErrSubtaskDepthExceeded, got %v", err)
+	}
+}
+
+func TestService_UpdateTask_RejectsMovingTaskWithChildren(t *testing.T) {
+	svc, _, _, create := reparentFixture(t)
+	ctx := context.Background()
+	root := create("Root")
+	child := create("Child")
+	target := create("Target")
+	// child nested under root — root now has a child.
+	if _, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr(root.ID)}); err != nil {
+		t.Fatalf("nest child under root: %v", err)
+	}
+
+	// Nesting root (which has a child) under target would push child to depth 2.
+	_, err := svc.UpdateTask(ctx, root.ID, &UpdateTaskRequest{ParentID: strptr(target.ID)})
+	if err == nil {
+		t.Fatalf("expected subtask-depth error, got nil")
+	}
+	if !errors.Is(err, ErrInvalidParent) {
+		t.Errorf("depth error should wrap ErrInvalidParent, got %v", err)
+	}
+	if !errors.Is(err, ErrSubtaskDepthExceeded) {
+		t.Errorf("depth error should wrap ErrSubtaskDepthExceeded, got %v", err)
+	}
+}
+
+func TestService_UpdateTask_AllowsDeepOfficeNesting(t *testing.T) {
+	svc, _, repo, _ := reparentFixture(t)
+	ctx := context.Background()
+	// Office task trees intentionally allow arbitrary depth, so the one-level
+	// guard must not fire when the endpoints are Office tasks. A non-empty
+	// project_id is what the repository projection uses to mark a task
+	// IsFromOffice.
+	grandparent := &models.Task{ID: "o-gp", WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "GP", ProjectID: "proj-1"}
+	parent := &models.Task{ID: "o-parent", WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "P", ParentID: "o-gp", ProjectID: "proj-1"}
+	child := &models.Task{ID: "o-child", WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "C", ProjectID: "proj-1"}
+	for _, tk := range []*models.Task{grandparent, parent, child} {
+		if err := repo.CreateTask(ctx, tk); err != nil {
+			t.Fatalf("create %s: %v", tk.ID, err)
+		}
+	}
+
+	// parent is already a subtask; nesting child under it is depth 2, which is
+	// allowed for Office tasks.
+	if _, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr(parent.ID)}); err != nil {
+		t.Fatalf("office deep nesting should be allowed: %v", err)
+	}
+	got, err := svc.GetTask(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.ParentID != parent.ID {
+		t.Errorf("office child ParentID = %q, want %q", got.ParentID, parent.ID)
+	}
+}
+
 func TestService_UpdateTask_RejectsCrossWorkspaceParent(t *testing.T) {
 	svc, _, repo, create := reparentFixture(t)
 	ctx := context.Background()

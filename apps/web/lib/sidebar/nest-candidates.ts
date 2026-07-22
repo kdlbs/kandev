@@ -9,32 +9,26 @@ export type NestCandidate = {
 };
 
 /**
- * computeNestCandidates returns the tasks that `taskId` may be nested under.
+ * computeNestCandidates returns the tasks that `taskId` may be nested under,
+ * enforcing the one-level kanban subtask limit.
  *
- * A candidate is any task that is NOT:
+ * When the task itself already has children, nesting it under any parent would
+ * push those children to depth 2, so no candidate is offered. Otherwise a
+ * candidate is any task that is NOT:
  *  - the task itself,
- *  - a descendant of the task (nesting under a descendant would create a
- *    cycle), or
- *  - the task's current parent (selecting it would be a no-op).
+ *  - the task's current parent (selecting it would be a no-op), or
+ *  - already a subtask — nesting under a subtask would create a grandchild
+ *    (this also structurally excludes the task's own descendants, so no cycle
+ *    can be introduced).
  *
  * Order is preserved from the input list.
  */
 export function computeNestCandidates<T extends NestCandidate>(tasks: T[], taskId: string): T[] {
   const task = tasks.find((t) => t.id === taskId);
 
-  // Build the excluded set: the task plus its transitive descendants.
-  const excluded = new Set<string>([taskId]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const t of tasks) {
-      if (t.parentTaskId && excluded.has(t.parentTaskId) && !excluded.has(t.id)) {
-        excluded.add(t.id);
-        grew = true;
-      }
-    }
-  }
+  // A task with children cannot be nested without exceeding the one-level limit.
+  if (tasks.some((t) => t.parentTaskId === taskId)) return [];
 
   const currentParent = task?.parentTaskId ?? undefined;
-  return tasks.filter((t) => !excluded.has(t.id) && t.id !== currentParent);
+  return tasks.filter((t) => t.id !== taskId && t.id !== currentParent && !t.parentTaskId);
 }
