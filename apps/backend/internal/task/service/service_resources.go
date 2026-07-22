@@ -668,17 +668,8 @@ func (s *Service) createRepository(
 		CopyFiles:              req.CopyFiles,
 	}
 
-	// Auto-detect provider identity from the origin when it is available.
-	if resolveProvider && repository.LocalPath != "" && (repository.Provider == "" || repository.ProviderHost == "") {
-		p, h, o, n := ResolveGitRemoteProviderIdentity(repository.LocalPath)
-		if repository.Provider == "" {
-			repository.Provider = p
-		}
-		if repository.Provider != "" && (strings.HasPrefix(h, "http://") || strings.HasPrefix(h, "https://")) {
-			repository.ProviderHost = h
-			repository.ProviderOwner = o
-			repository.ProviderName = n
-		}
+	if resolveProvider {
+		resolveRepositoryProviderIdentity(repository)
 	}
 
 	if err := s.repoEntities.CreateRepository(ctx, repository); err != nil {
@@ -689,6 +680,22 @@ func (s *Service) createRepository(
 	s.publishRepositoryEvent(ctx, events.RepositoryCreated, repository)
 	s.logger.Info("repository created", zap.String("repository_id", repository.ID))
 	return repository, nil
+}
+
+// resolveRepositoryProviderIdentity fills missing provider metadata from a local repository origin.
+func resolveRepositoryProviderIdentity(repository *models.Repository) {
+	if repository.LocalPath == "" || (repository.Provider != "" && repository.ProviderHost != "") {
+		return
+	}
+	p, h, o, n := ResolveGitRemoteProviderIdentity(repository.LocalPath)
+	if repository.Provider == "" {
+		repository.Provider = p
+	}
+	if repository.Provider != "" && (strings.HasPrefix(h, "http://") || strings.HasPrefix(h, "https://")) {
+		repository.ProviderHost = h
+		repository.ProviderOwner = o
+		repository.ProviderName = n
+	}
 }
 
 func (s *Service) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
