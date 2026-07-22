@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -55,15 +56,37 @@ func (s *blockingLSPInstallStrategy) Install(ctx context.Context) (*tools.Instal
 	return nil, ctx.Err()
 }
 
+type controlledLSPInstallStrategy struct {
+	name    string
+	started chan struct{}
+	release <-chan struct{}
+}
+
+func (s *controlledLSPInstallStrategy) Name() string { return s.name }
+
+func (s *controlledLSPInstallStrategy) Install(ctx context.Context) (*tools.InstallResult, error) {
+	close(s.started)
+	select {
+	case <-s.release:
+		return &tools.InstallResult{BinaryPath: s.name}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 type fakeLSPInstallerRegistry struct {
-	strategy tools.Strategy
+	strategy   tools.Strategy
+	strategies map[string]tools.Strategy
 }
 
 func (r *fakeLSPInstallerRegistry) BinaryPath(string) (string, error) {
 	return "", os.ErrNotExist
 }
 
-func (r *fakeLSPInstallerRegistry) StrategyFor(string) (tools.Strategy, error) {
+func (r *fakeLSPInstallerRegistry) StrategyFor(language string) (tools.Strategy, error) {
+	if strategy := r.strategies[language]; strategy != nil {
+		return strategy, nil
+	}
 	return r.strategy, nil
 }
 
@@ -150,15 +173,15 @@ func TestNewServerDoesNotResolveProjectControlledLSPBinary(t *testing.T) {
 	}
 }
 
-func TestLSPInstallGateSerializesSharedCacheMutations(t *testing.T) {
-	gate := newLSPInstallGate()
+func TestLSPInstallCoordinatorSerializesSharedNpmPrefix(t *testing.T) {
+	coordinator := newLSPInstallCoordinator()
 	firstEntered := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	var releaseOnce sync.Once
 	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseFirst) }) })
 	firstDone := make(chan error, 1)
 	go func() {
-		_, err := gate.run(context.Background(), func() (string, error) {
+		_, err := coordinator.run(context.Background(), lspInstallMutationKey("typescript"), func() (string, error) {
 			close(firstEntered)
 			<-releaseFirst
 			return "typescript", nil
@@ -170,7 +193,7 @@ func TestLSPInstallGateSerializesSharedCacheMutations(t *testing.T) {
 	secondEntered := make(chan struct{})
 	secondDone := make(chan error, 1)
 	go func() {
-		_, err := gate.run(context.Background(), func() (string, error) {
+		_, err := coordinator.run(context.Background(), lspInstallMutationKey("python"), func() (string, error) {
 			close(secondEntered)
 			return "python", nil
 		})
@@ -188,6 +211,123 @@ func TestLSPInstallGateSerializesSharedCacheMutations(t *testing.T) {
 	}
 	if err := <-secondDone; err != nil {
 		t.Fatalf("second install: %v", err)
+	}
+}
+
+func TestLSPInstallMutationKeyMatchesStrategyTargets(t *testing.T) {
+	tests := map[string]string{
+		"typescript": "npm-prefix",
+		"go":         "go:gopls",
+		"rust":       "release:rust-analyzer",
+	}
+	for language, want := range tests {
+		if got := lspInstallMutationKey(language); got != want {
+			t.Errorf("lspInstallMutationKey(%q) = %q, want %q", language, got, want)
+		}
+	}
+	if lspInstallMutationKey("python") != lspInstallMutationKey("typescript") {
+		t.Error("Python and TypeScript installs must share the npm-prefix mutation key")
+	}
+}
+
+func TestLSPInstallCoordinatorAllowsIndependentCacheMutations(t *testing.T) {
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "independent-installs"}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = procMgr.StopForTeardown(ctx)
+	})
+
+	releaseTypeScript := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseTypeScript) }) })
+	typeScriptStarted := make(chan struct{})
+	goStarted := make(chan struct{})
+	server := NewServer(cfg, procMgr, nil, nil, log)
+	server.lspInstaller = &fakeLSPInstallerRegistry{strategies: map[string]tools.Strategy{
+		"typescript": &controlledLSPInstallStrategy{
+			name:    "typescript",
+			started: typeScriptStarted,
+			release: releaseTypeScript,
+		},
+		"go": &controlledLSPInstallStrategy{
+			name:    "go",
+			started: goStarted,
+			release: make(chan struct{}),
+		},
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	typeScriptDone := make(chan error, 1)
+	go func() {
+		_, err := server.awaitOrInstallLSP(ctx, "typescript")
+		typeScriptDone <- err
+	}()
+	<-typeScriptStarted
+	goDone := make(chan error, 1)
+	go func() {
+		_, err := server.awaitOrInstallLSP(ctx, "go")
+		goDone <- err
+	}()
+
+	select {
+	case <-goStarted:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("independent Go install waited for the npm-prefix mutation")
+	}
+	releaseOnce.Do(func() { close(releaseTypeScript) })
+	if err := <-typeScriptDone; err != nil {
+		t.Fatalf("TypeScript install: %v", err)
+	}
+	cancel()
+	if err := <-goDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Go install error = %v, want context canceled", err)
+	}
+}
+
+func TestLSPInstallCoordinatorCanceledWaiterDoesNotInstall(t *testing.T) {
+	coordinator := newLSPInstallCoordinator()
+	firstEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseFirst) }) })
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := coordinator.run(context.Background(), lspInstallMutationKey("typescript"), func() (string, error) {
+			close(firstEntered)
+			<-releaseFirst
+			return "typescript", nil
+		})
+		firstDone <- err
+	}()
+	<-firstEntered
+
+	waiterCtx, cancelWaiter := context.WithCancel(context.Background())
+	waiterEntered := make(chan struct{})
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, err := coordinator.run(waiterCtx, lspInstallMutationKey("python"), func() (string, error) {
+			close(waiterEntered)
+			return "python", nil
+		})
+		waiterDone <- err
+	}()
+	cancelWaiter()
+	if err := <-waiterDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled waiter error = %v, want context canceled", err)
+	}
+	select {
+	case <-waiterEntered:
+		t.Fatal("canceled waiter entered the shared npm-prefix install")
+	default:
+	}
+
+	releaseOnce.Do(func() { close(releaseFirst) })
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first install: %v", err)
 	}
 }
 
