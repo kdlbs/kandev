@@ -187,8 +187,24 @@ const (
 
 const (
 	claudeOriginMetaKey          = "_claude/origin"
+	claudeOriginHuman            = "human"
 	claudeOriginTaskNotification = "task-notification"
 )
+
+// foregroundIdle emits the human-origin usage boundary Claude sends after it
+// hands the foreground back while detached work remains active.
+func (e *emitter) foregroundIdle() {
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{UsageUpdate: &acp.SessionUsageUpdate{
+			Size: 1_000_000,
+			Used: 24_000,
+			Meta: map[string]any{
+				claudeOriginMetaKey: map[string]any{"kind": claudeOriginHuman},
+			},
+		}},
+	})
+}
 
 // subagentClaudeMeta builds the `_meta.claudeCode.toolName=Agent` payload that
 // claude-agent-acp tags subagent (Task) tool_call notifications with. The
@@ -261,7 +277,7 @@ func (e *emitter) launchAsyncSubagentTool(
 	response := map[string]any{
 		"claudeCode": map[string]any{
 			"toolResponse": map[string]any{
-				"agentId":           "agent_e2e_detached",
+				"agentId":           asyncSubagentAgentID,
 				"agentType":         subagentType,
 				subagentKeyStatus:   subagentStatusAsync,
 				"isAsync":           true,
@@ -281,7 +297,8 @@ func (e *emitter) launchAsyncSubagentTool(
 
 // completeDetachedWork emits the same task-notification usage boundary Claude
 // sends when an async workload finishes. The provider does not expose the task
-// ID on this frame, so the orchestrator conservatively retires one registration.
+// ID on this frame, so the orchestrator retires it only when one registration is
+// outstanding and the completion is therefore unambiguous.
 func (e *emitter) completeDetachedWork() {
 	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
 		SessionId: e.sid,

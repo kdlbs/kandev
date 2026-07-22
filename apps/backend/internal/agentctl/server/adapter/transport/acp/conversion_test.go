@@ -937,6 +937,9 @@ func TestTryConvertUntypedUpdate_TaskNotificationSignalsOneBackgroundCompletion(
 	if event.Type != "background_complete" {
 		t.Fatalf("event type = %q, want background_complete", event.Type)
 	}
+	if event.ToolCallID != "" {
+		t.Fatalf("task-notification unexpectedly invented work identity %q", event.ToolCallID)
+	}
 }
 
 func TestTryConvertUntypedUpdate_SessionInfoUpdate(t *testing.T) {

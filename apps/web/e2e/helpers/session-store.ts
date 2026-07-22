@@ -23,7 +23,7 @@ type AvailableCommand = {
 
 export async function waitForActiveSessionForegroundActivity(
   page: Page,
-  activity: "generating" | "background",
+  activity: "generating" | "background" | null,
 ): Promise<void> {
   await page.waitForFunction(
     (expected) => {
@@ -31,7 +31,9 @@ export async function waitForActiveSessionForegroundActivity(
       if (!store) return false;
       const state = store.getState();
       const sessionId = state.tasks.activeSessionId;
-      return !!sessionId && state.taskSessions.items[sessionId]?.foreground_activity === expected;
+      if (!sessionId) return false;
+      const current = state.taskSessions.items[sessionId]?.foreground_activity;
+      return expected === null ? current == null : current === expected;
     },
     activity,
     { timeout: 20_000 },

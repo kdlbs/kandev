@@ -260,6 +260,21 @@ background-running value may therefore be carried for a session whose coarse
 state is no longer `RUNNING`. The composer gates only on foreground ownership;
 background liveness alone never puts the composer into queue mode.
 
+Foreground ownership is scoped to the accepted prompt cycle, not to individual
+output chunks within that cycle. If a provider yields, emits final assistant,
+thinking, or tool output for the same prompt, and then completes that prompt,
+the final completion still releases foreground ownership. Output from that same
+prompt must not be mistaken for a successor prompt, while delayed events from a
+predecessor prompt must never release the current prompt's foreground ownership.
+
+Detached-work completion is accountable to the owning execution. When the
+provider supplies a stable work identity, completion retires that exact
+registration and duplicate completion evidence is idempotent. When completion
+evidence is uncorrelated, the implementation fails closed while the execution
+is live, but execution stop, failure, cancellation, and teardown remove every
+remaining registration owned by that execution. A registration must not keep a
+task background-running after its owning execution has ended.
+
 **Safe fallback.** The fine-grained substate is in-memory and best-effort by
 design (ADR-0049). While the agent execution remains connected, a background
 launch stays background-running until terminal evidence arrives; a foreground

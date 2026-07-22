@@ -68,3 +68,38 @@ func TestDetachedBackgroundLifecycleFrames(t *testing.T) {
 		t.Fatalf("completion session = %q", got[2].notification.SessionId)
 	}
 }
+
+func TestAsyncSubagentForegroundFramesMatchClaudeOrdering(t *testing.T) {
+	e, updates := newTestEmitter()
+	emitAsyncSubagentLifecycle(e, "/async-subagent-teardown", false)
+
+	got := updates.getUpdates()
+	if len(got) != 5 {
+		t.Fatalf("updates = %d, want launch, async acknowledgement, idle, thought, and message", len(got))
+	}
+	if got[0].notification.Update.ToolCall == nil {
+		t.Fatal("first update must start the Agent tool")
+	}
+	launch := got[1].notification.Update.ToolCallUpdate
+	if launch == nil {
+		t.Fatal("second update must acknowledge the async launch")
+	}
+	response := launch.Meta["claudeCode"].(map[string]any)["toolResponse"].(map[string]any)
+	if response["agentId"] != asyncSubagentAgentID || response[subagentKeyStatus] != subagentStatusAsync {
+		t.Fatalf("async launch response = %#v", response)
+	}
+	idle := got[2].notification.Update.UsageUpdate
+	if idle == nil {
+		t.Fatal("third update must be the foreground-idle usage boundary")
+	}
+	origin := idle.Meta[claudeOriginMetaKey].(map[string]any)
+	if origin["kind"] != claudeOriginHuman {
+		t.Fatalf("idle origin = %#v", origin)
+	}
+	if !isThoughtUpdate(got[3]) {
+		t.Fatal("fourth update must be final same-prompt thinking")
+	}
+	if !isTextUpdate(got[4]) || getTextContent(got[4]) != "Foreground response after async launch." {
+		t.Fatalf("fifth update must be final same-prompt assistant output, got %#v", got[4])
+	}
+}

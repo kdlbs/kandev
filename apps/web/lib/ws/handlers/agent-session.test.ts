@@ -6,7 +6,10 @@ import type { AppState } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
 import type { TaskSession } from "@/lib/types/http";
-import type { TaskSessionStateChangedPayload } from "@/lib/types/backend";
+import type {
+  TaskSessionActivityChangedPayload,
+  TaskSessionStateChangedPayload,
+} from "@/lib/types/backend";
 
 function makeStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -51,12 +54,29 @@ function makeMessage(payload: TaskSessionStateChangedPayload) {
   };
 }
 
-function makeActivityMessage(payload: {
-  task_id?: string;
-  session_id?: string;
-  foreground_activity?: string;
-}) {
-  return { id: "m", type: "notification" as const, action: ACTIVITY_EVENT, payload };
+function makeActivityMessage(payload: TaskSessionActivityChangedPayload) {
+  return {
+    id: "m",
+    type: "notification" as const,
+    action: "session.activity_changed" as const,
+    payload,
+  };
+}
+
+function makeRealActivityStore(state: TaskSession["state"] = "WAITING_FOR_INPUT") {
+  const selected = {
+    id: "s-1",
+    task_id: "t-1",
+    state,
+    foreground_activity: "background",
+    started_at: RECOVERABLE_ERROR_AT,
+    updated_at: RECOVERABLE_ERROR_AT,
+  } as TaskSession;
+  const peer = { ...selected, id: "s-2" } as TaskSession;
+  const store = createAppStore();
+  store.getState().setTaskSession(selected);
+  store.getState().setTaskSession(peer);
+  return store;
 }
 
 function assertRealStoreActivityRouting() {
@@ -967,6 +987,16 @@ describe("session.activity_changed handler — fine-grained busy signal", () => 
     "drives the selected session queue→direct→queue in the real store without affecting peers",
     assertRealStoreActivityRouting,
   );
+
+  it("clears background activity from an input-capable session without affecting its peer", () => {
+    const store = makeRealActivityStore();
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT]!;
+
+    handler(makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: null }));
+
+    expect(store.getState().taskSessions.items["s-1"].foreground_activity).toBeNull();
+    expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+  });
 });
 
 describe("session.state_changed carries and resets the busy substate", () => {
@@ -1019,5 +1049,90 @@ describe("session.state_changed carries and resets the busy substate", () => {
       state: "WAITING_FOR_INPUT",
       foreground_activity: "background",
     });
+  });
+});
+
+describe("session activity explicit-null contract", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("clears stale background activity on a terminal state event without affecting its peer", () => {
+    const store = makeRealActivityStore("RUNNING");
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "COMPLETED",
+        foreground_activity: null,
+      }),
+    );
+
+    expect(store.getState().taskSessions.items["s-1"]).toMatchObject({
+      state: "COMPLETED",
+      foreground_activity: null,
+    });
+    expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+  });
+
+  it.each([
+    {
+      name: "terminal clear before delayed activity",
+      events: [
+        makeMessage({
+          task_id: "t-1",
+          session_id: "s-1",
+          new_state: "COMPLETED",
+          foreground_activity: null,
+        }),
+        makeActivityMessage({
+          task_id: "t-1",
+          session_id: "s-1",
+          foreground_activity: "background",
+        }),
+      ],
+    },
+    {
+      name: "activity clear before terminal clear",
+      events: [
+        makeActivityMessage({
+          task_id: "t-1",
+          session_id: "s-1",
+          foreground_activity: null,
+        }),
+        makeMessage({
+          task_id: "t-1",
+          session_id: "s-1",
+          new_state: "COMPLETED",
+          foreground_activity: null,
+        }),
+      ],
+    },
+  ])("keeps terminal activity cleared when $name", ({ events }) => {
+    const store = makeRealActivityStore();
+    const handlers = registerTaskSessionHandlers(store);
+
+    for (const event of events) {
+      if (event.action === STATE_CHANGED_EVENT) handlers[STATE_CHANGED_EVENT]!(event as never);
+      else handlers[ACTIVITY_EVENT]!(event as never);
+    }
+
+    expect(store.getState().taskSessions.items["s-1"]).toMatchObject({
+      state: "COMPLETED",
+      foreground_activity: null,
+    });
+    expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+  });
+
+  it("preserves background activity when a state event omits the activity field", () => {
+    const store = makeRealActivityStore("RUNNING");
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "WAITING_FOR_INPUT" }));
+
+    expect(store.getState().taskSessions.items["s-1"].foreground_activity).toBe("background");
+    expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
   });
 });

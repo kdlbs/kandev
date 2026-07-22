@@ -45,8 +45,9 @@ const (
 	EventTypeForegroundIdle = "foreground_idle"
 
 	// EventTypeBackgroundComplete indicates one provider-reported background
-	// workload completed. Some providers do not expose the workload ID on this
-	// terminal frame, so consumers retire one outstanding registration.
+	// workload completed. ToolCallID carries a stable provider work identity when
+	// available. Some providers expose no identity on the terminal frame; consumers
+	// must fail closed rather than guessing among multiple registrations.
 	EventTypeBackgroundComplete = "background_complete"
 
 	// EventTypeAvailableCommands indicates available slash commands from the agent.

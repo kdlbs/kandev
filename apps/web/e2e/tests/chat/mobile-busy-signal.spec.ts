@@ -12,6 +12,86 @@ import { waitForActiveSessionForegroundActivity } from "../../helpers/session-st
 test.describe("Mobile fine-grained busy signal", () => {
   test.describe.configure({ retries: 1 });
 
+  test("async subagent allows instant mobile send and clears on singleton ID-less completion", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile async subagent lifecycle",
+      seedData.agentProfileId,
+      {
+        description: "/async-subagent-lifecycle 25s",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(testPage.getByText("Foreground response after async launch.")).toBeVisible({
+      timeout: 25_000,
+    });
+    await expect(session.idleInput()).toBeVisible({ timeout: 25_000 });
+    await expect(session.agentStatus()).toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+
+    // Use the shipped Pixel 5 composer button path; the prompt must be posted,
+    // not queued, and foreground must take visual precedence over the child.
+    await session.sendMessageViaButton("/slow 3s");
+    await expect(testPage.getByText("/slow 3s")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "generating");
+
+    await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+    await expect(session.agentStatus()).not.toBeVisible({ timeout: 45_000 });
+    await waitForActiveSessionForegroundActivity(testPage, null);
+    await expect(session.agentStatus()).not.toBeVisible();
+  });
+
+  test("execution teardown clears a missing async completion on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(100_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile async subagent teardown",
+      seedData.agentProfileId,
+      {
+        description: "/async-subagent-teardown",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("auto-started task did not return a session id");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 25_000 });
+    await expect(session.agentStatus()).toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+
+    await apiClient.stopSession({
+      session_id: task.session_id,
+      reason: "e2e teardown",
+      force: true,
+    });
+    await expect(session.agentStatus()).not.toBeVisible({ timeout: 20_000 });
+    await waitForActiveSessionForegroundActivity(testPage, null);
+    await expect(session.agentStatus()).not.toBeVisible();
+  });
+
   test("background-idle session shows working AND accepts input at mobile width", async ({
     testPage,
     apiClient,

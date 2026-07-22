@@ -2676,9 +2676,14 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		// Re-apply transforms in case metadata changed during ensureSessionRunning.
 		effectivePrompt = s.effectivePromptForSession(sessionID, prompt, planMode, session)
 	}
+	foregroundDispatch := s.beginForegroundDispatch(sessionID, foregroundClaim)
+	if foregroundDispatch == nil {
+		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
+	}
 
 	if result, handled, switchErr := s.trySwitchModelForPrompt(
-		ctx, taskID, sessionID, model, effectivePrompt, session, foregroundClaim,
+		ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch,
 	); handled {
 		return result, switchErr
 	}
@@ -2694,23 +2699,16 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		ctx, taskID, sessionID, claimEntryID, session, foregroundClaim,
 	)
 	if err != nil {
-		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
 		return nil, err
 	}
 	session = claimedSession
 	s.startTurnForSession(ctx, sessionID)
-	// A fresh foreground prompt is, by definition, foreground generation — clear
-	// any lingering "waiting on background" state so this turn gates input while
-	// it runs. Publish the flip: setSessionRunning above no-ops on an already-RUNNING
-	// session, so this is the only signal that resets the client's stale
-	// foreground_activity=background.
-	//
-	// Either side can be the one that flipped it. A prompt into a background-idle
-	// session already flipped it when it claimed the turn above, so
-	// markForegroundGenerating has nothing left to change and reports false —
-	// the claim is the transition, and it still has to be broadcast.
-	flippedToGenerating := s.markForegroundGenerating(sessionID)
-	if flippedToGenerating || foregroundClaim != nil {
+	// beginForegroundDispatch atomically established foreground-generating
+	// ownership before any cleanup/provider event could interleave. Publish that
+	// flip now that session admission succeeded; claimed RUNNING prompts also need
+	// the broadcast because their earlier atomic claim made the same transition.
+	if foregroundDispatch.yieldedBeforeBegin || foregroundClaim != nil {
 		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
 
@@ -2721,12 +2719,13 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	result, err := s.executor.PromptWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
 		func() {
-			if s.completeForegroundClaim(foregroundClaim) {
+			if s.acceptForegroundDispatch(foregroundDispatch) {
 				s.publishForegroundActivityChanged(promptCtx, taskID, sessionID)
 			}
 		}, session,
 	)
 	if err != nil {
+		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
 		return s.handlePromptDispatchFailure(ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments, previousSessionState, err)
 	}
 	return &PromptResult{
@@ -2771,19 +2770,29 @@ func (s *Service) releaseForegroundClaimOnFailure(ctx context.Context, taskID, s
 	}
 }
 
+func (s *Service) rollbackForegroundDispatchOnFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	dispatch *foregroundDispatch,
+) {
+	if s.rollbackForegroundDispatch(dispatch) {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+	}
+}
+
 // trySwitchModelForPrompt keeps foreground admission consistent when a model
 // switch either dispatches the prompt itself or fails before reaching the agent.
-func (s *Service) trySwitchModelForPrompt(ctx context.Context, taskID, sessionID, model, prompt string, session *models.TaskSession, claim *foregroundClaim) (*PromptResult, bool, error) {
+func (s *Service) trySwitchModelForPrompt(ctx context.Context, taskID, sessionID, model, prompt string, session *models.TaskSession, dispatch *foregroundDispatch) (*PromptResult, bool, error) {
 	result, switched, err := s.trySwitchModel(ctx, taskID, sessionID, model, prompt, session)
 	if !switched && err == nil {
 		return nil, false, nil
 	}
 	if err != nil {
-		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, claim)
+		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, dispatch)
 		return result, true, err
 	}
-	if claim != nil {
-		s.completeForegroundClaim(claim)
+	revealedBackground := s.acceptForegroundDispatch(dispatch)
+	if revealedBackground || dispatch.yieldedBeforeBegin || s.acceptedForegroundDispatchClaim(dispatch) {
 		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
 	return result, true, nil

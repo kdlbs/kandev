@@ -101,8 +101,11 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldProviderIdle)
 
 	case streams.EventTypeBackgroundComplete:
-		if s.completeOneBackgroundTask(sessionID) {
-			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+		value := s.backgroundCompletionActivityValue(ctx, sessionID)
+		if publication, changed := s.completeBackgroundWorkSnapshot(
+			sessionID, payload.ExecutionID, payload.Data.ToolCallID, value,
+		); changed {
+			s.publishForegroundActivitySnapshot(ctx, taskID, sessionID, publication)
 		}
 
 	case "plan":
@@ -117,6 +120,17 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "log":
 		s.handleAgentLogEvent(ctx, payload)
 	}
+}
+
+func (s *Service) backgroundCompletionActivityValue(ctx context.Context, sessionID string) interface{} {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err == nil && session != nil && session.State != models.TaskSessionStateRunning {
+		// A settled foreground has no generating substate to fall back to after
+		// its final detached child finishes. Explicit null is required because
+		// partial client-store merges preserve an omitted/stale background value.
+		return nil
+	}
+	return string(v1.ForegroundActivityGenerating)
 }
 
 func (s *Service) foregroundIdleOwnsCurrentPrompt(payload *lifecycle.AgentStreamEventPayload) bool {
@@ -445,6 +459,20 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	if s.shouldDropCompletedExecutionStreamEvent(payload) {
 		return
 	}
+	// A terminal update from a foreground tool can be the last substantive frame
+	// after the provider has already announced foreground-idle. Its output still
+	// belongs to the current prompt and therefore temporarily restores foreground
+	// precedence until turn completion. Do not apply this to nested subagent work,
+	// a registered background tool, or an async launch card: those describe the
+	// detached workload rather than resumed foreground output.
+	if isTerminalToolStatus(payload.Data.ToolStatus) &&
+		len(payload.Data.ToolCallContents) > 0 &&
+		payload.Data.ParentToolCallID == "" &&
+		!s.hasBackgroundTask(payload.SessionID, payload.Data.ToolCallID) &&
+		!normalizedIsDetachedLaunch(payload.Data.Normalized) &&
+		s.markForegroundGenerating(payload.SessionID) {
+		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
+	}
 
 	// Background-work bookkeeping for the finer-grained busy signal runs
 	// regardless of message persistence — mirrors handleToolCallEvent — so a
@@ -515,8 +543,6 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		s.setSessionRunningForExecution(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID)
 	}
 
-	// Background-work bookkeeping for the finer-grained busy signal.
-	s.trackBackgroundToolUpdate(ctx, payload)
 }
 
 // trackBackgroundToolUpdate maintains the fine-grained busy signal's background
@@ -534,6 +560,12 @@ func (s *Service) trackBackgroundToolUpdate(ctx context.Context, payload *lifecy
 		// signal arrives. Monitor terminal payloads are no longer classified as
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
+			s.registerBackgroundWork(
+				payload.SessionID,
+				payload.Data.ToolCallID,
+				payload.ExecutionID,
+				backgroundWorkID(payload.Data.Normalized),
+			)
 			return
 		}
 		// A finished top-level background task no longer holds the turn open.
@@ -544,7 +576,9 @@ func (s *Service) trackBackgroundToolUpdate(ctx context.Context, payload *lifecy
 		// leaving the session permanently "not generating" for the rest of the
 		// turn. completeBackgroundTask is a no-op for IDs that were never
 		// registered, so this cannot clear a still-outstanding background task.
-		if s.completeBackgroundTask(payload.SessionID, payload.Data.ToolCallID) {
+		if s.completeBackgroundTaskForExecution(
+			payload.SessionID, payload.Data.ToolCallID, payload.ExecutionID,
+		) {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 		}
 		return
@@ -565,7 +599,25 @@ func (s *Service) trackBackgroundToolUpdate(ctx context.Context, payload *lifecy
 	// classifier can see them. Register only on that first recognition:
 	// re-registering on later updates would re-set `yielded` and clobber a
 	// foreground stream that meanwhile marked the turn generating again.
-	s.registerBackgroundTask(payload.SessionID, payload.Data.ToolCallID)
+	s.registerBackgroundWork(
+		payload.SessionID,
+		payload.Data.ToolCallID,
+		payload.ExecutionID,
+		backgroundWorkID(payload.Data.Normalized),
+	)
+}
+
+func backgroundWorkID(payload *streams.NormalizedPayload) string {
+	if payload == nil {
+		return ""
+	}
+	if subagent := payload.SubagentTask(); subagent != nil {
+		return subagent.AgentID
+	}
+	if monitor := payload.Monitor(); monitor != nil {
+		return monitor.TaskID
+	}
+	return ""
 }
 
 // isTerminalToolStatus reports whether a tool_update status marks the tool call
@@ -920,6 +972,10 @@ func (s *Service) publishTaskSessionStateChanged(
 			agentProfileID = task.AssigneeAgentProfileID
 		}
 	}
+	var foregroundActivity interface{}
+	if nextState == models.TaskSessionStateRunning || nextState == models.TaskSessionStateWaitingForInput {
+		foregroundActivity = string(s.foregroundActivityValue(sessionID))
+	}
 	eventData := map[string]interface{}{
 		metaKeyTaskID:            taskID,
 		metaKeySessionID:         sessionID,
@@ -929,10 +985,10 @@ func (s *Service) publishTaskSessionStateChanged(
 		metaKeyAgentProfileID:    agentProfileID,
 		"agent_profile_snapshot": session.AgentProfileSnapshot,
 		"is_passthrough":         session.IsPassthrough,
-		// Carry the fine-grained busy substate on every coarse transition. A new
-		// foreground turn resets it to generating; a turn ending may preserve
-		// background while detached work remains live (ADR-0049).
-		"foreground_activity": string(s.foregroundActivityValue(sessionID)),
+		// Carry activity only while the session can own foreground/background
+		// work. Every other state gets an explicit null so partial client-store
+		// merges clear a previously-live substate during session.stop/teardown.
+		"foreground_activity": foregroundActivity,
 	}
 	if stateUpdatedAt != nil && !stateUpdatedAt.IsZero() {
 		eventData[metaKeyUpdatedAt] = stateUpdatedAt.Format(time.RFC3339Nano)
