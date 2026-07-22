@@ -227,7 +227,7 @@ test.describe("Docker task-host LSP", () => {
     await expect(saveButton).toBeDisabled({ timeout: 15_000 });
 
     await testPage.reload();
-    await task.session.waitForLoad(45_000);
+    await task.session.showSessionContext(45_000);
     await task.session.waitForChatIdle({ timeout: 45_000 });
     await openDesktopFile(testPage, task.session, filePath);
     await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(editMarker, {
