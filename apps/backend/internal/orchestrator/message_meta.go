@@ -182,7 +182,7 @@ func mergeMetadata(base, extra map[string]interface{}) map[string]interface{} {
 	if len(base) == 0 {
 		return extra
 	}
-	merged := make(map[string]interface{}, len(base)+len(extra))
+	merged := make(map[string]interface{}, len(base))
 	for k, v := range base {
 		merged[k] = v
 	}

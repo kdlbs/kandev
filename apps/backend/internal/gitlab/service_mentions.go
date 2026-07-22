@@ -370,6 +370,14 @@ func normalizeMentionHost(raw string) (string, error) {
 	return parsed.String(), nil
 }
 
+// SameMentionHost reports whether two GitLab origins normalize to the same
+// mention-search host. Invalid or missing hosts never match.
+func SameMentionHost(left, right string) bool {
+	left, leftErr := normalizeMentionHost(left)
+	right, rightErr := normalizeMentionHost(right)
+	return leftErr == nil && rightErr == nil && left == right
+}
+
 func normalizeMentionProjects(projects []MentionProjectScope) ([]MentionProjectScope, error) {
 	if len(projects) == 0 || len(projects) > maxMentionProjects {
 		return nil, ErrMentionInvalidScope

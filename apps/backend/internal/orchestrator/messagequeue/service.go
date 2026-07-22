@@ -54,7 +54,7 @@ func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, 
 // is propagated to the resulting Message row when the queued message is
 // drained (e.g. sender_task_id for messages sent via message_task_kandev).
 func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}) (*QueuedMessage, error) {
-	metadataCopy := copyMessageMetadata(metadata, 0)
+	metadataCopy := copyMessageMetadata(metadata, false)
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
 		TaskID:      taskID,
@@ -87,7 +87,7 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 // inserts a new tail entry if allowInsert is true; otherwise ErrEntryNotFound is
 // returned. The returned bool is true when an existing entry was replaced.
 func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, error) {
-	metadataCopy := copyMessageMetadata(metadata, 1)
+	metadataCopy := copyMessageMetadata(metadata, true)
 	metadataCopy[MetadataCoalesceKey] = coalesceKey
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
@@ -119,11 +119,11 @@ func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, ta
 	return queued, replaced, nil
 }
 
-func copyMessageMetadata(metadata map[string]interface{}, extraCapacity int) map[string]interface{} {
-	if len(metadata) == 0 && extraCapacity == 0 {
+func copyMessageMetadata(metadata map[string]interface{}, ensureWritable bool) map[string]interface{} {
+	if len(metadata) == 0 && !ensureWritable {
 		return nil
 	}
-	out := make(map[string]interface{}, len(metadata)+extraCapacity)
+	out := make(map[string]interface{}, len(metadata))
 	for key, value := range metadata {
 		out[key] = value
 	}

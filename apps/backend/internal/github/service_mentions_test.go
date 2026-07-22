@@ -42,7 +42,7 @@ func TestServiceSearchMentionsUsesServerBuiltTitleOnlyQuery(t *testing.T) {
 	issues, err := service.SearchMentionIssuesForWorkspace(
 		context.Background(),
 		"workspace-1",
-		`fix repo:foreign/private "auth" \\ flow`,
+		`fix type:pr is:issue repo:foreign/private "auth" \\ flow`,
 		3,
 	)
 	if err != nil {
@@ -51,15 +51,22 @@ func TestServiceSearchMentionsUsesServerBuiltTitleOnlyQuery(t *testing.T) {
 	prs, err := service.SearchMentionPullRequestsForWorkspace(
 		context.Background(),
 		"workspace-1",
-		`fix repo:foreign/private "auth" \\ flow`,
+		`fix type:pr is:issue repo:foreign/private "auth" \\ flow`,
 		4,
 	)
 	if err != nil {
 		t.Fatalf("search PR mentions: %v", err)
 	}
-	wantQuery := `in:title "fix repo:foreign/private \"auth\" \\\\ flow"`
-	if client.issueQuery != wantQuery || client.prQuery != wantQuery {
-		t.Fatalf("queries = issue %q PR %q, want %q", client.issueQuery, client.prQuery, wantQuery)
+	wantIssueQuery := `type:issue in:title "fix type:pr is:issue repo:foreign/private \"auth\" \\\\ flow"`
+	wantPRQuery := `type:pr in:title "fix type:pr is:issue repo:foreign/private \"auth\" \\\\ flow"`
+	if client.issueQuery != wantIssueQuery || client.prQuery != wantPRQuery {
+		t.Fatalf(
+			"queries = issue %q PR %q, want issue %q PR %q",
+			client.issueQuery,
+			client.prQuery,
+			wantIssueQuery,
+			wantPRQuery,
+		)
 	}
 	if len(issues) != 1 || issues[0].NodeID != "I_kwDOA" {
 		t.Fatalf("issues = %#v", issues)

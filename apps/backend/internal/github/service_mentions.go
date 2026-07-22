@@ -31,7 +31,7 @@ func (s *Service) SearchMentionIssuesForWorkspace(
 		ctx,
 		workspaceID,
 		"",
-		buildMentionTitleQuery(query),
+		buildMentionTitleQuery("type:issue", query),
 		1,
 		limit,
 	)
@@ -59,7 +59,7 @@ func (s *Service) SearchMentionPullRequestsForWorkspace(
 		ctx,
 		workspaceID,
 		"",
-		buildMentionTitleQuery(query),
+		buildMentionTitleQuery("type:pr", query),
 		1,
 		limit,
 	)
@@ -90,10 +90,10 @@ func normalizeMentionSearch(workspaceID, query string, limit int) (string, strin
 	return workspaceID, query, limit, nil
 }
 
-// buildMentionTitleQuery quotes all user input so tokens such as repo: or
-// org: remain title text instead of becoming GitHub search qualifiers.
-func buildMentionTitleQuery(query string) string {
+// buildMentionTitleQuery keeps the server-owned type qualifier outside the
+// quoted user input so qualifier-like title text cannot change result types.
+func buildMentionTitleQuery(typeQualifier, query string) string {
 	query = strings.ReplaceAll(query, `\`, `\\`)
 	query = strings.ReplaceAll(query, `"`, `\"`)
-	return `in:title "` + query + `"`
+	return typeQualifier + ` in:title "` + query + `"`
 }

@@ -45,8 +45,15 @@ func TestBuiltinGitLabMentionsSyncWorkspaceRepositoryScopeBeforeSearch(t *testin
 	repositories := &gitLabMentionRepositoryResolverStub{repositories: []*models.Repository{
 		{
 			ID: "repo-gitlab", WorkspaceID: "workspace-1", Provider: "gitlab",
-			ProviderRepoID: "101", ProviderOwner: "group", ProviderName: "api",
+			ProviderRepoID: "101", ProviderHost: "HTTPS://GITLAB.EXAMPLE.TEST/",
+			ProviderOwner: "group", ProviderName: "api",
 			RemoteURL: host + "/group/api.git",
+		},
+		{
+			ID: "repo-foreign-gitlab", WorkspaceID: "workspace-1", Provider: "gitlab",
+			ProviderRepoID: "202", ProviderHost: "https://gitlab.other.test",
+			ProviderOwner: "other", ProviderName: "private",
+			RemoteURL: "https://gitlab.other.test/other/private.git",
 		},
 		{
 			ID: "repo-github", WorkspaceID: "workspace-1", Provider: "github",
@@ -86,7 +93,11 @@ func TestBuiltinGitLabMentionsSyncWorkspaceRepositoryScopeBeforeSearch(t *testin
 		t.Fatalf("scope = %#v", scope)
 	}
 
-	repositories.repositories = nil
+	repositories.repositories = []*models.Repository{{
+		ID: "repo-unknown-gitlab", WorkspaceID: "workspace-1", Provider: "gitlab",
+		ProviderRepoID: "101", ProviderOwner: "group", ProviderName: "api",
+		RemoteURL: host + "/group/api.git",
+	}}
 	_, err = issueProvider.Search(context.Background(), mentions.SearchRequest{
 		WorkspaceID: "workspace-1", Query: "auth", Limit: 5,
 	})

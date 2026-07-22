@@ -72,7 +72,7 @@ describe("entity reference Markdown matching", () => {
       "[#ENG\\[1\\]](https://jira.example/browse/ENG-1?q=hello%20world%28test%29)",
     );
     expect(
-      matchEntityReferenceLink([reference], "#ENG[1]", reference.url.replace(" ", "%20")),
+      matchEntityReferenceLink([reference], "#ENG[1]", reference.url.replaceAll(" ", "%20")),
     ).toBeNull();
     expect(
       matchEntityReferenceLink(

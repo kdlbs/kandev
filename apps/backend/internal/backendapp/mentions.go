@@ -210,11 +210,11 @@ func (s *workspaceScopedGitLabMentionService) ensureScope(ctx context.Context, w
 	if err != nil {
 		return fmt.Errorf("list workspace GitLab mention repositories: %w", err)
 	}
-	projects, err := gitLabMentionProjects(workspaceID, repositories)
+	host := s.service.Host()
+	projects, err := gitLabMentionProjects(workspaceID, host, repositories)
 	if err != nil {
 		return err
 	}
-	host := s.service.Host()
 	current, currentErr := s.service.MentionScopeForWorkspace(ctx, workspaceID)
 	if currentErr == nil && sameGitLabMentionScope(current, workspaceID, host, projects) {
 		return nil
@@ -226,17 +226,20 @@ func (s *workspaceScopedGitLabMentionService) ensureScope(ctx context.Context, w
 }
 
 func gitLabMentionProjects(
-	workspaceID string,
+	workspaceID, host string,
 	repositories []*models.Repository,
 ) ([]gitlab.MentionProjectScope, error) {
 	byID := make(map[int64]string)
 	byPath := make(map[string]int64)
 	for _, repository := range repositories {
-		if repository == nil || !strings.EqualFold(strings.TrimSpace(repository.Provider), "gitlab") {
+		if !isGitLabRepository(repository) {
 			continue
 		}
 		if repository.WorkspaceID != workspaceID {
 			return nil, gitlab.ErrMentionInvalidScope
+		}
+		if !gitlab.SameMentionHost(repository.ProviderHost, host) {
+			continue
 		}
 		projectIDText := strings.TrimSpace(repository.ProviderRepoID)
 		projectID, err := strconv.ParseInt(projectIDText, 10, 64)
@@ -268,6 +271,10 @@ func gitLabMentionProjects(
 		return projects[i].ID < projects[j].ID
 	})
 	return projects, nil
+}
+
+func isGitLabRepository(repository *models.Repository) bool {
+	return repository != nil && strings.EqualFold(strings.TrimSpace(repository.Provider), "gitlab")
 }
 
 func sameGitLabMentionScope(
