@@ -444,12 +444,9 @@ func (s *Service) GetWorkspaceAuthStatus(
 	if err != nil {
 		return nil, err
 	}
-	var personal *UserConnection
-	if userID != "" {
-		personal, err = s.store.GetUserConnection(ctx, workspaceID, userID)
-		if err != nil {
-			return nil, err
-		}
+	personal, err := s.workspacePersonalConnection(ctx, workspaceID, userID)
+	if err != nil {
+		return nil, err
 	}
 	status := &WorkspaceAuthStatus{
 		WorkspaceID: workspaceID, Personal: personal, RequiredScopes: RequiredGitHubScopes,
@@ -464,17 +461,8 @@ func (s *Service) GetWorkspaceAuthStatus(
 		WorkspaceConnection: connection,
 		LegacyMigration:     connection.Source == ConnectionSourceLegacyShared,
 	}
-	if connection.Source == ConnectionSourceGitHubAppInstallation && connection.AppRegistrationID != "" {
-		registration, registrationErr := s.store.GetAppRegistration(ctx, connection.AppRegistrationID)
-		if registrationErr != nil {
-			return nil, registrationErr
-		}
-		if registration != nil {
-			status.AppRegistration = cloneDeploymentAppRegistration(registration)
-			runtime := s.AppRegistrationRuntimeSnapshot(registration.ID)
-			status.GitHubAppAvailable = registration.Status == AppRegistrationStatusActive && runtime.Ready
-			status.AppAvailable = status.GitHubAppAvailable
-		}
+	if err := s.populateAppRegistrationStatus(ctx, connection, status); err != nil {
+		return nil, err
 	}
 	if connection.Status != ConnectionStatusActive || s.resolver == nil {
 		return status, nil
@@ -493,6 +481,44 @@ func (s *Service) GetWorkspaceAuthStatus(
 	status.Automation.RateLimit = rateLimitInfoForTracker(automation.RateTracker)
 	status.RateLimit = status.Automation.RateLimit
 
+	s.populateEffectivePersonalActors(ctx, workspaceID, userID, status)
+	return status, nil
+}
+
+func (s *Service) workspacePersonalConnection(
+	ctx context.Context,
+	workspaceID, userID string,
+) (*UserConnection, error) {
+	if userID == "" {
+		return nil, nil
+	}
+	return s.store.GetUserConnection(ctx, workspaceID, userID)
+}
+
+func (s *Service) populateAppRegistrationStatus(
+	ctx context.Context,
+	connection *WorkspaceConnection,
+	status *WorkspaceAuthStatus,
+) error {
+	if connection.Source != ConnectionSourceGitHubAppInstallation || connection.AppRegistrationID == "" {
+		return nil
+	}
+	registration, err := s.store.GetAppRegistration(ctx, connection.AppRegistrationID)
+	if err != nil || registration == nil {
+		return err
+	}
+	status.AppRegistration = cloneDeploymentAppRegistration(registration)
+	runtime := s.AppRegistrationRuntimeSnapshot(registration.ID)
+	status.GitHubAppAvailable = registration.Status == AppRegistrationStatusActive && runtime.Ready
+	status.AppAvailable = status.GitHubAppAvailable
+	return nil
+}
+
+func (s *Service) populateEffectivePersonalActors(
+	ctx context.Context,
+	workspaceID, userID string,
+	status *WorkspaceAuthStatus,
+) {
 	personalActor, _ := s.resolver.Resolve(ctx, ResolveCredentialRequest{
 		WorkspaceID: workspaceID, UserID: userID, Purpose: CredentialPurposePersonalRead,
 	})
@@ -505,7 +531,6 @@ func (s *Service) GetWorkspaceAuthStatus(
 	if mutationActor != nil {
 		status.EffectiveManualMutationActor = principalPointer(mutationActor.Principal)
 	}
-	return status, nil
 }
 
 func principalPointer(principal AuthPrincipal) *AuthPrincipal {

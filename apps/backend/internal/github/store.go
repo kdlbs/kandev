@@ -433,6 +433,21 @@ const appRegistrationTablesSQL = `
 `
 
 func (s *Store) initSchema(legacyUpgrade bool) error {
+	if err := s.initSchemaFoundations(); err != nil {
+		return err
+	}
+	s.applyIdempotentSchemaColumns()
+	if err := s.initSchemaUpgrades(); err != nil {
+		return err
+	}
+	if err := s.initSchemaData(legacyUpgrade); err != nil {
+		return err
+	}
+	s.applyIdempotentSchemaIndexes()
+	return s.ensureWorkspaceOwnershipIndexes()
+}
+
+func (s *Store) initSchemaFoundations() error {
 	if err := s.resetUnpublishedGitHubAuthSchema(); err != nil {
 		return err
 	}
@@ -445,6 +460,10 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 	if err := s.addReviewWatchTargetLogin(); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (s *Store) applyIdempotentSchemaColumns() {
 	// Idempotent migrations for existing databases.
 	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN last_review_state TEXT DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN mergeable_state TEXT NOT NULL DEFAULT ''`)
@@ -464,6 +483,9 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 	// engaged), 'always' (delete on terminal state), 'never' (manual only).
 	_, _ = s.db.Exec(`ALTER TABLE github_review_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`)
 	_, _ = s.db.Exec(`ALTER TABLE github_issue_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`)
+}
+
+func (s *Store) initSchemaUpgrades() error {
 	// Watcher self-heal columns: when the dispatch pipeline detects an
 	// orphaned watcher (e.g. its agent profile has been soft-deleted), it
 	// disables the row and stamps a human-readable cause + timestamp here
@@ -485,6 +507,10 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 	if err := s.addAppRegistrationReferenceColumns(); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (s *Store) initSchemaData(legacyUpgrade bool) error {
 	if err := s.backfillGitHubUserConnectionVersions(); err != nil {
 		return err
 	}
@@ -505,15 +531,15 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (s *Store) applyIdempotentSchemaIndexes() {
 	// pr_number is the 3rd column of UNIQUE(task_id, repository_id, pr_number),
 	// so SQLite can't use that index for the PR-number task search. Add a
 	// dedicated leading-key index so lookups by PR number stay index-backed.
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_prs_pr_number ON github_task_prs (pr_number)`)
-	if err := s.ensureWorkspaceOwnershipIndexes(); err != nil {
-		return err
-	}
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_ci_pr_state_task ON github_task_ci_pr_state (task_id)`)
-	return nil
 }
 
 func (s *Store) resetUnpublishedGitHubAuthSchema() error {

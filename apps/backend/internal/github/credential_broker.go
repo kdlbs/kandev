@@ -125,25 +125,9 @@ func (b *CredentialBroker) Issue(ctx context.Context, req CredentialLeaseRequest
 	); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCredentialScopeDenied, err)
 	}
-	connection, err := b.connections.GetWorkspaceConnection(ctx, req.WorkspaceID)
+	connection, appCredentialGeneration, err := b.issueConnection(ctx, req.WorkspaceID)
 	if err != nil {
-		return nil, fmt.Errorf("load GitHub workspace connection: %w", err)
-	}
-	if connection == nil {
-		return nil, ErrGitHubNotConfigured
-	}
-	if connection.Status != ConnectionStatusActive {
-		return nil, ErrGitHubConnectionInvalid
-	}
-	appCredentialGeneration := int64(0)
-	if connection.Source == ConnectionSourceGitHubAppInstallation {
-		if strings.TrimSpace(connection.AppRegistrationID) == "" {
-			return nil, ErrGitHubNotConfigured
-		}
-		appCredentialGeneration, err = b.resolver.appCredentialGeneration(connection.AppRegistrationID)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	ttl := req.TTL
 	if ttl <= 0 || ttl > defaultCredentialLeaseTTL {
@@ -180,6 +164,33 @@ func (b *CredentialBroker) Issue(ctx context.Context, req CredentialLeaseRequest
 		ExpiresAt:               expiresAt,
 	}
 	return &CredentialLease{Token: token, ExpiresAt: expiresAt}, nil
+}
+
+func (b *CredentialBroker) issueConnection(
+	ctx context.Context,
+	workspaceID string,
+) (*WorkspaceConnection, int64, error) {
+	connection, err := b.connections.GetWorkspaceConnection(ctx, workspaceID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("load GitHub workspace connection: %w", err)
+	}
+	if connection == nil {
+		return nil, 0, ErrGitHubNotConfigured
+	}
+	if connection.Status != ConnectionStatusActive {
+		return nil, 0, ErrGitHubConnectionInvalid
+	}
+	if connection.Source != ConnectionSourceGitHubAppInstallation {
+		return connection, 0, nil
+	}
+	if strings.TrimSpace(connection.AppRegistrationID) == "" {
+		return nil, 0, ErrGitHubNotConfigured
+	}
+	generation, err := b.resolver.appCredentialGeneration(connection.AppRegistrationID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return connection, generation, nil
 }
 
 func (b *CredentialBroker) Resolve(

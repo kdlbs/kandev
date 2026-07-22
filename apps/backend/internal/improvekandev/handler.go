@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -127,16 +128,21 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
 		return
 	}
+	workspaceID, err := canonicalWorkspaceID(req.WorkspaceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id must be a UUID"})
+		return
+	}
 
 	ctx := c.Request.Context()
-	repo, err := h.resolveOrCloneRepo(ctx, req.WorkspaceID)
+	repo, err := h.resolveOrCloneRepo(ctx, workspaceID)
 	if err != nil {
 		h.log.Error("improve-kandev: repository upsert failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register kandev repository"})
 		return
 	}
 
-	workflow, err := h.ensureWorkflow(ctx, req.WorkspaceID)
+	workflow, err := h.ensureWorkflow(ctx, workspaceID)
 	if err != nil {
 		h.log.Error("improve-kandev: workflow upsert failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to ensure improve-kandev workflow"})
@@ -177,6 +183,14 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		ForkStatus:     access.forkStatus,
 		ForkMessage:    access.forkMessage,
 	})
+}
+
+func canonicalWorkspaceID(value string) (string, error) {
+	id, err := uuid.Parse(value)
+	if err != nil {
+		return "", err
+	}
+	return id.String(), nil
 }
 
 // resolveOrCloneRepo returns the workspace's kandev repository, preferring an

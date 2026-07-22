@@ -1042,18 +1042,10 @@ export class ApiClient {
     const workspaceId = await this.activeWorkspaceId();
     if (!workspaceId) return;
 
-    await Promise.all([
-      this.mockGitHubSetWorkspaceConnection(workspaceId, {
-        source: "legacy_shared",
-        status: "active",
-      }),
-      this.mockGitHubSetPersonalConnection(workspaceId, {
-        login: username,
-        status: "active",
-        github_user_id: 1,
-        access_expires_at: "2100-01-01T00:00:00Z",
-      }),
-    ]);
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
   }
 
   async mockGitHubSetWorkspaceConnection(

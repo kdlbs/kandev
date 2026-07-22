@@ -208,17 +208,6 @@ func (s *Service) commitWorkspaceGHCLI(
 	return connection, nil
 }
 
-func (s *Service) restorePATAfterFailedTransition(
-	ctx context.Context,
-	key, previous string,
-	hadPrevious bool,
-) error {
-	if hadPrevious {
-		return s.connectionSecrets.Set(ctx, key, workspacePATSecretName, previous)
-	}
-	return deleteOptionalSecret(ctx, s.connectionSecrets, key)
-}
-
 func (s *Service) revokePersonalForAutomationTransition(
 	ctx context.Context,
 	existing, replacement *WorkspaceConnection,

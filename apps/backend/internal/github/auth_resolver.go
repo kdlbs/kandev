@@ -239,21 +239,9 @@ func (r *CredentialResolver) resolveAutomation(
 		strings.TrimSpace(connection.AppRegistrationID) == "" {
 		return nil, ErrGitHubNotConfigured
 	}
-	key := credentialCacheKey{
-		workspaceID: req.WorkspaceID, source: connection.Source,
-		generation: connection.CredentialGeneration, appRegistrationID: connection.AppRegistrationID,
-		purpose: req.Purpose, repoOwner: strings.ToLower(strings.TrimSpace(req.RepoOwner)),
-		repoName: strings.ToLower(strings.TrimSpace(req.RepoName)),
-	}
-	if connection.Source == ConnectionSourceGitHubAppInstallation {
-		provider, ok := r.app.(appCredentialGenerationProvider)
-		if !ok {
-			key.appCredentialGeneration = 0
-		} else if generation, found := provider.AppCredentialGeneration(connection.AppRegistrationID); found {
-			key.appCredentialGeneration = generation
-		} else {
-			return nil, ErrGitHubNotConfigured
-		}
+	key, err := r.automationCacheKey(connection, req)
+	if err != nil {
+		return nil, err
 	}
 	if cached := r.cached(key); cached != nil {
 		return cached, nil
@@ -268,19 +256,8 @@ func (r *CredentialResolver) resolveAutomation(
 	}
 	resolved.Principal.WorkspaceID = req.WorkspaceID
 	resolved.CredentialGeneration = connection.CredentialGeneration
-	if connection.Source == ConnectionSourceGitHubAppInstallation {
-		if resolved.AppRegistrationID == "" {
-			resolved.AppRegistrationID = connection.AppRegistrationID
-		}
-		if resolved.Principal.AppRegistrationID == "" {
-			resolved.Principal.AppRegistrationID = resolved.AppRegistrationID
-		}
-		if resolved.Principal.AppRegistrationID != connection.AppRegistrationID ||
-			resolved.AppRegistrationID != connection.AppRegistrationID {
-			return nil, ErrGitHubNotConfigured
-		}
-		resolved.Principal.AppCredentialGeneration = resolved.AppCredentialGeneration
-		key.appCredentialGeneration = resolved.AppCredentialGeneration
+	if err := applyAppCredentialMetadata(connection, resolved, &key); err != nil {
+		return nil, err
 	}
 	if !resolved.ExpiresAt.IsZero() && !resolved.ExpiresAt.After(r.now()) {
 		return nil, ErrInstallationTokenExpired
@@ -289,6 +266,54 @@ func (r *CredentialResolver) resolveAutomation(
 		return nil, errCredentialResolutionInvalidated
 	}
 	return resolved, nil
+}
+
+func (r *CredentialResolver) automationCacheKey(
+	connection *WorkspaceConnection,
+	req ResolveCredentialRequest,
+) (credentialCacheKey, error) {
+	key := credentialCacheKey{
+		workspaceID: req.WorkspaceID, source: connection.Source,
+		generation: connection.CredentialGeneration, appRegistrationID: connection.AppRegistrationID,
+		purpose: req.Purpose, repoOwner: strings.ToLower(strings.TrimSpace(req.RepoOwner)),
+		repoName: strings.ToLower(strings.TrimSpace(req.RepoName)),
+	}
+	if connection.Source != ConnectionSourceGitHubAppInstallation {
+		return key, nil
+	}
+	provider, ok := r.app.(appCredentialGenerationProvider)
+	if !ok {
+		return key, nil
+	}
+	generation, found := provider.AppCredentialGeneration(connection.AppRegistrationID)
+	if !found {
+		return credentialCacheKey{}, ErrGitHubNotConfigured
+	}
+	key.appCredentialGeneration = generation
+	return key, nil
+}
+
+func applyAppCredentialMetadata(
+	connection *WorkspaceConnection,
+	resolved *ResolvedCredential,
+	key *credentialCacheKey,
+) error {
+	if connection.Source != ConnectionSourceGitHubAppInstallation {
+		return nil
+	}
+	if resolved.AppRegistrationID == "" {
+		resolved.AppRegistrationID = connection.AppRegistrationID
+	}
+	if resolved.Principal.AppRegistrationID == "" {
+		resolved.Principal.AppRegistrationID = resolved.AppRegistrationID
+	}
+	if resolved.Principal.AppRegistrationID != connection.AppRegistrationID ||
+		resolved.AppRegistrationID != connection.AppRegistrationID {
+		return ErrGitHubNotConfigured
+	}
+	resolved.Principal.AppCredentialGeneration = resolved.AppCredentialGeneration
+	key.appCredentialGeneration = resolved.AppCredentialGeneration
+	return nil
 }
 
 func (r *CredentialResolver) resolveAutomationSource(
