@@ -55,6 +55,7 @@ function useSessionPromptHarness(initialPrompt = ORIGINAL_PROMPT, hasTarget = tr
     promptValue,
     setPromptValue,
     setHasPrompt,
+    "task-1",
   );
 
   return {

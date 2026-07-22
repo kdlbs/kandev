@@ -150,6 +150,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
  * needs without spreading hook/state plumbing across the parent component.
  */
 export function useSubtaskPromptZone(opts: {
+  parentTaskId: string;
   taskTitle: string;
   inputDisabled: boolean;
   contextValue: string;
@@ -159,6 +160,7 @@ export function useSubtaskPromptZone(opts: {
   setHasPrompt: (v: boolean) => void;
 }) {
   const {
+    parentTaskId,
     taskTitle,
     inputDisabled,
     contextValue,
@@ -177,6 +179,7 @@ export function useSubtaskPromptZone(opts: {
     taskTitle,
   });
   const promptResultDelivery = usePromptResultDelivery({
+    scopeKey: `new-subtask:${parentTaskId}`,
     getCurrent: () => latestPromptValueRef.current,
     apply: (value) => {
       if (!promptRef.current) {
@@ -191,9 +194,10 @@ export function useSubtaskPromptZone(opts: {
   const handleEnhancePrompt = useCallback(async () => {
     const current = latestPromptValueRef.current;
     if (!current.trim()) return;
+    const generation = promptResultDelivery.captureScope();
 
     await enhancePrompt(current, (enhanced) => {
-      const delivered = promptResultDelivery.deliver(current, enhanced);
+      const delivered = promptResultDelivery.deliver(current, enhanced, generation);
       if (delivered) {
         toast({ description: "Enhanced prompt applied.", variant: "success" });
       }

@@ -333,11 +333,13 @@ function applyEnhancedPromptToEditor(inputRef: ContainerState["inputRef"], value
 
 function useChatPromptEnhancement({
   inputRef,
+  taskId,
   sessionId,
   taskTitle,
   taskDescription,
 }: {
   inputRef: ContainerState["inputRef"];
+  taskId: string | null;
   sessionId: string | null;
   taskTitle?: string;
   taskDescription: string;
@@ -354,6 +356,7 @@ function useChatPromptEnhancement({
     [inputRef],
   );
   const promptDelivery = usePromptResultDelivery({
+    scopeKey: `chat:${taskId ?? ""}:${sessionId ?? ""}`,
     getCurrent: getCurrentEditorValue,
     apply: applyEnhancedPrompt,
   });
@@ -361,7 +364,10 @@ function useChatPromptEnhancement({
     const currentValue = getCurrentEditorValue();
     if (currentValue === null) return;
     if (!currentValue.trim()) return;
-    void enhancePrompt(currentValue, (result) => promptDelivery.deliver(currentValue, result));
+    const generation = promptDelivery.captureScope();
+    void enhancePrompt(currentValue, (result) =>
+      promptDelivery.deliver(currentValue, result, generation),
+    );
   }, [getCurrentEditorValue, enhancePrompt, promptDelivery]);
 
   return { handleEnhancePrompt, isEnhancingPrompt, isUtilityConfigured, promptDelivery };
@@ -416,6 +422,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
 
     const promptEnhancement = useChatPromptEnhancement({
       inputRef: s.inputRef,
+      taskId,
       sessionId,
       taskTitle,
       taskDescription,

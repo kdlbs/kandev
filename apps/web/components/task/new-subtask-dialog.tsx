@@ -298,6 +298,7 @@ function NewSubtaskForm({
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
   useExecutorDefault(allExecutorProfiles, fs.executorProfileId, fs.setExecutorProfileId);
   const promptZone = useSubtaskPromptZone({
+    parentTaskId,
     taskTitle: title,
     inputDisabled: isCreating || isSummarizing,
     contextValue,
@@ -421,7 +422,7 @@ export function NewSubtaskDialog({
           </DialogTitle>
         </DialogHeader>
         <NewSubtaskForm
-          key={`${open}`}
+          key={`${parentTaskId}-${open}`}
           parentTaskId={parentTaskId}
           defaultTitle={defaultTitle}
           defaultProfileId={currentSession?.agent_profile_id ?? ""}

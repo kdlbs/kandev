@@ -136,6 +136,61 @@ test.describe("Enhance prompt button in task creation", () => {
     await expect(recovery).toHaveCount(0);
   });
 
+  test("ignores a delayed result after closing and reopening the dialog", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const prompt = "Synthetic prompt reused after reopening.";
+    const generatedPrompt = "Synthetic delayed enhancement result.";
+    let requestStarted: (() => void) | null = null;
+    let releaseResponse: (() => void) | null = null;
+    const requestGate = new Promise<void>((resolve) => {
+      requestStarted = resolve;
+    });
+    const responseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+
+    await testPage.route("**/api/v1/utility/execute", async (route) => {
+      requestStarted?.();
+      await responseGate;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          call_id: "delayed-call-id",
+          response: generatedPrompt,
+        }),
+      });
+    });
+
+    await configureDefaultUtilityAgent(apiClient);
+    const dialog = await openCreateTaskDialog(testPage, seedData.workspaceId);
+    const textarea = testPage.getByTestId("task-description-input");
+    const enhanceBtn = testPage.getByTestId("enhance-prompt-button");
+
+    await textarea.fill(prompt);
+    await enhanceBtn.click();
+    await requestGate;
+    await testPage.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+
+    await openCreateTaskDialog(testPage, seedData.workspaceId);
+    await textarea.fill(prompt);
+    releaseResponse?.();
+    await testPage.evaluate(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+
+    await expect(enhanceBtn).toBeEnabled();
+    await expect(textarea).toHaveValue(prompt);
+    await expect(testPage.getByTestId("prompt-result-recovery")).toHaveCount(0);
+    await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
+  });
+
   test("keeps the description unchanged and shows the existing failure toast when enhancement fails", async ({
     testPage,
     apiClient,

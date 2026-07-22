@@ -385,6 +385,7 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
     taskDescription: taskDescription ?? "",
   });
   const promptDelivery = usePromptResultDelivery({
+    scopeKey: `task-comment:${taskId}`,
     getCurrent: () => inputValueRef.current,
     apply: (value) => {
       setInputAndSync(value);
@@ -411,8 +412,9 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
   const handleEnhance = useCallback(() => {
     const current = inputValueRef.current;
     if (!current.trim()) return;
+    const generation = promptDelivery.captureScope();
     void enhancePrompt(current, (result) => {
-      const inserted = promptDelivery.deliver(current, result);
+      const inserted = promptDelivery.deliver(current, result, generation);
       if (inserted) {
         toast.success(PROMPT_INSERTED_MESSAGE);
       }

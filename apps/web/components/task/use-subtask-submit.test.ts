@@ -31,6 +31,7 @@ function useSubtaskPromptHarness(initialPrompt = ORIGINAL_PROMPT) {
   const [promptValue, setPromptValue] = useState(initialPrompt);
   const [hasPrompt, setHasPrompt] = useState(Boolean(initialPrompt.trim()));
   const promptZone = useSubtaskPromptZone({
+    parentTaskId: "task-1",
     taskTitle: "Parent task",
     inputDisabled: false,
     contextValue: "blank",

@@ -33,12 +33,12 @@ it.each([
 ])("%s", (source, current, expectedApplied, _label) => {
   const apply = vi.fn(() => true);
   const { result } = renderHook(() =>
-    usePromptResultDelivery({ getCurrent: () => current, apply }),
+    usePromptResultDelivery({ scopeKey: "test", getCurrent: () => current, apply }),
   );
 
   let delivered = false;
   act(() => {
-    delivered = result.current.deliver(source, GENERATED_RESULT);
+    delivered = result.current.deliver(source, GENERATED_RESULT, result.current.captureScope());
   });
   expect(delivered).toBe(expectedApplied);
   expect(apply).toHaveBeenCalledTimes(expectedApplied ? 1 : 0);
@@ -59,12 +59,12 @@ it.each([
 it("retains the result when insertion rejects unchanged input", () => {
   const apply = vi.fn(() => false);
   const { result } = renderHook(() =>
-    usePromptResultDelivery({ getCurrent: () => "original", apply }),
+    usePromptResultDelivery({ scopeKey: "test", getCurrent: () => "original", apply }),
   );
 
   let delivered = true;
   act(() => {
-    delivered = result.current.deliver("original", GENERATED_RESULT);
+    delivered = result.current.deliver("original", GENERATED_RESULT, result.current.captureScope());
   });
   expect(delivered).toBe(false);
 
@@ -78,11 +78,11 @@ it("retains the result when insertion rejects unchanged input", () => {
 it("applyPending clears only after apply succeeds", () => {
   const apply = vi.fn(() => false);
   const { result } = renderHook(() =>
-    usePromptResultDelivery({ getCurrent: () => "edited", apply }),
+    usePromptResultDelivery({ scopeKey: "test", getCurrent: () => "edited", apply }),
   );
 
   act(() => {
-    result.current.deliver("original", GENERATED_RESULT);
+    result.current.deliver("original", GENERATED_RESULT, result.current.captureScope());
   });
   vi.clearAllMocks();
 
@@ -107,11 +107,15 @@ it("copyPending writes the pending result and reports success", async () => {
     value: { writeText },
   });
   const { result } = renderHook(() =>
-    usePromptResultDelivery({ getCurrent: () => "edited", apply: vi.fn(() => true) }),
+    usePromptResultDelivery({
+      scopeKey: "test",
+      getCurrent: () => "edited",
+      apply: vi.fn(() => true),
+    }),
   );
 
   act(() => {
-    result.current.deliver("original", GENERATED_RESULT);
+    result.current.deliver("original", GENERATED_RESULT, result.current.captureScope());
   });
   vi.clearAllMocks();
 
@@ -138,11 +142,15 @@ it("copyPending reports clipboard failure without clearing the result", async ()
   const appendChild = vi.spyOn(document.body, "appendChild");
   const createElement = vi.spyOn(document, "createElement");
   const { result } = renderHook(() =>
-    usePromptResultDelivery({ getCurrent: () => "edited", apply: vi.fn(() => true) }),
+    usePromptResultDelivery({
+      scopeKey: "test",
+      getCurrent: () => "edited",
+      apply: vi.fn(() => true),
+    }),
   );
 
   act(() => {
-    result.current.deliver("original", GENERATED_RESULT);
+    result.current.deliver("original", GENERATED_RESULT, result.current.captureScope());
   });
   vi.clearAllMocks();
 
@@ -170,11 +178,15 @@ it("copyPending reports failure without DOM fallback when clipboard is unavailab
   const appendChild = vi.spyOn(document.body, "appendChild");
   const createElement = vi.spyOn(document, "createElement");
   const { result } = renderHook(() =>
-    usePromptResultDelivery({ getCurrent: () => "edited", apply: vi.fn(() => true) }),
+    usePromptResultDelivery({
+      scopeKey: "test",
+      getCurrent: () => "edited",
+      apply: vi.fn(() => true),
+    }),
   );
 
   act(() => {
-    result.current.deliver("original", GENERATED_RESULT);
+    result.current.deliver("original", GENERATED_RESULT, result.current.captureScope());
   });
   vi.clearAllMocks();
 
@@ -195,11 +207,15 @@ it("copyPending reports failure without DOM fallback when clipboard is unavailab
 
 it("dismissPending clears the retained result", () => {
   const { result } = renderHook(() =>
-    usePromptResultDelivery({ getCurrent: () => "edited", apply: vi.fn(() => true) }),
+    usePromptResultDelivery({
+      scopeKey: "test",
+      getCurrent: () => "edited",
+      apply: vi.fn(() => true),
+    }),
   );
 
   act(() => {
-    result.current.deliver("original", GENERATED_RESULT);
+    result.current.deliver("original", GENERATED_RESULT, result.current.captureScope());
   });
 
   expect(result.current.pendingResult).toEqual(GENERATED_RESULT);
@@ -209,4 +225,46 @@ it("dismissPending clears the retained result", () => {
   });
 
   expect(result.current.pendingResult).toBeNull();
+});
+
+it("ignores a delayed result after the dialog closes and reopens with the same text", () => {
+  const apply = vi.fn(() => true);
+  const { result, rerender } = renderHook(
+    ({ scopeKey }) => usePromptResultDelivery({ scopeKey, getCurrent: () => "original", apply }),
+    { initialProps: { scopeKey: "dialog:task-1:open-1" } },
+  );
+  const generation = result.current.captureScope();
+
+  rerender({ scopeKey: "dialog:task-1:open-2" });
+
+  let delivered = true;
+  act(() => {
+    delivered = result.current.deliver("original", GENERATED_RESULT, generation);
+  });
+
+  expect(delivered).toBe(false);
+  expect(apply).not.toHaveBeenCalled();
+  expect(result.current.pendingResult).toBeNull();
+  expect(mockToast).not.toHaveBeenCalled();
+});
+
+it("ignores a delayed result after switching task or session with the same text", () => {
+  const apply = vi.fn(() => true);
+  const { result, rerender } = renderHook(
+    ({ scopeKey }) => usePromptResultDelivery({ scopeKey, getCurrent: () => "original", apply }),
+    { initialProps: { scopeKey: "task-1:session-1" } },
+  );
+  const generation = result.current.captureScope();
+
+  rerender({ scopeKey: "task-2:session-2" });
+
+  let delivered = true;
+  act(() => {
+    delivered = result.current.deliver("original", GENERATED_RESULT, generation);
+  });
+
+  expect(delivered).toBe(false);
+  expect(apply).not.toHaveBeenCalled();
+  expect(result.current.pendingResult).toBeNull();
+  expect(mockToast).not.toHaveBeenCalled();
 });

@@ -250,7 +250,11 @@ function DialogFormBody(props: DialogFormBodyProps) {
   );
 }
 
-function useEnhanceForDialog(fs: DialogFormState) {
+function useEnhanceForDialog(
+  fs: DialogFormState,
+  taskId: string | null | undefined,
+  open: boolean,
+) {
   const isConfigured = useIsUtilityConfigured();
   const { toast } = useToast();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
@@ -273,14 +277,16 @@ function useEnhanceForDialog(fs: DialogFormState) {
     [fs],
   );
   const promptDelivery = usePromptResultDelivery({
+    scopeKey: `task-create:${open}:${fs.openCycle}:${taskId ?? ""}`,
     getCurrent: () => fs.descriptionInputRef.current?.getValue() ?? null,
     apply: applyDescription,
   });
   const onEnhance = useCallback(() => {
     const current = fs.descriptionInputRef.current?.getValue() ?? "";
     if (!current.trim()) return;
+    const generation = promptDelivery.captureScope();
     void enhancePrompt(current, (result) => {
-      const inserted = promptDelivery.deliver(current, result);
+      const inserted = promptDelivery.deliver(current, result, generation);
       if (inserted) {
         toast({ description: PROMPT_INSERTED_MESSAGE, variant: "success" });
       }
@@ -504,7 +510,7 @@ export function useTaskCreateDialogSetup(
     taskCreateLastUsed,
     userSettingsLoaded,
     guardedHandleSubmit,
-    enhance: useEnhanceForDialog(fs),
+    enhance: useEnhanceForDialog(fs, props.taskId, props.open),
     handleJiraImport: useJiraImportHandler(fs),
     handleLinearImport: useLinearImportHandler(fs),
   };

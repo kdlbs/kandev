@@ -172,12 +172,14 @@ export function useSessionPromptController(
   promptValue: string,
   setPromptValue: (value: string) => void,
   setHasPrompt: (value: boolean) => void,
+  taskId: string,
 ) {
   const { toast } = useToast();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({ sessionId: null });
   const latestPromptValueRef = useRef(promptValue);
   latestPromptValueRef.current = promptValue;
   const promptResultDelivery = usePromptResultDelivery({
+    scopeKey: `new-session:${taskId}`,
     getCurrent: () => latestPromptValueRef.current,
     apply: (value) => {
       if (!promptRef.current) {
@@ -193,9 +195,10 @@ export function useSessionPromptController(
   const handleEnhancePrompt = useCallback(async () => {
     const current = latestPromptValueRef.current;
     if (!current.trim()) return;
+    const generation = promptResultDelivery.captureScope();
 
     await enhancePrompt(current, (enhanced) => {
-      const delivered = promptResultDelivery.deliver(current, enhanced);
+      const delivered = promptResultDelivery.deliver(current, enhanced, generation);
       if (delivered) {
         toast({ description: "Enhanced prompt applied.", variant: "success" });
       }
@@ -414,7 +417,7 @@ function NewSessionForm({
     setSelectedProfileId,
   });
   const { handleEnhancePrompt, isEnhancingPrompt, pendingResult, applyPending, copyPending } =
-    useSessionPromptController(promptRef, promptValue, setPromptValue, setHasPrompt);
+    useSessionPromptController(promptRef, promptValue, setPromptValue, setHasPrompt, taskId);
   const handleContextChange = useSessionContextChange({
     promptRef: controlledPromptRef,
     initialPrompt,
@@ -573,8 +576,8 @@ export function NewSessionDialog({
   const executorProfile = useTaskExecutorProfile(taskId, open);
   const handoffLabel = handoffProfileLabel(agentProfiles, handoff);
   const formKey = handoff
-    ? `${open}-${handoff.sourceSessionId}-${handoff.targetProfileId}`
-    : `${open}`;
+    ? `${taskId}-${open}-${handoff.sourceSessionId}-${handoff.targetProfileId}`
+    : `${taskId}-${open}`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
