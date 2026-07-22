@@ -11,6 +11,7 @@ export type ReviewExternalLinkContext = {
   fallbackBaseBranch?: string;
   taskId?: string | null;
   publishedPRBranch?: string;
+  publishedPRNumber?: number;
   publishedPRRepositoryId?: string;
 };
 
@@ -50,15 +51,16 @@ export function ReviewDiffHeader({
   fallbackBaseBranch,
   taskId,
   publishedPRBranch,
+  publishedPRNumber,
   publishedPRRepositoryId,
 }: ReviewDiffHeaderProps) {
-  const publishedBranch =
+  const hasPublishedPR =
     file.source === "pr" &&
     (!file.repository_id ||
       !publishedPRRepositoryId ||
-      file.repository_id === publishedPRRepositoryId)
-      ? publishedPRBranch
-      : undefined;
+      file.repository_id === publishedPRRepositoryId);
+  const publishedBranch = hasPublishedPR ? publishedPRBranch : undefined;
+  const publishedPullRequestNumber = hasPublishedPR ? publishedPRNumber : undefined;
   const baseBranch =
     baseBranchByRepo[file.repository_name ?? ""] ??
     (file.repository_name ? undefined : fallbackBaseBranch);
@@ -107,6 +109,7 @@ export function ReviewDiffHeader({
         taskId={taskId}
         repositoryId={file.repository_id}
         publishedBranch={publishedBranch}
+        publishedPullRequestNumber={publishedPullRequestNumber}
         baseBranch={baseBranch}
         wordWrap={wordWrap}
         expandUnchanged={expandUnchanged}

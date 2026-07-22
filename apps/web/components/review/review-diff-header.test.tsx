@@ -57,4 +57,34 @@ describe("ReviewDiffHeader external context", () => {
     });
     expect(props).not.toHaveProperty("publishedBranch");
   });
+
+  it("forwards the GitHub PR number with its published branch", () => {
+    render(
+      <ReviewDiffHeader
+        file={{ ...file, repository_id: "repo-1" }}
+        isReviewed={false}
+        isStale={false}
+        sessionId="session-1"
+        collapsed={false}
+        wordWrap={false}
+        expandUnchanged={false}
+        baseBranchByRepo={{ frontend: "main" }}
+        taskId="task-1"
+        publishedPRBranch="contributor:feature/share"
+        publishedPRNumber={42}
+        publishedPRRepositoryId="repo-1"
+        onCheckboxChange={vi.fn()}
+        onDiscard={vi.fn()}
+        onToggleCollapse={vi.fn()}
+        onToggleExpandUnchanged={vi.fn()}
+        onToggleWordWrap={vi.fn()}
+      />,
+    );
+
+    const props = JSON.parse(screen.getByTestId("review-toolbar-props").dataset.props ?? "{}");
+    expect(props).toMatchObject({
+      publishedBranch: "contributor:feature/share",
+      publishedPullRequestNumber: 42,
+    });
+  });
 });

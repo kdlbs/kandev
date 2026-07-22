@@ -47,6 +47,7 @@ describe("FileDiffToolbar", () => {
           repositoryId="repo-1"
           source="pr"
           publishedBranch="feature/review-link"
+          publishedPullRequestNumber={42}
           baseBranch="main"
           wordWrap={false}
           expandUnchanged={false}
@@ -67,6 +68,7 @@ describe("FileDiffToolbar", () => {
       repositoryId: "repo-1",
       repositoryName: "frontend",
       publishedBranch: "feature/review-link",
+      publishedPullRequestNumber: 42,
       baseBranch: "main",
       size: "xs",
     });

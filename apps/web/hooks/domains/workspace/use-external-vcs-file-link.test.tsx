@@ -263,8 +263,8 @@ describe("useExternalVcsFileLink repository and revision resolution", () => {
 
     expect(result.current).toMatchObject({
       provider: "github",
-      revision: "feature/share",
-      url: "https://github.com/acme/web/blob/feature%2Fshare/src/app.ts",
+      revision: "refs/pull/42/head",
+      url: "https://github.com/acme/web/blob/refs%2Fpull%2F42%2Fhead/src/app.ts",
     });
   });
 
@@ -340,6 +340,29 @@ describe("useExternalVcsFileLink repository and revision resolution", () => {
   });
 });
 
+describe("useExternalVcsFileLink GitHub pull-head revisions", () => {
+  it("uses the base repository's pull-head ref for a published GitHub fork PR", () => {
+    const { result } = renderHook(
+      () =>
+        useExternalVcsFileLink({
+          filePath: "src/app.ts",
+          sessionId: SESSION_ID,
+          repositoryId: GITHUB_REPOSITORY_ID,
+        }),
+      {
+        wrapper: wrapper({
+          prs: [githubPR({ head_branch: "contributor:feature/share", pr_number: 42 })],
+        }),
+      },
+    );
+
+    expect(result.current).toMatchObject({
+      revision: "refs/pull/42/head",
+      url: "https://github.com/acme/web/blob/refs%2Fpull%2F42%2Fhead/src/app.ts",
+    });
+  });
+});
+
 describe("useExternalVcsFileLink repeated repository matching", () => {
   it("matches a repeated repository through the named worktree's active branch", () => {
     const { result } = renderHook(
@@ -367,7 +390,7 @@ describe("useExternalVcsFileLink repeated repository matching", () => {
       },
     );
 
-    expect(result.current).toMatchObject({ revision: SECOND_BRANCH });
+    expect(result.current).toMatchObject({ revision: "refs/pull/43/head" });
   });
 
   it("does not reuse a sibling worktree's published branch", () => {
@@ -418,8 +441,8 @@ describe("useExternalVcsFileLink repeated repository matching", () => {
 
     expect(result.current).toMatchObject({
       provider: "github",
-      revision: SECOND_BRANCH,
-      url: "https://github.com/acme/web/blob/feature%2Ftwo/src/editor.ts",
+      revision: "refs/pull/43/head",
+      url: "https://github.com/acme/web/blob/refs%2Fpull%2F43%2Fhead/src/editor.ts",
     });
   });
 });
@@ -539,7 +562,7 @@ describe("useExternalVcsFileLink legacy provider identity", () => {
       { wrapper: wrapper({ prs: [githubPR({ repository_id: undefined })] }) },
     );
 
-    expect(result.current?.revision).toBe("feature/share");
+    expect(result.current?.revision).toBe("refs/pull/42/head");
   });
 });
 

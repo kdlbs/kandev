@@ -12,6 +12,7 @@ const renamedPath = "src/new.ts";
 const previousRenamedPath = "src/old.ts";
 const gitlabOwner = "platform/tools";
 const currentPath = "src/app.ts";
+const featureShareBranch = "feature/share";
 
 function resolve(overrides: Partial<ExternalVcsFileURLInput> = {}) {
   return resolveExternalVcsFileURL({
@@ -55,12 +56,12 @@ describe("resolveExternalVcsFileURL provider routes", () => {
     },
   ])("builds the $name URL from credential-free metadata", ({ repository, expected }) => {
     expect(
-      resolve({ repository, path: "src/a file.ts", publishedBranch: "feature/share" }),
+      resolve({ repository, path: "src/a file.ts", publishedBranch: featureShareBranch }),
     ).toEqual({
       provider: repository.provider,
       url: expected,
       path: "src/a file.ts",
-      revision: "feature/share",
+      revision: featureShareBranch,
     });
   });
 
@@ -117,7 +118,41 @@ describe("resolveExternalVcsFileURL provider routes", () => {
         "https://dev.azure.com/acme/Platform/_git/api?path=%2Fsrc%2Fapp.ts&version=GBfeature%2Fshare",
     },
   ])("builds a credential-free HTTPS URL from a $name", ({ repository, expected }) => {
-    expect(resolve({ repository, publishedBranch: "feature/share" })?.url).toBe(expected);
+    expect(resolve({ repository, publishedBranch: featureShareBranch })?.url).toBe(expected);
+  });
+});
+
+describe("resolveExternalVcsFileURL review revisions", () => {
+  it("uses a GitHub pull-head ref when Review supplies its published PR number", () => {
+    expect(
+      resolve({
+        publishedBranch: "contributor:feature/share",
+        publishedPullRequestNumber: 42,
+      }),
+    ).toMatchObject({
+      revision: "refs/pull/42/head",
+      url: "https://github.com/acme/web/blob/refs%2Fpull%2F42%2Fhead/src/app.ts",
+    });
+  });
+});
+
+describe("resolveExternalVcsFileURL Azure DevOps clone normalization", () => {
+  it("strips Azure DevOps's clone-only .git suffix before building a file URL", () => {
+    expect(
+      resolve({
+        repository: {
+          provider: "azure_devops",
+          provider_host: "",
+          provider_owner: "Platform",
+          provider_name: "api",
+          remote_url: "https://dev.azure.com/acme/Platform/_git/api.git",
+        },
+        path: currentPath,
+        publishedBranch: featureShareBranch,
+      })?.url,
+    ).toBe(
+      "https://dev.azure.com/acme/Platform/_git/api?path=%2Fsrc%2Fapp.ts&version=GBfeature%2Fshare",
+    );
   });
 });
 
