@@ -66,11 +66,14 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
 
 ### GitHub access approval gate
 
-Before the first command that can access GitHub, request network access through
-the runtime's escalation or approval mechanism. This includes
-`scripts/pr-state`, `scripts/pr-resolve`, and `scripts/run-quiet` when they wrap
-`gh`, as well as direct `gh pr`, `gh api`, and `gh run` calls. Request approval
-proactively; do not run an unapproved probe first and wait for it to fail.
+Before the first command that can access GitHub, check the runtime's current
+network access. If access is already granted, including in a full-access
+runtime, run the command normally. If network access requires approval and the
+runtime supports prompting, request it proactively through the runtime's
+escalation or approval mechanism; do not run an unapproved probe first and wait
+for it to fail. This includes `scripts/pr-state`, `scripts/pr-resolve`, and
+`scripts/run-quiet` when they wrap `gh`, as well as direct `gh pr`, `gh api`,
+and `gh run` calls.
 
 If approval is denied, cancelled, or interrupted, stop immediately. Do not run
 another GitHub command, switch helpers, wait, or ask the planner to relaunch
@@ -209,7 +212,7 @@ such as a DNS timeout or GitHub API failure, use the fetch-failure recovery path
    `rate_limited`, mergeability and local conflict state are known clean, and
    all required counts are known. The `recommendation:` line is one short
    sentence chosen from this menu, picking the first that applies:
-   - `"GitHub access requires approval; planner must surface the approval gate to the user and must not relaunch polling."` if network escalation or approval was denied, cancelled, or interrupted
+   - `"GitHub access requires approval; planner must surface the approval gate to the user and must not relaunch polling."` if the network escalation or approval request was denied, cancelled, or interrupted
    - `"PR has merge conflicts — planner should assign bounded conflict resolution."` if `mergeable` is `CONFLICTING`, `merge_state_status` is `DIRTY`, or `local_unmerged_entries` is greater than zero
    - `"CI failed — planner should assign log triage and remediation."` if `ci_failed` is non-empty
    - `"Claude summary flags <N> blocker(s); planner should assign comment triage and remediation."` if `claude_summary.blockers > 0`
