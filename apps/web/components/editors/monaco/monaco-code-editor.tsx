@@ -124,6 +124,9 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     onSave,
   } = props;
   const contentRef = useRef(content);
+  useEffect(() => {
+    contentRef.current = content;
+  }, [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const language = getMonacoLanguage(path);
   const state = useMonacoEditorComments({
@@ -139,10 +142,12 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
   const lsp = useMonacoEditorLsp({
     sessionId,
     worktreePath,
+    repo,
     language,
     path,
     contentRef,
     editorRef: state.editorRef,
+    editorReady: state.editorInstance !== null,
   });
   const { diffStats } = useMonacoDiffDecorations({
     originalContent,
@@ -154,9 +159,6 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     editorRef: state.editorRef,
     diffDecorationsRef: state.diffDecorationsRef,
   });
-  useEffect(() => {
-    contentRef.current = content;
-  }, [content]);
   useEditorViewZoneComments(
     state.editorInstance,
     [state.comments, state.formZoneRange, state.editingCommentId],

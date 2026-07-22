@@ -9,6 +9,6 @@ export function openContentSearchResult(
 ): void {
   const repo = result.repository_name || undefined;
   setPendingCursorPosition(result.path, result.line, result.column, repo);
-  scrollEditorIfMounted(result.path, worktreePath, result.line, result.column, repo);
+  scrollEditorIfMounted(result.path, worktreePath, result.line, result.column, { repo });
   useDockviewStore.getState().addFileEditorPanel(result.path, getFileName(result.path), { repo });
 }

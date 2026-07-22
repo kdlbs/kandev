@@ -76,6 +76,10 @@ export function LspStatusButton({
           className="h-6 w-6 p-0 cursor-pointer"
           onClick={c.clickable ? onToggle : undefined}
           disabled={!c.clickable}
+          data-testid="lsp-status-button"
+          data-lsp-state={status.state}
+          data-lsp-language={lspLanguage}
+          aria-label={c.tooltip}
         >
           {c.icon}
         </Button>

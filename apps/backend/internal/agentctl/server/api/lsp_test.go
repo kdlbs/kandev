@@ -16,6 +16,31 @@ import (
 	tools "github.com/kandev/kandev/internal/tools/installer"
 )
 
+func TestWorkspaceFileURI(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "posix reserved characters", path: "/task root/A#B?100%.kt", want: "file:///task%20root/A%23B%3F100%25.kt"},
+		{name: "strict path characters", path: "/task:root/A!B(C):D.kt", want: "file:///task%3Aroot/A%21B%28C%29%3AD.kt"},
+		{name: "windows drive", path: `C:\Task Root\src\Main.kt`, want: "file:///C:/Task%20Root/src/Main.kt"},
+		{name: "windows UNC", path: `\\build-server\work share\Main.kt`, want: "file://build-server/work%20share/Main.kt"},
+		{name: "posix literal backslash", path: `/task\name/Main.kt`, want: "file:///task%5Cname/Main.kt"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := workspaceFileURI(tt.path); got != tt.want {
+				t.Fatalf("workspaceFileURI(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 type blockingLSPInstallStrategy struct {
 	started  chan struct{}
 	canceled chan struct{}

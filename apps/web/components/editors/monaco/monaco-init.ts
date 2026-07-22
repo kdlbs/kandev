@@ -4,6 +4,7 @@ import { KANDEV_MONACO_DARK, KANDEV_MONACO_LIGHT } from "@/lib/theme/editor-them
 
 let initialized = false;
 let monacoInstance: Monaco | null = null;
+let monacoReadyPromise: Promise<Monaco> | null = null;
 
 export function initMonacoThemes() {
   if (initialized || typeof window === "undefined") return;
@@ -11,7 +12,7 @@ export function initMonacoThemes() {
 
   // Dynamic import ensures monaco-loader runs (which sets MonacoEnvironment +
   // loader.config) before any <Editor> component mounts.
-  import("./monaco-loader").then(({ monaco }) => {
+  const loadPromise = import("./monaco-loader").then(({ monaco }) => {
     monacoInstance = monaco;
 
     monaco.editor.defineTheme("kandev-dark", KANDEV_MONACO_DARK);
@@ -76,11 +77,27 @@ export function initMonacoThemes() {
         },
       });
     });
+
+    return monaco;
+  });
+  monacoReadyPromise = loadPromise.catch((error) => {
+    initialized = false;
+    monacoInstance = null;
+    monacoReadyPromise = null;
+    throw error;
   });
 }
 
 export function getMonacoInstance(): Monaco | null {
   return monacoInstance;
+}
+
+/** Resolve once the shared Monaco instance is configured and ready for provider registration. */
+export function waitForMonacoInstance(): Promise<Monaco> {
+  if (monacoInstance) return Promise.resolve(monacoInstance);
+  initMonacoThemes();
+  if (monacoReadyPromise) return monacoReadyPromise;
+  return Promise.reject(new Error("Monaco is unavailable outside the browser"));
 }
 
 export function setMonacoDiagnostics(enabled: boolean) {

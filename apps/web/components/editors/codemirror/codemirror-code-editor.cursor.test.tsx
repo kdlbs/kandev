@@ -178,7 +178,7 @@ describe("CodeMirrorCodeEditor mounted cursor broker", () => {
     });
     setPendingCursorPosition(FILE_PATH, 2, 3, FRONTEND_REPO);
 
-    const revealed = scrollEditorIfMounted(FILE_PATH, null, 2, 3, FRONTEND_REPO);
+    const revealed = scrollEditorIfMounted(FILE_PATH, null, 2, 3, { repo: FRONTEND_REPO });
 
     expect(revealed).toBe(true);
     expect(view.dispatch).toHaveBeenCalledWith({
@@ -192,7 +192,7 @@ describe("CodeMirrorCodeEditor mounted cursor broker", () => {
     vi.mocked(view.dispatch).mockClear();
     setPendingCursorPosition(FILE_PATH, 3, 1, FRONTEND_REPO);
 
-    expect(scrollEditorIfMounted(FILE_PATH, null, 3, 1, FRONTEND_REPO)).toBe(false);
+    expect(scrollEditorIfMounted(FILE_PATH, null, 3, 1, { repo: FRONTEND_REPO })).toBe(false);
     expect(view.dispatch).not.toHaveBeenCalled();
     expect(consumePendingCursorPosition(FILE_PATH, FRONTEND_REPO)).toEqual({
       line: 3,
@@ -206,7 +206,7 @@ describe("CodeMirrorCodeEditor mounted cursor broker", () => {
     mountEditorView(view);
     setPendingCursorPosition(FILE_PATH, 3, 2, BACKEND_REPO);
 
-    const revealed = scrollEditorIfMounted(FILE_PATH, null, 3, 2, BACKEND_REPO);
+    const revealed = scrollEditorIfMounted(FILE_PATH, null, 3, 2, { repo: BACKEND_REPO });
 
     expect(revealed).toBe(false);
     expect(view.dispatch).not.toHaveBeenCalled();

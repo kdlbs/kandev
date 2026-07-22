@@ -22,7 +22,12 @@ export type LspStatus =
   | { state: "unavailable"; reason: string; cause: LspUnavailableCause }
   | { state: "error"; reason: string };
 
-export type OpenDocument = { version: number; languageId: string };
+export type OpenDocument = {
+  version: number;
+  languageId: string;
+  refCount: number;
+  text: string;
+};
 
 export type LSPConnection = {
   ws: WebSocket;
@@ -33,7 +38,8 @@ export type LSPConnection = {
   openDocuments: Map<string, OpenDocument>;
   providerDisposables: IDisposable[];
   serverCapabilities: Record<string, unknown> | null;
-  workspacePath: string | null;
+  workspaceUri: string | null;
+  repositorySubpaths: Set<string>;
 };
 
 // ---------------------------------------------------------------------------

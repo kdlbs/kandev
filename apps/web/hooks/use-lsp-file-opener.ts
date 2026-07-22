@@ -9,6 +9,7 @@ import {
   scrollEditorIfMounted,
 } from "@/hooks/use-file-editors";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
+import { documentUriForModel, filePathToUri, resolveFileUriInWorkspace } from "@/lib/lsp/file-uri";
 
 export function toWorkspaceRelativePath(filePath: string, workspacePath: string | null): string {
   const normalizedWorkspacePath = workspacePath?.replace(/\/+$/, "") ?? "";
@@ -25,7 +26,9 @@ export function toWorkspaceRelativePath(filePath: string, workspacePath: string 
 export function useLspFileOpener() {
   const { openFile } = useFileEditors();
 
-  const workspacePath = useAppStore((state) => {
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+
+  const worktreePath = useAppStore((state) => {
     const sessionId = state.tasks.activeSessionId;
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
@@ -34,28 +37,44 @@ export function useLspFileOpener() {
 
   useEffect(() => {
     const opener = async (uri: string, line?: number, column?: number) => {
-      // uri is like "file:///workspace/path/src/foo.ts"
-      const filePath = uri.replace(/^file:\/\//, "");
+      if (!activeSessionId) return;
+      const documentUri = documentUriForModel(uri, activeSessionId);
+      if (!documentUri) return;
+      let fallbackWorkspaceUri: string | null = null;
+      try {
+        fallbackWorkspaceUri = worktreePath ? filePathToUri(worktreePath) : null;
+      } catch {
+        fallbackWorkspaceUri = null;
+      }
+      const workspaceUri =
+        lspClientManager.getWorkspaceUriForSession(activeSessionId) ?? fallbackWorkspaceUri;
+      if (!workspaceUri) return;
+      const location = resolveFileUriInWorkspace(
+        documentUri,
+        workspaceUri,
+        lspClientManager.getRepositorySubpaths(activeSessionId),
+      );
+      if (!location) return;
 
       // Dispose the placeholder model since a real tab will create its own model
       lspClientManager.disposePlaceholderModel(uri);
-
-      // Convert absolute path to workspace-relative path
-      const relativePath = toWorkspaceRelativePath(filePath, workspacePath);
 
       // Set pending cursor position so the editor jumps to the correct line/column.
       // For new files: consumed by handleEditorDidMount when the editor mounts.
       // For already-open files: consumed by scrollEditorIfMounted below.
       if (line) {
-        setPendingCursorPosition(relativePath, line, column ?? 1);
+        setPendingCursorPosition(location.path, line, column ?? 1, location.repo);
       }
 
-      await openFile(relativePath);
+      await openFile(location.path, location.repo);
 
       // For already-open files, the editor is already mounted so handleEditorDidMount
       // won't fire. Scroll the editor directly.
       if (line) {
-        scrollEditorIfMounted(relativePath, workspacePath, line, column ?? 1);
+        scrollEditorIfMounted(location.path, workspaceUri, line, column ?? 1, {
+          repo: location.repo,
+          sessionId: activeSessionId,
+        });
       }
     };
 
@@ -66,5 +85,5 @@ export function useLspFileOpener() {
         lspClientManager.setFileOpener(null);
       }
     };
-  }, [openFile, workspacePath]);
+  }, [activeSessionId, openFile, worktreePath]);
 }

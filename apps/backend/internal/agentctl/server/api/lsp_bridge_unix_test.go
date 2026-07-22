@@ -53,11 +53,16 @@ func TestHandleLSPStreamBridgesFramesAndStopsOwnedProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ready: %v", err)
 	}
-	var status map[string]string
+	var status struct {
+		Status       string   `json:"status"`
+		Workspace    string   `json:"workspacePath"`
+		WorkspaceURI string   `json:"workspaceUri"`
+		RepoSubpaths []string `json:"repoSubpaths"`
+	}
 	if err := json.Unmarshal(ready, &status); err != nil {
 		t.Fatalf("decode ready: %v", err)
 	}
-	if status["status"] != "ready" || status["workspacePath"] != workDir {
+	if status.Status != "ready" || status.Workspace != workDir || status.WorkspaceURI != workspaceFileURI(workDir) || status.RepoSubpaths == nil {
 		t.Fatalf("ready status = %v", status)
 	}
 

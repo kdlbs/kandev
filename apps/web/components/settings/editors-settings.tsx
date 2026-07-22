@@ -102,6 +102,7 @@ function LspLanguageCards({
               key={lang.id}
               className="rounded-lg border border-border/60 bg-background px-4 py-3 space-y-2.5"
               data-settings-dirty={autoStartDirty || autoInstallDirty}
+              data-testid={`lsp-language-card-${lang.id}`}
             >
               <div>
                 <div className="text-sm font-medium text-foreground">{lang.label}</div>
@@ -113,6 +114,8 @@ function LspLanguageCards({
                   checked={lspAutoStartLanguages.includes(lang.id)}
                   onCheckedChange={(checked) => toggleAutoStart(lang.id, checked === true)}
                   data-settings-dirty={autoStartDirty}
+                  data-testid={`lsp-auto-start-${lang.id}`}
+                  aria-label={t("settings:autoStartLanguageServer", { language: lang.label })}
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -123,6 +126,7 @@ function LspLanguageCards({
                     onCheckedChange={(checked) => toggleAutoInstall(lang.id, checked === true)}
                     className="h-3.5 w-3.5"
                     data-settings-dirty={autoInstallDirty}
+                    data-testid={`lsp-auto-install-${lang.id}`}
                   />
                 )}
                 {autoInstallSupported ? (
@@ -146,6 +150,14 @@ function LspLanguageCards({
                   </TooltipContent>
                 </Tooltip>
               </div>
+              {!autoInstallSupported && (
+                <p
+                  className="text-[11px] leading-relaxed text-muted-foreground"
+                  data-testid={`lsp-install-guidance-${lang.id}`}
+                >
+                  {t(lang.installHintKey, lang.installHintValues)}
+                </p>
+              )}
             </div>
           );
         })}
