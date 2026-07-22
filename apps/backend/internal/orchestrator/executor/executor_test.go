@@ -2343,24 +2343,32 @@ func TestRepositoryCloneURL(t *testing.T) {
 type recordingAuthenticatedCloner struct {
 	normalCalls int
 	authCalls   int
+	workspaceID string
+	provider    string
 	password    string
 }
 
-func (c *recordingAuthenticatedCloner) EnsureClonedForProvider(
-	_ context.Context, _, _, _, _, _, _, _ string,
+func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedForProvider(
+	_ context.Context, workspaceID, _, provider, _, _, _, _, _ string,
 ) (string, error) {
 	c.normalCalls++
+	c.workspaceID = workspaceID
+	c.provider = provider
 	return "/repos/normal", nil
 }
+
+func (c *recordingAuthenticatedCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
 
 func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_, _, _, _ string) (string, error) {
 	return "", nil
 }
 
-func (c *recordingAuthenticatedCloner) EnsureClonedWithBasicAuth(
-	_ context.Context, _, _, _, _, password string,
+func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedWithBasicAuth(
+	_ context.Context, workspaceID, provider, _, _, _, _, _, password string,
 ) (string, error) {
 	c.authCalls++
+	c.workspaceID = workspaceID
+	c.provider = provider
 	c.password = password
 	return "/repos/azure", nil
 }
@@ -2383,11 +2391,14 @@ func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path != "/repos/azure" || cloner.authCalls != 1 || cloner.password != "workspace-pat" {
+	if path != "/repos/azure" || cloner.authCalls != 1 || cloner.workspaceID != "workspace-1" ||
+		cloner.provider != "azure_devops" || cloner.password != "workspace-pat" {
 		t.Fatalf("authenticated clone was not used with workspace credential: %+v", cloner)
 	}
 
-	github := &models.Repository{Provider: "github", ProviderOwner: "acme", ProviderName: "api"}
+	github := &models.Repository{
+		WorkspaceID: "workspace-2", Provider: "github", ProviderOwner: "acme", ProviderName: "api",
+	}
 	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), github, "https://github.com/acme/api.git"); err != nil {
 		t.Fatal(err)
 	}
@@ -2397,6 +2408,9 @@ func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	}
 	if cloner.normalCalls != 2 || cloner.authCalls != 1 {
 		t.Fatalf("non-Azure-HTTPS providers must use ordinary cloning: %+v", cloner)
+	}
+	if cloner.workspaceID != "workspace-1" || cloner.provider != "azure_devops" {
+		t.Fatalf("ordinary clone did not preserve workspace/provider isolation: %+v", cloner)
 	}
 }
 
@@ -2607,6 +2621,12 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 	var launchCount int64
 	entered := make(chan struct{}, 2)
 	gate := make(chan struct{})
+	startProcessGate := make(chan struct{})
+	var releaseStartProcess sync.Once
+	releaseStartProcessGate := func() {
+		releaseStartProcess.Do(func() { close(startProcessGate) })
+	}
+	t.Cleanup(releaseStartProcessGate)
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			atomic.AddInt64(&launchCount, 1)
@@ -2629,6 +2649,13 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 		// the live store would return after the first caller registered.
 		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
 			return "exec-race", nil
+		},
+		// The repository mock returns shared pointers, unlike the production
+		// database store. Hold both async process-start callbacks until the
+		// serialized launch calls finish mutating their session snapshots.
+		startAgentProcessFunc: func(_ context.Context, _ string) error {
+			<-startProcessGate
+			return nil
 		},
 	}
 	executor := newTestExecutor(t, agentManager, repo)
@@ -2669,6 +2696,9 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 	}
 	close(gate)
 	wg.Wait()
+	releaseStartProcessGate()
+	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
+	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
 
 	// First call ran LaunchAgent; second call took the fast path so total
 	// stays at 1. Both return non-error (the second is a no-op start).

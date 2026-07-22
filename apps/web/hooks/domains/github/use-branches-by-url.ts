@@ -37,7 +37,7 @@ type URLState = {
 export type UseBranchesByURLResult = {
   branches: (url: string) => Branch[];
   loading: (url: string) => boolean;
-  ensure: (url: string, workspaceId?: string) => void;
+  ensure: (url: string) => void;
   /**
    * Forget the cached entry for `url` so the next `ensure(url)` re-fetches.
    * Aborts any in-flight request and discards any pending callbacks via the
@@ -119,7 +119,7 @@ function finalizeRequest(refs: Refs, url: string, seq: number): void {
   refs.abortersRef.current.delete(url);
 }
 
-export function useBranchesByURL(): UseBranchesByURLResult {
+export function useBranchesByURL(workspaceId: string | null = null): UseBranchesByURLResult {
   const [state, setState] = useState<Record<string, URLState>>({});
   // Tracks in-flight URLs so concurrent ensure() calls coalesce. We use a ref
   // (not state) because the dedup check must observe the latest value
@@ -160,30 +160,42 @@ export function useBranchesByURL(): UseBranchesByURLResult {
     };
   }, []);
 
-  const ensure = useCallback((rawUrl: string, workspaceId: string = "") => {
-    // Normalize on entry so the cache key is canonical — see the matching
-    // comment in usePRInfoByURL for the rationale.
-    const url = rawUrl.trim();
-    if (!url) return;
-    if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
-    // Accept plain repo URLs plus PR/issue URLs — branches are listed against
-    // the repo in every case, so we extract just `{ owner, repo }` and ignore
-    // the item number. Using the repo-only parser here used to reject PR URLs
-    // outright, leaving the branch picker permanently empty when the user
-    // pasted a PR link into the Remote tab.
-    const request = branchRequestForURL(url, workspaceId);
-    if (!request) {
-      loadedRef.current.add(url);
-      setState((prev) => ({ ...prev, [url]: { branches: [], loading: false } }));
-      return;
-    }
-    const refs = refsRef.current;
-    const { seq, signal } = initRequest(refs, setState, url);
-    request(signal)
-      .then((res) => handleSuccess(refs, setState, url, seq, res))
-      .catch(() => handleFailure(refs, setState, url, seq))
-      .finally(() => finalizeRequest(refs, url, seq));
-  }, []);
+  useEffect(() => {
+    for (const controller of abortersRef.current.values()) controller.abort();
+    abortersRef.current.clear();
+    inFlightRef.current.clear();
+    loadedRef.current.clear();
+    seqRef.current.clear();
+    setState({});
+  }, [workspaceId]);
+
+  const ensure = useCallback(
+    (rawUrl: string) => {
+      // Normalize on entry so the cache key is canonical — see the matching
+      // comment in usePRInfoByURL for the rationale.
+      const url = rawUrl.trim();
+      if (!url) return;
+      if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
+      // Accept plain repo URLs plus PR/issue URLs — branches are listed against
+      // the repo in every case, so we extract just `{ owner, repo }` and ignore
+      // the item number. Using the repo-only parser here used to reject PR URLs
+      // outright, leaving the branch picker permanently empty when the user
+      // pasted a PR link into the Remote tab.
+      const request = branchRequestForURL(url, workspaceId);
+      if (!request) {
+        loadedRef.current.add(url);
+        setState((prev) => ({ ...prev, [url]: { branches: [], loading: false } }));
+        return;
+      }
+      const refs = refsRef.current;
+      const { seq, signal } = initRequest(refs, setState, url);
+      request(signal)
+        .then((res) => handleSuccess(refs, setState, url, seq, res))
+        .catch(() => handleFailure(refs, setState, url, seq))
+        .finally(() => finalizeRequest(refs, url, seq));
+    },
+    [workspaceId],
+  );
 
   const clear = useCallback((rawUrl: string) => {
     const url = rawUrl.trim();
@@ -218,17 +230,19 @@ export function useBranchesByURL(): UseBranchesByURLResult {
 
 type BranchRequest = (signal: AbortSignal) => Promise<{ branches?: Array<{ name: string }> }>;
 
-function branchRequestForURL(rawURL: string, workspaceId: string): BranchRequest | null {
+function branchRequestForURL(rawURL: string, workspaceId: string | null): BranchRequest | null {
   const github = parseGitHubAnyUrl(rawURL);
   if (github) {
-    return (signal) => fetchRepoBranches(github.owner, github.repo, { init: { signal } });
+    if (!workspaceId) return null;
+    return (signal) =>
+      fetchRepoBranches(workspaceId, github.owner, github.repo, { init: { signal } });
   }
   const parsed = parseRemoteURL(rawURL);
   if (!parsed) return null;
 
   switch (parsed.hostname) {
     case "github.com":
-      return githubBranchRequest(parsed);
+      return githubBranchRequest(parsed, workspaceId);
     case "gitlab.com":
       return gitLabBranchRequest(parsed, workspaceId);
     case "dev.azure.com":
@@ -240,23 +254,24 @@ function branchRequestForURL(rawURL: string, workspaceId: string): BranchRequest
   }
 }
 
-function githubBranchRequest(parsed: URL): BranchRequest | null {
+function githubBranchRequest(parsed: URL, workspaceId: string | null): BranchRequest | null {
+  if (!workspaceId) return null;
   const parts = parsed.pathname
     .replace(/^\//, "")
     .replace(/\.git$/, "")
     .split("/");
   if (parts.length < 2) return null;
-  return (signal) => fetchRepoBranches(parts[0], parts[1], { init: { signal } });
+  return (signal) => fetchRepoBranches(workspaceId, parts[0], parts[1], { init: { signal } });
 }
 
-function gitLabBranchRequest(parsed: URL, workspaceId: string): BranchRequest | null {
+function gitLabBranchRequest(parsed: URL, workspaceId: string | null): BranchRequest | null {
   if (!workspaceId) return null;
   const project = parsed.pathname.replace(/^\//, "").replace(/\.git$/, "");
   if (!project.includes("/")) return null;
   return (signal) => listProjectBranches(workspaceId, project, { init: { signal } });
 }
 
-function azureHTTPSBranchRequest(parsed: URL, workspaceId: string): BranchRequest | null {
+function azureHTTPSBranchRequest(parsed: URL, workspaceId: string | null): BranchRequest | null {
   if (!workspaceId) return null;
   const parts = parsed.pathname.split("/").filter(Boolean);
   if (parts.length !== 4 || parts[2] !== "_git") return null;
@@ -264,7 +279,7 @@ function azureHTTPSBranchRequest(parsed: URL, workspaceId: string): BranchReques
     listAzureDevOpsBranches(workspaceId, parts[0], parts[1], parts[3], { init: { signal } });
 }
 
-function azureSSHBranchRequest(parsed: URL, workspaceId: string): BranchRequest | null {
+function azureSSHBranchRequest(parsed: URL, workspaceId: string | null): BranchRequest | null {
   if (!workspaceId) return null;
   const parts = parsed.pathname.split("/").filter(Boolean);
   if (parts.length !== 4 || parts[0] !== "v3") return null;
@@ -272,7 +287,10 @@ function azureSSHBranchRequest(parsed: URL, workspaceId: string): BranchRequest 
     listAzureDevOpsBranches(workspaceId, parts[1], parts[2], parts[3], { init: { signal } });
 }
 
-function selfManagedGitLabBranchRequest(parsed: URL, workspaceId: string): BranchRequest | null {
+function selfManagedGitLabBranchRequest(
+  parsed: URL,
+  workspaceId: string | null,
+): BranchRequest | null {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
   return gitLabBranchRequest(parsed, workspaceId);
 }

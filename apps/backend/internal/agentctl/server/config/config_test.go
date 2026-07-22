@@ -1,6 +1,30 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
+	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_URL", "https://kandev.example/api/github/credentials/resolve")
+	t.Setenv("KANDEV_GITHUB_CLI_SHIM_DIR", "/kandev/shims")
+	env := CollectAgentEnv(map[string]string{"PATH": "/profile/bin:/usr/bin"})
+	want := strings.Join([]string{"/kandev/shims", "/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
+	if got := envSliceValue(env, "PATH"); got != want {
+		t.Fatalf("PATH = %q, want %q", got, want)
+	}
+}
+
+func envSliceValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
+}
 
 func TestConsumeNonce(t *testing.T) {
 	t.Run("valid nonce returns token and burns nonce", func(t *testing.T) {

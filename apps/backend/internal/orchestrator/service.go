@@ -653,6 +653,12 @@ func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.Rep
 	s.executor.SetRepoCloner(cloner, updater)
 }
 
+// SetGitHubCredentialBroker configures renewable workspace GitHub credentials
+// for executor git and gh operations.
+func (s *Service) SetGitHubCredentialBroker(issuer executor.GitHubCredentialLeaseIssuer, endpoint string) {
+	s.executor.SetGitHubCredentialBroker(issuer, endpoint)
+}
+
 // SetTurnService sets the turn service for tracking conversation turns.
 //
 // A "turn" represents a single conversation round-trip: user prompt → agent response.

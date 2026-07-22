@@ -321,6 +321,7 @@ function KanbanCardDialogs({
         onConfirm={menu.handleDetachConfirm}
       />
       <TaskGitHubPRDialog
+        workspaceId={workspaceId}
         open={menu.showPRDialog}
         onOpenChange={menu.setShowPRDialog}
         task={task}

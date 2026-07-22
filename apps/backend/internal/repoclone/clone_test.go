@@ -2,6 +2,7 @@ package repoclone
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,7 +44,7 @@ func TestClone_PreservesNonDefaultRemoteBranches(t *testing.T) {
 	targetPath := filepath.Join(t.TempDir(), "clone")
 
 	cloner := NewCloner(Config{}, ProtocolSSH, t.TempDir(), logger.Default())
-	if err := cloner.clone(context.Background(), originPath, targetPath, "", "", "", ""); err != nil {
+	if err := cloner.clone(context.Background(), originPath, targetPath, nil); err != nil {
 		t.Fatalf("clone() unexpected error: %v", err)
 	}
 
@@ -52,93 +53,309 @@ func TestClone_PreservesNonDefaultRemoteBranches(t *testing.T) {
 	}
 }
 
-func TestRepoPathConfinesRepositoryToCloneBase(t *testing.T) {
+func TestWorkspaceRepoPathIsolatesManagedClones(t *testing.T) {
+	t.Parallel()
+
+	basePath := t.TempDir()
+	cloner := NewCloner(Config{BasePath: basePath}, ProtocolSSH, "", logger.Default())
+	first, err := cloner.WorkspaceRepoPath("workspace-a", "github", "acme", "private")
+	if err != nil {
+		t.Fatalf("WorkspaceRepoPath(workspace-a): %v", err)
+	}
+	second, err := cloner.WorkspaceRepoPath("workspace-b", "github", "acme", "private")
+	if err != nil {
+		t.Fatalf("WorkspaceRepoPath(workspace-b): %v", err)
+	}
+	if first == second {
+		t.Fatalf("workspace clone paths must differ, both were %q", first)
+	}
+	if !cloner.ShouldRecloneForWorkspace("workspace-b", first) {
+		t.Fatal("workspace-b must not reuse workspace-a's managed clone")
+	}
+	if cloner.ShouldRecloneForWorkspace("workspace-a", first) {
+		t.Fatal("workspace-a should reuse its own managed clone")
+	}
+	legacy := filepath.Join(basePath, "acme", "private")
+	if !cloner.ShouldRecloneForWorkspace("workspace-a", legacy) {
+		t.Fatal("legacy shared managed clone must be rematerialized")
+	}
+}
+
+func TestWorkspaceProviderRepoPathSeparatesSelfManagedOrigins(t *testing.T) {
 	t.Parallel()
 
 	basePath := t.TempDir()
 	cloner := NewCloner(Config{BasePath: basePath}, ProtocolHTTPS, "", logger.Default())
-
-	path, err := cloner.RepoPath("group/subgroup", "repository")
+	first, err := cloner.WorkspaceProviderRepoPath(
+		"workspace-a", "gitlab", "https://gitlab.first.internal", "acme", "api",
+	)
 	if err != nil {
-		t.Fatalf("RepoPath() unexpected error: %v", err)
+		t.Fatalf("first WorkspaceProviderRepoPath: %v", err)
 	}
-	want := filepath.Join(basePath, "group", "subgroup", "repository")
-	if path != want {
-		t.Fatalf("RepoPath() = %q, want %q", path, want)
+	second, err := cloner.WorkspaceProviderRepoPath(
+		"workspace-a", "gitlab", "https://gitlab.second.internal", "acme", "api",
+	)
+	if err != nil {
+		t.Fatalf("second WorkspaceProviderRepoPath: %v", err)
 	}
+	defaultOrigin, err := cloner.WorkspaceProviderRepoPath(
+		"workspace-a", "gitlab", "https://gitlab.com", "acme", "api",
+	)
+	if err != nil {
+		t.Fatalf("default WorkspaceProviderRepoPath: %v", err)
+	}
+	if first == second {
+		t.Fatalf("self-managed origins collided at %q", first)
+	}
+	if !strings.Contains(first, filepath.Join("gitlab", "gitlab.first.internal", "acme", "api")) {
+		t.Fatalf("first path did not retain normalized origin: %q", first)
+	}
+	wantDefault := filepath.Join(basePath, "workspaces", "workspace-a", "gitlab", "acme", "api")
+	if defaultOrigin != wantDefault {
+		t.Fatalf("default origin path = %q, want %q", defaultOrigin, wantDefault)
+	}
+}
 
-	for _, test := range []struct {
-		name  string
-		owner string
-		repo  string
+func TestWorkspaceRepoPathRejectsTraversal(t *testing.T) {
+	t.Parallel()
+
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", logger.Default())
+	for _, testCase := range []struct {
+		name, workspaceID, owner, repo string
 	}{
-		{name: "owner traversal", owner: "../../outside", repo: "repository"},
-		{name: "repository traversal", owner: "group", repo: "../../../outside"},
+		{name: "workspace", workspaceID: "../outside", owner: "acme", repo: "private"},
+		{name: "owner", workspaceID: "workspace", owner: "../outside", repo: "private"},
+		{name: "repo", workspaceID: "workspace", owner: "acme", repo: "../outside"},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			if _, pathErr := cloner.RepoPath(test.owner, test.repo); pathErr == nil {
-				t.Fatal("RepoPath() accepted a path outside the clone base")
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, err := cloner.WorkspaceRepoPath(testCase.workspaceID, "github", testCase.owner, testCase.repo); err == nil {
+				t.Fatal("WorkspaceRepoPath() expected traversal error")
 			}
 		})
 	}
 }
 
-func TestGitCmdBindsGitLabCredentialToExactOrigin(t *testing.T) {
-	cloner := NewCloner(Config{}, ProtocolHTTPS, t.TempDir(), logger.Default())
-	cmd, err := cloner.gitCmd(
-		context.Background(),
-		"https://gitlab.internal/group/repo.git",
-		"https://gitlab.internal",
-		"workspace-token",
-		"clone",
+func TestWorkspaceRepoPathSupportsNestedProviderOwner(t *testing.T) {
+	t.Parallel()
+
+	basePath := t.TempDir()
+	cloner := NewCloner(Config{BasePath: basePath}, ProtocolHTTPS, "", logger.Default())
+	path, err := cloner.WorkspaceRepoPath("workspace-a", "gitlab", "group/subgroup", "repository")
+	if err != nil {
+		t.Fatalf("WorkspaceRepoPath() unexpected error: %v", err)
+	}
+	want := filepath.Join(basePath, "workspaces", "workspace-a", "gitlab", "group", "subgroup", "repository")
+	if path != want {
+		t.Fatalf("WorkspaceRepoPath() = %q, want %q", path, want)
+	}
+}
+
+func TestEnsureWorkspaceClonedUsesSelectedCredentialWithoutAmbientFallback(t *testing.T) {
+	root := t.TempDir()
+	binDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	capturePath := filepath.Join(root, "capture")
+	gitPath := filepath.Join(binDir, "git")
+	script := `#!/bin/sh
+printf '%s\n' "$@" > "$KANDEV_TEST_CAPTURE.args"
+printf '%s\n' "$GH_TOKEN|$GITHUB_TOKEN|$GIT_CONFIG_GLOBAL|$GIT_CONFIG_NOSYSTEM|$KANDEV_REPOCLONE_GITHUB_USERNAME|$KANDEV_REPOCLONE_GITHUB_TOKEN|$GIT_CONFIG_VALUE_1" > "$KANDEV_TEST_CAPTURE.env"
+`
+	if err := os.WriteFile(gitPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("KANDEV_TEST_CAPTURE", capturePath)
+	t.Setenv("GH_TOKEN", "ambient-gh-token")
+	t.Setenv("GITHUB_TOKEN", "ambient-github-token")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "credential.helper")
+	t.Setenv("GIT_CONFIG_VALUE_0", "!malicious-helper")
+
+	credentials := &recordingCredentialProvider{password: "workspace-token"}
+	cloner := NewCloner(Config{BasePath: filepath.Join(root, "repos")}, ProtocolSSH, "", logger.Default())
+	cloner.SetGitCredentialProvider(credentials)
+	target, err := cloner.EnsureWorkspaceCloned(
+		context.Background(), "workspace-a", "github", "git@github.com:acme/private.git", "acme", "private",
 	)
 	if err != nil {
-		t.Fatalf("gitCmd: %v", err)
+		t.Fatalf("EnsureWorkspaceCloned(): %v", err)
 	}
+	if credentials.workspaceID != "workspace-a" {
+		t.Fatalf("credential workspace = %q, want workspace-a", credentials.workspaceID)
+	}
+	if !strings.Contains(target, filepath.Join("workspaces", "workspace-a", "github", "acme", "private")) {
+		t.Fatalf("target path %q is not workspace isolated", target)
+	}
+	args := readTestFile(t, capturePath+".args")
+	if !strings.Contains(args, "https://github.com/acme/private.git") {
+		t.Fatalf("git args do not contain credential-compatible HTTPS URL: %s", args)
+	}
+	if !strings.Contains(args, "--\nhttps://github.com/acme/private.git") {
+		t.Fatalf("git args do not terminate clone options before the URL: %s", args)
+	}
+	if strings.Contains(args, "workspace-token") || strings.Contains(args, "ambient-") {
+		t.Fatalf("git args leaked credential material: %s", args)
+	}
+	env := strings.TrimSpace(readTestFile(t, capturePath+".env"))
+	wantParts := []string{"", "", os.DevNull, "1", "x-access-token", "workspace-token", gitCredentialHelper}
+	if got, want := strings.Split(env, "|"), wantParts; strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("git auth environment = %#v, want %#v", got, want)
+	}
+	cmd := exec.CommandContext(context.Background(), "git", "version")
+	configureGitCommand(cmd, &cloneAuth{
+		origin: "https://github.com", username: "x-access-token", password: "workspace-token",
+	})
+	assertUniqueGitConfigEnv(t, cmd.Env)
+}
+
+func TestManagedGitCommandExecutesWithCompleteConfigAndNoAmbientAuth(t *testing.T) {
+	t.Setenv("GH_TOKEN", "ambient-gh-token")
+	t.Setenv("GITHUB_TOKEN", "ambient-github-token")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "credential.helper")
+	t.Setenv("GIT_CONFIG_VALUE_0", "!printf 'password=ambient-token\\n'")
+
+	cmd := exec.CommandContext(context.Background(), "git", "credential", "fill")
+	configureGitCommand(cmd, &cloneAuth{
+		origin: "https://github.com", username: "workspace-user", password: "workspace-token",
+	})
+	cmd.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=acme/private.git\n\n")
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("managed git credential command failed: %v\n%s", err, out)
+	}
+	got := string(out)
+	if !strings.Contains(got, "username=workspace-user") || !strings.Contains(got, "password=workspace-token") {
+		t.Fatalf("managed credential output = %q", got)
+	}
+	if strings.Contains(got, "ambient-token") || envValue(cmd.Env, "GH_TOKEN") != "" ||
+		envValue(cmd.Env, "GITHUB_TOKEN") != "" {
+		t.Fatalf("ambient authentication reached managed git: output=%q env=%v", got, cmd.Env)
+	}
+}
+
+func TestEnsureWorkspaceClonedRequiresExplicitGitHubCredential(t *testing.T) {
+	t.Parallel()
+
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", logger.Default())
+	_, err := cloner.EnsureWorkspaceCloned(
+		context.Background(), "workspace-a", "github", "https://github.com/acme/private.git", "acme", "private",
+	)
+	if !errors.Is(err, ErrWorkspaceCredentialUnavailable) {
+		t.Fatalf("EnsureWorkspaceCloned() error = %v, want credential unavailable", err)
+	}
+}
+
+func TestWorkspaceCloneAuthPreservesNonGitHubURL(t *testing.T) {
+	t.Parallel()
+
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolSSH, "", logger.Default())
+	want := "git@ssh.dev.azure.com:v3/acme/Platform/api"
+	got, auth, err := cloner.workspaceCloneAuth(
+		context.Background(), "workspace-a", "azure_devops", want, "Platform", "api", "", "",
+	)
+	if err != nil {
+		t.Fatalf("workspaceCloneAuth() unexpected error: %v", err)
+	}
+	if got != want || auth != nil {
+		t.Fatalf("workspaceCloneAuth() = (%q, %#v), want (%q, nil)", got, auth, want)
+	}
+}
+
+type recordingCredentialProvider struct {
+	workspaceID string
+	password    string
+}
+
+func (p *recordingCredentialProvider) ResolveGitCredential(
+	_ context.Context,
+	workspaceID, _, _, _ string,
+) (string, string, error) {
+	p.workspaceID = workspaceID
+	return "x-access-token", p.password, nil
+}
+
+func readTestFile(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(content)
+}
+
+func assertUniqueGitConfigEnv(t *testing.T, env []string) {
+	t.Helper()
+	counts := make(map[string]int)
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if key == "GIT_CONFIG_COUNT" || strings.HasPrefix(key, "GIT_CONFIG_KEY_") ||
+			strings.HasPrefix(key, "GIT_CONFIG_VALUE_") {
+			counts[key]++
+		}
+	}
+	for key, count := range counts {
+		if count != 1 {
+			t.Fatalf("%s occurs %d times in git environment", key, count)
+		}
+	}
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
+}
+
+func TestGitCmdBindsGitLabCredentialToExactOrigin(t *testing.T) {
+	auth, err := credentialAuth(
+		"https://gitlab.internal/group/repo.git", "https://gitlab.internal", "workspace-token",
+	)
+	if err != nil {
+		t.Fatalf("credentialAuth: %v", err)
+	}
+	cmd := exec.CommandContext(context.Background(), "git", "version")
+	configureGitCommand(cmd, auth)
 	joined := strings.Join(cmd.Env, "\n")
-	if !strings.Contains(joined, "KANDEV_GIT_CREDENTIAL_TOKEN=workspace-token") ||
-		!strings.Contains(joined, "GIT_CONFIG_KEY_0=credential.https://gitlab.internal.helper") {
+	if !strings.Contains(joined, gitHubCredentialEnv+"=workspace-token") ||
+		!strings.Contains(joined, "GIT_CONFIG_KEY_1=credential.https://gitlab.internal.helper") {
 		t.Fatalf("credential env = %s", joined)
 	}
-	if _, err := cloner.gitCmd(
-		context.Background(),
-		"https://gitlab.com/group/repo.git",
-		"https://gitlab.internal",
-		"must-not-leak",
-		"clone",
+	if _, err := credentialAuth(
+		"https://gitlab.com/group/repo.git", "https://gitlab.internal", "must-not-leak",
 	); err == nil {
 		t.Fatal("expected cross-host credential binding to fail")
 	}
 }
 
 func TestGitCmdUsesSSHAuthForMatchingWorkspaceGitLabHost(t *testing.T) {
-	cloner := NewCloner(Config{}, ProtocolSSH, t.TempDir(), logger.Default())
 	for _, cloneURL := range []string{
 		"git@gitlab.internal:group/repo.git",
 		"ssh://git@gitlab.internal:2222/group/repo.git",
 	} {
-		cmd, err := cloner.gitCmd(
-			context.Background(), cloneURL, "https://gitlab.internal:8443", "workspace-token", "clone",
-		)
+		auth, err := credentialAuth(cloneURL, "https://gitlab.internal:8443", "workspace-token")
 		if err != nil {
-			t.Fatalf("gitCmd(%q): %v", cloneURL, err)
+			t.Fatalf("credentialAuth(%q): %v", cloneURL, err)
 		}
-		joined := strings.Join(cmd.Env, "\n")
-		if strings.Contains(joined, "workspace-token") || strings.Contains(joined, "credential.gitlab") {
-			t.Fatalf("SSH clone received HTTP credentials: %s", joined)
+		if auth != nil {
+			t.Fatalf("SSH clone received HTTP credentials: %#v", auth)
 		}
 	}
 }
 
 func TestGitCmdRejectsSSHCloneForDifferentWorkspaceGitLabHost(t *testing.T) {
-	cloner := NewCloner(Config{}, ProtocolSSH, t.TempDir(), logger.Default())
 	for _, cloneURL := range []string{
 		"git@gitlab.other:group/repo.git",
 		"ssh://git@gitlab.other:2222/group/repo.git",
 	} {
-		if _, err := cloner.gitCmd(
-			context.Background(), cloneURL, "https://gitlab.internal", "must-not-leak", "clone",
-		); err == nil {
+		if _, err := credentialAuth(cloneURL, "https://gitlab.internal", "must-not-leak"); err == nil {
 			t.Fatalf("gitCmd accepted mismatched SSH clone %q", cloneURL)
 		}
 	}

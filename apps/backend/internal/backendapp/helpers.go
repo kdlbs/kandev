@@ -873,7 +873,17 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 			// primary repository (first task_repository row). Resolve to that
 			// repository_id so the resulting TaskPR/PRWatch are scoped per-repo.
 			repositoryID := resolvePrimaryTaskRepositoryID(ctx, p.taskRepo, taskID, p.log)
-			ghSvc.AssociatePRByURL(ctx, sessionID, taskID, repositoryID, prURL, branch)
+			task, taskErr := p.taskRepo.GetTask(ctx, taskID)
+			if taskErr != nil || task == nil || task.WorkspaceID == "" {
+				p.log.Warn("cannot associate GitHub PR without task workspace", zap.String("task_id", taskID), zap.Error(taskErr))
+				return
+			}
+			if err := ghSvc.AssociatePRByURLForWorkspace(
+				ctx, task.WorkspaceID, github.DefaultUserID,
+				sessionID, taskID, repositoryID, prURL, branch,
+			); err != nil {
+				p.log.Warn("failed to associate task GitHub PR", zap.String("task_id", taskID), zap.Error(err))
+			}
 		})
 	}
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
@@ -1113,7 +1123,7 @@ func registerHealthRoutes(p routeParams) {
 	var githubProvider health.GitHubStatusProvider
 	var githubRateProvider health.GitHubRateLimitProvider
 	if p.services.GitHub != nil {
-		githubProvider = p.services.GitHub
+		githubProvider = githubWorkspaceHealthAdapter{svc: p.services.GitHub}
 		githubRateProvider = githubRateLimitAdapter{svc: p.services.GitHub}
 	}
 	githubChecker := health.NewGitHubChecker(githubProvider)
@@ -1135,6 +1145,30 @@ func registerHealthRoutes(p routeParams) {
 	}
 	healthSvc := health.NewService(p.log, checkers...)
 	health.RegisterRoutes(p.router, healthSvc, p.log)
+}
+
+type githubWorkspaceHealthAdapter struct {
+	svc *github.Service
+}
+
+func (a githubWorkspaceHealthAdapter) GitHubConnectionHealth(
+	ctx context.Context,
+) (health.GitHubConnectionHealth, error) {
+	if a.svc == nil {
+		return health.GitHubConnectionHealth{}, github.ErrGitHubNotConfigured
+	}
+	summary, err := a.svc.GetWorkspaceConnectionHealth(ctx)
+	if err != nil {
+		return health.GitHubConnectionHealth{}, err
+	}
+	return health.GitHubConnectionHealth{
+		WorkspaceCount: summary.WorkspaceCount,
+		Active:         summary.Active,
+		Disconnected:   summary.Disconnected,
+		Invalid:        summary.Invalid,
+		Suspended:      summary.Suspended,
+		Revoked:        summary.Revoked,
+	}, nil
 }
 
 // githubRateLimitAdapter bridges the github.Service's per-resource exhaustion

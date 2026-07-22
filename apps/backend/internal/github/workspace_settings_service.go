@@ -9,6 +9,11 @@ import (
 
 var ErrWorkspaceSettingsValidation = errors.New("invalid workspace settings")
 
+const (
+	personalSearchFetchPageSize = 100
+	githubSearchResultLimit     = 1000
+)
+
 // GetWorkspaceSettings returns the GitHub operational settings for a workspace.
 func (s *Service) GetWorkspaceSettings(ctx context.Context, workspaceID string) (*WorkspaceSettings, error) {
 	if s.store == nil {
@@ -51,14 +56,33 @@ func (s *Service) SearchUserPRsPagedForWorkspace(
 	page int,
 	perPage int,
 ) (*PRSearchPage, error) {
-	settings, err := s.GetWorkspaceSettings(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	if !workspaceSettingsHasScope(settings) {
-		return s.SearchUserPRsPaged(ctx, filter, customQuery, page, perPage)
-	}
-	return s.searchUserPRsPagedScoped(ctx, settings, filter, customQuery, page, perPage)
+	return s.SearchUserPRsPagedForWorkspaceUser(ctx, workspaceID, "", filter, customQuery, page, perPage)
+}
+
+//nolint:dupl // The PR and issue adapters preserve their strongly typed public response contracts.
+func (s *Service) SearchUserPRsPagedForWorkspaceUser(
+	ctx context.Context,
+	workspaceID string,
+	userID string,
+	filter string,
+	customQuery string,
+	page int,
+	perPage int,
+) (*PRSearchPage, error) {
+	return searchPersonalWorkspacePageResult(
+		ctx, s, workspaceID, userID, page, perPage,
+		func(resolved *resolvedServiceClient, settings *WorkspaceSettings, providerPage, providerPerPage int) ([]*PR, int, error) {
+			result, fetchErr := s.searchPersonalPRPage(ctx, resolved, settings, filter, customQuery, providerPage, providerPerPage)
+			if fetchErr != nil || result == nil {
+				return nil, 0, fetchErr
+			}
+			return result.PRs, result.TotalCount, nil
+		},
+		func(items []*PR) ([]*PR, error) { return s.filterPersonalPRsByAutomation(ctx, workspaceID, items) },
+		func(result filteredPersonalSearchPage[*PR], page, perPage int) *PRSearchPage {
+			return &PRSearchPage{PRs: result.items, TotalCount: result.total, Page: page, PerPage: perPage}
+		},
+	)
 }
 
 func (s *Service) SearchUserIssuesPagedForWorkspace(
@@ -69,18 +93,216 @@ func (s *Service) SearchUserIssuesPagedForWorkspace(
 	page int,
 	perPage int,
 ) (*IssueSearchPage, error) {
+	return s.SearchUserIssuesPagedForWorkspaceUser(ctx, workspaceID, "", filter, customQuery, page, perPage)
+}
+
+//nolint:dupl // The PR and issue adapters preserve their strongly typed public response contracts.
+func (s *Service) SearchUserIssuesPagedForWorkspaceUser(
+	ctx context.Context,
+	workspaceID string,
+	userID string,
+	filter string,
+	customQuery string,
+	page int,
+	perPage int,
+) (*IssueSearchPage, error) {
+	return searchPersonalWorkspacePageResult(
+		ctx, s, workspaceID, userID, page, perPage,
+		func(resolved *resolvedServiceClient, settings *WorkspaceSettings, providerPage, providerPerPage int) ([]*Issue, int, error) {
+			result, fetchErr := s.searchPersonalIssuePage(ctx, resolved, settings, filter, customQuery, providerPage, providerPerPage)
+			if fetchErr != nil || result == nil {
+				return nil, 0, fetchErr
+			}
+			return result.Issues, result.TotalCount, nil
+		},
+		func(items []*Issue) ([]*Issue, error) {
+			return s.filterPersonalIssuesByAutomation(ctx, workspaceID, items)
+		},
+		func(result filteredPersonalSearchPage[*Issue], page, perPage int) *IssueSearchPage {
+			return &IssueSearchPage{
+				Issues: result.items, TotalCount: result.total, Page: page, PerPage: perPage,
+			}
+		},
+	)
+}
+
+func (s *Service) resolvePersonalSearchContext(
+	ctx context.Context, workspaceID, userID string,
+) (*resolvedServiceClient, *WorkspaceSettings, error) {
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, "", "")
+	if err != nil {
+		return nil, nil, err
+	}
 	settings, err := s.GetWorkspaceSettings(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return resolved, settings, nil
+}
+
+func (s *Service) searchPersonalPRPage(
+	ctx context.Context,
+	resolved *resolvedServiceClient,
+	settings *WorkspaceSettings,
+	filter, customQuery string,
+	page, perPage int,
+) (*PRSearchPage, error) {
+	if !workspaceSettingsHasScope(settings) {
+		return s.searchUserPRsPagedWithClient(
+			ctx, resolved.Client, resolved.CacheScope, filter, customQuery, page, perPage,
+		)
+	}
+	return s.searchUserPRsPagedScoped(
+		ctx, resolved.Client, resolved.CacheScope, settings, filter, customQuery, page, perPage,
+	)
+}
+
+func (s *Service) searchPersonalIssuePage(
+	ctx context.Context,
+	resolved *resolvedServiceClient,
+	settings *WorkspaceSettings,
+	filter, customQuery string,
+	page, perPage int,
+) (*IssueSearchPage, error) {
+	if !workspaceSettingsHasScope(settings) {
+		return s.searchUserIssuesPagedWithClient(
+			ctx, resolved.Client, resolved.CacheScope, filter, customQuery, page, perPage,
+		)
+	}
+	return s.searchUserIssuesPagedScoped(
+		ctx, resolved.Client, resolved.CacheScope, settings, filter, customQuery, page, perPage,
+	)
+}
+
+type filteredPersonalSearchPage[T any] struct {
+	items []T
+	total int
+}
+
+func searchPersonalWorkspacePageResult[T any, R any](
+	ctx context.Context,
+	service *Service,
+	workspaceID, userID string,
+	page, perPage int,
+	fetch func(*resolvedServiceClient, *WorkspaceSettings, int, int) ([]T, int, error),
+	filter func([]T) ([]T, error),
+	build func(filteredPersonalSearchPage[T], int, int) R,
+) (R, error) {
+	result, page, perPage, err := searchPersonalWorkspacePage(
+		ctx, service, workspaceID, userID, page, perPage, fetch, filter,
+	)
+	if err != nil {
+		var zero R
+		return zero, err
+	}
+	return build(result, page, perPage), nil
+}
+
+func searchPersonalWorkspacePage[T any](
+	ctx context.Context,
+	service *Service,
+	workspaceID, userID string,
+	page, perPage int,
+	fetch func(*resolvedServiceClient, *WorkspaceSettings, int, int) ([]T, int, error),
+	filter func([]T) ([]T, error),
+) (filteredPersonalSearchPage[T], int, int, error) {
+	resolved, settings, err := service.resolvePersonalSearchContext(ctx, workspaceID, userID)
+	if err != nil {
+		return filteredPersonalSearchPage[T]{}, page, perPage, err
+	}
+	page, perPage = clampSearchPage(page, perPage)
+	if resolved.Principal.UserID == "" {
+		items, total, fetchErr := fetch(resolved, settings, page, perPage)
+		return filteredPersonalSearchPage[T]{items: items, total: total}, page, perPage, fetchErr
+	}
+	result, err := searchFilteredPersonalPage(page, perPage, func(providerPage int) ([]T, int, error) {
+		return fetch(resolved, settings, providerPage, personalSearchFetchPageSize)
+	}, filter)
+	return result, page, perPage, err
+}
+
+// searchFilteredPersonalPage scans GitHub's bounded Search API result window
+// before applying the workspace automation boundary. Filtering one requested
+// provider page at a time can otherwise produce empty pages while permitted
+// results remain later in the search.
+func searchFilteredPersonalPage[T any](
+	page, perPage int,
+	fetch func(providerPage int) ([]T, int, error),
+	filter func([]T) ([]T, error),
+) (filteredPersonalSearchPage[T], error) {
+	all := make([]T, 0, personalSearchFetchPageSize)
+	resultLimit := githubSearchResultLimit
+	for providerPage := 1; (providerPage-1)*personalSearchFetchPageSize < resultLimit; providerPage++ {
+		items, total, err := fetch(providerPage)
+		if err != nil {
+			return filteredPersonalSearchPage[T]{}, err
+		}
+		if providerPage == 1 && total < resultLimit {
+			resultLimit = max(total, 0)
+		}
+		all = append(all, items...)
+		if providerPage*personalSearchFetchPageSize >= resultLimit {
+			break
+		}
+	}
+	filtered, err := filter(all)
+	if err != nil {
+		return filteredPersonalSearchPage[T]{}, err
+	}
+	return filteredPersonalSearchPage[T]{
+		items: paginateSearchResults(filtered, page, perPage),
+		total: len(filtered),
+	}, nil
+}
+
+func (s *Service) filterPersonalPRsByAutomation(
+	ctx context.Context, workspaceID string, prs []*PR,
+) ([]*PR, error) {
+	repositories := make([]RepoFilter, 0, len(prs))
+	for _, pr := range prs {
+		if pr != nil {
+			repositories = append(repositories, RepoFilter{Owner: pr.RepoOwner, Name: pr.RepoName})
+		}
+	}
+	visible, err := s.automationRepositoryVisibility(ctx, workspaceID, repositories)
 	if err != nil {
 		return nil, err
 	}
-	if !workspaceSettingsHasScope(settings) {
-		return s.SearchUserIssuesPaged(ctx, filter, customQuery, page, perPage)
+	filtered := make([]*PR, 0, len(prs))
+	for _, pr := range prs {
+		if pr != nil && visible[repositoryIdentityKey(pr.RepoOwner, pr.RepoName)] {
+			filtered = append(filtered, pr)
+		}
 	}
-	return s.searchUserIssuesPagedScoped(ctx, settings, filter, customQuery, page, perPage)
+	return filtered, nil
+}
+
+func (s *Service) filterPersonalIssuesByAutomation(
+	ctx context.Context, workspaceID string, issues []*Issue,
+) ([]*Issue, error) {
+	repositories := make([]RepoFilter, 0, len(issues))
+	for _, issue := range issues {
+		if issue != nil {
+			repositories = append(repositories, RepoFilter{Owner: issue.RepoOwner, Name: issue.RepoName})
+		}
+	}
+	visible, err := s.automationRepositoryVisibility(ctx, workspaceID, repositories)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]*Issue, 0, len(issues))
+	for _, issue := range issues {
+		if issue != nil && visible[repositoryIdentityKey(issue.RepoOwner, issue.RepoName)] {
+			filtered = append(filtered, issue)
+		}
+	}
+	return filtered, nil
 }
 
 func (s *Service) searchUserPRsPagedScoped(
 	ctx context.Context,
+	client Client,
+	cacheScope string,
 	settings *WorkspaceSettings,
 	filter string,
 	customQuery string,
@@ -92,11 +314,11 @@ func (s *Service) searchUserPRsPagedScoped(
 	}
 	qualifiers := workspaceScopeQualifiers(settings)
 	if len(qualifiers) > 1 {
-		return s.searchUserPRsPagedScopedAcrossQualifiers(ctx, settings, filter, customQuery, page, perPage, qualifiers)
+		return s.searchUserPRsPagedScopedAcrossQualifiers(ctx, client, cacheScope, settings, filter, customQuery, page, perPage, qualifiers)
 	}
 	filter, customQuery = appendWorkspaceScopeToSearch(filter, customQuery, settings)
-	v, err := s.searchUserPagedScoped("pr", settings, filter, customQuery, page, perPage, func(page, perPage int) (any, error) {
-		result, err := s.client.SearchPRsPaged(ctx, filter, customQuery, page, perPage)
+	v, err := s.searchUserPagedScoped(cacheScope, "pr", settings, filter, customQuery, page, perPage, func(page, perPage int) (any, error) {
+		result, err := client.SearchPRsPaged(ctx, filter, customQuery, page, perPage)
 		if err != nil {
 			return nil, err
 		}
@@ -110,6 +332,8 @@ func (s *Service) searchUserPRsPagedScoped(
 
 func (s *Service) searchUserIssuesPagedScoped(
 	ctx context.Context,
+	client Client,
+	cacheScope string,
 	settings *WorkspaceSettings,
 	filter string,
 	customQuery string,
@@ -121,11 +345,11 @@ func (s *Service) searchUserIssuesPagedScoped(
 	}
 	qualifiers := workspaceScopeQualifiers(settings)
 	if len(qualifiers) > 1 {
-		return s.searchUserIssuesPagedScopedAcrossQualifiers(ctx, settings, filter, customQuery, page, perPage, qualifiers)
+		return s.searchUserIssuesPagedScopedAcrossQualifiers(ctx, client, cacheScope, settings, filter, customQuery, page, perPage, qualifiers)
 	}
 	filter, customQuery = appendWorkspaceScopeToSearch(filter, customQuery, settings)
-	v, err := s.searchUserPagedScoped("issue", settings, filter, customQuery, page, perPage, func(page, perPage int) (any, error) {
-		result, err := s.client.ListIssuesPaged(ctx, filter, customQuery, page, perPage)
+	v, err := s.searchUserPagedScoped(cacheScope, "issue", settings, filter, customQuery, page, perPage, func(page, perPage int) (any, error) {
+		result, err := client.ListIssuesPaged(ctx, filter, customQuery, page, perPage)
 		if err != nil {
 			return nil, err
 		}
@@ -138,6 +362,7 @@ func (s *Service) searchUserIssuesPagedScoped(
 }
 
 func (s *Service) searchUserPagedScoped(
+	cacheScope string,
 	kind string,
 	settings *WorkspaceSettings,
 	filter string,
@@ -146,12 +371,9 @@ func (s *Service) searchUserPagedScoped(
 	perPage int,
 	fetch func(page int, perPage int) (any, error),
 ) (any, error) {
-	if s.client == nil {
-		return nil, fmt.Errorf("github client not available")
-	}
 	page, perPage = clampSearchPage(page, perPage)
 	scopeKey := workspaceSearchScopeKey(settings)
-	key := searchCacheKey(kind+":"+scopeKey, filter, customQuery, page, perPage)
+	key := scopedCacheKey(cacheScope, searchCacheKey(kind+":"+scopeKey, filter, customQuery, page, perPage))
 	return s.searchCache.doOrFetch(key, func() (any, error) {
 		return fetch(page, perPage)
 	})
@@ -159,6 +381,8 @@ func (s *Service) searchUserPagedScoped(
 
 func (s *Service) searchUserPRsPagedScopedAcrossQualifiers(
 	ctx context.Context,
+	client Client,
+	cacheScope string,
 	settings *WorkspaceSettings,
 	filter string,
 	customQuery string,
@@ -166,8 +390,8 @@ func (s *Service) searchUserPRsPagedScopedAcrossQualifiers(
 	perPage int,
 	qualifiers []string,
 ) (*PRSearchPage, error) {
-	result, err := cachedScopedSearchAcrossQualifiers(s.client, s.searchCache, "pr", settings, filter, customQuery, page, perPage, func(page, perPage int) ([]*PR, int, error) {
-		return s.fetchScopedPRsAcrossQualifiers(ctx, settings, filter, customQuery, page, perPage, qualifiers)
+	result, err := cachedScopedSearchAcrossQualifiers(client, s.searchCache, cacheScope+":pr", settings, filter, customQuery, page, perPage, func(page, perPage int) ([]*PR, int, error) {
+		return s.fetchScopedPRsAcrossQualifiers(ctx, client, settings, filter, customQuery, page, perPage, qualifiers)
 	})
 	if err != nil {
 		return nil, err
@@ -177,6 +401,8 @@ func (s *Service) searchUserPRsPagedScopedAcrossQualifiers(
 
 func (s *Service) searchUserIssuesPagedScopedAcrossQualifiers(
 	ctx context.Context,
+	client Client,
+	cacheScope string,
 	settings *WorkspaceSettings,
 	filter string,
 	customQuery string,
@@ -184,8 +410,8 @@ func (s *Service) searchUserIssuesPagedScopedAcrossQualifiers(
 	perPage int,
 	qualifiers []string,
 ) (*IssueSearchPage, error) {
-	result, err := cachedScopedSearchAcrossQualifiers(s.client, s.searchCache, "issue", settings, filter, customQuery, page, perPage, func(page, perPage int) ([]*Issue, int, error) {
-		return s.fetchScopedIssuesAcrossQualifiers(ctx, settings, filter, customQuery, page, perPage, qualifiers)
+	result, err := cachedScopedSearchAcrossQualifiers(client, s.searchCache, cacheScope+":issue", settings, filter, customQuery, page, perPage, func(page, perPage int) ([]*Issue, int, error) {
+		return s.fetchScopedIssuesAcrossQualifiers(ctx, client, settings, filter, customQuery, page, perPage, qualifiers)
 	})
 	if err != nil {
 		return nil, err
@@ -237,6 +463,7 @@ func cachedScopedSearchAcrossQualifiers[T any](
 
 func (s *Service) fetchScopedPRsAcrossQualifiers(
 	ctx context.Context,
+	client Client,
 	settings *WorkspaceSettings,
 	filter string,
 	customQuery string,
@@ -245,7 +472,7 @@ func (s *Service) fetchScopedPRsAcrossQualifiers(
 	qualifiers []string,
 ) ([]*PR, int, error) {
 	return fetchScopedResultsAcrossQualifiers(settings, filter, customQuery, page, perPage, qualifiers, prScopeKey, func(scopedFilter, scopedCustomQuery string, providerPage, fetchPerPage int) ([]*PR, int, error) {
-		result, err := s.client.SearchPRsPaged(ctx, scopedFilter, scopedCustomQuery, providerPage, fetchPerPage)
+		result, err := client.SearchPRsPaged(ctx, scopedFilter, scopedCustomQuery, providerPage, fetchPerPage)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -258,6 +485,7 @@ func (s *Service) fetchScopedPRsAcrossQualifiers(
 
 func (s *Service) fetchScopedIssuesAcrossQualifiers(
 	ctx context.Context,
+	client Client,
 	settings *WorkspaceSettings,
 	filter string,
 	customQuery string,
@@ -266,7 +494,7 @@ func (s *Service) fetchScopedIssuesAcrossQualifiers(
 	qualifiers []string,
 ) ([]*Issue, int, error) {
 	return fetchScopedResultsAcrossQualifiers(settings, filter, customQuery, page, perPage, qualifiers, issueScopeKey, func(scopedFilter, scopedCustomQuery string, providerPage, fetchPerPage int) ([]*Issue, int, error) {
-		result, err := s.client.ListIssuesPaged(ctx, scopedFilter, scopedCustomQuery, providerPage, fetchPerPage)
+		result, err := client.ListIssuesPaged(ctx, scopedFilter, scopedCustomQuery, providerPage, fetchPerPage)
 		if err != nil {
 			return nil, 0, err
 		}

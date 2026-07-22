@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -670,6 +672,129 @@ func TestBuildReconnectCreateInstanceRequestOmitsAutoApproveOverrideWhenUnset(t 
 	got := buildReconnectCreateInstanceRequest(req, "previous-exec")
 	if got.AutoApprovePermissions != nil {
 		t.Fatalf("AutoApprovePermissions = %v, want nil", got.AutoApprovePermissions)
+	}
+}
+
+type recordingReconnectControl struct {
+	methods []string
+	created *agentctl.CreateInstanceRequest
+}
+
+func (c *recordingReconnectControl) GetInstance(
+	_ context.Context,
+	_ string,
+) (*agentctl.InstanceInfo, error) {
+	c.methods = append(c.methods, "GET")
+	return &agentctl.InstanceInfo{ID: "instance-1", Port: 41001}, nil
+}
+
+func (c *recordingReconnectControl) DeleteInstance(_ context.Context, _ string) error {
+	c.methods = append(c.methods, "DELETE")
+	return nil
+}
+
+func (c *recordingReconnectControl) CreateInstance(
+	_ context.Context,
+	req *agentctl.CreateInstanceRequest,
+) (*agentctl.CreateInstanceResponse, error) {
+	c.methods = append(c.methods, "POST")
+	c.created = req
+	return &agentctl.CreateInstanceResponse{ID: "instance-1", Port: 41002}, nil
+}
+
+func TestDockerManagedBrokerReconnectRecreatesInstanceWithFreshLease(t *testing.T) {
+	const freshLease = "fresh-lease-after-restart"
+	control := &recordingReconnectControl{}
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		TaskID:     "task-1",
+		SessionID:  "session-1",
+		Env: map[string]string{
+			envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+			envKeyGitHubCredentialLease:     freshLease,
+		},
+	}
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	dockerExec.brokerPreflight = func(
+		context.Context,
+		brokerAgentctlProcessClient,
+		string,
+		map[string]string,
+	) error {
+		return nil
+	}
+	gotPort, reused, err := dockerExec.findExistingInstance(
+		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
+		req, "container-1", "172.17.0.2", "instance-1", "",
+	)
+	if err != nil {
+		t.Fatalf("findExistingInstance() error = %v", err)
+	}
+	if reused {
+		t.Fatal("managed broker reconnect reused the stale instance")
+	}
+	if gotPort != 41002 {
+		t.Fatalf("instance port = %d, want recreated port 41002", gotPort)
+	}
+	if got, want := strings.Join(control.methods, ","), "GET,DELETE,POST"; got != want {
+		t.Fatalf("control methods = %s, want %s", got, want)
+	}
+	if control.created == nil || control.created.Env[envKeyGitHubCredentialLease] != freshLease {
+		t.Fatalf("recreated request = %#v, want lease %q", control.created, freshLease)
+	}
+}
+
+func TestDockerManagedBrokerReconnectStopsBeforeReplacementWhenUnreachable(t *testing.T) {
+	control := &recordingReconnectControl{}
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		SessionID:  "session-1",
+		Env: map[string]string{
+			envKeyGitHubCredentialBrokerURL: "https://unreachable.example/resolve",
+			envKeyGitHubCredentialLease:     "fresh-lease",
+		},
+	}
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	dockerExec.brokerPreflight = func(
+		context.Context,
+		brokerAgentctlProcessClient,
+		string,
+		map[string]string,
+	) error {
+		return ErrGitHubCredentialBrokerUnreachable
+	}
+	_, _, err := dockerExec.findExistingInstance(
+		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
+		req, "container-1", "172.17.0.2", "instance-1", "",
+	)
+	if !errors.Is(err, ErrGitHubCredentialBrokerUnreachable) {
+		t.Fatalf("findExistingInstance() error = %v, want unreachable", err)
+	}
+	if got, want := strings.Join(control.methods, ","), "GET"; got != want {
+		t.Fatalf("control methods = %s, want %s", got, want)
+	}
+}
+
+func TestDockerExplicitTokenReconnectDoesNotReplaceInstance(t *testing.T) {
+	control := &recordingReconnectControl{}
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		SessionID:  "session-1",
+		Env:        map[string]string{"GITHUB_TOKEN": "explicit-profile-token"},
+	}
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	port, _, err := dockerExec.findExistingInstance(
+		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
+		req, "container-1", "172.17.0.2", "instance-1", "",
+	)
+	if err != nil {
+		t.Fatalf("findExistingInstance() error = %v", err)
+	}
+	if port != 41001 {
+		t.Fatalf("instance port = %d, want existing port", port)
+	}
+	if got, want := strings.Join(control.methods, ","), "GET"; got != want {
+		t.Fatalf("control methods = %s, want %s", got, want)
 	}
 }
 

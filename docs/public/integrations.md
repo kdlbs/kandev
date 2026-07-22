@@ -13,11 +13,11 @@ They do **not** provide every credential a task needs. Keep these paths distinct
 - Git or SSH credentials in an executor let the task fetch and push a repository;
 - an agent login or API key lets the coding CLI call its model provider.
 
-GitHub and GitLab can also contribute credentials to task runtimes. For Local Docker, Sprites, and SSH launches (and the registered Remote Docker path, although that runtime is not implemented), Kandev resolves profile remote-auth secrets and selected remote credentials first. A resulting `GITHUB_TOKEN` or `GH_TOKEN` wins. Otherwise Kandev injects the globally stored `GITHUB_TOKEN`/`github_token` secret as both variables, with automatic extraction from the local `gh` login as the final fallback. The workspace repository list does **not** restrict what that injected token can access. Local and Worktree sessions continue to use credentials available on the host.
+GitHub is the important exception. Kandev first resolves explicit profile remote-auth secrets; a resulting `GITHUB_TOKEN` or `GH_TOKEN` is an unmanaged override. Otherwise, for each repository identified as GitHub, the task receives an opaque, task/repository-scoped credential lease instead of an ambient token. Git resolves the matching lease against the workspace automation connection when it runs, so an App installation token can be renewed during a long task. The App private key and personal user tokens are never sent to an executor. Repository and credential-generation checks are repeated when a lease is resolved, and disconnecting or replacing the connection invalidates old leases.
 
 For GitLab, Kandev resolves only the active task workspace's connection. It provides that connection's token as `GITLAB_TOKEN` and its normalized host as `GITLAB_HOST`/`KANDEV_GITLAB_HOST` to the execution path, and configures HTTP Git authentication only for the matching host. It does not reuse another workspace's GitLab credential or silently fall back from a self-managed host to `gitlab.com`. SSH remotes still require usable SSH credentials in the executor.
 
-A task can therefore display a pull or merge request while its worktree cannot push, or edit a repository while Kandev cannot read provider state. Diagnose the failing credential path separately and treat injected GitHub or GitLab integration tokens as credentials that task agents may receive.
+A task can therefore display a pull or merge request while its worktree cannot push, or edit a repository while Kandev cannot read provider state. Diagnose the failing credential path separately. An App token redeemed through the broker is minted for that repository. PAT and named-CLI tokens remain bearer credentials with all provider-granted scopes once delivered to the trusted Git or `gh` subprocess; lease matching prevents accidental cross-repository redemption but cannot narrow those tokens at GitHub. GitLab integration tokens are provided only to tasks in their configured workspace and should be treated as credentials that task agents may receive.
 
 ## Open integration settings
 
@@ -33,7 +33,7 @@ Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a pro
 
 Compatibility routes under **Settings > Integrations** use the active workspace where the provider has workspace settings.
 
-GitHub authentication is installation-wide and the current integration targets `github.com`. GitLab, Azure DevOps, Jira, Linear, and Slack configuration is workspace-specific. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
+GitHub, GitLab, Azure DevOps, Jira, Linear, and Slack configuration are workspace-specific. GitHub supports one automation connection per workspace and, for App-backed workspaces, one personal identity per Kandev user and workspace. The current GitHub integration targets `github.com`; GitLab supports `gitlab.com` and self-managed origins. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
 
 Provider secrets saved by these forms use Kandev's encrypted secret store. The backend must still decrypt them to make API requests. Limit access to settings and the Kandev data directory, and use the narrowest provider scope that works.
 
@@ -49,17 +49,167 @@ Use GitHub for pull requests, issues, reviews, checks, repository discovery, tas
 
 ### Authenticate
 
-Open the workspace GitHub settings. Authentication is resolved installation-wide in this order:
+Open the workspace GitHub settings. **Workspace automation** offers three connection types:
 
-1. an authenticated `gh` CLI;
-2. `GITHUB_TOKEN` in the backend environment;
-3. `GH_TOKEN` in the backend environment;
-4. a stored secret named `GITHUB_TOKEN` or `github_token`;
-5. no authenticated client.
+- **Personal access token (PAT):** Kandev validates the token before replacing the current connection and stores it in the encrypted secret store. A classic PAT needs `repo` and `read:org` for full behavior. Scope a fine-grained token to only the repositories and operations the workspace needs.
+- **GitHub CLI:** first run `gh auth login` as the operating-system user that runs the Kandev backend. Kandev lists every authenticated host/login pair and stores the selected `github.com` login, not its token. It resolves that exact account with `gh auth token --hostname github.com --user <login>` and never changes the host's active account with `gh auth switch`.
+- **GitHub App:** recommended for organization-managed or unattended automation. From the
+  workspace, select a known registration, add an App you already own, or create one through
+  GitHub's App Manifest flow, then install it on the intended account. Kandev keeps root App
+  credentials server-side and mints short-lived installation tokens as needed.
 
-If `gh` is installed, use the host terminal action and run `gh auth login` as Kandev's service user. The token form validates the GitHub API before saving an encrypted token; the UI calls out `repo` and `read:org` scopes for a classic personal access token. Scope any token to only the organizations, repositories, and write operations that Kandev needs.
+A workspace has one active automation connection at a time. Replacing it changes the identity used by repository discovery, watches, background work, and task GitHub access in that workspace only. Disconnecting a CLI connection does not sign the host out of `gh`; disconnecting an App connection removes only the workspace binding and does not uninstall the App from GitHub.
 
-The status panel reports the authenticated user, selected method, rate-limit information, and diagnostics. Clearing Kandev's stored token does not remove a valid CLI or environment credential, and a valid `gh` login continues to take precedence over a stored token.
+The status panel identifies the selected source, verified actor, connection state, rate limits, and any missing App capabilities. A failed PAT or CLI validation leaves the previous connection intact. An unknown CLI login, revoked PAT, suspended/deleted installation, or missing App permission affects only the bound workspace and displays a reconnect or capability-specific error.
+
+### Automation and personal identity
+
+PAT and CLI connections are human identities. They provide both workspace automation and the fallback identity for **My GitHub** views and user-triggered actions.
+
+A GitHub App installation is an automation identity, not a person. App-backed repository discovery, watches, task Git operations, pull-request creation, reviews, and merges are attributed to the App when the App is the effective actor. To see pull requests or issues assigned to the current user, connect **My GitHub identity** in that workspace. This is a GitHub App user authorization, stored per Kandev user and workspace.
+
+Kandev routes credentials as follows:
+
+| Operation | Credential | GitHub attribution |
+|---|---|---|
+| Background reads/writes, watches, task Git, and agent `gh` | Workspace automation | PAT/CLI user or App |
+| **My GitHub** reads | Personal identity, then human PAT/CLI automation | User |
+| User-triggered review, merge, or other mutation | Personal identity, then human PAT/CLI automation, then App | Effective actor shown in the UI |
+
+An App-only workspace continues automation without a personal connection, but **My GitHub** remains unavailable. A personal connection cannot widen access: Kandev intersects the workspace repository scope, the App installation's repositories, and the user's GitHub access. Personal access and refresh tokens are never exposed to agents or executors.
+
+For task processes, Git's credential helper selects among all attached repository leases. The
+broker-aware `gh` shim uses the primary repository lease for each invocation. With App automation,
+that makes agent-issued `gh` commands primary-repository scoped; use Kandev's workspace-aware
+backend actions for another attached repository. PAT/CLI `gh` commands still receive the broader
+bearer grant described above. Explicit executor-profile tokens bypass these managed guarantees and
+must be scoped and rotated independently.
+
+### Use a GitHub App
+
+Choose a GitHub App when automation should not depend on one person's long-lived credential, when
+an organization wants to approve repository access centrally, or when background jobs need
+short-lived tokens. PAT and named CLI connections are simpler for a local workspace that should act
+as one person. An App adds ownership, public callback, webhook, installation, and credential-
+rotation responsibilities, and GitHub attributes its automation to the App rather than a human.
+
+Kandev stores a catalog of App registrations. Adding or creating a registration does not change a
+workspace's active connection; the workspace must explicitly select the registration and complete
+an installation. You can use the same registration in several related workspaces, or create
+separate registrations for stronger isolation:
+
+| Choice | Shared | Isolated per workspace installation |
+|---|---|---|
+| Reuse one registration | App owner and bot identity, private key, OAuth client secret, webhook secret, permission policy, and root-credential revocation | Installation token, account/repository grants, workspace scope, personal OAuth tokens, and broker leases |
+| Use separate registrations | Nothing at the App-credential layer | App owner, bot identity, root credentials, permission policy, revocation, installations, repository grants, and workspace credentials |
+
+Reuse is appropriate for related workspaces that deliberately share one organizational automation
+identity. Create separate registrations for work and personal accounts, unrelated organizations,
+or any boundary where rotating or deleting one App must not affect the other.
+
+This feature targets `github.com`, not GitHub Enterprise Server. Before creating or importing an
+App, give Kandev a stable public HTTPS origin. GitHub must reach the callback and webhook routes
+from the public internet. Guided setup rejects private, loopback, split-horizon, and plain HTTP
+origins. A local deployment needs a trusted HTTPS tunnel or reverse proxy whose hostname remains
+stable for the life of the registration.
+
+#### Create a new App
+
+1. Open the workspace's GitHub integration settings, choose **Change connection**, then choose
+   **GitHub App** and **Create new App**.
+2. Choose the GitHub user or organization that will own the App, enter a registration label and
+   the public Kandev origin, and review the requested permissions.
+3. Keep **Private** unless the same App must be installable outside its owner. **Public** means
+   other GitHub accounts can install it. It does not publish the App to Marketplace, reveal its
+   credentials, or grant any repository without an approved installation.
+4. Continue to GitHub and confirm the generated manifest within one hour. Kandev verifies the
+   single-use callback, encrypts the returned credentials, and adds the registration without a
+   restart.
+5. Back in the workspace, select the new registration and install it. The GitHub account owner
+   still chooses the account, organization, and repositories granted to that workspace.
+
+Creating an App does not select it automatically. If GitHub creates the App but Kandev cannot save
+the callback result, remove that orphan App in GitHub or restart the registration flow; Kandev
+cannot delete the provider-side App for you.
+
+#### Add an existing App
+
+Use **Add existing App** when you own a GitHub App that should follow the same catalog lifecycle as
+a Kandev-created App. The preparation step allocates a registration ID and displays exact,
+copyable settings for that pending import. It is short-lived and single-use.
+
+1. Start **Add existing App** from the workspace GitHub connection flow. Enter its owner, label,
+   visibility, and the public Kandev origin.
+2. Open the App under the owning user's or organization's **Settings > Developer settings > GitHub
+   Apps**, then apply every URL, permission, and event shown by Kandev. Set the App homepage to the
+   public Kandev origin, use JSON webhook delivery with SSL verification, request user
+   authorization during installation, and keep expiring user tokens enabled.
+3. Return before the preparation expires and provide the App ID, OAuth client ID and secret, App
+   slug, webhook secret, and an RSA private key generated for that App. Treat every secret field as
+   a root credential and never put it in workspace environment variables or executor profiles.
+4. Kandev authenticates as the App, verifies its ID, owner, slug, homepage, permissions, events,
+   and webhook settings where GitHub exposes them, then encrypts the credential bundle. You must
+   confirm callback/setup settings that GitHub's API does not expose.
+5. Select and install the imported registration. Importing alone never replaces the workspace's
+   current PAT, CLI account, or App installation.
+
+If the App is already in the catalog, Kandev directs you to the known registration instead of
+storing a second copy of the same root credentials.
+
+Each registration uses its own ID in every public route. The UI supplies complete URLs; these path
+templates are useful when checking a proxy or GitHub setting:
+
+| Purpose | URL path |
+|---|---|
+| Manifest creation callback | `/api/v1/github/app/registrations/{registrationId}/manifest/callback` |
+| Workspace installation setup | `/api/v1/github/app/registrations/{registrationId}/install/callback` |
+| Personal identity OAuth callback | `/api/v1/github/app/registrations/{registrationId}/personal/callback` |
+| Signed webhook delivery | `/api/v1/github/app/registrations/{registrationId}/webhook` |
+
+The registration starts with an unverified webhook status. It becomes verified only after Kandev
+receives a correctly signed delivery on that registration's route. A failing status indicates a
+route, proxy, secret, or post-signature processing problem; a successful browser callback alone
+does not prove webhook reachability.
+
+For full Kandev behavior, request the smallest applicable repository/organization permissions from this list:
+
+| GitHub App permission | Access | Used for |
+|---|---|---|
+| Metadata | Read | Repository discovery and identity. |
+| Contents | Read and write | Clone, fetch, push, and repository content changes. |
+| Pull requests | Read and write | PR browsing, creation, reviews, and merges. |
+| Issues | Read and write | Issue browsing and updates. |
+| Checks | Read | Check runs and conclusions. |
+| Commit statuses | Read | Commit status reporting. |
+| Actions | Read | Workflow-run status. |
+| Administration | Read | Branch-protection details. |
+| Members | Read | Organization/team membership lookups. |
+| Workflows | Write | Changes under `.github/workflows`; omit when agents must not edit workflow files. |
+
+Subscribe only to `installation`, `installation_repositories`, and `github_app_authorization`. Kandev uses these events to track installation suspension/deletion, repository access changes, and revoked personal authorizations. PR, issue, review, and CI watches continue to poll and do not require their corresponding webhooks. GitHub's [registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app), [App permission reference](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps), and [webhook guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/using-webhooks-with-github-apps) describe the provider-side settings.
+
+To delete a registration, first disconnect every workspace using it and remove personal identities
+issued through it. Kandev blocks deletion while any workspace or personal connection is bound,
+deletes only the encrypted catalog credential bundle, and does not delete or uninstall the App on
+GitHub. Remove the provider-side App separately only after confirming that no other deployment uses
+it.
+
+### Upgrade and recovery
+
+Workspaces that existed when workspace authentication was introduced receive a **Legacy shared** connection so upgrades do not immediately lose GitHub access. It preserves the previous installation-wide resolution behavior while the workspace is migrated. New workspaces start disconnected. After a legacy workspace selects a PAT, named CLI account, or App installation, it cannot return to legacy mode. Copying a workspace never copies authentication or App installation bindings.
+
+Legacy shared resolution checks an authenticated host `gh` CLI first, then backend `GITHUB_TOKEN`, backend `GH_TOKEN`, and finally the old stored `GITHUB_TOKEN`/`github_token` secret. Those ambient sources are migration compatibility only; configure an explicit workspace connection to make identity and access deterministic.
+
+For recovery:
+
+- Replace an invalid PAT or select the exact CLI account again; validation must succeed before Kandev swaps the connection.
+- Run `gh auth status --hostname github.com` as the Kandev service user when a selected CLI login disappears, then sign in that account again if necessary.
+- Reconnect **My GitHub identity** after authorization expiry/revocation. App automation remains available while the personal connection is invalid.
+- Ask an organization owner to unsuspend or reinstall an App, restore its repository selection, or grant a reported missing permission. Refresh the workspace status afterward.
+- Disconnect and repeat **Install GitHub App** when the workspace is bound to the wrong installation. Removing the binding does not uninstall the provider-side App.
+- To replace compromised App root credentials, disconnect every binding, delete the catalog
+  registration, rotate the credentials in GitHub, and add the App again. Kandev does not rotate App
+  private keys, OAuth client secrets, or webhook secrets automatically.
 
 ### Configure and use the workspace
 
@@ -67,11 +217,13 @@ Workspace GitHub settings control repository scope, default/saved searches, quic
 
 A **Review Watch** polls a GitHub search and creates review work. It requires a workflow, starting step, prompt, and workspace. The default query is `type:pr state:open review-requested:@me -is:draft`; add repository filters or replace the query as needed. An optional agent or executor profile overrides the selected step's defaults. The poll interval defaults to 300 seconds and accepts 60–3,600 seconds.
 
+When a review watch is created, Kandev saves its verified target GitHub login. App-backed polling replaces `review-requested:@me` with that explicit login because an installation is not a user. Creating a user-targeted review watch therefore requires a connected personal identity or human PAT/CLI automation identity. A migrated watch with no verified target is disabled until an identity is reconnected.
+
 An **Issue Watch** behaves similarly for issues. Its default search is `type:issue state:open`. Choose labels or provide a custom GitHub query; the custom query takes precedence over label selection.
 
 Both watch types default to the **Auto** cleanup policy: delete merged/closed tasks only when the user has not typed a message. **Always** deletes even after user engagement; **Never** retains every task. You can pause a watch, poll immediately, or clean completed work. Deleting a GitHub review or issue watch best-effort cascade-deletes the tasks it owns. **Reset** is also destructive: after its preview, it permanently cascade-deletes every watch-created task, including archived tasks, and clears cursor/deduplication state so current matches become eligible again. Review-watch reset schedules a re-import; issue-watch reset re-imports on its next poll. Reset is not a way to keep old tasks and rerun a query.
 
-Repository scope and watch filters are workspace-specific even though the GitHub login is global. They constrain backend browsing and watch queries, not the permissions of a token injected into a remote executor. GitHub workspace configuration can be copied, but credentials and watches are deliberately not copied.
+Repository scope, authentication, and watch filters are workspace-specific. Repository scope constrains Kandev operations in addition to the repositories allowed by the selected credential; it cannot grant access the credential lacks. Explicit executor profile tokens remain a separate override and should be scoped independently. GitHub workspace configuration can be copied, but credentials, App installation bindings, personal identities, and watches are deliberately not copied.
 
 ## GitLab
 
@@ -240,7 +392,7 @@ Issue bodies, pull-request comments, commit messages, Slack threads, and inciden
 - **Cleared token but connection remains:** for GitHub, a higher-priority CLI or environment credential may still be active. Clearing GitLab from its workspace settings removes that workspace connection.
 - **Repository, project, or team is missing:** confirm the connected identity can see it and check workspace filters/defaults.
 - **Kandev can read but cannot write:** add only the specific provider write scope needed, then repeat the test.
-- **Task cannot fetch or push:** inspect the selected executor's Git/SSH credentials and repository remote. For GitLab HTTP remotes, confirm the task workspace connection host exactly matches the remote and its token can access the project. The Azure PAT can authenticate the backend's initial managed clone/fetch but is not exposed to the task for later pushes. GitHub remote launches can resolve profile/global tokens or a local `gh` fallback.
+- **Task cannot fetch or push:** inspect the selected executor's Git/SSH credentials and repository remote. For GitHub, inspect any explicit profile `GITHUB_TOKEN`/`GH_TOKEN`; otherwise verify the workspace automation connection, repository scope, broker reachability, and App Contents permission. For GitLab HTTP remotes, confirm the task workspace connection host exactly matches the remote and its token can access the project. The Azure PAT can authenticate the backend's initial managed clone/fetch but is not exposed to the task for later pushes. Jira, Linear, Sentry, and Slack integration credentials are not task Git credentials.
 - **A watch still runs after disabling the provider:** the Enabled switch is browser-local. Pause/delete the watch, or remove the backend configuration.
 - **Unexpected work is created:** pause the watch or automation, inspect its query, last-polled/status fields, and created-task list, then narrow provider filters before resetting or polling again. Watch tables do not provide a separate run/import history.
 

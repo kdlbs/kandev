@@ -1,5 +1,6 @@
 import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { expectElementsNotToIntersect } from "../../helpers/layout-assertions";
 
 async function openConfigChatFromSettings(page: Page): Promise<Locator> {
   const pageErrors: string[] = [];
@@ -196,21 +197,6 @@ test.describe("Configuration Chat", () => {
     await expect(clarification).not.toBeVisible({ timeout: 30_000 });
   });
 });
-
-async function expectElementsNotToIntersect(
-  first: import("@playwright/test").Locator,
-  second: import("@playwright/test").Locator,
-) {
-  const [firstBox, secondBox] = await Promise.all([first.boundingBox(), second.boundingBox()]);
-  expect(firstBox).not.toBeNull();
-  expect(secondBox).not.toBeNull();
-  const intersects =
-    firstBox!.x < secondBox!.x + secondBox!.width &&
-    firstBox!.x + firstBox!.width > secondBox!.x &&
-    firstBox!.y < secondBox!.y + secondBox!.height &&
-    firstBox!.y + firstBox!.height > secondBox!.y;
-  expect(intersects).toBe(false);
-}
 
 async function expectElementAbove(
   upper: import("@playwright/test").Locator,

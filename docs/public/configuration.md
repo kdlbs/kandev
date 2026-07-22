@@ -122,6 +122,27 @@ Do not infer security from `auth.jwtSecret`: setting it currently does not turn 
 
 The voice fallback sends audio to the configured OpenAI transcription service and incurs that provider's network, data-handling, and billing behavior. Browser-native speech recognition has its own browser/vendor behavior and does not use this server key.
 
+### GitHub credential broker
+
+Managed SSH, Sprites, and remote-container executors redeem task-scoped GitHub credentials through
+the Kandev backend. Configure a public broker base URL independently of GitHub App registration so
+PAT-only and named GitHub CLI workspaces can use those executors.
+
+| YAML key | Environment variable | Default | Current behavior |
+|---|---|---|---|
+| `githubCredentialBroker.publicBaseUrl` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` | empty | Externally reachable Kandev base URL used for `/api/v1/github/credentials/resolve`. Must be absolute HTTPS, except HTTP is allowed for loopback development. Credentials, query strings, and fragments are rejected. |
+
+When this value is empty, local and worktree execution can use the backend loopback URL; non-local
+executors require an externally reachable HTTPS URL. Before clone or agent startup, managed
+executors send an unauthenticated `GET` to the exact resolution route and require `204 No Content`.
+This readiness response contains no connection or credential data; credential redemption remains a
+lease-authenticated `POST`.
+
+GitHub App registrations are persistent product settings, not backend startup configuration.
+Create or import them from a workspace's GitHub integration flow. See
+[Integrations](./integrations.md#use-a-github-app) for registration isolation, exact callback and
+webhook paths, permissions, events, and secret-handling guidance.
+
 ### Logging
 
 | YAML key | Environment variable | Default | Current behavior |
@@ -205,6 +226,9 @@ server:
   writeTimeout: 30
   webInternalUrl: ""
 
+githubCredentialBroker:
+  publicBaseUrl: ""
+
 database:
   driver: "sqlite"
   path: ""
@@ -278,6 +302,7 @@ voice:
 features:
   office: false
   plugins: false
+
 ```
 
 Copying this entire file is unnecessary and can freeze old defaults in a deployment. Keep only deliberate overrides. On Windows, do not copy the Unix Docker host/path literals from this example.

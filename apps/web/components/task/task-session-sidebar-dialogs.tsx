@@ -145,6 +145,7 @@ export function SidebarLinkDialogs({
     <>
       {linkingPullRequestTask && (
         <TaskGitHubPRDialog
+          workspaceId={workspaceId}
           open={true}
           onOpenChange={(open) => {
             if (!open) setLinkingPullRequestTask(null);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useState, useRef } from "react";
+import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { PRDiffFile } from "@/lib/types/github";
@@ -12,6 +13,7 @@ type PRDiffState = {
   loading: boolean;
   error: string | null;
 };
+type WorkspacePRDiffState = { workspaceId: string | null; state: PRDiffState };
 
 const INITIAL_STATE: PRDiffState = {
   files: [],
@@ -20,6 +22,7 @@ const INITIAL_STATE: PRDiffState = {
 };
 
 async function fetchPRFiles(
+  workspaceId: string,
   owner: string,
   repo: string,
   prNumber: number,
@@ -32,6 +35,7 @@ async function fetchPRFiles(
   debug("fetch.start", { owner, repo, prNumber });
   try {
     const response = await client.request<{ files?: PRDiffFile[] }>("github.pr_files.get", {
+      workspace_id: workspaceId,
       owner,
       repo,
       number: prNumber,
@@ -56,36 +60,42 @@ export function usePRDiff(
   prNumber: number | null,
   refreshKey?: string | null,
 ) {
-  const [state, setState] = useState<PRDiffState>(INITIAL_STATE);
-  const hasParams = !!owner && !!repo && !!prNumber;
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const [result, setResult] = useState<WorkspacePRDiffState>({
+    workspaceId: null,
+    state: INITIAL_STATE,
+  });
+  const hasParams = !!workspaceId && !!owner && !!repo && !!prNumber;
   const paramsKeyRef = useRef<string>("");
   const requestIdRef = useRef(0);
 
   const refresh = useCallback(() => {
-    if (!owner || !repo || !prNumber) return;
+    if (!workspaceId || !owner || !repo || !prNumber) return;
     const requestId = ++requestIdRef.current;
-    void fetchPRFiles(owner, repo, prNumber, (next) => {
+    void fetchPRFiles(workspaceId, owner, repo, prNumber, (next) => {
       if (requestId !== requestIdRef.current) return;
-      setState(next);
+      setResult({ workspaceId, state: next });
     });
-  }, [owner, repo, prNumber]);
+  }, [workspaceId, owner, repo, prNumber]);
 
   useEffect(() => {
-    const key = hasParams ? `${owner}/${repo}/${prNumber}/${refreshKey ?? ""}` : "";
+    const key = hasParams ? `${workspaceId}/${owner}/${repo}/${prNumber}/${refreshKey ?? ""}` : "";
     if (key === paramsKeyRef.current) return;
     paramsKeyRef.current = key;
-    if (!owner || !repo || !prNumber) {
+    if (!workspaceId || !owner || !repo || !prNumber) {
       requestIdRef.current++; // invalidate in-flight responses
       return;
     }
     const requestId = ++requestIdRef.current;
-    void fetchPRFiles(owner, repo, prNumber, (next) => {
+    void fetchPRFiles(workspaceId, owner, repo, prNumber, (next) => {
       if (requestId !== requestIdRef.current) return;
-      setState(next);
+      setResult({ workspaceId, state: next });
     });
-  }, [owner, repo, prNumber, hasParams, refreshKey]);
+  }, [workspaceId, owner, repo, prNumber, hasParams, refreshKey]);
 
   // Return initial state when params are null to clear stale data
-  if (!hasParams) return { ...INITIAL_STATE, refresh };
-  return { ...state, refresh };
+  if (!hasParams || result.workspaceId !== workspaceId) {
+    return { ...INITIAL_STATE, refresh };
+  }
+  return { ...result.state, refresh };
 }

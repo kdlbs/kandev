@@ -51,9 +51,8 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 }
 
 // isContainerizedExecutor returns true for executor types that run agents in
-// containers or remote sandboxes (Docker variants + Sprites). These executors
-// need GitHub token injection for git operations since they don't have access
-// to the host's git credentials, and they're the same set that needs the
+// containers or remote sandboxes (Docker variants + Sprites). These are the
+// same executors that need explicitly configured remote credentials and the
 // kandev-managed feature branch propagated through env metadata.
 func isContainerizedExecutor(executorType string) bool {
 	switch models.ExecutorType(executorType) {
@@ -65,10 +64,9 @@ func isContainerizedExecutor(executorType string) bool {
 }
 
 // executorNeedsResolvedCredentials reports whether an executor runs the agent
-// off the control-plane host and therefore needs credentials resolved into
-// req.Env (rather than inherited from the kandev process environment). This is
-// every containerized executor plus SSH, whose remote agentctl only receives
-// the credential keys we forward in req.Env.
+// off the control-plane host and therefore needs explicitly selected profile
+// credentials resolved into req.Env. This is every containerized executor plus
+// SSH, whose remote agentctl only receives the keys we forward in req.Env.
 func executorNeedsResolvedCredentials(executorType string) bool {
 	return isContainerizedExecutor(executorType) ||
 		models.ExecutorType(executorType) == models.ExecutorTypeSSH
@@ -1050,12 +1048,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		}
 	}
 
-	// For remote executors (containerized *and* SSH), resolve credentials into
-	// req.Env in this order:
-	// 1. Profile remote_auth_secrets (e.g., gh_cli_env method with secret)
-	// 2. Profile remote_credentials with gh_cli_token (extract from local gh CLI)
-	// 3. Global GITHUB_TOKEN secret (fallback)
-	// 4. Auto-extract from local gh CLI (final fallback)
+	// For remote executors (containerized *and* SSH), resolve only explicitly
+	// selected profile auth secrets. Workspace GitHub automation is configured
+	// below through a scoped renewable broker lease.
 	// SSH is included so env-authenticated agents (e.g. claude-acp reading
 	// CLAUDE_CODE_OAUTH_TOKEN) and remote git get their credentials from the
 	// configured profile/secret store rather than from a blanket forward of the
@@ -1068,6 +1063,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 
 	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
 	if err != nil {
+		return nil, execConfig, err
+	}
+	if err := e.configureGitHubCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
 		return nil, execConfig, err
 	}
 
@@ -1106,11 +1104,9 @@ func mergeEnv(req *LaunchAgentRequest, env map[string]string) {
 	}
 }
 
-// applyContainerCredentials resolves and injects credentials for containerized executors.
+// applyContainerCredentials resolves explicit profile credentials for remote executors.
 func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAgentRequest, metadata map[string]interface{}) {
 	e.resolveRemoteCredentials(ctx, req, metadata)
-	e.injectGitHubToken(ctx, req)        // Fallback to global secret
-	e.injectGitHubTokenFromCLI(ctx, req) // Final fallback to local gh CLI
 }
 
 // buildRepoSpecs converts resolved repoInfos into per-repo launch specs for

@@ -14,21 +14,31 @@ import (
 
 // mockBackend records uploads and supports configurable upload/delete errors.
 type mockBackend struct {
-	uploads   int
-	deletes   []string
-	uploadErr error
-	deleteErr error
-	nextID    string
-	nextURL   string
+	uploads          int
+	uploadWorkspaces []string
+	deletes          []string
+	deleteWorkspaces []string
+	accessWorkspaces []string
+	uploadErr        error
+	deleteErr        error
+	accessErr        error
+	nextID           string
+	nextURL          string
 }
 
 func (m *mockBackend) Name() string { return BackendGitHubGist }
 
-func (m *mockBackend) Upload(_ context.Context, _ *Snapshot) (string, string, error) {
+func (m *mockBackend) CheckAccess(_ context.Context, workspaceID string) error {
+	m.accessWorkspaces = append(m.accessWorkspaces, workspaceID)
+	return m.accessErr
+}
+
+func (m *mockBackend) Upload(_ context.Context, workspaceID string, _ *Snapshot) (string, string, error) {
 	if m.uploadErr != nil {
 		return "", "", m.uploadErr
 	}
 	m.uploads++
+	m.uploadWorkspaces = append(m.uploadWorkspaces, workspaceID)
 	id := m.nextID
 	if id == "" {
 		id = "gist-1"
@@ -40,18 +50,19 @@ func (m *mockBackend) Upload(_ context.Context, _ *Snapshot) (string, string, er
 	return id, url, nil
 }
 
-func (m *mockBackend) Delete(_ context.Context, id string) error {
+func (m *mockBackend) Delete(_ context.Context, workspaceID, id string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
 	m.deletes = append(m.deletes, id)
+	m.deleteWorkspaces = append(m.deleteWorkspaces, workspaceID)
 	return nil
 }
 
 func completedSession() *stubReader {
 	completed := time.Now().UTC()
 	return &stubReader{
-		task: &models.Task{ID: "t-1", Title: "test task"},
+		task: &models.Task{ID: "t-1", WorkspaceID: "workspace-1", Title: "test task"},
 		session: &models.TaskSession{
 			ID: "s-1", TaskID: "t-1", State: models.TaskSessionStateCompleted,
 			StartedAt: completed.Add(-time.Minute), CompletedAt: &completed,
@@ -74,6 +85,9 @@ func TestService_CreateShare_HappyPath(t *testing.T) {
 	}
 	if share.ExternalID != "abc" || share.ExternalURL != "https://gist.github.com/u/abc" {
 		t.Fatalf("unexpected share: %+v", share)
+	}
+	if len(mock.uploadWorkspaces) != 1 || mock.uploadWorkspaces[0] != "workspace-1" {
+		t.Fatalf("upload workspaces = %v, want workspace-1", mock.uploadWorkspaces)
 	}
 	if share.SnapshotSizeBytes <= 0 {
 		t.Fatalf("expected non-zero snapshot size, got %d", share.SnapshotSizeBytes)
@@ -159,12 +173,28 @@ func TestService_RevokeShare_DeletesAndMarksRevoked(t *testing.T) {
 	if len(mock.deletes) != 1 || mock.deletes[0] != "abc" {
 		t.Fatalf("expected backend Delete(abc), got %v", mock.deletes)
 	}
+	if len(mock.deleteWorkspaces) != 1 || mock.deleteWorkspaces[0] != "workspace-1" {
+		t.Fatalf("delete workspaces = %v, want workspace-1", mock.deleteWorkspaces)
+	}
 	got, err := repo.GetByID(context.Background(), share.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
 	if got.RevokedAt == nil {
 		t.Fatal("expected RevokedAt to be set")
+	}
+}
+
+func TestService_CreateShare_FailsClosedWithoutTaskWorkspace(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	reader := completedSession()
+	reader.task.WorkspaceID = ""
+	mock := &mockBackend{}
+	svc := New(repo, reader, mock, nil, "v")
+	_, err := svc.CreateShare(context.Background(), "s-1")
+	if !errors.Is(err, ErrWorkspaceRequired) || mock.uploads != 0 {
+		t.Fatalf("CreateShare() error = %v, uploads = %d", err, mock.uploads)
 	}
 }
 

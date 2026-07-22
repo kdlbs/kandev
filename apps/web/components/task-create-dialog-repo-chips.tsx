@@ -170,11 +170,11 @@ function ModeBody({
   if (fs.useRemote) {
     return (
       <RemoteRepoChipsRow
+        workspaceId={workspaceId}
         fs={fs}
         onUpdateRow={fs.updateRemoteRepo}
         onAddRow={fs.addRemoteRepo}
         onRemoveRow={fs.removeRemoteRepo}
-        workspaceId={workspaceId ?? undefined}
       />
     );
   }

@@ -52,12 +52,13 @@ func TestHTTPCreateRepositoryRejectsInvalidLocalPathWithoutPersistence(t *testin
 }
 
 type repositoryHandlerRemoteLister struct {
-	calls int
+	calls               int
+	expectedWorkspaceID string
 }
 
-func (l *repositoryHandlerRemoteLister) ListRepoBranches(_ context.Context, owner, name string) ([]service.Branch, error) {
+func (l *repositoryHandlerRemoteLister) ListRepoBranches(_ context.Context, workspaceID, owner, name string) ([]service.Branch, error) {
 	l.calls++
-	if owner != "owner" || name != "repo" {
+	if workspaceID != l.expectedWorkspaceID || owner != "owner" || name != "repo" {
 		return nil, errors.New("unexpected provider identity")
 	}
 	return []service.Branch{{Name: "main", Type: "remote"}}, nil
@@ -77,7 +78,7 @@ func TestHTTPListRepositoryBranchesUsesRepositoryIdentity(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
-	svc.SetRemoteBranchLister(&repositoryHandlerRemoteLister{})
+	svc.SetRemoteBranchLister(&repositoryHandlerRemoteLister{expectedWorkspaceID: "ws-1"})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/repositories/provider-repo/branches", nil)
 	response := httptest.NewRecorder()
@@ -109,7 +110,7 @@ func TestHTTPListBranchesRejectsRepositoryFromAnotherWorkspace(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
-	lister := &repositoryHandlerRemoteLister{}
+	lister := &repositoryHandlerRemoteLister{expectedWorkspaceID: "ws-b"}
 	svc.SetRemoteBranchLister(lister)
 
 	crossWorkspace := httptest.NewRequest(

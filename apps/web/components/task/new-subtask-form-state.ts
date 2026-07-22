@@ -47,11 +47,11 @@ export function defaultSubtaskWorkspaceMode(
  * because the subtask dialog renders its own title input and inherits the
  * parent's workflow.
  */
-export function useSubtaskFormState(): DialogFormState {
+export function useSubtaskFormState(workspaceId: string | null): DialogFormState {
   const repos = useRepositoriesState();
   const remoteRepos = useRemoteReposState();
-  const branchesByUrl = useBranchesByURL();
-  const prInfoByUrl = usePRInfoByURL();
+  const branchesByUrl = useBranchesByURL(workspaceId);
+  const prInfoByUrl = usePRInfoByURL(workspaceId);
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
   const [useRemote, setUseRemote] = useState(false);

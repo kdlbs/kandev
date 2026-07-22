@@ -1,376 +1,413 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
+  IconBrandGithub,
   IconCheck,
-  IconChevronDown,
-  IconChevronRight,
-  IconInfoCircle,
-  IconX,
+  IconExternalLink,
   IconRefresh,
-  IconKey,
   IconTrash,
-  IconEye,
-  IconEyeOff,
-  IconTerminal2,
+  IconX,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
-import { Input } from "@kandev/ui/input";
 import { Spinner } from "@kandev/ui/spinner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
-import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { SettingsSection } from "@/components/settings/settings-section";
 import { useToast } from "@/components/toast-provider";
-import { configureGitHubToken, clearGitHubToken } from "@/lib/api/domains/github-api";
-import type { AuthDiagnostics } from "@/lib/types/github";
-import { GitHubRateLimitDisplay } from "./github-rate-limit";
-import { HostShellDialog } from "@/components/settings/host-shell-dialog";
+import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { useGitHubAppRegistrations } from "@/hooks/domains/github/use-github-app-registrations";
+import {
+  disconnectGitHubPersonal,
+  disconnectGitHubWorkspace,
+  startGitHubPersonalConnect,
+} from "@/lib/api/domains/github-api";
+import { getGitHubPersonalIdentityState } from "@/lib/github-auth";
+import type {
+  GitHubConnectionSource,
+  GitHubConnectionState,
+  GitHubStatus,
+  GitHubAppRegistrationCatalogItem,
+} from "@/lib/types/github";
+import { GitHubConnectionDialog } from "./github-connection-dialog";
+import { GitHubPermissionsDialog } from "./github-permissions-dialog";
 
-function DiagnosticsOutput({ diagnostics }: { diagnostics: AuthDiagnostics }) {
-  return (
-    <div className="mt-3 space-y-2">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <code className="bg-muted px-1.5 py-0.5 rounded">{diagnostics.command}</code>
-        <Badge
-          variant={diagnostics.exit_code === 0 ? "secondary" : "destructive"}
-          className="text-xs"
-        >
-          exit code: {diagnostics.exit_code}
-        </Badge>
-      </div>
-      {diagnostics.exit_code !== 0 && (
-        <p className="text-xs text-muted-foreground">
-          A non-zero exit code means the command failed. Review the output below for details.
-        </p>
-      )}
-      <pre className="text-xs bg-muted/50 border rounded-md p-3 overflow-x-auto whitespace-pre-wrap max-h-48">
-        {diagnostics.output.trim()}
-      </pre>
-    </div>
-  );
-}
-
-function TokenConfigForm({ onSuccess }: { onSuccess: () => void }) {
-  const [token, setToken] = useState("");
-  const [showToken, setShowToken] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const { toast } = useToast();
-
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!token.trim()) return;
-
-      setSaving(true);
-      try {
-        await configureGitHubToken(token.trim());
-        toast({ description: "GitHub token configured successfully", variant: "success" });
-        setToken("");
-        onSuccess();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to configure token";
-        toast({ description: message, variant: "error" });
-      } finally {
-        setSaving(false);
-      }
-    },
-    [token, toast, onSuccess],
-  );
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-3">
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Input
-            type={showToken ? "text" : "password"}
-            placeholder="ghp_xxxxxxxxxxxx"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            className="pr-8 font-mono text-sm"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0 cursor-pointer"
-            onClick={() => setShowToken(!showToken)}
-          >
-            {showToken ? (
-              <IconEyeOff className="h-3.5 w-3.5" />
-            ) : (
-              <IconEye className="h-3.5 w-3.5" />
-            )}
-          </Button>
-        </div>
-        <Button
-          type="submit"
-          size="sm"
-          disabled={!token.trim() || saving}
-          className="cursor-pointer"
-        >
-          {saving ? <Spinner className="h-4 w-4" /> : <IconKey className="h-4 w-4 mr-1" />}
-          Configure
-        </Button>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Create a{" "}
-        <a
-          href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=Kandev"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline cursor-pointer"
-        >
-          Personal Access Token
-        </a>{" "}
-        with <code className="bg-muted px-1 rounded">repo</code> and{" "}
-        <code className="bg-muted px-1 rounded">read:org</code> scopes.
-      </p>
-    </form>
-  );
-}
-
-type StatusForNotConnected = {
-  diagnostics?: AuthDiagnostics;
+const sourceLabels: Record<GitHubConnectionSource, string> = {
+  pat: "Personal access token",
+  gh_cli: "GitHub CLI",
+  github_app_installation: "GitHub App",
+  legacy_shared: "Legacy shared connection",
 };
 
-function NotConnectedView({
-  status,
-  refresh,
-  ghAuthOpen,
-  setGhAuthOpen,
-}: {
-  status: StatusForNotConnected | null;
-  refresh: () => void;
-  ghAuthOpen: boolean;
-  setGhAuthOpen: (open: boolean) => void;
-}) {
-  // gh installed → CLI sign-in is the recommended path (browser-driven OAuth,
-  // no PAT to manage). When it's missing we drop to PAT-only.
-  const ghInstalled = useAppStore((state) =>
-    state.availableAgents.tools.some((t) => t.name === "gh" && t.available),
-  );
-  const [tokenOpen, setTokenOpen] = useState(false);
-  const [diagOpen, setDiagOpen] = useState(false);
-
+function connectionLabel(status: GitHubStatus): string {
+  const connection = status.automation;
+  if (!connection) return "";
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <IconX className="h-4 w-4 text-red-500" />
-        <span className="text-sm font-medium">Not connected to GitHub</span>
-        <Button variant="ghost" size="sm" onClick={refresh} className="cursor-pointer h-6 px-2">
-          <IconRefresh className="h-3.5 w-3.5" />
-          Refresh
-        </Button>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className="ml-auto text-muted-foreground hover:text-foreground cursor-help"
-              aria-label="Authentication methods"
-            >
-              <IconInfoCircle className="h-4 w-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-xs">
-            <p className="text-xs">
-              Kandev also accepts a <code>GITHUB_TOKEN</code> environment variable on startup. The
-              UI options below cover the common cases.
-            </p>
-          </TooltipContent>
-        </Tooltip>
-      </div>
+    connection.actor?.login ??
+    connection.login ??
+    connection.installation_account_login ??
+    "GitHub App"
+  );
+}
 
-      {ghInstalled ? (
-        <PrimaryCLISignIn onClick={() => setGhAuthOpen(true)} />
+function automationActor(status: GitHubStatus): string | null {
+  if (!status.authenticated) return null;
+  return status.automation?.actor?.login ?? null;
+}
+
+function StatusLine({ status }: { status: GitHubStatus }) {
+  const connection = status.automation;
+  if (!connection) {
+    return (
+      <div className="flex items-center gap-2 text-sm">
+        <IconX className="h-4 w-4 shrink-0 text-destructive" />
+        <span>No automation connection</span>
+      </div>
+    );
+  }
+  const actor = automationActor(status);
+  const active = connection.status === "active" && actor !== null;
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+      {active ? (
+        <IconCheck className="h-4 w-4 shrink-0 text-green-500" />
       ) : (
-        <CLIUnavailableHint />
+        <IconX className="h-4 w-4 shrink-0 text-destructive" />
       )}
-
-      <Collapsible open={tokenOpen} onOpenChange={setTokenOpen}>
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-          >
-            {tokenOpen ? (
-              <IconChevronDown className="h-3 w-3" />
-            ) : (
-              <IconChevronRight className="h-3 w-3" />
-            )}
-            {ghInstalled ? "Use a personal access token instead" : "Configure GitHub token"}
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="pt-2">
-          {/* TokenConfigForm already renders the "Create a Personal Access
-              Token with repo + read:org scopes" hint below its input. */}
-          <TokenConfigForm onSuccess={refresh} />
-        </CollapsibleContent>
-      </Collapsible>
-
-      {status?.diagnostics && (
-        <DiagnosticsDisclosure
-          diagnostics={status.diagnostics}
-          open={diagOpen}
-          onOpenChange={setDiagOpen}
-        />
-      )}
-
-      <HostShellDialog
-        open={ghAuthOpen}
-        onOpenChange={setGhAuthOpen}
-        initialInput={"gh auth login\n"}
-        onClose={refresh}
-      />
+      <span className="min-w-0 break-words font-medium">
+        {actor ??
+          (connection.status === "active" ? "Authentication unavailable" : connectionLabel(status))}
+      </span>
+      <Badge variant={active ? "secondary" : "destructive"}>
+        {sourceLabels[connection.source]}
+      </Badge>
+      {connection.status !== "active" && <Badge variant="outline">{connection.status}</Badge>}
     </div>
   );
 }
 
-function DiagnosticsDisclosure({
-  diagnostics,
-  open,
-  onOpenChange,
+async function redirectFrom(start: () => Promise<{ url?: string; URL?: string }>) {
+  const response = await start();
+  const url = response.url ?? response.URL;
+  if (!url) throw new Error("GitHub did not return a redirect URL");
+  window.location.assign(url);
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
+function AutomationStatusSummary({
+  status,
+  app,
 }: {
-  diagnostics: AuthDiagnostics;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  status: GitHubStatus;
+  app?: GitHubAppRegistrationCatalogItem;
+}) {
+  const appAutomation = status.automation?.source === "github_app_installation";
+  return (
+    <div className="min-w-0 space-y-1">
+      <StatusLine status={status} />
+      <AutomationActorExplanation status={status} appAutomation={appAutomation} />
+      {appAutomation && <AppRegistrationDetails app={app} />}
+      {!appAutomation && <HumanIdentityExplanation status={status} />}
+      <AutomationError status={status} />
+    </div>
+  );
+}
+
+function AutomationActorExplanation({
+  status,
+  appAutomation,
+}: {
+  status: GitHubStatus;
+  appAutomation: boolean;
+}) {
+  const actor = status.automation?.actor?.login;
+  if (!status.authenticated || !actor) return null;
+  return (
+    <p className="text-xs text-muted-foreground">
+      {appAutomation
+        ? `Kandev-managed operations use the GitHub App installed for ${actor}.`
+        : `Kandev-managed operations act as ${actor}.`}
+    </p>
+  );
+}
+
+function AppRegistrationDetails({ app }: { app?: GitHubAppRegistrationCatalogItem }) {
+  if (!app) return null;
+  return (
+    <>
+      <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span className="break-words">{app.display_name}</span>
+        <Badge variant="outline" className="capitalize">
+          {app.visibility}
+        </Badge>
+        <Badge variant="outline" className="capitalize">
+          Webhook {app.webhook_status}
+        </Badge>
+        <span>{app.source === "managed" ? "Created by Kandev" : "Imported"}</span>
+      </div>
+      {app.shared && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          This App registration is shared by {app.workspace_binding_count} workspaces. Registration
+          changes affect every workspace using it; installation access remains workspace-specific.
+        </p>
+      )}
+    </>
+  );
+}
+
+function HumanIdentityExplanation({ status }: { status: GitHubStatus }) {
+  if (status.effective_personal_actor?.kind !== "human") return null;
+  return (
+    <p className="text-xs text-muted-foreground">
+      This account also powers My GitHub and user-triggered actions.
+    </p>
+  );
+}
+
+function AutomationError({ status }: { status: GitHubStatus }) {
+  if (!status.automation?.last_error) return null;
+  return <p className="text-xs text-destructive">{status.automation.last_error}</p>;
+}
+
+function AutomationActions({
+  status,
+  workspaceId,
+  busy,
+  onDisconnect,
+  onRefresh,
+}: {
+  status: GitHubStatus;
+  workspaceId: string;
+  busy: boolean;
+  onDisconnect: () => void;
+  onRefresh: () => void;
 }) {
   return (
-    <Collapsible open={open} onOpenChange={onOpenChange}>
-      <CollapsibleTrigger asChild>
-        <button
-          type="button"
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-        >
-          {open ? (
-            <IconChevronDown className="h-3 w-3" />
-          ) : (
-            <IconChevronRight className="h-3 w-3" />
-          )}
-          Diagnostics (<code className="bg-muted px-1 rounded">{diagnostics.command}</code>, exit{" "}
-          {diagnostics.exit_code})
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <DiagnosticsOutput diagnostics={diagnostics} />
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-function PrimaryCLISignIn({ onClick }: { onClick: () => void }) {
-  return (
-    <div className="rounded-md border border-primary/40 bg-primary/5 p-4 space-y-3">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">Sign in with the GitHub CLI</p>
-        <p className="text-xs text-muted-foreground">
-          Recommended. Opens a terminal that runs{" "}
-          <code className="bg-muted px-1 rounded">gh auth login</code> with browser-based
-          authentication.
-        </p>
-      </div>
+    <div className="flex flex-wrap gap-2">
+      <GitHubPermissionsDialog status={status} />
+      <GitHubConnectionDialog status={status} workspaceId={workspaceId} onSaved={onRefresh} />
       <Button
-        size="default"
-        onClick={onClick}
-        className="cursor-pointer"
-        data-testid="github-gh-auth-login"
+        variant="outline"
+        size="icon"
+        onClick={onRefresh}
+        className="h-11 w-11 cursor-pointer"
+        aria-label="Refresh GitHub connection"
       >
-        <IconTerminal2 className="h-4 w-4 mr-2" />
-        Open terminal and sign in
+        <IconRefresh className="h-4 w-4" />
       </Button>
-    </div>
-  );
-}
-
-function CLIUnavailableHint() {
-  return (
-    <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-      <p>
-        The <code className="bg-muted px-1 rounded">gh</code> CLI is not installed on this host - a
-        personal access token is the only sign-in option available here. To install it later, see{" "}
-        <a
-          href="https://cli.github.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline hover:text-foreground cursor-pointer"
+      {status.automation && (
+        <Button
+          variant="outline"
+          onClick={onDisconnect}
+          disabled={busy}
+          className="h-11 cursor-pointer text-destructive"
         >
-          cli.github.com
-        </a>
-        .
-      </p>
+          <IconTrash className="mr-2 h-4 w-4" />
+          Disconnect
+        </Button>
+      )}
     </div>
   );
 }
 
-export function GitHubStatusCard() {
-  const { status, loaded, loading, refresh } = useGitHubStatus();
+export function GitHubAutomationSettings({ workspaceId }: { workspaceId: string }) {
+  const { status, loaded, loading, refresh } = useGitHubStatus(workspaceId);
+  const appRegistrations = useGitHubAppRegistrations(workspaceId);
+  const [busy, setBusy] = useState(false);
   const { toast } = useToast();
-  const [clearing, setClearing] = useState(false);
-  const [ghAuthOpen, setGhAuthOpen] = useState(false);
-
-  const handleClearToken = useCallback(async () => {
-    setClearing(true);
+  const disconnect = useCallback(async () => {
+    setBusy(true);
     try {
-      await clearGitHubToken();
-      toast({ description: "GitHub token removed", variant: "success" });
+      await disconnectGitHubWorkspace(workspaceId);
+      toast({ description: "Workspace GitHub connection removed", variant: "success" });
       refresh();
-    } catch {
-      toast({ description: "Failed to clear token", variant: "error" });
+    } catch (error) {
+      toast({
+        description: error instanceof Error ? error.message : "Disconnect failed",
+        variant: "error",
+      });
     } finally {
-      setClearing(false);
+      setBusy(false);
     }
-  }, [toast, refresh]);
-
-  if (loading || !loaded) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner className="h-4 w-4" />
-        Checking GitHub connection...
-      </div>
-    );
-  }
-
-  if (!status || !status.authenticated) {
-    return (
-      <NotConnectedView
-        status={status}
-        refresh={refresh}
-        ghAuthOpen={ghAuthOpen}
-        setGhAuthOpen={setGhAuthOpen}
-      />
-    );
-  }
-
+  }, [refresh, toast, workspaceId]);
+  if (!loaded || loading || !status) return <LoadingStatus />;
+  const activeRegistrationId =
+    status.app_registration?.id ?? status.automation?.app_registration_id;
+  const activeApp = appRegistrations.registrations.find((item) => item.id === activeRegistrationId);
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <IconCheck className="h-4 w-4 text-green-500" />
-        <span className="text-sm">
-          Connected as <strong>{status.username}</strong>
-        </span>
-        <Badge variant="secondary" className="text-xs">
-          {status.auth_method === "gh_cli" ? "gh CLI" : "PAT"}
-        </Badge>
-        {status.token_configured && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleClearToken}
-            disabled={clearing}
-            className="cursor-pointer h-6 px-2 text-muted-foreground hover:text-destructive"
-            title="Remove configured token"
-          >
-            {clearing ? <Spinner className="h-3.5 w-3.5" /> : <IconTrash className="h-3.5 w-3.5" />}
-          </Button>
-        )}
-      </div>
-      {status.token_configured && (
-        <p className="text-xs text-muted-foreground">
-          Token stored in secrets. This token is used by remote agents for GitHub operations.
-        </p>
-      )}
-      <GitHubRateLimitDisplay info={status.rate_limit} />
+    <div
+      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+      data-testid="github-workspace-automation"
+    >
+      <AutomationStatusSummary status={status} app={activeApp} />
+      <AutomationActions
+        status={status}
+        workspaceId={workspaceId}
+        busy={busy}
+        onDisconnect={disconnect}
+        onRefresh={refresh}
+      />
     </div>
   );
+}
+
+type PersonalIdentityView = {
+  active: boolean;
+  actor: string;
+  personalActive: boolean;
+  status: GitHubConnectionState | null;
+};
+
+function personalIdentityView(status: GitHubStatus): PersonalIdentityView {
+  const identity = getGitHubPersonalIdentityState(status);
+  return {
+    active: identity.active,
+    actor: identity.actor,
+    personalActive: identity.personalOAuthActive,
+    status: status.personal?.status ?? null,
+  };
+}
+
+function PersonalIdentityStatus({ view }: { view: PersonalIdentityView }) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+      {view.active ? (
+        <IconCheck className="h-4 w-4 text-green-500" />
+      ) : (
+        <IconX className="h-4 w-4 text-destructive" />
+      )}
+      <span className="break-words font-medium">{view.actor}</span>
+      {view.personalActive && <Badge variant="secondary">Personal OAuth</Badge>}
+      {view.status && view.status !== "active" && (
+        <Badge variant="destructive">{view.status}</Badge>
+      )}
+    </div>
+  );
+}
+
+function PersonalIdentityActions({
+  status,
+  busy,
+  onConnect,
+  onDisconnect,
+}: {
+  status: GitHubStatus;
+  busy: boolean;
+  onConnect: () => void;
+  onDisconnect: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row">
+      {status.app_available && status.automation?.source === "github_app_installation" && (
+        <Button disabled={busy} onClick={onConnect} className="h-11 cursor-pointer">
+          <IconBrandGithub className="mr-2 h-4 w-4" />
+          {status.personal ? "Reconnect identity" : "Connect identity"}
+          <IconExternalLink className="ml-2 h-4 w-4" />
+        </Button>
+      )}
+      {status.personal && (
+        <Button
+          variant="outline"
+          onClick={onDisconnect}
+          disabled={busy}
+          className="h-11 cursor-pointer text-destructive"
+        >
+          <IconTrash className="mr-2 h-4 w-4" />
+          Disconnect
+        </Button>
+      )}
+    </div>
+  );
+}
+
+export function GitHubPersonalSettings({ workspaceId }: { workspaceId: string }) {
+  const { status, loaded, loading, refresh } = useGitHubStatus(workspaceId);
+  const [busy, setBusy] = useState(false);
+  const { toast } = useToast();
+  if (!loaded || loading || !status) {
+    return (
+      <SettingsSection
+        title="My GitHub identity"
+        description="Connect your GitHub user for My GitHub and human-attributed actions. Without it, automation continues as the App."
+      >
+        <LoadingStatus />
+      </SettingsSection>
+    );
+  }
+  const view = personalIdentityView(status);
+  const appAutomation = status.automation?.source === "github_app_installation";
+  if (!status.automation) return null;
+  if (!appAutomation) {
+    return (
+      <SettingsSection
+        title="My GitHub identity"
+        description="My GitHub and human-attributed actions use the same human account selected for workspace access. Choose a different PAT or GitHub CLI account by changing the workspace connection."
+      >
+        <div className="space-y-2" data-testid="github-personal-identity">
+          <PersonalIdentityStatus view={view} />
+          <p className="text-xs text-muted-foreground">
+            A separate personal identity is only needed when workspace automation uses a GitHub App.
+          </p>
+        </div>
+      </SettingsSection>
+    );
+  }
+  const disconnect = async () => {
+    setBusy(true);
+    try {
+      await disconnectGitHubPersonal(workspaceId);
+      toast({ description: "Personal GitHub identity disconnected", variant: "success" });
+      refresh();
+    } catch (error) {
+      toast({
+        description: error instanceof Error ? error.message : "Disconnect failed",
+        variant: "error",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const connect = () => {
+    void redirectFrom(() => startGitHubPersonalConnect(workspaceId)).catch((error: unknown) =>
+      toast({
+        description: errorMessage(error, "Identity connection failed"),
+        variant: "error",
+      }),
+    );
+  };
+  return (
+    <SettingsSection
+      title="My GitHub identity"
+      description="Optionally connect your GitHub user for My GitHub and human-attributed actions. This identity is never given to managed agents; workspace automation continues as the App."
+    >
+      <div className="space-y-4" data-testid="github-personal-identity">
+        <PersonalIdentityStatus view={view} />
+        {status.personal?.last_error && (
+          <p className="text-xs text-destructive">{status.personal.last_error}</p>
+        )}
+        <PersonalIdentityActions
+          status={status}
+          busy={busy}
+          onConnect={connect}
+          onDisconnect={disconnect}
+        />
+      </div>
+    </SettingsSection>
+  );
+}
+
+function LoadingStatus() {
+  return (
+    <div className="flex min-h-11 items-center gap-2 text-sm text-muted-foreground">
+      <Spinner className="h-4 w-4" />
+      Checking GitHub connection...
+    </div>
+  );
+}
+
+/** Compatibility export used by older settings entrypoints. */
+export function GitHubStatusCard({ workspaceId }: { workspaceId: string }) {
+  return <GitHubAutomationSettings workspaceId={workspaceId} />;
 }

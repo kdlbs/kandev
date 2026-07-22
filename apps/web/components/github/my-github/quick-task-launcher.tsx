@@ -206,7 +206,7 @@ export function QuickTaskLauncher({
     if (!open) onClose();
   };
   const handleSuccess = (task: Task) => {
-    if (payload?.kind === "pr") {
+    if (payload?.kind === "pr" && workspaceId) {
       const repositoryId = pickRepositoryIdForPR(
         task.repositories,
         payload.pr,
@@ -216,6 +216,7 @@ export function QuickTaskLauncher({
       // missing GH client) shouldn't block navigation — the existing
       // branch-based poller will still try once the agent starts.
       void createTaskPR({
+        workspace_id: workspaceId,
         task_id: task.id,
         repository_id: repositoryId,
         pr_url: prURL(payload.pr),

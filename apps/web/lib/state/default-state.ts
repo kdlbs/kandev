@@ -68,6 +68,7 @@ export const defaultState = {
   promptUsage: defaultSessionRuntimeState.promptUsage,
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   githubStatus: defaultGitHubState.githubStatus,
+  githubAppRegistrations: defaultGitHubState.githubAppRegistrations,
   taskPRs: defaultGitHubState.taskPRs,
   taskIssues: defaultGitHubState.taskIssues,
   pendingPrUrlByTaskId: defaultGitHubState.pendingPrUrlByTaskId,
@@ -198,6 +199,16 @@ function mergeSidebarTaskPrefsState(
   };
 }
 
+function mergeGitHubState(initialState: Partial<DefaultState>) {
+  return {
+    githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
+    githubAppRegistrations: {
+      ...defaultState.githubAppRegistrations,
+      ...initialState.githubAppRegistrations,
+    },
+  };
+}
+
 export function mergeInitialState(initialState?: Partial<DefaultState>): DefaultState {
   if (!initialState) return defaultState;
 
@@ -257,7 +268,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     sessionModels: { ...defaultState.sessionModels, ...initialState.sessionModels },
     promptUsage: { ...defaultState.promptUsage, ...initialState.promptUsage },
     sessionPollMode: { ...defaultState.sessionPollMode, ...initialState.sessionPollMode },
-    githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
+    ...mergeGitHubState(initialState),
     taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
     taskIssues: { ...defaultState.taskIssues, ...initialState.taskIssues },
     pendingPrUrlByTaskId: {

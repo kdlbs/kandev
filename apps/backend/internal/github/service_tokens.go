@@ -39,10 +39,14 @@ func (s *Service) ExhaustedRateLimits() []ExhaustedRateLimit {
 // returned by GetStatus and the rate-limit WS notification. Returns nil
 // when no buckets are known yet so the field stays omitted.
 func (s *Service) rateLimitInfo() *GitHubRateLimitInfo {
-	if s.rateTracker == nil {
+	return rateLimitInfoForTracker(s.rateTracker)
+}
+
+func rateLimitInfoForTracker(tracker *RateTracker) *GitHubRateLimitInfo {
+	if tracker == nil {
 		return nil
 	}
-	all := s.rateTracker.All()
+	all := tracker.All()
 	if len(all) == 0 {
 		return nil
 	}

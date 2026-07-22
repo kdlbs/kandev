@@ -10,8 +10,18 @@ import (
 
 // GitHubStatusProvider abstracts the GitHub service status check.
 type GitHubStatusProvider interface {
-	IsAuthenticated() bool
-	AuthMethod() string
+	GitHubConnectionHealth(context.Context) (GitHubConnectionHealth, error)
+}
+
+// GitHubConnectionHealth is an aggregate of persisted workspace-owned
+// connections. It intentionally contains no process-global auth state.
+type GitHubConnectionHealth struct {
+	WorkspaceCount int
+	Active         int
+	Disconnected   int
+	Invalid        int
+	Suspended      int
+	Revoked        int
 }
 
 // GitHubRateLimitProvider exposes per-resource exhaustion state so the health
@@ -53,30 +63,57 @@ func (c *GitHubChecker) Name() string { return "GitHub integration" }
 // Category returns the issue category this checker emits issues under.
 func (c *GitHubChecker) Category() string { return "github" }
 
-func (c *GitHubChecker) Check(_ context.Context) []Issue {
+func (c *GitHubChecker) Check(ctx context.Context) []Issue {
 	if c.provider == nil {
-		return []Issue{{
+		return append([]Issue{{
 			ID:       "github_unavailable",
 			Category: "github",
 			Title:    "GitHub integration unavailable",
-			Message:  "Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
+			Message:  "Configure a GitHub connection for a workspace.",
 			Severity: SeverityWarning,
 			FixURL:   "/settings/integrations/github",
 			FixLabel: "Configure GitHub",
-		}}
+		}}, c.rateLimitIssues()...)
 	}
-	if !c.provider.IsAuthenticated() {
-		return []Issue{{
+	health, err := c.provider.GitHubConnectionHealth(ctx)
+	if err != nil {
+		return append([]Issue{{
+			ID:       "github_status_unavailable",
+			Category: "github",
+			Title:    "GitHub connection status unavailable",
+			Message:  "Kandev could not read workspace GitHub connection status.",
+			Severity: SeverityWarning,
+			FixURL:   "/settings/integrations/github",
+			FixLabel: "View status",
+		}}, c.rateLimitIssues()...)
+	}
+	issues := make([]Issue, 0, 1)
+	unhealthy := health.Disconnected + health.Invalid + health.Suspended + health.Revoked
+	if health.WorkspaceCount == 0 || (health.Active == 0 && unhealthy == health.WorkspaceCount) {
+		issues = append(issues, Issue{
 			ID:       "github_not_authenticated",
 			Category: "github",
 			Title:    "GitHub not authenticated",
-			Message:  "Run 'gh auth login' or add a GITHUB_TOKEN secret.",
+			Message:  "Configure a GitHub connection for a workspace.",
 			Severity: SeverityWarning,
 			FixURL:   "/settings/integrations/github",
 			FixLabel: "Configure GitHub",
-		}}
+		})
+	} else if unhealthy > 0 {
+		issues = append(issues, Issue{
+			ID:       "github_workspace_connections_unhealthy",
+			Category: "github",
+			Title:    "GitHub workspace connections need attention",
+			Message: fmt.Sprintf(
+				"%d of %d GitHub workspace connections need attention (%d disconnected, %d invalid, %d suspended, %d revoked).",
+				unhealthy, health.WorkspaceCount, health.Disconnected, health.Invalid, health.Suspended, health.Revoked,
+			),
+			Severity: SeverityWarning,
+			FixURL:   "/settings/integrations/github",
+			FixLabel: "Configure GitHub",
+		})
 	}
-	return c.rateLimitIssues()
+	return append(issues, c.rateLimitIssues()...)
 }
 
 // rateLimitIssues materializes one Issue per exhausted resource bucket.

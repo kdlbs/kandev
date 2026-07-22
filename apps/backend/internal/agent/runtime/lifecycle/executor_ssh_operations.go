@@ -463,6 +463,7 @@ func startRemoteAgentctl(
 	ctx context.Context,
 	client *ssh.Client,
 	shell, agentctlBin, workspacePath, sessionDir string,
+	env map[string]string,
 	log *logger.Logger,
 ) (port int, pid int, err error) {
 	port = pickRemoteAgentctlPort()
@@ -488,7 +489,18 @@ echo "$AGENTCTL_PID"
 		shellQuote(workspacePath),
 		port,
 	)
-	out, stderr, err := runSSHCommand(ctx, client, WrapLoginShell(shell, innerScript))
+	launchScript := innerScript
+	var envInput *strings.Reader
+	if len(env) > 0 {
+		launchScript = "set -a; . /dev/stdin; set +a\n" + innerScript
+		envInput = strings.NewReader(buildSSHEnvInitScript(env))
+	}
+	var out, stderr string
+	if envInput == nil {
+		out, stderr, err = runSSHCommand(ctx, client, WrapLoginShell(shell, launchScript))
+	} else {
+		out, stderr, err = runSSHCommandStdin(ctx, client, WrapLoginShell(shell, launchScript), envInput)
+	}
 	if err != nil {
 		return 0, 0, fmt.Errorf("ssh: launch agentctl: %w (stderr: %s)", err, strings.TrimSpace(stderr))
 	}
@@ -664,6 +676,9 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 		if val := req.Env[key]; val != "" {
 			env[key] = val
 		}
+	}
+	for key, value := range managedGitHubBrokerEnv(req.Env) {
+		env[key] = value
 	}
 	if len(env) == 0 {
 		return nil

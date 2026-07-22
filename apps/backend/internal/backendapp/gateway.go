@@ -181,7 +181,15 @@ func provideGateway(
 				},
 			}
 			if githubSvc != nil {
-				router.associateGitHub = githubSvc.AssociatePRByURL
+				router.associateGitHub = func(
+					ctx context.Context,
+					workspaceID, sessionID, taskID, repositoryID, prURL, branch string,
+				) error {
+					return githubSvc.AssociatePRByURLForWorkspace(
+						ctx, workspaceID, github.DefaultUserID,
+						sessionID, taskID, repositoryID, prURL, branch,
+					)
+				}
 			}
 			if gitlabSvc != nil {
 				router.associateGitLab = func(ctx context.Context, workspaceID, taskID, repositoryID, mrURL string) error {
@@ -335,7 +343,7 @@ func provideGateway(
 type createdChangeAssociationRouter struct {
 	resolveRepositoryID func(context.Context, string, string) string
 	resolveWorkspaceID  func(context.Context, string) (string, error)
-	associateGitHub     func(context.Context, string, string, string, string, string)
+	associateGitHub     func(context.Context, string, string, string, string, string, string) error
 	associateGitLab     func(context.Context, string, string, string, string) error
 }
 
@@ -364,9 +372,17 @@ func (r createdChangeAssociationRouter) associate(
 		}
 		return r.associateGitLab(ctx, workspaceID, taskID, repositoryID, changeURL)
 	case "github", "":
-		if r.associateGitHub != nil {
-			r.associateGitHub(ctx, sessionID, taskID, repositoryID, changeURL, branch)
+		if r.associateGitHub == nil {
+			return nil
 		}
+		if r.resolveWorkspaceID == nil {
+			return fmt.Errorf("GitHub workspace resolver unavailable")
+		}
+		workspaceID, err := r.resolveWorkspaceID(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		return r.associateGitHub(ctx, workspaceID, sessionID, taskID, repositoryID, changeURL, branch)
 	}
 	return nil
 }

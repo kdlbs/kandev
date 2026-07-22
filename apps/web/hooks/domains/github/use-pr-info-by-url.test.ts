@@ -109,11 +109,11 @@ describe("parseGitHubIssueUrl", () => {
 
 describe("usePRInfoByURL", () => {
   it("fetches PR info once per unique PR URL when ensure() is called", async () => {
-    fetchPRInfoMock.mockImplementation((_o: string, _r: string, n: number) => {
+    fetchPRInfoMock.mockImplementation((_ws: string, _o: string, _r: string, n: number) => {
       return Promise.resolve(makePR({ number: n, head: n === 42 ? "feat-a" : "feat-b" }));
     });
 
-    const { result } = renderHook(() => usePRInfoByURL());
+    const { result } = renderHook(() => usePRInfoByURL("ws-1"));
 
     act(() => {
       result.current.ensure(PR_URL_A);
@@ -141,7 +141,7 @@ describe("usePRInfoByURL", () => {
   it("dedupes concurrent ensure() calls for the same URL into a single fetch", async () => {
     fetchPRInfoMock.mockResolvedValue(makePR({ number: 42 }));
 
-    const { result } = renderHook(() => usePRInfoByURL());
+    const { result } = renderHook(() => usePRInfoByURL("ws-1"));
 
     act(() => {
       result.current.ensure(PR_URL_A);
@@ -162,7 +162,7 @@ describe("usePRInfoByURL", () => {
         }),
     );
 
-    const { result } = renderHook(() => usePRInfoByURL());
+    const { result } = renderHook(() => usePRInfoByURL("ws-1"));
 
     act(() => {
       result.current.ensure(PR_URL_A);
@@ -181,7 +181,7 @@ describe("usePRInfoByURL", () => {
 
 describe("usePRInfoByURL — non-PR and issue URLs", () => {
   it("no-ops (no fetch, no cached info) for a non-PR repo URL", async () => {
-    const { result } = renderHook(() => usePRInfoByURL());
+    const { result } = renderHook(() => usePRInfoByURL("ws-1"));
 
     act(() => {
       result.current.ensure(REPO_URL);
@@ -201,7 +201,7 @@ describe("usePRInfoByURL — non-PR and issue URLs", () => {
 
   it("clear() is a no-op after ensure() records a non-GitHub URL as loaded", () => {
     const url = "https://example.com/not-github";
-    const { result } = renderHook(() => usePRInfoByURL());
+    const { result } = renderHook(() => usePRInfoByURL("ws-1"));
 
     act(() => {
       result.current.ensure(url);
@@ -217,7 +217,7 @@ describe("usePRInfoByURL — non-PR and issue URLs", () => {
   it("fetches issue info and exposes a suggested title for GitHub issue URLs", async () => {
     fetchIssueInfoMock.mockResolvedValue(makeIssue({ number: 1456, title: "Fix remote picker" }));
 
-    const { result } = renderHook(() => usePRInfoByURL());
+    const { result } = renderHook(() => usePRInfoByURL("ws-1"));
 
     act(() => {
       result.current.ensure(ISSUE_URL_A);
@@ -225,7 +225,13 @@ describe("usePRInfoByURL — non-PR and issue URLs", () => {
 
     await waitFor(() => expect(result.current.info(ISSUE_URL_A)).toBeDefined());
     expect(fetchIssueInfoMock).toHaveBeenCalledTimes(1);
-    expect(fetchIssueInfoMock).toHaveBeenCalledWith("acme", "site", 1456, expect.any(Object));
+    expect(fetchIssueInfoMock).toHaveBeenCalledWith(
+      "ws-1",
+      "acme",
+      "site",
+      1456,
+      expect.any(Object),
+    );
     expect(fetchPRInfoMock).not.toHaveBeenCalled();
     expect(result.current.info(ISSUE_URL_A)).toMatchObject({
       issueNumber: 1456,
@@ -234,7 +240,7 @@ describe("usePRInfoByURL — non-PR and issue URLs", () => {
   });
 
   it("ignores ensure() with empty string", () => {
-    const { result } = renderHook(() => usePRInfoByURL());
+    const { result } = renderHook(() => usePRInfoByURL("ws-1"));
     act(() => {
       result.current.ensure("");
     });
@@ -246,7 +252,7 @@ describe("usePRInfoByURL — cache invalidation", () => {
   it("does not re-fetch when ensure() is called for an already-loaded URL", async () => {
     fetchPRInfoMock.mockResolvedValue(makePR({ number: 42 }));
 
-    const { result } = renderHook(() => usePRInfoByURL());
+    const { result } = renderHook(() => usePRInfoByURL("ws-1"));
 
     act(() => {
       result.current.ensure(PR_URL_A);
@@ -262,7 +268,7 @@ describe("usePRInfoByURL — cache invalidation", () => {
 
   it("clear(url) forgets the cached entry so the next ensure() re-fetches", async () => {
     fetchPRInfoMock.mockResolvedValue(makePR({ number: 42 }));
-    const { result } = renderHook(() => usePRInfoByURL());
+    const { result } = renderHook(() => usePRInfoByURL("ws-1"));
 
     act(() => {
       result.current.ensure(PR_URL_A);
@@ -282,7 +288,7 @@ describe("usePRInfoByURL — cache invalidation", () => {
   });
 
   it("returns undefined info / false loading for an unknown URL", () => {
-    const { result } = renderHook(() => usePRInfoByURL());
+    const { result } = renderHook(() => usePRInfoByURL("ws-1"));
     expect(result.current.info("https://github.com/who/what/pull/1")).toBeUndefined();
     expect(result.current.loading("https://github.com/who/what/pull/1")).toBe(false);
   });
@@ -308,7 +314,7 @@ describe("usePRInfoByURL — cache invalidation", () => {
           }),
       );
 
-    const { result } = renderHook(() => usePRInfoByURL());
+    const { result } = renderHook(() => usePRInfoByURL("ws-1"));
 
     act(() => {
       result.current.ensure(PR_URL_A);

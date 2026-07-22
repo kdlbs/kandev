@@ -119,7 +119,8 @@ See [Sessions and review](sessions-and-review.md) for the workbench and [Tasks a
 - **Auto Approve**, permission-skipping flags, and unrestricted passthrough remove human gates inside the agent CLI. They are security decisions.
 - Local and worktree sessions run on the Kandev host. Worktree separation does not limit process, filesystem, network, or credential access.
 - Containers and remote executors change the boundary, but their mounted files, copied credentials, environment, daemon/socket access, and prepare scripts can reintroduce host or provider access.
-- Local Docker, Sprites, and SSH launches resolve remote credentials. Unless the profile already supplies `GITHUB_TOKEN` or `GH_TOKEN`, Kandev can inject the globally stored GitHub token as both variables, with local `gh` authentication as a fallback. The registered Remote Docker path does the same credential resolution, although its runtime is not implemented. Workspace repository scope does not limit that token's provider privileges.
+- Managed GitHub task access uses task/repository-bound broker leases from the workspace automation connection. GitHub App tokens are minted for the redeemed repository; PAT and named-CLI bearer tokens retain all provider-granted scopes once delivered to the trusted agent subprocess. Personal tokens and the App private key never enter executors.
+- A profile-supplied `GITHUB_TOKEN` or `GH_TOKEN` is an explicit unmanaged override and bypasses workspace broker selection. Ambient backend tokens and the host-active `gh` account are used only by migration-only **Legacy shared** workspace connections.
 - Repository, executor, and task action scripts are executable configuration. Review them like code.
 - The web app, HTTP API, WebSocket, and external MCP routes currently have no Kandev user-login boundary. Treat anyone who can reach the backend as an operator; keep the whole origin on loopback or a trusted network, or put it behind an authenticated TLS proxy.
 

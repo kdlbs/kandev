@@ -9,11 +9,64 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
+import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useRepoMergeMethods } from "@/hooks/domains/github/use-repo-merge-methods";
 import { mergePR } from "@/lib/api/domains/github-api";
+import { getGitHubMutationActor } from "@/lib/github-auth";
 import type { MergeMethod, TaskPR } from "@/lib/types/github";
 import { isPRReadyToMerge } from "./pr-task-icon";
+
+function MutationActor({ actor }: { actor: string | null }) {
+  if (!actor) return null;
+  return <span className="text-[11px] text-muted-foreground">as {actor}</span>;
+}
+
+function CompactMergeButton({
+  label,
+  disabled,
+  actor,
+  onPrimaryClick,
+  extraMethods,
+  onPickMethod,
+}: Omit<MergeButtonShellProps, "compact">) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button
+        type="button"
+        data-testid="pr-merge-button"
+        onClick={onPrimaryClick}
+        disabled={disabled}
+        className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-green-600 px-2 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-green-700 disabled:cursor-default disabled:opacity-60 cursor-pointer"
+      >
+        <IconGitMerge className="h-3.5 w-3.5" />
+        {label}
+      </button>
+      {extraMethods.length > 0 && (
+        <div className="flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
+          <span>or</span>
+          {extraMethods.map((method) => (
+            <button
+              key={method}
+              type="button"
+              data-testid={`pr-merge-method-${method}`}
+              disabled={disabled}
+              onClick={(event) => {
+                event.stopPropagation();
+                onPickMethod(method);
+              }}
+              className="cursor-pointer rounded px-1.5 py-0.5 font-medium hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-60"
+            >
+              {mergeShortLabel(method)}
+            </button>
+          ))}
+        </div>
+      )}
+      <MutationActor actor={actor} />
+    </div>
+  );
+}
 
 // Renders nothing unless the PR is fully green (CI success + mergeable +
 // approval or no-review-needed). When `useRepoMergeMethods` hasn't yet
@@ -37,7 +90,10 @@ export function PRMergeButton({
   // state="merged" — otherwise the button briefly re-enables during the async
   // refresh window and a double-click would hit the GitHub API again.
   const [merged, setMerged] = useState(false);
-  const methods = useRepoMergeMethods(taskPR.owner, taskPR.repo);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const methods = useRepoMergeMethods(workspaceId, taskPR.owner, taskPR.repo);
+  const { status } = useGitHubStatus(workspaceId);
+  const mutationActor = getGitHubMutationActor(status);
 
   // If the same component instance ever renders a different PR (e.g. the user
   // switches the active task while the panel/popover stays mounted), the
@@ -59,9 +115,10 @@ export function PRMergeButton({
   const primary = pickPrimaryMethod(allowed);
 
   const runMerge = async (method?: MergeMethod) => {
+    if (!workspaceId) return;
     setMerging(true);
     try {
-      await mergePR(taskPR.owner, taskPR.repo, taskPR.pr_number, method);
+      await mergePR(workspaceId, taskPR.owner, taskPR.repo, taskPR.pr_number, method);
       setMerged(true);
       toast({ description: "PR merged", variant: "success" });
       onMerged?.();
@@ -86,6 +143,7 @@ export function PRMergeButton({
       compact={compact}
       label={merging ? "Merging..." : mergeLabel(primary)}
       disabled={merging}
+      actor={mutationActor}
       onPrimaryClick={handlePrimary}
       extraMethods={allowed.filter((m) => m !== primary)}
       onPickMethod={(m) => void runMerge(m)}
@@ -93,21 +151,25 @@ export function PRMergeButton({
   );
 }
 
+type MergeButtonShellProps = {
+  compact: boolean;
+  label: string;
+  disabled: boolean;
+  actor: string | null;
+  onPrimaryClick: (e: React.MouseEvent) => void;
+  extraMethods: MergeMethod[];
+  onPickMethod: (m: MergeMethod) => void;
+};
+
 function MergeButtonShell({
   compact,
   label,
   disabled,
+  actor,
   onPrimaryClick,
   extraMethods,
   onPickMethod,
-}: {
-  compact: boolean;
-  label: string;
-  disabled: boolean;
-  onPrimaryClick: (e: React.MouseEvent) => void;
-  extraMethods: MergeMethod[];
-  onPickMethod: (m: MergeMethod) => void;
-}) {
+}: MergeButtonShellProps) {
   // Compact (hover popover): a single full-width primary button plus quiet
   // "or <method>" links for the alternates. Deliberately avoids a dropdown —
   // its menu renders in a detached portal that closes the hover popover the
@@ -115,38 +177,14 @@ function MergeButtonShell({
   // every action inside the popover's own DOM.
   if (compact) {
     return (
-      <div className="flex flex-col gap-1.5">
-        <button
-          type="button"
-          data-testid="pr-merge-button"
-          onClick={onPrimaryClick}
-          disabled={disabled}
-          className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-green-600 px-2 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-green-700 disabled:cursor-default disabled:opacity-60 cursor-pointer"
-        >
-          <IconGitMerge className="h-3.5 w-3.5" />
-          {label}
-        </button>
-        {extraMethods.length > 0 && (
-          <div className="flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
-            <span>or</span>
-            {extraMethods.map((m) => (
-              <button
-                key={m}
-                type="button"
-                data-testid={`pr-merge-method-${m}`}
-                disabled={disabled}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPickMethod(m);
-                }}
-                className="cursor-pointer rounded px-1.5 py-0.5 font-medium hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-60"
-              >
-                {mergeShortLabel(m)}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <CompactMergeButton
+        label={label}
+        disabled={disabled}
+        actor={actor}
+        onPrimaryClick={onPrimaryClick}
+        extraMethods={extraMethods}
+        onPickMethod={onPickMethod}
+      />
     );
   }
 
@@ -165,33 +203,41 @@ function MergeButtonShell({
   );
 
   if (!showDropdown) {
-    return <span className="self-end">{primaryBtn}</span>;
+    return (
+      <span className="flex flex-col items-end gap-1 self-end">
+        {primaryBtn}
+        <MutationActor actor={actor} />
+      </span>
+    );
   }
 
   return (
-    <span className="self-end inline-flex">
-      {primaryBtn}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            data-testid="pr-merge-button-more"
-            aria-label="Choose merge method"
-            disabled={disabled}
-            onClick={(e) => e.stopPropagation()}
-            className="inline-flex items-center rounded-r-md border-l border-green-700/40 bg-green-600 px-2 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-60 cursor-pointer"
-          >
-            <IconChevronDown className="h-3.5 w-3.5" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-auto">
-          {extraMethods.map((m) => (
-            <DropdownMenuItem key={m} onSelect={() => onPickMethod(m)}>
-              {mergeLabel(m)}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+    <span className="flex flex-col items-end gap-1 self-end">
+      <span className="inline-flex">
+        {primaryBtn}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              data-testid="pr-merge-button-more"
+              aria-label="Choose merge method"
+              disabled={disabled}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center rounded-r-md border-l border-green-700/40 bg-green-600 px-2 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-60 cursor-pointer"
+            >
+              <IconChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto">
+            {extraMethods.map((m) => (
+              <DropdownMenuItem key={m} onSelect={() => onPickMethod(m)}>
+                {mergeLabel(m)}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </span>
+      <MutationActor actor={actor} />
     </span>
   );
 }

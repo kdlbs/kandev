@@ -607,6 +607,7 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 	// Create task
 	task := &models.Task{
 		ID:             taskID,
+		WorkspaceID:    "ws1",
 		WorkflowID:     "wf1",
 		WorkflowStepID: workflowStepID,
 		Title:          "Test Task",

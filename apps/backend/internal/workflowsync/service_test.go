@@ -17,7 +17,23 @@ type fakeClients struct {
 	client github.Client
 }
 
-func (f fakeClients) Client() github.Client { return f.client }
+func (f fakeClients) ListRepoDirectoryForWorkspace(
+	ctx context.Context, _ string, owner, repo, path, ref string,
+) ([]github.RepoContentEntry, error) {
+	if f.client == nil {
+		return nil, github.ErrNoClient
+	}
+	return f.client.ListRepoDirectory(ctx, owner, repo, path, ref)
+}
+
+func (f fakeClients) GetRepoFileContentForWorkspace(
+	ctx context.Context, _ string, owner, repo, path, ref string,
+) ([]byte, error) {
+	if f.client == nil {
+		return nil, github.ErrNoClient
+	}
+	return f.client.GetRepoFileContent(ctx, owner, repo, path, ref)
+}
 
 // fakeApplier is mutex-guarded because the poller invokes it from its own
 // goroutine while tests assert on call counts (-race catches unguarded use).
@@ -188,7 +204,7 @@ func TestSyncWorkspace_NilClientRecordsFailure(t *testing.T) {
 
 	_, err := svc.SyncWorkspace(context.Background(), "ws-1")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not authenticated")
+	assert.Contains(t, err.Error(), "not configured")
 
 	cfg, cfgErr := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 	require.NoError(t, cfgErr)

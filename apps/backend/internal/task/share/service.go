@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +43,10 @@ func (s *Service) PreviewSnapshot(ctx context.Context, taskSessionID string) (*S
 // CreateShare builds a snapshot, uploads it via the configured backend, and
 // records the row in the repository.
 func (s *Service) CreateShare(ctx context.Context, taskSessionID string) (*Share, error) {
+	workspaceID, err := s.workspaceForSession(ctx, taskSessionID)
+	if err != nil {
+		return nil, err
+	}
 	snap, err := BuildSnapshot(ctx, s.taskRepo, taskSessionID, s.kandevVer)
 	if err != nil {
 		return nil, err
@@ -52,7 +57,7 @@ func (s *Service) CreateShare(ctx context.Context, taskSessionID string) (*Share
 	if err != nil {
 		return nil, fmt.Errorf("marshal snapshot: %w", err)
 	}
-	extID, extURL, err := s.backend.Upload(ctx, snap)
+	extID, extURL, err := s.backend.Upload(ctx, workspaceID, snap)
 	if err != nil {
 		return nil, fmt.Errorf("upload snapshot: %w", err)
 	}
@@ -69,7 +74,7 @@ func (s *Service) CreateShare(ctx context.Context, taskSessionID string) (*Share
 		// The gist exists on GitHub but we failed to persist the row.
 		// Best-effort: try to clean up the orphaned gist; log if that
 		// also fails so the user can manually delete it.
-		if delErr := s.backend.Delete(ctx, extID); delErr != nil {
+		if delErr := s.backend.Delete(ctx, workspaceID, extID); delErr != nil {
 			s.logWarn("orphaned gist after row insert failed",
 				zap.String("gist_id", extID), zap.Error(delErr))
 		}
@@ -89,7 +94,11 @@ func (s *Service) RevokeShare(ctx context.Context, shareID string) error {
 	if row.IsRevoked() {
 		return nil
 	}
-	if delErr := s.backend.Delete(ctx, row.ExternalID); delErr != nil {
+	workspaceID, err := s.workspaceForSession(ctx, row.TaskSessionID)
+	if err != nil {
+		return err
+	}
+	if delErr := s.backend.Delete(ctx, workspaceID, row.ExternalID); delErr != nil {
 		if !IsAlreadyGone(delErr) {
 			return fmt.Errorf("delete from backend: %w", delErr)
 		}
@@ -103,6 +112,38 @@ func (s *Service) RevokeShare(ctx context.Context, shareID string) error {
 		return fmt.Errorf("mark revoked: %w", err)
 	}
 	return nil
+}
+
+// CheckBackendAccess resolves the task's workspace and validates its backend
+// identity. Dry-run previews intentionally do not call this method.
+func (s *Service) CheckBackendAccess(ctx context.Context, taskSessionID string) error {
+	workspaceID, err := s.workspaceForSession(ctx, taskSessionID)
+	if err != nil {
+		return err
+	}
+	return s.backend.CheckAccess(ctx, workspaceID)
+}
+
+func (s *Service) workspaceForSession(ctx context.Context, taskSessionID string) (string, error) {
+	session, err := s.taskRepo.GetTaskSession(ctx, taskSessionID)
+	if err != nil {
+		return "", fmt.Errorf("load session workspace: %w", err)
+	}
+	if session == nil {
+		return "", ErrNotFound
+	}
+	task, err := s.taskRepo.GetTask(ctx, session.TaskID)
+	if err != nil {
+		return "", fmt.Errorf("load task workspace: %w", err)
+	}
+	if task == nil {
+		return "", ErrNotFound
+	}
+	workspaceID := strings.TrimSpace(task.WorkspaceID)
+	if workspaceID == "" {
+		return "", ErrWorkspaceRequired
+	}
+	return workspaceID, nil
 }
 
 // ListBySession returns every share row for a session (including revoked).

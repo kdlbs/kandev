@@ -3,6 +3,7 @@ package share
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,37 +11,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 func init() { gin.SetMode(gin.TestMode) }
 
-// stubGHAuth lets tests toggle the IsAuthenticated response without owning
-// the full Client interface.
-type stubGHAuth struct {
-	authed bool
-}
-
-func (s *stubGHAuth) IsAuthenticated(context.Context) (bool, error) { return s.authed, nil }
-
-// embedNoop fills the rest of the Client surface with the noop implementation
-// so we don't have to re-implement 30 methods just for a handler test.
-type embedNoop struct {
-	*stubGHAuth
-	*github.NoopClient
-}
-
-func (e *embedNoop) IsAuthenticated(ctx context.Context) (bool, error) {
-	return e.stubGHAuth.IsAuthenticated(ctx)
-}
-
 func newHandlersForTest(t *testing.T, reader TaskReader, backend Backend, authed bool) (*HTTPHandlers, *Service) {
 	t.Helper()
 	repo := newTestRepo(t)
 	svc := New(repo, reader, backend, nil, "v-test")
-	gh := &embedNoop{stubGHAuth: &stubGHAuth{authed: authed}, NoopClient: &github.NoopClient{}}
-	return NewHTTPHandlers(svc, gh, nil), svc
+	if mock, ok := backend.(*mockBackend); ok && !authed {
+		mock.accessErr = errors.New("connect a GitHub account to share tasks publicly")
+	}
+	return NewHTTPHandlers(svc, nil), svc
 }
 
 func newGinRouter(h *HTTPHandlers) *gin.Engine {
@@ -71,6 +54,9 @@ func TestHTTP_Create_HappyPath(t *testing.T) {
 	}
 	if body.URL != "https://gist.githack.com/jane/gist-x/raw/share.html" {
 		t.Fatalf("unexpected url: %s", body.URL)
+	}
+	if len(backend.accessWorkspaces) != 1 || backend.accessWorkspaces[0] != "workspace-1" {
+		t.Fatalf("access workspaces = %v, want workspace-1", backend.accessWorkspaces)
 	}
 }
 

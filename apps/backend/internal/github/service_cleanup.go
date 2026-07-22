@@ -12,15 +12,22 @@ import (
 // CleanupMergedReviewTasks checks PRs tracked by a review watch and deletes
 // tasks whose PRs are merged/closed. Returns the number of tasks deleted.
 func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWatch) (int, error) {
-	if s.client == nil || s.taskDeleter == nil {
+	if s.taskDeleter == nil {
 		return 0, nil
+	}
+	if watch == nil || watch.WorkspaceID == "" {
+		return 0, ErrGitHubWorkspaceRequired
+	}
+	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, "", "")
+	if err != nil {
+		return 0, err
 	}
 	prTasks, err := s.store.ListReviewPRTasksByWatch(ctx, watch.ID)
 	if err != nil {
 		return 0, fmt.Errorf("list review PR tasks: %w", err)
 	}
 	policy := NormalizeCleanupPolicy(watch.CleanupPolicy)
-	return s.cleanupReviewPRTaskBatch(ctx, prTasks, func(_ *ReviewPRTask) string { return policy }), nil
+	return s.cleanupReviewPRTaskBatch(ctx, resolved.Client, prTasks, func(_ *ReviewPRTask) string { return policy }), nil
 }
 
 // CleanupAllOrphanedReviewTasks sweeps dedup rows whose watch is deleted or
@@ -46,8 +53,12 @@ func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
 //
 //nolint:dupl // mirrors CleanupIssueTasksForWorkspace — different task/watch types
 func (s *Service) CleanupReviewTasksForWorkspace(ctx context.Context, workspaceID string) (int, error) {
-	if s.client == nil || s.taskDeleter == nil {
+	if s.taskDeleter == nil {
 		return 0, nil
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, "", "")
+	if err != nil {
+		return 0, err
 	}
 	watches, err := s.store.ListReviewWatches(ctx, workspaceID)
 	if err != nil {
@@ -70,7 +81,7 @@ func (s *Service) CleanupReviewTasksForWorkspace(ctx context.Context, workspaceI
 			candidates = append(candidates, rpt)
 		}
 	}
-	return s.cleanupReviewPRTaskBatch(ctx, candidates, func(rpt *ReviewPRTask) string {
+	return s.cleanupReviewPRTaskBatch(ctx, resolved.Client, candidates, func(rpt *ReviewPRTask) string {
 		return watchPolicies[rpt.ReviewWatchID]
 	}), nil
 }
@@ -81,7 +92,7 @@ func (s *Service) CleanupReviewTasksForWorkspace(ctx context.Context, workspaceI
 //
 //nolint:dupl // mirrors cleanupAllIssueTasks — different types, same orchestration
 func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (int, error) {
-	if s.client == nil || s.taskDeleter == nil {
+	if s.taskDeleter == nil {
 		return 0, nil
 	}
 	prTasks, err := s.store.ListAllReviewPRTasks(ctx)
@@ -91,12 +102,12 @@ func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (
 	if len(prTasks) == 0 {
 		return 0, nil
 	}
-	policyCache, enabledCache, unknownCache := s.buildReviewWatchCaches(ctx, prTasks)
+	policyCache, enabledCache, unknownCache, workspaceCache := s.buildReviewWatchCaches(ctx, prTasks)
 	// Allocate a fresh slice rather than reusing prTasks' backing array
 	// via prTasks[:0]; the in-place version is safe today (write index
 	// always trails read index) but silently breaks if a future caller
 	// reads prTasks after the filter.
-	candidates := make([]*ReviewPRTask, 0, len(prTasks))
+	candidatesByWorkspace := make(map[string][]*ReviewPRTask)
 	for _, rpt := range prTasks {
 		// Watch fetch failed — skip this cycle so we don't fail-open and
 		// reap an enabled-watch row under the wrong policy.
@@ -108,19 +119,25 @@ func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (
 		if orphansOnly && enabledCache[rpt.ReviewWatchID] {
 			continue
 		}
-		candidates = append(candidates, rpt)
-	}
-	if len(candidates) == 0 {
-		return 0, nil
-	}
-	return s.cleanupReviewPRTaskBatch(ctx, candidates, func(rpt *ReviewPRTask) string {
-		if p, ok := policyCache[rpt.ReviewWatchID]; ok {
-			return p
+		workspaceID := workspaceCache[rpt.ReviewWatchID]
+		if workspaceID == "" {
+			continue
 		}
-		// Watch was deleted: fall back to the documented default so the row
-		// (and any task it points at) can still be reaped.
-		return CleanupPolicyAuto
-	}), nil
+		candidatesByWorkspace[workspaceID] = append(candidatesByWorkspace[workspaceID], rpt)
+	}
+	deleted := 0
+	for workspaceID, candidates := range candidatesByWorkspace {
+		resolved, resolveErr := s.resolveAutomationClient(ctx, workspaceID, "", "")
+		if resolveErr != nil {
+			s.logger.Warn("skip review cleanup for unavailable workspace connection",
+				zap.String("workspace_id", workspaceID), zap.Error(resolveErr))
+			continue
+		}
+		deleted += s.cleanupReviewPRTaskBatch(ctx, resolved.Client, candidates, func(rpt *ReviewPRTask) string {
+			return policyCache[rpt.ReviewWatchID]
+		})
+	}
+	return deleted, nil
 }
 
 // buildReviewWatchCaches loads the cleanup policy + enabled flag for each
@@ -135,7 +152,9 @@ func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (
 // `unknown`, so callers treat them as legitimate orphans.
 //
 //nolint:dupl // mirrors buildIssueWatchCaches — different task/watch types
-func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewPRTask) (policy map[string]string, enabled map[string]bool, unknown map[string]bool) {
+func (s *Service) buildReviewWatchCaches(
+	ctx context.Context, prTasks []*ReviewPRTask,
+) (policy map[string]string, enabled map[string]bool, unknown map[string]bool, workspace map[string]string) {
 	seen := make(map[string]struct{})
 	for _, rpt := range prTasks {
 		seen[rpt.ReviewWatchID] = struct{}{}
@@ -143,6 +162,7 @@ func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewP
 	policy = make(map[string]string, len(seen))
 	enabled = make(map[string]bool, len(seen))
 	unknown = make(map[string]bool)
+	workspace = make(map[string]string, len(seen))
 	for watchID := range seen {
 		watch, err := s.store.GetReviewWatch(ctx, watchID)
 		if err != nil {
@@ -156,8 +176,9 @@ func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewP
 		}
 		policy[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
 		enabled[watchID] = watch.Enabled
+		workspace[watchID] = watch.WorkspaceID
 	}
-	return policy, enabled, unknown
+	return policy, enabled, unknown, workspace
 }
 
 // deleteTaskWithReason deletes a task, threading the cleanup reason through to
@@ -175,7 +196,9 @@ func (s *Service) deleteTaskWithReason(ctx context.Context, taskID, reason strin
 // supply it so per-watch and global-sweep paths can share this body.
 //
 //nolint:dupl // mirrors cleanupIssueTaskBatch — different types, same structure
-func (s *Service) cleanupReviewPRTaskBatch(ctx context.Context, prTasks []*ReviewPRTask, resolvePolicy func(*ReviewPRTask) string) int {
+func (s *Service) cleanupReviewPRTaskBatch(
+	ctx context.Context, client Client, prTasks []*ReviewPRTask, resolvePolicy func(*ReviewPRTask) string,
+) int {
 	deleted := 0
 	for _, rpt := range prTasks {
 		policy := resolvePolicy(rpt)
@@ -189,7 +212,7 @@ func (s *Service) cleanupReviewPRTaskBatch(ctx context.Context, prTasks []*Revie
 			// increment `deleted`: the count is reported back to the
 			// settings-page toast as "Deleted N tasks", and these rows
 			// never had an associated task.
-			if should, _ := s.shouldDeleteReviewTask(ctx, rpt, policy); should {
+			if should, _ := s.shouldDeleteReviewTaskWithClient(ctx, client, rpt, policy); should {
 				if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
 					s.logger.Warn("failed to delete orphan reservation row",
 						zap.String("dedup_id", rpt.ID), zap.Error(err))
@@ -197,7 +220,7 @@ func (s *Service) cleanupReviewPRTaskBatch(ctx context.Context, prTasks []*Revie
 			}
 			continue
 		}
-		shouldDelete, reason := s.shouldDeleteReviewTask(ctx, rpt, policy)
+		shouldDelete, reason := s.shouldDeleteReviewTaskWithClient(ctx, client, rpt, policy)
 		if !shouldDelete {
 			continue
 		}
@@ -245,11 +268,17 @@ func (s *Service) cleanupReviewPRTaskBatch(ctx context.Context, prTasks []*Revie
 // Terminal state covers: PR merged/closed, OR the authenticated user already
 // approved the PR on GitHub (so it's effectively done from their POV).
 func (s *Service) shouldDeleteReviewTask(ctx context.Context, rpt *ReviewPRTask, policy string) (bool, string) {
+	return s.shouldDeleteReviewTaskWithClient(ctx, s.client, rpt, policy)
+}
+
+func (s *Service) shouldDeleteReviewTaskWithClient(
+	ctx context.Context, client Client, rpt *ReviewPRTask, policy string,
+) (bool, string) {
 	if policy == CleanupPolicyNever {
 		return false, ""
 	}
 	failureKey := reviewFailureKey(rpt)
-	feedback, err := s.client.GetPRFeedback(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
+	feedback, err := client.GetPRFeedback(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
 	if err != nil {
 		s.trackCleanupFailure(failureKey, "review", rpt.RepoOwner+"/"+rpt.RepoName, rpt.PRNumber, err)
 		return false, ""
@@ -263,7 +292,7 @@ func (s *Service) shouldDeleteReviewTask(ctx context.Context, rpt *ReviewPRTask,
 		reason = "pr_merged_or_closed" //nolint:goconst // also referenced by string in service_cleanup_policy_test.go; introducing a constant would require coupling the test
 	} else {
 		// Check if the authenticated user already approved the PR on GitHub.
-		user, _ := s.client.GetAuthenticatedUser(ctx)
+		user, _ := client.GetAuthenticatedUser(ctx)
 		for _, review := range feedback.Reviews {
 			if review.State == "APPROVED" && review.Author == user {
 				reason = "pr_approved_by_user"
@@ -338,15 +367,22 @@ func (s *Service) resetCleanupFailure(key string) {
 //
 //nolint:dupl // mirrors CleanupMergedReviewTasks — different types, same structure
 func (s *Service) CleanupClosedIssueTasks(ctx context.Context, watch *IssueWatch) (int, error) {
-	if s.client == nil || s.taskDeleter == nil {
+	if s.taskDeleter == nil {
 		return 0, nil
+	}
+	if watch == nil || watch.WorkspaceID == "" {
+		return 0, ErrGitHubWorkspaceRequired
+	}
+	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, "", "")
+	if err != nil {
+		return 0, err
 	}
 	issueTasks, err := s.store.ListIssueWatchTasksByWatch(ctx, watch.ID)
 	if err != nil {
 		return 0, fmt.Errorf("list issue watch tasks: %w", err)
 	}
 	policy := NormalizeCleanupPolicy(watch.CleanupPolicy)
-	return s.cleanupIssueTaskBatch(ctx, issueTasks, func(_ *IssueWatchTask) string { return policy }), nil
+	return s.cleanupIssueTaskBatch(ctx, resolved.Client, issueTasks, func(_ *IssueWatchTask) string { return policy }), nil
 }
 
 // CleanupAllOrphanedIssueTasks sweeps dedup rows whose watch is deleted or
@@ -366,8 +402,12 @@ func (s *Service) CleanupAllIssueTasks(ctx context.Context) (int, error) {
 //
 //nolint:dupl // mirrors CleanupReviewTasksForWorkspace — different task/watch types
 func (s *Service) CleanupIssueTasksForWorkspace(ctx context.Context, workspaceID string) (int, error) {
-	if s.client == nil || s.taskDeleter == nil {
+	if s.taskDeleter == nil {
 		return 0, nil
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, "", "")
+	if err != nil {
+		return 0, err
 	}
 	watches, err := s.store.ListIssueWatches(ctx, workspaceID)
 	if err != nil {
@@ -390,14 +430,14 @@ func (s *Service) CleanupIssueTasksForWorkspace(ctx context.Context, workspaceID
 			candidates = append(candidates, it)
 		}
 	}
-	return s.cleanupIssueTaskBatch(ctx, candidates, func(it *IssueWatchTask) string {
+	return s.cleanupIssueTaskBatch(ctx, resolved.Client, candidates, func(it *IssueWatchTask) string {
 		return watchPolicies[it.IssueWatchID]
 	}), nil
 }
 
 //nolint:dupl // mirrors cleanupAllReviewTasks — different types, same orchestration
 func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (int, error) {
-	if s.client == nil || s.taskDeleter == nil {
+	if s.taskDeleter == nil {
 		return 0, nil
 	}
 	issueTasks, err := s.store.ListAllIssueWatchTasks(ctx)
@@ -407,8 +447,8 @@ func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (i
 	if len(issueTasks) == 0 {
 		return 0, nil
 	}
-	policyCache, enabledCache, unknownCache := s.buildIssueWatchCaches(ctx, issueTasks)
-	candidates := make([]*IssueWatchTask, 0, len(issueTasks))
+	policyCache, enabledCache, unknownCache, workspaceCache := s.buildIssueWatchCaches(ctx, issueTasks)
+	candidatesByWorkspace := make(map[string][]*IssueWatchTask)
 	for _, it := range issueTasks {
 		if unknownCache[it.IssueWatchID] {
 			continue
@@ -416,21 +456,31 @@ func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (i
 		if orphansOnly && enabledCache[it.IssueWatchID] {
 			continue
 		}
-		candidates = append(candidates, it)
-	}
-	if len(candidates) == 0 {
-		return 0, nil
-	}
-	return s.cleanupIssueTaskBatch(ctx, candidates, func(it *IssueWatchTask) string {
-		if p, ok := policyCache[it.IssueWatchID]; ok {
-			return p
+		workspaceID := workspaceCache[it.IssueWatchID]
+		if workspaceID == "" {
+			continue
 		}
-		return CleanupPolicyAuto
-	}), nil
+		candidatesByWorkspace[workspaceID] = append(candidatesByWorkspace[workspaceID], it)
+	}
+	deleted := 0
+	for workspaceID, candidates := range candidatesByWorkspace {
+		resolved, resolveErr := s.resolveAutomationClient(ctx, workspaceID, "", "")
+		if resolveErr != nil {
+			s.logger.Warn("skip issue cleanup for unavailable workspace connection",
+				zap.String("workspace_id", workspaceID), zap.Error(resolveErr))
+			continue
+		}
+		deleted += s.cleanupIssueTaskBatch(ctx, resolved.Client, candidates, func(it *IssueWatchTask) string {
+			return policyCache[it.IssueWatchID]
+		})
+	}
+	return deleted, nil
 }
 
 //nolint:dupl // mirrors buildReviewWatchCaches — different task/watch types
-func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*IssueWatchTask) (policy map[string]string, enabled map[string]bool, unknown map[string]bool) {
+func (s *Service) buildIssueWatchCaches(
+	ctx context.Context, issueTasks []*IssueWatchTask,
+) (policy map[string]string, enabled map[string]bool, unknown map[string]bool, workspace map[string]string) {
 	seen := make(map[string]struct{})
 	for _, it := range issueTasks {
 		seen[it.IssueWatchID] = struct{}{}
@@ -438,6 +488,7 @@ func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*Issue
 	policy = make(map[string]string, len(seen))
 	enabled = make(map[string]bool, len(seen))
 	unknown = make(map[string]bool)
+	workspace = make(map[string]string, len(seen))
 	for watchID := range seen {
 		watch, err := s.store.GetIssueWatch(ctx, watchID)
 		if err != nil {
@@ -451,19 +502,22 @@ func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*Issue
 		}
 		policy[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
 		enabled[watchID] = watch.Enabled
+		workspace[watchID] = watch.WorkspaceID
 	}
-	return policy, enabled, unknown
+	return policy, enabled, unknown, workspace
 }
 
 //nolint:dupl // mirrors cleanupReviewPRTaskBatch — different types, same structure
-func (s *Service) cleanupIssueTaskBatch(ctx context.Context, issueTasks []*IssueWatchTask, resolvePolicy func(*IssueWatchTask) string) int {
+func (s *Service) cleanupIssueTaskBatch(
+	ctx context.Context, client Client, issueTasks []*IssueWatchTask, resolvePolicy func(*IssueWatchTask) string,
+) int {
 	deleted := 0
 	for _, it := range issueTasks {
 		policy := resolvePolicy(it)
 		if it.TaskID == "" {
 			// Orphan reservation row — no task was created. Clean it up
 			// but don't count it as a deleted task.
-			if should, _ := s.shouldDeleteIssueTask(ctx, it, policy); should {
+			if should, _ := s.shouldDeleteIssueTaskWithClient(ctx, client, it, policy); should {
 				if err := s.store.DeleteIssueWatchTask(ctx, it.ID); err != nil {
 					s.logger.Warn("failed to delete orphan reservation row",
 						zap.String("dedup_id", it.ID), zap.Error(err))
@@ -471,7 +525,7 @@ func (s *Service) cleanupIssueTaskBatch(ctx context.Context, issueTasks []*Issue
 			}
 			continue
 		}
-		shouldDelete, reason := s.shouldDeleteIssueTask(ctx, it, policy)
+		shouldDelete, reason := s.shouldDeleteIssueTaskWithClient(ctx, client, it, policy)
 		if !shouldDelete {
 			continue
 		}
@@ -509,11 +563,17 @@ func (s *Service) cleanupIssueTaskBatch(ctx context.Context, issueTasks []*Issue
 // shouldDeleteIssueTask checks whether an issue task is eligible for cleanup.
 // Policy gating mirrors shouldDeleteReviewTask.
 func (s *Service) shouldDeleteIssueTask(ctx context.Context, it *IssueWatchTask, policy string) (bool, string) {
+	return s.shouldDeleteIssueTaskWithClient(ctx, s.client, it, policy)
+}
+
+func (s *Service) shouldDeleteIssueTaskWithClient(
+	ctx context.Context, client Client, it *IssueWatchTask, policy string,
+) (bool, string) {
 	if policy == CleanupPolicyNever {
 		return false, ""
 	}
 	failureKey := issueFailureKey(it)
-	state, err := s.client.GetIssueState(ctx, it.RepoOwner, it.RepoName, it.IssueNumber)
+	state, err := client.GetIssueState(ctx, it.RepoOwner, it.RepoName, it.IssueNumber)
 	if err != nil {
 		s.trackCleanupFailure(failureKey, "issue", it.RepoOwner+"/"+it.RepoName, it.IssueNumber, err)
 		return false, ""

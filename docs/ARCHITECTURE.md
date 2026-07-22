@@ -112,11 +112,11 @@ When agent.failed:
 
 ### 4. Agent Manager Service
 **Port:** 8083
-**Purpose:** Docker container lifecycle management with ACP streaming and credential mounting
+**Purpose:** Agent-environment lifecycle management with ACP streaming and scoped credential delivery
 
 **Responsibilities:**
 - Launch Docker containers for AI agents
-- **Mount host credentials (SSH keys, Git config) into containers**
+- Resolve profile credentials and workspace-scoped GitHub credential leases for each launch
 - **Capture and parse ACP messages from container stdout**
 - **Publish ACP messages to NATS event bus**
 - Monitor container health and status
@@ -129,7 +129,7 @@ When agent.failed:
 - Docker Engine (container operations)
 - PostgreSQL (agent_instances, agent_logs, agent_types tables)
 - NATS (event publishing + ACP message publishing)
-- **Host filesystem (for credential mounting)**
+- Host filesystem and configured executor providers
 
 **Events Published:**
 - `agent.started`
@@ -145,7 +145,7 @@ When agent.failed:
 2. Lookup agent_type configuration
 3. Create agent_instance record (status: PENDING)
 4. Pull Docker image if needed
-5. **Prepare host credential mounts (SSH, Git config)**
+5. **Resolve explicit profile credentials and repository-scoped GitHub broker leases**
 6. **Checkout repository on host (if repository_url provided)**
 7. Prepare volume mounts (workspace, credentials)
 8. Create container with resource limits and mounts
@@ -163,21 +163,44 @@ When agent.failed:
 20. Cleanup container and workspace
 ```
 
-**Credential Mounting Strategy:**
+**Credential Delivery Strategy:**
 ```
-Mounts (Read-Only):
-- ~/.ssh → /root/.ssh (SSH keys)
-- ~/.gitconfig → /root/.gitconfig (Git configuration)
-- ~/.git-credentials → /root/.git-credentials (HTTPS credentials)
+Profile Configuration:
+- Literal or secret-referenced environment variables are explicit, unmanaged grants
+- Executor-specific credential files are copied or mounted only when selected
 
-Environment Variables:
-- GITHUB_TOKEN (from host environment)
-- GITLAB_TOKEN (from host environment)
-- GEMINI_API_KEY (from host environment)
+Managed GitHub Automation:
+- One workspace automation identity is resolved for the task
+- A task/repository/generation-bound lease is supplied instead of an ambient host token
+- Git uses agentctl's credential helper to redeem the matching repository lease on demand
+- gh uses a PATH-prepended shim and the primary repository lease
+- App private keys and personal GitHub tokens never enter the executor
 
 Workspace Mount (Read-Write):
 - /tmp/kandev/workspaces/{task_id} → /workspace
 ```
+
+GitHub App installation tokens redeemed through the broker are minted for the requested
+repository. PAT and named `gh` CLI credentials remain bearer tokens with their provider-granted
+scope after redemption; lease and helper matching prevents accidental redemption for another
+repository but does not cryptographically narrow a PAT or CLI token. Agent subprocesses are
+therefore trusted with the workspace automation grant. Only migration-only `legacy_shared`
+connections may resolve ambient backend `gh`, `GITHUB_TOKEN`, or `GH_TOKEN` authentication.
+
+GitHub App root credentials live in a deployment catalog of registrations, but no registration is
+globally active. A workspace App connection names both one registration and one verified
+installation. Related workspaces may deliberately reuse a registration, sharing its bot identity,
+root credentials, permission policy, and root-credential revocation boundary; separate
+registrations provide independent work, personal, or organization trust boundaries. Installation
+tokens, repository grants, workspace generations, personal OAuth tokens, and broker leases remain
+workspace-scoped even when a registration is shared.
+
+Manifest creation, existing-App import, installation, and personal authorization start from the
+workspace GitHub settings flow. Runtime clients and caches are keyed by registration ID and
+credential generation. Public callbacks and webhooks use
+`/api/v1/github/app/registrations/{registrationId}/...`; the route ID selects one candidate App,
+while single-use state or webhook HMAC still provides authorization. App credentials are persisted
+as versioned encrypted bundles and are never sourced from backend startup configuration.
 
 ---
 
@@ -218,12 +241,11 @@ Workspace Mount (Read-Write):
 6. Agent Manager:
    - Create agent_instance record
    - Pull docker image "augmentcode/auggie-cli:latest"
-   - **Mount host credentials (SSH keys, Git config)**
+   - **Resolve profile credentials and GitHub broker leases**
    - **Clone repository to /tmp/kandev/workspaces/{task_id}**
    - Create container with volume mounts:
      * /tmp/kandev/workspaces/{task_id} → /workspace
-     * ~/.ssh → /root/.ssh (read-only)
-     * ~/.gitconfig → /root/.gitconfig (read-only)
+     * task-scoped executor credentials and repository leases
    - Start container
    - **Attach to container stdout for ACP capture**
    - Publish agent.started event
@@ -604,4 +626,3 @@ flowchart TB
 - Centralized credential management
 - Usage-based billing
 ```
-

@@ -19,17 +19,47 @@ func (s *Service) SubmitReview(ctx context.Context, owner, repo string, number i
 	if s.client == nil {
 		return fmt.Errorf("github client not configured")
 	}
+	return submitReview(ctx, s.client, owner, repo, number, event, body)
+}
+
+// SubmitReviewForWorkspace submits a user-triggered review with an explicitly
+// resolved workspace principal. GitHub App fallback is allowed by the resolver
+// and remains attributable to the App rather than impersonating the user.
+func (s *Service) SubmitReviewForWorkspace(
+	ctx context.Context,
+	workspaceID string,
+	userID string,
+	owner string,
+	repo string,
+	number int,
+	event string,
+	body string,
+) (AuthPrincipal, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return AuthPrincipal{}, err
+	}
+	resolved, err := s.resolvePersonalWriteClient(ctx, workspaceID, userID, owner, repo)
+	if err != nil {
+		return AuthPrincipal{}, err
+	}
+	if err := requireGitHubCapability(resolved, CapabilityPullRequestWrite); err != nil {
+		return AuthPrincipal{}, err
+	}
+	return resolved.Principal, submitReview(ctx, resolved.Client, owner, repo, number, event, body)
+}
+
+func submitReview(ctx context.Context, client Client, owner, repo string, number int, event, body string) error {
 	if event == reviewEventApprove {
-		user, userErr := s.client.GetAuthenticatedUser(ctx)
+		user, userErr := client.GetAuthenticatedUser(ctx)
 		if userErr == nil && user != "" {
-			pr, prErr := s.client.GetPR(ctx, owner, repo, number)
+			pr, prErr := client.GetPR(ctx, owner, repo, number)
 			if prErr == nil && pr != nil &&
 				strings.EqualFold(strings.TrimSpace(pr.AuthorLogin), strings.TrimSpace(user)) {
 				return ErrSelfApprove
 			}
 		}
 	}
-	return s.client.SubmitReview(ctx, owner, repo, number, event, body)
+	return client.SubmitReview(ctx, owner, repo, number, event, body)
 }
 
 // MergePR merges a pull request. mergeMethod is one of "merge", "squash",
@@ -41,6 +71,44 @@ func (s *Service) MergePR(ctx context.Context, owner, repo string, number int, m
 	if s.client == nil {
 		return ErrNoClient
 	}
+	return s.mergePRWithClient(ctx, s.client, "legacy", owner, repo, number, mergeMethod)
+}
+
+// MergePRForWorkspace performs a user-triggered merge using the workspace's
+// personal-write routing rules and returns the actual attributed principal.
+func (s *Service) MergePRForWorkspace(
+	ctx context.Context,
+	workspaceID string,
+	userID string,
+	owner string,
+	repo string,
+	number int,
+	mergeMethod string,
+) (AuthPrincipal, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return AuthPrincipal{}, err
+	}
+	resolved, err := s.resolvePersonalWriteClient(ctx, workspaceID, userID, owner, repo)
+	if err != nil {
+		return AuthPrincipal{}, err
+	}
+	if err := requireGitHubCapability(resolved, CapabilityPullRequestWrite); err != nil {
+		return AuthPrincipal{}, err
+	}
+	return resolved.Principal, s.mergePRWithClient(
+		ctx, resolved.Client, resolved.CacheScope, owner, repo, number, mergeMethod,
+	)
+}
+
+func (s *Service) mergePRWithClient(
+	ctx context.Context,
+	client Client,
+	cacheScope string,
+	owner string,
+	repo string,
+	number int,
+	mergeMethod string,
+) error {
 	if mergeMethod == "" {
 		// Resolve to an allowed method up-front so we don't rely on GitHub's
 		// "default to merge" behavior, which 405s on repos that disallow
@@ -48,13 +116,13 @@ func (s *Service) MergePR(ctx context.Context, owner, repo string, number int, m
 		// lookup fails (or — degenerate config — reports no method allowed),
 		// fall back to GitHub's default and surface its error rather than
 		// blocking the merge attempt.
-		if methods, err := s.GetRepoMergeMethods(ctx, owner, repo); err == nil {
+		if methods, err := s.getRepoMergeMethods(ctx, client, cacheScope, owner, repo); err == nil {
 			if pick := pickDefaultMergeMethod(methods); pick != "" {
 				mergeMethod = pick
 			}
 		}
 	}
-	return s.client.MergePR(ctx, owner, repo, number, mergeMethod)
+	return client.MergePR(ctx, owner, repo, number, mergeMethod)
 }
 
 // GetRepoMergeMethods returns the merge methods a repo allows, cached for
@@ -63,9 +131,32 @@ func (s *Service) GetRepoMergeMethods(ctx context.Context, owner, repo string) (
 	if s.client == nil {
 		return RepoMergeMethods{}, ErrNoClient
 	}
-	key := owner + "/" + repo
+	return s.getRepoMergeMethods(ctx, s.client, "legacy", owner, repo)
+}
+
+func (s *Service) GetRepoMergeMethodsForWorkspace(
+	ctx context.Context, workspaceID, userID, owner, repo string,
+) (RepoMergeMethods, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return RepoMergeMethods{}, err
+	}
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
+	if err != nil {
+		return RepoMergeMethods{}, err
+	}
+	return s.getRepoMergeMethods(ctx, resolved.Client, resolved.CacheScope, owner, repo)
+}
+
+func (s *Service) getRepoMergeMethods(
+	ctx context.Context,
+	client Client,
+	cacheScope string,
+	owner string,
+	repo string,
+) (RepoMergeMethods, error) {
+	key := scopedCacheKey(cacheScope, owner+"/"+repo)
 	v, err := s.mergeMethodsCache.doOrFetch(key, func() (any, error) {
-		return s.client.GetRepoMergeMethods(ctx, owner, repo)
+		return client.GetRepoMergeMethods(ctx, owner, repo)
 	})
 	if err != nil {
 		return RepoMergeMethods{}, err
@@ -107,6 +198,19 @@ func (s *Service) GetPR(ctx context.Context, owner, repo string, number int) (*P
 	return s.client.GetPR(ctx, owner, repo, number)
 }
 
+func (s *Service) GetPRForWorkspace(
+	ctx context.Context, workspaceID, userID, owner, repo string, number int,
+) (*PR, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.Client.GetPR(ctx, owner, repo, number)
+}
+
 // GetIssue fetches basic issue details from GitHub. The create-task dialog is
 // currently the only caller and dedupes requests per URL on the frontend.
 func (s *Service) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
@@ -114,6 +218,19 @@ func (s *Service) GetIssue(ctx context.Context, owner, repo string, number int) 
 		return nil, ErrNoClient
 	}
 	return s.client.GetIssue(ctx, owner, repo, number)
+}
+
+func (s *Service) GetIssueForWorkspace(
+	ctx context.Context, workspaceID, userID, owner, repo string, number int,
+) (*Issue, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.Client.GetIssue(ctx, owner, repo, number)
 }
 
 // GetPRFeedback fetches live PR feedback from GitHub. Cached briefly with
@@ -126,6 +243,25 @@ func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number 
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
+	return s.getPRFeedback(ctx, s.client, "legacy", owner, repo, number)
+}
+
+func (s *Service) GetPRFeedbackForWorkspace(
+	ctx context.Context, workspaceID, userID, owner, repo string, number int,
+) (*PRFeedback, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	return s.getPRFeedback(ctx, resolved.Client, resolved.CacheScope, owner, repo, number)
+}
+
+func (s *Service) getPRFeedback(
+	ctx context.Context, client Client, cacheScope, owner, repo string, number int,
+) (*PRFeedback, error) {
 	// Detach the upstream call's context from the singleflight leader: a
 	// cancelled leader (user closes the tab) would otherwise return its
 	// context error to all co-waiters, cascading a single client disconnect
@@ -136,9 +272,9 @@ func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number 
 	// consumed past the deadline.
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
 	defer cancelFetch()
-	key := prStatusCacheKey(owner, repo, number)
+	key := scopedCacheKey(cacheScope, prStatusCacheKey(owner, repo, number))
 	v, err := s.prFeedbackCache.doOrFetch(key, func() (any, error) {
-		return s.client.GetPRFeedback(fetchCtx, owner, repo, number)
+		return client.GetPRFeedback(fetchCtx, owner, repo, number)
 	})
 	if err != nil {
 		return nil, err
@@ -154,13 +290,32 @@ func (s *Service) GetPRStatus(ctx context.Context, owner, repo string, number in
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
+	return s.getPRStatus(ctx, s.client, "legacy", owner, repo, number)
+}
+
+func (s *Service) GetPRStatusForWorkspace(
+	ctx context.Context, workspaceID, userID, owner, repo string, number int,
+) (*PRStatus, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	return s.getPRStatus(ctx, resolved.Client, resolved.CacheScope, owner, repo, number)
+}
+
+func (s *Service) getPRStatus(
+	ctx context.Context, client Client, cacheScope, owner, repo string, number int,
+) (*PRStatus, error) {
 	// Detach the upstream call from the singleflight leader's context; see
 	// GetPRFeedback for the cascading-cancel + deadline-preserve rationale.
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
 	defer cancelFetch()
-	key := prStatusCacheKey(owner, repo, number)
+	key := scopedCacheKey(cacheScope, prStatusCacheKey(owner, repo, number))
 	v, err := s.prStatusCache.doOrFetch(key, func() (any, error) {
-		return s.client.GetPRStatus(fetchCtx, owner, repo, number)
+		return client.GetPRStatus(fetchCtx, owner, repo, number)
 	})
 	if err != nil {
 		return nil, err
@@ -205,6 +360,46 @@ func (s *Service) GetPRStatusesBatch(ctx context.Context, refs []PRRef) (map[str
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
+	return s.getPRStatusesBatchWithClient(ctx, s.client, "legacy", refs)
+}
+
+func (s *Service) GetPRStatusesBatchForWorkspace(
+	ctx context.Context, workspaceID, userID string, refs []PRRef,
+) (map[string]*PRStatus, error) {
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, "", "")
+	if err != nil {
+		return nil, err
+	}
+	settings, err := s.GetWorkspaceSettings(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]PRRef, 0, len(refs))
+	for _, ref := range refs {
+		if repositoryInWorkspaceScope(settings, ref.Owner, ref.Repo) {
+			filtered = append(filtered, ref)
+		}
+	}
+	visibilityInput := make([]RepoFilter, 0, len(filtered))
+	for _, ref := range filtered {
+		visibilityInput = append(visibilityInput, RepoFilter{Owner: ref.Owner, Name: ref.Repo})
+	}
+	visible, err := s.automationRepositoryVisibility(ctx, workspaceID, visibilityInput)
+	if err != nil {
+		return nil, err
+	}
+	allowed := filtered[:0]
+	for _, ref := range filtered {
+		if visible[repositoryIdentityKey(ref.Owner, ref.Repo)] {
+			allowed = append(allowed, ref)
+		}
+	}
+	return s.getPRStatusesBatchWithClient(ctx, resolved.Client, resolved.CacheScope, allowed)
+}
+
+func (s *Service) getPRStatusesBatchWithClient(
+	ctx context.Context, client Client, cacheScope string, refs []PRRef,
+) (map[string]*PRStatus, error) {
 	result := make(map[string]*PRStatus, len(refs))
 	var mu sync.Mutex
 	sem := make(chan struct{}, prStatusBatchConcurrency)
@@ -225,7 +420,7 @@ func (s *Service) GetPRStatusesBatch(ctx context.Context, refs []PRRef) (map[str
 				return
 			}
 			defer func() { <-sem }()
-			status, err := s.GetPRStatus(ctx, r.Owner, r.Repo, r.Number)
+			status, err := s.getPRStatus(ctx, client, cacheScope, r.Owner, r.Repo, r.Number)
 			if err != nil {
 				s.logger.Debug("batch PR status fetch failed",
 					zap.String("owner", r.Owner),
@@ -253,12 +448,38 @@ func (s *Service) GetPRFiles(ctx context.Context, owner, repo string, number int
 	return s.client.ListPRFiles(ctx, owner, repo, number)
 }
 
+func (s *Service) GetPRFilesForWorkspace(
+	ctx context.Context, workspaceID, userID, owner, repo string, number int,
+) ([]PRFile, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.Client.ListPRFiles(ctx, owner, repo, number)
+}
+
 // GetPRCommits fetches commits in a PR from GitHub.
 func (s *Service) GetPRCommits(ctx context.Context, owner, repo string, number int) ([]PRCommitInfo, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
 	return s.client.ListPRCommits(ctx, owner, repo, number)
+}
+
+func (s *Service) GetPRCommitsForWorkspace(
+	ctx context.Context, workspaceID, userID, owner, repo string, number int,
+) ([]PRCommitInfo, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.Client.ListPRCommits(ctx, owner, repo, number)
 }
 
 // timeEqual compares two nullable time pointers for equality.

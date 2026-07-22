@@ -1,11 +1,14 @@
 package lifecycle
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/common/logger"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestResolveSSHTarget_ExplicitFields(t *testing.T) {
@@ -387,10 +390,15 @@ func TestSSHRemoteAgentEnv(t *testing.T) {
 
 	// req.Env credential keys are forwarded; non-credential keys (HOME/PATH) are not.
 	req := &ExecutorCreateRequest{Env: map[string]string{
-		"CLAUDE_CODE_OAUTH_TOKEN": tokenFromReq,
-		"HOME":                    nonCredentialHome,
-		"PATH":                    nonCredentialPath,
-		"OPENAI_API_KEY":          openAIKey,
+		"CLAUDE_CODE_OAUTH_TOKEN":       tokenFromReq,
+		"HOME":                          nonCredentialHome,
+		"PATH":                          nonCredentialPath,
+		"OPENAI_API_KEY":                openAIKey,
+		envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+		envKeyGitHubCredentialLease:     "opaque-lease",
+		"GIT_CONFIG_COUNT":              "1",
+		"GIT_CONFIG_KEY_0":              "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0":            "!agentctl git-credential",
 	}}
 	got := sshRemoteAgentEnv(req)
 	if got["CLAUDE_CODE_OAUTH_TOKEN"] != tokenFromReq {
@@ -398,6 +406,9 @@ func TestSSHRemoteAgentEnv(t *testing.T) {
 	}
 	if got["OPENAI_API_KEY"] != openAIKey {
 		t.Fatalf("OPENAI_API_KEY = %q, want %q", got["OPENAI_API_KEY"], openAIKey)
+	}
+	if got[envKeyGitHubCredentialLease] != "opaque-lease" || got["GIT_CONFIG_KEY_0"] == "" {
+		t.Fatalf("managed GitHub broker env was not forwarded: %#v", got)
 	}
 	if _, ok := got["HOME"]; ok {
 		t.Error("HOME must NOT be forwarded to the remote agent")
@@ -433,5 +444,86 @@ func TestSSHRemoteAgentEnvEmpty(t *testing.T) {
 	}
 	if got := sshRemoteAgentEnv(&ExecutorCreateRequest{}); got != nil {
 		t.Fatalf("expected nil for no credentials, got %v", got)
+	}
+}
+
+func TestSSHManagedBrokerResumeForcesFreshAgentctlWithNewLease(t *testing.T) {
+	sshExec := NewSSHExecutor(nil, nil, nil, logger.Default())
+	sshExec.sessions["instance-1"] = &sshSessionState{pid: 1234, remoteDir: "/remote/session"}
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		Env: map[string]string{
+			envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+			envKeyGitHubCredentialLease:     "fresh-lease-after-backend-restart",
+		},
+		Metadata: map[string]interface{}{
+			MetadataKeySSHHost:               "remote.example",
+			MetadataKeySSHRemoteSessionDir:   "/remote/session",
+			MetadataKeySSHRemoteAgentctlPort: "41001",
+			MetadataKeySSHRemoteAgentctlPID:  "1234",
+			MetadataKeySSHLocalForwardPort:   "51001",
+			MetadataKeySSHRemoteAgentctlURL:  "http://127.0.0.1:41001",
+		},
+	}
+
+	var probedLease string
+	sshExec.brokerPreflight = func(
+		_ context.Context,
+		_ *ssh.Client,
+		probeReq *ExecutorCreateRequest,
+		_ SSHRemotePlatform,
+	) error {
+		probedLease = managedGitHubBrokerEnv(probeReq.Env)[envKeyGitHubCredentialLease]
+		return nil
+	}
+	var stoppedPID int
+	sshExec.stopRemote = func(_ context.Context, _ *ssh.Client, _ string, pid int) error {
+		stoppedPID = pid
+		return nil
+	}
+	if err := sshExec.resetManagedBrokerResume(
+		context.Background(), req, "1234", "/remote/session",
+	); err != nil {
+		t.Fatalf("resetManagedBrokerResume() error = %v", err)
+	}
+	if probedLease != "fresh-lease-after-backend-restart" {
+		t.Fatalf("preflight lease = %q, want fresh lease", probedLease)
+	}
+	if stoppedPID != 1234 {
+		t.Fatalf("stopped pid = %d, want stale agentctl pid 1234", stoppedPID)
+	}
+	if _, tracked := sshExec.sessions["instance-1"]; tracked {
+		t.Fatal("stale broker-backed SSH session remains tracked")
+	}
+	if _, reused := sshExec.resumedStateForCreate(req); reused {
+		t.Fatal("managed broker recovery reused agentctl carrying an invalidated lease")
+	}
+	for _, key := range []string{
+		MetadataKeySSHRemoteSessionDir,
+		MetadataKeySSHRemoteAgentctlPort,
+		MetadataKeySSHRemoteAgentctlPID,
+		MetadataKeySSHLocalForwardPort,
+		MetadataKeySSHRemoteAgentctlURL,
+	} {
+		if _, ok := req.Metadata[key]; ok {
+			t.Errorf("stale resume metadata %s was retained", key)
+		}
+	}
+	if req.Metadata[MetadataKeySSHHost] != "remote.example" {
+		t.Fatal("connection metadata required for fresh SSH launch was removed")
+	}
+}
+
+func TestSSHExplicitTokenResumeKeepsExistingAgentctl(t *testing.T) {
+	sshExec := NewSSHExecutor(nil, nil, nil, logger.Default())
+	state := &sshSessionState{}
+	sshExec.sessions["instance-1"] = state
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		Env:        map[string]string{"GITHUB_TOKEN": "explicit-profile-token"},
+	}
+	got, reused := sshExec.resumedStateForCreate(req)
+	if !reused || got != state {
+		t.Fatal("explicit profile token resume must preserve the existing agentctl")
 	}
 }

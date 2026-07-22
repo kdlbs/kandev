@@ -20,12 +20,25 @@ const GistMaxBytes = 10 * 1024 * 1024
 // account. Created gists are always secret (unlisted); anyone with the URL
 // can view them but they are not crawled.
 type GistBackend struct {
-	client github.Client
+	client   github.Client
+	resolver GitHubClientResolver
+}
+
+// GitHubClientResolver resolves the automation principal selected by a
+// workspace. Implementations must fail closed for missing workspace IDs.
+type GitHubClientResolver interface {
+	ResolveGitHubAutomationClient(context.Context, string) (github.Client, error)
 }
 
 // NewGistBackend returns a Backend that uses the given github.Client.
 func NewGistBackend(client github.Client) *GistBackend {
 	return &GistBackend{client: client}
+}
+
+// NewWorkspaceGistBackend returns a Gist backend that resolves a client for
+// each owning workspace instead of retaining an installation-global client.
+func NewWorkspaceGistBackend(resolver GitHubClientResolver) *GistBackend {
+	return &GistBackend{resolver: resolver}
 }
 
 // Name implements Backend.
@@ -36,7 +49,7 @@ func (b *GistBackend) Name() string { return BackendGitHubGist }
 // the rendered view served via gist.githack.com — that's the link users
 // share. The gist itself is preserved in the database via the externalID
 // so we can still delete it on revoke.
-func (b *GistBackend) Upload(ctx context.Context, snap *Snapshot) (string, string, error) {
+func (b *GistBackend) Upload(ctx context.Context, workspaceID string, snap *Snapshot) (string, string, error) {
 	body, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return "", "", fmt.Errorf("marshal snapshot: %w", err)
@@ -44,7 +57,11 @@ func (b *GistBackend) Upload(ctx context.Context, snap *Snapshot) (string, strin
 	if len(body) > GistMaxBytes {
 		return "", "", fmt.Errorf("%w: %d bytes > %d", ErrSnapshotTooLarge, len(body), GistMaxBytes)
 	}
-	resp, err := b.client.CreateGist(ctx, github.CreateGistInput{
+	client, err := b.clientFor(ctx, workspaceID)
+	if err != nil {
+		return "", "", err
+	}
+	resp, err := client.CreateGist(ctx, github.CreateGistInput{
 		Description: gistDescription(snap),
 		Public:      false,
 		Files: map[string]github.GistFile{
@@ -143,8 +160,12 @@ func ownerAndIDFromGithackURL(url string) (string, string) {
 
 // Delete removes the gist. A 404 from GitHub is returned to the caller as-is
 // so the service can treat it as "already gone".
-func (b *GistBackend) Delete(ctx context.Context, externalID string) error {
-	if err := b.client.DeleteGist(ctx, externalID); err != nil {
+func (b *GistBackend) Delete(ctx context.Context, workspaceID, externalID string) error {
+	client, err := b.clientFor(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := client.DeleteGist(ctx, externalID); err != nil {
 		var apiErr *github.GitHubAPIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
 			return err
@@ -152,6 +173,42 @@ func (b *GistBackend) Delete(ctx context.Context, externalID string) error {
 		return fmt.Errorf("delete gist %s: %w", externalID, err)
 	}
 	return nil
+}
+
+// CheckAccess verifies the resolved workspace client before share creation.
+func (b *GistBackend) CheckAccess(ctx context.Context, workspaceID string) error {
+	client, err := b.clientFor(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	authenticated, err := client.IsAuthenticated(ctx)
+	if err != nil {
+		return err
+	}
+	if !authenticated {
+		return errors.New("connect a GitHub account to share tasks publicly")
+	}
+	return nil
+}
+
+func (b *GistBackend) clientFor(ctx context.Context, workspaceID string) (github.Client, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrWorkspaceRequired
+	}
+	if b != nil && b.resolver != nil {
+		client, err := b.resolver.ResolveGitHubAutomationClient(ctx, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		if client == nil {
+			return nil, errors.New("github client resolver returned no client")
+		}
+		return client, nil
+	}
+	if b == nil || b.client == nil {
+		return nil, errors.New("github client is not configured")
+	}
+	return b.client, nil
 }
 
 func gistDescription(snap *Snapshot) string {

@@ -819,6 +819,32 @@ func TestListAccessibleRepos_QueryFilterAndClamp(t *testing.T) {
 	}
 }
 
+func TestListAccessibleRepos_InstallationUsesInstallationEndpoint(t *testing.T) {
+	var gotPerPage string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/installation/repositories" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
+		}
+		gotPerPage = r.URL.Query().Get("per_page")
+		_, _ = w.Write([]byte(`{"repositories":[
+			{"full_name":"acme/widget","owner":{"login":"acme"},"name":"widget","private":true,"default_branch":"main"}
+		]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewTokenClient("installation-token", TokenPrincipal{Kind: TokenCredentialInstallation})
+	c.httpClient = &http.Client{Transport: &rewriteTransport{base: srv.URL}}
+	repos, err := c.ListAccessibleRepos(context.Background(), "widget", 50)
+	if err != nil {
+		t.Fatalf("ListAccessibleRepos: %v", err)
+	}
+	if gotPerPage != "50" || len(repos) != 1 || repos[0].FullName != "acme/widget" {
+		t.Fatalf("per_page=%q repos=%+v", gotPerPage, repos)
+	}
+}
+
 func TestListAccessibleRepos_AuthError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/user/repos" {

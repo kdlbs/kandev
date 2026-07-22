@@ -328,7 +328,7 @@ func (s *Service) SetQuickChatDir(dir string) {
 // registered as remote ("Remote" badge in the UI) can serve branches before
 // or even without the orchestrator finishing its clone.
 type RemoteBranchLister interface {
-	ListRepoBranches(ctx context.Context, owner, repo string) ([]Branch, error)
+	ListRepoBranches(ctx context.Context, workspaceID, owner, repo string) ([]Branch, error)
 }
 
 // SetRemoteBranchLister wires the remote branch source. Currently only GitHub

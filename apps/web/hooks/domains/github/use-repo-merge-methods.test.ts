@@ -26,7 +26,7 @@ afterEach(() => {
 
 describe("useRepoMergeMethods", () => {
   it("returns null when owner or repo are missing", () => {
-    const { result } = renderHook(() => useRepoMergeMethods(null, null));
+    const { result } = renderHook(() => useRepoMergeMethods("ws-1", null, null));
     expect(result.current).toBeNull();
     expect(getRepoMergeMethodsMock).not.toHaveBeenCalled();
   });
@@ -36,12 +36,12 @@ describe("useRepoMergeMethods", () => {
     const methods = { merge: false, squash: true, rebase: false };
     getRepoMergeMethodsMock.mockResolvedValueOnce(methods);
 
-    const { result } = renderHook(() => useRepoMergeMethods(owner, repo));
+    const { result } = renderHook(() => useRepoMergeMethods("ws-1", owner, repo));
     expect(result.current).toBeNull();
 
     await waitFor(() => expect(result.current).toEqual(methods));
     expect(getRepoMergeMethodsMock).toHaveBeenCalledTimes(1);
-    expect(getRepoMergeMethodsMock).toHaveBeenCalledWith(owner, repo);
+    expect(getRepoMergeMethodsMock).toHaveBeenCalledWith("ws-1", owner, repo);
   });
 
   it("returns the cached value on subsequent mounts without refetching", async () => {
@@ -49,11 +49,11 @@ describe("useRepoMergeMethods", () => {
     const methods = { merge: true, squash: false, rebase: false };
     getRepoMergeMethodsMock.mockResolvedValueOnce(methods);
 
-    const first = renderHook(() => useRepoMergeMethods(owner, repo));
+    const first = renderHook(() => useRepoMergeMethods("ws-1", owner, repo));
     await waitFor(() => expect(first.result.current).toEqual(methods));
     first.unmount();
 
-    const second = renderHook(() => useRepoMergeMethods(owner, repo));
+    const second = renderHook(() => useRepoMergeMethods("ws-1", owner, repo));
     // Cache hit: synchronously returns the stored value on first render.
     expect(second.result.current).toEqual(methods);
     expect(getRepoMergeMethodsMock).toHaveBeenCalledTimes(1);
@@ -64,8 +64,8 @@ describe("useRepoMergeMethods", () => {
     const methods = { merge: true, squash: true, rebase: true };
     getRepoMergeMethodsMock.mockResolvedValueOnce(methods);
 
-    const first = renderHook(() => useRepoMergeMethods(owner, repo));
-    const second = renderHook(() => useRepoMergeMethods(owner, repo));
+    const first = renderHook(() => useRepoMergeMethods("ws-1", owner, repo));
+    const second = renderHook(() => useRepoMergeMethods("ws-1", owner, repo));
 
     await waitFor(() => {
       expect(first.result.current).toEqual(methods);
@@ -90,13 +90,13 @@ describe("useRepoMergeMethods", () => {
     };
     window.addEventListener("unhandledrejection", onRejection);
 
-    const first = renderHook(() => useRepoMergeMethods(owner, repo));
+    const first = renderHook(() => useRepoMergeMethods("ws-1", owner, repo));
     await waitFor(() => expect(getRepoMergeMethodsMock).toHaveBeenCalledTimes(1));
     expect(first.result.current).toBeNull();
     first.unmount();
 
     // Failed fetch must NOT have cached null — the next mount retries.
-    const second = renderHook(() => useRepoMergeMethods(owner, repo));
+    const second = renderHook(() => useRepoMergeMethods("ws-1", owner, repo));
     await waitFor(() => expect(getRepoMergeMethodsMock).toHaveBeenCalledTimes(2));
     await waitFor(() =>
       expect(second.result.current).toEqual({ merge: false, squash: true, rebase: false }),
@@ -116,7 +116,7 @@ describe("useRepoMergeMethods", () => {
     const start = new Date("2026-01-01T00:00:00Z");
     vi.setSystemTime(start);
 
-    const firstMount = renderHook(() => useRepoMergeMethods(owner, repo));
+    const firstMount = renderHook(() => useRepoMergeMethods("ws-1", owner, repo));
     await waitFor(() => expect(firstMount.result.current).toEqual(first));
     firstMount.unmount();
 
@@ -125,7 +125,7 @@ describe("useRepoMergeMethods", () => {
       vi.setSystemTime(new Date(start.getTime() + 6 * 60 * 1000));
     });
 
-    const secondMount = renderHook(() => useRepoMergeMethods(owner, repo));
+    const secondMount = renderHook(() => useRepoMergeMethods("ws-1", owner, repo));
     // Expired entry should be evicted on read → null while refetch is in flight.
     expect(secondMount.result.current).toBeNull();
     await waitFor(() => expect(secondMount.result.current).toEqual(second));

@@ -2,7 +2,8 @@ import type { StateCreator } from "zustand";
 import type { GitHubSlice, GitHubSliceState } from "./types";
 
 export const defaultGitHubState: GitHubSliceState = {
-  githubStatus: { status: null, loaded: false, loading: false },
+  githubStatus: { byWorkspaceId: {} },
+  githubAppRegistrations: { byWorkspaceId: {} },
   taskPRs: { byTaskId: {} },
   taskIssues: { workspaceId: null, byTaskId: {} },
   pendingPrUrlByTaskId: { byTaskId: {} },
@@ -22,16 +23,61 @@ type ImmerSet = Parameters<
 
 function createGitHubStatusActions(
   set: ImmerSet,
-): Pick<GitHubSlice, "setGitHubStatus" | "setGitHubStatusLoading"> {
+): Pick<GitHubSlice, "setGitHubStatus" | "setGitHubStatusLoading" | "resetGitHubStatus"> {
   return {
-    setGitHubStatus: (status) =>
+    setGitHubStatus: (workspaceId, status) =>
       set((draft) => {
-        draft.githubStatus.status = status;
-        draft.githubStatus.loaded = true;
+        const entry = draft.githubStatus.byWorkspaceId[workspaceId];
+        if (!entry) return;
+        entry.status = status;
+        entry.loaded = true;
       }),
-    setGitHubStatusLoading: (loading) =>
+    setGitHubStatusLoading: (workspaceId, loading) =>
       set((draft) => {
-        draft.githubStatus.loading = loading;
+        const entry = draft.githubStatus.byWorkspaceId[workspaceId];
+        if (!entry) return;
+        entry.loading = loading;
+      }),
+    resetGitHubStatus: (workspaceId) =>
+      set((draft) => {
+        draft.githubStatus.byWorkspaceId[workspaceId] = {
+          status: null,
+          loaded: false,
+          loading: false,
+        };
+      }),
+  };
+}
+
+function createGitHubAppRegistrationActions(
+  set: ImmerSet,
+): Pick<
+  GitHubSlice,
+  "setGitHubAppRegistrations" | "setGitHubAppRegistrationsLoading" | "resetGitHubAppRegistrations"
+> {
+  return {
+    setGitHubAppRegistrations: (workspaceId, catalog, error = null) =>
+      set((draft) => {
+        const entry = draft.githubAppRegistrations.byWorkspaceId[workspaceId];
+        if (!entry) return;
+        entry.catalog = catalog;
+        entry.error = error;
+        entry.loaded = true;
+      }),
+    setGitHubAppRegistrationsLoading: (workspaceId, loading) =>
+      set((draft) => {
+        const entry = draft.githubAppRegistrations.byWorkspaceId[workspaceId];
+        if (!entry) return;
+        entry.loading = loading;
+      }),
+    resetGitHubAppRegistrations: (workspaceId) =>
+      set((draft) => {
+        draft.githubAppRegistrations.byWorkspaceId[workspaceId] = {
+          catalog: null,
+          loaded: false,
+          loading: false,
+          error: null,
+        };
       }),
   };
 }
@@ -281,16 +327,15 @@ function createRateLimitActions(set: ImmerSet): Pick<GitHubSlice, "applyGitHubRa
   return {
     applyGitHubRateLimitUpdate: (update) =>
       set((draft) => {
-        const existing = draft.githubStatus.status;
-        if (!existing) {
-          // Status not yet hydrated; defer until the SSR/HTTP fetch lands.
-          return;
+        for (const entry of Object.values(draft.githubStatus.byWorkspaceId)) {
+          const existing = entry.status;
+          if (!existing || existing.automation?.source !== "legacy_shared") continue;
+          const rateLimit = { ...(existing.rate_limit ?? {}) };
+          for (const snap of update.snapshots) {
+            rateLimit[snap.resource] = snap;
+          }
+          entry.status = { ...existing, rate_limit: rateLimit };
         }
-        const rateLimit = { ...(existing.rate_limit ?? {}) };
-        for (const snap of update.snapshots) {
-          rateLimit[snap.resource] = snap;
-        }
-        draft.githubStatus.status = { ...existing, rate_limit: rateLimit };
       }),
   };
 }
@@ -303,6 +348,7 @@ export const createGitHubSlice: StateCreator<
 > = (set) => ({
   ...defaultGitHubState,
   ...createGitHubStatusActions(set),
+  ...createGitHubAppRegistrationActions(set),
   ...createTaskPRActions(set),
   ...createWatchActions(set),
   ...createActionPresetActions(set),

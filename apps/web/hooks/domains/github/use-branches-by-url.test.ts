@@ -31,14 +31,23 @@ const REPO_B = "https://github.com/acme/api";
 const WORKSPACE_ID = "workspace-1";
 
 describe("useBranchesByURL", () => {
+  it("does not load GitHub branches without a workspace credential scope", () => {
+    const { result } = renderHook(() => useBranchesByURL());
+
+    act(() => result.current.ensure(REPO_A));
+
+    expect(fetchRepoBranchesMock).not.toHaveBeenCalled();
+    expect(result.current.branches(REPO_A)).toEqual([]);
+  });
+
   it("fetches branches once per unique URL when ensure() is called", async () => {
-    fetchRepoBranchesMock.mockImplementation((_owner: string, repo: string) => {
+    fetchRepoBranchesMock.mockImplementation((_workspace: string, _owner: string, repo: string) => {
       return Promise.resolve({
         branches: [{ name: repo === "site" ? "main" : "develop" }],
       });
     });
 
-    const { result } = renderHook(() => useBranchesByURL());
+    const { result } = renderHook(() => useBranchesByURL("ws-1"));
 
     act(() => {
       result.current.ensure(REPO_A);
@@ -54,59 +63,19 @@ describe("useBranchesByURL", () => {
     expect(result.current.branches(REPO_A)[0]).toMatchObject({ name: "main", type: "remote" });
     expect(result.current.branches(REPO_B)[0]).toMatchObject({ name: "develop", type: "remote" });
   });
-
-  it("dedupes concurrent ensure() calls for the same URL into a single fetch", async () => {
-    fetchRepoBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
-
-    const { result } = renderHook(() => useBranchesByURL());
-
-    act(() => {
-      result.current.ensure(REPO_A);
-      result.current.ensure(REPO_A);
-      result.current.ensure(REPO_A);
-    });
-
-    await waitFor(() => expect(result.current.branches(REPO_A)).toHaveLength(1));
-    expect(fetchRepoBranchesMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("reports loading(url) true during fetch and false after settle", async () => {
-    let resolveFetch: ((v: { branches: { name: string }[] }) => void) | null = null;
-    fetchRepoBranchesMock.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveFetch = resolve;
-        }),
-    );
-
-    const { result } = renderHook(() => useBranchesByURL());
-
-    act(() => {
-      result.current.ensure(REPO_A);
-    });
-
-    await waitFor(() => expect(result.current.loading(REPO_A)).toBe(true));
-
-    act(() => {
-      resolveFetch?.({ branches: [{ name: "main" }] });
-    });
-
-    await waitFor(() => expect(result.current.loading(REPO_A)).toBe(false));
-    expect(result.current.branches(REPO_A)).toHaveLength(1);
-  });
 });
 
 describe("useBranchesByURL provider routing", () => {
   it("dispatches GitLab and Azure URLs without calling GitHub", async () => {
     listProjectBranchesMock.mockResolvedValue({ branches: [{ name: "develop" }] });
     listAzureDevOpsBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
-    const { result } = renderHook(() => useBranchesByURL());
+    const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
     const gitlab = "https://gitlab.com/acme/platform/api.git";
     const azure = "https://dev.azure.com/acme/Platform/_git/api";
 
     act(() => {
-      result.current.ensure(gitlab, WORKSPACE_ID);
-      result.current.ensure(azure, WORKSPACE_ID);
+      result.current.ensure(gitlab);
+      result.current.ensure(azure);
     });
 
     await waitFor(() => {
@@ -128,12 +97,29 @@ describe("useBranchesByURL provider routing", () => {
     );
   });
 
-  it("loads branches for a provider-selected self-managed GitLab URL", async () => {
+  it("passes the organization parsed from an Azure SSH URL", async () => {
+    listAzureDevOpsBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
+    const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
+    const azure = "git@ssh.dev.azure.com:v3/acme/Platform/api";
+
+    act(() => result.current.ensure(azure));
+
+    await waitFor(() => expect(result.current.branches(azure)).toHaveLength(1));
+    expect(listAzureDevOpsBranchesMock).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      "acme",
+      "Platform",
+      "api",
+      expect.anything(),
+    );
+  });
+
+  it("loads branches for a self-managed GitLab URL", async () => {
     listProjectBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
-    const { result } = renderHook(() => useBranchesByURL());
+    const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
     const gitlab = "https://gitlab.internal:8443/acme/platform/api.git";
 
-    act(() => result.current.ensure(gitlab, WORKSPACE_ID));
+    act(() => result.current.ensure(gitlab));
 
     await waitFor(() => {
       expect(listProjectBranchesMock).toHaveBeenCalledWith(
@@ -146,22 +132,47 @@ describe("useBranchesByURL provider routing", () => {
       ]);
     });
   });
+});
 
-  it("passes the organization parsed from an Azure SSH URL", async () => {
-    listAzureDevOpsBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
-    const { result } = renderHook(() => useBranchesByURL());
-    const azure = "git@ssh.dev.azure.com:v3/acme/Platform/api";
+describe("useBranchesByURL request state", () => {
+  it("dedupes concurrent ensure() calls for the same URL into a single fetch", async () => {
+    fetchRepoBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
 
-    act(() => result.current.ensure(azure, WORKSPACE_ID));
+    const { result } = renderHook(() => useBranchesByURL("ws-1"));
 
-    await waitFor(() => expect(result.current.branches(azure)).toHaveLength(1));
-    expect(listAzureDevOpsBranchesMock).toHaveBeenCalledWith(
-      WORKSPACE_ID,
-      "acme",
-      "Platform",
-      "api",
-      expect.anything(),
+    act(() => {
+      result.current.ensure(REPO_A);
+      result.current.ensure(REPO_A);
+      result.current.ensure(REPO_A);
+    });
+
+    await waitFor(() => expect(result.current.branches(REPO_A)).toHaveLength(1));
+    expect(fetchRepoBranchesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports loading(url) true during fetch and false after settle", async () => {
+    let resolveFetch: ((v: { branches: { name: string }[] }) => void) | null = null;
+    fetchRepoBranchesMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
     );
+
+    const { result } = renderHook(() => useBranchesByURL("ws-1"));
+
+    act(() => {
+      result.current.ensure(REPO_A);
+    });
+
+    await waitFor(() => expect(result.current.loading(REPO_A)).toBe(true));
+
+    act(() => {
+      resolveFetch?.({ branches: [{ name: "main" }] });
+    });
+
+    await waitFor(() => expect(result.current.loading(REPO_A)).toBe(false));
+    expect(result.current.branches(REPO_A)).toHaveLength(1);
   });
 });
 
@@ -169,7 +180,7 @@ describe("useBranchesByURL cache behavior", () => {
   it("ignores ensure() with empty string and treats it as a clear", async () => {
     fetchRepoBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
 
-    const { result } = renderHook(() => useBranchesByURL());
+    const { result } = renderHook(() => useBranchesByURL("ws-1"));
 
     act(() => {
       result.current.ensure(REPO_A);
@@ -185,7 +196,7 @@ describe("useBranchesByURL cache behavior", () => {
   });
 
   it("returns an empty array for an unknown URL", () => {
-    const { result } = renderHook(() => useBranchesByURL());
+    const { result } = renderHook(() => useBranchesByURL("ws-1"));
     expect(result.current.branches("https://github.com/who/what")).toEqual([]);
     expect(result.current.loading("https://github.com/who/what")).toBe(false);
   });
@@ -193,7 +204,7 @@ describe("useBranchesByURL cache behavior", () => {
   it("does not re-fetch when ensure() is called for an already-loaded URL", async () => {
     fetchRepoBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
 
-    const { result } = renderHook(() => useBranchesByURL());
+    const { result } = renderHook(() => useBranchesByURL("ws-1"));
 
     act(() => {
       result.current.ensure(REPO_A);
@@ -215,7 +226,7 @@ describe("useBranchesByURL — failure & invalidation", () => {
     // of short-circuiting on the cached failure.
     fetchRepoBranchesMock.mockRejectedValueOnce(new Error("network boom"));
 
-    const { result } = renderHook(() => useBranchesByURL());
+    const { result } = renderHook(() => useBranchesByURL("ws-1"));
 
     act(() => {
       result.current.ensure(REPO_A);
@@ -237,12 +248,13 @@ describe("useBranchesByURL — failure & invalidation", () => {
     // `/pull/N` paths, so pasting a PR URL marked the URL as loaded with an
     // empty branches list — the branch picker stayed permanently empty even
     // though the repo itself has branches.
-    fetchRepoBranchesMock.mockImplementation((owner: string, repo: string) => {
+    fetchRepoBranchesMock.mockImplementation((workspace: string, owner: string, repo: string) => {
+      expect(workspace).toBe("ws-1");
       expect(owner).toBe("acme");
       expect(repo).toBe("site");
       return Promise.resolve({ branches: [{ name: "main" }, { name: "feature/x" }] });
     });
-    const { result } = renderHook(() => useBranchesByURL());
+    const { result } = renderHook(() => useBranchesByURL("ws-1"));
     const PR_URL = "https://github.com/acme/site/pull/42";
 
     act(() => {
@@ -254,12 +266,13 @@ describe("useBranchesByURL — failure & invalidation", () => {
   });
 
   it("accepts an issue URL and fetches branches against the underlying repo", async () => {
-    fetchRepoBranchesMock.mockImplementation((owner: string, repo: string) => {
+    fetchRepoBranchesMock.mockImplementation((workspace: string, owner: string, repo: string) => {
+      expect(workspace).toBe("ws-1");
       expect(owner).toBe("acme");
       expect(repo).toBe("site");
       return Promise.resolve({ branches: [{ name: "main" }, { name: "fix/issue" }] });
     });
-    const { result } = renderHook(() => useBranchesByURL());
+    const { result } = renderHook(() => useBranchesByURL("ws-1"));
     const issueURL = "https://github.com/acme/site/issues/1456";
 
     act(() => {
@@ -273,7 +286,7 @@ describe("useBranchesByURL — failure & invalidation", () => {
   it("clear(url) lets the next ensure() refetch a successfully loaded URL", async () => {
     fetchRepoBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
 
-    const { result } = renderHook(() => useBranchesByURL());
+    const { result } = renderHook(() => useBranchesByURL("ws-1"));
 
     act(() => {
       result.current.ensure(REPO_A);

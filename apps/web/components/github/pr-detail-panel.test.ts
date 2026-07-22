@@ -88,6 +88,12 @@ describe("shouldHideApproveButton", () => {
     expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, "   ")).toBe(true);
   });
 
+  it("allows App-attributed approval when a mutation actor is available", () => {
+    expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, null, true)).toBe(
+      false,
+    );
+  });
+
   it("hides when current user authored the PR (case-insensitive)", () => {
     expect(shouldHideApproveButton(makeTaskPR({ author_login: "Alice" }), null, "alice")).toBe(
       true,

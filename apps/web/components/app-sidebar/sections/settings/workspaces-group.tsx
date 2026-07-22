@@ -61,7 +61,7 @@ function WorkspaceIntegrationItems({
   pathname: string;
 }) {
   const azureDevOps = useAzureDevOpsAvailable(workspaceId);
-  const { status: githubStatus } = useGitHubStatus();
+  const { status: githubStatus } = useGitHubStatus(workspaceId);
   const gitlab = useGitLabAvailable();
   const jira = useJiraAuthed(workspaceId);
   const linear = useLinearAuthed(workspaceId);

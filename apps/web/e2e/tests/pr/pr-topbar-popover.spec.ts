@@ -574,10 +574,7 @@ test.describe("PR top-bar CI popover", () => {
       seedData.repositoryId,
       title,
     );
-    await apiClient.mockGitHubSetAuthHealth({
-      authenticated: false,
-      error: "token expired",
-    });
+    await apiClient.mockGitHubSetWorkspaceConnectionStatus(seedData.workspaceId, "invalid");
     await associatePR(apiClient, seed.taskId, {
       checks_state: "failure",
       checks_total: 2,

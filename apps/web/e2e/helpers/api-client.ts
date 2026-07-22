@@ -102,6 +102,39 @@ export type MockCheckRun = {
   completed_at?: string;
 };
 
+export type MockGitHubConnectionStatus = "active" | "invalid" | "suspended" | "revoked";
+
+export type MockGitHubWorkspaceConnection = {
+  source: "pat" | "gh_cli" | "github_app_installation" | "legacy_shared";
+  status: MockGitHubConnectionStatus;
+  login?: string;
+  installation_id?: number;
+  installation_account_login?: string;
+  installation_account_type?: string;
+  app_registration_id?: string;
+  capabilities?: Record<string, boolean>;
+};
+
+export type MockGitHubPersonalConnection = {
+  login: string;
+  status: MockGitHubConnectionStatus;
+  github_user_id?: number;
+  access_expires_at?: string;
+};
+
+export type MockGitHubCLIAccount = {
+  host: string;
+  login: string;
+  active: boolean;
+  state: string;
+};
+
+export type MockGitHubAppRegistration = {
+  id: string;
+  display_name: string;
+  app_id: number;
+};
+
 export type MockGitLabMRSeed = Pick<MockGitLabMR, "iid" | "title"> & Partial<MockGitLabMR>;
 export type MockGitLabIssueSeed = Pick<MockGitLabIssue, "iid" | "title"> & Partial<MockGitLabIssue>;
 
@@ -209,11 +242,17 @@ export class ApiClient {
   constructor(private baseUrl: string) {}
 
   /** Perform an HTTP request and return the raw Response (does not throw on non-2xx). */
-  async rawRequest(method: string, path: string, body?: unknown): Promise<Response> {
+  async rawRequest(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: Pick<RequestInit, "redirect">,
+  ): Promise<Response> {
     return fetch(`${this.baseUrl}${path}`, {
       method,
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
+      ...options,
     });
   }
 
@@ -999,14 +1038,83 @@ export class ApiClient {
 
   async mockGitHubSetUser(username: string): Promise<void> {
     await this.request("PUT", "/api/v1/github/mock/user", { username });
+
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+  }
+
+  async mockGitHubSetWorkspaceConnection(
+    workspaceId: string,
+    connection: MockGitHubWorkspaceConnection,
+  ): Promise<void> {
+    await this.request(
+      "PUT",
+      `/api/v1/github/mock/workspace-connections/${encodeURIComponent(workspaceId)}`,
+      connection,
+    );
+  }
+
+  async mockGitHubDeleteWorkspaceConnection(workspaceId: string): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/github/mock/workspace-connections/${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async mockGitHubSetWorkspaceConnectionStatus(
+    workspaceId: string,
+    status: MockGitHubConnectionStatus,
+  ): Promise<void> {
+    await this.request(
+      "PUT",
+      `/api/v1/github/mock/workspace-connections/${encodeURIComponent(workspaceId)}/status`,
+      { status },
+    );
+  }
+
+  async mockGitHubSetPersonalConnection(
+    workspaceId: string,
+    connection: MockGitHubPersonalConnection,
+  ): Promise<void> {
+    await this.request(
+      "PUT",
+      `/api/v1/github/mock/personal-connections/${encodeURIComponent(workspaceId)}`,
+      connection,
+    );
+  }
+
+  async mockGitHubDeletePersonalConnection(workspaceId: string): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/github/mock/personal-connections/${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async mockGitHubSetCLIAccounts(accounts: MockGitHubCLIAccount[]): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/cli-accounts", { accounts });
+  }
+
+  async mockGitHubSetAppRegistration(registration: MockGitHubAppRegistration) {
+    return this.request<Record<string, unknown>>(
+      "PUT",
+      `/api/v1/github/mock/app-registrations/${encodeURIComponent(registration.id)}`,
+      { display_name: registration.display_name, app_id: registration.app_id },
+    );
   }
 
   async mockGitHubAddPRs(prs: MockPR[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/prs", { prs });
+    await this.seedMockGitHubRepositoryAccess(prs);
   }
 
   async mockGitHubAddIssues(issues: MockIssue[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/issues", { issues });
+    await this.seedMockGitHubRepositoryAccess(issues);
   }
 
   async mockGitHubAddOrgs(orgs: MockOrg[]): Promise<void> {
@@ -1015,6 +1123,25 @@ export class ApiClient {
 
   async mockGitHubAddRepos(org: string, repos: MockRepo[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/repos", { org, repos });
+  }
+
+  private async seedMockGitHubRepositoryAccess(
+    items: Array<{ repo_owner: string; repo_name: string }>,
+  ): Promise<void> {
+    const reposByOwner = new Map<string, Map<string, MockRepo>>();
+    for (const item of items) {
+      const owner = item.repo_owner.trim();
+      const name = item.repo_name.trim();
+      if (!owner || !name) continue;
+      const repos = reposByOwner.get(owner) ?? new Map<string, MockRepo>();
+      repos.set(name, { full_name: `${owner}/${name}`, owner, name });
+      reposByOwner.set(owner, repos);
+    }
+    await Promise.all(
+      Array.from(reposByOwner, ([owner, repos]) =>
+        this.mockGitHubAddRepos(owner, Array.from(repos.values())),
+      ),
+    );
   }
 
   async mockGitHubAddReviews(
@@ -1083,6 +1210,16 @@ export class ApiClient {
       number,
       commits,
     });
+    await this.seedMockGitHubRepositoryAccess([{ repo_owner: owner, repo_name: repo }]);
+
+    // PR commit fixtures predate workspace-scoped GitHub authentication and
+    // expect the shared mock client to be available for provider lookups.
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
   }
 
   async mockGitHubAddBranches(
@@ -1094,6 +1231,15 @@ export class ApiClient {
       owner,
       repo,
       branches,
+    });
+
+    // Branch fixtures predate workspace-scoped GitHub authentication and
+    // expect the shared mock client to be available for provider lookups.
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
     });
   }
 
@@ -1193,6 +1339,7 @@ export class ApiClient {
     }>;
   }): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/pr-feedback", data);
+    await this.seedMockGitHubRepositoryAccess([{ repo_owner: data.owner, repo_name: data.repo }]);
   }
 
   async mockGitHubSetAuthHealth(data: { authenticated: boolean; error?: string }): Promise<void> {

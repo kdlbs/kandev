@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,22 +29,51 @@ type Config struct {
 	// <repo>/.kandev-dev during local development). When empty, falls back
 	// to ~/.kandev. All workspace artifacts (data, tasks, worktrees, repos)
 	// live under this root.
-	HomeDir             string                    `mapstructure:"homeDir"`
-	Server              ServerConfig              `mapstructure:"server"`
-	Database            DatabaseConfig            `mapstructure:"database"`
-	NATS                NATSConfig                `mapstructure:"nats"`
-	Events              EventsConfig              `mapstructure:"events"`
-	Docker              DockerConfig              `mapstructure:"docker"`
-	Agent               AgentConfig               `mapstructure:"agent"`
-	Auth                AuthConfig                `mapstructure:"auth"`
-	Logging             LoggingConfig             `mapstructure:"logging"`
-	RepositoryDiscovery RepositoryDiscoveryConfig `mapstructure:"repositoryDiscovery"`
-	Worktree            WorktreeConfig            `mapstructure:"worktree"`
-	RepoClone           RepoCloneConfig           `mapstructure:"repoClone"`
-	Debug               DebugConfig               `mapstructure:"debug"`
-	Office              OfficeConfig              `mapstructure:"office"`
-	Voice               VoiceConfig               `mapstructure:"voice"`
-	Features            FeaturesConfig            `mapstructure:"features"`
+	HomeDir                string                       `mapstructure:"homeDir"`
+	Server                 ServerConfig                 `mapstructure:"server"`
+	Database               DatabaseConfig               `mapstructure:"database"`
+	NATS                   NATSConfig                   `mapstructure:"nats"`
+	Events                 EventsConfig                 `mapstructure:"events"`
+	Docker                 DockerConfig                 `mapstructure:"docker"`
+	Agent                  AgentConfig                  `mapstructure:"agent"`
+	Auth                   AuthConfig                   `mapstructure:"auth"`
+	Logging                LoggingConfig                `mapstructure:"logging"`
+	RepositoryDiscovery    RepositoryDiscoveryConfig    `mapstructure:"repositoryDiscovery"`
+	Worktree               WorktreeConfig               `mapstructure:"worktree"`
+	RepoClone              RepoCloneConfig              `mapstructure:"repoClone"`
+	Debug                  DebugConfig                  `mapstructure:"debug"`
+	Office                 OfficeConfig                 `mapstructure:"office"`
+	Voice                  VoiceConfig                  `mapstructure:"voice"`
+	Features               FeaturesConfig               `mapstructure:"features"`
+	GitHubCredentialBroker GitHubCredentialBrokerConfig `mapstructure:"githubCredentialBroker"`
+}
+
+// GitHubCredentialBrokerConfig holds the externally reachable service URL
+// used by managed remote executors. It is independent of GitHub App setup so
+// PAT and named gh CLI workspaces can use remote executors.
+type GitHubCredentialBrokerConfig struct {
+	PublicBaseURL string `mapstructure:"publicBaseUrl" json:"-"`
+}
+
+func (c GitHubCredentialBrokerConfig) validate() error {
+	if strings.TrimSpace(c.PublicBaseURL) == "" {
+		return nil
+	}
+	return validatePublicBaseURL("githubCredentialBroker.publicBaseUrl", c.PublicBaseURL)
+}
+
+func validatePublicBaseURL(field, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || u.Hostname() == "" {
+		return fmt.Errorf("%s must be an absolute URL", field)
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%s must not include credentials, query, or fragment", field)
+	}
+	if u.Scheme != "https" && (u.Scheme != "http" || !IsLoopbackHost(u.Hostname())) {
+		return fmt.Errorf("%s must use HTTPS outside loopback development", field)
+	}
+	return nil
 }
 
 // expandTilde expands a leading "~/" to the user's home directory.
@@ -625,6 +655,10 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("debug.devMode", "KANDEV_DEBUG_DEV_MODE")
 	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
 	_ = v.BindEnv("voice.openAIApiKey", "KANDEV_VOICE_OPENAI_API_KEY")
+	_ = v.BindEnv(
+		"githubCredentialBroker.publicBaseUrl",
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
+	)
 
 	// Configure config file
 	v.SetConfigName("config")
@@ -720,6 +754,10 @@ func validate(cfg *Config) error {
 
 	if cfg.RepositoryDiscovery.MaxDepth <= 0 {
 		errs = append(errs, "repositoryDiscovery.maxDepth must be positive")
+	}
+
+	if err := cfg.GitHubCredentialBroker.validate(); err != nil {
+		errs = append(errs, err.Error())
 	}
 
 	if len(errs) > 0 {

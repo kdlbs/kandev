@@ -39,14 +39,18 @@ func TestCreatedChangeAssociationRouterPreservesGitHubAndMissingServices(t *test
 	var got string
 	router := createdChangeAssociationRouter{
 		resolveRepositoryID: func(context.Context, string, string) string { return "repo-1" },
-		associateGitHub: func(_ context.Context, sessionID, taskID, repositoryID, prURL, branch string) {
-			got = sessionID + "|" + taskID + "|" + repositoryID + "|" + prURL + "|" + branch
+		resolveWorkspaceID:  func(context.Context, string) (string, error) { return "workspace-1", nil },
+		associateGitHub: func(
+			_ context.Context, workspaceID, sessionID, taskID, repositoryID, prURL, branch string,
+		) error {
+			got = workspaceID + "|" + sessionID + "|" + taskID + "|" + repositoryID + "|" + prURL + "|" + branch
+			return nil
 		},
 	}
 	if err := router.associate(context.Background(), "session-1", "task-1", "github", "https://github.com/g/r/pull/2", "feature", ""); err != nil {
 		t.Fatal(err)
 	}
-	if got != "session-1|task-1|repo-1|https://github.com/g/r/pull/2|feature" {
+	if got != "workspace-1|session-1|task-1|repo-1|https://github.com/g/r/pull/2|feature" {
 		t.Fatalf("GitHub association = %q", got)
 	}
 	if err := router.associate(context.Background(), "session-1", "task-1", "gitlab", "url", "feature", ""); err != nil {

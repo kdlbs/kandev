@@ -3,33 +3,191 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/url"
-	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 const (
 	// envGitHubToken is the environment variable name for GitHub authentication tokens.
 	envGitHubToken = "GITHUB_TOKEN"
 	// envGHToken is the gh CLI compatible environment variable name.
-	envGHToken             = "GH_TOKEN"
-	envGitLabToken         = "GITLAB_TOKEN"
-	envGitLabHost          = "GITLAB_HOST"
-	envKandevGitLabHost    = "KANDEV_GITLAB_HOST"
+	envGHToken          = "GH_TOKEN"
+	envGitLabToken      = "GITLAB_TOKEN"
+	envGitLabHost       = "GITLAB_HOST"
+	envKandevGitLabHost = "KANDEV_GITLAB_HOST"
+
+	gitHubCredentialHelper = "!agentctl git-credential"
+	defaultGitHubHost      = "github.com"
 	gitLabCredentialHelper = `!f() { echo "username=oauth2"; echo "password=$GITLAB_TOKEN"; }; f`
 )
 
-// injectGitLabWorkspaceCredentials overrides any inherited/profile GitLab
-// credential with the current workspace's configured connection. Empty
-// values are deliberate: standalone executions otherwise inherit the backend
-// process environment and could receive another workspace's fallback token.
+var ErrGitHubCredentialBrokerURL = errors.New("invalid GitHub credential broker URL")
+
+type GitHubCredentialLeaseRequest struct {
+	WorkspaceID  string
+	TaskID       string
+	SessionID    string
+	RepositoryID string
+	Owner        string
+	Repo         string
+	Host         string
+}
+
+type GitHubCredentialLease struct {
+	Token string
+}
+
+type githubCredentialScope struct {
+	Lease        string `json:"lease"`
+	TaskID       string `json:"task_id"`
+	SessionID    string `json:"session_id"`
+	RepositoryID string `json:"repository_id"`
+	Owner        string `json:"owner"`
+	Repo         string `json:"repo"`
+	Host         string `json:"host"`
+}
+
+type GitHubCredentialLeaseIssuer interface {
+	IssueGitHubCredentialLease(context.Context, GitHubCredentialLeaseRequest) (GitHubCredentialLease, error)
+}
+
+// SetGitHubCredentialBroker configures renewable workspace automation credentials.
+// brokerURL is the full credential-resolution endpoint URL.
+func (e *Executor) SetGitHubCredentialBroker(issuer GitHubCredentialLeaseIssuer, brokerURL string) {
+	e.githubCredentialIssuer = issuer
+	e.githubCredentialBrokerURL = strings.TrimSpace(brokerURL)
+}
+
+func (e *Executor) configureGitHubCredentialBroker(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	info *repoInfo,
+) error {
+	return e.configureGitHubCredentialBrokerForRepositories(ctx, req, []*repoInfo{info})
+}
+
+func (e *Executor) configureGitHubCredentialBrokerForRepositories(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	infos []*repoInfo,
+) error {
+	if e.githubCredentialIssuer == nil || len(infos) == 0 {
+		return nil
+	}
+	if req.Env == nil {
+		req.Env = make(map[string]string)
+	}
+	if req.Env[envGitHubToken] != "" || req.Env[envGHToken] != "" {
+		return nil
+	}
+	scopes := make([]githubCredentialScope, 0, len(infos))
+	for _, info := range infos {
+		scope, err := e.issueGitHubCredentialScope(ctx, req, info)
+		if err != nil {
+			return err
+		}
+		if scope != nil {
+			scopes = append(scopes, *scope)
+		}
+	}
+	if len(scopes) == 0 {
+		return nil
+	}
+	encodedScopes, err := json.Marshal(scopes)
+	if err != nil {
+		return fmt.Errorf("encode GitHub credential scopes: %w", err)
+	}
+	primary := scopes[0]
+	req.Env[githubauth.CredentialBrokerURLEnv] = e.githubCredentialBrokerURL
+	req.Env[githubauth.CredentialLeaseEnv] = primary.Lease
+	req.Env[githubauth.CredentialTaskIDEnv] = primary.TaskID
+	req.Env[githubauth.CredentialSessionIDEnv] = primary.SessionID
+	req.Env[githubauth.CredentialRepositoryEnv] = primary.RepositoryID
+	req.Env[githubauth.CredentialOwnerEnv] = primary.Owner
+	req.Env[githubauth.CredentialRepoEnv] = primary.Repo
+	req.Env[githubauth.CredentialHostEnv] = primary.Host
+	req.Env[githubauth.CredentialScopesEnv] = string(encodedScopes)
+	req.Env["GIT_TERMINAL_PROMPT"] = "0"
+	appendGitConfig(req.Env, "credential.https://github.com.helper", gitHubCredentialHelper)
+	appendGitConfig(req.Env, "credential.useHttpPath", "true")
+	return nil
+}
+
+func (e *Executor) issueGitHubCredentialScope(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	info *repoInfo,
+) (*githubCredentialScope, error) {
+	if info == nil || info.Repository == nil {
+		return nil, nil
+	}
+	repository := info.Repository
+	if repository.Provider != "" && !strings.EqualFold(repository.Provider, "github") {
+		return nil, nil
+	}
+	owner := strings.TrimSpace(repository.ProviderOwner)
+	repo := strings.TrimSpace(repository.ProviderName)
+	if owner == "" || repo == "" || info.RepositoryID == "" {
+		return nil, nil
+	}
+	if err := validateGitHubCredentialBrokerURL(e.githubCredentialBrokerURL, req.ExecutorType); err != nil {
+		return nil, err
+	}
+	lease, err := e.githubCredentialIssuer.IssueGitHubCredentialLease(ctx, GitHubCredentialLeaseRequest{
+		WorkspaceID: req.WorkspaceID, TaskID: req.TaskID, SessionID: req.SessionID,
+		RepositoryID: info.RepositoryID, Owner: owner, Repo: repo, Host: defaultGitHubHost,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("issue GitHub credential lease: %w", err)
+	}
+	if strings.TrimSpace(lease.Token) == "" {
+		return nil, fmt.Errorf("issue GitHub credential lease: empty lease")
+	}
+	return &githubCredentialScope{
+		Lease: lease.Token, TaskID: req.TaskID, SessionID: req.SessionID,
+		RepositoryID: info.RepositoryID, Owner: owner, Repo: repo, Host: defaultGitHubHost,
+	}, nil
+}
+
+func validateGitHubCredentialBrokerURL(raw, executorType string) error {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		return fmt.Errorf("%w: absolute endpoint is required", ErrGitHubCredentialBrokerURL)
+	}
+	if parsed.Scheme == "https" {
+		return nil
+	}
+	if parsed.Scheme != "http" || executorNeedsResolvedCredentials(executorType) || !isLoopbackHost(parsed.Hostname()) {
+		return fmt.Errorf("%w: HTTPS is required for non-local executors", ErrGitHubCredentialBrokerURL)
+	}
+	return nil
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func appendGitConfig(env map[string]string, key, value string) {
+	count, _ := strconv.Atoi(env["GIT_CONFIG_COUNT"])
+	env[fmt.Sprintf("GIT_CONFIG_KEY_%d", count)] = key
+	env[fmt.Sprintf("GIT_CONFIG_VALUE_%d", count)] = value
+	env["GIT_CONFIG_COUNT"] = strconv.Itoa(count + 1)
+}
+
+// injectGitLabWorkspaceCredentials overrides inherited GitLab credentials
+// with the current workspace's configured connection.
 func (e *Executor) injectGitLabWorkspaceCredentials(ctx context.Context, req *LaunchAgentRequest) {
 	if req.Env == nil {
 		req.Env = make(map[string]string)
@@ -73,14 +231,15 @@ func removeGitLabCredentialHelpers(env map[string]string) {
 	}
 	if len(entries) == 0 {
 		delete(env, "GIT_CONFIG_COUNT")
-	} else {
-		env["GIT_CONFIG_COUNT"] = strconv.Itoa(len(entries))
+		return
 	}
+	env["GIT_CONFIG_COUNT"] = strconv.Itoa(len(entries))
 }
 
 func appendGitLabCredentialHelper(env map[string]string, host string) {
 	origin, err := url.Parse(strings.TrimSpace(host))
-	if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host == "" || origin.User != nil || (origin.Path != "" && origin.Path != "/") {
+	if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host == "" ||
+		origin.User != nil || (origin.Path != "" && origin.Path != "/") {
 		return
 	}
 	origin.Path = ""
@@ -112,94 +271,13 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return cloned
 }
 
-// injectGitHubToken injects GITHUB_TOKEN and GH_TOKEN into the request env for remote executors.
-// It looks for a GITHUB_TOKEN secret in the secrets store and injects it if found.
-// Both env vars are set for compatibility: GITHUB_TOKEN for git, GH_TOKEN for gh CLI.
-func (e *Executor) injectGitHubToken(ctx context.Context, req *LaunchAgentRequest) {
-	if req.Env == nil {
-		req.Env = make(map[string]string)
-	}
-
-	// Skip if already set (user configured explicitly in profile)
-	if req.Env[envGitHubToken] != "" || req.Env[envGHToken] != "" {
-		return
-	}
-
-	if e.secretStore == nil {
-		return
-	}
-
-	// Look for a GITHUB_TOKEN secret in the secrets store
-	items, err := e.secretStore.List(ctx)
-	if err != nil {
-		e.logger.Debug("failed to list secrets for GitHub token injection", zap.Error(err))
-		return
-	}
-
-	var tokenSecretID string
-	for _, item := range items {
-		if !item.HasValue {
-			continue
-		}
-		if item.Name == envGitHubToken || item.Name == "github_token" {
-			tokenSecretID = item.ID
-			break
-		}
-	}
-	if tokenSecretID == "" {
-		return
-	}
-
-	token, err := e.secretStore.Reveal(ctx, tokenSecretID)
-	if err != nil || token == "" {
-		e.logger.Debug("failed to reveal GitHub token secret", zap.Error(err))
-		return
-	}
-
-	// Inject both env vars for compatibility
-	req.Env[envGitHubToken] = token
-	req.Env[envGHToken] = token
-	e.logger.Debug("injected GitHub token for remote executor")
-}
-
-// injectGitHubTokenFromCLI is the final fallback that extracts a token from
-// the local gh CLI if no other credential source provided a GitHub token.
-// This enables "just works" behavior when the user has gh authenticated locally.
-func (e *Executor) injectGitHubTokenFromCLI(_ context.Context, req *LaunchAgentRequest) {
-	if req.Env == nil {
-		req.Env = make(map[string]string)
-	}
-
-	// Skip if already set by any previous method
-	if req.Env[envGitHubToken] != "" || req.Env[envGHToken] != "" {
-		return
-	}
-
-	// Try to extract token from local gh CLI
-	token, err := detectGHToken()
-	if err != nil {
-		e.logger.Debug("no GitHub token from local gh CLI", zap.Error(err))
-		return
-	}
-
-	req.Env[envGitHubToken] = token
-	req.Env[envGHToken] = token
-	e.logger.Debug("injected GitHub token from local gh CLI")
-}
-
-// resolveRemoteCredentials handles profile-level remote auth credentials.
-// It resolves remote_auth_secrets (secret-based env vars like gh_cli_env)
-// and remote_credentials (including gh_cli_token which extracts from local gh CLI).
+// resolveRemoteCredentials handles explicit profile-level remote auth secrets.
 func (e *Executor) resolveRemoteCredentials(ctx context.Context, req *LaunchAgentRequest, metadata map[string]interface{}) {
 	if req.Env == nil {
 		req.Env = make(map[string]string)
 	}
 
-	// 1. Resolve remote_auth_secrets (e.g., gh_cli_env method with a secret ID)
 	e.resolveAuthSecrets(ctx, req, metadata)
-
-	// 2. Handle gh_cli_token from remote_credentials (extract from local gh CLI)
-	e.resolveGHCLIToken(req, metadata)
 }
 
 // resolveAuthSecrets reads remote_auth_secrets from metadata and resolves secret values
@@ -265,76 +343,4 @@ func methodIDToEnvVar(methodID string) string {
 		}
 		return ""
 	}
-}
-
-// resolveGHCLIToken handles gh_cli_token from remote_credentials metadata.
-// If selected, it extracts the token from the local gh CLI via `gh auth token`.
-func (e *Executor) resolveGHCLIToken(req *LaunchAgentRequest, metadata map[string]interface{}) {
-	// Skip if either GITHUB_TOKEN or GH_TOKEN is already set (respect profile env vars priority)
-	if req.Env[envGitHubToken] != "" || req.Env[envGHToken] != "" {
-		return
-	}
-
-	credsJSON, _ := metadata[profileKeyRemoteCredentials].(string)
-	if credsJSON == "" {
-		return
-	}
-
-	var credentialIDs []string
-	if err := json.Unmarshal([]byte(credsJSON), &credentialIDs); err != nil {
-		e.logger.Debug("failed to parse remote_credentials", zap.Error(err))
-		return
-	}
-
-	// Check if gh_cli_token is selected
-	hasGHToken := false
-	for _, id := range credentialIDs {
-		if id == "gh_cli_token" {
-			hasGHToken = true
-			break
-		}
-	}
-	if !hasGHToken {
-		return
-	}
-
-	// Extract token from local gh CLI
-	token, err := detectGHToken()
-	if err != nil {
-		e.logger.Debug("failed to detect gh token from local CLI", zap.Error(err))
-		return
-	}
-
-	req.Env[envGitHubToken] = token
-	req.Env[envGHToken] = token
-	e.logger.Debug("resolved GITHUB_TOKEN from local gh CLI")
-}
-
-// detectGHToken runs `gh auth token` to extract the GitHub token from the local gh CLI.
-//
-// Throttle Acquire (30s budget) runs first; the 5s exec ctx is constructed
-// AFTER the slot is held so its deadline starts from when gh actually
-// begins running. Building it earlier would let throttle queue time eat
-// into the exec budget and silently skip GITHUB_TOKEN injection.
-func detectGHToken() (string, error) {
-	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelAcquire()
-	release, err := subproc.GH().Acquire(acquireCtx)
-	if err != nil {
-		return "", fmt.Errorf("gh throttle acquire: %w", err)
-	}
-	defer release()
-	execCtx, cancelExec := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelExec()
-
-	cmd := exec.CommandContext(execCtx, "gh", "auth", "token")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	token := strings.TrimSpace(string(out))
-	if token == "" {
-		return "", fmt.Errorf("gh auth token returned empty")
-	}
-	return token, nil
 }
