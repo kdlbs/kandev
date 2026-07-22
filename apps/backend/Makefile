@@ -17,8 +17,9 @@ LDFLAGS := -s -w
 # when `-o` is explicit.
 #
 # Install GNU Make on Windows with `winget install ezwinports.make` (or via
-# scoop/chocolatey). Targets that rely on Unix builtins (run, dev,
-# start-debug, build-cross) remain Unix-only.
+# scoop/chocolatey). run/dev/start-debug branch on OS below (Windows uses
+# `set VAR=VAL&` + backslashed paths). build-cross remains Unix-only — it
+# cross-compiles with CGO for other OSes, which needs Unix toolchains.
 ifeq ($(OS),Windows_NT)
   RM = cmd /c del /s /q
   RMDIR = cmd /c rmdir /s /q
@@ -35,6 +36,12 @@ ifeq ($(OS),Windows_NT)
   GO_DARWIN_ARM64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=arm64&
   GO_DARWIN_AMD64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=amd64&
   EXE = .exe
+  # Run-target env prefixes and binary invocation. cmd.exe has no `NAME=VAL cmd`
+  # syntax (use `set NAME=VAL&`) and no `exec`; the binary path needs backslashes.
+  DEV_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true&
+  DEBUG_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug&
+  EXEC =
+  RUN_BIN = "$(subst /,\,$(BUILD_DIR)/$(BINARY_NAME).exe)"
   # Windows recipes run under cmd.exe, which has no POSIX `if command -v ...; then`
   # syntax. Neither codesign nor rcodesign ships on Windows anyway, so ad-hoc
   # signing is a no-op here: darwin/arm64 stays Go-signed at link time, and
@@ -52,6 +59,10 @@ else
   GO_DARWIN_ARM64 = CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
   GO_DARWIN_AMD64 = CGO_ENABLED=0 GOOS=darwin GOARCH=amd64
   EXE =
+  DEV_ENV = KANDEV_DEBUG_PPROF_ENABLED=true
+  DEBUG_ENV = KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug
+  EXEC = exec
+  RUN_BIN = ./$(BUILD_DIR)/$(BINARY_NAME)$(EXE)
   # Ad-hoc sign a darwin Mach-O so Apple Silicon (AMFI) will run it; ad-hoc needs
   # no Apple identity. Go already ad-hoc-signs darwin/arm64 at link time, so this
   # is mainly to (a) sign darwin/amd64 too and (b) re-sign uniformly. Prefer
@@ -200,17 +211,17 @@ clean:
 ## Run the application
 run: build
 	@echo "Running $(BINARY_NAME)..."
-	./$(BUILD_DIR)/$(BINARY_NAME)$(EXE) __backend
+	$(RUN_BIN) __backend
 
 ## Run in development mode (with pprof enabled)
 dev: build
 	@echo "Running $(BINARY_NAME) in development mode..."
-	@KANDEV_DEBUG_PPROF_ENABLED=true exec ./$(BUILD_DIR)/$(BINARY_NAME)$(EXE) __backend
+	@$(DEV_ENV) $(EXEC) $(RUN_BIN) __backend
 
 ## Run in debug mode (pprof + debug logging)
 start-debug: build
 	@echo "Running $(BINARY_NAME) in debug mode (pprof + debug logging)..."
-	@KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug exec ./$(BUILD_DIR)/$(BINARY_NAME)$(EXE) __backend
+	@$(DEBUG_ENV) $(EXEC) $(RUN_BIN) __backend
 
 ## Run tests
 test:

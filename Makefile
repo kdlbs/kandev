@@ -150,7 +150,11 @@ bootstrap-e2e:
 
 .PHONY: doctor
 doctor:
+ifeq ($(OS),Windows_NT)
+	@echo pre-commit hooks skipped on native Windows - run scripts/doctor from Git Bash to enable
+else
 	@scripts/doctor
+endif
 
 .PHONY: dev
 dev: doctor
