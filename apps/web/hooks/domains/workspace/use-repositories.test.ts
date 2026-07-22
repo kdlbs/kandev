@@ -85,4 +85,16 @@ describe("useRepositories", () => {
     expect(mockListRepositories).toHaveBeenCalledWith("ws-1", undefined, { cache: "no-store" });
     expect(mockSetRepositories).toHaveBeenCalledWith("ws-1", [{ id: "r1", name: "Repo One" }]);
   });
+
+  it("keeps cached repositories when a manual refresh fails", async () => {
+    setup(/* loaded */ true);
+    mockListRepositories.mockRejectedValueOnce(new Error("Network unavailable"));
+    const { result } = renderHook(() => useRepositories("ws-1"));
+
+    await expect(result.current.refresh()).resolves.toBeUndefined();
+
+    expect(mockSetRepositories).not.toHaveBeenCalled();
+    expect(mockSetRepositoriesLoading).toHaveBeenNthCalledWith(1, "ws-1", true);
+    expect(mockSetRepositoriesLoading).toHaveBeenLastCalledWith("ws-1", false);
+  });
 });

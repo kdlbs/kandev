@@ -39,6 +39,8 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     try {
       const response = await listRepositories(workspaceId, undefined, { cache: "no-store" });
       setRepositories(workspaceId, response.repositories);
+    } catch {
+      // Keep the existing cached repositories when a manual refresh fails.
     } finally {
       setRepositoriesLoading(workspaceId, false);
     }
