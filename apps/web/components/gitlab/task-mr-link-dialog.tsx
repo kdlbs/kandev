@@ -125,6 +125,12 @@ export function TaskMRLinkDialog({
   const { toast } = useToast();
 
   useEffect(() => {
+    if (repositoryID === NO_REPOSITORY && defaultRepositoryID !== NO_REPOSITORY) {
+      setRepositoryID(defaultRepositoryID);
+    }
+  }, [defaultRepositoryID, repositoryID]);
+
+  useEffect(() => {
     if (open) return;
     setMRURL("");
     setRepositoryID(defaultRepositoryID);
