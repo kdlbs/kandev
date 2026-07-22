@@ -9,6 +9,7 @@ const loadPlugins = vi.fn(async () => {});
 const unloadPlugin = vi.fn();
 const installPluginFromUrl = vi.fn<() => Promise<InstallResult>>();
 const installPluginUpload = vi.fn<() => Promise<InstallResult>>();
+const enablePlugin = vi.fn(async () => ({ enabled: true }));
 
 vi.mock("@/lib/plugins/host", () => ({
   loadPlugins: (...args: unknown[]) => loadPlugins(...(args as [])),
@@ -23,6 +24,7 @@ vi.mock("@/lib/api/domains/plugins-api", async () => {
     ...actual,
     installPluginFromUrl: (...args: unknown[]) => installPluginFromUrl(...(args as [])),
     installPluginUpload: (...args: unknown[]) => installPluginUpload(...(args as [])),
+    enablePlugin: (...args: unknown[]) => enablePlugin(...(args as [])),
   };
 });
 
@@ -57,6 +59,7 @@ beforeEach(() => {
   unloadPlugin.mockClear();
   installPluginFromUrl.mockReset();
   installPluginUpload.mockReset();
+  enablePlugin.mockClear();
 });
 
 describe("usePluginActions — install/update", () => {
@@ -72,6 +75,28 @@ describe("usePluginActions — install/update", () => {
 
     await waitFor(() => expect(loadPlugins).toHaveBeenCalledTimes(1));
     expect(unloadPlugin).toHaveBeenCalledWith(plugin.id, { evictCache: true });
+
+    const unloadOrder = unloadPlugin.mock.invocationCallOrder[0];
+    const loadOrder = loadPlugins.mock.invocationCallOrder[0];
+    expect(unloadOrder).toBeLessThan(loadOrder);
+  });
+});
+
+describe("usePluginActions — enable", () => {
+  it("does not evict the cached bundle registration on plain enable, so a disable-then-re-enable cycle reuses it", async () => {
+    const plugin = activeRecord();
+
+    const { result } = renderHook(() => usePluginActions(), { wrapper });
+
+    await act(async () => {
+      await result.current.handleEnable(plugin);
+    });
+
+    await waitFor(() => expect(loadPlugins).toHaveBeenCalledTimes(1));
+    // Enable must unload without evicting the cache — eviction is reserved
+    // for install/update, where the bundle content actually changed.
+    expect(unloadPlugin).toHaveBeenCalledWith(plugin.id);
+    expect(unloadPlugin).not.toHaveBeenCalledWith(plugin.id, { evictCache: true });
 
     const unloadOrder = unloadPlugin.mock.invocationCallOrder[0];
     const loadOrder = loadPlugins.mock.invocationCallOrder[0];
