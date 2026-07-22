@@ -24,11 +24,7 @@ describe("SessionMobileBottomNav", () => {
 
   it("does not consume navigation space without a linked merge request", () => {
     render(
-      <SessionMobileBottomNav
-        activePanel="chat"
-        onPanelChange={vi.fn()}
-        onOpenStatus={vi.fn()}
-      />,
+      <SessionMobileBottomNav activePanel="chat" onPanelChange={vi.fn()} onOpenStatus={vi.fn()} />,
     );
     expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
   });

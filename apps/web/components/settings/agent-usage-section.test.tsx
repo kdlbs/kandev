@@ -12,7 +12,9 @@ vi.mock("@/lib/api", () => ({
 }));
 
 vi.mock("@/components/agent-logo", () => ({
-  AgentLogo: ({ agentName }: { agentName: string }) => <span data-testid={`logo-${agentName}`} />,
+  AgentLogo: ({ agentName, className }: { agentName: string; className?: string }) => (
+    <span data-testid={`logo-${agentName}`} className={className} />
+  ),
 }));
 
 afterEach(() => {
@@ -76,6 +78,8 @@ describe("AgentUsageSection", () => {
     expect(screen.getByText("62%")).toBeDefined();
     expect(screen.getByText("7d")).toBeDefined();
     expect(screen.getByText("Codex")).toBeDefined();
+    expect(screen.getByTestId("logo-codex-acp").className).toContain("!opacity-100");
+    expect(screen.getByTestId("logo-codex-acp").className).toContain("brightness-100");
     expect(screen.getByText("Could not fetch usage data.")).toBeDefined();
   });
 });

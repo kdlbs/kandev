@@ -24,7 +24,7 @@ Kandev has useful app-wide state, but it is scattered through route headers. A s
 - A modified pointer press that does not become a horizontal drag preserves the contribution's normal click behavior. Plain mouse/touch interaction never starts reordering.
 - Modified dragging does not start browser text selection. The surface uses a clear grabbing state after the horizontal drag threshold is crossed.
 - Status item contents share one optical vertical center. The 1 px top separator does not reduce or offset the 24 px content alignment box.
-- The bar is a quiet technical strip rather than a collection of chips: low-contrast Kandev surface tokens, deliberate space between opaque status items, Geist Sans for labels, Geist Mono plus tabular numerals for changing metrics, consistent icon weight, and no decorative elevation.
+- The bar is a quiet technical strip rather than a collection of chips: its background, foreground, and separator use the same Kandev app-surface tokens as the sidebar, with deliberate space between opaque status items, Geist Sans for labels, Geist Mono plus tabular numerals for changing metrics, consistent icon weight, and no decorative elevation.
 
 ## Responsive and layout contract
 

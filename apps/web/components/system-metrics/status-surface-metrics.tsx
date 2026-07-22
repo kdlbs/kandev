@@ -178,6 +178,10 @@ function MetricValue({
   source: SystemMetricsSource;
   updatedAt?: string;
 }) {
+  const help =
+    metric.id === "io_load"
+      ? "Average number of tasks running or waiting for CPU during the last minute. Compare this value with the host's CPU core count."
+      : null;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -195,6 +199,7 @@ function MetricValue({
       <TooltipContent>
         <div className="space-y-1">
           <div className="font-medium">{metricLabel(metric.id)}</div>
+          {help ? <div className="max-w-72 text-xs text-muted-foreground">{help}</div> : null}
           <div className="text-xs text-muted-foreground">Host: {source.label}</div>
           <div className="text-xs tabular-nums">{formatMetric(metric)}</div>
           {metric.error ? (
@@ -214,7 +219,7 @@ function metricLabel(id: string) {
       memory_percent: "Memory",
       disk_percent: "Disk",
       cpu_temp: "CPU temperature",
-      io_load: "Load avg",
+      io_load: "System load (1 min)",
     }[id] ?? id
   );
 }

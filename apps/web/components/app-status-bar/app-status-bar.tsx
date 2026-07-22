@@ -38,7 +38,7 @@ export function AppStatusBar({
       ref={drag.barRef}
       {...drag.barHandlers}
       className={cn(
-        "relative flex h-6 shrink-0 select-none items-center gap-4 overflow-hidden bg-app-status-bar px-3 text-xs font-medium leading-none text-app-status-bar-foreground/80 antialiased [font-family:var(--font-geist-sans)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-app-status-bar-border",
+        "relative flex h-6 shrink-0 select-none items-center gap-4 overflow-hidden bg-background px-3 text-xs font-medium leading-none text-foreground/80 antialiased [font-family:var(--font-geist-sans)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-border",
         drag.draggingId && "cursor-grabbing",
       )}
       data-testid="app-status-bar"

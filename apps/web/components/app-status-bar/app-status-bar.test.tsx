@@ -89,6 +89,15 @@ describe("AppStatusBar rendering", () => {
     expect(screen.getByTestId(APP_STATUS_BAR_TEST_ID).className).toContain("before:h-px");
   });
 
+  it("uses the same surface colors as the app sidebar", () => {
+    renderBar();
+
+    const bar = screen.getByTestId(APP_STATUS_BAR_TEST_ID);
+    expect(bar.className).toContain("bg-background");
+    expect(bar.className).toContain("text-foreground/80");
+    expect(bar.className).toContain("before:bg-border");
+  });
+
   it("does not render an empty metrics item when the metrics preference is disabled", () => {
     renderBar();
 

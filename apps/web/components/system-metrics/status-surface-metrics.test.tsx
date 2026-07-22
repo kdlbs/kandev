@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
@@ -69,13 +69,7 @@ function renderMetrics(drawerOpen = false) {
                       value: 63,
                       available: true,
                     },
-                    {
-                      id: "cpu_temp",
-                      label: "CPU temperature",
-                      unit: "°C",
-                      value: 72,
-                      available: true,
-                    },
+                    { id: "io_load", label: "Load average", value: 2.5, available: true },
                   ],
                 },
                 {
@@ -118,7 +112,7 @@ describe("StatusSurfaceMetrics", () => {
 
   afterEach(cleanup);
 
-  it("subscribes and renders in the desktop status bar", () => {
+  it("subscribes and renders in the desktop status bar", async () => {
     renderMetrics();
 
     expect(subscribeMock).toHaveBeenCalledWith(true);
@@ -126,7 +120,14 @@ describe("StatusSurfaceMetrics", () => {
     expect(screen.getByLabelText("CPU 42%")).toBeTruthy();
     expect(screen.getByLabelText("Memory 51%")).toBeTruthy();
     expect(screen.getByLabelText("Disk 63%")).toBeTruthy();
-    expect(screen.getByLabelText("CPU temperature 72°C")).toBeTruthy();
+    const systemLoad = screen.getByLabelText("System load (1 min) 2.5");
+    expect(systemLoad).toBeTruthy();
+    fireEvent.focus(systemLoad);
+    expect(
+      await screen.findAllByText(
+        "Average number of tasks running or waiting for CPU during the last minute. Compare this value with the host's CPU core count.",
+      ),
+    ).not.toHaveLength(0);
     expect(screen.queryByLabelText("Executor metrics")).toBeNull();
     expect(screen.queryByLabelText("Memory 99%")).toBeNull();
   });
