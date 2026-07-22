@@ -299,7 +299,12 @@ type acpUsageUpdate struct {
 	SessionUpdate string `json:"sessionUpdate"`
 	Size          int64  `json:"size"`
 	Used          int64  `json:"used"`
-	Cost          *struct {
+	Meta          struct {
+		ClaudeOrigin struct {
+			Kind string `json:"kind"`
+		} `json:"_claude/origin"`
+	} `json:"_meta,omitempty"`
+	Cost *struct {
 		Amount   float64 `json:"amount"`
 		Currency string  `json:"currency"`
 	} `json:"cost,omitempty"`
@@ -436,7 +441,7 @@ func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID stri
 	effectiveSize := a.recordUsageAndMaxSize(sessionID, usage.Size, usage.Used, costSubcents)
 
 	remaining := max(effectiveSize-usage.Used, 0)
-	return &AgentEvent{
+	contextEvent := &AgentEvent{
 		Type:                   streams.EventTypeContextWindow,
 		SessionID:              sessionID,
 		ContextWindowSize:      effectiveSize,
@@ -444,6 +449,22 @@ func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID stri
 		ContextWindowRemaining: remaining,
 		ContextEfficiency:      float64(usage.Used) / float64(effectiveSize) * 100,
 	}
+
+	var lifecycleType string
+	switch usage.Meta.ClaudeOrigin.Kind {
+	case "human":
+		lifecycleType = streams.EventTypeForegroundIdle
+	case "task-notification":
+		lifecycleType = streams.EventTypeBackgroundComplete
+	}
+	if lifecycleType == "" {
+		return contextEvent
+	}
+	// Preserve the context-window update carried by the same provider frame.
+	// The returned lifecycle event follows it through the normal notification
+	// worker path, maintaining provider order without overloading either type.
+	a.sendUpdate(*contextEvent)
+	return &AgentEvent{Type: lifecycleType, SessionID: sessionID}
 }
 
 // convertMessageChunk converts an ACP ContentBlock to an AgentEvent, handling multimodal content.

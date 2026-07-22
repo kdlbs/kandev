@@ -208,8 +208,9 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.name !== undefined) update.name = payload.name;
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
-  // Reset the fine-grained busy substate on every coarse transition so a stale
-  // "background" value can't survive into the next turn (ADR-0038).
+  // Carry the authoritative activity value across coarse transitions. A new
+  // foreground turn resets it to generating; settled detached work may remain
+  // background (ADR-0049).
   if (payload.foreground_activity !== undefined)
     update.foreground_activity = payload.foreground_activity;
   return update;
@@ -486,9 +487,7 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
   });
 }
 
-/** Apply an intra-RUNNING flip of the fine-grained busy substate: the
- *  foreground turn moved between generating and idle-on-background-work without
- *  any coarse state change (ADR-0038). Annotates the
+/** Apply a fine-grained busy-substate flip (ADR-0049). Annotates the
  *  existing session row so the composer gate and status indicator update; does
  *  nothing until the row exists (state_changed seeds it first). */
 function applyForegroundActivity(
@@ -501,12 +500,10 @@ function applyForegroundActivity(
   const sessionId = toSessionId(payload.session_id);
   const existing = store.getState().taskSessions.items[sessionId];
   if (!existing) return;
-  // The substate is only meaningful while the session is RUNNING. Ignoring a
-  // flip for any other coarse state prevents a delayed/out-of-order background
-  // event from reopening the composer after the turn already ended (the coarse
-  // state governs then). Also guard the task binding so a stale or malformed
-  // payload cannot move the session onto another task's list.
-  if (existing.state !== "RUNNING") return;
+  // Detached work can outlive the foreground turn, whose coarse state is then
+  // WAITING_FOR_INPUT. Terminal/parked sessions reject delayed activity frames;
+  // their execution teardown owns the final clear.
+  if (existing.state !== "RUNNING" && existing.state !== "WAITING_FOR_INPUT") return;
   if (existing.task_id && existing.task_id !== taskId) return;
   store.getState().upsertTaskSessionFromEvent(taskId, {
     id: sessionId,

@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 	"time"
+
+	acp "github.com/coder/acp-go-sdk"
 )
 
 // TestParseBackgroundDuration pins the /background argument parsing, including
@@ -30,5 +32,39 @@ func TestParseBackgroundDuration(t *testing.T) {
 				t.Fatalf("parseBackgroundDuration(%q) = %v, want %v", tc.cmd, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDetachedBackgroundLifecycleFrames(t *testing.T) {
+	e, updates := newTestEmitter()
+	e.launchAsyncSubagentTool("detached-1", "Detached work", "Keep working", "general-purpose")
+	e.completeDetachedWork()
+
+	got := updates.getUpdates()
+	if len(got) != 3 {
+		t.Fatalf("updates = %d, want launch, async acknowledgement, and completion", len(got))
+	}
+	if got[0].notification.Update.ToolCall == nil {
+		t.Fatal("first update must register the subagent tool")
+	}
+	launch := got[1].notification.Update.ToolCallUpdate
+	if launch == nil {
+		t.Fatal("second update must acknowledge the async launch")
+	}
+	response := launch.Meta["claudeCode"].(map[string]any)["toolResponse"].(map[string]any)
+	if response[subagentKeyStatus] != subagentStatusAsync || response["isAsync"] != true {
+		t.Fatalf("async launch response = %#v", response)
+	}
+
+	usage := got[2].notification.Update.UsageUpdate
+	if usage == nil {
+		t.Fatal("third update must be a usage lifecycle boundary")
+	}
+	origin := usage.Meta[claudeOriginMetaKey].(map[string]any)
+	if origin["kind"] != claudeOriginTaskNotification {
+		t.Fatalf("completion origin = %#v", origin)
+	}
+	if got[2].notification.SessionId != acp.SessionId("test-session") {
+		t.Fatalf("completion session = %q", got[2].notification.SessionId)
 	}
 }

@@ -158,13 +158,13 @@ export type TaskSessionState =
 export type TaskPendingAction = "clarification" | "permission";
 
 /**
- * Fine-grained busy substate of a RUNNING session (see ADR-0038). Distinguishes
+ * Fine-grained busy substate of a session (see ADR-0049). Distinguishes
  * a foreground turn that is actively generating from one that is idle, held open
  * only by spawned background work (a subagent task, a run-in-background shell, an
- * active Monitor). Only meaningful while `state === "RUNNING"`; for every other
- * state the coarse state already tells the whole story. Delivered live over the
- * `session.activity_changed` WS event and reset on every `session.state_changed`
- * transition; absent/`null` is treated as "generating" (the safe default).
+ * active Monitor). `generating` is meaningful while `state === "RUNNING"`;
+ * `background` may outlive the foreground turn. Delivered live over the
+ * `session.activity_changed` WS event and carried on `session.state_changed`;
+ * absent/`null` is treated as "generating" for a RUNNING session.
  */
 export type ForegroundActivity = "generating" | "background";
 
@@ -423,9 +423,8 @@ export type TaskSession = {
   task_environment_id?: string;
   state: TaskSessionState;
   /**
-   * Fine-grained busy substate while `state === "RUNNING"`
-   * (ADR-0038). Pushed over `session.activity_changed`;
-   * absent/`null` means the foreground turn is generating (the safe default).
+   * Fine-grained busy substate (ADR-0049). Pushed over
+   * `session.activity_changed`; background may outlive the foreground turn.
    */
   foreground_activity?: ForegroundActivity | null;
   error_message?: string;

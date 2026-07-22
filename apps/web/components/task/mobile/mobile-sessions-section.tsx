@@ -91,7 +91,10 @@ function sessionStateLabel(
   foregroundActivity: ForegroundActivity | null,
   pending: PendingInput,
 ): string {
-  if (state === "RUNNING" && foregroundActivity === "background") {
+  if (
+    (state === "RUNNING" || state === "WAITING_FOR_INPUT") &&
+    foregroundActivity === "background"
+  ) {
     return BACKGROUND_RUNNING_LABEL;
   }
   if (pending.permission) return "Permission requested";

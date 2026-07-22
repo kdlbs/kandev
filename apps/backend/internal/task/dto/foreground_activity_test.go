@@ -25,8 +25,7 @@ func TestEnrichForegroundActivity(t *testing.T) {
 		state    models.TaskSessionState
 		provider *fakeForegroundActivityProvider
 		want     v1.ForegroundActivity
-		// wantQueried asserts whether the provider was consulted — a non-RUNNING
-		// session must never be queried so we never fabricate a substate.
+		// wantQueried asserts whether the provider was consulted.
 		wantQueried bool
 	}{
 		{
@@ -44,11 +43,18 @@ func TestEnrichForegroundActivity(t *testing.T) {
 			wantQueried: true,
 		},
 		{
-			name:        "non-running is left empty and never queried",
+			name:        "non-running detached background is surfaced",
 			state:       models.TaskSessionStateWaitingForInput,
 			provider:    &fakeForegroundActivityProvider{value: v1.ForegroundActivityBackground},
+			want:        v1.ForegroundActivityBackground,
+			wantQueried: true,
+		},
+		{
+			name:        "non-running generating fallback is omitted",
+			state:       models.TaskSessionStateWaitingForInput,
+			provider:    &fakeForegroundActivityProvider{value: v1.ForegroundActivityGenerating},
 			want:        "",
-			wantQueried: false,
+			wantQueried: true,
 		},
 	}
 
@@ -98,8 +104,8 @@ func TestEnrichTaskForegroundActivity(t *testing.T) {
 		sessions []*models.TaskSession
 		byID     map[string]v1.ForegroundActivity
 		want     v1.ForegroundActivity
-		// wantQueried lists the session IDs the provider must be consulted for —
-		// only RUNNING sessions, never a terminal/waiting one.
+		// wantQueried lists the session IDs consulted for detached background
+		// activity, including settled sessions.
 		wantQueried []string
 	}{
 		{
@@ -121,14 +127,14 @@ func TestEnrichTaskForegroundActivity(t *testing.T) {
 			sessions:    []*models.TaskSession{sess("primary", done), sess("secondary", running)},
 			byID:        map[string]v1.ForegroundActivity{"secondary": v1.ForegroundActivityBackground},
 			want:        v1.ForegroundActivityBackground,
-			wantQueried: []string{"secondary"},
+			wantQueried: []string{"primary", "secondary"},
 		},
 		{
 			name:        "no running session falls through to empty",
 			sessions:    []*models.TaskSession{sess("a", done), sess("b", waiting)},
 			byID:        map[string]v1.ForegroundActivity{},
 			want:        "",
-			wantQueried: nil,
+			wantQueried: []string{"a", "b"},
 		},
 		{
 			name:        "nil sessions are skipped",

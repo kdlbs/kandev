@@ -129,7 +129,7 @@ describe("MobileSessionsPicker", () => {
     mocks.activeSessionId = SESSION_BG;
     mocks.sessions = [
       session(SESSION_BG, "profile-a", START_TIME, {
-        state: "RUNNING",
+        state: "WAITING_FOR_INPUT",
         foreground_activity: "background",
       }),
       session("session-gen", "profile-b", "2026-01-01T00:01:00Z", {

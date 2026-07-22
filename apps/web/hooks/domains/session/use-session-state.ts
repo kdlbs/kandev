@@ -8,19 +8,19 @@ export function deriveSessionFlags(session: TaskSession | null | undefined) {
   const errorMessage = session?.error_message;
   const isStarting = state === "STARTING";
   const isRunning = state === "RUNNING";
-  // ADR-0038. Three conditions, not two:
+  // ADR-0049. Three conditions, not two:
   //  (a) generating       — RUNNING, foreground actively producing output
-  //  (b) background-idle   — RUNNING, foreground yielded to spawned background work
-  //  (c) fully idle        — not RUNNING
+  //  (b) background-idle   — foreground settled, spawned background work remains
+  //  (c) fully idle        — no foreground or background work
   // `isAgentBusy` gates the composer (queue-vs-send): only a foreground-
   // generating turn (a) blocks input; (b) accepts it. An absent/unknown
   // substate defaults to generating, preserving the historical
   // reject-while-RUNNING contract.
-  const isBackgroundIdle = isRunning && session?.foreground_activity === "background";
-  const isAgentBusy = isRunning && !isBackgroundIdle;
+  const hasBackgroundWork = session?.foreground_activity === "background";
+  const isAgentBusy = isRunning && !hasBackgroundWork;
   // `isWorking` drives the spinner/affordance: any live turn (generating OR
   // background-idle) plus STARTING — it must stay up through (b).
-  const isWorking = isStarting || isRunning;
+  const isWorking = isStarting || isRunning || hasBackgroundWork;
   const isFailed = state === "FAILED" || state === "CANCELLED";
   const needsRecovery = state === "WAITING_FOR_INPUT" && !!errorMessage;
   return { isStarting, isWorking, isAgentBusy, isFailed, needsRecovery };

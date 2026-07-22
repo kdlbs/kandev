@@ -1,15 +1,16 @@
 # 0049: Fine-grained foreground-idle busy signal
 
-**Status:** accepted
+**Status:** accepted (amended 2026-07-21)
 **Date:** 2026-07-11
 **Area:** backend, frontend, protocol
 
 ## Context
 
-A session's durable state is a single scalar (`RUNNING`, `WAITING_FOR_INPUT`, …). While a turn is `RUNNING`, that scalar cannot distinguish two very different situations:
+A session's durable state is a single scalar (`RUNNING`, `WAITING_FOR_INPUT`, …). That scalar cannot distinguish three independent lifecycle facts:
 
-1. the foreground agent is actively generating output, versus
-2. the foreground turn is idle and only held open by spawned background work — a subagent `Task`, a `run_in_background` shell, or an active Claude `Monitor` watch.
+1. the foreground agent is actively generating output,
+2. the foreground is idle while spawned background work is still live, or
+3. the foreground turn has completed while detached background work continues.
 
 Because both read as `RUNNING`, a session that kicked off a long background job rejected every new operator message as "agent is already running" for the entire duration of that job — locking the operator out of the conversation with no recovery but a restart.
 
@@ -19,7 +20,33 @@ Mid-turn steering — delivering a message *into* a turn while the model is acti
 
 ## Decision
 
-Track, per session and **in memory**, whether the open turn is foreground-driven or has yielded to outstanding background work, and narrow the prompt gate (`checkSessionPromptable`) to the foreground only:
+Track, per session and **in memory**, foreground ownership and background
+liveness independently, and narrow the prompt gate (`checkSessionPromptable`)
+to the foreground only:
+
+- Foreground activity has absolute display and admission precedence. While a
+  prompt is claimed, dispatched, or producing top-level output, the session is
+  generating regardless of background activity. When the foreground is idle,
+  outstanding recognized work produces the background-running state; only the
+  absence of both produces done/idle.
+- Foreground turn completion clears foreground ownership only. It does not
+  clear background registrations. Each background registration remains live
+  until a terminal signal for that workload arrives or the owning agent
+  execution is explicitly torn down.
+- A tool result that reports successful asynchronous launch is terminal for the
+  launch tool card but not for the launched workload. The orchestrator retains
+  the originating tool-call registration and clears workload liveness separately
+  when the provider reports a
+  task-notification result. Claude ACP currently exposes the notification's
+  origin but not its task ID; one notification therefore retires one session
+  background registration, while an ambiguous remainder stays background-live
+  rather than guessing done. Prompt completion and prompt-end tool sweeps do not
+  synthesize workload completion for detached shell work.
+- Claude ACP usage updates expose the origin of each model cycle. Completion of
+  the human-origin cycle is the explicit foreground-yield boundary even when
+  the ACP prompt RPC remains held open for spawned subagents; a later
+  task-notification-origin cycle may temporarily take foreground precedence
+  while it generates the completion summary.
 
 - A `RUNNING` session accepts a new prompt when its foreground turn is idle and at least one recognized background task is outstanding; otherwise it keeps rejecting input exactly as before.
 - Recognition keys off the **normalized shape** of the work (subagent task / `run_in_background` shell / active Monitor), not tool-name string matching. The ACP normalizer is corrected to recognize Claude's `run_in_background:true` shell shape (a normalizer bug fix in its own right).
@@ -34,17 +61,26 @@ The distinction is surfaced to the operator as a fine-grained substate (`foregro
 
 - The composer gates on foreground-generating rather than coarse `RUNNING`.
 - A tri-state status indicator distinguishes generating / working-in-background / done; the established "running" affordance is unchanged and a distinct indicator is *added* for the background-idle substate — it never reads as "done" while background work runs.
-- The substate is delivered live over a `session.activity_changed` WS event (and carried on `session.state_changed` to reset on every coarse transition), and is also read from the in-memory tracker into the boot payload and the session REST/WS DTOs (`RUNNING`-only) so a fresh page-load or a second tab is immediately correct rather than showing the coarse busy signal until the next flip.
+- The substate is delivered live over a `session.activity_changed` WS event and
+  carried on `session.state_changed`. It is also read from the in-memory tracker
+  into the boot payload and the session REST/WS DTOs. Generating is meaningful
+  for a `RUNNING` session; background may also be carried after the coarse state
+  settles when detached work remains live.
 
 ## Consequences
 
 The operator is no longer falsely locked out while background work runs, and the UI truthfully shows "working in the background" as distinct from both "generating" and "done". Accepting input earlier does not make delivery earlier for a held-open subagent turn — that message still waits behind the open exchange, as the queue does today — but out-of-turn work (a Monitor burst, a backgrounded shell after the main turn yielded) is forwarded promptly with no false "already running" rejection.
 
-The signal is best-effort across a backend restart: a restart ends the turn, so the in-memory tracker resets to the safe "generating" default and no stale "you may type" is ever surfaced. Correctness is never traded — only the optimization. Recognition is deliberately Claude-shaped today (subagent task, `run_in_background` shell, active Monitor are Claude features); other agents keep today's behavior.
+The signal is best-effort across a backend or agent-execution restart. Connected
+executions retain background liveness across foreground turns, but detached
+work that survives a restart cannot be reconstructed without an agent-side
+liveness API. Recognition is deliberately Claude-shaped today (subagent task,
+`run_in_background` shell, active Monitor are Claude features); other agents
+keep today's behavior.
 
 ## Alternatives Considered
 
 - **Rely on upstream synthetic idle-turn completion alone.** Rejected: it structurally cannot arm while the foreground prompt exchange is open, and its debounce re-extends under event bursts, so the held-open and chained-burst windows remain. A falsifiable acceptance test drives a chatty Monitor and confirms a prompt sent during a burst is accepted only with the fine-grained gate.
 - **Drop the `RUNNING` gate / always accept input.** Rejected: it would let a new message race a genuinely-generating foreground turn, risking dropped or reordered messages and regressing non-steering agents.
-- **Persist the foreground/background distinction to the database (like the coarse states).** Rejected: it only matters for a live in-flight turn, so a persisted value becomes a second source of truth that can drift from the gate, survives a restart as a false "you may type" for a session whose turn is gone (needing extra reconciliation to stay safe), and adds write churn to the hot streaming path. In-memory tracking that resets to the safe default on every turn-close is sufficient and simpler; the same in-memory value is read at the serialization boundary to keep fresh page-loads correct without persistence.
+- **Persist the foreground/background distinction to the database (like the coarse states).** Rejected: persistence without an agent-side reconciliation API becomes a second source of truth and can survive restart as a false live value after the workload has died. Connected-execution tracking is kept in memory and read at serialization boundaries; turn close no longer destroys it, while execution teardown does.
 - **Recognize background work by tool-name string matching.** Rejected as brittle across agents and updates; recognition keys on the normalized payload shape so producer and consumer share one contract.

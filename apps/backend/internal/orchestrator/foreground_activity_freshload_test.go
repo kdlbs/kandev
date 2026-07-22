@@ -63,6 +63,27 @@ func TestFreshLoad_SettledSessionOmitsSubstate(t *testing.T) {
 	}
 }
 
+func TestFreshLoad_SettledSessionWithDetachedWorkSerializesBackground(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	const sessionID = "session-detached"
+	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
+	sessionDTO := &taskdto.TaskSessionDTO{ID: sessionID, State: models.TaskSessionStateWaitingForInput}
+	taskdto.EnrichForegroundActivity(sessionDTO, svc)
+	if got := marshalField(t, sessionDTO); got != string(v1.ForegroundActivityBackground) {
+		t.Fatalf("settled detached session foreground_activity: got %q, want background", got)
+	}
+
+	taskDTO := &taskdto.TaskDTO{ID: "task-detached"}
+	sessions := []*models.TaskSession{{ID: sessionID, State: models.TaskSessionStateWaitingForInput}}
+	taskdto.EnrichTaskForegroundActivity(taskDTO, sessions, svc)
+	if got := marshalField(t, taskDTO); got != string(v1.ForegroundActivityBackground) {
+		t.Fatalf("detached task foreground_activity: got %q, want background", got)
+	}
+}
+
 // marshalField marshals the DTO and returns the string value of foreground_activity.
 func marshalField(t *testing.T, dto any) string {
 	t.Helper()

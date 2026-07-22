@@ -47,7 +47,8 @@ func TestForegroundActivitySignal_PublishesOnFlips(t *testing.T) {
 		sessionID = "session-activity"
 	)
 
-	// A top-level subagent tool_call: the foreground yields to background work.
+	// A top-level subagent tool_call registers background work, but the launch
+	// itself cannot override the foreground.
 	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
 		TaskID:    taskID,
 		SessionID: sessionID,
@@ -58,6 +59,7 @@ func TestForegroundActivitySignal_PublishesOnFlips(t *testing.T) {
 			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
 		},
 	})
+	emitForegroundIdle(svc, taskID, sessionID)
 
 	// A streamed foreground message: the agent is generating again even though
 	// the subagent is still outstanding.
@@ -127,6 +129,10 @@ func TestForegroundActivitySignal_NoPublishWithoutFlip(t *testing.T) {
 	// flip anything (already yielded) — no publish.
 	svc.handleAgentStreamEvent(context.Background(), subagent("subagent-1"))
 	svc.handleAgentStreamEvent(context.Background(), subagent("subagent-2"))
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID: taskID, SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{Type: streams.EventTypeForegroundIdle},
+	})
 
 	// Completing the first while the second is still outstanding does not flip —
 	// no publish. Completing the last flips back to generating (publish #2).
@@ -159,6 +165,7 @@ func TestForegroundActivitySignal_ClaimReleasePublishesRestoredBackground(t *tes
 	)
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
 	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
 
 	// Admission claims the foreground, but the missing executor row makes
 	// ensureSessionRunning fail before the prompt reaches the agent. Releasing
@@ -202,6 +209,7 @@ func TestForegroundActivitySignal_ModelSwitchPublishesClaimedGenerating(t *testi
 	}
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-1")
 	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
 
 	result, err := svc.PromptTask(context.Background(), taskID, sessionID, "continue", "new-model", false, nil, false)
 	if err != nil {
@@ -229,19 +237,21 @@ func TestForegroundActivitySignal_DispatchPublishesBackgroundRegisteredDuringCla
 		sessionID = "session-dispatch-signal"
 	)
 	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
 	claim := svc.claimForegroundTurn(sessionID)
 	if claim == nil {
 		t.Fatal("prompt must claim the background-idle turn")
 	}
-	if svc.registerBackgroundTask(sessionID, "background-2") {
-		t.Fatal("background registration must not publish through an active claim")
-	}
+	svc.registerBackgroundTask(sessionID, "background-2")
 	if s := svc.ForegroundActivity(sessionID); s != v1.ForegroundActivityGenerating {
 		t.Fatalf("active claim must remain generating, got %q", s)
 	}
 
-	if !svc.completeForegroundClaim(claim) {
-		t.Fatal("dispatch must expose the background work registered during admission")
+	if svc.completeForegroundClaim(claim) {
+		t.Fatal("dispatch alone must not expose background work before foreground idle")
+	}
+	if !svc.markForegroundIdle(sessionID) {
+		t.Fatal("foreground idle must expose work registered during admission")
 	}
 	svc.publishForegroundActivityChanged(context.Background(), taskID, sessionID)
 
@@ -258,7 +268,7 @@ type recordingTaskEvents struct {
 	activityTaskIDs []string
 }
 
-func (r *recordingTaskEvents) PublishTaskUpdated(context.Context, *models.Task) {}
+func (r *recordingTaskEvents) PublishTaskUpdated(context.Context, *models.Task, ...string) {}
 
 func (r *recordingTaskEvents) PublishTaskStateChanged(context.Context, *models.Task, v1.TaskState) {
 }
@@ -295,6 +305,7 @@ func TestForegroundActivitySignal_PropagatesToTaskLevel(t *testing.T) {
 			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
 		},
 	})
+	emitForegroundIdle(svc, taskID, sessionID)
 	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
 		TaskID:    taskID,
 		SessionID: sessionID,

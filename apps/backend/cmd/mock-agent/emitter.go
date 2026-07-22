@@ -179,9 +179,15 @@ func (e *emitter) endMonitorTool(id acp.ToolCallId) {
 const (
 	subagentKeyStatus       = "status"
 	subagentStatusCompleted = "completed"
+	subagentStatusAsync     = "async_launched"
 	subagentKeyDescription  = "description"
 	subagentKeyPrompt       = "prompt"
 	subagentKeySubagentType = "subagent_type"
+)
+
+const (
+	claudeOriginMetaKey          = "_claude/origin"
+	claudeOriginTaskNotification = "task-notification"
 )
 
 // subagentClaudeMeta builds the `_meta.claudeCode.toolName=Agent` payload that
@@ -239,6 +245,53 @@ func (e *emitter) startSubagentTool(id acp.ToolCallId, description, prompt, suba
 			}),
 			withStartMeta(subagentClaudeMeta()),
 		),
+	})
+}
+
+// launchAsyncSubagentTool mirrors Claude's detached Agent launch: the Task
+// invocation is terminal, but its independently-running workload is not.
+func (e *emitter) launchAsyncSubagentTool(
+	id acp.ToolCallId,
+	description, prompt, subagentType string,
+) {
+	e.startSubagentTool(id, description, prompt, subagentType)
+	withUpdateMeta := func(meta any) acp.ToolCallUpdateOpt {
+		return func(tu *acp.SessionToolCallUpdate) { tu.Meta = toMetaMap(meta) }
+	}
+	response := map[string]any{
+		"claudeCode": map[string]any{
+			"toolResponse": map[string]any{
+				"agentId":           "agent_e2e_detached",
+				"agentType":         subagentType,
+				subagentKeyStatus:   subagentStatusAsync,
+				"isAsync":           true,
+				"outputFile":        "/tmp/kandev-e2e-detached.output",
+				"canReadOutputFile": true,
+			},
+		},
+	}
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.UpdateToolCall(id,
+			acp.WithUpdateRawOutput("Async agent launched successfully."),
+			withUpdateMeta(response),
+		),
+	})
+}
+
+// completeDetachedWork emits the same task-notification usage boundary Claude
+// sends when an async workload finishes. The provider does not expose the task
+// ID on this frame, so the orchestrator conservatively retires one registration.
+func (e *emitter) completeDetachedWork() {
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{UsageUpdate: &acp.SessionUsageUpdate{
+			Size: 1_000_000,
+			Used: 25_000,
+			Meta: map[string]any{
+				claudeOriginMetaKey: map[string]any{"kind": claudeOriginTaskNotification},
+			},
+		}},
 	})
 }
 

@@ -11,6 +11,13 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+func emitForegroundIdle(svc *Service, taskID, sessionID string) {
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID: taskID, SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{Type: streams.EventTypeForegroundIdle},
+	})
+}
+
 // TestCheckSessionPromptable_BackgroundTaskAcceptsInput is the red
 // characterization test for ADR-0038: a session whose
 // foreground turn is idle while a spawned background task is still running must
@@ -35,6 +42,7 @@ func TestCheckSessionPromptable_BackgroundTaskAcceptsInput(t *testing.T) {
 
 	// The agent spawns a background task and goes idle in the foreground.
 	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
+	svc.markForegroundIdle(sessionID)
 
 	// The session must now accept a new message even though its state is RUNNING.
 	if err := svc.checkSessionPromptable("task1", sessionID, models.TaskSessionStateRunning); err != nil {
@@ -56,6 +64,7 @@ func TestForegroundToolCallClosesBackgroundIdleGate(t *testing.T) {
 
 	const sessionID = "session-foreground-tool"
 	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
 
 	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
 		TaskID:    "task1",
@@ -92,8 +101,12 @@ func TestForegroundActivity_ExportedValue(t *testing.T) {
 	}
 
 	svc.registerBackgroundTask(s, "t1")
+	if got := svc.ForegroundActivity(s); got != v1.ForegroundActivityGenerating {
+		t.Fatalf("registration must not override foreground activity, got %q", got)
+	}
+	svc.markForegroundIdle(s)
 	if got := svc.ForegroundActivity(s); got != v1.ForegroundActivityBackground {
-		t.Fatalf("after registering background work, got %q, want background", got)
+		t.Fatalf("after foreground idle with background work, got %q, want background", got)
 	}
 
 	svc.completeBackgroundTask(s, "t1")
@@ -121,10 +134,14 @@ func TestTurnActivity_ForegroundBackgroundTransitions(t *testing.T) {
 		t.Fatal("untracked session must default to foreground-generating")
 	}
 
-	// Register a background task: foreground has yielded.
+	// Registration records liveness but cannot override a busy foreground.
 	svc.registerBackgroundTask(s, "t1")
+	if !svc.isForegroundTurnGenerating(s) {
+		t.Fatal("background registration must not override foreground generation")
+	}
+	svc.markForegroundIdle(s)
 	if svc.isForegroundTurnGenerating(s) {
-		t.Fatal("after registering a background task the foreground must be idle")
+		t.Fatal("after the foreground-idle boundary the background task must be visible")
 	}
 	svc.completeBackgroundTask(s, "t1")
 
@@ -137,6 +154,7 @@ func TestTurnActivity_ForegroundBackgroundTransitions(t *testing.T) {
 	// Two concurrent background tasks: the foreground is idle until BOTH finish.
 	svc.registerBackgroundTask(s, "t2")
 	svc.registerBackgroundTask(s, "t3")
+	svc.markForegroundIdle(s)
 	if svc.isForegroundTurnGenerating(s) {
 		t.Fatal("with outstanding background tasks the foreground must be idle")
 	}
@@ -157,23 +175,61 @@ func TestTurnActivity_ForegroundBackgroundTransitions(t *testing.T) {
 	}
 }
 
-// TestCompleteTurnClearsBackgroundActivity confirms that closing a turn drops the
-// background-activity tracking so the next turn starts clean.
-func TestCompleteTurnClearsBackgroundActivity(t *testing.T) {
+// TestCompleteTurnPreservesBackgroundActivity confirms that foreground turn
+// completion does not erase detached work that outlives it.
+func TestCompleteTurnPreservesBackgroundActivity(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
 	const s = "session-turn"
 	svc.registerBackgroundTask(s, "t1")
-	if svc.isForegroundTurnGenerating(s) {
-		t.Fatal("precondition: session should be waiting on background work")
+	if !svc.isForegroundTurnGenerating(s) {
+		t.Fatal("precondition: registration alone must retain foreground precedence")
 	}
 
-	// completeTurnForSession must clear turn activity (turnService is nil in this
-	// test service, which exercises the early-return path).
+	// completeTurnForSession must leave detached work background-idle even when
+	// turnService is nil (the early-return path).
 	svc.completeTurnForSession(t.Context(), s)
-	if !svc.isForegroundTurnGenerating(s) {
-		t.Fatal("completeTurnForSession must clear background activity")
+	if svc.isForegroundTurnGenerating(s) {
+		t.Fatal("completeTurnForSession must preserve background activity")
+	}
+}
+
+func TestForegroundIdleEventRestoresOutstandingBackground(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	const sessionID = "session-idle-signal"
+	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundGenerating(sessionID)
+
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task1",
+		SessionID: sessionID,
+		Data:      &lifecycle.AgentStreamEventData{Type: streams.EventTypeForegroundIdle},
+	})
+
+	if svc.isForegroundTurnGenerating(sessionID) {
+		t.Fatal("human-cycle completion must yield to outstanding background work")
+	}
+}
+
+func TestBackgroundCompleteEventRetiresOneOutstandingTask(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	const sessionID = "session-background-complete"
+	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
+
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task1",
+		SessionID: sessionID,
+		Data:      &lifecycle.AgentStreamEventData{Type: streams.EventTypeBackgroundComplete},
+	})
+
+	if !svc.isForegroundTurnGenerating(sessionID) {
+		t.Fatal("the final background completion must return to the idle/default state")
 	}
 }
 
@@ -195,8 +251,8 @@ func TestForegroundBusySignal_WiredThroughStreamEvents(t *testing.T) {
 		t.Fatalf("precondition: RUNNING session should gate input, got: %v", err)
 	}
 
-	// A top-level subagent Task tool_call arrives on the stream — the agent has
-	// spawned background work and yielded the foreground.
+	// A top-level subagent Task tool_call registers work; the provider then marks
+	// the foreground cycle idle.
 	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
 		TaskID:    taskID,
 		SessionID: sessionID,
@@ -207,6 +263,7 @@ func TestForegroundBusySignal_WiredThroughStreamEvents(t *testing.T) {
 			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
 		},
 	})
+	emitForegroundIdle(svc, taskID, sessionID)
 
 	// The gate now accepts a new message even though the session state is RUNNING.
 	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
@@ -259,6 +316,7 @@ func TestForegroundBusySignal_TerminalToolUpdateReclosesGate(t *testing.T) {
 			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
 		},
 	})
+	emitForegroundIdle(svc, taskID, sessionID)
 	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
 		t.Fatalf("precondition: background subagent tool_call should open the gate, got: %v", err)
 	}
@@ -309,6 +367,7 @@ func TestForegroundBusySignal_TerminalToolUpdateReclosesGateByIDNotKind(t *testi
 			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
 		},
 	})
+	emitForegroundIdle(svc, taskID, sessionID)
 	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
 		t.Fatalf("precondition: background subagent tool_call should open the gate, got: %v", err)
 	}
@@ -356,6 +415,7 @@ func TestForegroundBusySignal_UnregisteredTerminalToolUpdateLeavesGateOpen(t *te
 			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
 		},
 	})
+	emitForegroundIdle(svc, taskID, sessionID)
 	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
 		t.Fatalf("precondition: background subagent tool_call should open the gate, got: %v", err)
 	}
@@ -435,8 +495,9 @@ func TestNormalizedIsBackgroundTask(t *testing.T) {
 // tool_call with an empty (foreground-looking) payload, then a non-terminal
 // tool_call_update whose Normalized ShellExec carries Background:true. The
 // update must open checkSessionPromptable for a RUNNING session; the terminal
-// update re-closes it. Before the wiring fix the update path never registered
-// background work, so the gate stayed shut for the whole watch.
+// launch-card update must leave it open until workload completion. Before the
+// wiring fix the update path never registered background work, so the gate stayed
+// shut for the whole watch.
 func TestForegroundBusySignal_BackgroundShellViaUpdate(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -473,11 +534,12 @@ func TestForegroundBusySignal_BackgroundShellViaUpdate(t *testing.T) {
 			Normalized: streams.NewShellExec("npm run dev", "", "", 0, true),
 		},
 	})
+	emitForegroundIdle(svc, taskID, sessionID)
 	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
 		t.Fatalf("a run_in_background shell tool_update must open the gate, got: %v", err)
 	}
 
-	// Terminal update for the same tool-call ID re-closes the gate.
+	// Terminal update closes the launch card, not the detached workload.
 	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
 		TaskID:    taskID,
 		SessionID: sessionID,
@@ -488,8 +550,44 @@ func TestForegroundBusySignal_BackgroundShellViaUpdate(t *testing.T) {
 			Normalized: streams.NewShellExec("npm run dev", "", "", 0, true),
 		},
 	})
+	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
+		t.Fatalf("terminal shell launch update must preserve background promptability, got: %v", err)
+	}
+
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		Data:      &lifecycle.AgentStreamEventData{Type: streams.EventTypeBackgroundComplete},
+	})
 	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); !errors.Is(err, ErrAgentPromptInProgress) {
-		t.Fatalf("terminal shell tool_update must re-close the gate, got: %v", err)
+		t.Fatalf("workload completion must re-close the RUNNING gate, got: %v", err)
+	}
+}
+
+func TestForegroundBusySignal_AsyncSubagentLaunchCompletionPreservesWorkload(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = &mockMessageCreator{}
+
+	const sessionID = "session-async-subagent"
+	payload := streams.NewSubagentTask("background", "sleep", "general-purpose")
+	payload.SubagentTask().IsAsync = true
+	svc.registerBackgroundTask(sessionID, "subagent-1")
+	svc.markForegroundIdle(sessionID)
+
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task1",
+		SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       "tool_update",
+			ToolCallID: "subagent-1",
+			ToolStatus: agentEventComplete,
+			Normalized: payload,
+		},
+	})
+
+	if svc.isForegroundTurnGenerating(sessionID) {
+		t.Fatal("async launch-card completion must preserve subagent workload liveness")
 	}
 }
 
@@ -539,6 +637,7 @@ func TestForegroundBusySignal_MonitorViaUpdate(t *testing.T) {
 			Normalized: monitorGenericPayload(false),
 		},
 	})
+	emitForegroundIdle(svc, taskID, sessionID)
 	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
 		t.Fatalf("an active Monitor registration tool_update must open the gate, got: %v", err)
 	}
@@ -591,6 +690,7 @@ func TestForegroundBusySignal_UpdateDoesNotReYieldAfterForeground(t *testing.T) 
 
 	// A background run_in_background shell is recognized on its first update.
 	bgUpdate()
+	emitForegroundIdle(svc, taskID, sessionID)
 	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
 		t.Fatalf("precondition: background shell update should open the gate, got: %v", err)
 	}

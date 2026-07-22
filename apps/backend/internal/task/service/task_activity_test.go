@@ -80,7 +80,7 @@ func TestTaskUpdated_StampsForegroundActivityAggregate(t *testing.T) {
 	}
 }
 
-func TestTaskUpdated_ForegroundActivityNilWhenNoRunningSession(t *testing.T) {
+func TestTaskUpdated_BackgroundActivitySurvivesSettledSession(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 	createTaskWithoutRepositories(t, ctx, repo)
@@ -90,8 +90,8 @@ func TestTaskUpdated_ForegroundActivityNilWhenNoRunningSession(t *testing.T) {
 
 	eventBus.ClearEvents()
 	svc.PublishTaskUpdated(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1"})
-	if got := foregroundActivityField(t, singlePublishedEventData(t, eventBus)); got != nil {
-		t.Fatalf("no running session: foreground_activity=%#v, want nil", got)
+	if got := foregroundActivityField(t, singlePublishedEventData(t, eventBus)); got != "background" {
+		t.Fatalf("settled background session: foreground_activity=%#v, want background", got)
 	}
 }
 

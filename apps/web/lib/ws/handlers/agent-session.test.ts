@@ -877,6 +877,27 @@ describe("session.activity_changed handler — fine-grained busy signal", () => 
     });
   });
 
+  it("keeps accepting detached activity updates after the foreground settles", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "WAITING_FOR_INPUT" } },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler(
+      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+    );
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      state: "WAITING_FOR_INPUT",
+      foreground_activity: "background",
+    });
+  });
+
   it("flips back to generating on the next activity event", () => {
     const upsert = vi.fn();
     const store = makeStore({
@@ -936,6 +957,29 @@ describe("session.state_changed carries and resets the busy substate", () => {
     expect(upsert.mock.calls[0][1]).toMatchObject({
       state: "RUNNING",
       foreground_activity: "generating",
+    });
+  });
+
+  it("merges background activity when the foreground settles", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: { "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING" } } },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "WAITING_FOR_INPUT",
+        foreground_activity: "background",
+      }),
+    );
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      state: "WAITING_FOR_INPUT",
+      foreground_activity: "background",
     });
   });
 });

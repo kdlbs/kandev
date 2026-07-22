@@ -251,16 +251,15 @@ export type TaskSessionStateChangedPayload = {
   review_status?: string;
   // Task environment (for session→environment mapping)
   task_environment_id?: string;
-  // Fine-grained busy substate (see ADR-0038), carried on every transition so
-  // the client resets stale values; intra-RUNNING flips arrive on
-  // session.activity_changed instead.
+  // Fine-grained busy substate (see ADR-0049), carried on coarse transitions;
+  // live flips arrive on session.activity_changed.
   foreground_activity?: ForegroundActivity;
 };
 
 /**
  * Payload for `session.activity_changed` — the fine-grained busy signal
- * (see ADR-0038). Fires when a RUNNING session's foreground turn flips between
- * generating and idle-on-background-work, with no coarse state change.
+ * (see ADR-0049). Fires when foreground ownership or detached background
+ * liveness changes, including after the foreground turn settles.
  */
 export type TaskSessionActivityChangedPayload = {
   task_id: string;

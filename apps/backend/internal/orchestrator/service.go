@@ -976,11 +976,10 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 // query the DB for any open turn and close it. Loops to mop up multiple
 // zombies (e.g. left over from before this fix) with a small sanity bound.
 func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
-	// The foreground/background activity signal is turn-scoped: once the turn is
-	// closed the next foreground prompt starts from the "generating" default.
-	// Clear it before the turnService guard so the reset happens even when no
-	// turn service is wired (tests, minimal configs).
-	s.clearTurnActivity(sessionID)
+	// Foreground ownership ends with the turn, but detached background work can
+	// outlive it. Preserve those registrations and expose them as background-idle;
+	// full cleanup belongs to execution/session teardown paths.
+	s.markForegroundIdle(sessionID)
 
 	if s.turnService == nil {
 		return

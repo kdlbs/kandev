@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
-// Mobile (Pixel 5) coverage for ADR-0038. Filename matches
+// Mobile (Pixel 5) coverage for ADR-0049. Filename matches
 // /mobile-.*\.spec\.ts/ so the `mobile-chrome` project picks it up. The composer
 // gating and the working affordance derive from the same shared hooks the
 // desktop path uses, so this asserts the operator-visible outcome holds at
@@ -27,7 +27,7 @@ test.describe("Mobile fine-grained busy signal", () => {
       "Mobile busy signal",
       seedData.agentProfileId,
       {
-        description: "/background 12s",
+        description: "/detached-background 12s",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
@@ -46,9 +46,7 @@ test.describe("Mobile fine-grained busy signal", () => {
     // visible at once at mobile width.
     await expect(session.idleInput()).toBeVisible({ timeout: 25_000 });
     await expect(session.agentStatus()).toBeVisible();
-    await expect(session.turnComplete()).toHaveCount(0);
-
-    // After the background task completes, the turn ends → done/idle.
+    // After the detached task completes, the working affordance clears.
     await expect(session.agentStatus()).not.toBeVisible({ timeout: 40_000 });
     await expect(session.idleInput()).toBeVisible({ timeout: 10_000 });
   });
@@ -66,7 +64,7 @@ test.describe("Mobile fine-grained busy signal", () => {
       "Mobile busy signal reload",
       seedData.agentProfileId,
       {
-        description: "/background 20s",
+        description: "/detached-background 20s",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
@@ -84,12 +82,11 @@ test.describe("Mobile fine-grained busy signal", () => {
 
     // Reload mid-window: a fresh mobile client. The accept-input + working
     // affordance must come straight from the boot payload (no persisted value,
-    // no activity_changed WS flip due) — ADR-0038.
+    // no activity_changed WS flip due) — ADR-0049.
     await testPage.reload();
     await session.waitForLoad();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await expect(session.agentStatus()).toBeVisible();
-    await expect(session.turnComplete()).toHaveCount(0);
   });
 });

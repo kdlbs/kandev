@@ -272,9 +272,31 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitSleep(e, cmd)
 	case strings.EqualFold(cmd, "/background") || strings.HasPrefix(strings.ToLower(cmd), "/background "):
 		emitBackgroundWork(e, cmd)
+	case strings.EqualFold(cmd, "/detached-background") || strings.HasPrefix(strings.ToLower(cmd), "/detached-background "):
+		emitDetachedBackgroundWork(e, cmd)
 	default:
 		emitRandomResponse(e, cmd, model)
 	}
+}
+
+// emitDetachedBackgroundWork launches work that outlives this prompt response.
+// It is intentionally different from /background, whose foreground prompt stays
+// open for the entire delay, so E2E can cover settled+background explicitly.
+func emitDetachedBackgroundWork(e *emitter, cmd string) {
+	d := parseBackgroundDuration(cmd, 8*time.Second)
+	e.text("Launching detached background work; this foreground turn is complete.")
+
+	taskToolID := nextToolID()
+	e.launchAsyncSubagentTool(taskToolID,
+		"Detached background exploration",
+		"Continue working after the foreground response ends",
+		"general-purpose")
+
+	backgroundEmitter := &emitter{ctx: context.Background(), conn: e.conn, sid: e.sid}
+	go func() {
+		time.Sleep(d)
+		backgroundEmitter.completeDetachedWork()
+	}()
 }
 
 // emitSleep sleeps for the requested duration (default 10s) then responds.

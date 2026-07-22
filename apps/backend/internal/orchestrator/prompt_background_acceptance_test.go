@@ -118,6 +118,7 @@ func TestPromptTask_BackgroundWorkAcceptsInput(t *testing.T) {
 					},
 				})
 			}
+			emitForegroundIdle(svc, taskID, sessionID)
 
 			// The session is still RUNNING: #1600's synthetic turn-complete has not
 			// fired (the bursts kept its debounce alive), so the durable state alone

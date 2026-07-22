@@ -81,14 +81,13 @@ func TestHTTPGetTaskSession_StampsForegroundActivityOnRunning(t *testing.T) {
 		"a RUNNING session must carry the fine-grained busy substate on a fresh fetch")
 }
 
-func TestHTTPGetTaskSession_OmitsForegroundActivityWhenNotRunning(t *testing.T) {
+func TestHTTPGetTaskSession_PreservesBackgroundActivityWhenNotRunning(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc, _ := newSessionHandlerService(t, &models.TaskSession{
 		ID:    "sess-wait",
 		State: models.TaskSessionStateWaitingForInput,
 	})
-	// Even a provider that would report "background" must not leak onto a
-	// non-RUNNING session — the coarse state already tells the whole story.
+	// Detached work can outlive the foreground turn and its coarse RUNNING state.
 	h := &TaskHandlers{
 		service:            svc,
 		foregroundActivity: fakeForegroundActivityProvider{value: v1.ForegroundActivityBackground},
@@ -96,12 +95,12 @@ func TestHTTPGetTaskSession_OmitsForegroundActivityWhenNotRunning(t *testing.T) 
 	}
 
 	resp := doGetTaskSession(t, h, "sess-wait")
-	assert.Empty(t, resp.Session.ForegroundActivity,
-		"a non-RUNNING session must not carry a fine-grained busy substate")
+	assert.Equal(t, v1.ForegroundActivityBackground, resp.Session.ForegroundActivity,
+		"a settled session must preserve live detached background activity")
 
-	// And confirm the JSON wire actually omits the key (omitempty).
+	// Confirm the fresh-load wire carries the live background value.
 	rec := getTaskSessionRecorder(t, h, "sess-wait")
-	assert.NotContains(t, rec.Body.String(), "foreground_activity")
+	assert.Contains(t, rec.Body.String(), `"foreground_activity":"background"`)
 }
 
 func doGetTaskSession(t *testing.T, h *TaskHandlers, id string) dto.GetTaskSessionResponse {

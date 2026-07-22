@@ -226,15 +226,26 @@ describe("useSessionState — fine-grained busy signal (foreground_activity)", (
     expect(result.current.isWorking).toBe(true);
   });
 
-  it("a stale background substate is ignored once the session leaves RUNNING", () => {
+  it("settled+background accepts input while detached work keeps the affordance active", () => {
     mockSession = {
-      ...createMockSession("session-1", "task-1", "COMPLETED"),
+      ...createMockSession("session-1", "task-1", "WAITING_FOR_INPUT"),
       foreground_activity: "background",
     };
 
     const { result } = renderHook(() => useSessionState("session-1"));
 
-    // Fully idle (c): neither working nor busy.
+    expect(result.current.isWorking).toBe(true);
+    expect(result.current.isAgentBusy).toBe(false);
+  });
+
+  it("settled+generating is idle because generating only owns a live foreground turn", () => {
+    mockSession = {
+      ...createMockSession("session-1", "task-1", "WAITING_FOR_INPUT"),
+      foreground_activity: "generating",
+    };
+
+    const { result } = renderHook(() => useSessionState("session-1"));
+
     expect(result.current.isWorking).toBe(false);
     expect(result.current.isAgentBusy).toBe(false);
   });

@@ -10,7 +10,7 @@ import (
 )
 
 // ForegroundActivityProvider surfaces the live fine-grained busy substate of a
-// RUNNING session (ADR-0047), satisfied by the orchestrator. The task service
+// session (ADR-0049), satisfied by the orchestrator. The task service
 // depends only on this narrow seam so it takes no hard orchestrator dependency
 // and can be faked in tests.
 type ForegroundActivityProvider interface {
@@ -26,9 +26,9 @@ func (s *Service) SetForegroundActivityProvider(provider ForegroundActivityProvi
 }
 
 // computeTaskForegroundActivity resolves the task-level MOST-ACTIVE-WINS activity
-// aggregate for a task from its currently-active sessions
-// (§spec:task-level-indicator). Only RUNNING sessions carry a busy substate, so a
-// finished primary session never masks a secondary session that is still working.
+// aggregate for a task from its active sessions (§spec:task-level-indicator).
+// RUNNING sessions contribute foreground activity; settled sessions contribute
+// only when their connected execution still reports detached background work.
 //
 // The second return value reports whether the aggregate is KNOWN. It is false only
 // when the session set could not be loaded: the substate is then unavailable, and
@@ -49,10 +49,13 @@ func (s *Service) computeTaskForegroundActivity(ctx context.Context, taskID stri
 	}
 	activities := make([]v1.ForegroundActivity, 0, len(sessions))
 	for _, session := range sessions {
-		if session == nil || session.State != models.TaskSessionStateRunning {
+		if session == nil {
 			continue
 		}
-		activities = append(activities, s.foregroundActivity.ForegroundActivity(session.ID))
+		activity := s.foregroundActivity.ForegroundActivity(session.ID)
+		if session.State == models.TaskSessionStateRunning || activity == v1.ForegroundActivityBackground {
+			activities = append(activities, activity)
+		}
 	}
 	return v1.AggregateForegroundActivity(activities), true
 }

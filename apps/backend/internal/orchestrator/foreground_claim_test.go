@@ -36,6 +36,7 @@ func TestClaimForegroundTurn_OnlyOneConcurrentPromptWins(t *testing.T) {
 	// The agent spawned background work and went idle in the foreground: the gate
 	// is open, and every contender below is about to read it as open.
 	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
+	svc.markForegroundIdle(sessionID)
 
 	var (
 		start sync.WaitGroup
@@ -116,6 +117,7 @@ func TestPromptTask_ConcurrentPromptsIntoBackgroundIdleStartOneTurn(t *testing.T
 			Normalized: streams.NewShellExec("npm run dev", "", "", 0, true),
 		},
 	})
+	emitForegroundIdle(svc, taskID, sessionID)
 
 	// The operator double-sends, or two tabs fire at once.
 	var (
@@ -179,6 +181,7 @@ func TestPromptTask_SupersededQueuedDispatchReleasesForegroundClaim(t *testing.T
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-1")
 	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
 
 	_, err := svc.promptTask(
 		context.Background(), taskID, sessionID, "queued prompt", "", false, nil, false, "stale-entry",
@@ -202,17 +205,15 @@ func TestPromptTask_SupersededQueuedDispatchReleasesForegroundClaim(t *testing.T
 }
 
 // The claim has to be durable against the background set moving underneath it.
-// A background tool_call landing while a prompt is mid-admission calls
-// registerBackgroundTask, which re-sets `yielded` — if promptability were derived
-// from `yielded` alone that would reopen the gate under the in-flight prompt and
-// admit a second one, putting two prompts on one ACP session. The in-flight claim
-// is tracked independently of background-idle activity precisely so it can't.
+// A background tool_call can land while a prompt is mid-admission. Registration
+// must not override the in-flight foreground claim or reopen the gate.
 func TestClaimForegroundTurn_BackgroundRegistrationCannotReopenTheAdmissionWindow(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
 	const sessionID = "session-reopen"
 	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
+	svc.markForegroundIdle(sessionID)
 
 	claim := svc.claimForegroundTurn(sessionID)
 	if claim == nil {
@@ -230,11 +231,15 @@ func TestClaimForegroundTurn_BackgroundRegistrationCannotReopenTheAdmissionWindo
 		t.Fatal("a new background task must not reopen the admission window under an in-flight prompt")
 	}
 
-	// Once the prompt is handed to the agent, the admission window closes and the
-	// background set governs again — work THIS turn spawned may legitimately yield it.
-	svc.completeForegroundClaim(claim)
-	if svc.isForegroundTurnGenerating(sessionID) {
-		t.Fatal("after handoff the outstanding background work must make the turn background-idle again")
+	// Dispatch alone is not an idle boundary; the foreground keeps precedence.
+	if svc.completeForegroundClaim(claim) {
+		t.Fatal("dispatch must not expose background work before foreground idle")
+	}
+	if !svc.isForegroundTurnGenerating(sessionID) {
+		t.Fatal("after handoff the foreground must remain generating")
+	}
+	if !svc.markForegroundIdle(sessionID) {
+		t.Fatal("foreground idle must expose the outstanding background work")
 	}
 }
 
@@ -247,6 +252,7 @@ func TestReleaseForegroundClaim_DoesNotReopenGateOverALiveForeground(t *testing.
 
 	const sessionID = "session-stale-release"
 	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
+	svc.markForegroundIdle(sessionID)
 
 	claim := svc.claimForegroundTurn(sessionID)
 	if claim == nil {
@@ -294,6 +300,7 @@ func TestReleaseForegroundClaim_FailedPromptReopensTheGate(t *testing.T) {
 
 	const sessionID = "session-release"
 	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
+	svc.markForegroundIdle(sessionID)
 
 	claim := svc.claimForegroundTurn(sessionID)
 	if claim == nil {
@@ -327,6 +334,7 @@ func TestReleaseForegroundClaim_DoesNotReopenGateWithoutBackgroundWork(t *testin
 
 	const sessionID = "session-release-nobg"
 	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
+	svc.markForegroundIdle(sessionID)
 	claim := svc.claimForegroundTurn(sessionID)
 	if claim == nil {
 		t.Fatal("the prompt must win the claim")
@@ -350,15 +358,19 @@ func TestForegroundClaim_StaleTokenCannotCompleteOrReleaseNewClaim(t *testing.T)
 
 	const sessionID = "session-claim-generation"
 	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
 	first := svc.claimForegroundTurn(sessionID)
 	if first == nil {
 		t.Fatal("first prompt must win the claim")
 	}
-	// Work registered during admission becomes visible after agentctl accepts the
-	// prompt, allowing the dispatched turn to yield again.
+	// Work registered during admission becomes visible only after the provider
+	// reports that the dispatched foreground yielded.
 	svc.registerBackgroundTask(sessionID, "background-2")
-	if !svc.completeForegroundClaim(first) {
-		t.Fatal("first claim must complete")
+	if svc.completeForegroundClaim(first) {
+		t.Fatal("claim completion alone must not expose background work")
+	}
+	if !svc.markForegroundIdle(sessionID) {
+		t.Fatal("foreground idle must expose background work")
 	}
 	second := svc.claimForegroundTurn(sessionID)
 	if second == nil {

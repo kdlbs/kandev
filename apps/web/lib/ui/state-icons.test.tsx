@@ -150,9 +150,9 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
 });
 
 describe("getSessionStateIcon — fine-grained busy tri-state", () => {
-  // ADR-0047. Three distinguishable conditions:
+  // ADR-0049. Three distinguishable conditions:
   //  (a) RUNNING + generating  → the established static "running" dot (unchanged)
-  //  (b) RUNNING + background   → working-in-background spinner, NOT the done check
+  //  (b) settled + background   → working-in-background spinner, NOT the done check
   //  (c) COMPLETED              → done checkmark
   it("(a) keeps the established static running dot while the foreground is generating", () => {
     // The fine-grained signal only ADDS a background indicator; the foreground
@@ -169,7 +169,7 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
   });
 
   it("(b) shows a working spinner — never the done checkmark — while background work runs", () => {
-    const b = getSessionStateIcon("RUNNING", undefined, "background");
+    const b = getSessionStateIcon("WAITING_FOR_INPUT", undefined, "background");
     expect(iconType(b)).toBe(IconLoader2);
     expect(iconType(b)).not.toBe(IconCircleCheck);
     expect(iconClassName(b)).toContain("animate-spin");
@@ -181,10 +181,7 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     expect(a).not.toBe(b);
   });
 
-  it("(c) flips to the done checkmark only once the session leaves RUNNING", () => {
-    // The (b)→(c) flip: the coarse state stays RUNNING while background work is
-    // outstanding, so the checkmark appears only after the last task finishes
-    // and the session settles to COMPLETED.
+  it("(c) flips to the done checkmark once background activity is cleared", () => {
     expect(iconType(getSessionStateIcon("COMPLETED"))).toBe(IconCircleCheck);
     // A stale "background" substate must not resurrect a spinner on a terminal
     // session — the coarse state governs (c).
@@ -228,11 +225,11 @@ describe("getSessionStateIcon — waiting-for-input variants (§spec:waiting-for
   });
 
   it("keeps background-running ahead of a waiting flag (still working in background)", () => {
-    // Session-level background is the emerald IconLoader2 spinner (ADR-0047),
+    // Session-level background is the emerald IconLoader2 spinner (ADR-0049),
     // distinct from the task-level violet IconLoader.
-    expect(iconType(getSessionStateIcon("RUNNING", undefined, "background", true, false))).toBe(
-      IconLoader2,
-    );
+    expect(
+      iconType(getSessionStateIcon("WAITING_FOR_INPUT", undefined, "background", true, false)),
+    ).toBe(IconLoader2);
   });
 
   it("does not let stale pending input mask starting or terminal session states", () => {

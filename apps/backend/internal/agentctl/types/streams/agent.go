@@ -40,6 +40,15 @@ const (
 	// EventTypeContextWindow indicates a context window update.
 	EventTypeContextWindow = "context_window"
 
+	// EventTypeForegroundIdle indicates the provider finished its foreground
+	// model cycle even when the prompt RPC remains open for background work.
+	EventTypeForegroundIdle = "foreground_idle"
+
+	// EventTypeBackgroundComplete indicates one provider-reported background
+	// workload completed. Some providers do not expose the workload ID on this
+	// terminal frame, so consumers retire one outstanding registration.
+	EventTypeBackgroundComplete = "background_complete"
+
 	// EventTypeAvailableCommands indicates available slash commands from the agent.
 	EventTypeAvailableCommands = "available_commands"
 

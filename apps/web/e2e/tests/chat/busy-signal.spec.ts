@@ -6,11 +6,11 @@ import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 
 // ---------------------------------------------------------------------------
-// ADR-0038 — operator-visible surfacing.
+// ADR-0049 — operator-visible surfacing.
 //
-// The mock `/background <dur>` command spawns a top-level subagent Task and then
-// holds the turn open with NO foreground output, so the session sits in the
-// background-idle substate: RUNNING (working affordance up) yet promptable.
+// The mock `/detached-background <dur>` command returns its foreground response
+// immediately while the launched workload continues, so this suite exercises
+// work that genuinely outlives the foreground turn.
 //
 // The distinguishing observable of the background-idle window (b) is that the
 // agent status still reads "running" (the working affordance) WHILE the composer
@@ -58,8 +58,8 @@ test.describe("Fine-grained busy signal — composer + status", () => {
 
     const session = await seedTaskAndWaitForIdle(testPage, apiClient, seedData, "Busy signal (b)");
 
-    // Spawn background work: foreground yields to a held-open subagent.
-    await session.sendMessage("/background 12s");
+    // Launch work whose foreground prompt closes immediately.
+    await session.sendMessage("/detached-background 12s");
 
     // The turn is working…
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
@@ -72,10 +72,7 @@ test.describe("Fine-grained busy signal — composer + status", () => {
     await expect(session.agentStatus()).toBeVisible();
 
     // The working affordance must NOT be the done state while background runs.
-    await expect(session.turnComplete()).toHaveCount(0);
-
-    // Once the background subagent completes, the turn ends → done/idle and the
-    // working affordance clears.
+    // Once the detached workload completes, the working affordance clears.
     await expect(session.agentStatus()).not.toBeVisible({ timeout: 40_000 });
     await expect(session.idleInput()).toBeVisible({ timeout: 10_000 });
   });
@@ -89,24 +86,34 @@ test.describe("Fine-grained busy signal — composer + status", () => {
 
     const session = await seedTaskAndWaitForIdle(testPage, apiClient, seedData, "Busy signal send");
 
-    await session.sendMessage("/background 20s");
+    await session.sendMessage("/detached-background 20s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
 
     // Wait for the background-idle window (accept-input while still working).
     await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
     await expect(session.agentStatus()).toBeVisible();
 
-    // Type and submit — the message is accepted and posted, not diverted.
+    // Type and submit a foreground turn — it is accepted and posted, not
+    // diverted, and foreground busy temporarily takes absolute precedence.
     const editor = testPage.locator(".tiptap.ProseMirror").first();
     await editor.click();
-    await editor.fill("are you still working?");
+    await editor.fill("/slow 3s");
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await editor.press(`${modifier}+Enter`);
 
     // It appears in the conversation as a sent user message…
-    await expect(testPage.getByText("are you still working?")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("/slow 3s")).toBeVisible({ timeout: 15_000 });
     // …and was NOT silently diverted to the queue.
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
+
+    // While that foreground is active, the instant-send placeholder disappears
+    // even though the older detached workload remains registered.
+    await expect(session.idleInput()).not.toBeVisible({ timeout: 2_000 });
+    await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible();
+
+    // Foreground completion reveals the still-running detached work again.
+    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await expect(session.agentStatus()).toBeVisible();
   });
 
   test("background-idle substate survives a fresh page reload (boot payload, no WS flip)", async ({
@@ -124,7 +131,7 @@ test.describe("Fine-grained busy signal — composer + status", () => {
     );
 
     // Open a long background window so it is still held after the reload lands.
-    await session.sendMessage("/background 20s");
+    await session.sendMessage("/detached-background 20s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
 
     // Reach the background-idle window: accept-input while still working.
@@ -132,8 +139,8 @@ test.describe("Fine-grained busy signal — composer + status", () => {
     await expect(session.agentStatus()).toBeVisible();
 
     // Reload: this is a fresh client that loads MID background-window. The
-    // substate is not persisted and no activity_changed WS flip is due (the turn
-    // was already background before the reload), so the only way the composer can
+    // substate is not persisted and no activity_changed WS flip is due, so the
+    // only way the composer can
     // show accept-input + working here is if the boot payload carried the
     // fine-grained substate. This is the exact gap this batch closes: before it,
     // a reload showed the coarse "Queue more instructions…" busy affordance until
@@ -143,7 +150,6 @@ test.describe("Fine-grained busy signal — composer + status", () => {
 
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await expect(session.agentStatus()).toBeVisible();
-    await expect(session.turnComplete()).toHaveCount(0);
   });
 
   test("a turn with no background work keeps the composer gated (queues input)", async ({

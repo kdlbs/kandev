@@ -4,7 +4,7 @@ The system already tracks, per session, a fine-grained substate that
 distinguishes an actively-generating foreground turn from a foreground turn that
 has gone idle and is only held open by spawned background work — a subagent, a
 backgrounded shell, or an active monitor (the busy signal recorded in
-ADR-0047). This spec makes the operator-facing status indicators as
+ADR-0049). This spec makes the operator-facing status indicators as
 fine-grained as that signal: everywhere a task or session status appears, the
 "still working in the background" condition reads as its own state, distinct
 from both "actively generating" and "done".
@@ -37,6 +37,14 @@ conditions for an in-flight unit of work:
   work (subagent / backgrounded shell / active monitor) is still running.
 - **done** — no work is in progress.
 
+The states have strict precedence. Foreground work always wins: while the
+foreground is generating or a newly accepted prompt is being dispatched, the
+surface shows **generating**, regardless of any background work. Only after the
+foreground becomes idle does outstanding background work select
+**background-running**. **Done** is possible only when neither foreground nor
+recognized background work is active. Ending the foreground turn does not, by
+itself, end or hide background work that outlives that turn.
+
 The background-running affordance is visually separable from *both* the
 generating affordance *and* the done affordance, and the separation does not
 rely on hue alone: an operator distinguishes it by shape or motion, so it
@@ -60,7 +68,7 @@ recognize.
 
 **Additive, not a re-signal.** The background-running affordance communicates
 only "work is still in progress." It deliberately does not signal "you may now
-type" — composer input-gating is a separate concern (ADR-0047) and is not
+type" — composer input-gating is a separate concern (ADR-0049) and is not
 represented by this indicator.
 
 **Alternatives considered.**
@@ -222,9 +230,12 @@ in-scope surface — session-level and task-level — updates promptly without a
 manual refresh. A freshly loaded page and a second tab show the correct state
 immediately rather than a stale value that only corrects on the next transition.
 When the fine-grained substate is unknown or unavailable, no surface falsely
-reads "done" while a turn is still open.
+reads "done" while recognized background work remains live, including after
+the foreground turn has closed and the coarse session state has settled.
 
-**Decision and the constraint that drove it.** Transitions are pushed live:
+**Decision and the constraint that drove it.** Foreground ownership and
+background liveness are independent signals with foreground-first precedence.
+Transitions are pushed live:
 per-session substate flips propagate to session-level surfaces, and because the
 task-level aggregate is carried on the task record, a session's activity flip
 also refreshes the task-level surfaces subscribed to that task. The initial page
@@ -234,22 +245,30 @@ by the requirement that a stale "done" that clears only on refresh is itself a
 defect: the indicator's whole value is being trusted at a glance, so it must be
 correct at the moment of the glance, including immediately after load.
 
+A foreground turn completing clears only foreground ownership. Recognized
+background work remains attached to the session until its own terminal
+lifecycle signal arrives or the owning agent execution is torn down. A
+background-running value may therefore be carried for a session whose coarse
+state is no longer `RUNNING`. The composer gates only on foreground ownership;
+background liveness alone never puts the composer into queue mode.
+
 **Safe fallback.** The fine-grained substate is in-memory and best-effort by
-design (ADR-0047); after a backend restart the in-memory tracker resets. The
-fallback is chosen so that an unknown substate never resolves to "done" while a
-turn is open: an in-flight session whose substate is unknown reads as working
-(generating), not done, and a task with such a session does not read done.
-Correctness of "not falsely done" is never traded for the optimization of the
-finer distinction.
+design (ADR-0049). While the agent execution remains connected, a background
+launch stays background-running until terminal evidence arrives; a foreground
+turn-complete event is not terminal evidence for detached work. After a backend
+or agent-execution restart, live detached work that cannot be reconstructed is
+outside this guarantee. For an in-flight `RUNNING` session whose substate is
+unknown, the fallback remains working (generating), not done.
 
 **Alternatives considered.**
 
 - *Persist the fine-grained substate so it survives restart.* Rejected
-  (consistent with ADR-0047): a persisted copy becomes a second source of truth
+  (consistent with ADR-0049): a persisted copy becomes a second source of truth
   that can drift, can survive a restart as a false reading for a session whose
   turn is already gone, and adds write churn on the hot streaming path. The
-  substate only matters for a live in-flight turn; resetting to the safe default
-  on turn-close is sufficient and simpler.
+  longer than the connected agent lifecycle. Persistence without an agent-side
+  reconciliation API could preserve a false live value after restart, so this
+  change keeps connected-execution tracking in memory.
 - *Refresh task-level surfaces only on coarse state changes, not on
   activity flips.* Rejected: a generating→background flip does not change the
   coarse state, so the scanning surfaces would keep showing the wrong one of the

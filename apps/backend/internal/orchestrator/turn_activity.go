@@ -12,9 +12,9 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// turnActivity tracks, in memory, whether a session's open turn is being driven
-// by the foreground agent (actively generating) or is merely held open while a
-// spawned background task runs.
+// turnActivity tracks foreground ownership and spawned background-work liveness
+// independently. Foreground activity always has precedence; background work is
+// visible only after an explicit foreground-idle boundary.
 //
 // It is the finer-grained signal behind checkSessionPromptable: a session whose
 // foreground turn has yielded to background work should accept a new message
@@ -90,23 +90,39 @@ func (s *Service) markForegroundGenerating(sessionID string) bool {
 	return changed
 }
 
-// registerBackgroundTask records a spawned background task (a subagent Task or a
-// run-in-background shell). While at least one is outstanding, the foreground
-// turn is treated as "waiting on background" rather than "actively generating".
-// It returns true when this call flipped the session into the background-idle
-// substate (i.e. it was foreground-generating before), so the caller publishes
-// the activity signal only on the first background task, not every one.
-func (s *Service) registerBackgroundTask(sessionID, toolCallID string) bool {
-	if sessionID == "" || toolCallID == "" {
+// markForegroundIdle records an explicit provider boundary proving the current
+// foreground model cycle ended. Outstanding background work becomes the visible
+// activity only when no prompt admission claim is still in flight.
+func (s *Service) markForegroundIdle(sessionID string) bool {
+	if sessionID == "" {
 		return false
+	}
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil {
+		return false
+	}
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	if ta.promptInFlight || len(ta.background) == 0 || ta.yielded {
+		return false
+	}
+	ta.yielded = true
+	return true
+}
+
+// registerBackgroundTask records a spawned background task (a subagent Task or a
+// run-in-background shell). Registration alone is not evidence that the
+// foreground yielded: launch frames can arrive while the top-level agent is
+// still generating, and foreground activity must retain precedence. A later
+// foreground-idle boundary exposes the outstanding work.
+func (s *Service) registerBackgroundTask(sessionID, toolCallID string) {
+	if sessionID == "" || toolCallID == "" {
+		return
 	}
 	ta := s.turnActivityFor(sessionID, true)
 	ta.mu.Lock()
-	changed := !ta.yielded && !ta.promptInFlight
 	ta.background[toolCallID] = struct{}{}
-	ta.yielded = true
 	ta.mu.Unlock()
-	return changed
 }
 
 // hasBackgroundTask reports whether toolCallID is already tracked as outstanding
@@ -149,9 +165,31 @@ func (s *Service) completeBackgroundTask(sessionID, toolCallID string) bool {
 	return changed
 }
 
-// clearTurnActivity drops all tracked activity for a session. Called from every
-// turn-close path (turn complete, error, cancel, teardown) so a fresh turn
-// starts from the "foreground generating" default.
+// completeOneBackgroundTask retires one outstanding workload when the provider
+// reports a task-notification completion without exposing its task ID. The
+// indicator only depends on whether any work remains, so arbitrary retirement
+// is safe; one completion can never clear more than one registration.
+func (s *Service) completeOneBackgroundTask(sessionID string) bool {
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil {
+		return false
+	}
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	for toolCallID := range ta.background {
+		delete(ta.background, toolCallID)
+		if len(ta.background) == 0 && ta.yielded {
+			ta.yielded = false
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+// clearTurnActivity drops all tracked activity for a session. Foreground turn
+// completion deliberately does not call it because detached work may outlive
+// that turn; execution teardown and session removal do.
 func (s *Service) clearTurnActivity(sessionID string) {
 	if sessionID == "" {
 		return
@@ -203,7 +241,7 @@ func (ta *turnActivity) generatingLocked() bool {
 // overlapping turns on one ACP session. Claiming closes that window: the first
 // prompt in wins, and every prompt behind it sees a generating foreground and is
 // rejected with ErrAgentPromptInProgress exactly as it would have been before
-// ADR-0038.
+// ADR-0049.
 //
 // The claim is held until agentctl accepts the prompt (completeForegroundClaim)
 // or it is handed back (releaseForegroundClaim). The returned token binds both
@@ -274,7 +312,7 @@ func (s *Service) completeForegroundClaim(claim *foregroundClaim) bool {
 // it was taken for never made it to the agent (ensureSessionRunning failed, the
 // model switch failed). Without it the session would sit in RUNNING advertising a
 // generating foreground it does not have, locking the operator out for the rest
-// of the turn — the exact lockout ADR-0038 exists to remove.
+// of the turn — the exact lockout ADR-0049 exists to remove.
 //
 // It reports whether the turn was actually handed back to background-idle, so the
 // caller can broadcast the restored substate. Two things stop a release from
@@ -308,7 +346,8 @@ func (s *Service) releaseForegroundClaim(claim *foregroundClaim) bool {
 // foregroundActivityValue reports the fine-grained busy substate of a session
 // for the operator-facing signal: "generating" when the foreground turn is
 // actively producing output (the default), "background" when it has yielded to
-// outstanding spawned work. Only meaningful while the session state is RUNNING.
+// outstanding spawned work. Background activity can remain meaningful after the
+// coarse session state settles because detached work can outlive a turn.
 func (s *Service) foregroundActivityValue(sessionID string) v1.ForegroundActivity {
 	if s.isForegroundTurnGenerating(sessionID) {
 		return v1.ForegroundActivityGenerating
@@ -317,14 +356,12 @@ func (s *Service) foregroundActivityValue(sessionID string) v1.ForegroundActivit
 }
 
 // ForegroundActivity exposes the in-memory fine-grained busy substate so the
-// page-load / list serialization layer can stamp it onto a RUNNING session's
-// DTO (ADR-0038). This is the same value that drives the
+// page-load / list serialization layer can stamp it onto a session DTO
+// (ADR-0049). This is the same value that drives the
 // live task_session.activity_changed WS event, read straight from the in-memory
-// tracker — the single source of truth. There is no persisted copy: an untracked
-// session (including every session after a backend restart, which ends the turn)
-// reports the safe "generating" default, so a stale "you may type" can never be
-// serialized. Callers must only stamp the result on RUNNING sessions; for every
-// other state the coarse session state already tells the whole story.
+// tracker — the single source of truth. There is no persisted copy. Callers emit
+// generating only for RUNNING sessions, but may emit background for a settled
+// session while its connected execution still has detached work.
 func (s *Service) ForegroundActivity(sessionID string) v1.ForegroundActivity {
 	return s.foregroundActivityValue(sessionID)
 }
@@ -377,6 +414,21 @@ func normalizedIsBackgroundTask(n *streams.NormalizedPayload) bool {
 	// recognized via the shared streams predicate rather than a tool-name match.
 	if n.IsActiveMonitor() {
 		return true
+	}
+	return false
+}
+
+// normalizedIsDetachedLaunch distinguishes a launch tool completing from its
+// asynchronously-running workload completing.
+func normalizedIsDetachedLaunch(n *streams.NormalizedPayload) bool {
+	if n == nil {
+		return false
+	}
+	if subagent := n.SubagentTask(); subagent != nil {
+		return subagent.IsAsync
+	}
+	if shell := n.ShellExec(); shell != nil {
+		return shell.Background
 	}
 	return false
 }

@@ -94,6 +94,16 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case streams.EventTypeSessionInfo:
 		s.handleSessionInfoEvent(ctx, payload)
 
+	case streams.EventTypeForegroundIdle:
+		if s.markForegroundIdle(sessionID) {
+			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+		}
+
+	case streams.EventTypeBackgroundComplete:
+		if s.completeOneBackgroundTask(sessionID) {
+			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+		}
+
 	case "plan":
 		s.handleSessionTodosEvent(ctx, payload)
 
@@ -267,9 +277,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 	// never clear.
 	if payload.Data.ParentToolCallID == "" && !isTerminalToolStatus(payload.Data.ToolStatus) {
 		if normalizedIsBackgroundTask(payload.Data.Normalized) {
-			if s.registerBackgroundTask(payload.SessionID, payload.Data.ToolCallID) {
-				s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
-			}
+			s.registerBackgroundTask(payload.SessionID, payload.Data.ToolCallID)
 		} else if s.markForegroundGenerating(payload.SessionID) {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 		}
@@ -496,6 +504,13 @@ func (s *Service) trackBackgroundToolUpdate(ctx context.Context, payload *lifecy
 		return
 	}
 	if isTerminalToolStatus(payload.Data.ToolStatus) {
+		// A detached launch card is terminal as a tool invocation, but the
+		// launched workload remains active until a provider background-complete
+		// signal arrives. Monitor terminal payloads are no longer classified as
+		// active, and synchronous subagents do not carry IsAsync.
+		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
+			return
+		}
 		// A finished top-level background task no longer holds the turn open.
 		// Once none remain, the foreground is no longer "waiting on background".
 		// Cleared by tool-call ID membership rather than by re-classifying the
@@ -525,9 +540,7 @@ func (s *Service) trackBackgroundToolUpdate(ctx context.Context, payload *lifecy
 	// classifier can see them. Register only on that first recognition:
 	// re-registering on later updates would re-set `yielded` and clobber a
 	// foreground stream that meanwhile marked the turn generating again.
-	if s.registerBackgroundTask(payload.SessionID, payload.Data.ToolCallID) {
-		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
-	}
+	s.registerBackgroundTask(payload.SessionID, payload.Data.ToolCallID)
 }
 
 // isTerminalToolStatus reports whether a tool_update status marks the tool call
@@ -891,10 +904,9 @@ func (s *Service) publishTaskSessionStateChanged(
 		metaKeyAgentProfileID:    agentProfileID,
 		"agent_profile_snapshot": session.AgentProfileSnapshot,
 		"is_passthrough":         session.IsPassthrough,
-		// Carry the fine-grained busy substate on every coarse transition so
-		// the client resets any stale "background" value when a new turn starts
-		// or the turn ends (ADR-0038). Intra-RUNNING flips
-		// ride the dedicated task_session.activity_changed event instead.
+		// Carry the fine-grained busy substate on every coarse transition. A new
+		// foreground turn resets it to generating; a turn ending may preserve
+		// background while detached work remains live (ADR-0049).
 		"foreground_activity": string(s.foregroundActivityValue(sessionID)),
 	}
 	if stateUpdatedAt != nil && !stateUpdatedAt.IsZero() {
