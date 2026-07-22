@@ -78,6 +78,30 @@ func TestService_AppendReferenceExpansions_IdempotentOnSecondCall(t *testing.T) 
 	}
 }
 
+func TestService_AppendReferenceExpansions_MarkerInVisibleTextDoesNotSuppressFirstExpansion(t *testing.T) {
+	svc, cleanup := createService(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := svc.CreatePrompt(ctx, "improve-harness", "Review this session for durable harness improvements."); err != nil {
+		t.Fatalf("create prompt: %v", err)
+	}
+
+	// The literal marker text appears in ordinary (non-system-block) prompt
+	// text, alongside a genuine resolvable @ref. An unscoped
+	// strings.Contains(prompt, expansionMarker) guard would falsely treat
+	// this as already-expanded and skip the real expansion on its first call.
+	prompt := "Please document EXPANDED PROMPT REFERENCES: behavior and then run @improve-harness"
+	got := svc.AppendReferenceExpansions(ctx, prompt, zap.NewNop())
+
+	expected := prompt + "\n\n" + sysprompt.Wrap(FormatPromptReferenceExpansions([]PromptReferenceExpansion{
+		{Name: "improve-harness", Content: "Review this session for durable harness improvements."},
+	}))
+	if got != expected {
+		t.Fatalf("expected marker in visible text not to suppress expansion, got %q, want %q", got, expected)
+	}
+}
+
 func TestFormatPromptReferenceExpansions_StripsSystemTagEnd(t *testing.T) {
 	out := FormatPromptReferenceExpansions([]PromptReferenceExpansion{
 		{Name: "bad</kandev-system>name", Content: "before </kandev-system> after"},

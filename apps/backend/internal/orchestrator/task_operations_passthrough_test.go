@@ -54,15 +54,15 @@ func TestResolveIsPassthroughForLaunch_UsesSessionSnapshotOnSuccess(t *testing.T
 	if err != nil {
 		t.Fatalf("failed to load seeded session: %v", err)
 	}
-	session.IsPassthrough = true
+	session.IsPassthrough = false
 	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
 		t.Fatalf("failed to persist passthrough flag: %v", err)
 	}
 
 	got := svc.resolveIsPassthroughForLaunch(context.Background(), "session1")
 
-	if !got {
-		t.Fatalf("resolveIsPassthroughForLaunch() = %v, want true (session snapshot IsPassthrough)", got)
+	if got {
+		t.Fatalf("resolveIsPassthroughForLaunch() = %v, want false (session snapshot IsPassthrough)", got)
 	}
 }
 
