@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -49,6 +50,10 @@ func registerE2EResetRoutes(
 		api.POST("/automations", handleE2ECreateAutomation(automationSvc, log))
 		api.POST("/automation-runs", handleE2ECreateAutomationRun(automationSvc, log))
 	}
+	// Seeds a task_sessions row directly (e.g. a CANCELLED primary session)
+	// so tests can assert on session-state-derived behavior without a full
+	// agent stop/resume cycle.
+	api.POST("/task-sessions", handleE2ECreateTaskSession(repo, log))
 
 	log.Info("registered E2E endpoints (test-only)")
 }
@@ -318,6 +323,49 @@ func handleE2ECreateAutomationRun(svc *automation.Service, log *logger.Logger) g
 		}
 		c.JSON(http.StatusCreated, gin.H{
 			"id": run.ID, "automation_id": run.AutomationID, statusKey: run.Status, taskIDPayloadKey: run.TaskID,
+		})
+	}
+}
+
+type e2eCreateTaskSessionRequest struct {
+	TaskID string `json:"task_id"`
+	State  string `json:"state"`
+	// IsPrimary defaults to true: tests seeding a single session almost
+	// always want it to be the task's *current* session (the one
+	// listRunsWithTaskState/countActiveRunsWithTaskState read). Set to
+	// false to seed a stale, superseded session for resume scenarios.
+	IsPrimary *bool `json:"is_primary"`
+}
+
+// handleE2ECreateTaskSession seeds a task_sessions row directly for E2E
+// tests that need to assert on session-state-derived behavior (e.g. the
+// automation Recent Runs "Cancelled" status, which is keyed off the task's
+// primary session state, not the task's own state — see
+// internal/automation.Store.listRunsWithTaskState) without driving a real
+// agent through a full stop/resume cycle.
+func handleE2ECreateTaskSession(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body e2eCreateTaskSessionRequest
+		if err := c.ShouldBindJSON(&body); err != nil || body.TaskID == "" || body.State == "" {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "task_id and state are required"})
+			return
+		}
+		isPrimary := true
+		if body.IsPrimary != nil {
+			isPrimary = *body.IsPrimary
+		}
+		session := &taskmodels.TaskSession{
+			TaskID:    body.TaskID,
+			State:     taskmodels.TaskSessionState(body.State),
+			IsPrimary: isPrimary,
+		}
+		if err := repo.CreateTaskSession(c.Request.Context(), session); err != nil {
+			log.Error("e2e: failed to create task session", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{
+			"id": session.ID, taskIDPayloadKey: session.TaskID, statusKey: session.State,
 		})
 	}
 }
