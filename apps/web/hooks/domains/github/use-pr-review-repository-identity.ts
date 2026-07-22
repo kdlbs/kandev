@@ -35,7 +35,12 @@ function normalizeReviewWorktrees(
   for (const id of liveWorktreeIds) {
     const worktree = liveWorktrees[id];
     if (!worktree || seen.has(id)) continue;
-    normalized.push(worktree);
+    normalized.push({
+      id: worktree.id,
+      repositoryId: worktree.repositoryId,
+      branch: worktree.branch,
+      path: worktree.path,
+    });
   }
   return normalized;
 }

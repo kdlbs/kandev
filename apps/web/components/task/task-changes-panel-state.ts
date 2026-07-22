@@ -13,6 +13,24 @@ export function shouldDeferReviewStateForPR(
   return hasSelectedPR && prDiffLoading && usesPRDiff;
 }
 
+export function shouldBlockChangesForPR(
+  sourceFilter: "all" | ReviewSource,
+  visibleFiles: ReviewFile[],
+): boolean {
+  if (sourceFilter === "pr") return true;
+  if (sourceFilter !== "all") return false;
+  return !visibleFiles.some((file) => file.source !== "pr");
+}
+
+export function resolveSelectedFileRepositoryName(
+  sourceFilter: "all" | ReviewSource,
+  prKey: string | undefined,
+  fileRepositoryName: string | undefined,
+  visibleFileRepositoryName: string | undefined,
+): string | undefined {
+  return prKey && sourceFilter === "pr" ? visibleFileRepositoryName : fileRepositoryName;
+}
+
 export function shouldCloseFileDiffPanel(
   gitStatus: { files?: Record<string, { diff?: string }> } | undefined,
   filePath: string,

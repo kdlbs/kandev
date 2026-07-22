@@ -21,6 +21,8 @@ import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import { ChangesTopBar } from "./changes-top-bar";
 import {
+  resolveSelectedFileRepositoryName,
+  shouldBlockChangesForPR,
   shouldDeferReviewStateForPR,
   useAutoCloseWhenEmpty,
   useVisibleDiffState,
@@ -193,6 +195,29 @@ function useWalkthroughRequest(activeSessionId: string | null | undefined, allFi
   });
 }
 
+function useChangesPRPresentation(opts: {
+  sourceFilter: "all" | ReviewSource;
+  prKey: string | undefined;
+  mode: "all" | "file";
+  filePath: string | undefined;
+  fileRepositoryName: string | undefined;
+  visibleFiles: ReviewFile[];
+}) {
+  const visibleSelectedFile = opts.visibleFiles.find((file) => file.path === opts.filePath);
+  const selectedFileKey = useSelectedFileKey(
+    opts.mode,
+    opts.filePath,
+    resolveSelectedFileRepositoryName(
+      opts.sourceFilter,
+      opts.prKey,
+      opts.fileRepositoryName,
+      visibleSelectedFile?.repository_name,
+    ),
+  );
+  const blockChangesForPR = shouldBlockChangesForPR(opts.sourceFilter, opts.visibleFiles);
+  return { selectedFileKey, blockChangesForPR };
+}
+
 function useChangesActions(
   activeSessionId: string | null | undefined,
   allFiles: ReviewFile[],
@@ -334,11 +359,14 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     reviewedFiles: view.reviewedFiles,
     staleFiles: view.staleFiles,
   });
-  const selectedFileKey = useSelectedFileKey(
+  const { selectedFileKey, blockChangesForPR } = useChangesPRPresentation({
+    sourceFilter,
+    prKey,
     mode,
     filePath,
-    prKey && sourceFilter === "pr" ? undefined : fileRepositoryName,
-  );
+    fileRepositoryName,
+    visibleFiles: visible.visibleFiles,
+  });
   useAutoCloseWhenEmpty({
     mode,
     filePath,
@@ -375,9 +403,9 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
       <PanelBody padding={false} scroll={false} className="overflow-hidden">
         <TruncatedFilesBanner count={view.truncatedFilesCount} />
         <ReviewPRDiffBoundary
-          selectedPR={usesPRDiff ? view.selectedPR : null}
-          loading={relevantPRLoading}
-          error={view.prDiffError}
+          selectedPR={usesPRDiff && blockChangesForPR ? view.selectedPR : null}
+          loading={blockChangesForPR && relevantPRLoading}
+          error={blockChangesForPR ? view.prDiffError : null}
           onRetry={view.refreshPRDiff}
         >
           <ChangesPanelContent

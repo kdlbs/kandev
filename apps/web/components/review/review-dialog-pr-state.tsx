@@ -70,7 +70,9 @@ export function useReviewDialogTransientState(sourceKey: string) {
     filter: "",
   }));
   const resolvedState = resolveReviewTransientState(state, sourceKey);
-  if (resolvedState !== state) setState(resolvedState);
+  useEffect(() => {
+    setState((current) => resolveReviewTransientState(current, sourceKey));
+  }, [sourceKey]);
 
   const setSelectedFile = useCallback(
     (value: string | null) =>

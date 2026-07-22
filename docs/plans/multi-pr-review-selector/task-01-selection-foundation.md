@@ -19,6 +19,8 @@ plan: ./plan.md
 - Existing `prTaskKey` importers
 - `apps/web/hooks/domains/github/use-review-pr-selection.ts`
 - `apps/web/hooks/domains/github/use-review-pr-selection.test.ts`
+- `apps/web/hooks/domains/github/use-pr-review-repository-identity.ts`
+- `apps/web/hooks/domains/github/use-pr-review-repository-identity.test.tsx`
 - `apps/web/lib/state/slices/ui/types.ts`
 - `apps/web/lib/state/slices/ui/ui-slice.ts`
 - `apps/web/lib/state/default-state.ts`
@@ -37,7 +39,7 @@ Use strict RED → GREEN → REFACTOR. First run must fail on behavior, not miss
 
 ## Verification
 
-`cd apps && pnpm --filter @kandev/web test -- --run hooks/domains/github/use-review-pr-selection.test.ts lib/state/store.test.ts`
+`cd apps/web && pnpm test -- hooks/domains/github/use-review-pr-selection.test.ts hooks/domains/github/use-pr-review-repository-identity.test.tsx lib/state/store.test.ts`
 
 ## Output contract
 

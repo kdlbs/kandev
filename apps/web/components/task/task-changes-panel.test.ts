@@ -3,6 +3,8 @@ import { renderHook } from "@testing-library/react";
 import { scrollToFileAndClear } from "./task-changes-panel";
 import {
   filterVisibleFiles,
+  resolveSelectedFileRepositoryName,
+  shouldBlockChangesForPR,
   shouldDeferReviewStateForPR,
   shouldCloseFileDiffPanel,
   useAutoCloseWhenEmpty,
@@ -188,6 +190,29 @@ describe("shouldDeferReviewStateForPR", () => {
   it("keeps local review marks stable during an unrelated PR fetch", () => {
     expect(shouldDeferReviewStateForPR(true, true, "uncommitted")).toBe(false);
     expect(shouldDeferReviewStateForPR(true, true, "committed")).toBe(false);
+  });
+});
+
+describe("shouldBlockChangesForPR", () => {
+  it("keeps local files visible while the selected PR is loading or failed", () => {
+    expect(shouldBlockChangesForPR("all", [file("local.ts", "uncommitted")])).toBe(false);
+  });
+
+  it("blocks a PR-only view until the selected PR is ready", () => {
+    expect(shouldBlockChangesForPR("pr", [])).toBe(true);
+  });
+});
+
+describe("resolveSelectedFileRepositoryName", () => {
+  it("uses the selected PR file identity instead of a timeline group label", () => {
+    expect(
+      resolveSelectedFileRepositoryName(
+        "pr",
+        "acme/widgets/42",
+        "widgets · feature/second",
+        "widgets-feature-second",
+      ),
+    ).toBe("widgets-feature-second");
   });
 });
 

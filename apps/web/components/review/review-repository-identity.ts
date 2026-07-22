@@ -59,12 +59,23 @@ function findPRWorktree(
   worktrees: ReviewWorktreeIdentity[],
 ): ReviewWorktreeIdentity | undefined {
   const branchSlug = sanitizeReviewRepositoryName(pr.head_branch ?? "");
-  return worktrees.find((worktree) => {
-    if (worktree.repositoryId !== pr.repository_id) return false;
-    if (pr.head_branch && worktree.branch === pr.head_branch) return true;
-    if (branchSlug && worktree.branchSlug === branchSlug) return true;
-    return taskRepository !== undefined && worktree.position === taskRepository.position;
-  });
+  const repositoryWorktrees = worktrees.filter(
+    (worktree) => worktree.repositoryId === pr.repository_id,
+  );
+  const exactBranch = repositoryWorktrees.find(
+    (worktree) => pr.head_branch && worktree.branch === pr.head_branch,
+  );
+  if (exactBranch) return exactBranch;
+
+  const exactPosition = repositoryWorktrees.find(
+    (worktree) => taskRepository !== undefined && worktree.position === taskRepository.position,
+  );
+  if (exactPosition) return exactPosition;
+
+  const slugMatches = repositoryWorktrees.filter(
+    (worktree) => branchSlug && worktree.branchSlug === branchSlug,
+  );
+  return slugMatches.length === 1 ? slugMatches[0] : undefined;
 }
 
 /**
