@@ -18,7 +18,9 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { PanelHeaderBarSplit } from "./panel-primitives";
+import { ReviewPRSelector } from "@/components/review/review-pr-selector";
+import type { TaskPR } from "@/lib/types/github";
+import { PanelHeaderBar, PanelHeaderBarSplit } from "./panel-primitives";
 
 export type ChangesTopBarProps = {
   autoMarkOnScroll: boolean;
@@ -34,6 +36,10 @@ export type ChangesTopBarProps = {
   handleFixComments: () => void;
   handleRequestWalkthrough?: () => void;
   requestWalkthroughDisabled?: boolean;
+  prs: TaskPR[];
+  selectedPR: TaskPR | null;
+  prDiffLoading: boolean;
+  onSelectPR: (pr: TaskPR) => void;
 };
 
 function ChangesTopBarLeft({
@@ -220,7 +226,53 @@ export function ChangesTopBar({
   handleFixComments,
   handleRequestWalkthrough,
   requestWalkthroughDisabled,
+  prs,
+  selectedPR,
+  prDiffLoading,
+  onSelectPR,
 }: ChangesTopBarProps) {
+  const selector = (
+    <ReviewPRSelector
+      prs={prs}
+      selectedPR={selectedPR}
+      loading={prDiffLoading}
+      onSelectPR={onSelectPR}
+      compact
+      testIdPrefix="changes-review-pr-selector"
+      className="w-full sm:w-auto"
+    />
+  );
+
+  if (prs.length > 1 && selectedPR) {
+    return (
+      <PanelHeaderBar className="h-auto flex-wrap gap-y-1 py-1 sm:min-h-[30px] sm:flex-nowrap sm:py-0">
+        <div className="order-first min-w-0 basis-full sm:order-none sm:basis-auto">{selector}</div>
+        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+          <ChangesTopBarLeft
+            autoMarkOnScroll={autoMarkOnScroll}
+            totalCount={totalCount}
+            reviewedCount={reviewedCount}
+            progressPercent={progressPercent}
+            handleToggleAutoMark={handleToggleAutoMark}
+          />
+        </div>
+        <div className="flex-1" />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <ChangesTopBarRight
+            splitView={splitView}
+            wordWrap={wordWrap}
+            totalCommentCount={totalCommentCount}
+            setWordWrap={setWordWrap}
+            handleToggleSplitView={handleToggleSplitView}
+            handleFixComments={handleFixComments}
+            handleRequestWalkthrough={handleRequestWalkthrough}
+            requestWalkthroughDisabled={requestWalkthroughDisabled}
+          />
+        </div>
+      </PanelHeaderBar>
+    );
+  }
+
   return (
     <PanelHeaderBarSplit
       left={

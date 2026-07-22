@@ -519,6 +519,8 @@ export function FileListSection(props: FileListSectionProps) {
 
 export type PRChangedFile = {
   path: string;
+  /** Stable owner/repo/number identity for the PR that produced this row. */
+  prKey?: string;
   status: FileInfo["status"];
   plus: number | undefined;
   minus: number | undefined;

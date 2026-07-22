@@ -75,6 +75,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
       path,
       sourceFilter: options?.source ?? "all",
       repositoryName: options?.repositoryName || undefined,
+      prKey: options?.prKey,
     });
   }, []);
 
