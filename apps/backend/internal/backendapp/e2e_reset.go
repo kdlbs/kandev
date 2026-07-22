@@ -355,14 +355,27 @@ func handleE2ECreateTaskSession(repo *sqliterepo.Repository, log *logger.Logger)
 			isPrimary = *body.IsPrimary
 		}
 		session := &taskmodels.TaskSession{
-			TaskID:    body.TaskID,
-			State:     taskmodels.TaskSessionState(body.State),
-			IsPrimary: isPrimary,
+			TaskID: body.TaskID,
+			State:  taskmodels.TaskSessionState(body.State),
 		}
 		if err := repo.CreateTaskSession(c.Request.Context(), session); err != nil {
 			log.Error("e2e: failed to create task session", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
 			return
+		}
+		// SetSessionPrimary clears is_primary on every other session for this
+		// task before setting it here, mirroring production's resume path
+		// (Repository.SetSessionPrimary) so seeding a second primary session
+		// for a task that already has one can't leave two is_primary = 1 rows
+		// behind — that would corrupt the run-status query's read of the
+		// task's "current" session (see listRunsWithTaskState).
+		if isPrimary {
+			if err := repo.SetSessionPrimary(c.Request.Context(), session.ID); err != nil {
+				log.Error("e2e: failed to set primary task session", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+				return
+			}
+			session.IsPrimary = true
 		}
 		c.JSON(http.StatusCreated, gin.H{
 			"id": session.ID, taskIDPayloadKey: session.TaskID, statusKey: session.State,

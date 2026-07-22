@@ -478,7 +478,7 @@ func (s *Store) listRunsWithTaskState(ctx context.Context, automationID string, 
 	// unrecoverable — shown as cancelled; (2) the task was archived
 	// (archived_at set, via the UI or by the agent itself, e.g. an
 	// "archive this task" instruction) — shown as archived, which takes
-	// precedence over the session check below since archiving is the
+	// precedence over the session check below; (3) the task's current
 	// (is_primary) session is CANCELLED — set only when an agent run was
 	// manually stopped (coordinator/MCP stop_task, or the UI Stop button)
 	// — a deliberate cancellation, shown as cancelled. Task.state is
