@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 
 // ---------------------------------------------------------------------------
@@ -70,6 +71,7 @@ test.describe("Fine-grained busy signal — composer + status", () => {
     // both visible at once. This is the whole point of the fine-grained signal.
     await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
     await expect(session.agentStatus()).toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "background");
 
     // The working affordance must NOT be the done state while background runs.
     // Once the detached workload completes, the working affordance clears.
@@ -92,6 +94,7 @@ test.describe("Fine-grained busy signal — composer + status", () => {
     // Wait for the background-idle window (accept-input while still working).
     await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
     await expect(session.agentStatus()).toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "background");
 
     // Type and submit a foreground turn — it is accepted and posted, not
     // diverted, and foreground busy temporarily takes absolute precedence.
@@ -110,10 +113,12 @@ test.describe("Fine-grained busy signal — composer + status", () => {
     // even though the older detached workload remains registered.
     await expect(session.idleInput()).not.toBeVisible({ timeout: 2_000 });
     await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "generating");
 
     // Foreground completion reveals the still-running detached work again.
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await expect(session.agentStatus()).toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "background");
   });
 
   test("background-idle substate survives a fresh page reload (boot payload, no WS flip)", async ({

@@ -125,11 +125,14 @@ describe("useSubmitHandler", () => {
     });
   });
 
-  it("reports deterministic preflight failures as not sent", async () => {
+  it.each([
+    ["connection-unavailable", "Connection unavailable. Reconnect and try again."],
+    ["session-unavailable", "The selected session is not available for input."],
+  ])("reports deterministic %s preflight failures as not sent", async (code, message) => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const error = Object.assign(new Error("Connection unavailable. Reconnect and try again."), {
+    const error = Object.assign(new Error(message), {
       name: "MessageSendError",
-      code: "connection-unavailable",
+      code,
     });
     handleSendMessageMock.mockRejectedValueOnce(error);
     const { result } = renderHook(() => useSubmitHandler(panelState()));
@@ -140,7 +143,7 @@ describe("useSubmitHandler", () => {
 
     expect(toastMock).toHaveBeenCalledWith({
       title: "Message not sent",
-      description: "Connection unavailable. Reconnect and try again.",
+      description: message,
       variant: "error",
     });
   });

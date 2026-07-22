@@ -913,6 +913,19 @@ func TestTryConvertUntypedUpdate_HumanOriginSignalsForegroundIdle(t *testing.T) 
 	}
 }
 
+func TestTryConvertUntypedUpdate_HumanOriginPreservesPromptGeneration(t *testing.T) {
+	a := newTestAdapter()
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":1000000,"used":23638,"_meta":{"_claude/origin":{"kind":"human"}}}}`)
+
+	event := a.tryConvertUntypedUpdate(raw, "s1", 42)
+	if event == nil {
+		t.Fatal("expected foreground-idle event")
+	}
+	if event.PromptGeneration != 42 {
+		t.Fatalf("prompt generation = %d, want 42", event.PromptGeneration)
+	}
+}
+
 func TestTryConvertUntypedUpdate_TaskNotificationSignalsOneBackgroundCompletion(t *testing.T) {
 	a := newTestAdapter()
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":1000000,"used":24892,"_meta":{"_claude/origin":{"kind":"task-notification"}}}}`)

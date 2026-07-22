@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -11,6 +12,20 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type failOnceGetTaskSessionRepo struct {
+	repoStore
+	err    error
+	failed bool
+}
+
+func (r *failOnceGetTaskSessionRepo) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	if !r.failed {
+		r.failed = true
+		return nil, r.err
+	}
+	return r.repoStore.GetTaskSession(ctx, id)
+}
 
 // activityValues returns the foreground_activity payloads of every
 // task_session.activity_changed event recorded on the bus, in publish order.
@@ -324,5 +339,337 @@ func TestForegroundActivitySignal_PropagatesToTaskLevel(t *testing.T) {
 		if taskEvents.activityTaskIDs[i] != want[i] {
 			t.Fatalf("task-level recompute %d: got %q, want %q", i, taskEvents.activityTaskIDs[i], want[i])
 		}
+	}
+}
+
+func TestForegroundActivitySignal_TurnCompletionPublishesBackgroundExactlyOnce(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(*Service, string, string)
+	}{
+		{
+			name: "completion without provider idle",
+			act: func(svc *Service, _, sessionID string) {
+				svc.completeTurnForSession(t.Context(), sessionID)
+			},
+		},
+		{
+			name: "repeated completion",
+			act: func(svc *Service, _, sessionID string) {
+				svc.completeTurnForSession(t.Context(), sessionID)
+				svc.completeTurnForSession(t.Context(), sessionID)
+			},
+		},
+		{
+			name: "provider idle before completion",
+			act: func(svc *Service, taskID, sessionID string) {
+				emitForegroundIdle(svc, taskID, sessionID)
+				svc.completeTurnForSession(t.Context(), sessionID)
+			},
+		},
+		{
+			name: "provider idle after completion",
+			act: func(svc *Service, taskID, sessionID string) {
+				svc.completeTurnForSession(t.Context(), sessionID)
+				emitForegroundIdle(svc, taskID, sessionID)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+			eb := &recordingEventBus{}
+			svc.eventBus = eb
+			taskEvents := &recordingTaskEvents{}
+			svc.SetTaskEventPublisher(taskEvents)
+
+			const (
+				taskID    = "task-completion-signal"
+				sessionID = "session-completion-signal"
+			)
+			seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+			svc.registerBackgroundTask(sessionID, "subagent-1")
+
+			tt.act(svc, taskID, sessionID)
+
+			got := activityValues(eb)
+			want := []string{string(v1.ForegroundActivityBackground)}
+			if len(got) != len(want) || got[0] != want[0] {
+				t.Fatalf("expected exactly one session background publication %v, got %v", want, got)
+			}
+			if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {
+				t.Fatalf("expected exactly one task aggregate publication for %q, got %v", taskID, taskEvents.activityTaskIDs)
+			}
+			for _, rec := range eb.events {
+				if rec.subject != events.TaskSessionActivityChanged {
+					continue
+				}
+				data, ok := rec.event.Data.(map[string]interface{})
+				if !ok || data[metaKeyTaskID] != taskID || data[metaKeySessionID] != sessionID {
+					t.Fatalf("activity publication lost task/session identity: %#v", rec.event.Data)
+				}
+			}
+		})
+	}
+}
+
+func TestForegroundActivitySignal_TurnCompletionPreservesFinalBackgroundCompletion(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+	taskEvents := &recordingTaskEvents{}
+	svc.SetTaskEventPublisher(taskEvents)
+
+	const (
+		taskID    = "task-completion-finished"
+		sessionID = "session-completion-finished"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	svc.registerBackgroundTask(sessionID, "subagent-1")
+	svc.completeTurnForSession(t.Context(), sessionID)
+
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		Data:      &lifecycle.AgentStreamEventData{Type: streams.EventTypeBackgroundComplete},
+	})
+
+	got := activityValues(eb)
+	want := []string{string(v1.ForegroundActivityBackground), string(v1.ForegroundActivityGenerating)}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("expected completion and final-background publications %v, got %v", want, got)
+	}
+	if len(taskEvents.activityTaskIDs) != 2 || taskEvents.activityTaskIDs[0] != taskID || taskEvents.activityTaskIDs[1] != taskID {
+		t.Fatalf("expected one task aggregate publication per real flip for %q, got %v", taskID, taskEvents.activityTaskIDs)
+	}
+}
+
+func TestForegroundActivitySignal_DelayedOldCompletionCannotYieldSuccessor(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+	taskEvents := &recordingTaskEvents{}
+	svc.SetTaskEventPublisher(taskEvents)
+
+	const (
+		taskID    = "task-delayed-completion"
+		sessionID = "session-delayed-completion"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	svc.registerBackgroundTask(sessionID, "subagent-1")
+	emitForegroundIdle(svc, taskID, sessionID)
+
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("successor prompt must claim the background-idle foreground")
+	}
+	svc.completeForegroundClaim(claim)
+	svc.markForegroundGenerating(sessionID)
+	eb.events = nil
+	taskEvents.activityTaskIDs = nil
+
+	// This is the old cycle's delayed completion, arriving after its successor
+	// has already claimed and begun generating in the same session.
+	svc.completeTurnForSession(t.Context(), sessionID)
+
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+		t.Fatalf("delayed old completion yielded successor foreground: got %q", got)
+	}
+	if got := activityValues(eb); len(got) != 0 {
+		t.Fatalf("delayed old completion must not publish successor as background, got %v", got)
+	}
+	if len(taskEvents.activityTaskIDs) != 0 {
+		t.Fatalf("delayed old completion must not recompute task activity, got %v", taskEvents.activityTaskIDs)
+	}
+}
+
+func TestForegroundActivitySignal_OldCompletionBeforeSuccessorLeavesSuccessorCompletionValid(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+	taskEvents := &recordingTaskEvents{}
+	svc.SetTaskEventPublisher(taskEvents)
+
+	const (
+		taskID    = "task-ordered-completion"
+		sessionID = "session-ordered-completion"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	svc.registerBackgroundTask(sessionID, "subagent-1")
+	emitForegroundIdle(svc, taskID, sessionID)
+	svc.completeTurnForSession(t.Context(), sessionID)
+
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("successor prompt must claim after old completion")
+	}
+	svc.completeForegroundClaim(claim)
+	svc.markForegroundGenerating(sessionID)
+	eb.events = nil
+	taskEvents.activityTaskIDs = nil
+
+	// With the old completion consumed before the successor began, completing
+	// the successor is current and must expose the still-running background task.
+	svc.completeTurnForSession(t.Context(), sessionID)
+
+	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityBackground) {
+		t.Fatalf("current successor completion must publish background once, got %v", got)
+	}
+	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {
+		t.Fatalf("current successor completion must recompute task once, got %v", taskEvents.activityTaskIDs)
+	}
+}
+
+func TestForegroundActivitySignal_TaskLookupFailureDoesNotConsumeCompletionYield(t *testing.T) {
+	baseRepo := setupTestRepo(t)
+	svc := createTestService(baseRepo, newMockStepGetter(), newMockTaskRepo())
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+	taskEvents := &recordingTaskEvents{}
+	svc.SetTaskEventPublisher(taskEvents)
+
+	const (
+		taskID    = "task-lookup-retry"
+		sessionID = "session-lookup-retry"
+	)
+	seedTaskAndSession(t, baseRepo, taskID, sessionID, models.TaskSessionStateRunning)
+	svc.registerBackgroundTask(sessionID, "subagent-1")
+	svc.repo = &failOnceGetTaskSessionRepo{repoStore: baseRepo, err: errors.New("transient lookup failure")}
+
+	svc.completeTurnForSession(t.Context(), sessionID)
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+		t.Fatalf("failed identity lookup must not consume transition, got %q", got)
+	}
+	if got := activityValues(eb); len(got) != 0 {
+		t.Fatalf("failed identity lookup must not publish, got %v", got)
+	}
+
+	svc.completeTurnForSession(t.Context(), sessionID)
+	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityBackground) {
+		t.Fatalf("retry must publish preserved background transition once, got %v", got)
+	}
+	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {
+		t.Fatalf("retry must recompute owning task once, got %v", taskEvents.activityTaskIDs)
+	}
+}
+
+func TestForegroundActivitySignal_TurnCompletionIsSessionIsolated(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+	taskEvents := &recordingTaskEvents{}
+	svc.SetTaskEventPublisher(taskEvents)
+
+	const (
+		taskA    = "task-completion-a"
+		sessionA = "session-completion-a"
+		taskB    = "task-completion-b"
+		sessionB = "session-completion-b"
+	)
+	seedTaskAndSession(t, repo, taskA, sessionA, models.TaskSessionStateRunning)
+	seedTaskAndSession(t, repo, taskB, sessionB, models.TaskSessionStateRunning)
+	svc.registerBackgroundTask(sessionA, "subagent-a")
+	svc.registerBackgroundTask(sessionB, "subagent-b")
+
+	svc.completeTurnForSession(t.Context(), sessionA)
+
+	if got := svc.ForegroundActivity(sessionA); got != v1.ForegroundActivityBackground {
+		t.Fatalf("completed session A must become background, got %q", got)
+	}
+	if got := svc.ForegroundActivity(sessionB); got != v1.ForegroundActivityGenerating {
+		t.Fatalf("completion for session A mutated session B: got %q", got)
+	}
+	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityBackground) {
+		t.Fatalf("expected one session A background event, got %v", got)
+	}
+	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskA {
+		t.Fatalf("completion for session A published another task: %v", taskEvents.activityTaskIDs)
+	}
+	for _, rec := range eb.events {
+		if rec.subject != events.TaskSessionActivityChanged {
+			continue
+		}
+		data, ok := rec.event.Data.(map[string]interface{})
+		if !ok || data[metaKeyTaskID] != taskA || data[metaKeySessionID] != sessionA {
+			t.Fatalf("completion for session A published another session: %#v", rec.event.Data)
+		}
+	}
+}
+
+func TestForegroundActivitySignal_DelayedOldProviderIdleCannotYieldSuccessor(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{currentPromptExecutionID: "execution-provider-idle"}
+	agentMgr.currentPromptGeneration.Store(1)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+	taskEvents := &recordingTaskEvents{}
+	svc.SetTaskEventPublisher(taskEvents)
+
+	const (
+		taskID    = "task-delayed-provider-idle"
+		sessionID = "session-delayed-provider-idle"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	svc.registerBackgroundTask(sessionID, "subagent-1")
+
+	// The old turn completes without its provider-idle frame arriving yet.
+	svc.completeTurnForSession(t.Context(), sessionID)
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("successor prompt must claim the completion-yielded foreground")
+	}
+	svc.completeForegroundClaim(claim)
+	svc.markForegroundGenerating(sessionID)
+	agentMgr.currentPromptGeneration.Store(2)
+	eb.events = nil
+	taskEvents.activityTaskIDs = nil
+
+	// The old turn's delayed provider-idle arrives after the successor started.
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID:      taskID,
+		SessionID:   sessionID,
+		ExecutionID: "execution-provider-idle",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             streams.EventTypeForegroundIdle,
+			PromptGeneration: 1,
+		},
+	})
+
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+		t.Fatalf("delayed old provider idle yielded successor foreground: got %q", got)
+	}
+	if got := activityValues(eb); len(got) != 0 {
+		t.Fatalf("delayed old provider idle must not publish background, got %v", got)
+	}
+	if len(taskEvents.activityTaskIDs) != 0 {
+		t.Fatalf("delayed old provider idle must not recompute task activity, got %v", taskEvents.activityTaskIDs)
+	}
+
+	// The actual successor's idle signal carries the current immutable prompt
+	// generation and must still expose background work immediately.
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID:      taskID,
+		SessionID:   sessionID,
+		ExecutionID: "execution-provider-idle",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             streams.EventTypeForegroundIdle,
+			PromptGeneration: 2,
+		},
+	})
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("current provider idle must yield promptly, got %q", got)
+	}
+	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityBackground) {
+		t.Fatalf("current provider idle must publish background once, got %v", got)
+	}
+	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {
+		t.Fatalf("current provider idle must recompute task once, got %v", taskEvents.activityTaskIDs)
 	}
 }

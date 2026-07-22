@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { registerTaskSessionHandlers } from "./agent-session";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import { createAppStore } from "@/lib/state/store";
+import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
+import type { TaskSession } from "@/lib/types/http";
 import type { TaskSessionStateChangedPayload } from "@/lib/types/backend";
 
 function makeStore(overrides: Record<string, unknown> = {}) {
@@ -35,6 +38,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
 }
 
 const STATE_CHANGED_EVENT = "session.state_changed";
+const ACTIVITY_EVENT = "session.activity_changed";
 const RECOVERABLE_ERROR_MESSAGE = "peer disconnected before response";
 const RECOVERABLE_ERROR_AT = "2026-06-14T14:06:40Z";
 
@@ -45,6 +49,45 @@ function makeMessage(payload: TaskSessionStateChangedPayload) {
     action: "session.state_changed" as const,
     payload,
   };
+}
+
+function makeActivityMessage(payload: {
+  task_id?: string;
+  session_id?: string;
+  foreground_activity?: string;
+}) {
+  return { id: "m", type: "notification" as const, action: ACTIVITY_EVENT, payload };
+}
+
+function assertRealStoreActivityRouting() {
+  const selected = {
+    id: "s-1",
+    task_id: "t-1",
+    state: "RUNNING",
+    foreground_activity: "generating",
+    started_at: RECOVERABLE_ERROR_AT,
+    updated_at: RECOVERABLE_ERROR_AT,
+  } as TaskSession;
+  const peer = { ...selected, id: "s-2", foreground_activity: "background" } as TaskSession;
+  const store = createAppStore();
+  store.getState().setTaskSession(selected);
+  store.getState().setTaskSession(peer);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+  expect(deriveSessionInputMode(store.getState().taskSessions.items["s-1"])).toBe("queue");
+  handler(
+    makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+  );
+  expect(store.getState().taskSessions.items["s-1"].foreground_activity).toBe("background");
+  expect(deriveSessionInputMode(store.getState().taskSessions.items["s-1"])).toBe("direct");
+  expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+
+  handler(
+    makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "generating" }),
+  );
+  expect(deriveSessionInputMode(store.getState().taskSessions.items["s-1"])).toBe("queue");
+  expect(deriveSessionInputMode(store.getState().taskSessions.items["s-2"])).toBe("direct");
 }
 
 describe("session.state_changed handler", () => {
@@ -842,19 +885,9 @@ describe("session.state_changed → agentctl ready fallback", () => {
 });
 
 describe("session.activity_changed handler — fine-grained busy signal", () => {
-  const ACTIVITY_EVENT = "session.activity_changed";
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
-
-  function makeActivityMessage(payload: {
-    task_id?: string;
-    session_id?: string;
-    foreground_activity?: string;
-  }) {
-    return { id: "m", type: "notification" as const, action: ACTIVITY_EVENT, payload };
-  }
 
   it("annotates an existing RUNNING session with the background substate", () => {
     const upsert = vi.fn();
@@ -929,6 +962,11 @@ describe("session.activity_changed handler — fine-grained busy signal", () => 
 
     expect(upsert).not.toHaveBeenCalled();
   });
+
+  it(
+    "drives the selected session queue→direct→queue in the real store without affecting peers",
+    assertRealStoreActivityRouting,
+  );
 });
 
 describe("session.state_changed carries and resets the busy substate", () => {

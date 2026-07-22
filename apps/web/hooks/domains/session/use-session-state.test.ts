@@ -136,6 +136,7 @@ describe("useSessionState", () => {
 
       expect(result.current.isStarting).toBe(true);
       expect(result.current.isWorking).toBe(true);
+      expect(result.current.isAgentBusy).toBe(true);
     });
 
     it("does not set isStarting when session state is CREATED", () => {
@@ -143,9 +144,10 @@ describe("useSessionState", () => {
 
       const { result } = renderHook(() => useSessionState("session-1"));
 
-      // CREATED is not isStarting — the input should be enabled so tests
-      // that create sessions and immediately fill() the input work correctly.
+      // CREATED stays directly promptable so its first chat can start the agent.
       expect(result.current.isStarting).toBe(false);
+      expect(result.current.isAgentBusy).toBe(false);
+      expect(result.current.inputMode).toBe("direct");
     });
 
     it("does not set isStarting when WAITING_FOR_INPUT", () => {
@@ -174,6 +176,7 @@ describe("useSessionState", () => {
 
       expect(result.current.isAgentBusy).toBe(true);
       expect(result.current.isWorking).toBe(true);
+      expect(result.current.inputMode).toBe("queue");
     });
 
     it("sets isFailed when session state is FAILED", () => {
@@ -224,6 +227,7 @@ describe("useSessionState — fine-grained busy signal (foreground_activity)", (
     // yet still working, never "done".
     expect(result.current.isAgentBusy).toBe(false);
     expect(result.current.isWorking).toBe(true);
+    expect(result.current.inputMode).toBe("direct");
   });
 
   it("settled+background accepts input while detached work keeps the affordance active", () => {

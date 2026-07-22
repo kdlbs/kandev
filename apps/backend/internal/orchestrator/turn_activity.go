@@ -43,7 +43,24 @@ type turnActivity struct {
 	promptInFlight  bool
 	claimGeneration uint64 // identifies the current admission owner
 	foregroundEpoch uint64 // increments on genuine foreground output
+
+	// foregroundGeneration identifies the prompt cycle that currently owns the
+	// foreground. Provider-idle records that immutable generation so a delayed
+	// completion from the old cycle cannot yield a successor cycle that has since
+	// claimed the same session.
+	foregroundGeneration           uint64
+	pendingCompletionGeneration    uint64
+	hasPendingCompletionGeneration bool
+	completedGeneration            uint64
+	hasCompletedGeneration         bool
 }
+
+type foregroundYieldSource uint8
+
+const (
+	foregroundYieldProviderIdle foregroundYieldSource = iota
+	foregroundYieldTurnCompletion
+)
 
 // foregroundClaim binds admission to the exact activity record and generation
 // it claimed. The foreground epoch separately detects output that makes a failed
@@ -82,6 +99,9 @@ func (s *Service) markForegroundGenerating(sessionID string) bool {
 	ta.mu.Lock()
 	changed := ta.yielded
 	ta.yielded = false
+	if changed {
+		ta.foregroundGeneration++
+	}
 	// Real foreground output redefines ownership of the turn: it invalidates any
 	// outstanding claim's epoch, so a prompt that later fails cannot release the
 	// gate back open on top of a foreground that is now genuinely generating.
@@ -103,11 +123,74 @@ func (s *Service) markForegroundIdle(sessionID string) bool {
 	}
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
+	return ta.markForegroundIdleLocked()
+}
+
+func (ta *turnActivity) markForegroundIdleLocked() bool {
 	if ta.promptInFlight || len(ta.background) == 0 || ta.yielded {
 		return false
 	}
 	ta.yielded = true
 	return true
+}
+
+// yieldForegroundAndPublish records the foreground-to-background transition and
+// publishes both operator-facing activity signals exactly once. taskID may be
+// omitted by lifecycle callers that only have a session ID. Resolve identity
+// before touching the tracker so a transient lookup failure cannot consume an
+// otherwise publishable transition. The source-specific generation check and
+// mutation happen atomically; publication happens after the lock is released.
+func (s *Service) yieldForegroundAndPublish(
+	ctx context.Context,
+	taskID, sessionID string,
+	source foregroundYieldSource,
+) {
+	if taskID == "" {
+		session, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil || session == nil {
+			s.logger.Warn("resolve task for foreground activity publish failed",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return
+		}
+		taskID = session.TaskID
+	}
+	if !s.transitionForegroundToBackground(sessionID, source) {
+		return
+	}
+	s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+}
+
+func (s *Service) transitionForegroundToBackground(sessionID string, source foregroundYieldSource) bool {
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil {
+		return false
+	}
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+
+	if source == foregroundYieldProviderIdle {
+		if !ta.hasCompletedGeneration || ta.completedGeneration != ta.foregroundGeneration {
+			ta.pendingCompletionGeneration = ta.foregroundGeneration
+			ta.hasPendingCompletionGeneration = true
+		}
+		return ta.markForegroundIdleLocked()
+	}
+
+	completionGeneration := ta.foregroundGeneration
+	if ta.hasPendingCompletionGeneration {
+		completionGeneration = ta.pendingCompletionGeneration
+		ta.hasPendingCompletionGeneration = false
+	}
+	if ta.hasCompletedGeneration && ta.completedGeneration == completionGeneration {
+		return false
+	}
+	ta.completedGeneration = completionGeneration
+	ta.hasCompletedGeneration = true
+	if completionGeneration != ta.foregroundGeneration {
+		return false
+	}
+	return ta.markForegroundIdleLocked()
 }
 
 // registerBackgroundTask records a spawned background task (a subagent Task or a
@@ -305,6 +388,7 @@ func (s *Service) completeForegroundClaim(claim *foregroundClaim) bool {
 		return false
 	}
 	ta.promptInFlight = false
+	ta.foregroundGeneration++
 	return ta.yielded
 }
 

@@ -99,8 +99,9 @@ type AgentEvent struct {
 	OperationID string `json:"operation_id,omitempty"`
 
 	// PromptGeneration is the lifecycle-owned identity assigned when this
-	// prompt was accepted. Terminal events echo it so delayed completions
-	// cannot be attributed to a newer prompt on the same execution.
+	// prompt was accepted. Terminal events and ownership-sensitive lifecycle
+	// boundaries such as foreground-idle echo it so delayed events cannot be
+	// attributed to a newer prompt on the same execution.
 	PromptGeneration uint64 `json:"prompt_generation,omitempty"`
 
 	// --- Message fields (for "message_chunk" type) ---

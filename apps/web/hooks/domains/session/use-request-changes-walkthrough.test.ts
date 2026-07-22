@@ -32,9 +32,14 @@ vi.mock("@/lib/ws/connection", () => ({
 
 import { useRequestChangesWalkthrough } from "./use-request-changes-walkthrough";
 
-function storeState(sessionState: string, planMode = false) {
+function storeState(sessionState: string, planMode = false, foregroundActivity?: string) {
   return {
-    taskSessions: { items: { "session-1": { state: sessionState } } },
+    taskSessions: {
+      items: {
+        "session-1": { state: sessionState, foreground_activity: foregroundActivity },
+        "other-session": { state: "RUNNING", foreground_activity: "generating" },
+      },
+    },
     chatInput: { planModeBySessionId: { "session-1": planMode } },
     addMessage: mockAddMessage,
   };
@@ -50,21 +55,23 @@ function renderRequestHook(ready = true) {
   );
 }
 
-describe("useRequestChangesWalkthrough", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockStoreState = storeState("WAITING_FOR_INPUT");
-    mockListPrompts.mockResolvedValue({
-      prompts: [
-        {
-          id: "builtin-changes-walkthrough",
-          name: "changes-walkthrough",
-          content: "CUSTOM_WALKTHROUGH_PROMPT\nshow_walkthrough_kandev",
-          builtin: true,
-        },
-      ],
-    });
+function setup() {
+  vi.clearAllMocks();
+  mockStoreState = storeState("WAITING_FOR_INPUT");
+  mockListPrompts.mockResolvedValue({
+    prompts: [
+      {
+        id: "builtin-changes-walkthrough",
+        name: "changes-walkthrough",
+        content: "CUSTOM_WALKTHROUGH_PROMPT\nshow_walkthrough_kandev",
+        builtin: true,
+      },
+    ],
   });
+}
+
+describe("useRequestChangesWalkthrough", () => {
+  beforeEach(setup);
 
   it("sends a walkthrough request directly when the agent is waiting", async () => {
     mockRequest.mockResolvedValueOnce({
@@ -143,5 +150,64 @@ describe("useRequestChangesWalkthrough", () => {
       expect.objectContaining({ title: "Changes are still loading", variant: "error" }),
     );
     expect(mockListPrompts).not.toHaveBeenCalled();
+  });
+});
+
+describe("useRequestChangesWalkthrough input-mode edge cases", () => {
+  beforeEach(setup);
+
+  it("sends directly for a CREATED session", async () => {
+    mockStoreState = storeState("CREATED");
+    const { result } = renderRequestHook();
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockRequest).toHaveBeenCalled();
+    expect(mockQueueMessage).not.toHaveBeenCalled();
+  });
+
+  it("queues for a STARTING session", async () => {
+    mockStoreState = storeState("STARTING");
+    const { result } = renderRequestHook();
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockQueueMessage).toHaveBeenCalled();
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it("sends directly during RUNNING background work despite another generating session", async () => {
+    mockStoreState = storeState("RUNNING", false, "background");
+    const { result } = renderRequestHook();
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockRequest).toHaveBeenCalled();
+    expect(mockQueueMessage).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Walkthrough request sent" }),
+    );
+  });
+
+  it("does not send or queue when the selected session is unavailable", async () => {
+    mockStoreState = storeState("COMPLETED");
+    const { result } = renderRequestHook();
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockListPrompts).not.toHaveBeenCalled();
+    expect(mockRequest).not.toHaveBeenCalled();
+    expect(mockQueueMessage).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Session is not available for input", variant: "error" }),
+    );
   });
 });
