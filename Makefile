@@ -150,7 +150,11 @@ bootstrap-e2e:
 
 .PHONY: doctor
 doctor:
-ifeq ($(OS),Windows_NT)
+# Native Windows (cmd/PowerShell) has no POSIX shell for the bash-only doctor
+# script. Under Git Bash/MSYS ($(MSYSTEM) is set) it runs fine, so skip only
+# when OS is Windows_NT AND MSYSTEM is empty — the concatenation equals
+# "Windows_NT" only in that native case.
+ifeq ($(OS)$(MSYSTEM),Windows_NT)
 	@echo pre-commit hooks skipped on native Windows - run scripts/doctor from Git Bash to enable
 else
 	@scripts/doctor

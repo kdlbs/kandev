@@ -41,7 +41,7 @@ ifeq ($(OS),Windows_NT)
   DEV_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true&
   DEBUG_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug&
   EXEC =
-  RUN_BIN = "$(subst /,\,$(BUILD_DIR)/$(BINARY_NAME).exe)"
+  RUN_BIN = "$(subst /,\,$(BUILD_DIR)/$(BINARY_NAME)$(EXE))"
   # Windows recipes run under cmd.exe, which has no POSIX `if command -v ...; then`
   # syntax. Neither codesign nor rcodesign ships on Windows anyway, so ad-hoc
   # signing is a no-op here: darwin/arm64 stays Go-signed at link time, and
