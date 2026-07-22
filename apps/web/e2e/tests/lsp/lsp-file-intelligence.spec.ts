@@ -19,7 +19,8 @@ import {
 
 const EDITORS_SETTINGS_PATH = "/settings/general/editors";
 const RESERVED_SOURCE_PATH = "Main # query? 100%.kt";
-const DEFINITION_TARGET_PATH = "Definition Target # query? 100%.kt";
+const DEFINITION_PARENT_PATH = "nested/references";
+const DEFINITION_TARGET_PATH = `${DEFINITION_PARENT_PATH}/Definition Target # query? 100%.kt`;
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -192,15 +193,22 @@ test.describe("LSP file intelligence", () => {
     await expect(testPage.getByText("Fake Kotlin hover", { exact: true })).toBeVisible();
     await testPage.keyboard.press("Escape");
 
+    const nestedFolder = task.session.fileTreeNode("nested");
+    const definitionFolder = task.session.fileTreeNode(DEFINITION_PARENT_PATH);
+    const definitionTarget = task.session.fileTreeNode(DEFINITION_TARGET_PATH);
+    await expect(nestedFolder.locator(".tabler-icon-chevron-right")).toBeVisible();
+    await expect(definitionFolder).toHaveCount(0);
+    await expect(definitionTarget).toHaveCount(0);
+
     await testPage.keyboard.press("F12");
     await expectFakeLspEvent(
       backend,
       (event) => event.event === "message" && event.method === "textDocument/definition",
       "definition request",
     );
-    await expect(testPage.locator(".dv-default-tab", { hasText: task.filePaths[1] })).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(
+      testPage.locator(".dv-default-tab", { hasText: path.basename(task.filePaths[1]) }),
+    ).toBeVisible({ timeout: 15_000 });
     await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
       "fun greeting1(name: String): String",
     );
@@ -252,6 +260,12 @@ test.describe("LSP file intelligence", () => {
         activeUri: definitionModelUri,
         position: { lineNumber: 3, column: 5 },
       });
+
+    await expect(nestedFolder.locator(".tabler-icon-chevron-down")).toBeVisible();
+    await expect(definitionFolder.locator(".tabler-icon-chevron-down")).toBeVisible();
+    await expect(definitionTarget).toBeVisible();
+    await expect(definitionTarget).toHaveAttribute("data-active", "true");
+
     await testPage.keyboard.press("Shift+F12");
     await expectFakeLspEvent(
       backend,
@@ -362,9 +376,15 @@ test.describe("LSP file intelligence", () => {
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const repositoryName = `lsp-secondary-${suffix}`;
     const secondaryFilePath = "src/Multi Repo # query? 100%.kt";
+    const secondaryDefinitionPath = path.posix.join(
+      path.posix.dirname(secondaryFilePath),
+      DEFINITION_TARGET_PATH,
+    );
     const repositoryDirectory = path.join(backend.tmpDir, "repos", repositoryName);
     const gitEnv = makeGitEnv(backend.tmpDir);
-    fs.mkdirSync(path.join(repositoryDirectory, "src"), { recursive: true });
+    fs.mkdirSync(path.join(repositoryDirectory, path.dirname(secondaryDefinitionPath)), {
+      recursive: true,
+    });
     execSync("git init -b main", { cwd: repositoryDirectory, env: gitEnv });
     fs.writeFileSync(
       path.join(repositoryDirectory, secondaryFilePath),
@@ -372,6 +392,17 @@ test.describe("LSP file intelligence", () => {
         "package secondary",
         "",
         "fun secondaryGreeting(name: String): String {",
+        '    return "Hello, $name"',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repositoryDirectory, secondaryDefinitionPath),
+      [
+        "package secondary.definition",
+        "",
+        "fun secondaryDefinition(name: String): String {",
         '    return "Hello, $name"',
         "}",
         "",
@@ -395,6 +426,7 @@ test.describe("LSP file intelligence", () => {
       repositoryIds: [seedData.repositoryId, secondaryRepository.id],
     });
     const taskRelativePath = `${repositoryName}/${secondaryFilePath}`;
+    const definitionTaskRelativePath = `${repositoryName}/${secondaryDefinitionPath}`;
     await openDesktopFile(testPage, task.session, taskRelativePath);
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
     await statusButton.click();
@@ -429,6 +461,44 @@ test.describe("LSP file intelligence", () => {
     await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
       "fun secondaryGreeting(name: String): String",
     );
+
+    const nestedPath = `${repositoryName}/src/nested`;
+    const referencesPath = `${repositoryName}/src/${DEFINITION_PARENT_PATH}`;
+    const targetPath = `${repositoryName}/${secondaryDefinitionPath}`;
+    const nestedFolder = task.session.fileTreeNode(nestedPath);
+    const referencesFolder = task.session.fileTreeNode(referencesPath);
+    const definitionTarget = task.session.fileTreeNode(targetPath);
+    await expect(nestedFolder.locator(".tabler-icon-chevron-right")).toBeVisible();
+    await expect(referencesFolder).toHaveCount(0);
+    await expect(definitionTarget).toHaveCount(0);
+
+    await testPage.locator(".monaco-editor:visible").click();
+    await testPage.keyboard.press("F12");
+    await expectFakeLspEvent(
+      backend,
+      (event) => event.event === "message" && event.method === "textDocument/definition",
+      "secondary repository definition request",
+    );
+    const definitionUri = pathToFileURL(path.join(started.cwd!, definitionTaskRelativePath)).href;
+    await expect(
+      testPage.locator(".dv-default-tab", { hasText: path.basename(secondaryDefinitionPath) }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
+      "fun secondaryDefinition(name: String): String",
+    );
+    await expectFakeLspEvent(
+      backend,
+      (event) =>
+        event.event === "message" &&
+        event.method === "textDocument/didOpen" &&
+        (event.params?.textDocument as { uri?: string } | undefined)?.uri === definitionUri,
+      "secondary repository definition didOpen",
+    );
+    await expect(nestedFolder.locator(".tabler-icon-chevron-down")).toBeVisible();
+    await expect(referencesFolder.locator(".tabler-icon-chevron-down")).toBeVisible();
+    await expect(definitionTarget).toBeVisible();
+    await expect(definitionTarget).toHaveAttribute("data-active", "true");
+
     await statusButton.click();
     await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
   });

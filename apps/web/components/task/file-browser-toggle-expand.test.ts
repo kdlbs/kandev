@@ -44,10 +44,10 @@ const FILE: FileTreeNode = { name: "a.ts", path: "src/a.ts", is_dir: false, size
 describe("toggleFolderExpand", () => {
   it("expands a collapsed folder synchronously, before the async load resolves", async () => {
     const { state, expanded } = makeTreeState();
-    let resolveLoad: () => void = () => {};
+    let resolveLoad: (loaded: boolean) => void = () => {};
     const loadChildren = vi.fn(
       () =>
-        new Promise<void>((resolve) => {
+        new Promise<boolean>((resolve) => {
           resolveLoad = resolve;
         }),
     );
@@ -67,14 +67,14 @@ describe("toggleFolderExpand", () => {
     expect(setActiveFolderPath).toHaveBeenCalledWith("src");
     expect(loadChildren).toHaveBeenCalledTimes(1);
 
-    resolveLoad();
+    resolveLoad(true);
     await promise;
     expect(expanded.current.has("src")).toBe(true);
   });
 
   it("collapses an already-expanded folder and skips the async load", async () => {
     const { state, expanded } = makeTreeState(new Set(["src"]));
-    const loadChildren = vi.fn(() => Promise.resolve());
+    const loadChildren = vi.fn(() => Promise.resolve(true));
 
     await toggleFolderExpand({
       node: FOLDER,
@@ -90,7 +90,7 @@ describe("toggleFolderExpand", () => {
 
   it("ignores file nodes", async () => {
     const { state, expanded } = makeTreeState();
-    const loadChildren = vi.fn(() => Promise.resolve());
+    const loadChildren = vi.fn(() => Promise.resolve(true));
     const setActiveFolderPath = vi.fn();
 
     await toggleFolderExpand({
@@ -108,7 +108,7 @@ describe("toggleFolderExpand", () => {
 
   it("uses functional setState so the latest expanded set is mutated", async () => {
     const { state, expanded } = makeTreeState();
-    const loadChildren = vi.fn(() => Promise.resolve());
+    const loadChildren = vi.fn(() => Promise.resolve(true));
 
     // Simulate another path being added while the toggle is in flight.
     const promise = toggleFolderExpand({

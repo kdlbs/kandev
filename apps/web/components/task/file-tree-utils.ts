@@ -125,6 +125,31 @@ export function findNodeByPath(root: FileTreeNode, targetPath: string): FileTree
   return null;
 }
 
+/** Return the directory paths that must be expanded to reveal a file. */
+export function getAncestorPaths(targetPath: string): string[] {
+  const parts = targetPath.split("/");
+  return Array.from({ length: Math.max(0, parts.length - 1) }, (_, index) =>
+    parts.slice(0, index + 1).join("/"),
+  );
+}
+
+/** Find the next loaded directory whose child must be fetched to reveal a file. */
+export function findUnloadedAncestor(
+  tree: FileTreeNode,
+  targetPath: string,
+  ancestors: string[],
+): FileTreeNode | null {
+  let children = tree.children;
+  for (const [index, path] of ancestors.entries()) {
+    const node = children?.find((candidate) => candidate.path === path);
+    if (!node) return null;
+    const nextPath = ancestors[index + 1] ?? targetPath;
+    if (!node.children?.some((child) => child.path === nextPath)) return node;
+    children = node.children;
+  }
+  return null;
+}
+
 /** Disambiguate a filename if it already exists in the used set. */
 function deduplicateName(name: string, usedNames: Set<string>): string {
   if (!usedNames.has(name)) return name;
