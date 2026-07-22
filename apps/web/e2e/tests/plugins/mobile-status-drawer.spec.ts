@@ -94,7 +94,10 @@ test.describe("Mobile Status drawer", () => {
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
       await testPage.evaluate(() => document.documentElement.clientWidth),
     );
-    await testPage.keyboard.press("Escape");
+    // Chromium may consume Escape immediately after the synthetic modifier drag.
+    await testPage
+      .locator('[data-slot="drawer-overlay"][data-state="open"]')
+      .click({ position: { x: 4, y: 4 } });
     await expect(drawer).toBeHidden();
 
     const task = await apiClient.createTask(seedData.workspaceId, "Mobile status task", {
