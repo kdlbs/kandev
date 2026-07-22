@@ -2437,7 +2437,7 @@ export class ApiClient {
    * is keyed off the task's *primary* session state, not the task's own
    * state). Only works when KANDEV_MOCK_AGENT is active.
    */
-  async seedTaskSession(
+  async seedAutomationTaskSession(
     taskId: string,
     state: string,
     isPrimary = true,

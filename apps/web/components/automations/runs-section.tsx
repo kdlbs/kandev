@@ -42,8 +42,8 @@ const STATUS_BADGE: Record<
   // user cancellation: archiving just closes the task out, it doesn't
   // mean the run's work was rejected. See internal/automation.RunStatusArchived.
   archived: { variant: "outline", label: "Archived" },
-  // The generating task no longer exists, or was explicitly put into the
-  // CANCELLED task state — a real cancellation, distinct from archived.
+  // The generating task no longer exists, or its current primary session
+  // is CANCELLED — a real cancellation, distinct from archived.
   // See internal/automation.RunStatusCancelled.
   cancelled: { variant: "outline", label: "Cancelled" },
 };

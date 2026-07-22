@@ -398,7 +398,7 @@ test.describe("Automations settings page", () => {
     await apiClient.seedAutomationRun(automation.id, "task_created", cancelledTask.id);
     await apiClient.seedAutomationRun(automation.id, "task_created", openTask.id);
     await apiClient.archiveTask(archivedTask.id);
-    await apiClient.seedTaskSession(cancelledTask.id, "CANCELLED");
+    await apiClient.seedAutomationTaskSession(cancelledTask.id, "CANCELLED");
 
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
     await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
