@@ -1,7 +1,7 @@
 ---
 id: "09-follow-up-review-and-verification"
 title: "Follow-up review and verification"
-status: in_progress
+status: done
 wave: 9
 depends_on: ["06-publish-completion-foreground-yield", "07-consolidate-session-input-mode", "08-required-behavior-coverage-audit"]
 plan: "plan.md"

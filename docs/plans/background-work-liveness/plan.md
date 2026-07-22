@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/fine-grained-background-running-status-indicator/spec.md
 created: 2026-07-21
-status: in_progress
+status: completed
 ---
 
 # Implementation Plan: Background work liveness
@@ -167,4 +167,4 @@ Wave 8:
 
 Wave 9:
 
-- [ ] [Task 09: Follow-up review and verification](task-09-follow-up-review-and-verification.md)
+- [x] [Task 09: Follow-up review and verification](task-09-follow-up-review-and-verification.md)
