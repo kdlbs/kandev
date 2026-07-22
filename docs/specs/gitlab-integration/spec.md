@@ -1,7 +1,7 @@
 ---
-status: shipped
+status: building
 created: 2026-05-04
-updated: 2026-07-20
+updated: 2026-07-22
 owner: tbd
 ---
 
@@ -43,6 +43,13 @@ workflows are not usable end to end.
 - Users can link an existing task to a merge request by pasting a full MR URL,
   including URLs from the workspace's configured self-managed host. They can
   unlink one association without deleting the task or upstream MR.
+- For a workspace with GitLab configured, task context menus expose
+  `GitLab Merge Request` inside the shared `Link` submenu. Desktop users can
+  reach it by right-clicking a task, and touch users can reach the same action
+  through the task row's visible actions menu.
+- An unlinked task does not show a persistent `Link MR` action in its task top
+  bar. After at least one MR is linked, the top bar shows the linked-MR status
+  control and continues to allow opening, unlinking, or linking another MR.
 - Linked MRs are visible from both the GitLab list and task detail. Multiple
   tasks can link to one MR, and a multi-repository task can link one MR per
   repository.
@@ -322,6 +329,16 @@ protocol action name for compatibility.
 - **GIVEN** a self-managed workspace connection, **WHEN** a user links a valid
   MR URL from that host, **THEN** the task shows the linked MR and its live
   review details after reload.
+- **GIVEN** a task with no linked MR in a GitLab-configured workspace, **WHEN**
+  the task detail opens, **THEN** the top bar has no `Link MR` action and the
+  task's contextual `Link` submenu offers `GitLab Merge Request`.
+- **GIVEN** a touch viewport and a task with no linked MR in a GitLab-configured
+  workspace, **WHEN** the user opens the task row's visible actions menu and
+  chooses `Link` then `GitLab Merge Request`, **THEN** the GitLab MR link dialog
+  opens without relying on right-click or long press.
+- **GIVEN** a task with a linked GitLab MR, **WHEN** the task detail opens,
+  **THEN** the top bar shows the linked MR status control rather than a generic
+  link action.
 - **GIVEN** an MR URL from a different host, **WHEN** it is linked in the current
   workspace, **THEN** the request is rejected and no association is written.
 - **GIVEN** a linked MR, **WHEN** the user unlinks it, **THEN** it disappears

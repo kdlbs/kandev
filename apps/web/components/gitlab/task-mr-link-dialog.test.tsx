@@ -1,9 +1,27 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Repository } from "@/lib/types/http";
 import { TaskMRLinkDialog } from "./task-mr-link-dialog";
 
 const appState = { setTaskMR: vi.fn() };
+const createTaskMR = vi.hoisted(() => vi.fn().mockResolvedValue({}));
+const repositories = [
+  {
+    id: "repository-1",
+    name: "kandev",
+    provider_owner: "platform",
+    provider_name: "kandev",
+  },
+  {
+    id: "repository-2",
+    name: "docs",
+    provider_owner: "platform",
+    provider_name: "docs",
+  },
+] as Repository[];
+const taskRepositories = repositories.map((repository) => ({ repository_id: repository.id }));
+const mrURL = "https://gitlab.example.test/platform/kandev/-/merge_requests/81";
+const mergeRequestURLLabel = "Merge request URL";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof appState) => unknown) => selector(appState),
@@ -13,52 +31,100 @@ vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
 }));
 
-vi.mock("@/lib/api/domains/gitlab-api", () => ({
-  createTaskMR: vi.fn(),
-}));
+vi.mock("@/lib/api/domains/gitlab-api", () => ({ createTaskMR }));
 
-afterEach(cleanup);
+function dialog({
+  open = true,
+  repositoryOptions = repositories,
+  taskRepositoryLinks = taskRepositories,
+}: {
+  open?: boolean;
+  repositoryOptions?: Repository[];
+  taskRepositoryLinks?: { repository_id: string }[];
+} = {}) {
+  return (
+    <TaskMRLinkDialog
+      open={open}
+      onOpenChange={vi.fn()}
+      taskId="task-1"
+      workspaceId="workspace-1"
+      taskRepositories={taskRepositoryLinks}
+      repositories={repositoryOptions}
+    />
+  );
+}
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 describe("TaskMRLinkDialog", () => {
-  it("preserves the typed URL when repository props refresh while open", () => {
-    const repository = {
-      id: "repository-1",
-      name: "kandev",
-      provider_owner: "platform",
-      provider_name: "kandev",
-    } as Repository;
-    const props = {
-      open: true,
-      onOpenChange: vi.fn(),
-      taskId: "task-1",
-      workspaceId: "workspace-1",
-    };
-    const { rerender } = render(
-      <TaskMRLinkDialog
-        {...props}
-        taskRepositories={[{ repository_id: repository.id }]}
-        repositories={[repository]}
-      />,
-    );
+  it("submits the default repository when initially mounted open", async () => {
+    render(dialog());
 
-    const url = screen.getByLabelText("Merge request URL");
-    fireEvent.change(url, {
-      target: { value: "https://gitlab.example.test/platform/kandev/-/merge_requests/81" },
+    fireEvent.change(screen.getByLabelText(mergeRequestURLLabel), {
+      target: { value: mrURL },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Link merge request" }));
 
-    rerender(
-      <TaskMRLinkDialog
-        {...props}
-        taskRepositories={[{ repository_id: repository.id }]}
-        repositories={[{ ...repository }]}
-      />,
+    await waitFor(() => expect(createTaskMR).toHaveBeenCalledTimes(1));
+    expect(createTaskMR).toHaveBeenCalledWith(
+      {
+        task_id: "task-1",
+        repository_id: "repository-1",
+        mr_url: mrURL,
+      },
+      "workspace-1",
     );
+  });
 
-    expect((url as HTMLInputElement).value).toBe(
-      "https://gitlab.example.test/platform/kandev/-/merge_requests/81",
+  it("preserves the typed URL and repository selection when props refresh while open", async () => {
+    const { rerender } = render(dialog());
+
+    const url = screen.getByLabelText(mergeRequestURLLabel);
+    fireEvent.change(url, {
+      target: { value: mrURL },
+    });
+    fireEvent.click(screen.getByRole("combobox", { name: "Task repository" }));
+    fireEvent.click(await screen.findByRole("option", { name: "platform/docs" }));
+
+    rerender(dialog({ repositoryOptions: repositories.map((repository) => ({ ...repository })) }));
+
+    expect((url as HTMLInputElement).value).toBe(mrURL);
+    fireEvent.click(screen.getByRole("button", { name: "Link merge request" }));
+
+    await waitFor(() => expect(createTaskMR).toHaveBeenCalledTimes(1));
+    expect(createTaskMR).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repository_id: "repository-2",
+        mr_url: mrURL,
+      }),
+      "workspace-1",
     );
-    expect(
-      (screen.getByRole("button", { name: "Link merge request" }) as HTMLButtonElement).disabled,
-    ).toBe(false);
+  });
+
+  it("resets the URL and selection to the current default after closing", async () => {
+    const { rerender } = render(dialog());
+
+    fireEvent.change(screen.getByLabelText(mergeRequestURLLabel), {
+      target: { value: mrURL },
+    });
+    const reorderedLinks = [taskRepositories[1], taskRepositories[0]];
+    rerender(dialog({ open: false, taskRepositoryLinks: reorderedLinks }));
+    rerender(dialog({ taskRepositoryLinks: reorderedLinks }));
+
+    const url = screen.getByLabelText(mergeRequestURLLabel) as HTMLInputElement;
+    expect(url.value).toBe("");
+    fireEvent.change(url, {
+      target: { value: "https://gitlab.example.test/platform/docs/-/merge_requests/12" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Link merge request" }));
+
+    await waitFor(() => expect(createTaskMR).toHaveBeenCalledTimes(1));
+    expect(createTaskMR).toHaveBeenCalledWith(
+      expect.objectContaining({ repository_id: "repository-2" }),
+      "workspace-1",
+    );
   });
 });

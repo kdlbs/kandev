@@ -19,6 +19,7 @@ import {
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
+import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import { useDetachTask } from "@/hooks/use-detach-task";
@@ -206,6 +207,7 @@ function useKanbanCardMenus({
   const [showDetachConfirm, setShowDetachConfirm] = useState(false);
   const [showPRDialog, setShowPRDialog] = useState(false);
   const [showIssueDialog, setShowIssueDialog] = useState(false);
+  const [showMRDialog, setShowMRDialog] = useState(false);
   const [externalLinkProvider, setExternalLinkProvider] = useState<ExternalLinkProvider | null>(
     null,
   );
@@ -240,6 +242,7 @@ function useKanbanCardMenus({
       task.parentTaskId && !actingOnMultiSelection ? () => setShowDetachConfirm(true) : undefined,
     onLinkPullRequest: () => setShowPRDialog(true),
     onLinkIssue: () => setShowIssueDialog(true),
+    onLinkMergeRequest: externalLinkAvailability.gitlab ? () => setShowMRDialog(true) : undefined,
     ...externalLinkHandlers(externalLinkAvailability, setExternalLinkProvider),
   };
 
@@ -266,6 +269,8 @@ function useKanbanCardMenus({
     setShowPRDialog,
     showIssueDialog,
     setShowIssueDialog,
+    showMRDialog,
+    setShowMRDialog,
     externalLinkProvider,
     setExternalLinkProvider,
   };
@@ -332,6 +337,16 @@ function KanbanCardDialogs({
         task={task}
         repositories={repositories}
       />
+      {workspaceId && (
+        <TaskMRLinkDialog
+          open={menu.showMRDialog}
+          onOpenChange={menu.setShowMRDialog}
+          taskId={task.id}
+          workspaceId={workspaceId}
+          taskRepositories={task.repositories ?? []}
+          repositories={repositories}
+        />
+      )}
       {menu.externalLinkProvider && workspaceId && (
         <TaskExternalLinkDialog
           open={true}
