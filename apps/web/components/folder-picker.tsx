@@ -91,6 +91,7 @@ export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps
 function leafName(path: string): string {
   if (!path) return "";
   const trimmed = path.replace(/[\\/]+$/, "");
+  if (/^[A-Za-z]:$/.test(trimmed)) return `${trimmed}\\`;
   const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   return idx === -1 ? trimmed : trimmed.slice(idx + 1) || "/";
 }

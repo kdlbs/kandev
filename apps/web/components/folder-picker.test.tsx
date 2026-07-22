@@ -48,6 +48,12 @@ afterEach(() => {
 });
 
 describe("FolderPicker", () => {
+  it("preserves the separator when displaying a Windows drive root", () => {
+    render(<FolderPicker value="C:\\" onChange={vi.fn()} />);
+
+    expect(screen.getByTestId(TRIGGER_TEST_ID).textContent).toBe("C:\\");
+  });
+
   it("builds Windows breadcrumbs with a virtual root and native drive paths", async () => {
     mockedListDirectory
       .mockResolvedValueOnce(
