@@ -286,6 +286,22 @@ describe("PRStatusChip mobile branch", () => {
     expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("failed");
   });
 
+  it("identifies a draft PR with passing CI as draft", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ mergeable_state: "draft" })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("draft");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("false");
+  });
+
   it("shows automation badges on the mobile chip trigger", () => {
     renderWithStore(
       {

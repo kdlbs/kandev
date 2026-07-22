@@ -9,39 +9,68 @@ import { subscribeIntegrationAvailability } from "@/lib/integrations/integration
  * useGitLabStatus subscribes the slice to the latest GitLab connection status.
  * Fetches on mount, retries are caller-driven via the returned `refresh`.
  *
- * Guards against an infinite re-fetch loop when GitLab is unreachable: a
- * fetch failure leaves `status` null, so without a per-mount attempted flag
- * the effect would re-run every render and hammer the backend.
+ * Effect-driven and imperative fetches share one generation guard so a stale
+ * workspace response cannot overwrite the currently selected workspace.
  */
 export function useGitLabStatus() {
-  const status = useAppStore((state) => state.gitlabStatus.data);
-  const loading = useAppStore((state) => state.gitlabStatus.loading);
-  const loadedAt = useAppStore((state) => state.gitlabStatus.loadedAt);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const statusSnapshot = useAppStore((state) => state.gitlabStatus);
+  const ownsSnapshot = statusSnapshot.workspaceId === workspaceId;
+  const status = ownsSnapshot ? statusSnapshot.data : null;
+  const loading = ownsSnapshot ? statusSnapshot.loading : Boolean(workspaceId);
   const setStatus = useAppStore((state) => state.setGitLabStatus);
   const setStatusLoading = useAppStore((state) => state.setGitLabStatusLoading);
-  const attemptedRef = useRef(false);
+  const requestGeneration = useRef(0);
+  const currentWorkspaceId = useRef(workspaceId);
+  currentWorkspaceId.current = workspaceId;
+
+  const loadStatus = useCallback(
+    async (requestedWorkspaceId: string) => {
+      const generation = ++requestGeneration.current;
+      const isCurrentRequest = () =>
+        generation === requestGeneration.current &&
+        requestedWorkspaceId === currentWorkspaceId.current;
+
+      setStatusLoading(requestedWorkspaceId, true);
+      try {
+        const res = await fetchGitLabStatus({
+          cache: "no-store",
+          workspaceId: requestedWorkspaceId,
+        });
+        if (isCurrentRequest()) setStatus(requestedWorkspaceId, res ?? null);
+      } catch {
+        if (isCurrentRequest()) setStatus(requestedWorkspaceId, null);
+      } finally {
+        if (isCurrentRequest()) setStatusLoading(requestedWorkspaceId, false);
+      }
+    },
+    [setStatus, setStatusLoading],
+  );
 
   useEffect(() => {
-    if (loading || loadedAt !== null || attemptedRef.current) return;
-    attemptedRef.current = true;
-    setStatusLoading(true);
-    fetchGitLabStatus({ cache: "no-store" })
-      .then((res) => setStatus(res ?? null))
-      .catch(() => setStatus(null))
-      .finally(() => setStatusLoading(false));
-  }, [loading, loadedAt, setStatus, setStatusLoading]);
+    if (!workspaceId) {
+      requestGeneration.current++;
+      setStatus(null, null);
+      setStatusLoading(null, false);
+      return;
+    }
+    setStatus(workspaceId, null);
+    void loadStatus(workspaceId);
+    return () => {
+      requestGeneration.current++;
+    };
+  }, [workspaceId, loadStatus, setStatus, setStatusLoading]);
 
   const refresh = useCallback(async () => {
-    setStatusLoading(true);
-    try {
-      const res = await fetchGitLabStatus({ cache: "no-store" });
-      setStatus(res ?? null);
-    } catch {
-      setStatus(null);
-    } finally {
-      setStatusLoading(false);
+    const requestedWorkspaceId = currentWorkspaceId.current;
+    if (!requestedWorkspaceId) {
+      requestGeneration.current++;
+      setStatus(null, null);
+      setStatusLoading(null, false);
+      return;
     }
-  }, [setStatus, setStatusLoading]);
+    await loadStatus(requestedWorkspaceId);
+  }, [loadStatus, setStatus, setStatusLoading]);
 
   useEffect(() => subscribeIntegrationAvailability(() => void refresh()), [refresh]);
 

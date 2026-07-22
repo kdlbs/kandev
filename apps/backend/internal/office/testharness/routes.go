@@ -13,7 +13,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +37,8 @@ import (
 // EnvVar gates registration of the test routes. Must be the literal string
 // "true" to enable — matches the convention used by KANDEV_MOCK_JIRA etc.
 const EnvVar = "KANDEV_E2E_MOCK"
+
+const gitLabRemoteURLEnv = "KANDEV_E2E_GITLAB_REMOTE_URL"
 
 // errInvalidJSONPrefix is the shared 400 message for malformed request bodies.
 const errInvalidJSONPrefix = "invalid JSON: "
@@ -93,6 +98,9 @@ func RegisterRoutes(
 	g.POST("/task-sessions", seedTaskSessionHandler(repo, eventBus, log))
 	g.POST("/messages", seedMessageHandler(repo, eventBus, log))
 	g.POST("/workflows", seedWorkflowHandler(repo, log))
+	g.PUT("/repositories/:id/git-remote", configureGitRemoteHandler(repo, log))
+	g.DELETE("/repositories/:id/git-remote", configureGitRemoteHandler(repo, log))
+	g.GET("/repositories/:id/git-push-record", gitPushRecordHandler(repo))
 	if officeRepo != nil {
 		g.POST("/comments", seedCommentHandler(officeRepo, eventBus, log))
 		g.POST("/agent-failures", seedAgentFailureHandler(officeRepo, eventBus, log))
@@ -108,6 +116,111 @@ func RegisterRoutes(
 	}
 	if agentSettings != nil {
 		g.POST("/agent-profiles/:id/desired-skills", setDesiredSkillsHandler(agentSettings, log))
+	}
+}
+
+type configureGitRemoteRequest struct {
+	RemoteURL string `json:"remote_url"`
+}
+
+func configureGitRemoteHandler(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		repository, err := repo.GetRepository(c.Request.Context(), c.Param("id"))
+		if err != nil || strings.TrimSpace(repository.LocalPath) == "" {
+			errJSON(c, http.StatusNotFound, "repository with a local path not found")
+			return
+		}
+		if c.Request.Method == http.MethodDelete {
+			removeGitRemote(c.Request.Context(), repository.LocalPath)
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+			return
+		}
+
+		trustedRemoteURL, status, err := trustedGitRemoteURL(c)
+		if err != nil {
+			errJSON(c, status, err.Error())
+			return
+		}
+		args := []string{"-C", repository.LocalPath, "remote", "add", "origin", trustedRemoteURL}
+		if getErr := exec.CommandContext(c.Request.Context(), "git", "-C", repository.LocalPath,
+			"remote", "get-url", "origin").Run(); getErr == nil {
+			args = []string{"-C", repository.LocalPath, "remote", "set-url", "origin", trustedRemoteURL}
+		}
+		if output, runErr := exec.CommandContext(c.Request.Context(), "git", args...).CombinedOutput(); runErr != nil {
+			log.Error("test harness: configure git remote failed", zap.Error(runErr))
+			errJSON(c, http.StatusInternalServerError, strings.TrimSpace(string(output)))
+			return
+		}
+		if err := writeGitLabPushMarker(trustedRemoteURL); err != nil {
+			log.Error("test harness: write GitLab push marker failed", zap.Error(err))
+			errJSON(c, http.StatusInternalServerError, "write GitLab push marker")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func removeGitRemote(ctx context.Context, repositoryPath string) {
+	_ = exec.CommandContext(ctx, "git", "-C", repositoryPath, "remote", "remove", "origin").Run()
+	for _, envKey := range []string{"KANDEV_E2E_GITLAB_PUSH_FILE", "KANDEV_E2E_GITLAB_PUSH_RECORD_FILE"} {
+		if path := os.Getenv(envKey); path != "" {
+			_ = os.Remove(path)
+		}
+	}
+}
+
+func trustedGitRemoteURL(c *gin.Context) (string, int, error) {
+	var req configureGitRemoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return "", http.StatusBadRequest, errors.New(errInvalidJSONPrefix + err.Error())
+	}
+	requestedRemote, err := localE2ERemoteURL(req.RemoteURL)
+	if err != nil {
+		return "", http.StatusBadRequest, errors.New("remote_url must use the local E2E server")
+	}
+	configuredRemote, err := localE2ERemoteURL(os.Getenv(gitLabRemoteURLEnv))
+	if err != nil {
+		return "", http.StatusInternalServerError, errors.New("GitLab E2E remote is not configured")
+	}
+	if requestedRemote.String() != configuredRemote.String() {
+		return "", http.StatusBadRequest, errors.New("remote_url does not match the configured E2E remote")
+	}
+	return configuredRemote.String(), http.StatusOK, nil
+}
+
+func localE2ERemoteURL(raw string) (*url.URL, error) {
+	remote, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (remote.Hostname() != "localhost" && remote.Hostname() != "127.0.0.1") {
+		return nil, errors.New("remote is not local")
+	}
+	return remote, nil
+}
+
+func writeGitLabPushMarker(remoteURL string) error {
+	marker := os.Getenv("KANDEV_E2E_GITLAB_PUSH_FILE")
+	if marker == "" {
+		return nil
+	}
+	return os.WriteFile(marker, []byte(remoteURL), 0o600)
+}
+
+func gitPushRecordHandler(repo *sqliterepo.Repository) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, err := repo.GetRepository(c.Request.Context(), c.Param("id")); err != nil {
+			errJSON(c, http.StatusNotFound, "repository not found")
+			return
+		}
+		recordPath := os.Getenv("KANDEV_E2E_GITLAB_PUSH_RECORD_FILE")
+		if recordPath == "" {
+			errJSON(c, http.StatusNotFound, "git push was not recorded")
+			return
+		}
+		contents, err := os.ReadFile(recordPath)
+		if err != nil {
+			errJSON(c, http.StatusNotFound, "git push was not recorded")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"args": strings.TrimSpace(string(contents))})
 	}
 }
 

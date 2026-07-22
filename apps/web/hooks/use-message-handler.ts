@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { MessageSendError } from "@/lib/chat/message-send-error";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useQueue } from "./domains/session/use-queue";
 import type { MessageAttachment } from "@/components/task/chat/chat-input-container";
@@ -155,9 +156,16 @@ type SendMessagePayload = {
   contextFilesMeta?: Array<{ path: string; name: string }>;
 };
 
-async function sendMessageRequest(payload: SendMessagePayload): Promise<Message | undefined> {
+export async function sendMessageRequest(
+  payload: SendMessagePayload,
+): Promise<Message | undefined> {
   const client = getWebSocketClient();
-  if (!client) return undefined;
+  if (!client) {
+    throw new MessageSendError(
+      "connection-unavailable",
+      "Connection unavailable. Reconnect and try again.",
+    );
+  }
 
   const {
     taskId,
@@ -227,8 +235,12 @@ export function useMessageHandler({
       inlineTaskMentions?: TaskMentionData[],
     ) => {
       if (!taskId || !resolvedSessionId) {
-        console.error("No active task session. Start an agent before sending a message.");
-        return;
+        const error = new MessageSendError(
+          "no-active-session",
+          "No active task session. Start an agent before sending a message.",
+        );
+        console.error(error.message);
+        throw error;
       }
 
       const { finalMessage, allContextFiles } = buildFinalMessage(

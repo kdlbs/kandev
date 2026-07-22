@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback } from "react";
 import {
   listReviewWatches,
   createReviewWatch,
@@ -8,23 +8,29 @@ import {
   deleteReviewWatch,
   triggerReviewWatch,
   triggerAllReviewWatches,
+  previewResetReviewWatch,
+  resetReviewWatch,
   type CreateReviewWatchRequest,
   type UpdateReviewWatchRequest,
 } from "@/lib/api/domains/gitlab-api";
 import { useAppStore } from "@/components/state-provider";
 
+const WORKSPACE_REQUIRED = "workspaceId required";
+
+function filterByWorkspace<T extends { workspace_id: string }>(
+  items: T[],
+  workspaceId?: string | null,
+) {
+  return workspaceId ? items.filter((watch) => watch.workspace_id === workspaceId) : [];
+}
+
 /**
- * useGitLabReviewWatches — three modes:
- *   - workspaceId: string         → fetch watches scoped to one workspace
- *   - workspaceId: undefined      → fetch watches across all workspaces
- *   - workspaceId: null           → don't fetch (caller hasn't resolved a workspace yet)
+ * Fetches watches for one resolved workspace. Null pauses fetching while the
+ * caller is resolving its workspace.
  *
- * The internal `loaded` flag lives on the slice and is shared across all
- * useGitLabReviewWatches instances, so it can't double as a per-workspace
- * cache key. We track the last-fetched workspace key here and re-fetch when
- * it changes (workspace switch).
+ * The workspace dependency refetches when the caller switches workspaces.
  */
-export function useGitLabReviewWatches(workspaceId?: string | null) {
+export function useGitLabReviewWatches(workspaceId: string | null) {
   const items = useAppStore((state) => state.gitlabReviewWatches.items);
   const loaded = useAppStore((state) => state.gitlabReviewWatches.loaded);
   const loading = useAppStore((state) => state.gitlabReviewWatches.loading);
@@ -33,18 +39,25 @@ export function useGitLabReviewWatches(workspaceId?: string | null) {
   const add = useAppStore((state) => state.addGitLabReviewWatch);
   const upd = useAppStore((state) => state.updateGitLabReviewWatchInStore);
   const rm = useAppStore((state) => state.removeGitLabReviewWatch);
-  const lastFetchedRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
-    if (workspaceId === null || loading) return;
-    if (loaded && lastFetchedRef.current === workspaceId) return;
-    lastFetchedRef.current = workspaceId;
+    if (!workspaceId) return;
+    let cancelled = false;
     setLoading(true);
-    listReviewWatches(workspaceId ?? undefined, { cache: "no-store" })
-      .then((response) => set(response?.watches ?? []))
-      .catch(() => set([]))
-      .finally(() => setLoading(false));
-  }, [workspaceId, loaded, loading, set, setLoading]);
+    listReviewWatches(workspaceId, { cache: "no-store" })
+      .then((response) => {
+        if (!cancelled) set(response?.watches ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) set([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, set, setLoading]);
 
   const create = useCallback(
     async (req: CreateReviewWatchRequest) => {
@@ -56,24 +69,65 @@ export function useGitLabReviewWatches(workspaceId?: string | null) {
   );
 
   const update = useCallback(
-    async (id: string, req: UpdateReviewWatchRequest) => {
-      const watch = await updateReviewWatch(id, req);
+    async (id: string, req: UpdateReviewWatchRequest, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      const watch = await updateReviewWatch(id, ws, req);
       upd(watch);
       return watch;
     },
-    [upd],
+    [upd, workspaceId],
   );
 
   const remove = useCallback(
-    async (id: string) => {
-      await deleteReviewWatch(id);
+    async (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      await deleteReviewWatch(id, ws);
       rm(id);
     },
-    [rm],
+    [rm, workspaceId],
   );
 
-  const trigger = useCallback((id: string) => triggerReviewWatch(id), []);
-  const triggerAll = useCallback(() => triggerAllReviewWatches(), []);
+  const trigger = useCallback(
+    (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      return triggerReviewWatch(id, ws);
+    },
+    [workspaceId],
+  );
+  const triggerAll = useCallback(() => {
+    if (!workspaceId) throw new Error(WORKSPACE_REQUIRED);
+    return triggerAllReviewWatches(workspaceId);
+  }, [workspaceId]);
+  const previewReset = useCallback(
+    (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      return previewResetReviewWatch(id, ws);
+    },
+    [workspaceId],
+  );
+  const reset = useCallback(
+    async (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      return resetReviewWatch(id, ws);
+    },
+    [workspaceId],
+  );
 
-  return { items, loaded, loading, create, update, remove, trigger, triggerAll };
+  return {
+    items: filterByWorkspace(items, workspaceId),
+    loaded,
+    loading,
+    create,
+    update,
+    remove,
+    trigger,
+    triggerAll,
+    previewReset,
+    reset,
+  };
 }

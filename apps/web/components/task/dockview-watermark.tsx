@@ -10,6 +10,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { AddPanelMenuItems } from "./dockview-add-panel-items";
 import { NewSessionDialog } from "./new-session-dialog";
@@ -92,6 +93,7 @@ function useWatermarkMenuState(
     return s.taskSessions.items[activeSessionId]?.is_passthrough === true;
   });
   const { prs } = useTaskPR(taskID);
+  const mrs = useTaskMRs(taskID);
   return useMemo(
     () => ({
       taskId: taskID,
@@ -99,8 +101,9 @@ function useWatermarkMenuState(
       hasChanges: Boolean(containerApi.getPanel("changes") ?? containerApi.getPanel("diff-files")),
       hasFiles: Boolean(containerApi.getPanel("files") ?? containerApi.getPanel("all-files")),
       prs,
+      mrs,
     }),
-    [taskID, isPassthrough, containerApi, prs],
+    [taskID, isPassthrough, containerApi, prs, mrs],
   );
 }
 

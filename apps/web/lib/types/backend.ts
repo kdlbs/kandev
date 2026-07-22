@@ -24,6 +24,7 @@ import type {
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
 import type { GitHubRateLimitUpdate, TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
+import type { TaskMR } from "@/lib/types/gitlab";
 import type { SystemMetricsSnapshot } from "./system";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type {
@@ -559,6 +560,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
       TaskCIAutomationOptions
     >;
     "github.rate_limit.updated": BackendMessage<"github.rate_limit.updated", GitHubRateLimitUpdate>;
+    "gitlab.task_mr.updated": BackendMessage<
+      "gitlab.task_mr.updated",
+      TaskMR & { workspace_id: string }
+    >;
     "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
   };
 

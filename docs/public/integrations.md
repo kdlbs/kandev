@@ -13,9 +13,11 @@ They do **not** provide every credential a task needs. Keep these paths distinct
 - Git or SSH credentials in an executor let the task fetch and push a repository;
 - an agent login or API key lets the coding CLI call its model provider.
 
-GitHub is the important exception. For Local Docker, Sprites, and SSH launches (and the registered Remote Docker path, although that runtime is not implemented), Kandev resolves profile remote-auth secrets and selected remote credentials first. A resulting `GITHUB_TOKEN` or `GH_TOKEN` wins. Otherwise Kandev injects the globally stored `GITHUB_TOKEN`/`github_token` secret as both variables, with automatic extraction from the local `gh` login as the final fallback. The workspace repository list does **not** restrict what that injected token can access. Local and Worktree sessions continue to use credentials available on the host.
+GitHub and GitLab can also contribute credentials to task runtimes. For Local Docker, Sprites, and SSH launches (and the registered Remote Docker path, although that runtime is not implemented), Kandev resolves profile remote-auth secrets and selected remote credentials first. A resulting `GITHUB_TOKEN` or `GH_TOKEN` wins. Otherwise Kandev injects the globally stored `GITHUB_TOKEN`/`github_token` secret as both variables, with automatic extraction from the local `gh` login as the final fallback. The workspace repository list does **not** restrict what that injected token can access. Local and Worktree sessions continue to use credentials available on the host.
 
-A task can therefore display a pull request while a host worktree cannot push, or edit a repository while Kandev cannot read checks. Diagnose the failing credential path separately and treat a GitHub integration token as a credential that remote task agents may receive.
+For GitLab, Kandev resolves only the active task workspace's connection. It provides that connection's token as `GITLAB_TOKEN` and its normalized host as `GITLAB_HOST`/`KANDEV_GITLAB_HOST` to the execution path, and configures HTTP Git authentication only for the matching host. It does not reuse another workspace's GitLab credential or silently fall back from a self-managed host to `gitlab.com`. SSH remotes still require usable SSH credentials in the executor.
+
+A task can therefore display a pull or merge request while its worktree cannot push, or edit a repository while Kandev cannot read provider state. Diagnose the failing credential path separately and treat injected GitHub or GitLab integration tokens as credentials that task agents may receive.
 
 ## Open integration settings
 
@@ -31,7 +33,7 @@ Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a pro
 
 Compatibility routes under **Settings > Integrations** use the active workspace where the provider has workspace settings.
 
-GitHub authentication is installation-wide and the current integration targets `github.com`. GitLab authentication and its selected host are also installation-wide. Azure DevOps, Jira, Linear, and Slack configuration is workspace-specific. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
+GitHub authentication is installation-wide and the current integration targets `github.com`. GitLab, Azure DevOps, Jira, Linear, and Slack configuration is workspace-specific. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
 
 Provider secrets saved by these forms use Kandev's encrypted secret store. The backend must still decrypt them to make API requests. Limit access to settings and the Kandev data directory, and use the narrowest provider scope that works.
 
@@ -73,24 +75,57 @@ Repository scope and watch filters are workspace-specific even though the GitHub
 
 ## GitLab
 
-Use `/gitlab` to browse/search merge requests and issues and follow links to GitLab. The current public page does **not** launch Kandev tasks. For an already associated merge request, the task top bar can show an external link and aggregate state, but Kandev does not currently expose GitLab discussions, reply/resolve controls, full review feedback, or pipeline review actions.
+GitLab supports workspace-scoped connections, issue and merge-request browsing, task launch and durable MR links, automation watches, linked-MR review actions, and merge-request creation. GitHub and GitLab can be connected at the same time; each provider uses its own credentials and records.
 
-The selected GitLab host and authentication are installation-wide, even though the page is reachable from workspace settings. `https://gitlab.com` is the default. For a self-managed instance, enter an HTTP or HTTPS base URL that the Kandev backend can reach. One Kandev installation can select only one GitLab host at a time; it cannot simultaneously browse `gitlab.com` and a self-managed host.
+### Connect a workspace
 
-Authentication is resolved in this order:
+Open **Settings > Workspaces > _Workspace_ > Integrations > GitLab**. Each workspace owns one connection: a normalized HTTP(S) origin and one authentication method. `https://gitlab.com` is the default. For a self-managed instance, enter the exact HTTP or HTTPS origin that the Kandev backend and task executors can reach. The configured scheme is significant for HTTP remotes, API requests, links, and MR creation.
 
-1. an authenticated `glab` CLI for the selected host;
-2. `GITLAB_TOKEN` in the backend environment;
-3. a stored secret named `GITLAB_TOKEN` or `gitlab_token`;
-4. no authenticated client.
+The normal settings path saves an encrypted personal access token and validates it against GitLab before replacing the current connection. The UI calls out `api` and `read_user`; write actions need the corresponding upstream project permissions, and GitLab tier or project policy can further restrict approvals and merges. Use a dedicated account with only the access Kandev needs. Connection health refreshes periodically, normally about every 90 seconds, and distinguishes rejected authentication from an unreachable host.
 
-The token form validates the `/user` API before saving. The UI requires a token with `api` and `read_user`; Kandev does not perform an authorization grant or request those scopes for you. GitLab's `api` scope is broad and write-capable, so use a dedicated, minimally privileged account where possible. Diagnostics distinguish a host that cannot be reached from a missing or rejected credential. Clearing the stored token does not sign out `glab` or remove an environment token.
+Workspaces are isolated. Two workspaces can connect to different GitLab hosts or accounts simultaneously, and browse, watch, review, and write requests resolve only the requested workspace's connection. Removing a connection leaves links and watch definitions stored, but provider polling and actions fail until that workspace is connected again.
 
-At `/gitlab`, use built-in searches or per-user saved searches. The project picker only filters the current client-side result set (up to 25 items); it is not a provider permission boundary or a project-scoped server query. Open an item in GitLab for provider-side actions.
+The settings header's **Copy configuration** action copies the host, authentication method, and stored PAT into another workspace after confirmation. It overwrites the target connection, but does not copy watches, task-launch action presets, or task-to-MR links.
 
-Current public GitLab settings expose the connection only. Although internal services contain watcher and preset data types, there is no current end-user settings workflow for GitLab watches or prompt presets. Do not rely on those features until they appear in the UI.
+### Browse, launch, and link tasks
 
-Unlike GitHub, Kandev does not automatically inject the stored GitLab integration token into task executors. Configure the executor's Git credentials separately when a task must fetch from or push to GitLab.
+Use `/gitlab` with the active workspace to browse built-in or saved merge-request and issue queries. Results are server-paginated in pages of 25. The project picker narrows only the current page's results; it is not a GitLab permission boundary or a provider-side project query, so matching items can still exist on later pages.
+
+Each row has a task-launch menu backed by workspace-specific prompt presets. Launching from an issue adds its URL, title, and prompt context to the task but does not create a durable issue association. Launching from an MR also attempts to record a durable link. If that second step fails, the task still opens and Kandev shows an error with instructions to retry from the task.
+
+Automatic repository selection and MR linking require a repository recorded as provider `gitlab` with the same normalized host and full `group/subgroup/project` path. A same-named project on another host is not eligible. From an existing task, select **Link GitLab merge request**, paste a URL from the workspace's configured host, and choose the task repository when the task has more than one. Unlinking removes only the Kandev association; it does not close, merge, or unsubscribe from the upstream MR.
+
+Linked MRs appear in the GitLab results and task toolbar. One MR can be linked to several tasks, and multi-repository tasks keep each link scoped to its selected repository.
+
+### Review a linked merge request
+
+Open a linked MR from the task review surface. Kandev fetches and displays its overview, source and target branches, mergeability and conflicts, approvals, pipeline rollup, files, commits, reviewers, assignees, labels, and threaded discussions. From the same panel you can:
+
+- reply to or resolve a discussion and add selected feedback to the active task session's prompt context;
+- approve or unapprove, merge after confirmation, and update labels or assignees;
+- search active project members and replace or clear the reviewer list using GitLab user IDs;
+- subscribe or unsubscribe the connected GitLab user from that MR's upstream notifications;
+- refresh, open in GitLab, or unlink the association.
+
+These actions use the connected GitLab user's permissions and do not bypass protected branches, approval requirements, merge rules, or reviewer eligibility. The current product UI exposes notification subscription for linked merge requests; issue subscribe/unsubscribe is implemented in the backend integration but has no issue-detail control in `/gitlab`.
+
+### Create review and issue watches
+
+GitLab settings include **Merge request review watches** and **Issue watches**. Each watch selects a workflow and initial step, optional repository/base branch and profile overrides, a task prompt, project paths, raw GitLab query parameters, a 60–3,600 second poll interval, an optional maximum in-flight task count, and an **Auto**, **Always**, or **Never** cleanup policy. Issue watches can also require labels. Leaving project paths empty searches every project visible to the connected user.
+
+With no custom query, a review watch searches open MRs that directly request the connected user as reviewer; an issue watch searches open issues assigned to that user. A custom query replaces those default constraints. GitLab has no team review-request equivalent, so the broader **Direct and group-compatible requests** setting currently behaves like direct user requests.
+
+A new match creates at most one task for that watch and external item. MR-created tasks are linked to the MR; issue-created tasks retain issue metadata but are not durable issue associations. Watch controls let you edit, pause/enable, run now, reset, and delete. Invalid or removed workspace dependencies self-disable the affected watch and leave its error visible.
+
+Both watch types inspect only their first GitLab result page, up to 50 items. Already-seen items still occupy that window, so narrow broad queries enough that important matches can reach the first page. The in-flight cap defers dispatch when too many watch-created tasks are active; it does not expand the provider result window.
+
+**Reset** previews its task count, then permanently best-effort deletes all tasks owned by that watch, including archived tasks, clears deduplication state, and makes current matches eligible again. A review-watch reset schedules an immediate rerun; an issue-watch reset waits for the next poll or **Run now**. Deleting a watch also best-effort deletes all of its owned tasks and cannot trigger another run.
+
+### Create a merge request from a task
+
+For a task repository whose `origin` matches the workspace's GitLab host, the Changes surface labels the provider action **Create Merge Request**. Kandev pushes the current branch, uses an explicit target branch or resolves the GitLab project's default branch, supports draft MRs, and creates through an authenticated `glab` when available or the workspace token REST fallback. HTTPS, SSH, `gitlab.com`, and configured self-managed remotes are supported.
+
+A successful create returns the MR URL and asynchronously records it against the originating task repository. If association fails, use the manual link action. Retrying is idempotent for an existing open MR with the same source and target branches. A push can succeed even when MR creation fails; Kandev reports that partial result and leaves the remote branch in place for retry.
 
 ## Azure DevOps
 
@@ -193,7 +228,7 @@ Supported integration pages offer **Copy configuration** with provider-specific 
 - GitHub copies repository scope, saved/default searches, and quick-action presets. It does not copy authentication or watches.
 - Azure DevOps, Jira, Linear, and Slack copy the workspace configuration and encrypted credential, replacing the target's provider configuration and re-running health checks. They do not copy watches.
 - Sentry adds copies of the source instances with new IDs and copied secrets, preserves target instances, and deduplicates conflicting names. It does not copy watches.
-- GitLab host and authentication are already global, so there is no workspace copy action.
+- GitLab replaces the target workspace's host, authentication method, and stored PAT. It does not copy watches, task-launch action presets, or task-to-MR links.
 
 Workspace automations are never copied by this action. Review the target workspace's repository and workflow scope before enabling any copied connection.
 
@@ -202,10 +237,10 @@ Workspace automations are never copied by this action. Review the target workspa
 Issue bodies, pull-request comments, commit messages, Slack threads, and incident details are untrusted prompt input. Use read-only credentials for triage, restrict repositories/projects/channels, and keep a human workflow gate before merge, release, deployment, or sensitive transitions.
 
 - **Connection test fails:** verify the base URL, deployment type, token format, expiration, scopes, and network/DNS access from the backend host.
-- **Cleared token but connection remains:** a higher-priority CLI or environment credential is still active for GitHub or GitLab.
+- **Cleared token but connection remains:** for GitHub, a higher-priority CLI or environment credential may still be active. Clearing GitLab from its workspace settings removes that workspace connection.
 - **Repository, project, or team is missing:** confirm the connected identity can see it and check workspace filters/defaults.
 - **Kandev can read but cannot write:** add only the specific provider write scope needed, then repeat the test.
-- **Task cannot fetch or push:** fix Git/SSH credentials in the executor. The Azure PAT can authenticate the backend's initial managed clone/fetch but is not exposed to the task for later pushes. GitHub remote launches can resolve profile/global tokens or a local `gh` fallback; other integration credentials are not task Git credentials.
+- **Task cannot fetch or push:** inspect the selected executor's Git/SSH credentials and repository remote. For GitLab HTTP remotes, confirm the task workspace connection host exactly matches the remote and its token can access the project. The Azure PAT can authenticate the backend's initial managed clone/fetch but is not exposed to the task for later pushes. GitHub remote launches can resolve profile/global tokens or a local `gh` fallback.
 - **A watch still runs after disabling the provider:** the Enabled switch is browser-local. Pause/delete the watch, or remove the backend configuration.
 - **Unexpected work is created:** pause the watch or automation, inspect its query, last-polled/status fields, and created-task list, then narrow provider filters before resetting or polling again. Watch tables do not provide a separate run/import history.
 

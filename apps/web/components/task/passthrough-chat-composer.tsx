@@ -13,6 +13,7 @@ import {
 } from "./chat/chat-input-container";
 import type { useChatPanelState } from "./chat/use-chat-panel-state";
 import type { DiffComment } from "@/lib/diff/types";
+import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import { buildContextFilesContext, buildTaskMentionsContext } from "@/hooks/use-message-handler";
@@ -52,7 +53,8 @@ export function PassthroughComposerPanel({
   const hasContextComments =
     panelState.planComments.length > 0 ||
     panelState.pendingPRFeedback.length > 0 ||
-    panelState.walkthroughComments.length > 0;
+    panelState.walkthroughComments.length > 0 ||
+    panelState.messageComments.length > 0;
   return (
     <div
       data-testid="passthrough-composer"
@@ -97,7 +99,7 @@ export function PassthroughComposerPanel({
 
 type PassthroughFinalMessage = {
   content: string;
-  commentsToSend: DiffComment[];
+  commentsToSend: Array<DiffComment | AgentMessageComment>;
   contextFilesMeta?: Array<{ path: string; name: string }>;
 };
 
@@ -108,21 +110,24 @@ export function formatPassthroughBaseMessage(
   panelState: ReturnType<typeof useChatPanelState>,
 ) {
   const commentsToSend = reviewComments ?? pendingComments;
+  const messageComments = panelState.messageComments;
   const hasStructuredComments =
     !!reviewComments ||
     panelState.pendingPRFeedback.length > 0 ||
     panelState.planComments.length > 0 ||
-    panelState.walkthroughComments.length > 0;
+    panelState.walkthroughComments.length > 0 ||
+    messageComments.length > 0;
   if (hasStructuredComments) {
     return {
-      formatted: buildSubmitMessage(
-        content,
-        commentsToSend.length > 0 ? commentsToSend : undefined,
-        panelState.pendingPRFeedback,
-        panelState.planComments,
-        panelState.walkthroughComments,
-      ),
-      commentsToSend,
+      formatted: buildSubmitMessage({
+        message: content,
+        reviewComments: commentsToSend.length > 0 ? commentsToSend : undefined,
+        pendingPRFeedback: panelState.pendingPRFeedback,
+        planComments: panelState.planComments,
+        walkthroughComments: panelState.walkthroughComments,
+        messageComments,
+      }),
+      commentsToSend: [...commentsToSend, ...messageComments],
     };
   }
   if (pendingComments.length > 0) {
@@ -257,6 +262,9 @@ export function clearPassthroughComposerContext(panelState: ReturnType<typeof us
   }
   if (panelState.walkthroughComments.length > 0) {
     panelState.handleClearWalkthroughComments();
+  }
+  if (panelState.messageComments.length > 0) {
+    panelState.handleClearMessageComments();
   }
   if (!panelState.resolvedSessionId) return;
   panelState.clearEphemeral(panelState.resolvedSessionId);

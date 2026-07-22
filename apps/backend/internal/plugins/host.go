@@ -61,6 +61,17 @@ type pluginHost struct {
 	workflowSteps    workflowStepLister
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
+	messageData      messageDataSource
+
+	// utilityDeps returns the live utility-agent dependencies (ADR 0048) at
+	// call time rather than a spawn-time snapshot. hostUtilityMgr is
+	// constructed late in boot — after StartActivePlugins has already spawned
+	// boot-active plugins — so snapshotting here would strand those hosts with
+	// nil deps and make InvokeUtilityAgent return Unimplemented for their whole
+	// lifetime. Reading live (under Service.mu) lets the later SetUtilityAgent
+	// wiring take effect without a plugin restart. nil on a bare test host.
+	// See host_utility.go.
+	utilityDeps func() (utilityAgentSource, utilityRunner)
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)
@@ -79,6 +90,12 @@ func permissionDenied(capability string) error {
 // (nil, nil) success for a missing task.
 func taskNotFound(id string) error {
 	return status.Errorf(codes.NotFound, "task %q not found", id)
+}
+
+// invalidArgument builds the gRPC error a Host data reader returns when a
+// plugin passes a malformed filter value (e.g. a non-RFC3339 time bound).
+func invalidArgument(msg string) error {
+	return status.Error(codes.InvalidArgument, msg)
 }
 
 func (h *pluginHost) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {

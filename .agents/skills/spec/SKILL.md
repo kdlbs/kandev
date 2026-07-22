@@ -5,6 +5,9 @@ description: Write a feature spec — the "what & why" of a kandev product featu
 
 # Writing a Spec
 
+This is a planner-side artifact skill. The user-started primary planner may
+write and revise specs; implementation workers only read the relevant sections.
+
 A spec captures **what** a feature does and **why**, before deciding **how**.
 
 If the user intent is still vague, run `/interview-me` first. A spec records confirmed intent; it should not be the place where the agent guesses what the user meant.

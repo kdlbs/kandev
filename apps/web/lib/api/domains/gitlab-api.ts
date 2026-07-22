@@ -10,35 +10,93 @@ import type {
   Issue,
   MRSearchPage,
   IssueSearchPage,
+  GitLabConfig,
+  SetGitLabConfigRequest,
+  TestGitLabConnectionResult,
 } from "@/lib/types/gitlab";
 import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
-export async function fetchGitLabStatus(options?: ApiRequestOptions) {
-  return fetchJson<GitLabStatus>("/api/v1/gitlab/status", options);
+type WorkspaceApiOptions = ApiRequestOptions & { workspaceId: string };
+
+function withWorkspace(path: string, options: WorkspaceApiOptions): string {
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}workspace_id=${encodeURIComponent(options.workspaceId)}`;
 }
 
-export async function configureGitLabToken(token: string) {
-  return invalidateIntegrationAvailabilityAfter(
-    fetchJson<GitLabConfigureTokenResponse>("/api/v1/gitlab/token", {
-      init: { method: "POST", body: JSON.stringify({ token }) },
-    }),
+function requestOptions(options: WorkspaceApiOptions): ApiRequestOptions {
+  const { workspaceId: _workspaceId, ...rest } = options;
+  return rest;
+}
+
+export async function fetchGitLabStatus(options: WorkspaceApiOptions) {
+  return fetchJson<GitLabStatus>(
+    withWorkspace("/api/v1/gitlab/status", options),
+    requestOptions(options),
   );
 }
 
-export async function clearGitLabToken() {
-  return invalidateIntegrationAvailabilityAfter(
-    fetchJson<GitLabClearTokenResponse>("/api/v1/gitlab/token", {
-      init: { method: "DELETE" },
-    }),
+export async function getGitLabConfig(options: WorkspaceApiOptions): Promise<GitLabConfig | null> {
+  const config = await fetchJson<GitLabConfig | undefined>(
+    withWorkspace("/api/v1/gitlab/config", options),
+    requestOptions(options),
+  );
+  return config ?? null;
+}
+
+export async function setGitLabConfig(
+  payload: SetGitLabConfigRequest,
+  options: WorkspaceApiOptions,
+) {
+  return fetchJson<GitLabConfig>(withWorkspace("/api/v1/gitlab/config", options), {
+    ...requestOptions(options),
+    init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
+  });
+}
+
+export async function deleteGitLabConfig(options: WorkspaceApiOptions) {
+  return fetchJson<{ deleted: boolean }>(withWorkspace("/api/v1/gitlab/config", options), {
+    ...requestOptions(options),
+    init: { ...(options?.init ?? {}), method: "DELETE" },
+  });
+}
+
+export async function testGitLabConfig(
+  payload: SetGitLabConfigRequest,
+  options: WorkspaceApiOptions,
+) {
+  return fetchJson<TestGitLabConnectionResult>(
+    withWorkspace("/api/v1/gitlab/config/test", options),
+    {
+      ...requestOptions(options),
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+    },
   );
 }
 
-export async function configureGitLabHost(host: string) {
-  return invalidateIntegrationAvailabilityAfter(
-    fetchJson<GitLabConfigureHostResponse>("/api/v1/gitlab/host", {
-      init: { method: "POST", body: JSON.stringify({ host }) },
-    }),
+export async function copyGitLabConfig(targetWorkspaceId: string, options: WorkspaceApiOptions) {
+  return fetchJson<GitLabConfig>(withWorkspace("/api/v1/gitlab/config/copy", options), {
+    ...requestOptions(options),
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ targetWorkspaceId }) },
+  });
+}
+
+export async function configureGitLabToken(token: string, options: WorkspaceApiOptions, host = "") {
+  await invalidateIntegrationAvailabilityAfter(
+    setGitLabConfig({ host, auth_method: "pat", token }, options),
   );
+  return { configured: true } satisfies GitLabConfigureTokenResponse;
+}
+
+export async function clearGitLabToken(options: WorkspaceApiOptions) {
+  await invalidateIntegrationAvailabilityAfter(deleteGitLabConfig(options));
+  return { cleared: true } satisfies GitLabClearTokenResponse;
+}
+
+export async function configureGitLabHost(host: string, options: WorkspaceApiOptions) {
+  const config = await invalidateIntegrationAvailabilityAfter(
+    setGitLabConfig({ host, auth_method: "pat" }, options),
+  );
+  return { configured: true, host: config.host } satisfies GitLabConfigureHostResponse;
 }
 
 /** List every MR association for tasks in a workspace, grouped by task ID. */
@@ -70,15 +128,34 @@ export async function syncTaskMR(
   });
 }
 
+export async function createTaskMR(
+  body: { task_id: string; repository_id?: string; mr_url: string },
+  workspaceId: string,
+) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<TaskMR>(`/api/v1/gitlab/task-mrs?${query.toString()}`, {
+    init: { method: "POST", body: JSON.stringify(body) },
+  });
+}
+
+export async function deleteTaskMR(associationId: string, workspaceId: string) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<{ deleted: boolean }>(
+    `/api/v1/gitlab/task-mrs/${encodeURIComponent(associationId)}?${query.toString()}`,
+    { init: { method: "DELETE" } },
+  );
+}
+
 /** Search the current user's MRs. filter is one of "assigned", "authored",
  * "review_requested" (matches GitLab's `scope` query param). */
 export async function searchUserMRs(params: {
+  workspaceId: string;
   filter?: string;
   customQuery?: string;
   page?: number;
   perPage?: number;
 }) {
-  const qs = new URLSearchParams();
+  const qs = new URLSearchParams({ workspace_id: params.workspaceId });
   if (params.filter) qs.set("filter", params.filter);
   if (params.customQuery) qs.set("custom_query", params.customQuery);
   if (params.page) qs.set("page", String(params.page));
@@ -90,12 +167,13 @@ export async function searchUserMRs(params: {
 
 /** Search the current user's issues. */
 export async function searchUserIssues(params: {
+  workspaceId: string;
   filter?: string;
   customQuery?: string;
   page?: number;
   perPage?: number;
 }) {
-  const qs = new URLSearchParams();
+  const qs = new URLSearchParams({ workspace_id: params.workspaceId });
   if (params.filter) qs.set("filter", params.filter);
   if (params.customQuery) qs.set("custom_query", params.customQuery);
   if (params.page) qs.set("page", String(params.page));
@@ -123,27 +201,61 @@ import type {
   GitLabMRFile,
   GitLabMRCommit,
   GitLabRepoBranch,
+  GitLabProjectMember,
+  GitLabSubscriptionState,
 } from "@/lib/types/gitlab";
+
+export type GitLabMRIdentity = {
+  workspaceId: string;
+  project: string;
+  iid: number;
+  host?: string;
+};
+
+function reviewPath(path: string, identity: GitLabMRIdentity): string {
+  const query = new URLSearchParams({
+    workspace_id: identity.workspaceId,
+    project: identity.project,
+    iid: String(identity.iid),
+  });
+  if (identity.host) query.set("expected_host", identity.host);
+  return `${path}?${query.toString()}`;
+}
+
+function reviewMutation<T>(
+  path: string,
+  method: "POST" | "PUT",
+  identity: GitLabMRIdentity,
+  body: Record<string, unknown> = {},
+) {
+  const query = new URLSearchParams({ workspace_id: identity.workspaceId });
+  if (identity.host) query.set("expected_host", identity.host);
+  return fetchJson<T>(`${path}?${query.toString()}`, {
+    init: {
+      method,
+      body: JSON.stringify({ project: identity.project, iid: identity.iid, ...body }),
+    },
+  });
+}
 
 // --- Watches ---
 
 export async function listMRWatches(
+  workspaceId: string,
   filters?: { sessionId?: string; taskId?: string },
   options?: ApiRequestOptions,
 ) {
-  const qs = new URLSearchParams();
+  const qs = new URLSearchParams({ workspace_id: workspaceId });
   if (filters?.sessionId) qs.set("session_id", filters.sessionId);
   if (filters?.taskId) qs.set("task_id", filters.taskId);
-  return fetchJson<{ watches: MRWatch[] }>(
-    `/api/v1/gitlab/watches/mr${qs.size > 0 ? `?${qs.toString()}` : ""}`,
-    options,
-  );
+  return fetchJson<{ watches: MRWatch[] }>(`/api/v1/gitlab/watches/mr?${qs.toString()}`, options);
 }
 
-export async function deleteMRWatch(id: string) {
-  return fetchJson<{ deleted: boolean }>(`/api/v1/gitlab/watches/mr/${encodeURIComponent(id)}`, {
-    init: { method: "DELETE" },
-  });
+export async function deleteMRWatch(id: string, workspaceId: string) {
+  return fetchJson<{ deleted: boolean }>(
+    withWorkspace(`/api/v1/gitlab/watches/mr/${encodeURIComponent(id)}`, { workspaceId }),
+    { init: { method: "DELETE" } },
+  );
 }
 
 export type CreateReviewWatchRequest = Omit<
@@ -157,45 +269,74 @@ export type UpdateReviewWatchRequest = Partial<Omit<CreateReviewWatchRequest, "w
   enabled?: boolean;
 };
 
-export async function listReviewWatches(workspaceId?: string, options?: ApiRequestOptions) {
-  const qs = new URLSearchParams();
-  if (workspaceId) qs.set("workspace_id", workspaceId);
+export async function listReviewWatches(workspaceId: string, options?: ApiRequestOptions) {
+  const qs = new URLSearchParams({ workspace_id: workspaceId });
   return fetchJson<{ watches: ReviewWatch[] }>(
-    `/api/v1/gitlab/watches/review${qs.size > 0 ? `?${qs.toString()}` : ""}`,
+    `/api/v1/gitlab/watches/review?${qs.toString()}`,
     options,
   );
 }
 
 export async function createReviewWatch(req: CreateReviewWatchRequest) {
-  return fetchJson<ReviewWatch>(`/api/v1/gitlab/watches/review`, {
-    init: { method: "POST", body: JSON.stringify(req) },
-  });
+  return fetchJson<ReviewWatch>(
+    withWorkspace(`/api/v1/gitlab/watches/review`, { workspaceId: req.workspace_id }),
+    {
+      init: { method: "POST", body: JSON.stringify(req) },
+    },
+  );
 }
 
-export async function updateReviewWatch(id: string, req: UpdateReviewWatchRequest) {
-  return fetchJson<ReviewWatch>(`/api/v1/gitlab/watches/review/${encodeURIComponent(id)}`, {
-    init: { method: "PUT", body: JSON.stringify(req) },
-  });
+export async function updateReviewWatch(
+  id: string,
+  workspaceId: string,
+  req: UpdateReviewWatchRequest,
+) {
+  return fetchJson<ReviewWatch>(
+    withWorkspace(`/api/v1/gitlab/watches/review/${encodeURIComponent(id)}`, { workspaceId }),
+    {
+      init: { method: "PUT", body: JSON.stringify(req) },
+    },
+  );
 }
 
-export async function deleteReviewWatch(id: string) {
+export async function deleteReviewWatch(id: string, workspaceId: string) {
   return fetchJson<{ deleted: boolean }>(
-    `/api/v1/gitlab/watches/review/${encodeURIComponent(id)}`,
+    withWorkspace(`/api/v1/gitlab/watches/review/${encodeURIComponent(id)}`, { workspaceId }),
     { init: { method: "DELETE" } },
   );
 }
 
-export async function triggerReviewWatch(id: string) {
+export async function triggerReviewWatch(id: string, workspaceId: string) {
   return fetchJson<{ mrs: MR[]; count: number }>(
-    `/api/v1/gitlab/watches/review/${encodeURIComponent(id)}/trigger`,
+    withWorkspace(`/api/v1/gitlab/watches/review/${encodeURIComponent(id)}/trigger`, {
+      workspaceId,
+    }),
     { init: { method: "POST" } },
   );
 }
 
-export async function triggerAllReviewWatches() {
-  return fetchJson<{ count: number }>(`/api/v1/gitlab/watches/review/trigger-all`, {
-    init: { method: "POST" },
-  });
+export async function triggerAllReviewWatches(workspaceId: string) {
+  return fetchJson<{ count: number }>(
+    withWorkspace(`/api/v1/gitlab/watches/review/trigger-all`, { workspaceId }),
+    {
+      init: { method: "POST" },
+    },
+  );
+}
+
+export async function previewResetReviewWatch(id: string, workspaceId: string) {
+  return fetchJson<{ taskCount: number }>(
+    withWorkspace(`/api/v1/gitlab/watches/review/${encodeURIComponent(id)}/reset/preview`, {
+      workspaceId,
+    }),
+  );
+}
+
+export async function resetReviewWatch(id: string, workspaceId: string) {
+  return fetchJson<{ tasksDeleted: number }>(
+    withWorkspace(`/api/v1/gitlab/watches/review/${encodeURIComponent(id)}/reset`, { workspaceId }),
+    { init: { method: "POST" } },
+  );
 }
 
 export type CreateIssueWatchRequest = Omit<
@@ -207,76 +348,121 @@ export type UpdateIssueWatchRequest = Partial<Omit<CreateIssueWatchRequest, "wor
   enabled?: boolean;
 };
 
-export async function listIssueWatches(workspaceId?: string, options?: ApiRequestOptions) {
-  const qs = new URLSearchParams();
-  if (workspaceId) qs.set("workspace_id", workspaceId);
+export async function listIssueWatches(workspaceId: string, options?: ApiRequestOptions) {
+  const qs = new URLSearchParams({ workspace_id: workspaceId });
   return fetchJson<{ watches: IssueWatch[] }>(
-    `/api/v1/gitlab/watches/issue${qs.size > 0 ? `?${qs.toString()}` : ""}`,
+    `/api/v1/gitlab/watches/issue?${qs.toString()}`,
     options,
   );
 }
 
 export async function createIssueWatch(req: CreateIssueWatchRequest) {
-  return fetchJson<IssueWatch>(`/api/v1/gitlab/watches/issue`, {
-    init: { method: "POST", body: JSON.stringify(req) },
-  });
+  return fetchJson<IssueWatch>(
+    withWorkspace(`/api/v1/gitlab/watches/issue`, { workspaceId: req.workspace_id }),
+    {
+      init: { method: "POST", body: JSON.stringify(req) },
+    },
+  );
 }
 
-export async function updateIssueWatch(id: string, req: UpdateIssueWatchRequest) {
-  return fetchJson<IssueWatch>(`/api/v1/gitlab/watches/issue/${encodeURIComponent(id)}`, {
-    init: { method: "PUT", body: JSON.stringify(req) },
-  });
+export async function updateIssueWatch(
+  id: string,
+  workspaceId: string,
+  req: UpdateIssueWatchRequest,
+) {
+  return fetchJson<IssueWatch>(
+    withWorkspace(`/api/v1/gitlab/watches/issue/${encodeURIComponent(id)}`, { workspaceId }),
+    {
+      init: { method: "PUT", body: JSON.stringify(req) },
+    },
+  );
 }
 
-export async function deleteIssueWatch(id: string) {
-  return fetchJson<{ deleted: boolean }>(`/api/v1/gitlab/watches/issue/${encodeURIComponent(id)}`, {
-    init: { method: "DELETE" },
-  });
+export async function deleteIssueWatch(id: string, workspaceId: string) {
+  return fetchJson<{ deleted: boolean }>(
+    withWorkspace(`/api/v1/gitlab/watches/issue/${encodeURIComponent(id)}`, { workspaceId }),
+    {
+      init: { method: "DELETE" },
+    },
+  );
 }
 
-export async function triggerIssueWatch(id: string) {
+export async function triggerIssueWatch(id: string, workspaceId: string) {
   return fetchJson<{ issues: Issue[]; count: number }>(
-    `/api/v1/gitlab/watches/issue/${encodeURIComponent(id)}/trigger`,
+    withWorkspace(`/api/v1/gitlab/watches/issue/${encodeURIComponent(id)}/trigger`, {
+      workspaceId,
+    }),
     { init: { method: "POST" } },
   );
 }
 
-export async function triggerAllIssueWatches() {
-  return fetchJson<{ count: number }>(`/api/v1/gitlab/watches/issue/trigger-all`, {
-    init: { method: "POST" },
-  });
+export async function triggerAllIssueWatches(workspaceId: string) {
+  return fetchJson<{ count: number }>(
+    withWorkspace(`/api/v1/gitlab/watches/issue/trigger-all`, { workspaceId }),
+    {
+      init: { method: "POST" },
+    },
+  );
+}
+
+export async function previewResetIssueWatch(id: string, workspaceId: string) {
+  return fetchJson<{ taskCount: number }>(
+    withWorkspace(`/api/v1/gitlab/watches/issue/${encodeURIComponent(id)}/reset/preview`, {
+      workspaceId,
+    }),
+  );
+}
+
+export async function resetIssueWatch(id: string, workspaceId: string) {
+  return fetchJson<{ tasksDeleted: number }>(
+    withWorkspace(`/api/v1/gitlab/watches/issue/${encodeURIComponent(id)}/reset`, { workspaceId }),
+    { init: { method: "POST" } },
+  );
 }
 
 // --- Cleanup ---
 
-export async function cleanupReviewTasks() {
-  return fetchJson<{ deleted: number }>(`/api/v1/gitlab/cleanup/review-tasks`, {
-    init: { method: "POST" },
-  });
+export async function cleanupReviewTasks(workspaceId: string) {
+  return fetchJson<{ deleted: number }>(
+    withWorkspace(`/api/v1/gitlab/cleanup/review-tasks`, { workspaceId }),
+    {
+      init: { method: "POST" },
+    },
+  );
 }
 
-export async function cleanupIssueTasks() {
-  return fetchJson<{ deleted: number }>(`/api/v1/gitlab/cleanup/issue-tasks`, {
-    init: { method: "POST" },
-  });
+export async function cleanupIssueTasks(workspaceId: string) {
+  return fetchJson<{ deleted: number }>(
+    withWorkspace(`/api/v1/gitlab/cleanup/issue-tasks`, { workspaceId }),
+    {
+      init: { method: "POST" },
+    },
+  );
 }
 
 // --- Projects ---
 
-export async function listUserProjects(options?: ApiRequestOptions) {
-  return fetchJson<{ projects: GitLabProject[] }>(`/api/v1/gitlab/projects`, options);
+export async function listUserProjects(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ projects: GitLabProject[] }>(
+    withWorkspace(`/api/v1/gitlab/projects`, { workspaceId }),
+    options,
+  );
 }
 
-export async function searchProjects(query: string) {
-  const qs = new URLSearchParams();
+export async function searchProjects(workspaceId: string, query: string) {
+  const qs = new URLSearchParams({ workspace_id: workspaceId });
   qs.set("query", query);
   return fetchJson<{ projects: GitLabProject[] }>(
     `/api/v1/gitlab/projects/search?${qs.toString()}`,
   );
 }
 
-export async function listProjectBranches(project: string, options?: ApiRequestOptions) {
-  const qs = new URLSearchParams();
+export async function listProjectBranches(
+  workspaceId: string,
+  project: string,
+  options?: ApiRequestOptions,
+) {
+  const qs = new URLSearchParams({ workspace_id: workspaceId });
   qs.set("project", project);
   return fetchJson<{ branches: GitLabRepoBranch[] }>(
     `/api/v1/gitlab/projects/branches?${qs.toString()}`,
@@ -284,8 +470,8 @@ export async function listProjectBranches(project: string, options?: ApiRequestO
   );
 }
 
-export async function getProjectMergeMethods(project: string) {
-  const qs = new URLSearchParams();
+export async function getProjectMergeMethods(workspaceId: string, project: string) {
+  const qs = new URLSearchParams({ workspace_id: workspaceId });
   qs.set("project", project);
   return fetchJson<ProjectMergeMethods>(`/api/v1/gitlab/projects/merge-methods?${qs.toString()}`);
 }
@@ -293,69 +479,118 @@ export async function getProjectMergeMethods(project: string) {
 // --- MR write actions ---
 
 export async function mergeMR(
-  project: string,
-  iid: number,
-  method?: string,
-  squashCommitMessage?: string,
+  identity: GitLabMRIdentity & { squash?: boolean; squashCommitMessage?: string },
 ) {
-  return fetchJson<MR>(`/api/v1/gitlab/mrs/merge`, {
-    init: {
-      method: "PUT",
-      body: JSON.stringify({
-        project,
-        iid,
-        method,
-        squash_commit_message: squashCommitMessage,
-      }),
-    },
+  return reviewMutation<MR>("/api/v1/gitlab/mrs/merge", "PUT", identity, {
+    method: identity.squash ? "squash" : undefined,
+    squash_commit_message: identity.squashCommitMessage,
   });
 }
 
-export async function approveMR(project: string, iid: number) {
-  return fetchJson<{ approved: boolean }>(`/api/v1/gitlab/mrs/approve`, {
-    init: { method: "POST", body: JSON.stringify({ project, iid }) },
+export async function approveMR(identity: GitLabMRIdentity) {
+  return reviewMutation<{ approved: boolean }>("/api/v1/gitlab/mrs/approve", "POST", identity);
+}
+
+export async function unapproveMR(identity: GitLabMRIdentity) {
+  return reviewMutation<{ unapproved: boolean }>("/api/v1/gitlab/mrs/unapprove", "POST", identity);
+}
+
+export async function setMRLabels(identity: GitLabMRIdentity & { labels: string[] }) {
+  return reviewMutation<{ updated: boolean }>("/api/v1/gitlab/mrs/labels", "PUT", identity, {
+    labels: identity.labels,
   });
 }
 
-export async function unapproveMR(project: string, iid: number) {
-  return fetchJson<{ unapproved: boolean }>(`/api/v1/gitlab/mrs/unapprove`, {
-    init: { method: "POST", body: JSON.stringify({ project, iid }) },
+export async function setMRAssignees(identity: GitLabMRIdentity & { assigneeIds: number[] }) {
+  return reviewMutation<{ updated: boolean }>("/api/v1/gitlab/mrs/assignees", "PUT", identity, {
+    assignee_ids: identity.assigneeIds,
   });
 }
 
-export async function setMRLabels(project: string, iid: number, labels: string[]) {
-  return fetchJson<{ updated: boolean }>(`/api/v1/gitlab/mrs/labels`, {
-    init: { method: "PUT", body: JSON.stringify({ project, iid, labels }) },
-  });
+export async function getMRFiles(identity: GitLabMRIdentity) {
+  return fetchJson<{ files: GitLabMRFile[] }>(reviewPath("/api/v1/gitlab/mrs/files", identity));
 }
 
-export async function setMRAssignees(project: string, iid: number, assigneeIDs: number[]) {
-  return fetchJson<{ updated: boolean }>(`/api/v1/gitlab/mrs/assignees`, {
-    init: { method: "PUT", body: JSON.stringify({ project, iid, assignee_ids: assigneeIDs }) },
-  });
+export async function getMRCommits(identity: GitLabMRIdentity) {
+  return fetchJson<{ commits: GitLabMRCommit[] }>(
+    reviewPath("/api/v1/gitlab/mrs/commits", identity),
+  );
 }
 
-export async function getMRFiles(project: string, iid: number) {
-  const qs = new URLSearchParams();
-  qs.set("project", project);
-  qs.set("iid", String(iid));
-  return fetchJson<{ files: GitLabMRFile[] }>(`/api/v1/gitlab/mrs/files?${qs.toString()}`);
-}
-
-export async function getMRCommits(project: string, iid: number) {
-  const qs = new URLSearchParams();
-  qs.set("project", project);
-  qs.set("iid", String(iid));
-  return fetchJson<{ commits: GitLabMRCommit[] }>(`/api/v1/gitlab/mrs/commits?${qs.toString()}`);
-}
-
-export async function getMRFeedback(project: string, iid: number) {
-  const qs = new URLSearchParams();
-  qs.set("project", project);
-  qs.set("iid", String(iid));
-  return fetchJson<GitLabMRFeedback>(`/api/v1/gitlab/mrs/feedback?${qs.toString()}`, {
+export async function getMRFeedback(identity: GitLabMRIdentity) {
+  return fetchJson<GitLabMRFeedback>(reviewPath("/api/v1/gitlab/mrs/feedback", identity), {
     cache: "no-store",
   });
+}
+
+export async function createMRDiscussionNote(
+  identity: GitLabMRIdentity & { discussionId: string; body: string },
+) {
+  return reviewMutation<GitLabMRFeedback["discussions"][number]["notes"][number]>(
+    "/api/v1/gitlab/mrs/discussions/notes",
+    "POST",
+    identity,
+    { discussion_id: identity.discussionId, body: identity.body },
+  );
+}
+
+export async function resolveMRDiscussion(identity: GitLabMRIdentity & { discussionId: string }) {
+  return reviewMutation<{ resolved: boolean }>(
+    "/api/v1/gitlab/mrs/discussions/resolve",
+    "POST",
+    identity,
+    { discussion_id: identity.discussionId },
+  );
+}
+
+export async function listProjectMembers(
+  workspaceId: string,
+  project: string,
+  query = "",
+  expectedHost?: string,
+) {
+  const qs = new URLSearchParams({ workspace_id: workspaceId, project });
+  if (query) qs.set("query", query);
+  if (expectedHost) qs.set("expected_host", expectedHost);
+  return fetchJson<GitLabProjectMember[]>(`/api/v1/gitlab/projects/members?${qs.toString()}`);
+}
+
+export async function setMRReviewers(identity: GitLabMRIdentity & { reviewerIds: number[] }) {
+  return reviewMutation<MR>("/api/v1/gitlab/mrs/reviewers", "PUT", identity, {
+    reviewer_ids: identity.reviewerIds,
+  });
+}
+
+export async function getMRSubscription(identity: GitLabMRIdentity) {
+  return fetchJson<GitLabSubscriptionState>(
+    reviewPath("/api/v1/gitlab/mrs/subscription", identity),
+    { cache: "no-store" },
+  );
+}
+
+export async function setMRSubscription(identity: GitLabMRIdentity & { subscribed: boolean }) {
+  return reviewMutation<GitLabSubscriptionState>(
+    "/api/v1/gitlab/mrs/subscription",
+    "PUT",
+    identity,
+    { subscribed: identity.subscribed },
+  );
+}
+
+export async function getIssueSubscription(identity: GitLabMRIdentity) {
+  return fetchJson<GitLabSubscriptionState>(
+    reviewPath("/api/v1/gitlab/issues/subscription", identity),
+    { cache: "no-store" },
+  );
+}
+
+export async function setIssueSubscription(identity: GitLabMRIdentity & { subscribed: boolean }) {
+  return reviewMutation<GitLabSubscriptionState>(
+    "/api/v1/gitlab/issues/subscription",
+    "PUT",
+    identity,
+    { subscribed: identity.subscribed },
+  );
 }
 
 // --- Action presets ---
@@ -370,12 +605,15 @@ export async function updateActionPresets(
   workspaceId: string,
   body: { mr?: GitLabActionPresets["mr"]; issue?: GitLabActionPresets["issue"] },
 ) {
-  return fetchJson<GitLabActionPresets>(`/api/v1/gitlab/action-presets`, {
-    init: {
-      method: "PUT",
-      body: JSON.stringify({ workspace_id: workspaceId, ...body }),
+  return fetchJson<GitLabActionPresets>(
+    withWorkspace(`/api/v1/gitlab/action-presets`, { workspaceId }),
+    {
+      init: {
+        method: "PUT",
+        body: JSON.stringify(body),
+      },
     },
-  });
+  );
 }
 
 export async function resetActionPresets(workspaceId: string) {
@@ -388,6 +626,8 @@ export async function resetActionPresets(workspaceId: string) {
 
 // --- Stats ---
 
-export async function fetchGitLabStats() {
-  return fetchJson<GitLabStats>(`/api/v1/gitlab/stats`, { cache: "no-store" });
+export async function fetchGitLabStats(workspaceId: string) {
+  return fetchJson<GitLabStats>(withWorkspace(`/api/v1/gitlab/stats`, { workspaceId }), {
+    cache: "no-store",
+  });
 }

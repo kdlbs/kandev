@@ -1067,6 +1067,29 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		reinsertPendingMove()
 		return
 	}
+	if targetStep.WorkflowID != move.WorkflowID {
+		s.logger.Error("pending move target step belongs to a different workflow; dropping move",
+			zap.String("task_id", taskID),
+			zap.String("target_step_id", move.WorkflowStepID),
+			zap.String("step_workflow_id", targetStep.WorkflowID),
+			zap.String("move_workflow_id", move.WorkflowID))
+		// Do NOT reinsert: the move is invalid and retrying would keep failing.
+		// The hand-off prompt was queued by handleMoveTask before the move was
+		// applied. Since the move is being dropped, the on_enter path that would
+		// have drained the queue won't run. Drop the orphan so it can't be
+		// misdelivered to the source step's agent on a future turn (it was
+		// authored for the move's *target* step) — mirrors the cleanup done on
+		// the ApplyTransition failure path below.
+		if s.messageQueue != nil {
+			if _, ok := s.messageQueue.TakeQueued(ctx, sessionID); ok {
+				s.publishQueueStatusEvent(ctx, sessionID)
+				s.logger.Warn("dropped hand-off prompt after pending-move workflow mismatch",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID))
+			}
+		}
+		return
+	}
 
 	// Mark the session WAITING_FOR_INPUT before processOnEnter runs. The agent
 	// just finished its turn; the active-turn guard in processOnEnter would

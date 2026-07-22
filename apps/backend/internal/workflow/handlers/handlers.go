@@ -12,6 +12,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/workflow/controller"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/service"
@@ -21,20 +23,22 @@ import (
 // Handlers manages workflow HTTP and WebSocket handlers
 type Handlers struct {
 	controller *controller.Controller
+	eventBus   bus.EventBus
 	logger     *logger.Logger
 }
 
 // NewHandlers creates new workflow handlers
-func NewHandlers(ctrl *controller.Controller, log *logger.Logger) *Handlers {
+func NewHandlers(ctrl *controller.Controller, eventBus bus.EventBus, log *logger.Logger) *Handlers {
 	return &Handlers{
 		controller: ctrl,
+		eventBus:   eventBus,
 		logger:     log.WithFields(zap.String("component", "workflow-handlers")),
 	}
 }
 
 // RegisterRoutes registers workflow HTTP and WebSocket handlers
-func RegisterRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *controller.Controller, log *logger.Logger) {
-	handlers := NewHandlers(ctrl, log)
+func RegisterRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *controller.Controller, eventBus bus.EventBus, log *logger.Logger) {
+	handlers := NewHandlers(ctrl, eventBus, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -210,12 +214,57 @@ func isStepValidationError(msg string) bool {
 }
 
 func (h *Handlers) httpDeleteStep(c *gin.Context) {
-	if err := h.controller.DeleteStep(c.Request.Context(), c.Param("id")); err != nil {
+	ctx := c.Request.Context()
+	stepID := c.Param("id")
+	stepResp, getErr := h.controller.GetStep(ctx, stepID)
+	if getErr != nil {
+		h.logger.Warn("failed to fetch step before delete; workflow_step.deleted event will not be published",
+			zap.String("step_id", stepID), zap.Error(getErr))
+	}
+
+	if err := h.controller.DeleteStep(ctx, stepID); err != nil {
 		h.logger.Error("failed to delete step", zap.Error(err))
 		h.writeStepMutationError(c, err)
 		return
 	}
+	if stepResp != nil {
+		h.publishWorkflowStepEvent(ctx, events.WorkflowStepDeleted, stepResp.Step)
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType string, step *models.WorkflowStep) {
+	if step == nil {
+		return
+	}
+	data := map[string]interface{}{
+		"step": map[string]interface{}{
+			"id":                           step.ID,
+			"workflow_id":                  step.WorkflowID,
+			"name":                         step.Name,
+			"position":                     step.Position,
+			"color":                        step.Color,
+			"prompt":                       step.Prompt,
+			"events":                       step.Events,
+			"show_in_command_panel":        step.ShowInCommandPanel,
+			"allow_manual_move":            step.AllowManualMove,
+			"is_start_step":                step.IsStartStep,
+			"auto_archive_after_hours":     step.AutoArchiveAfterHours,
+			"wip_limit":                    step.WIPLimit,
+			"pull_from_step_id":            step.PullFromStepID,
+			"agent_profile_id":             step.AgentProfileID,
+			"stage_type":                   string(step.StageType),
+			"auto_advance_requires_signal": step.AutoAdvanceRequiresSignal,
+			"created_at":                   step.CreatedAt,
+			"updated_at":                   step.UpdatedAt,
+		},
+	}
+	if err := h.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "workflow-handlers", data)); err != nil {
+		h.logger.Error("failed to publish workflow step event",
+			zap.String("event_type", eventType),
+			zap.String("step_id", step.ID),
+			zap.Error(err))
+	}
 }
 
 type httpReorderStepsRequest struct {

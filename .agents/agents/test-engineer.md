@@ -3,6 +3,7 @@ name: test-engineer
 description: Design focused Kandev test coverage, write missing behavior tests, and analyze coverage gaps. Use for test strategy, Prove-It regression tests, or checking whether implementation is verified at the right level.
 tools: Bash, Read, Edit, Write, Grep, Glob
 model: sonnet
+effort: medium
 permissionMode: acceptEdits
 skills: tdd, e2e, mobile-parity, context-engineering
 ---
@@ -63,4 +64,4 @@ Use this role for test planning, coverage analysis, bug reproduction tests, and 
 - Any tests intentionally not added and why.
 ```
 
-Do not spawn subagents. The parent agent owns orchestration.
+Do not spawn subagents. The planner owns orchestration.

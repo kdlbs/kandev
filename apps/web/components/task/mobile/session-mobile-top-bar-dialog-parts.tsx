@@ -6,20 +6,24 @@ import { Button } from "@kandev/ui/button";
 export function MobilePRBranchSummary({
   displayBranch,
   baseBranch,
+  terminology,
 }: {
   displayBranch: string | undefined;
   baseBranch: string | undefined;
+  terminology: { shortName: string };
 }) {
   return (
     <div className="text-sm text-muted-foreground">
       {baseBranch ? (
         <span>
-          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span> to{" "}
+          Creating {terminology.shortName} from{" "}
+          <span className="font-medium text-foreground">{displayBranch}</span> to{" "}
           <span className="font-medium text-foreground">{baseBranch}</span>
         </span>
       ) : (
         <span>
-          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>
+          Creating {terminology.shortName} from{" "}
+          <span className="font-medium text-foreground">{displayBranch}</span>
         </span>
       )}
     </div>
@@ -57,12 +61,16 @@ export function PRSubmitButton({
   prDraft,
   isGitLoading,
   onCreatePR,
+  terminology,
+  branchPushed,
 }: {
   prTitle: string;
   prBody: string;
   prDraft: boolean;
   isGitLoading: boolean;
   onCreatePR: (title: string, body: string, draft: boolean) => void;
+  terminology: { shortName: string };
+  branchPushed: boolean;
 }) {
   return (
     <Button
@@ -78,7 +86,7 @@ export function PRSubmitButton({
       ) : (
         <>
           <IconGitPullRequest className="h-4 w-4 mr-2" />
-          Create PR
+          {branchPushed ? "Retry" : "Create"} {terminology.shortName}
         </>
       )}
     </Button>

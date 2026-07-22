@@ -1,26 +1,32 @@
 ---
 name: verify
-description: Run Kandev format, typecheck, tests, and lint before commit, then fix failures and rerun focused failed commands until clean.
-tools: Bash, Read, Edit, Write, Grep, Glob
+description: Run Kandev format, typecheck, tests, and lint before commit, then return a compact pass/fail report without fixing source failures.
+tools: Bash, Read, Grep, Glob
 model: sonnet
+effort: low
 permissionMode: acceptEdits
 ---
 
 # Verify
 
-Run the full verification pipeline for the monorepo, then fix any issues found.
+Run the full verification pipeline for the monorepo and report any failures.
+Do not change production or test logic, resolve conflicts, rebase, or commit.
+
+`permissionMode: acceptEdits` is intentional so the Bash-driven `make fmt`
+step can retain formatter changes. It does not authorize source or test fixes.
 
 ## Steps
 
-1. **Prepare and rebase against the current PR base:**
+1. **Prepare and inspect the current PR base:**
    - Fresh worktrees share `.git/` but not dependencies. If `apps/node_modules` is missing, run `pnpm install --frozen-lockfile` from `apps/`.
    - Resolve the PR base from GitHub because stacked PRs may not target `main` and can be retargeted after a parent merges:
      ```bash
      PR_BASE="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null || true)"
      if [[ -n "$PR_BASE" ]]; then git fetch origin "$PR_BASE" --quiet; fi
      ```
-   - If the PR base is unavailable, skip rebasing and report it. Otherwise, if the current branch is not the base branch, rebase onto `origin/$PR_BASE`.
-   - Resolve conflicts by preserving the intended behavior from both sides. Stage each resolved file and continue. If a conflict is ambiguous, abort and report it rather than guessing.
+   - If the PR base is unavailable, report it. Otherwise report whether
+     `origin/$PR_BASE` is an ancestor of `HEAD`; do not rebase or resolve
+     conflicts in this role.
 
 2. **Format and generate metadata:**
    ```bash
@@ -40,16 +46,25 @@ Run the full verification pipeline for the monorepo, then fix any issues found.
    - `make test` covers backend, web, CLI, `test-scripts`, and desktop smoke checks. Do not skip a failed subtarget while reporting full verification as green.
    - If a command fails, inspect only targeted ranges of the returned log path; never stream or `cat` the entire log.
 
-4. **Fix issues** - do not just report them:
-   - Read each failing file at the reported line number.
-   - Fix the root cause; do not suppress warnings or add ignores.
-   - For type, lint, or test failures, fix implementation behavior unless the test is demonstrably outdated.
+4. **Classify and report issues:**
+   - Read each failing file at the reported line number when needed to make the
+     failure report actionable.
+   - Do not fix source/test failures or suppress checks. Return the command,
+     relevant log path/lines, likely owned files, and a concise remediation
+     recommendation for a new implementer assignment.
    - For goleak failures after otherwise passing Go tests, loop the affected package with `go test -race -count=10 ./internal/<pkg>/...` and inspect cleanup ownership.
    - If Go tests fail because `httptest.NewServer` cannot bind loopback in a restricted sandbox, rerun the exact command with normal network/loopback escalation before diagnosing code.
    - For `ENOSPC`, read-only cache, or cache-initialization failures, preserve an existing absolute managed `GOCACHE` and existing lint cache. Move only invocation scratch (`TMPDIR` and quiet logs) to a writable filesystem. If a cache filesystem itself is unusable, relocate only that cache to a persistent agent-owned path outside every worktree; never use a repository-local fallback.
    - For Rust/Tauri changes, compare `rustc --version` with `apps/desktop/src-tauri/Cargo.toml`'s `rust-version`. Activate a matching installed toolchain without replacing `PATH`; report or request installation if unavailable.
-   - After fixing, rerun only the failed command through `scripts/run-quiet`.
+   - For environment-only failures, rerun the exact command after correcting
+     the invocation environment. Do not turn an environment retry into source
+     remediation.
 
-5. **Repeat** steps 3-4 until all commands pass. If a fix introduces new issues, address those too.
+5. **Stop** after a reproducible source/test failure is captured. The planner
+   assigns remediation and then launches a fresh verification run.
 
-6. **Done** only when rebase, format, metadata generation, typecheck, the complete test target, lint, and any scoped Rust tests all pass.
+6. **Done** only when base ancestry has been reported and format, metadata
+   generation, typecheck, the complete test target, lint, and any scoped Rust
+   tests all pass.
+
+Do not spawn subagents. Report pass/fail state and blockers to the planner.

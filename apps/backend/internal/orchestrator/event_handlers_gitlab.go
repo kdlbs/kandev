@@ -8,36 +8,21 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/gitlab"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 )
-
-// GitLabIssueTaskCreator creates a task from a GitLab issue + watch context.
-// Mirrors github.IssueTaskCreator. Returns the created task id or an error.
-type GitLabIssueTaskCreator interface {
-	CreateGitLabIssueTask(ctx context.Context, evt *gitlab.NewIssueEvent) (string, error)
-}
-
-// GitLabReviewTaskCreator creates a task from a GitLab MR + watch context.
-type GitLabReviewTaskCreator interface {
-	CreateGitLabReviewTask(ctx context.Context, evt *gitlab.NewReviewMREvent) (string, error)
-}
-
-// SetGitLabIssueTaskCreator wires the issue→task creator used by the
-// `gitlab.new_issue` handler. When nil, watches still fire but no tasks
-// are auto-created (events are logged for observability).
-func (s *Service) SetGitLabIssueTaskCreator(c GitLabIssueTaskCreator) {
-	s.gitlabIssueTaskCreator = c
-}
-
-// SetGitLabReviewTaskCreator wires the review→task creator.
-func (s *Service) SetGitLabReviewTaskCreator(c GitLabReviewTaskCreator) {
-	s.gitlabReviewTaskCreator = c
-}
 
 // SetGitLabService is the entry point for wiring the GitLab service into the
 // orchestrator so the event handlers can reserve dedup rows. Mirrors
 // SetGitHubService / SetJiraService.
-func (s *Service) SetGitLabService(svc *gitlab.Service) {
+func (s *Service) SetGitLabService(svc GitLabWatchService) {
 	s.gitlabService = svc
+	s.gitlabReviewSource = NewGitLabReviewWatcherSource(svc, s.logger)
+	s.gitlabIssueSource = NewGitLabIssueWatcherSource(svc, s.logger)
+}
+
+// SetGitLabCredentialResolver binds execution auth to the task workspace.
+func (s *Service) SetGitLabCredentialResolver(resolver executor.GitLabCredentialResolver) {
+	s.executor.SetGitLabCredentialResolver(resolver)
 }
 
 // subscribeGitLabEvents wires bus subscriptions for the GitLab integration
@@ -66,50 +51,15 @@ func (s *Service) handleGitLabNewReviewMR(ctx context.Context, event *bus.Event)
 		zap.String("review_watch_id", evt.ReviewWatchID),
 		zap.String("project", evt.MR.ProjectPath),
 		zap.Int("iid", evt.MR.IID))
-	if s.gitlabReviewTaskCreator == nil {
-		s.logger.Debug("gitlab review task creator not configured; skipping task creation")
-		return nil
+	src := s.gitlabReviewSource
+	if src == nil {
+		src = NewGitLabReviewWatcherSource(nil, s.logger)
 	}
-	go s.createGitLabReviewTask(context.Background(), evt)
+	s.dispatchWatcherEvent(ctx, src, evt,
+		zap.String("review_watch_id", evt.ReviewWatchID),
+		zap.String("project", evt.MR.ProjectPath),
+		zap.Int("iid", evt.MR.IID))
 	return nil
-}
-
-// a different domain type (MR vs Issue); merging them would obscure the
-// per-event publishing contract.
-//
-//nolint:dupl // structurally similar to createGitLabIssueTask but operates on
-func (s *Service) createGitLabReviewTask(ctx context.Context, evt *gitlab.NewReviewMREvent) {
-	if s.gitlabService == nil {
-		s.logger.Warn("gitlab service not configured; cannot reserve dedup")
-		return
-	}
-	mr := evt.MR
-	claimed, err := s.gitlabService.ReserveReviewMRTask(ctx, evt.ReviewWatchID, mr.ProjectPath, mr.IID, mr.WebURL)
-	if err != nil || !claimed {
-		if err != nil {
-			s.logger.Warn("reserve gitlab review MR task", zap.Error(err))
-		}
-		return
-	}
-	taskID, err := s.gitlabReviewTaskCreator.CreateGitLabReviewTask(ctx, evt)
-	if err != nil {
-		s.logger.Warn("create gitlab review task", zap.Error(err))
-		if relErr := s.gitlabService.ReleaseReviewMRTask(ctx, evt.ReviewWatchID, mr.ProjectPath, mr.IID); relErr != nil {
-			s.logger.Warn("release gitlab review MR dedup row after task-create failure",
-				zap.String("review_watch_id", evt.ReviewWatchID),
-				zap.String("project", mr.ProjectPath),
-				zap.Int("iid", mr.IID),
-				zap.Error(relErr))
-		}
-		return
-	}
-	if err := s.gitlabService.AssignReviewMRTaskID(ctx, evt.ReviewWatchID, mr.ProjectPath, mr.IID, taskID); err != nil {
-		s.logger.Warn("assign gitlab review MR task id", zap.Error(err))
-	}
-	s.logger.Info("gitlab review MR task created",
-		zap.String("task_id", taskID),
-		zap.String("project", mr.ProjectPath),
-		zap.Int("iid", mr.IID))
 }
 
 // handleGitLabNewIssue mirrors handleGitLabNewReviewMR for issue events.
@@ -122,45 +72,13 @@ func (s *Service) handleGitLabNewIssue(ctx context.Context, event *bus.Event) er
 		zap.String("issue_watch_id", evt.IssueWatchID),
 		zap.String("project", evt.Issue.ProjectPath),
 		zap.Int("iid", evt.Issue.IID))
-	if s.gitlabIssueTaskCreator == nil {
-		s.logger.Debug("gitlab issue task creator not configured; skipping task creation")
-		return nil
+	src := s.gitlabIssueSource
+	if src == nil {
+		src = NewGitLabIssueWatcherSource(nil, s.logger)
 	}
-	go s.createGitLabIssueTask(context.Background(), evt)
+	s.dispatchWatcherEvent(ctx, src, evt,
+		zap.String("issue_watch_id", evt.IssueWatchID),
+		zap.String("project", evt.Issue.ProjectPath),
+		zap.Int("iid", evt.Issue.IID))
 	return nil
-}
-
-//nolint:dupl // see createGitLabReviewTask — same shape, different domain types.
-func (s *Service) createGitLabIssueTask(ctx context.Context, evt *gitlab.NewIssueEvent) {
-	if s.gitlabService == nil {
-		s.logger.Warn("gitlab service not configured; cannot reserve dedup")
-		return
-	}
-	issue := evt.Issue
-	claimed, err := s.gitlabService.ReserveIssueWatchTask(ctx, evt.IssueWatchID, issue.ProjectPath, issue.IID, issue.WebURL)
-	if err != nil || !claimed {
-		if err != nil {
-			s.logger.Warn("reserve gitlab issue task", zap.Error(err))
-		}
-		return
-	}
-	taskID, err := s.gitlabIssueTaskCreator.CreateGitLabIssueTask(ctx, evt)
-	if err != nil {
-		s.logger.Warn("create gitlab issue task", zap.Error(err))
-		if relErr := s.gitlabService.ReleaseIssueWatchTask(ctx, evt.IssueWatchID, issue.ProjectPath, issue.IID); relErr != nil {
-			s.logger.Warn("release gitlab issue dedup row after task-create failure",
-				zap.String("issue_watch_id", evt.IssueWatchID),
-				zap.String("project", issue.ProjectPath),
-				zap.Int("iid", issue.IID),
-				zap.Error(relErr))
-		}
-		return
-	}
-	if err := s.gitlabService.AssignIssueWatchTaskID(ctx, evt.IssueWatchID, issue.ProjectPath, issue.IID, taskID); err != nil {
-		s.logger.Warn("assign gitlab issue task id", zap.Error(err))
-	}
-	s.logger.Info("gitlab issue task created",
-		zap.String("task_id", taskID),
-		zap.String("project", issue.ProjectPath),
-		zap.Int("iid", issue.IID))
 }

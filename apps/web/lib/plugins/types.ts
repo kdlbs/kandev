@@ -76,9 +76,13 @@ export interface PluginRouteOptions {
  * send — receives `{ taskId, taskTitle, activeSessionId, sessionIds }` as
  * `slotProps`), "chat-top-bar" (status in the session top bar, beside the
  * CPU/DB metrics — receives `{ taskId, taskTitle, workspaceId, activeSessionId,
- * sessionIds }`), and "plugin-settings" (inline UI on a plugin's own settings
- * page, Settings > Plugins > <plugin>, between the settings form and the
- * manifest card — receives `{ pluginId: string; status: PluginStatus }` as
+ * sessionIds }`), "main-top-bar" (status/actions in the default app top bar on
+ * the Home / Kanban / Tasks views, beside the CPU/DB metrics and the
+ * view/display controls — the app-wide, task-agnostic counterpart to
+ * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage }`), and
+ * "plugin-settings" (inline UI on a plugin's own settings
+ * page, Settings > Plugins > <plugin>, at the top above the settings form —
+ * receives `{ pluginId: string; status: PluginStatus }` as
  * `slotProps`). "plugin-settings" is owner-scoped: the host renders only the
  * component registered by the plugin being viewed, so a plugin never appears on
  * another plugin's page and authors don't gate on the current id themselves.

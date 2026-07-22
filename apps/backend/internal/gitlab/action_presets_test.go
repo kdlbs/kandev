@@ -47,6 +47,28 @@ func TestService_UpdateActionPresets_PartialMerge(t *testing.T) {
 	}
 }
 
+func TestServiceUpdateActionPresetsNormalizesAndDropsBlankEntries(t *testing.T) {
+	svc := newServiceWithStore(t)
+	ctx := context.Background()
+	mrPresets := []ActionPreset{
+		{Label: "  Review carefully  ", Hint: "  inspect  ", Icon: " eye ", PromptTemplate: "  Review {{url}}  "},
+		{ID: "blank-label", Label: " ", PromptTemplate: "do work"},
+		{ID: "blank-prompt", Label: "No prompt", PromptTemplate: "  "},
+	}
+
+	got, err := svc.UpdateActionPresets(ctx, &UpdateActionPresetsRequest{WorkspaceID: "ws-1", MR: &mrPresets})
+	if err != nil {
+		t.Fatalf("UpdateActionPresets: %v", err)
+	}
+	if len(got.MR) != 1 {
+		t.Fatalf("normalized MR presets = %+v, want one valid entry", got.MR)
+	}
+	preset := got.MR[0]
+	if preset.ID == "" || preset.Label != "Review carefully" || preset.Hint != "inspect" || preset.Icon != "eye" || preset.PromptTemplate != "Review {{url}}" {
+		t.Fatalf("normalized preset = %+v", preset)
+	}
+}
+
 func TestService_ResetActionPresets(t *testing.T) {
 	svc := newServiceWithStore(t)
 	ctx := context.Background()

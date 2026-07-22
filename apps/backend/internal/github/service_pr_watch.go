@@ -530,23 +530,14 @@ func (s *Service) findTaskPRForStatus(ctx context.Context, taskID string, pr *PR
 	return nil, nil
 }
 
-// SyncTaskPR updates a TaskPR record with the latest PR status. Multi-repo:
-// the row is found by (task_id, owner, repo, pr_number) since the same
-// task can have several PRs; the legacy GetTaskPR(taskID) "first match"
-// would cross repos and silently update the wrong row.
-// It only publishes a github.task_pr.updated event when data actually changed,
-// preventing feedback loops with frontend sync handlers.
-//
-//nolint:cyclop // sequential field-by-field "populated/preserve" reconciliation; splitting helpers hides intent
-func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatus) error {
-	if status == nil || status.PR == nil {
-		return fmt.Errorf("sync task PR: missing PR data for task %s", taskID)
-	}
-	tp, err := s.findTaskPRForStatus(ctx, taskID, status.PR)
-	if err != nil || tp == nil {
-		return err
-	}
+type taskPRSyncState struct {
+	checksTotal, checksPassing                  int
+	unresolved, reviewCount, pendingReviewCount int
+	requiredReviews                             *int
+	baseBranch, mergeableState                  string
+}
 
+func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status *PRStatus) taskPRSyncState {
 	// Some sync paths (notably the batched GraphQL poller) don't populate
 	// ChecksTotal / ChecksPassing — they only carry the rollup state. The
 	// caller sets status.ChecksPopulated=true when it actually counted
@@ -591,6 +582,37 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	} else if fetched := s.fetchRequiredReviews(ctx, tp.Owner, tp.Repo, nextBaseBranch); fetched != nil {
 		nextRequiredReviews = fetched
 	}
+	// GitHub reports draft status separately from mergeStateStatus and can
+	// return CLEAN for a draft PR. Persist the effective blocker so every
+	// TaskPR consumer agrees that drafts are not ready to merge.
+	nextMergeableState := status.MergeableState
+	if status.PR.Draft {
+		nextMergeableState = "draft"
+	}
+	return taskPRSyncState{
+		checksTotal: nextChecksTotal, checksPassing: nextChecksPassing,
+		unresolved: nextUnresolved, reviewCount: nextReviewCount, pendingReviewCount: nextPendingReviewCount,
+		requiredReviews: nextRequiredReviews, baseBranch: nextBaseBranch, mergeableState: nextMergeableState,
+	}
+}
+
+// SyncTaskPR updates a TaskPR record with the latest PR status. Multi-repo:
+// the row is found by (task_id, owner, repo, pr_number) since the same
+// task can have several PRs; the legacy GetTaskPR(taskID) "first match"
+// would cross repos and silently update the wrong row.
+// It only publishes a github.task_pr.updated event when data actually changed,
+// preventing feedback loops with frontend sync handlers.
+//
+//nolint:cyclop // sequential field-by-field reconciliation keeps update intent clear
+func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatus) error {
+	if status == nil || status.PR == nil {
+		return fmt.Errorf("sync task PR: missing PR data for task %s", taskID)
+	}
+	tp, err := s.findTaskPRForStatus(ctx, taskID, status.PR)
+	if err != nil || tp == nil {
+		return err
+	}
+	next := s.prepareTaskPRSyncState(ctx, tp, status)
 
 	changed := tp.State != status.PR.State ||
 		tp.PRTitle != status.PR.Title ||
@@ -598,14 +620,14 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		tp.Deletions != status.PR.Deletions ||
 		tp.ReviewState != status.ReviewState ||
 		tp.ChecksState != status.ChecksState ||
-		tp.MergeableState != status.MergeableState ||
-		tp.ReviewCount != nextReviewCount ||
-		tp.PendingReviewCount != nextPendingReviewCount ||
-		!intPtrEqual(tp.RequiredReviews, nextRequiredReviews) ||
-		tp.ChecksTotal != nextChecksTotal ||
-		tp.ChecksPassing != nextChecksPassing ||
-		tp.UnresolvedReviewThreads != nextUnresolved ||
-		tp.BaseBranch != nextBaseBranch ||
+		tp.MergeableState != next.mergeableState ||
+		tp.ReviewCount != next.reviewCount ||
+		tp.PendingReviewCount != next.pendingReviewCount ||
+		!intPtrEqual(tp.RequiredReviews, next.requiredReviews) ||
+		tp.ChecksTotal != next.checksTotal ||
+		tp.ChecksPassing != next.checksPassing ||
+		tp.UnresolvedReviewThreads != next.unresolved ||
+		tp.BaseBranch != next.baseBranch ||
 		!timeEqual(tp.MergedAt, status.PR.MergedAt) ||
 		!timeEqual(tp.ClosedAt, status.PR.ClosedAt)
 
@@ -617,14 +639,14 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.ClosedAt = status.PR.ClosedAt
 	tp.ReviewState = status.ReviewState
 	tp.ChecksState = status.ChecksState
-	tp.MergeableState = status.MergeableState
-	tp.ReviewCount = nextReviewCount
-	tp.PendingReviewCount = nextPendingReviewCount
-	tp.RequiredReviews = nextRequiredReviews
-	tp.ChecksTotal = nextChecksTotal
-	tp.ChecksPassing = nextChecksPassing
-	tp.UnresolvedReviewThreads = nextUnresolved
-	tp.BaseBranch = nextBaseBranch
+	tp.MergeableState = next.mergeableState
+	tp.ReviewCount = next.reviewCount
+	tp.PendingReviewCount = next.pendingReviewCount
+	tp.RequiredReviews = next.requiredReviews
+	tp.ChecksTotal = next.checksTotal
+	tp.ChecksPassing = next.checksPassing
+	tp.UnresolvedReviewThreads = next.unresolved
+	tp.BaseBranch = next.baseBranch
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now

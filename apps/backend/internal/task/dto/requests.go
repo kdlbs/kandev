@@ -74,6 +74,7 @@ type CreateRepositoryRequest struct {
 	LocalPath              string
 	Provider               string
 	ProviderRepoID         string
+	ProviderHost           string
 	ProviderOwner          string
 	ProviderName           string
 	DefaultBranch          string
@@ -93,6 +94,7 @@ type UpdateRepositoryRequest struct {
 	LocalPath              *string
 	Provider               *string
 	ProviderRepoID         *string
+	ProviderHost           *string
 	ProviderOwner          *string
 	ProviderName           *string
 	DefaultBranch          *string

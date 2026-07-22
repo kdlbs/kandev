@@ -3,7 +3,8 @@ name: security-auditor
 description: Review Kandev changes for practical, exploitable security issues. Use for auth, workspace isolation, filesystem/process execution, integrations, webhooks, agent/tool permissions, secret handling, or any security-sensitive PR.
 tools: Bash, Read, Grep, Glob
 model: opus
-permissionMode: readOnly
+effort: high
+permissionMode: plan
 skills: context-engineering
 ---
 

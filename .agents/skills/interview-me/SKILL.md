@@ -38,7 +38,10 @@ Q: Is this primarily for human users switching between workspaces, or for office
 GUESS: Human users, because the pain sounds navigation-related rather than automation-related.
 ```
 
-If a tool is available that supports multiple questions in one turn, such as `ask_user_question_kandev`, ask 2-4 focused questions together. Keep each question short, include your guess in the prompt or options, and make the options concrete enough that the user can answer quickly.
+If the active harness provides a native user-question UI that supports multiple
+questions in one turn, ask 2-4 focused questions together. Keep each question
+short, include your guess in the prompt or options, and make the options
+concrete enough that the user can answer quickly.
 
 If no multi-question tool is available, ask one question at a time in chat. Do not send a long questionnaire.
 

@@ -6,12 +6,14 @@ import type {
   PlanComment,
   PRFeedbackComment,
   WalkthroughComment,
+  AgentMessageComment,
 } from "@/lib/state/slices/comments";
 import {
   isDiffComment,
   isPlanComment,
   isPRFeedbackComment,
   isWalkthroughComment,
+  isAgentMessageComment,
 } from "@/lib/state/slices/comments";
 
 const EMPTY_COMMENTS: Comment[] = [];
@@ -19,6 +21,7 @@ const EMPTY_DIFF_COMMENTS: DiffComment[] = [];
 const EMPTY_PLAN_COMMENTS: PlanComment[] = [];
 const EMPTY_PR_FEEDBACK_COMMENTS: PRFeedbackComment[] = [];
 const EMPTY_WALKTHROUGH_COMMENTS: WalkthroughComment[] = [];
+const EMPTY_AGENT_MESSAGE_COMMENTS: AgentMessageComment[] = [];
 
 /**
  * Get all pending comments (any source).
@@ -121,5 +124,24 @@ export function usePendingWalkthroughComments(sessionId?: string | null): Walkth
       }
     }
     return pending.length === 0 ? EMPTY_WALKTHROUGH_COMMENTS : pending;
+  }, [byId, pendingForChat, sessionId]);
+}
+
+/** Get pending inline comments attached to settled agent replies. */
+export function usePendingAgentMessageComments(sessionId?: string | null): AgentMessageComment[] {
+  const byId = useCommentsStore((state) => state.byId);
+  const pendingForChat = useCommentsStore((state) => state.pendingForChat);
+
+  return useMemo(() => {
+    if (!sessionId || pendingForChat.length === 0) return EMPTY_AGENT_MESSAGE_COMMENTS;
+    const pending: AgentMessageComment[] = [];
+    for (const id of pendingForChat) {
+      const comment = byId[id];
+      if (comment && isAgentMessageComment(comment)) {
+        if (comment.sessionId !== sessionId) continue;
+        pending.push(comment);
+      }
+    }
+    return pending.length === 0 ? EMPTY_AGENT_MESSAGE_COMMENTS : pending;
   }, [byId, pendingForChat, sessionId]);
 }

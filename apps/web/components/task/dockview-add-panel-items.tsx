@@ -14,6 +14,8 @@ import { prTaskKey } from "@/components/github/pr-detail-panel";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
+import type { TaskMR } from "@/lib/types/gitlab";
+import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
 import { TerminalReopenMenuItems } from "./terminal-reopen-menu";
@@ -25,6 +27,7 @@ type AddPanelMenuState = {
   hasFiles: boolean;
   /** All PRs linked to the task; multi-repo tasks render one menu item per PR. */
   prs: TaskPR[];
+  mrs: TaskMR[];
 };
 
 type AddPanelMenuItemsProps = {
@@ -53,6 +56,7 @@ export function AddPanelMenuItems({
   const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
   const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
+  const addMRPanel = useDockviewStore((s) => s.addMRPanel);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
 
   return (
@@ -105,6 +109,19 @@ export function AddPanelMenuItems({
           {state.prs.length > 1
             ? `${prPanelLabel(pr.pr_number)} — ${pr.repo}`
             : prPanelLabel(pr.pr_number)}
+        </DropdownMenuItem>
+      ))}
+      {state.mrs.map((mr) => (
+        <DropdownMenuItem
+          key={mr.id}
+          onClick={() => addMRPanel(mrTaskKey(mr), activeSessionId)}
+          className={MENU_ITEM_CLASS}
+          data-testid={`add-panel-mr-item-${mr.id}`}
+        >
+          <IconGitPullRequest className={`${MENU_ICON_CLASS} text-orange-500`} />
+          {state.mrs.length > 1
+            ? `MR !${mr.mr_iid} - ${mr.project_path}`
+            : `Merge Request !${mr.mr_iid}`}
         </DropdownMenuItem>
       ))}
       <RepositoryScriptsMenuItems onRunScript={onRunScript} onRunDevScript={onRunDevScript} />

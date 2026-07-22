@@ -517,6 +517,7 @@ func startAgentInfrastructure(
 	// orchestrator so review/issue watch events get turned into tasks.
 	if services.GitLab != nil {
 		orchestratorSvc.SetGitLabService(services.GitLab)
+		orchestratorSvc.SetGitLabCredentialResolver(services.GitLab)
 		services.GitLab.SetTaskDeleter(&taskDeleterAdapter{svc: services.Task})
 		services.GitLab.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		glPoller := gitlabpkg.NewPoller(services.GitLab, eventBus, log)
@@ -647,7 +648,7 @@ func startGatewayAndServe(
 	gateway, _, notificationCtrl, terminalSvc, err := provideGateway(
 		ctx, log, eventBus, services.Task, services.User,
 		orchestratorSvc, lifecycleMgr, agentRegistry,
-		repos.Notification, repos.Task, repos.Terminal, services.GitHub,
+		repos.Notification, repos.Task, repos.Terminal, services.GitHub, services.GitLab,
 		cfg.ResolvedHomeDir(),
 	)
 	if terminalSvc != nil {
@@ -712,6 +713,14 @@ func startGatewayAndServe(
 			log,
 		)
 		services.Slack.SetRunner(slackRunner)
+	}
+
+	// Wire Host.InvokeUtilityAgent (ADR 0048): plugins delegate one-shot LLM
+	// calls to the utility agent selected in each plugin's configuration and
+	// runs them through the sessionless host-utility
+	// tier. Same landing point as the Slack runner — hostUtilityMgr is live.
+	if services.Plugins != nil && services.Utility != nil {
+		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
 	}
 
 	if err := orchestratorSvc.Start(ctx); err != nil {

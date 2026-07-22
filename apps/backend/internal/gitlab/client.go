@@ -132,4 +132,19 @@ type Client interface {
 
 	// SetMRAssignees replaces an MR's assignees (by user ID).
 	SetMRAssignees(ctx context.Context, projectPath string, iid int, assigneeIDs []int) error
+
+	// ListProjectMembers searches active project members eligible for reviewer
+	// assignment. IDs are GitLab's numeric user IDs.
+	ListProjectMembers(ctx context.Context, projectPath, query string) ([]ProjectMember, error)
+
+	// SetMRReviewers replaces the complete MR reviewer list. An empty slice
+	// clears all reviewers.
+	SetMRReviewers(ctx context.Context, projectPath string, iid int, reviewerIDs []int64) error
+
+	// Notification subscription state is read from and written to GitLab; it is
+	// not a Kandev automation watch.
+	GetMRSubscription(ctx context.Context, projectPath string, iid int) (*SubscriptionState, error)
+	SetMRSubscription(ctx context.Context, projectPath string, iid int, subscribed bool) (*SubscriptionState, error)
+	GetIssueSubscription(ctx context.Context, projectPath string, iid int) (*SubscriptionState, error)
+	SetIssueSubscription(ctx context.Context, projectPath string, iid int, subscribed bool) (*SubscriptionState, error)
 }

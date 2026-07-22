@@ -7,6 +7,7 @@ import {
   IconGitBranch,
   IconFolder,
   IconTerminal2,
+  IconGitMerge,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@kandev/ui/badge";
@@ -17,6 +18,7 @@ type SessionMobileBottomNavProps = {
   onPanelChange: (panel: MobileSessionPanel) => void;
   planBadge?: boolean;
   changesBadge?: number;
+  hasReview?: boolean;
 };
 
 type NavItem = {
@@ -31,6 +33,7 @@ export function SessionMobileBottomNav({
   onPanelChange,
   planBadge = false,
   changesBadge = 0,
+  hasReview = false,
 }: SessionMobileBottomNavProps) {
   const items: NavItem[] = useMemo(
     () => [
@@ -66,13 +69,16 @@ export function SessionMobileBottomNav({
         label: "Files",
         icon: <IconFolder className="h-5 w-5" />,
       },
+      ...(hasReview
+        ? [{ id: "review" as const, label: "Review", icon: <IconGitMerge className="h-5 w-5" /> }]
+        : []),
       {
         id: "terminal",
         label: "Terminal",
         icon: <IconTerminal2 className="h-5 w-5" />,
       },
     ],
-    [planBadge, changesBadge],
+    [planBadge, changesBadge, hasReview],
   );
 
   return (
@@ -86,7 +92,7 @@ export function SessionMobileBottomNav({
           type="button"
           onClick={() => onPanelChange(item.id)}
           className={cn(
-            "flex flex-col items-center justify-center py-2 px-3 gap-0.5 min-w-0 flex-1 transition-colors",
+            "flex min-h-11 flex-col items-center justify-center py-2 px-3 gap-0.5 min-w-0 flex-1 transition-colors",
             activePanel === item.id
               ? "text-primary"
               : "text-muted-foreground hover:text-foreground",

@@ -137,9 +137,10 @@ restart_count: 0
 
 `capabilities.api_read` / `capabilities.api_write` gate the **Host data API** Host
 RPCs (read RPCs live now; write RPCs are deferred) — the vocabulary is a list of
-resource names: `tasks`, `sessions`, `workspaces`, `workflows`, `agent_profiles`,
-`repositories` for `api_read`, plus `comments` for `api_write` only (there is no
-`ListComments` read RPC). They are unrelated to office. See "Host data API".
+resource names: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`,
+`agent_profiles`, `repositories` for `api_read`, plus `comments` for `api_write`
+only (there is no `ListComments` read RPC). They are unrelated to office. See
+"Host data API".
 
 **Declaring data access.** Listing a resource under `api_read` grants the
 corresponding Host data reads for that resource only — e.g. `api_read:
@@ -305,6 +306,7 @@ service Host {
   rpc ListState(ListStateRequest) returns (ListStateResponse);
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
+  rpc InvokeUtilityAgent(InvokeUtilityAgentRequest) returns (InvokeUtilityAgentResponse);
 }
 ```
 
@@ -318,13 +320,26 @@ service Host {
 - `EmitEvent(event_name, payload)` publishes `plugin.<plugin_id>.<event_name>` on the
   internal event bus for delivery to subscribers (replaces the old
   `POST /api/plugins/{plugin_id}/events/emit` HTTP endpoint).
+- `InvokeUtilityAgent(prompt)` runs a one-shot, non-interactive completion using
+  the utility agent selected in the plugin's `utility_agent` config field and
+  returns its text. Plugins declaring `capabilities.agent_invoke: true` must
+  declare that field in `config_schema` with `type: string` and
+  `format: utility-agent`; Settings > Plugins then renders a picker containing
+  the configured built-in and custom utility agents. The picker displays the
+  agent name and persists its stable ID. It reuses kandev's
+  sessionless host-utility inference tier (ADR 0002) — no task, session, or
+  workspace — so a plugin can delegate a lightweight LLM step without holding a
+  provider API key. Returns gRPC `FailedPrecondition` when no utility agent is
+  configured, selected agent was deleted, or it is disabled. See
+  [ADR 0048](../../decisions/0048-plugin-host-utility-agent-invoke.md).
 
 Every Host RPC is capability-gated: `GetState`/`SetState`/`DeleteState`/`ListState`
-check `capabilities.state`, `RevealSecret` checks `capabilities.secrets`, and each
-Host data API read RPC checks `capabilities.api_read` for its resource (see "Host
-data API" below) — all before the handler runs, returning gRPC status
-`PermissionDenied` with message `capability '<name>' not declared` on a miss.
-`EmitEvent` is ungated (no boolean capability applies). The Host data API write
+check `capabilities.state`, `RevealSecret` checks `capabilities.secrets`,
+`InvokeUtilityAgent` checks `capabilities.agent_invoke`, and each Host data API
+read RPC checks `capabilities.api_read` for its resource (see "Host data API"
+below) — all before the handler runs, returning gRPC status `PermissionDenied`
+with message `capability '<name>' not declared` on a miss. `EmitEvent` is
+ungated (no boolean capability applies). The Host data API write
 RPCs are not implemented yet, so they return gRPC `Unimplemented` unconditionally
 and never reach an `api_write` capability check (see "Write phase (deferred)").
 
@@ -350,6 +365,7 @@ domain structs. See [ADR 0043](../../decisions/0043-plugin-host-data-api.md) and
 | `ListRepositories` | `api_read:repositories` | Repositories for a workspace (id, name, default branch) |
 | `ListSessions` | `api_read:sessions` | Session identity + agent context (id, task, agent profile, resolved display name + model, `acp_session_id`, state, timestamps) |
 | `ListSessionCodeStats` | `api_read:sessions` | **Computed** per-session code metrics: committed lines added/deleted, peak pending-diff lines added/deleted |
+| `ListMessages` | `api_read:messages` | Historical conversation content (id, session, task, turn, `author_type` (user/agent), `content`, `type`, `created_at`), filterable by session ids, task ids, a `created_at` range (`since`/`until`), and types. See "Conversation content" below. |
 
 `acp_session_id` on a session is the external usage-attribution join key (e.g.
 `tokscale`): kandev exposes the session identity and code stats but stays out of
@@ -357,6 +373,20 @@ the token business. `SessionCodeStats` is a deliberately computed shape — the
 aggregate the agent-stats plugin previously re-derived by hand from
 `task_session_commits` and `task_session_git_snapshots` — so plugins never touch
 those raw rows.
+
+**Conversation content (`api_read:messages`, ADR 0047).** `ListMessages` reads
+historical user/agent message content — the data a "summarize yesterday"
+plugin needs, which the `message.added` bus event alone (live-only,
+post-install-only) cannot provide. `MessageFilter` narrows by `session_ids`,
+`task_ids`, a `created_at` window (`since` inclusive / `until` exclusive,
+RFC3339), and message `types`; results are ordered oldest-first with opaque
+cursor pagination. `content` is sanitized the same way the event path is —
+kandev-injected `<kandev-system>` blocks are stripped via
+`sysprompt.StripSystemContent`, and raw system content is never exposed.
+`author_type` is only `user` or `agent`: kandev has no `system` author, since
+system context is inline markup removed at read time. Reads route through the
+task service's `ListMessagesForPlugin` (a single filtered
+session/task/time/type query), never a repository or the DB file directly.
 
 **Write phase (deferred).** `CreateTask`, `UpdateTask`, and `CreateComment` are
 specified in the proto but not implemented in this phase. When added, each is

@@ -182,6 +182,8 @@ const (
 	Host_ListRepositories_FullMethodName     = "/kandev.plugin.v1.Host/ListRepositories"
 	Host_ListSessions_FullMethodName         = "/kandev.plugin.v1.Host/ListSessions"
 	Host_ListSessionCodeStats_FullMethodName = "/kandev.plugin.v1.Host/ListSessionCodeStats"
+	Host_ListMessages_FullMethodName         = "/kandev.plugin.v1.Host/ListMessages"
+	Host_InvokeUtilityAgent_FullMethodName   = "/kandev.plugin.v1.Host/InvokeUtilityAgent"
 	Host_CreateTask_FullMethodName           = "/kandev.plugin.v1.Host/CreateTask"
 	Host_UpdateTask_FullMethodName           = "/kandev.plugin.v1.Host/UpdateTask"
 	Host_CreateComment_FullMethodName        = "/kandev.plugin.v1.Host/CreateComment"
@@ -252,6 +254,17 @@ type HostClient interface {
 	// not the raw commit/snapshot rows, whose JSON schema churns.
 	ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error)
 	ListSessionCodeStats(ctx context.Context, in *ListSessionCodeStatsRequest, opts ...grpc.CallOption) (*ListSessionCodeStatsResponse, error)
+	// Conversation content — capability api_read:messages. Historical
+	// user/agent message content for a session or task, filterable by a time
+	// range (e.g. "yesterday"). Content is sanitized: kandev-injected
+	// <kandev-system> blocks are stripped, exactly like the message.added bus
+	// event — raw system prompts are never exposed to plugins.
+	ListMessages(ctx context.Context, in *ListMessagesRequest, opts ...grpc.CallOption) (*ListMessagesResponse, error)
+	// Utility agent — capability agent_invoke. Runs a one-shot, non-interactive
+	// completion using the operator-configured "utility agent" profile (Settings
+	// > System), so a plugin can delegate a lightweight LLM step without holding
+	// its own API key. FailedPrecondition when no utility agent is configured.
+	InvokeUtilityAgent(ctx context.Context, in *InvokeUtilityAgentRequest, opts ...grpc.CallOption) (*InvokeUtilityAgentResponse, error)
 	// Writes — capability api_write:<resource>. Declared now for a stable
 	// contract; handlers land in a later phase (not implemented by this RPC
 	// addition). Route through service methods so the corresponding task.*
@@ -459,6 +472,26 @@ func (c *hostClient) ListSessionCodeStats(ctx context.Context, in *ListSessionCo
 	return out, nil
 }
 
+func (c *hostClient) ListMessages(ctx context.Context, in *ListMessagesRequest, opts ...grpc.CallOption) (*ListMessagesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMessagesResponse)
+	err := c.cc.Invoke(ctx, Host_ListMessages_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) InvokeUtilityAgent(ctx context.Context, in *InvokeUtilityAgentRequest, opts ...grpc.CallOption) (*InvokeUtilityAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InvokeUtilityAgentResponse)
+	err := c.cc.Invoke(ctx, Host_InvokeUtilityAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*CreateTaskResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateTaskResponse)
@@ -554,6 +587,17 @@ type HostServer interface {
 	// not the raw commit/snapshot rows, whose JSON schema churns.
 	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
 	ListSessionCodeStats(context.Context, *ListSessionCodeStatsRequest) (*ListSessionCodeStatsResponse, error)
+	// Conversation content — capability api_read:messages. Historical
+	// user/agent message content for a session or task, filterable by a time
+	// range (e.g. "yesterday"). Content is sanitized: kandev-injected
+	// <kandev-system> blocks are stripped, exactly like the message.added bus
+	// event — raw system prompts are never exposed to plugins.
+	ListMessages(context.Context, *ListMessagesRequest) (*ListMessagesResponse, error)
+	// Utility agent — capability agent_invoke. Runs a one-shot, non-interactive
+	// completion using the operator-configured "utility agent" profile (Settings
+	// > System), so a plugin can delegate a lightweight LLM step without holding
+	// its own API key. FailedPrecondition when no utility agent is configured.
+	InvokeUtilityAgent(context.Context, *InvokeUtilityAgentRequest) (*InvokeUtilityAgentResponse, error)
 	// Writes — capability api_write:<resource>. Declared now for a stable
 	// contract; handlers land in a later phase (not implemented by this RPC
 	// addition). Route through service methods so the corresponding task.*
@@ -627,6 +671,12 @@ func (UnimplementedHostServer) ListSessions(context.Context, *ListSessionsReques
 }
 func (UnimplementedHostServer) ListSessionCodeStats(context.Context, *ListSessionCodeStatsRequest) (*ListSessionCodeStatsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSessionCodeStats not implemented")
+}
+func (UnimplementedHostServer) ListMessages(context.Context, *ListMessagesRequest) (*ListMessagesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListMessages not implemented")
+}
+func (UnimplementedHostServer) InvokeUtilityAgent(context.Context, *InvokeUtilityAgentRequest) (*InvokeUtilityAgentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InvokeUtilityAgent not implemented")
 }
 func (UnimplementedHostServer) CreateTask(context.Context, *CreateTaskRequest) (*CreateTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTask not implemented")
@@ -1000,6 +1050,42 @@ func _Host_ListSessionCodeStats_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_ListMessages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMessagesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListMessages(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListMessages_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListMessages(ctx, req.(*ListMessagesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_InvokeUtilityAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InvokeUtilityAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).InvokeUtilityAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_InvokeUtilityAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).InvokeUtilityAgent(ctx, req.(*InvokeUtilityAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_CreateTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateTaskRequest)
 	if err := dec(in); err != nil {
@@ -1136,6 +1222,14 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListSessionCodeStats",
 			Handler:    _Host_ListSessionCodeStats_Handler,
+		},
+		{
+			MethodName: "ListMessages",
+			Handler:    _Host_ListMessages_Handler,
+		},
+		{
+			MethodName: "InvokeUtilityAgent",
+			Handler:    _Host_InvokeUtilityAgent_Handler,
 		},
 		{
 			MethodName: "CreateTask",

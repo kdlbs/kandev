@@ -5,6 +5,7 @@ import { IconMenu2, IconMessageCircle, IconSearch } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
 import { PageTopbar } from "@/components/page-topbar";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
+import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { useAppStore } from "@/components/state-provider";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
@@ -32,6 +33,71 @@ function MobileBrandLink({ workspaceId }: Pick<KanbanHeaderMobileProps, "workspa
     >
       Kandev
     </Link>
+  );
+}
+
+function MobileHeaderActions({
+  workspaceId,
+  workspaceLabel,
+  currentPage,
+  onSearchChange,
+  isSearchOpen,
+  handleOpenQuickChat,
+  toggleSearch,
+  setMenuOpen,
+}: {
+  workspaceId?: string;
+  workspaceLabel: string;
+  currentPage: "kanban" | "tasks";
+  onSearchChange?: (query: string) => void;
+  isSearchOpen: boolean;
+  handleOpenQuickChat: () => void;
+  toggleSearch: () => void;
+  setMenuOpen: (open: boolean) => void;
+}) {
+  return (
+    <>
+      <MainTopBarPluginActions
+        workspaceId={workspaceId}
+        workspaceLabel={workspaceLabel}
+        currentPage={currentPage}
+      />
+      <TopbarMetrics size="lg" />
+      {workspaceId && (
+        <Button
+          variant="outline"
+          size="icon-lg"
+          onClick={handleOpenQuickChat}
+          className="cursor-pointer"
+          aria-label="Quick Chat"
+          data-testid="mobile-quick-chat-button"
+        >
+          <IconMessageCircle className="h-4 w-4" />
+        </Button>
+      )}
+      {onSearchChange && (
+        <Button
+          variant={isSearchOpen ? "secondary" : "outline"}
+          size="icon-lg"
+          onClick={toggleSearch}
+          className="cursor-pointer"
+          aria-pressed={isSearchOpen}
+          aria-label="Search tasks"
+          data-testid="mobile-search-toggle"
+        >
+          <IconSearch className="h-4 w-4" />
+        </Button>
+      )}
+      <Button
+        variant="outline"
+        size="icon-lg"
+        onClick={() => setMenuOpen(true)}
+        className="cursor-pointer"
+      >
+        <IconMenu2 className="h-4 w-4" />
+        <span className="sr-only">Open menu</span>
+      </Button>
+    </>
   );
 }
 
@@ -82,43 +148,16 @@ export function KanbanHeaderMobile({
         }
         actionsClassName="gap-2"
         actions={
-          <>
-            <TopbarMetrics size="lg" />
-            {workspaceId && (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                onClick={handleOpenQuickChat}
-                className="cursor-pointer"
-                aria-label="Quick Chat"
-                data-testid="mobile-quick-chat-button"
-              >
-                <IconMessageCircle className="h-4 w-4" />
-              </Button>
-            )}
-            {onSearchChange && (
-              <Button
-                variant={isSearchOpen ? "secondary" : "outline"}
-                size="icon-lg"
-                onClick={toggleSearch}
-                className="cursor-pointer"
-                aria-pressed={isSearchOpen}
-                aria-label="Search tasks"
-                data-testid="mobile-search-toggle"
-              >
-                <IconSearch className="h-4 w-4" />
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              size="icon-lg"
-              onClick={() => setMenuOpen(true)}
-              className="cursor-pointer"
-            >
-              <IconMenu2 className="h-4 w-4" />
-              <span className="sr-only">Open menu</span>
-            </Button>
-          </>
+          <MobileHeaderActions
+            workspaceId={workspaceId}
+            workspaceLabel={workspaceLabel}
+            currentPage={currentPage}
+            onSearchChange={onSearchChange}
+            isSearchOpen={isSearchOpen}
+            handleOpenQuickChat={handleOpenQuickChat}
+            toggleSearch={toggleSearch}
+            setMenuOpen={setMenuOpen}
+          />
         }
       />
       <MobileMenuSheet

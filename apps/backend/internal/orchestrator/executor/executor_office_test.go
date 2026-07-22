@@ -30,12 +30,21 @@ func (r *officeRebindRaceRepository) UpdateTaskSessionIfCurrentState(
 	session *models.TaskSession,
 	expected models.TaskSessionState,
 ) (bool, error) {
+	return r.mockRepository.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+}
+
+func (r *officeRebindRaceRepository) UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	keys []string,
+) (bool, error) {
 	if r.beforeGuardedUpdate != nil {
 		hook := r.beforeGuardedUpdate
 		r.beforeGuardedUpdate = nil
 		hook()
 	}
-	return r.mockRepository.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	return r.mockRepository.UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(ctx, session, expected, keys)
 }
 
 func TestEnsureSessionForAgent_CreatesWhenMissing(t *testing.T) {
@@ -75,6 +84,17 @@ func TestEnsureSessionForAgent_RebindsExecutionProfileOnReuse(t *testing.T) {
 		ExecutionProfileID: "codex-profile",
 		State:              models.TaskSessionStateIdle,
 		StartedAt:          time.Now().UTC(),
+		Metadata: map[string]interface{}{
+			"acp_session_id":                            "codex-session",
+			models.SessionMetaKeySessionMode:            "default",
+			models.SessionMetaKeyRuntimeConfig:          models.SessionRuntimeConfig{Model: "codex-model"},
+			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{Mode: "default"},
+			models.SessionMetaKeyACPConfigBaseline:      map[string]string{"model": "codex-model"},
+			models.SessionMetaKeyACPModelState:          map[string]interface{}{"current_model_id": "codex-model"},
+			"context_window":                            map[string]interface{}{"size": int64(200000)},
+			models.SessionMetaKeyLastAgentError:         models.LastAgentError{Message: "old provider failed"},
+			models.SessionMetaKeyPendingStepCompletion:  true,
+		},
 	}
 	repo.sessions[existing.ID] = existing
 
@@ -89,6 +109,23 @@ func TestEnsureSessionForAgent_RebindsExecutionProfileOnReuse(t *testing.T) {
 	}
 	if got.ExecutionProfileID != "claude-profile" {
 		t.Fatalf("execution profile = %q, want claude-profile", got.ExecutionProfileID)
+	}
+	for _, key := range []string{
+		"acp_session_id",
+		models.SessionMetaKeySessionMode,
+		models.SessionMetaKeyRuntimeConfig,
+		models.SessionMetaKeyRuntimeConfigOverrides,
+		models.SessionMetaKeyACPConfigBaseline,
+		models.SessionMetaKeyACPModelState,
+		"context_window",
+		models.SessionMetaKeyLastAgentError,
+	} {
+		if _, exists := got.Metadata[key]; exists {
+			t.Errorf("provider runtime metadata %q survived execution profile change", key)
+		}
+	}
+	if got.Metadata[models.SessionMetaKeyPendingStepCompletion] != true {
+		t.Fatal("unrelated Office session metadata was not preserved")
 	}
 }
 

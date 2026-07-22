@@ -12,6 +12,17 @@ import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
 import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type {
+  GitLabMRApproval,
+  GitLabMRCommit,
+  GitLabMRDiscussion,
+  GitLabMRFile,
+  GitLabPipeline,
+  GitLabProjectMember,
+  Issue as MockGitLabIssue,
+  MR as MockGitLabMR,
+  TaskMR,
+} from "../../lib/types/gitlab";
+import type {
   SSHAgentReadinessResponse,
   SSHProbeShellsResponse,
   SSHSession,
@@ -90,6 +101,9 @@ export type MockCheckRun = {
   started_at?: string;
   completed_at?: string;
 };
+
+export type MockGitLabMRSeed = Pick<MockGitLabMR, "iid" | "title"> & Partial<MockGitLabMR>;
+export type MockGitLabIssueSeed = Pick<MockGitLabIssue, "iid" | "title"> & Partial<MockGitLabIssue>;
 
 function setIf(body: Record<string, unknown>, key: string, value: unknown) {
   if (value !== undefined && value !== null) body[key] = value;
@@ -237,6 +251,12 @@ export class ApiClient {
 
   async createWorkspace(name: string): Promise<Workspace> {
     return this.request("POST", "/api/v1/workspaces", { name });
+  }
+
+  async deleteWorkspace(workspaceId: string, confirmName: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/workspaces/${workspaceId}`, {
+      confirm_name: confirmName,
+    });
   }
 
   async listWorkspaces(): Promise<{ workspaces: Workspace[]; total: number }> {
@@ -493,6 +513,17 @@ export class ApiClient {
     });
   }
 
+  async startQuickChat(
+    workspaceId: string,
+    agentProfileId: string,
+    title: string,
+  ): Promise<{ task_id: string; session_id: string }> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/quick-chat`, {
+      title,
+      agent_profile_id: agentProfileId,
+    });
+  }
+
   /** Start a config chat session via the dedicated config-chat endpoint. */
   async startConfigChat(
     workspaceId: string,
@@ -534,6 +565,7 @@ export class ApiClient {
     opts?: {
       name?: string;
       provider?: string;
+      provider_host?: string;
       provider_owner?: string;
       provider_name?: string;
     },
@@ -544,6 +576,7 @@ export class ApiClient {
       local_path: localPath,
       default_branch: defaultBranch,
       ...(opts?.provider ? { provider: opts.provider } : {}),
+      ...(opts?.provider_host ? { provider_host: opts.provider_host } : {}),
       ...(opts?.provider_owner ? { provider_owner: opts.provider_owner } : {}),
       ...(opts?.provider_name ? { provider_name: opts.provider_name } : {}),
     });
@@ -552,6 +585,10 @@ export class ApiClient {
   async updateRepository(
     repositoryId: string,
     updates: {
+      provider?: string;
+      provider_host?: string;
+      provider_owner?: string;
+      provider_name?: string;
       dev_script?: string;
       setup_script?: string;
       cleanup_script?: string;
@@ -1178,6 +1215,227 @@ export class ApiClient {
     auth_method: string;
   }> {
     return this.request("GET", "/api/v1/github/status");
+  }
+
+  // --- GitLab Mock Control ---
+
+  private gitLabWorkspacePath(path: string, workspaceId: string): string {
+    const separator = path.includes("?") ? "&" : "?";
+    return `${path}${separator}workspace_id=${encodeURIComponent(workspaceId)}`;
+  }
+
+  async configureGitLab(
+    workspaceId: string,
+    host = "https://gitlab.com",
+    token = `e2e-gitlab:${workspaceId}`,
+  ): Promise<void> {
+    await this.request("PUT", this.gitLabWorkspacePath("/api/v1/gitlab/config", workspaceId), {
+      host,
+      auth_method: "pat",
+      token,
+    });
+  }
+
+  async configureGitLabRepositoryRemote(repositoryId: string, remoteUrl: string): Promise<void> {
+    await this.request("PUT", `/api/v1/_test/repositories/${repositoryId}/git-remote`, {
+      remote_url: remoteUrl,
+    });
+  }
+
+  async clearGitLabRepositoryRemote(repositoryId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/_test/repositories/${repositoryId}/git-remote`);
+  }
+
+  async getGitLabPushRecord(repositoryId: string): Promise<{ args: string }> {
+    return this.request("GET", `/api/v1/_test/repositories/${repositoryId}/git-push-record`);
+  }
+
+  async mockGitLabReset(workspaceId: string): Promise<void> {
+    await this.request(
+      "DELETE",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/reset", workspaceId),
+    );
+  }
+
+  async mockGitLabSetUser(workspaceId: string, username: string): Promise<void> {
+    await this.request("PUT", this.gitLabWorkspacePath("/api/v1/gitlab/mock/user", workspaceId), {
+      username,
+    });
+  }
+
+  async mockGitLabAddMRs(
+    workspaceId: string,
+    project: string,
+    mrs: MockGitLabMRSeed[],
+  ): Promise<void> {
+    await this.request("POST", this.gitLabWorkspacePath("/api/v1/gitlab/mock/mrs", workspaceId), {
+      project,
+      mrs,
+    });
+  }
+
+  async mockGitLabAddIssues(
+    workspaceId: string,
+    project: string,
+    issues: MockGitLabIssueSeed[],
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/issues", workspaceId),
+      { project, issues },
+    );
+  }
+
+  async mockGitLabAddPipelines(
+    workspaceId: string,
+    project: string,
+    pipelines: GitLabPipeline[],
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/pipelines", workspaceId),
+      { project, pipelines },
+    );
+  }
+
+  async mockGitLabAddDiscussions(
+    workspaceId: string,
+    project: string,
+    iid: number,
+    discussions: GitLabMRDiscussion[],
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/discussions", workspaceId),
+      { project, iid, discussions },
+    );
+  }
+
+  async mockGitLabAddApprovals(
+    workspaceId: string,
+    project: string,
+    iid: number,
+    approvals: GitLabMRApproval[],
+    required: number,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/approvals", workspaceId),
+      { project, iid, approvals, required },
+    );
+  }
+
+  async mockGitLabAddBranches(
+    workspaceId: string,
+    project: string,
+    branches: Array<{ name: string }>,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/branches", workspaceId),
+      { project, branches },
+    );
+  }
+
+  async mockGitLabAddMembers(
+    workspaceId: string,
+    project: string,
+    members: GitLabProjectMember[],
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/members", workspaceId),
+      { project, members },
+    );
+  }
+
+  async mockGitLabAddFiles(
+    workspaceId: string,
+    project: string,
+    iid: number,
+    files: GitLabMRFile[],
+  ): Promise<void> {
+    await this.request("POST", this.gitLabWorkspacePath("/api/v1/gitlab/mock/files", workspaceId), {
+      project,
+      iid,
+      files,
+    });
+  }
+
+  async mockGitLabAddCommits(
+    workspaceId: string,
+    project: string,
+    iid: number,
+    commits: GitLabMRCommit[],
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/commits", workspaceId),
+      { project, iid, commits },
+    );
+  }
+
+  async linkTaskGitLabMR(
+    workspaceId: string,
+    data: { task_id: string; repository_id?: string; mr_url: string },
+  ): Promise<TaskMR> {
+    return this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/task-mrs", workspaceId),
+      data,
+    );
+  }
+
+  async createGitLabReviewWatch(data: {
+    workspace_id: string;
+    workflow_id: string;
+    workflow_step_id: string;
+    agent_profile_id: string;
+    executor_profile_id: string;
+    projects?: Array<{ path: string }>;
+    prompt?: string;
+    enabled?: boolean;
+  }): Promise<{ id: string; workspace_id: string }> {
+    return this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/watches/review", data.workspace_id),
+      {
+        ...data,
+        projects: data.projects ?? [],
+        prompt: data.prompt ?? "Review {{mr.url}}",
+        review_scope: "user_and_teams",
+        custom_query: "",
+        enabled: data.enabled ?? true,
+        poll_interval_seconds: 300,
+        cleanup_policy: "auto",
+      },
+    );
+  }
+
+  async createGitLabIssueWatch(data: {
+    workspace_id: string;
+    workflow_id: string;
+    workflow_step_id: string;
+    agent_profile_id: string;
+    executor_profile_id: string;
+    projects?: Array<{ path: string }>;
+    prompt?: string;
+    enabled?: boolean;
+  }): Promise<{ id: string; workspace_id: string }> {
+    return this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/watches/issue", data.workspace_id),
+      {
+        ...data,
+        projects: data.projects ?? [],
+        prompt: data.prompt ?? "Investigate {{issue.url}}",
+        labels: [],
+        custom_query: "",
+        enabled: data.enabled ?? true,
+        poll_interval_seconds: 300,
+        cleanup_policy: "auto",
+      },
+    );
   }
 
   // --- Session ---

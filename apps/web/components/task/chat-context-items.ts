@@ -6,6 +6,7 @@ import type {
   PlanComment,
   PRFeedbackComment,
   WalkthroughComment,
+  AgentMessageComment,
 } from "@/lib/state/slices/comments";
 
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -31,6 +32,8 @@ export type BuildContextItemsParams = {
   walkthroughComments: WalkthroughComment[];
   handleRemoveWalkthroughComment: (commentId: string) => void;
   handleClearWalkthroughComments: () => void;
+  messageComments: AgentMessageComment[];
+  handleClearMessageComments: () => void;
   taskId: string | null;
 };
 
@@ -168,7 +171,7 @@ function buildPRFeedbackItems(params: BuildContextItemsParams): ContextItem[] {
     {
       kind: "pr-feedback" as const,
       id: "pr-feedback",
-      label: `${pendingPRFeedback.length} PR feedback`,
+      label: `${pendingPRFeedback.length} ${pendingPRFeedback.every((comment) => comment.provider === "gitlab") ? "MR" : "PR"} feedback`,
       comments: pendingPRFeedback,
       onRemove: handleClearPRFeedback,
       onRemoveComment: (id: string) => handleRemovePRFeedback(id),
@@ -192,6 +195,20 @@ function buildWalkthroughCommentItems(params: BuildContextItemsParams): ContextI
   ];
 }
 
+function buildAgentMessageCommentItems(params: BuildContextItemsParams): ContextItem[] {
+  const { messageComments, handleClearMessageComments } = params;
+  if (messageComments.length === 0) return [];
+  return [
+    {
+      kind: "agent-message-comment" as const,
+      id: "agent-message-comments",
+      label: `${messageComments.length} message comment${messageComments.length === 1 ? "" : "s"}`,
+      comments: messageComments,
+      onRemove: handleClearMessageComments,
+    },
+  ];
+}
+
 /** Sort: pinned first, then by kind order, then by label */
 const KIND_ORDER: Record<string, number> = {
   plan: 0,
@@ -200,8 +217,9 @@ const KIND_ORDER: Record<string, number> = {
   comment: 3,
   "plan-comment": 4,
   "walkthrough-comment": 5,
-  image: 6,
-  "pr-feedback": 7,
+  "agent-message-comment": 6,
+  image: 7,
+  "pr-feedback": 8,
 };
 
 export function contextItemSortFn(a: ContextItem, b: ContextItem): number {
@@ -221,6 +239,7 @@ export function buildContextItems(params: BuildContextItemsParams): ContextItem[
   items.push(...buildFileAndPromptItems(params));
   items.push(...buildCommentItems(params));
   items.push(...buildWalkthroughCommentItems(params));
+  items.push(...buildAgentMessageCommentItems(params));
   items.push(...buildPRFeedbackItems(params));
 
   if (params.planComments.length > 0) {

@@ -32,7 +32,7 @@ const singleflightComputeTimeout = 60 * time.Second
 // The callback uses it to scope the resulting TaskPR / PRWatch rows to the
 // owning repository so the second repo's PR doesn't overwrite the first.
 // Parameters: ctx, sessionID, taskID, prURL, branch.
-type PRCreatedCallback func(ctx context.Context, sessionID, taskID, prURL, branch, repo string)
+type PRCreatedCallback func(ctx context.Context, sessionID, taskID, provider, prURL, branch, repo string)
 
 // GitOperationFailedCallback is called when a git operation fails.
 // Parameters: ctx, sessionID, taskID, operation name, error output.
@@ -103,6 +103,17 @@ func (h *GitHandlers) SetOnPRCreated(cb PRCreatedCallback) {
 // wires GitHub TaskPR / PRWatch rows (Azure association is a separate follow-up).
 func isGitHubPRURL(prURL string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(prURL)), "/pull/")
+}
+
+func shouldAssociateCreatedChange(provider, changeURL string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "github":
+		return isGitHubPRURL(changeURL)
+	case "gitlab":
+		return strings.Contains(strings.ToLower(strings.TrimSpace(changeURL)), "/-/merge_requests/")
+	default:
+		return provider == "" && isGitHubPRURL(changeURL)
+	}
 }
 
 // SetOnGitOperationFailed sets a callback invoked when a git operation fails.
@@ -602,21 +613,26 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 	// flows through so the orchestrator can scope the resulting TaskPR /
 	// PRWatch rows to the per-task repository_id.
 	// Use a timeout-bound context so a stuck callback doesn't leak the goroutine.
-	if result.Success && result.PRURL != "" && h.onPRCreated != nil && isGitHubPRURL(result.PRURL) {
+	if result.Success && result.PRURL != "" && h.onPRCreated != nil && shouldAssociateCreatedChange(result.Provider, result.PRURL) {
 		execution, ok := h.lifecycleMgr.GetExecutionBySessionID(req.SessionID)
 		if ok && execution.TaskID != "" {
 			sessionID := req.SessionID
 			taskID := execution.TaskID
 			prURL := result.PRURL
+			provider := result.Provider
 			repo := req.Repo
 			go func() {
 				callbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				h.onPRCreated(callbackCtx, sessionID, taskID, prURL, "", repo)
+				h.onPRCreated(callbackCtx, sessionID, taskID, provider, prURL, "", repo)
 			}()
 		}
 	}
 
+	return newCreatePRResponse(msg, result)
+}
+
+func newCreatePRResponse(msg *ws.Message, result *client.PRCreateResult) (*ws.Message, error) {
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 

@@ -981,6 +981,22 @@ func newReadyAgentctlClient(t *testing.T, log *logger.Logger) *agentctl.Client {
 	return agentctl.NewClient(host, port, log)
 }
 
+func TestWaitForAgentctlReadyCachesSuccessfulHealthCheck(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		ID:        "exec-prepared",
+		TaskID:    "task-1",
+		SessionID: "session-1",
+		agentctl:  newReadyAgentctlClient(t, mgr.logger),
+	}
+
+	mgr.waitForAgentctlReady(execution)
+
+	if !execution.IsAgentctlReady() {
+		t.Fatal("expected successful agentctl health check to be cached")
+	}
+}
+
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }

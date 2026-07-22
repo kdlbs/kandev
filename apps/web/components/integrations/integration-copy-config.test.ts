@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { copySentryInstances } from "@/lib/api/domains/sentry-api";
 import { copyAzureDevOpsConfig } from "@/lib/api/domains/azure-devops-api";
+import { copyGitLabConfig } from "@/lib/api/domains/gitlab-api";
 import { copyIntegrationConfig, integrationFromPathname } from "./integration-copy-config";
 
 vi.mock("@/lib/api/domains/sentry-api", () => ({
@@ -10,6 +11,10 @@ vi.mock("@/lib/api/domains/sentry-api", () => ({
 
 vi.mock("@/lib/api/domains/azure-devops-api", () => ({
   copyAzureDevOpsConfig: vi.fn(),
+}));
+
+vi.mock("@/lib/api/domains/gitlab-api", () => ({
+  copyGitLabConfig: vi.fn(),
 }));
 
 afterEach(() => {
@@ -29,8 +34,14 @@ describe("integrationFromPathname", () => {
   });
 
   it("ignores non-copyable integration routes", () => {
-    expect(integrationFromPathname("/settings/workspace/ws-1/integrations/gitlab")).toBeNull();
+    expect(integrationFromPathname("/settings/workspace/ws-1/integrations/gitlab")).toBe("gitlab");
     expect(integrationFromPathname("/settings/workspace/ws-1/integrations")).toBeNull();
+  });
+
+  it("copies the GitLab connection within the selected workspace boundary", async () => {
+    await copyIntegrationConfig("gitlab", "ws-source", "ws-target");
+
+    expect(copyGitLabConfig).toHaveBeenCalledWith("ws-target", { workspaceId: "ws-source" });
   });
 });
 

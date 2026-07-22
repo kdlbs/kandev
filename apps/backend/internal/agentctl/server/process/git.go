@@ -40,6 +40,7 @@ type GitOperator struct {
 	workDir          string
 	logger           *logger.Logger
 	workspaceTracker *WorkspaceTracker
+	environment      func() []string
 	// repoName is the multi-repo subpath this operator runs in (e.g. "kandev").
 	// Empty for the workspace-root operator. Stamped on emitted commit
 	// notifications so the frontend can group commits per repo.
@@ -56,6 +57,7 @@ func NewGitOperator(workDir string, log *logger.Logger, workspaceTracker *Worksp
 		workDir:          workDir,
 		logger:           log.WithFields(zap.String("component", "git-operator")),
 		workspaceTracker: workspaceTracker,
+		environment:      os.Environ,
 	}
 }
 
@@ -65,6 +67,30 @@ func NewGitOperatorForRepo(workDir, repoName string, log *logger.Logger, workspa
 	op := NewGitOperator(workDir, log, workspaceTracker)
 	op.repoName = repoName
 	return op
+}
+
+func (g *GitOperator) setEnvironmentProvider(provider func() []string) {
+	if provider != nil {
+		g.environment = provider
+	}
+}
+
+func (g *GitOperator) environmentValues() []string {
+	if g.environment == nil {
+		return os.Environ()
+	}
+	return g.environment()
+}
+
+func (g *GitOperator) environmentValue(key string) string {
+	prefix := key + "="
+	env := g.environmentValues()
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			return strings.TrimPrefix(env[i], prefix)
+		}
+	}
+	return ""
 }
 
 // runGitCommand executes a git command in the workDir with defense-in-depth validation.
@@ -143,6 +169,7 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 	// This defense-in-depth validation prevents injection of arbitrary commands.
 	cmd := exec.CommandContext(ctx, "git", args...) // lgtm[go/command-injection]
 	cmd.Dir = g.workDir
+	cmd.Env = filterGitEnv(g.environmentValues())
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -158,9 +185,14 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 		}
 		output += stderr.String()
 	}
+	stderrOutput := stderr.String()
+	if len(args) > 0 && args[0] == "push" {
+		output = g.sanitizeGitPushOutput(output)
+		stderrOutput = g.sanitizeGitPushOutput(stderrOutput)
+	}
 
 	if err != nil {
-		return output, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+		return output, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderrOutput))
 	}
 
 	return output, nil
@@ -959,10 +991,12 @@ func (g *GitOperator) unlock() {
 
 // PRCreateResult represents the result of a PR creation operation.
 type PRCreateResult struct {
-	Success bool   `json:"success"`
-	PRURL   string `json:"pr_url,omitempty"`
-	Output  string `json:"output,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Success      bool   `json:"success"`
+	BranchPushed bool   `json:"branch_pushed,omitempty"`
+	PRURL        string `json:"pr_url,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	Output       string `json:"output,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 // CreatePR creates a pull request using the repository host's CLI.
@@ -989,26 +1023,74 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	}
 	g.logger.Debug("origin remote", zap.String("remote", redactRemoteURL(remoteURL)))
 
-	pushOutput, err := g.runGitCommand(ctx, "push", "--set-upstream", "origin", "HEAD")
-	if err != nil {
-		result.Error = fmt.Sprintf("failed to push branch: %s", pushOutput)
-		result.Output = pushOutput
-		return result, nil
-	}
-	g.logger.Debug("pushed branch to remote", zap.String("output", pushOutput))
-
-	switch detectPRProvider(remoteURL) {
+	provider := g.detectPRProvider(remoteURL)
+	var gitLabInfo *gitLabRepoInfo
+	switch provider {
 	case prProviderAzureRepos:
-		return g.createAzureReposPR(ctx, result, remoteURL, branch, title, body, baseBranch, draft)
+		result.Provider = string(prProviderAzureRepos)
+		if _, parseErr := parseAzureRepoInfo(remoteURL); parseErr != nil {
+			result.Error = parseErr.Error()
+			return result, nil
+		}
 	case prProviderGitHub:
-		return g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
+		result.Provider = string(prProviderGitHub)
+	case prProviderGitLab:
+		result.Provider = string(prProviderGitLab)
+		gitLabInfo, err = parseGitLabRepoInfo(remoteURL, g.environmentValue(gitLabHostEnv))
+		if err != nil {
+			result.Error = err.Error()
+			return result, nil
+		}
 	default:
 		result.Error = fmt.Sprintf(
-			"unsupported git remote for PR creation: %s (GitHub and Azure Repos are supported)",
+			"unsupported git remote for PR creation: %s (GitHub, GitLab, and Azure Repos are supported)",
 			redactRemoteURL(remoteURL),
 		)
 		return result, nil
 	}
+
+	pushOutput, err := g.runGitCommand(ctx, "push", "--set-upstream", "origin", "HEAD")
+	if err != nil {
+		sanitizedOutput := g.sanitizePRFailure(pushOutput, title, body)
+		result.Error = fmt.Sprintf("failed to push branch: %s", sanitizedOutput)
+		result.Output = sanitizedOutput
+		return result, nil
+	}
+	g.logger.Debug("pushed branch to remote", zap.String("output", g.sanitizeGitPushOutput(pushOutput)))
+
+	switch provider {
+	case prProviderAzureRepos:
+		created, createErr := g.createAzureReposPR(ctx, result, remoteURL, branch, title, body, baseBranch, draft)
+		return finalizePRCreationAfterPush(created, createErr)
+	case prProviderGitHub:
+		created, createErr := g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
+		return finalizePRCreationAfterPush(created, createErr)
+	case prProviderGitLab:
+		created, createErr := g.createGitLabPR(ctx, result, gitLabInfo, branch, title, body, baseBranch, draft)
+		return finalizePRCreationAfterPush(created, createErr)
+	default:
+		result.Error = "unsupported git remote for PR creation"
+		return result, nil
+	}
+}
+
+func finalizePRCreationAfterPush(result *PRCreateResult, createErr error) (*PRCreateResult, error) {
+	if result == nil {
+		result = &PRCreateResult{}
+	}
+	if createErr == nil && result.Success {
+		return result, nil
+	}
+	requestName := "pull request"
+	if result.Provider == string(prProviderGitLab) {
+		requestName = "merge request"
+	}
+	result.Success = false
+	result.BranchPushed = true
+	result.PRURL = ""
+	result.Output = ""
+	result.Error = "branch was pushed; retry " + requestName + " creation"
+	return result, nil
 }
 
 // parseStatSummary parses a git --shortstat / --stat summary line like

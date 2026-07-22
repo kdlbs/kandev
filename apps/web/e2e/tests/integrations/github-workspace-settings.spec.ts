@@ -38,6 +38,24 @@ test.describe("GitHub workspace settings", () => {
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
     await expect(testPage.getByTestId("github-integration-heading")).toBeVisible();
 
+    const issueWatchesHeading = testPage.getByRole("heading", { name: "Issue Watches" });
+    const repositoryScopeHeading = testPage.getByRole("heading", {
+      name: "Repository Scope",
+      exact: true,
+    });
+    const [issueWatchesBox, repositoryScopeBox] = await Promise.all([
+      issueWatchesHeading.boundingBox(),
+      repositoryScopeHeading.boundingBox(),
+    ]);
+    expect(issueWatchesBox).not.toBeNull();
+    expect(repositoryScopeBox).not.toBeNull();
+    expect(repositoryScopeBox!.y).toBeGreaterThan(issueWatchesBox!.y);
+
+    await testPage.getByRole("button", { name: "Explain repository scope" }).hover();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "Limits the GitHub pull requests and issues Kandev discovers for this workspace",
+    );
+
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Selected repositories" }).click();
     await testPage.getByTestId("github-scope-repos-input").fill("kdlbs/kandev");

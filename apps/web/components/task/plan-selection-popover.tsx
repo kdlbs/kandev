@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { floatingBounds, placeFloatingRect } from "@/components/task/floating-selection-position";
 
 type SelectionPosition = {
   x: number;
@@ -16,36 +17,22 @@ type SelectionPosition = {
 type PlanSelectionPopoverProps = {
   selectedText: string;
   position: SelectionPosition;
-  onAdd: (comment: string, selectedText: string) => void;
-  onAddAndRun?: (comment: string, selectedText: string) => void;
+  onAdd: (comment: string, selectedText: string) => boolean | void;
+  onAddAndRun?: (comment: string, selectedText: string) => boolean | void;
   onClose: () => void;
   editingComment?: string;
   onDelete?: () => void;
+  testId?: string;
+  inputTestId?: string;
+  addButtonTestId?: string;
+  runButtonTestId?: string;
+  portalContainer?: HTMLElement | null;
+  errorMessage?: string | null;
 };
 
 const POPOVER_WIDTH = 340;
 const POPOVER_HEIGHT = 180;
 const MARGIN = 8;
-
-function computePopoverPosition(position: SelectionPosition): { left: number; top: number } {
-  // Place directly below cursor, aligned to left of click
-  let left = position.x;
-  let top = position.y + 4;
-
-  // Clamp horizontal — keep popover on screen
-  if (left + POPOVER_WIDTH > window.innerWidth - MARGIN) {
-    left = window.innerWidth - POPOVER_WIDTH - MARGIN;
-  }
-  if (left < MARGIN) left = MARGIN;
-
-  // If overflows bottom, flip above cursor
-  if (top + POPOVER_HEIGHT > window.innerHeight - MARGIN) {
-    top = position.y - POPOVER_HEIGHT - 4;
-  }
-  if (top < MARGIN) top = MARGIN;
-
-  return { left, top };
-}
 
 /** Drag support for the popover. */
 function useDrag() {
@@ -111,20 +98,18 @@ function usePopoverDismiss(
 function usePopoverComposer(
   comment: string,
   selectedText: string,
-  onAdd: (comment: string, selectedText: string) => void,
+  onAdd: (comment: string, selectedText: string) => boolean | void,
   onClose: () => void,
-  onAddAndRun?: (comment: string, selectedText: string) => void,
+  onAddAndRun?: (comment: string, selectedText: string) => boolean | void,
 ) {
   const handleSubmit = useCallback(() => {
     if (!comment.trim()) return;
-    onAdd(comment.trim(), selectedText);
-    onClose();
+    if (onAdd(comment.trim(), selectedText) !== false) onClose();
   }, [comment, onAdd, selectedText, onClose]);
 
   const handleSubmitAndRun = useCallback(() => {
     if (!comment.trim() || !onAddAndRun) return;
-    onAddAndRun(comment.trim(), selectedText);
-    onClose();
+    if (onAddAndRun(comment.trim(), selectedText) !== false) onClose();
   }, [comment, onAddAndRun, selectedText, onClose]);
 
   const handleKeyDown = useCallback(
@@ -157,12 +142,16 @@ function PopoverActions({
   onSubmit,
   onSubmitAndRun,
   onDelete,
+  addButtonTestId,
+  runButtonTestId,
 }: {
   isEditing: boolean;
   isDisabled: boolean;
   onSubmit: () => void;
   onSubmitAndRun?: () => void;
   onDelete?: () => void;
+  addButtonTestId?: string;
+  runButtonTestId?: string;
 }) {
   return (
     <div className="mt-2 flex items-center justify-between">
@@ -176,6 +165,7 @@ function PopoverActions({
             size="sm"
             variant="ghost"
             onClick={onDelete}
+            aria-label="Delete comment"
             className="h-6 px-1.5 text-muted-foreground hover:text-destructive cursor-pointer"
           >
             <IconTrash className="h-3 w-3" />
@@ -191,6 +181,7 @@ function PopoverActions({
                 variant={onSubmitAndRun && !isEditing ? "outline" : "default"}
                 onClick={onSubmit}
                 disabled={isDisabled}
+                data-testid={addButtonTestId}
                 className={`h-7 gap-1 text-xs cursor-pointer ${onSubmitAndRun && !isEditing ? "rounded-r-none border-r-0" : ""}`}
               >
                 <IconPlus className="h-3 w-3" />
@@ -208,6 +199,7 @@ function PopoverActions({
                   size="sm"
                   onClick={onSubmitAndRun}
                   disabled={isDisabled}
+                  data-testid={runButtonTestId}
                   className="h-7 gap-1 rounded-l-none text-xs cursor-pointer"
                 >
                   <IconPlayerPlay className="h-3 w-3" />
@@ -233,6 +225,12 @@ export function PlanSelectionPopover({
   onClose,
   editingComment,
   onDelete,
+  testId,
+  inputTestId,
+  addButtonTestId,
+  runButtonTestId,
+  portalContainer,
+  errorMessage,
 }: PlanSelectionPopoverProps) {
   const [comment, setComment] = useState(editingComment || "");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -246,7 +244,15 @@ export function PlanSelectionPopover({
   const effectiveOnAddAndRun = editingComment ? undefined : onAddAndRun;
   const { handleSubmit, handleSubmitAndRun, handleKeyDown, isDisabled, previewText } =
     usePopoverComposer(comment, selectedText, onAdd, onClose, effectiveOnAddAndRun);
-  const { left, top } = computePopoverPosition(position);
+  const portalRect = portalContainer?.getBoundingClientRect();
+  const { left, top } = placeFloatingRect({
+    left: position.x,
+    topCandidates: [position.y + 4, position.y - POPOVER_HEIGHT - 4],
+    width: POPOVER_WIDTH,
+    height: POPOVER_HEIGHT,
+    bounds: floatingBounds(portalRect),
+    margin: MARGIN,
+  });
 
   const handleDelete = onDelete
     ? () => {
@@ -259,10 +265,16 @@ export function PlanSelectionPopover({
     <div
       ref={popoverRef}
       className={cn(
-        "fixed z-50 rounded-xl border border-border/50 bg-popover/95 backdrop-blur-sm shadow-xl",
+        "pointer-events-auto z-[60] rounded-xl border border-border/50 bg-popover/95 backdrop-blur-sm shadow-xl",
         "animate-in fade-in-0 zoom-in-95 duration-150",
+        portalContainer ? "absolute" : "fixed",
       )}
-      style={{ width: POPOVER_WIDTH, left: left + offset.dx, top: top + offset.dy }}
+      data-testid={testId}
+      style={{
+        width: POPOVER_WIDTH,
+        left: left + offset.dx - (portalRect?.left ?? 0),
+        top: top + offset.dy - (portalRect?.top ?? 0),
+      }}
     >
       <div
         onMouseDown={onMouseDown}
@@ -281,16 +293,24 @@ export function PlanSelectionPopover({
           onKeyDown={handleKeyDown}
           placeholder="Add your comment or instruction..."
           className="min-h-[60px] resize-none text-sm border-border/50 focus:border-primary/50"
+          data-testid={inputTestId}
         />
+        {errorMessage ? (
+          <p role="alert" className="mt-2 text-xs text-destructive">
+            {errorMessage}
+          </p>
+        ) : null}
         <PopoverActions
           isEditing={!!editingComment}
           isDisabled={isDisabled}
           onSubmit={handleSubmit}
           onSubmitAndRun={effectiveOnAddAndRun ? handleSubmitAndRun : undefined}
           onDelete={handleDelete}
+          addButtonTestId={addButtonTestId}
+          runButtonTestId={runButtonTestId}
         />
       </div>
     </div>,
-    document.body,
+    portalContainer ?? document.body,
   );
 }

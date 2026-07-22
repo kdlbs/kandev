@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
-import { IconGitCommit, IconGitPullRequest, IconLoader2, IconCheck } from "@tabler/icons-react";
+import { IconGitCommit, IconLoader2, IconCheck } from "@tabler/icons-react";
 import {
   Dialog,
   DialogContent,
@@ -14,20 +14,20 @@ import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
-import {
-  GenerateButton,
-  CommitBodyField,
-  PRTitleField,
-  PRDescriptionField,
-  PRBranchSummary,
-} from "./vcs-dialog-fields";
+import { GenerateButton, CommitBodyField } from "./vcs-dialog-fields";
+import { VcsChangeRequestDialog } from "./vcs-change-request-dialog";
 import {
   useSessionGitStatus,
   useSessionGitStatusByRepo,
 } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
-import { useGitOperations } from "@/hooks/use-git-operations";
+import {
+  getChangeRequestTerminology,
+  resolveChangeRequestTerminology,
+  useChangeRequestTerminology,
+  useGitOperations,
+} from "@/hooks/use-git-operations";
 import { useAppStore } from "@/components/state-provider";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
@@ -35,6 +35,7 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useToast } from "@/components/toast-provider";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import type { FileInfo } from "@/lib/state/slices";
+import { getChangeRequestFailureFeedback } from "./change-request-feedback";
 
 type VcsDialogsContextValue = {
   /** When `repo` is provided, the commit is scoped to that repo only. */
@@ -217,109 +218,6 @@ function CommitDialog({
   );
 }
 
-type PRDialogProps = {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  /** When set, the dialog title shows the repo name. */
-  scopedRepo?: string;
-  displayBranch?: string | null;
-  baseBranch?: string;
-  prTitle: string;
-  onPrTitleChange: (v: string) => void;
-  prBody: string;
-  onPrBodyChange: (v: string) => void;
-  prDraft: boolean;
-  onPrDraftChange: (v: boolean) => void;
-  isGitLoading: boolean;
-  onCreatePR: () => void;
-  onGenerateTitle: () => void;
-  isGeneratingTitle: boolean;
-  onGenerateDescription: () => void;
-  isGeneratingDescription: boolean;
-  isUtilityConfigured: boolean;
-};
-
-function PRDialog({
-  open,
-  onOpenChange,
-  scopedRepo,
-  displayBranch,
-  baseBranch,
-  prTitle,
-  onPrTitleChange,
-  prBody,
-  onPrBodyChange,
-  prDraft,
-  onPrDraftChange,
-  isGitLoading,
-  onCreatePR,
-  onGenerateTitle,
-  isGeneratingTitle,
-  onGenerateDescription,
-  isGeneratingDescription,
-  isUtilityConfigured,
-}: PRDialogProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <IconGitPullRequest className="h-5 w-5" />
-            {scopedRepo ? `Create Pull Request — ${scopedRepo}` : "Create Pull Request"}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 py-2">
-          <PRBranchSummary displayBranch={displayBranch} baseBranch={baseBranch} />
-          <PRTitleField
-            prTitle={prTitle}
-            onPrTitleChange={onPrTitleChange}
-            onGenerateTitle={onGenerateTitle}
-            isGeneratingTitle={isGeneratingTitle}
-            isUtilityConfigured={isUtilityConfigured}
-          />
-          <PRDescriptionField
-            prBody={prBody}
-            onPrBodyChange={onPrBodyChange}
-            onGenerateDescription={onGenerateDescription}
-            isGeneratingDescription={isGeneratingDescription}
-            isUtilityConfigured={isUtilityConfigured}
-          />
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="vcs-pr-draft"
-              checked={prDraft}
-              onCheckedChange={(checked) => onPrDraftChange(checked === true)}
-            />
-            <Label htmlFor="vcs-pr-draft" className="text-sm cursor-pointer">
-              Create as draft
-            </Label>
-          </div>
-        </div>
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button type="button" variant="outline" className="cursor-pointer">
-              Cancel
-            </Button>
-          </DialogClose>
-          <Button onClick={onCreatePR} disabled={!prTitle.trim() || isGitLoading}>
-            {isGitLoading ? (
-              <>
-                <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
-                Creating...
-              </>
-            ) : (
-              <>
-                <IconGitPullRequest className="h-4 w-4 mr-2" />
-                Create PR
-              </>
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 type UseCommitDialogReturn = {
   open: boolean;
   setOpen: (v: boolean) => void;
@@ -374,6 +272,8 @@ type UsePRDialogReturn = {
   setBody: (v: string) => void;
   draft: boolean;
   setDraft: (v: boolean) => void;
+  branchPushed: boolean;
+  setBranchPushed: (v: boolean) => void;
   /** Repo this PR is scoped to in multi-repo mode; "" = workspace root. */
   repo: string;
   setRepo: (v: string) => void;
@@ -385,10 +285,12 @@ function usePRDialogState(): UsePRDialogReturn {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [draft, setDraft] = useState(true);
+  const [branchPushed, setBranchPushed] = useState(false);
   const [repo, setRepo] = useState("");
   const openDialog = useCallback((taskTitle?: string, nextRepo?: string) => {
     setTitle(taskTitle || "");
     setBody("");
+    setBranchPushed(false);
     // Defensive: callers binding `openDialog` directly to onClick can leak the
     // React MouseEvent into nextRepo. Only accept actual repo strings.
     setRepo(typeof nextRepo === "string" ? nextRepo : "");
@@ -403,6 +305,8 @@ function usePRDialogState(): UsePRDialogReturn {
     setBody,
     draft,
     setDraft,
+    branchPushed,
+    setBranchPushed,
     repo,
     setRepo,
     openDialog,
@@ -470,6 +374,7 @@ function useCreatePRHandler(
   baseBranch: string | undefined,
   createPR: ReturnType<typeof useGitOperations>["createPR"],
   toast: ReturnType<typeof useToast>["toast"],
+  defaultTerminology: ReturnType<typeof getChangeRequestTerminology>,
 ) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
@@ -485,10 +390,11 @@ function useCreatePRHandler(
         ps.repo || undefined,
       );
       if (result.success) {
-        const title = ps.draft ? "Draft PR created" : "PR created";
+        const terms = resolveChangeRequestTerminology(result.provider, defaultTerminology);
+        const title = ps.draft ? `Draft ${terms.shortName} created` : `${terms.shortName} created`;
         toast({
           title,
-          description: result.pr_url || "PR created successfully",
+          description: result.pr_url || `${terms.longName} created successfully`,
           variant: "success",
         });
         if (result.pr_url) {
@@ -498,22 +404,25 @@ function useCreatePRHandler(
           void openExternalLink(result.pr_url).catch(() => undefined);
         }
       } else {
-        toast({
-          title: "Create PR failed",
-          description: result.error || "An error occurred",
-          variant: "error",
-        });
+        const feedback = getChangeRequestFailureFeedback(result, defaultTerminology);
+        toast(feedback);
+        if (result.branch_pushed) {
+          ps.setBranchPushed(true);
+          ps.setOpen(true);
+          return;
+        }
       }
     } catch (e) {
       toast({
-        title: "Create PR failed",
+        title: `Create ${defaultTerminology.shortName} failed`,
         description: e instanceof Error ? e.message : "An error occurred",
         variant: "error",
       });
     }
     ps.setTitle("");
     ps.setBody("");
-  }, [ps, baseBranch, createPR, toast, activeTaskId, setPendingPrUrlForTask]);
+    ps.setBranchPushed(false);
+  }, [ps, baseBranch, createPR, toast, defaultTerminology, activeTaskId, setPendingPrUrlForTask]);
 }
 
 function useVcsDialogsState(
@@ -533,6 +442,7 @@ function useVcsDialogsState(
   const { commit, createPR, repoNames, isLoading: isGitLoading } = useSessionGit(sessionId);
   const repoDisplayName = useRepoDisplayName(sessionId);
   const isMultiRepo = repoNames.filter((r) => r !== "").length > 1;
+  const changeRequestTerminology = useChangeRequestTerminology(sessionId, ps.repo || undefined);
   const fileSummary = useScopedFileSummary({
     scopedRepo: cs.repo,
     statusByRepo,
@@ -555,7 +465,13 @@ function useVcsDialogsState(
     cs.setBody("");
     cs.setRepo("");
   }, [cs, gitWithFeedback, commit]);
-  const handleCreatePR = useCreatePRHandler(ps, baseBranch, createPR, toast);
+  const handleCreatePR = useCreatePRHandler(
+    ps,
+    baseBranch,
+    createPR,
+    toast,
+    changeRequestTerminology,
+  );
   const contextValue = useMemo(
     () => ({
       openCommitDialog: cs.openDialog,
@@ -573,6 +489,7 @@ function useVcsDialogsState(
     contextValue,
     repoDisplayName,
     isMultiRepo,
+    changeRequestTerminology,
   };
 }
 
@@ -621,25 +538,27 @@ export function VcsDialogsProvider({
         isGeneratingDescription={isGeneratingCommitDescription}
         isUtilityConfigured={isUtilityConfigured}
       />
-      <PRDialog
+      <VcsChangeRequestDialog
         open={ps.open}
         onOpenChange={ps.setOpen}
         scopedRepo={effectivePRLabel}
         displayBranch={displayBranch}
         baseBranch={baseBranch}
-        prTitle={ps.title}
-        onPrTitleChange={ps.setTitle}
-        prBody={ps.body}
-        onPrBodyChange={ps.setBody}
-        prDraft={ps.draft}
-        onPrDraftChange={ps.setDraft}
-        isGitLoading={isGitLoading}
-        onCreatePR={handleCreatePR}
+        title={ps.title}
+        onTitleChange={ps.setTitle}
+        body={ps.body}
+        onBodyChange={ps.setBody}
+        draft={ps.draft}
+        onDraftChange={ps.setDraft}
+        loading={isGitLoading}
+        branchPushed={ps.branchPushed}
+        onCreate={handleCreatePR}
         onGenerateTitle={() => generatePRTitle(ps.setTitle)}
-        isGeneratingTitle={isGeneratingPRTitle}
+        generatingTitle={isGeneratingPRTitle}
         onGenerateDescription={() => generatePRDescription(ps.setBody)}
-        isGeneratingDescription={isGeneratingPRDescription}
-        isUtilityConfigured={isUtilityConfigured}
+        generatingDescription={isGeneratingPRDescription}
+        utilityConfigured={isUtilityConfigured}
+        terminology={state.changeRequestTerminology}
       />
     </VcsDialogsContext.Provider>
   );

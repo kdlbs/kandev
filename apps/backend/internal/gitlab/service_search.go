@@ -48,6 +48,18 @@ func (s *Service) SearchUserIssuesPaged(ctx context.Context, filter, customQuery
 // log gives ops something to triage when counts look wrong.
 func (s *Service) GetStats(ctx context.Context) (*Stats, error) {
 	client := s.Client()
+	return s.getStatsWithClient(ctx, client)
+}
+
+func (s *Service) GetStatsForWorkspace(ctx context.Context, workspaceID string) (*Stats, error) {
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return s.getStatsWithClient(ctx, client)
+}
+
+func (s *Service) getStatsWithClient(ctx context.Context, client Client) (*Stats, error) {
 	if client == nil {
 		return &Stats{}, nil
 	}

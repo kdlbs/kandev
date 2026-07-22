@@ -21,8 +21,9 @@
  *      and spawns it synchronously, so it comes back `active` in the same
  *      response. No signature was attached, so the unsigned badge shows.
  *   2. Reload the SPA — the boot payload now carries the active plugin — and
- *      confirm its nav item, top-level route, and `task-sidebar` slot render
- *      via the real `/api/plugins/:id/bundle` static-file proxy.
+ *      confirm its nav item, top-level route, `task-sidebar` slot, and
+ *      `main-top-bar` slot render via the real `/api/plugins/:id/bundle`
+ *      static-file proxy.
  *   3. Create a task while the plugin's own page stays mounted (no
  *      navigation in between) and prove BOTH real gRPC paths at once:
  *        - task.created -> Deliverer -> plugin subprocess OnEvent RPC,
@@ -141,6 +142,10 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     const navItem = testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`);
     await expect(navItem).toBeVisible({ timeout: 15_000 });
     await expect(navItem).toHaveText("Hello E2E");
+
+    // --- 2b. main-top-bar slot renders on the default app top bar (Home) ---
+    await expect(testPage.locator("#hello-main-top-bar")).toBeVisible();
+    await expect(testPage.locator("#hello-main-top-bar")).toHaveText("Hello kanban");
 
     await navItem.click();
     await expect(testPage).toHaveURL(new RegExp(`${PLUGIN_ROUTE}$`));

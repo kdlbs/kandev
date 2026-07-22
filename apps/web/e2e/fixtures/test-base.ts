@@ -213,6 +213,9 @@ export const test = backendFixture.extend<
       await apiClient
         .rawRequest("DELETE", `/api/v1/linear/config?${scoped}`)
         .catch(() => undefined);
+      await apiClient
+        .rawRequest("DELETE", `/api/v1/gitlab/config?${scoped}`)
+        .catch(() => undefined);
       await apiClient.deleteAllSentryInstances(seedData.workspaceId).catch(() => undefined);
       await apiClient
         .rawRequest("DELETE", `/api/v1/azure-devops/config?${scoped}`)
@@ -224,8 +227,14 @@ export const test = backendFixture.extend<
         apiClient.mockLinearReset().catch(() => undefined),
         apiClient.mockSentryReset().catch(() => undefined),
         apiClient.mockAzureDevOpsReset().catch(() => undefined),
+        apiClient.mockGitLabReset(seedData.workspaceId).catch(() => undefined),
+        apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined),
       ]);
-      await use();
+      try {
+        await use();
+      } finally {
+        await apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined);
+      }
     },
     { auto: true },
   ],

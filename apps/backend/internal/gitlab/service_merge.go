@@ -15,6 +15,24 @@ func (s *Service) MergeMR(ctx context.Context, projectPath string, iid int, meth
 	if client == nil {
 		return nil, ErrNoClient
 	}
+	return s.mergeMRWithClient(ctx, client, projectPath, iid, method, squashCommitMessage)
+}
+
+func (s *Service) MergeMRForWorkspace(ctx context.Context, workspaceID, projectPath string, iid int, method, squashCommitMessage string) (*MR, error) {
+	return s.MergeMRForWorkspaceHost(ctx, workspaceID, "", projectPath, iid, method, squashCommitMessage)
+}
+
+func (s *Service) MergeMRForWorkspaceHost(ctx context.Context, workspaceID, expectedHost, projectPath string, iid int, method, squashCommitMessage string) (*MR, error) {
+	var mr *MR
+	err := s.RunWithWorkspaceClient(ctx, workspaceID, expectedHost, func(client Client) error {
+		var actionErr error
+		mr, actionErr = s.mergeMRWithClient(ctx, client, projectPath, iid, method, squashCommitMessage)
+		return actionErr
+	})
+	return mr, err
+}
+
+func (s *Service) mergeMRWithClient(ctx context.Context, client Client, projectPath string, iid int, method, squashCommitMessage string) (*MR, error) {
 	methods, err := client.GetProjectMergeMethods(ctx, projectPath)
 	if err != nil {
 		return nil, fmt.Errorf("get project merge methods: %w", err)
