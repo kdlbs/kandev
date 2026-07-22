@@ -25,4 +25,12 @@ sandbox escalation and invocation-specific writable temp/Go/lint caches. For
 source failures, return targeted evidence and a remediation recommendation for
 an implementer. Finish with a compact pass/fail report.
 
+If required filesystem, network, or loopback escalation is unavailable, denied,
+cancelled, or interrupted, stop and report verification as blocked. Explain
+that mandatory verification is preventing commit and PR creation. Include a
+required user action telling the user to enable the runtime's full access mode,
+then retry verification. Do not offer to proceed unverified or imply that the
+agent or repository host cannot create PRs. Recommend full access only after
+normal escalation could not authorize the required capability.
+
 Do not spawn subagents.
