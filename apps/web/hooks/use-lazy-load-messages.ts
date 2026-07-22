@@ -5,13 +5,8 @@ import { createDebugLogger } from "@/lib/debug/log";
 
 const debug = createDebugLogger("messages:lazyload");
 
-function describeSkip(args: {
-  sessionId: string | null;
-  isLoading: boolean;
-  hasMore: boolean;
-}): string {
+function describeSkip(args: { sessionId: string | null; hasMore: boolean }): string {
   if (!args.sessionId) return "no-session";
-  if (args.isLoading) return "already-loading";
   if (!args.hasMore) return "no-more";
   return "no-cursor";
 }
@@ -72,6 +67,7 @@ export function useLazyLoadMessages(sessionId: string | null) {
 
   // Store current values in refs to avoid recreating loadMore on every state change
   const stateRef = useRef({ hasMore, oldestCursor, isLoading });
+  const inFlightRef = useRef<Promise<number> | null>(null);
   useEffect(() => {
     stateRef.current = { hasMore, oldestCursor, isLoading };
   }, [hasMore, oldestCursor, isLoading]);
@@ -80,60 +76,68 @@ export function useLazyLoadMessages(sessionId: string | null) {
   const setMessagesMetadata = useAppStore((state) => state.setMessagesMetadata);
 
   // Stable loadMore - only depends on sessionId and store actions
-  const loadMore = useCallback(async () => {
-    const { hasMore, isLoading, oldestCursor } = stateRef.current;
+  const loadMore = useCallback(() => {
+    if (inFlightRef.current) return inFlightRef.current;
+    const { hasMore, oldestCursor } = stateRef.current;
 
-    if (!sessionId || !hasMore || isLoading || !oldestCursor) {
+    if (!sessionId || !hasMore || !oldestCursor) {
       debug("loadMore: skipped", {
         sessionId,
-        reason: describeSkip({ sessionId, isLoading, hasMore }),
+        reason: describeSkip({ sessionId, hasMore }),
         hasMore,
         oldestCursor,
       });
-      return 0;
+      return Promise.resolve(0);
     }
 
-    debug("loadMore: requesting older page", { sessionId, before: oldestCursor, limit: 20 });
+    const request = (async () => {
+      debug("loadMore: requesting older page", { sessionId, before: oldestCursor, limit: 20 });
 
-    // Update ref synchronously so concurrent calls are blocked immediately
-    stateRef.current.isLoading = true;
-    setMessagesMetadata(sessionId, { isLoading: true });
-    try {
-      const response = await listTaskSessionMessages(sessionId, {
-        limit: 20,
-        before: oldestCursor,
-        sort: "desc",
-      });
-      const orderedMessages = [...(response.messages ?? [])].reverse();
-      // After reversing, orderedMessages[0] is the oldest message in this batch
-      const newOldestCursor = orderedMessages[0]?.id ?? null;
-      logLoadMoreResponse({
-        sessionId,
-        requestedBefore: oldestCursor,
-        ordered: orderedMessages,
-        responseHasMore: response.has_more,
-        newOldestCursor,
-      });
-      // Sync ref immediately so the next intersection callback sees correct state
-      // (the useEffect sync may not have run yet between store update and next observer fire)
-      stateRef.current = {
-        hasMore: response.has_more,
-        oldestCursor: newOldestCursor,
-        isLoading: false,
-      };
-      prependMessages(sessionId, orderedMessages, {
-        hasMore: response.has_more,
-        oldestCursor: newOldestCursor,
-      });
-      return orderedMessages.length;
-    } catch (error) {
-      console.error("[useLazyLoadMessages] Error loading messages:", error);
-      debug("loadMore: error", { sessionId, error });
-      stateRef.current.isLoading = false;
-      setMessagesMetadata(sessionId, { isLoading: false });
-      return 0;
-    }
+      // Update ref synchronously so concurrent callers share this request.
+      stateRef.current.isLoading = true;
+      setMessagesMetadata(sessionId, { isLoading: true });
+      try {
+        const response = await listTaskSessionMessages(sessionId, {
+          limit: 20,
+          before: oldestCursor,
+          sort: "desc",
+        });
+        const orderedMessages = [...(response.messages ?? [])].reverse();
+        // After reversing, orderedMessages[0] is the oldest message in this batch
+        const newOldestCursor = orderedMessages[0]?.id ?? null;
+        logLoadMoreResponse({
+          sessionId,
+          requestedBefore: oldestCursor,
+          ordered: orderedMessages,
+          responseHasMore: response.has_more,
+          newOldestCursor,
+        });
+        // Sync ref immediately so the next intersection callback sees correct state
+        // (the useEffect sync may not have run yet between store update and next observer fire)
+        stateRef.current = {
+          hasMore: response.has_more,
+          oldestCursor: newOldestCursor,
+          isLoading: false,
+        };
+        prependMessages(sessionId, orderedMessages, {
+          hasMore: response.has_more,
+          oldestCursor: newOldestCursor,
+        });
+        return orderedMessages.length;
+      } catch (error) {
+        console.error("[useLazyLoadMessages] Error loading messages:", error);
+        debug("loadMore: error", { sessionId, error });
+        stateRef.current.isLoading = false;
+        setMessagesMetadata(sessionId, { isLoading: false });
+        return 0;
+      }
+    })();
+    inFlightRef.current = request;
+    void request.finally(() => {
+      if (inFlightRef.current === request) inFlightRef.current = null;
+    });
+    return request;
   }, [sessionId, prependMessages, setMessagesMetadata]);
 
-  return { loadMore, hasMore, isLoading };
+  return { loadMore, hasMore, isLoading, oldestCursor };
 }

@@ -136,6 +136,8 @@
  *                                    `delta` between two transitions means
  *                                    Virtuoso saw the keyspace shift in a way
  *                                    that throws off scroll anchoring.
+ *     [chat:virtuoso:navigation]     user-prompt target index, mount result,
+ *                                    and failure-time viewport restoration.
  *     [chat:prepare-progress]        PrepareProgress status / autoExpand / expanded
  *                                    transitions per session. Status stuck on
  *                                    "preparing" with `expanded=true` while

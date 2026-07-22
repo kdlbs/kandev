@@ -95,6 +95,26 @@ export class SessionPage {
     return this.page.locator("[data-testid='session-chat']:visible").first();
   }
 
+  messageScrollOwner(): Locator {
+    return this.activeChat().locator(".chat-message-list");
+  }
+
+  previousUserMessageButton(message: Locator): Locator {
+    return message.getByRole("button", { name: "Previous user message" });
+  }
+
+  nextUserMessageButton(message: Locator): Locator {
+    return message.getByRole("button", { name: "Next user message" });
+  }
+
+  userMessageContaining(text: string): Locator {
+    return this.activeChat().locator("[data-user-message-id]").filter({ hasText: text });
+  }
+
+  loadOlderMessagesButton(): Locator {
+    return this.activeChat().getByTestId("load-older-messages");
+  }
+
   async waitForLoad(timeout = 15_000) {
     // When multiple session tabs are open, multiple session-chat panels exist in
     // the DOM but only the active one is visible. Use :visible to avoid matching

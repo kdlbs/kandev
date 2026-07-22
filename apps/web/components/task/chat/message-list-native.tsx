@@ -7,6 +7,8 @@ import type { Message } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
+import { UserMessageNavigationProvider } from "./user-message-navigation-context";
 import {
   type MessageListProps,
   MessageListStatus,
@@ -16,6 +18,10 @@ import {
   getSessionRunningState,
   getLastTurnGroupId,
   getStreamingAgentMessageId,
+  findUserMessageElement,
+  getNavigationScrollBehavior,
+  replayMessageHighlight,
+  waitForUserMessageElement,
 } from "./message-list-shared";
 
 /**
@@ -165,11 +171,82 @@ function useAutoScroll(
   }, [messages, scrollRef]);
 }
 
-function useScrollToMessage() {
-  return useCallback((messageId: string) => {
-    const el = document.getElementById(`msg-${messageId}`);
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+const NAVIGATION_SETTLE_ATTEMPTS = 4;
+
+function useNativeUserNavigation(args: {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  sessionId: string | null;
+  items: MessageListProps["items"];
+  hasMore: boolean;
+  oldestCursor: string | null;
+  loadMore: () => Promise<number>;
+}) {
+  const mountedRef = useRef(true);
+  const sessionIdRef = useRef(args.sessionId);
+  sessionIdRef.current = args.sessionId;
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
+  const navigateTo = useCallback(
+    async (messageId: string) => {
+      const scrollElement = args.scrollRef.current;
+      if (!scrollElement || !args.sessionId) return false;
+      const actionSessionId = args.sessionId;
+      const previousScrollTop = scrollElement.scrollTop;
+      for (let attempt = 0; attempt < NAVIGATION_SETTLE_ATTEMPTS; attempt++) {
+        const element = findUserMessageElement(scrollElement, messageId);
+        if (!element) break;
+        element.scrollIntoView({
+          block: "center",
+          behavior: attempt === 0 ? getNavigationScrollBehavior() : "auto",
+        });
+        const settled = await waitForUserMessageElement(
+          scrollElement,
+          messageId,
+          () => mountedRef.current && sessionIdRef.current === actionSessionId,
+        );
+        if (settled) {
+          replayMessageHighlight(settled);
+          return true;
+        }
+      }
+      if (mountedRef.current && sessionIdRef.current === actionSessionId) {
+        scrollElement.scrollTop = previousScrollTop;
+      }
+      return false;
+    },
+    [args.scrollRef, args.sessionId],
+  );
+  const navigation = useUserMessageNavigation({
+    sessionId: args.sessionId,
+    items: args.items,
+    hasOlder: args.hasMore,
+    oldestCursor: args.oldestCursor,
+    loadOlder: args.loadMore,
+    navigateTo,
+  });
+  return navigation;
+}
+
+function useInitialScrollToBottom(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  itemCount: number,
+) {
+  const didInitialScroll = useRef(false);
+  useEffect(() => {
+    if (didInitialScroll.current || itemCount === 0) return;
+    const element = scrollRef.current;
+    if (!element) return;
+    if (useDockviewStore.getState().pendingChatScrollTop !== null) {
+      didInitialScroll.current = true;
+      return;
+    }
+    element.scrollTop = element.scrollHeight;
+    didInitialScroll.current = true;
+  }, [itemCount, scrollRef]);
 }
 
 export const NativeMessageList = memo(function NativeMessageList({
@@ -187,82 +264,78 @@ export const NativeMessageList = memo(function NativeMessageList({
   onOpenFile,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-
   const { isInitialLoading, showLoadingState } = getConversationLoadingState({
     messagesLoading,
     messagesCount: messages.length,
     isWorking,
     sessionState,
   });
-  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
+  const {
+    loadMore,
+    hasMore,
+    isLoading: isLoadingMore,
+    oldestCursor,
+  } = useLazyLoadMessages(sessionId);
   const isRunning = getSessionRunningState(sessionState);
   const streamingMessageId = getStreamingAgentMessageId(messages);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
-  const handleScrollToMessage = useScrollToMessage();
+  const navigation = useNativeUserNavigation({
+    scrollRef,
+    sessionId,
+    items,
+    hasMore,
+    oldestCursor: oldestCursor ?? null,
+    loadMore,
+  });
 
   useScrollPositionOnPrepend(scrollRef, items.length);
   const sentinelRef = useLazyLoadSentinel(scrollRef, hasMore, isLoadingMore, loadMore);
   useAutoScroll(scrollRef, messages, isWorking);
-
-  // Scroll to bottom on initial load
-  const didInitialScroll = useRef(false);
-  useEffect(() => {
-    if (didInitialScroll.current || items.length === 0) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    // If a layout rebuild scroll restore is pending, skip initial scroll
-    // (the restore handler will set the correct position)
-    if (useDockviewStore.getState().pendingChatScrollTop !== null) {
-      didInitialScroll.current = true;
-      return;
-    }
-    el.scrollTop = el.scrollHeight;
-    didInitialScroll.current = true;
-  }, [items.length]);
+  useInitialScrollToBottom(scrollRef, items.length);
 
   return (
-    <SessionPanelContent ref={scrollRef} className="relative p-4 chat-message-list">
-      {/* Sentinel for lazy loading older messages */}
-      {hasMore && <div ref={sentinelRef} className="h-px" />}
+    <UserMessageNavigationProvider value={navigation}>
+      <SessionPanelContent ref={scrollRef} className="relative p-4 chat-message-list">
+        {hasMore && <div ref={sentinelRef} className="h-px" />}
 
-      <MessageListStatus
-        isLoadingMore={isLoadingMore}
-        hasMore={hasMore}
-        showLoadingState={showLoadingState}
-        messagesLoading={messagesLoading}
-        isInitialLoading={isInitialLoading}
-        messagesCount={messages.length}
-        onLoadMore={loadMore}
-      />
+        <MessageListStatus
+          isLoadingMore={isLoadingMore}
+          hasMore={hasMore}
+          showLoadingState={showLoadingState}
+          messagesLoading={messagesLoading}
+          isInitialLoading={isInitialLoading}
+          messagesCount={messages.length}
+          onLoadMore={loadMore}
+        />
 
-      {items.map((item) => {
-        const key = getItemKey(item);
-        return (
-          <div key={key} id={`msg-${key}`} className="pb-2" style={{ overflowAnchor: "none" }}>
-            <MessageItem
-              item={item}
-              sessionId={sessionId}
-              permissionsByToolCallId={permissionsByToolCallId}
-              childrenByParentToolCallId={childrenByParentToolCallId}
-              taskId={taskId}
-              worktreePath={worktreePath}
-              onOpenFile={onOpenFile}
-              isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
-              isTurnActive={isRunning}
-              streamingMessageId={streamingMessageId}
-              onScrollToMessage={handleScrollToMessage}
-            />
-          </div>
-        );
-      })}
+        {items.map((item) => {
+          const key = getItemKey(item);
+          return (
+            <div key={key} className="pb-2" style={{ overflowAnchor: "none" }}>
+              <MessageItem
+                item={item}
+                sessionId={sessionId}
+                permissionsByToolCallId={permissionsByToolCallId}
+                childrenByParentToolCallId={childrenByParentToolCallId}
+                taskId={taskId}
+                worktreePath={worktreePath}
+                onOpenFile={onOpenFile}
+                isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
+                isTurnActive={isRunning}
+                streamingMessageId={streamingMessageId}
+              />
+            </div>
+          );
+        })}
 
-      <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
-      {(footerActionMessages ?? []).map((msg: Message) => (
-        <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
-      ))}
+        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
+        {(footerActionMessages ?? []).map((msg: Message) => (
+          <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
+        ))}
 
-      {/* Bottom anchor — browser keeps scroll pinned here when new content appends */}
-      <div style={{ overflowAnchor: "auto", height: 1 }} />
-    </SessionPanelContent>
+        {/* Bottom anchor — browser keeps scroll pinned here when new content appends */}
+        <div style={{ overflowAnchor: "auto", height: 1 }} />
+      </SessionPanelContent>
+    </UserMessageNavigationProvider>
   );
 });

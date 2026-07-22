@@ -1,11 +1,13 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { createElement, type ReactNode } from "react";
-import { act, cleanup, renderHook } from "@testing-library/react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { act, renderHook } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
+import type { RenderItem } from "@/hooks/use-processed-messages";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
-import { useUserMessageNavigation } from "./use-message-navigation";
-
-afterEach(() => cleanup());
+import {
+  type UserMessageNavigationOptions,
+  useUserMessageNavigation,
+} from "./use-message-navigation";
 
 const SESSION_ID = "sess-1";
 
@@ -17,106 +19,309 @@ function makeMessage(id: string, authorType: Message["author_type"]): Message {
     author_type: authorType,
     content: "",
     type: "message",
-    created_at: "2026-06-12T00:00:00Z",
+    created_at: "2026-07-21T00:00:00Z",
   };
 }
 
-// Render the hook alongside setMessages so a test can seed the store and read
-// the resolved navigation within the same render tree.
-function renderNav(currentMessageId: string, sid: string | null = SESSION_ID) {
+function messageItem(id: string, authorType: Message["author_type"]): RenderItem {
+  return { type: "message", message: makeMessage(id, authorType) };
+}
+
+type TestNavigationOptions = UserMessageNavigationOptions & { oldestCursor: string | null };
+
+function renderNavigation(items: RenderItem[], overrides: Partial<TestNavigationOptions> = {}) {
   function wrapper({ children }: { children: ReactNode }) {
     return createElement(StateProvider, null, children);
   }
-  return renderHook(
-    () => {
-      const setMessages = useAppStore((s) => s.setMessages);
-      const nav = useUserMessageNavigation(sid, currentMessageId);
-      return { setMessages, nav };
-    },
-    { wrapper },
-  );
-}
-
-const NONE = { hasPrevious: false, hasNext: false, previousId: null, nextId: null };
-
-type Nav = ReturnType<typeof renderNav>;
-
-function seed(result: Nav["result"], messages: Message[]) {
-  act(() => result.current.setMessages(SESSION_ID, messages));
+  const initialProps: TestNavigationOptions = {
+    sessionId: SESSION_ID,
+    items,
+    hasOlder: false,
+    oldestCursor: items[0]?.type === "message" ? items[0].message.id : null,
+    loadOlder: vi.fn(async () => 0),
+    navigateTo: vi.fn(async () => true),
+    ...overrides,
+  };
+  return renderHook((props: TestNavigationOptions) => useUserMessageNavigation(props), {
+    wrapper,
+    initialProps,
+  });
 }
 
 describe("useUserMessageNavigation", () => {
-  it("returns no navigation when the session id is null", () => {
-    const { result } = renderNav("u1", null);
-    expect(result.current.nav).toEqual(NONE);
-  });
-
-  it("returns no navigation when the session has no messages", () => {
-    const { result } = renderNav("u1");
-    expect(result.current.nav).toEqual(NONE);
-  });
-
-  it("returns no navigation for a lone user message", () => {
-    const { result } = renderNav("u1");
-    seed(result, [makeMessage("u1", "user")]);
-    expect(result.current.nav).toEqual(NONE);
-  });
-
-  it("resolves both neighbours for a middle user message", () => {
-    const { result } = renderNav("u2");
-    seed(
-      result,
-      ["u1", "u2", "u3"].map((id) => makeMessage(id, "user")),
-    );
-    expect(result.current.nav).toEqual({
-      hasPrevious: true,
-      hasNext: true,
-      previousId: "u1",
-      nextId: "u3",
-    });
-  });
-
-  it("resolves only next for the first user message", () => {
-    const { result } = renderNav("u1");
-    seed(
-      result,
-      ["u1", "u2"].map((id) => makeMessage(id, "user")),
-    );
-    expect(result.current.nav).toMatchObject({
-      hasPrevious: false,
-      previousId: null,
-      nextId: "u2",
-    });
-  });
-
-  it("resolves only previous for the last user message", () => {
-    const { result } = renderNav("u2");
-    seed(
-      result,
-      ["u1", "u2"].map((id) => makeMessage(id, "user")),
-    );
-    expect(result.current.nav).toMatchObject({ hasNext: false, previousId: "u1", nextId: null });
-  });
-
-  it("ignores agent messages when computing neighbours", () => {
-    const { result } = renderNav("u2");
-    seed(result, [
-      makeMessage("u1", "user"),
-      makeMessage("a1", "agent"),
-      makeMessage("u2", "user"),
-      makeMessage("a2", "agent"),
-      makeMessage("u3", "user"),
+  it("orders every rendered user prompt and ignores non-user messages", () => {
+    const { result } = renderNavigation([
+      messageItem("u1", "user"),
+      messageItem("a1", "agent"),
+      {
+        type: "turn_group",
+        id: "activity-1",
+        turnId: "turn-1",
+        messages: [makeMessage("not-a-prompt", "user")],
+      },
+      messageItem("u2", "user"),
+      messageItem("u3", "user"),
     ]);
-    expect(result.current.nav).toMatchObject({ previousId: "u1", nextId: "u3" });
+
+    expect(result.current.userMessageIds).toEqual(["u1", "u2", "u3"]);
   });
 
-  it("returns no navigation when the current message is not a user message", () => {
-    const { result } = renderNav("a1");
-    seed(result, [
-      makeMessage("u1", "user"),
-      makeMessage("a1", "agent"),
-      makeMessage("u2", "user"),
+  it("derives boundaries for each user prompt", () => {
+    const { result } = renderNavigation([
+      messageItem("u1", "user"),
+      messageItem("u2", "user"),
+      messageItem("u3", "user"),
     ]);
-    expect(result.current.nav).toEqual(NONE);
+
+    expect(result.current.canNavigatePrevious("u1")).toBe(false);
+    expect(result.current.canNavigatePrevious("u2")).toBe(true);
+    expect(result.current.canNavigateNext("u2")).toBe(true);
+    expect(result.current.canNavigateNext("u3")).toBe(false);
+  });
+
+  it("exposes directional navigation actions", () => {
+    const { result } = renderNavigation([messageItem("u1", "user")]);
+
+    expect(result.current.goPrevious).toEqual(expect.any(Function));
+    expect(result.current.goNext).toEqual(expect.any(Function));
+  });
+
+  it("navigates to the next loaded prompt without loading older history", async () => {
+    const navigateTo = vi.fn(async () => true);
+    const loadOlder = vi.fn(async () => 20);
+    const { result } = renderNavigation([messageItem("u1", "user"), messageItem("u2", "user")], {
+      navigateTo,
+      loadOlder,
+    });
+    await act(() => result.current.goNext("u1"));
+
+    expect(navigateTo).toHaveBeenCalledWith("u2");
+    expect(loadOlder).not.toHaveBeenCalled();
+  });
+});
+
+describe("useUserMessageNavigation pagination", () => {
+  it("waits for prepended messages to commit after loadOlder resolves", async () => {
+    vi.useFakeTimers();
+    const navigateTo = vi.fn(async () => true);
+    const loadOlder = vi.fn(async () => 20);
+    const hook = renderNavigation([messageItem("u-current", "user")], {
+      hasOlder: true,
+      oldestCursor: "cursor-1",
+      loadOlder,
+      navigateTo,
+    });
+
+    let navigation!: Promise<void>;
+    act(() => {
+      navigation = hook.result.current.goPrevious("u-current");
+    });
+    await act(async () => Promise.resolve());
+    expect(navigateTo).not.toHaveBeenCalled();
+
+    hook.rerender({
+      sessionId: SESSION_ID,
+      items: [messageItem("u-old", "user"), messageItem("u-current", "user")],
+      hasOlder: false,
+      oldestCursor: "cursor-0",
+      loadOlder,
+      navigateTo,
+    });
+    await act(async () => vi.runAllTimersAsync());
+    await act(() => navigation);
+
+    expect(navigateTo).toHaveBeenCalledWith("u-old");
+    vi.useRealTimers();
+  });
+
+  it("allows a virtualized page time to commit before deciding pagination made no progress", async () => {
+    vi.useFakeTimers();
+    const navigateTo = vi.fn(async () => true);
+    const loadOlder = vi.fn(async () => 20);
+    const hook = renderNavigation([messageItem("u-current", "user")], {
+      hasOlder: true,
+      oldestCursor: "cursor-1",
+      loadOlder,
+      navigateTo,
+    });
+
+    let navigation!: Promise<void>;
+    act(() => {
+      navigation = hook.result.current.goPrevious("u-current");
+    });
+    await act(async () => Promise.resolve());
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+
+    hook.rerender({
+      sessionId: SESSION_ID,
+      items: [messageItem("u-old", "user"), messageItem("u-current", "user")],
+      hasOlder: false,
+      oldestCursor: "cursor-0",
+      loadOlder,
+      navigateTo,
+    });
+    await act(async () => vi.runAllTimersAsync());
+    await act(() => navigation);
+
+    expect(navigateTo).toHaveBeenCalledWith("u-old");
+    vi.useRealTimers();
+  });
+});
+
+describe("useUserMessageNavigation paginated actions", () => {
+  it("loads successive older pages until it finds the previous user prompt", async () => {
+    const navigateTo = vi.fn(async () => true);
+    const pageResolvers: Array<(count: number) => void> = [];
+    const loadOlder = vi.fn(() => new Promise<number>((resolve) => pageResolvers.push(resolve)));
+    const hook = renderNavigation([messageItem("u-current", "user")], {
+      hasOlder: true,
+      oldestCursor: "cursor-2",
+      loadOlder,
+      navigateTo,
+    });
+
+    let navigation!: Promise<void>;
+    act(() => {
+      navigation = hook.result.current.goPrevious("u-current");
+    });
+    hook.rerender({
+      sessionId: SESSION_ID,
+      items: [messageItem("a-older", "agent"), messageItem("u-current", "user")],
+      hasOlder: true,
+      oldestCursor: "cursor-1",
+      loadOlder,
+      navigateTo,
+    });
+    await act(async () => pageResolvers[0](20));
+
+    hook.rerender({
+      sessionId: SESSION_ID,
+      items: [
+        messageItem("u-old", "user"),
+        messageItem("a-older", "agent"),
+        messageItem("u-current", "user"),
+      ],
+      hasOlder: false,
+      oldestCursor: "cursor-0",
+      loadOlder,
+      navigateTo,
+    });
+    await act(async () => pageResolvers[1](20));
+    await act(() => navigation);
+
+    expect(loadOlder).toHaveBeenCalledTimes(2);
+    expect(navigateTo).toHaveBeenCalledWith("u-old");
+    expect(hook.result.current.isBusy).toBe(false);
+    expect(hook.result.current.canNavigatePrevious("u-old")).toBe(false);
+  });
+
+  it("blocks duplicate actions while destination navigation is pending", async () => {
+    let resolveNavigation!: (didNavigate: boolean) => void;
+    const navigateTo = vi.fn(
+      () => new Promise<boolean>((resolve) => (resolveNavigation = resolve)),
+    );
+    const { result } = renderNavigation([messageItem("u1", "user"), messageItem("u2", "user")], {
+      navigateTo,
+    });
+    let firstAction!: Promise<void>;
+    act(() => {
+      firstAction = result.current.goNext("u1");
+      void result.current.goNext("u1");
+    });
+
+    expect(navigateTo).toHaveBeenCalledTimes(1);
+    expect(result.current.isBusy).toBe(true);
+    await act(async () => resolveNavigation(true));
+    await act(() => firstAction);
+    expect(result.current.isBusy).toBe(false);
+  });
+});
+
+describe("useUserMessageNavigation boundaries and cancellation", () => {
+  it("does not enable previous navigation without a rendered user prompt", () => {
+    const { result } = renderNavigation([messageItem("a1", "agent")], {
+      hasOlder: true,
+      oldestCursor: "cursor-1",
+    });
+
+    expect(result.current.canNavigatePrevious("missing-user")).toBe(false);
+  });
+
+  it("leaves previous enabled after a failed or no-progress page", async () => {
+    const navigateTo = vi.fn(async () => true);
+    const loadOlder = vi.fn(async () => 0);
+    const { result } = renderNavigation([messageItem("u1", "user")], {
+      hasOlder: true,
+      oldestCursor: "cursor-1",
+      loadOlder,
+      navigateTo,
+    });
+
+    await act(() => result.current.goPrevious("u1"));
+
+    expect(result.current.canNavigatePrevious("u1")).toBe(true);
+    expect(result.current.isBusy).toBe(false);
+    expect(navigateTo).not.toHaveBeenCalled();
+  });
+
+  it("stops when a non-empty page leaves the cursor unchanged", async () => {
+    vi.useFakeTimers();
+    let resolvePage!: (count: number) => void;
+    const loadOlder = vi.fn(() => new Promise<number>((resolve) => (resolvePage = resolve)));
+    const hook = renderNavigation([messageItem("u1", "user")], {
+      hasOlder: true,
+      oldestCursor: "cursor-1",
+      loadOlder,
+    });
+    let navigation!: Promise<void>;
+    act(() => {
+      navigation = hook.result.current.goPrevious("u1");
+    });
+    hook.rerender({
+      sessionId: SESSION_ID,
+      items: [messageItem("u1", "user")],
+      hasOlder: true,
+      oldestCursor: "cursor-1",
+      loadOlder,
+      navigateTo: vi.fn(async () => true),
+    });
+
+    await act(async () => resolvePage(20));
+    await act(async () => vi.runAllTimersAsync());
+    await act(() => navigation);
+
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.canNavigatePrevious("u1")).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("discards a pending navigation when the active session changes", async () => {
+    let resolvePage!: (count: number) => void;
+    const navigateTo = vi.fn(async () => true);
+    const loadOlder = vi.fn(() => new Promise<number>((resolve) => (resolvePage = resolve)));
+    const hook = renderNavigation([messageItem("u1", "user")], {
+      hasOlder: true,
+      oldestCursor: "cursor-1",
+      loadOlder,
+      navigateTo,
+    });
+    let navigation!: Promise<void>;
+    act(() => {
+      navigation = hook.result.current.goPrevious("u1");
+    });
+    hook.rerender({
+      sessionId: "sess-2",
+      items: [messageItem("u-new", "user")],
+      hasOlder: false,
+      oldestCursor: "u-new",
+      loadOlder,
+      navigateTo,
+    });
+
+    await act(async () => resolvePage(20));
+    await act(() => navigation);
+
+    expect(navigateTo).not.toHaveBeenCalled();
+    expect(hook.result.current.isBusy).toBe(false);
   });
 });

@@ -14,7 +14,7 @@ import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
-import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
+import { useUserMessageNavigationActions } from "@/components/task/chat/user-message-navigation-context";
 import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { markdownComponents } from "@/components/shared/markdown-components";
@@ -42,7 +42,6 @@ type ChatMessageProps = {
   sessionId?: string | null;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
-  onScrollToMessage?: (messageId: string) => void;
   isTurnActive?: boolean;
 };
 
@@ -138,10 +137,8 @@ type UserMessageProps = {
   comment: Message;
   showRaw: boolean;
   onToggleRaw: () => void;
-  sessionId?: string | null;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
-  onScrollToMessage?: (messageId: string) => void;
 };
 
 type UserMessageMetadata = WorkflowMessageMetadata & {
@@ -391,12 +388,10 @@ function UserMessageContent({
   comment,
   showRaw,
   onToggleRaw,
-  sessionId,
   worktreePath,
   onOpenFile,
-  onScrollToMessage,
 }: UserMessageProps) {
-  const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
+  const navigation = useUserMessageNavigationActions(comment.id);
   const promptNames = usePromptMentionNames();
   const promptMentionComponents = usePromptMentionMarkdownComponents(promptNames);
   const {
@@ -461,19 +456,9 @@ function UserMessageContent({
           showTimestamp={true}
           showRawToggle={true}
           hasHiddenPrompts={hasHiddenPrompts}
-          showNavigation={userNavigation.hasPrevious || userNavigation.hasNext}
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
-          onNavigatePrev={() => {
-            if (userNavigation.previousId && onScrollToMessage)
-              onScrollToMessage(userNavigation.previousId);
-          }}
-          onNavigateNext={() => {
-            if (userNavigation.nextId && onScrollToMessage)
-              onScrollToMessage(userNavigation.nextId);
-          }}
-          hasPrev={userNavigation.hasPrevious}
-          hasNext={userNavigation.hasNext}
+          navigation={navigation}
         />
       </div>
     </div>
@@ -490,7 +475,6 @@ export const ChatMessage = memo(function ChatMessage({
   sessionId,
   worktreePath,
   onOpenFile,
-  onScrollToMessage,
   isTurnActive = false,
 }: ChatMessageProps) {
   const [showRaw, setShowRaw] = useState(false);
@@ -522,10 +506,8 @@ export const ChatMessage = memo(function ChatMessage({
         comment={comment}
         showRaw={showRaw}
         onToggleRaw={toggleRaw}
-        sessionId={sessionId}
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}
-        onScrollToMessage={onScrollToMessage}
       />
     );
   }

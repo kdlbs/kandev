@@ -43,6 +43,86 @@ export function getItemKey(item: RenderItem): string {
   return item.message.id;
 }
 
+export function getMessageDomId(messageId: string) {
+  return `msg-${messageId}`;
+}
+
+export type UserMessageRenderStop = {
+  messageId: string;
+  itemIndex: number;
+};
+
+export function getUserMessageRenderStops(items: RenderItem[]): UserMessageRenderStop[] {
+  const stops: UserMessageRenderStop[] = [];
+  items.forEach((item, itemIndex) => {
+    if (item.type === "message") {
+      if (item.message.author_type === "user") {
+        stops.push({ messageId: item.message.id, itemIndex });
+      }
+    }
+  });
+  return stops;
+}
+
+export function findUserMessageElement(
+  scrollElement: HTMLElement,
+  messageId: string,
+): HTMLElement | null {
+  for (const element of scrollElement.querySelectorAll<HTMLElement>("[data-user-message-id]")) {
+    if (element.dataset.userMessageId === messageId) return element;
+  }
+  return null;
+}
+
+export function replayMessageHighlight(element: HTMLElement) {
+  element.classList.remove("search-flash");
+  void element.offsetWidth;
+  element.classList.add("search-flash");
+  window.setTimeout(() => element.classList.remove("search-flash"), 1400);
+}
+
+export function getNavigationScrollBehavior(): "auto" | "smooth" {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
+function isAtNavigationPosition(scrollElement: HTMLElement, element: HTMLElement) {
+  if (scrollElement.clientHeight <= 0) return true;
+  const viewport = scrollElement.getBoundingClientRect();
+  const target = element.getBoundingClientRect();
+  const viewportCenter = viewport.top + viewport.height / 2;
+  const targetCenter = target.top + target.height / 2;
+  const isCentered = Math.abs(viewportCenter - targetCenter) <= 40;
+  const maxScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+  const isAtTopBoundary = scrollElement.scrollTop <= 1 && targetCenter <= viewportCenter;
+  const isAtBottomBoundary =
+    maxScrollTop - scrollElement.scrollTop <= 1 && targetCenter >= viewportCenter;
+  return isCentered || isAtTopBoundary || isAtBottomBoundary;
+}
+
+export async function waitForUserMessageElement(
+  scrollElement: HTMLElement,
+  messageId: string,
+  shouldContinue: () => boolean,
+): Promise<HTMLElement | null> {
+  const maxFrames = 30;
+  const requiredStableFrames = 8;
+  let candidate: HTMLElement | null = null;
+  let stableFrames = 0;
+  for (let frame = 0; frame < maxFrames && shouldContinue(); frame++) {
+    const mounted = findUserMessageElement(scrollElement, messageId);
+    const element = mounted && isAtNavigationPosition(scrollElement, mounted) ? mounted : null;
+    if (element === candidate && element) {
+      stableFrames++;
+    } else {
+      candidate = element;
+      stableFrames = element ? 1 : 0;
+    }
+    if (candidate && stableFrames >= requiredStableFrames) return candidate;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+  return null;
+}
+
 export function getSessionRunningState(sessionState: string | null | undefined) {
   return sessionState === "CREATED" || sessionState === "STARTING" || sessionState === "RUNNING";
 }
@@ -242,7 +322,6 @@ export const MessageItem = memo(function MessageItem({
   isLastGroup,
   isTurnActive,
   streamingMessageId,
-  onScrollToMessage,
 }: {
   item: RenderItem;
   sessionId: string | null;
@@ -254,7 +333,6 @@ export const MessageItem = memo(function MessageItem({
   isLastGroup: boolean;
   isTurnActive: boolean;
   streamingMessageId?: string | null;
-  onScrollToMessage: (id: string) => void;
 }) {
   if (item.type === "prepare_progress") {
     return <PrepareProgress sessionId={item.sessionId} />;
@@ -280,22 +358,25 @@ export const MessageItem = memo(function MessageItem({
             : false)
         }
         streamingMessageId={streamingMessageId}
-        onScrollToMessage={onScrollToMessage}
       />
     );
   }
   return (
-    <MessageRenderer
-      comment={item.message}
-      isTaskDescription={item.message.id === "task-description"}
-      taskId={taskId}
-      permissionsByToolCallId={permissionsByToolCallId}
-      childrenByParentToolCallId={childrenByParentToolCallId}
-      worktreePath={worktreePath}
-      sessionId={sessionId ?? undefined}
-      isTurnActive={isTurnActive && item.message.id === streamingMessageId}
-      onOpenFile={onOpenFile}
-      onScrollToMessage={onScrollToMessage}
-    />
+    <div
+      id={getMessageDomId(item.message.id)}
+      data-user-message-id={item.message.author_type === "user" ? item.message.id : undefined}
+    >
+      <MessageRenderer
+        comment={item.message}
+        isTaskDescription={item.message.id === "task-description"}
+        taskId={taskId}
+        permissionsByToolCallId={permissionsByToolCallId}
+        childrenByParentToolCallId={childrenByParentToolCallId}
+        worktreePath={worktreePath}
+        sessionId={sessionId ?? undefined}
+        isTurnActive={isTurnActive && item.message.id === streamingMessageId}
+        onOpenFile={onOpenFile}
+      />
+    </div>
   );
 });

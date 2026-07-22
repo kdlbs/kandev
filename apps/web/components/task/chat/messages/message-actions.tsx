@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
+  IconArrowDown,
+  IconArrowUp,
   IconCheck,
   IconCopy,
   IconCode,
-  IconChevronLeft,
-  IconChevronRight,
   IconEyeCode,
   IconInfoCircle,
 } from "@tabler/icons-react";
@@ -33,15 +33,51 @@ type MessageActionsProps = {
   showTimestamp?: boolean;
   showRawToggle?: boolean;
   hasHiddenPrompts?: boolean;
-  showNavigation?: boolean;
   showModel?: boolean;
   isRawView?: boolean;
   onToggleRaw?: () => void;
-  onNavigatePrev?: () => void;
-  onNavigateNext?: () => void;
-  hasPrev?: boolean;
-  hasNext?: boolean;
+  navigation?: MessageNavigationActions;
 };
+
+export type MessageNavigationActions = {
+  canNavigatePrevious: boolean;
+  canNavigateNext: boolean;
+  isBusy: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+};
+
+function NavigationButton({
+  direction,
+  disabled,
+  isBusy,
+  onClick,
+}: {
+  direction: "previous" | "next";
+  disabled: boolean;
+  isBusy: boolean;
+  onClick: () => void;
+}) {
+  const isPrevious = direction === "previous";
+  const label = isPrevious ? "Previous user message" : "Next user message";
+  const Icon = isPrevious ? IconArrowUp : IconArrowDown;
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.currentTarget.blur();
+        onClick();
+      }}
+      disabled={disabled}
+      aria-label={label}
+      aria-busy={isBusy || undefined}
+      title={label}
+      className="h-11 w-11 cursor-pointer rounded p-3 transition-colors duration-200 hover:bg-muted disabled:cursor-default disabled:opacity-35 sm:h-5 sm:w-5 sm:p-1"
+    >
+      <Icon className="h-full w-full" />
+    </button>
+  );
+}
 
 function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void }) {
   return (
@@ -58,51 +94,6 @@ function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void })
     >
       {copied ? <IconCheck className="h-full w-full" /> : <IconCopy className="h-full w-full" />}
     </button>
-  );
-}
-
-function NavigationButtons({
-  hasPrev,
-  hasNext,
-  onNavigatePrev,
-  onNavigateNext,
-}: {
-  hasPrev: boolean;
-  hasNext: boolean;
-  onNavigatePrev?: () => void;
-  onNavigateNext?: () => void;
-}) {
-  return (
-    <>
-      <button
-        onClick={onNavigatePrev}
-        disabled={!hasPrev}
-        className={cn(
-          ACTION_BUTTON_SIZE,
-          ACTION_BUTTON_HOVER,
-          ACTION_BUTTON_TRANSITION,
-          "disabled:opacity-30 disabled:cursor-not-allowed",
-        )}
-        title="Previous message"
-        aria-label="Go to previous message"
-      >
-        <IconChevronLeft className="h-full w-full" />
-      </button>
-      <button
-        onClick={onNavigateNext}
-        disabled={!hasNext}
-        className={cn(
-          ACTION_BUTTON_SIZE,
-          ACTION_BUTTON_HOVER,
-          ACTION_BUTTON_TRANSITION,
-          "disabled:opacity-30 disabled:cursor-not-allowed",
-        )}
-        title="Next message"
-        aria-label="Go to next message"
-      >
-        <IconChevronRight className="h-full w-full" />
-      </button>
-    </>
   );
 }
 
@@ -220,14 +211,10 @@ export function MessageActions({
   showTimestamp = true,
   showRawToggle = true,
   hasHiddenPrompts = false,
-  showNavigation = false,
   showModel = false,
   isRawView = false,
   onToggleRaw,
-  onNavigatePrev,
-  onNavigateNext,
-  hasPrev = false,
-  hasNext = false,
+  navigation,
 }: MessageActionsProps) {
   const { copied, copy } = useCopyToClipboard();
   const { turn, usageMultiplier } = useAppStore(
@@ -254,7 +241,10 @@ export function MessageActions({
   };
 
   return (
-    <div className="flex items-center gap-2 mt-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+    <div
+      data-testid="message-actions"
+      className="mt-2 flex items-center gap-2 opacity-100 transition-opacity focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+    >
       {showCopy && <CopyButton copied={copied} onCopy={handleCopy} />}
       {showRawToggle && onToggleRaw && (
         <RawToggleButton
@@ -263,15 +253,23 @@ export function MessageActions({
           hasHiddenPrompts={hasHiddenPrompts}
         />
       )}
-      {showNavigation && (
-        <NavigationButtons
-          hasPrev={hasPrev}
-          hasNext={hasNext}
-          onNavigatePrev={onNavigatePrev}
-          onNavigateNext={onNavigateNext}
-        />
-      )}
       <MessageDebugDialog message={message} turn={turn} usageMultiplier={usageMultiplier} />
+      {message.author_type === "user" && navigation && (
+        <>
+          <NavigationButton
+            direction="previous"
+            disabled={navigation.isBusy || !navigation.canNavigatePrevious}
+            isBusy={navigation.isBusy}
+            onClick={navigation.onPrevious}
+          />
+          <NavigationButton
+            direction="next"
+            disabled={navigation.isBusy || !navigation.canNavigateNext}
+            isBusy={navigation.isBusy}
+            onClick={navigation.onNext}
+          />
+        </>
+      )}
       <MessageMetaInfo
         showModel={showModel}
         sessionConfigText={sessionConfigText}
