@@ -466,11 +466,13 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         addFiles={s.addFiles}
         contextAreaProps={buildContextAreaProps(s, p)}
         promptResultRecovery={
-          <PromptResultRecovery
-            pendingResult={promptEnhancement.promptDelivery.pendingResult}
-            onApply={promptEnhancement.promptDelivery.applyPending}
-            onCopy={promptEnhancement.promptDelivery.copyPending}
-          />
+          promptEnhancement.promptDelivery.pendingResult ? (
+            <PromptResultRecovery
+              pendingResult={promptEnhancement.promptDelivery.pendingResult}
+              onApply={promptEnhancement.promptDelivery.applyPending}
+              onCopy={promptEnhancement.promptDelivery.copyPending}
+            />
+          ) : null
         }
         editorAreaProps={buildEditorAreaProps(s, p, {
           onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
