@@ -167,9 +167,9 @@ type Host interface {
 	// stripped; raw system prompts are never returned.
 	Messages() MessageReader
 
-	// InvokeUtilityAgent runs a one-shot completion using the
-	// operator-configured utility agent (capability agent_invoke). No API
-	// key of your own; FailedPrecondition when no utility agent is set.
+	// InvokeUtilityAgent runs a one-shot completion using this plugin's
+	// selected utility agent (capability agent_invoke). No API key of your
+	// own; FailedPrecondition when no valid enabled agent is selected.
 	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
 }
 ```
@@ -213,14 +213,34 @@ conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
 never sees raw system prompts.
 
 `host.InvokeUtilityAgent(ctx, prompt)` runs a one-shot, non-interactive LLM
-completion using the **utility agent** the operator selects in **Settings >
-System > Utility Agent** (capability `agent_invoke`), and returns its text. Your
-plugin needs no provider API key — it delegates to a kandev-configured agent.
-If the operator has not selected a utility agent (or the selected profile was
-deleted), the call returns a gRPC `FailedPrecondition` error, so handle that as
-"ask the operator to configure one" rather than a transient failure. This is the
-LLM step behind, e.g., a "summarize yesterday" plugin: read the conversation
-with `host.Messages()`, then summarize it with `host.InvokeUtilityAgent(...)`.
+completion using the utility agent selected for this plugin in **Settings >
+Plugins > `<plugin>`** (capability `agent_invoke`), and returns its text. Declare
+the selector in `manifest.yaml`:
+
+```yaml
+capabilities:
+  agent_invoke: true
+
+config_schema:
+  type: object
+  properties:
+    utility_agent:
+      type: string
+      format: utility-agent
+      title: Utility Agent
+      description: Agent used for this plugin's LLM calls
+  required: ["utility_agent"]
+```
+
+The picker displays configured built-in and custom agent names but stores the
+selected agent's stable ID. Omit `utility_agent` from `required` only when the
+plugin supports operating without LLM delegation; optional selectors include a
+**Not set** choice. The plugin needs no provider API key because it delegates to
+a kandev-configured agent. A missing, deleted, or disabled selection returns
+gRPC `FailedPrecondition`, so handle that as "ask the operator to configure
+one" rather than a transient failure. This is the LLM step behind, e.g., a
+"summarize yesterday" plugin: read the conversation with `host.Messages()`,
+then summarize it with `host.InvokeUtilityAgent(...)`.
 
 **Capability gating.** Every Host RPC except `GetConfig` and `EmitEvent` is
 checked against your manifest's `capabilities` before the handler runs:

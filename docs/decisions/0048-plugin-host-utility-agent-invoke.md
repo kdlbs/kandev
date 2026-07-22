@@ -31,8 +31,9 @@ configuration and the existing host-utility tier.
 1. **Plugin config: `utility_agent`.** Plugins declaring `agent_invoke` declare
    a `config_schema` field named `utility_agent`, with `type: string` and
    `format: utility-agent`. Settings > Plugins renders it as a picker of the
-   existing built-in and custom utility agents. The selected name is scoped to
-   the plugin; no global user setting or agent profile is involved.
+   existing built-in and custom utility agents. The picker displays the name
+   but stores the selected agent's stable ID, scoped to the plugin; no global
+   user setting or agent profile is involved.
 
 2. **New capability `agent_invoke`.** A boolean `Capabilities.AgentInvoke`,
    enforced exactly like `state`/`secrets`: `Host.InvokeUtilityAgent` returns
@@ -48,7 +49,7 @@ configuration and the existing host-utility tier.
 
 4. **Reuse the host-utility tier (ADR 0002).** The kandev-side handler:
    gate `agent_invoke` → read the calling plugin's `utility_agent` config →
-   resolve its name through the established utility-agent configuration → call a
+   resolve its ID through the established utility-agent configuration → call a
    narrow `utilityRunner.ExecutePrompt(ctx, agentType, model,
    "", prompt)` and return the text. `utilityRunner` is a thin
    `pluginsHostUtilityAdapter` over `hostutility.Manager` wired in `backendapp`,
@@ -59,7 +60,7 @@ configuration and the existing host-utility tier.
 5. **Typed "not configured" failure.** If no utility agent is selected — or the
    selected utility agent has since been deleted or disabled — the handler returns gRPC
    `FailedPrecondition` (`no utility agent configured` /
-   `configured utility agent "<name>" not found`), never a silent empty
+   `configured utility agent "<id>" not found`), never a silent empty
    completion. A stale selection is treated as "unconfigured", not an internal
    error.
 

@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -574,9 +575,12 @@ type pluginsUtilityAgentAdapter struct {
 	svc *utilityservice.Service
 }
 
-func (a pluginsUtilityAgentAdapter) GetAgentByName(ctx context.Context, name string) (*plugins.UtilityAgent, error) {
-	agent, err := a.svc.GetAgentByName(ctx, name)
+func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string) (*plugins.UtilityAgent, error) {
+	agent, err := a.svc.GetAgentByID(ctx, id)
 	if err != nil {
+		if errors.Is(err, utilityservice.ErrAgentNotFound) {
+			return nil, plugins.ErrUtilityAgentNotFound
+		}
 		return nil, err
 	}
 	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, Enabled: agent.Enabled}, nil

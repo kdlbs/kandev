@@ -325,7 +325,8 @@ service Host {
   returns its text. Plugins declaring `capabilities.agent_invoke: true` must
   declare that field in `config_schema` with `type: string` and
   `format: utility-agent`; Settings > Plugins then renders a picker containing
-  the configured built-in and custom utility agents. It reuses kandev's
+  the configured built-in and custom utility agents. The picker displays the
+  agent name and persists its stable ID. It reuses kandev's
   sessionless host-utility inference tier (ADR 0002) — no task, session, or
   workspace — so a plugin can delegate a lightweight LLM step without holding a
   provider API key. Returns gRPC `FailedPrecondition` when no utility agent is

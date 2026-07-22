@@ -193,7 +193,7 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		agentProfiles:    d.profiles,
 		sessionCodeStats: d.codeStats,
 		messageData:      d.messages,
-		configs:          &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "plugin-agent"}},
+		configs:          &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
 		utilityDeps: func() (utilityAgentSource, utilityRunner) {
 			return d.utilAgents, d.utilRun
 		},

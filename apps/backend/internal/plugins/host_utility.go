@@ -5,6 +5,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"google.golang.org/grpc/codes"
@@ -14,9 +15,13 @@ import (
 const (
 	capabilityAgentInvoke = "agent_invoke"
 	// utilityAgentConfigKey is the manifest config_schema field plugins with
-	// agent_invoke declare. Its value is the selected utility agent's name.
+	// agent_invoke declare. Its value is the selected utility agent's ID.
 	utilityAgentConfigKey = "utility_agent"
 )
+
+// ErrUtilityAgentNotFound lets backend adapters identify the one lookup error
+// that plugin calls should translate into a configuration failure.
+var ErrUtilityAgentNotFound = errors.New("utility agent not found")
 
 // UtilityAgent is the execution-relevant portion of a configured utility
 // agent. backendapp adapts internal/utility/service.Service to this shape.
@@ -28,7 +33,7 @@ type UtilityAgent struct {
 }
 
 type utilityAgentSource interface {
-	GetAgentByName(ctx context.Context, name string) (*UtilityAgent, error)
+	GetAgentByID(ctx context.Context, id string) (*UtilityAgent, error)
 }
 
 // utilityRunner runs a one-shot completion for an agent type + model and
@@ -56,16 +61,22 @@ func (h *pluginHost) InvokeUtilityAgent(ctx context.Context, prompt string) (str
 	if err != nil {
 		return "", fmt.Errorf("plugins: read plugin config: %w", err)
 	}
-	name, _ := config[utilityAgentConfigKey].(string)
-	if name == "" {
+	agentID, _ := config[utilityAgentConfigKey].(string)
+	if agentID == "" {
 		return "", errNoUtilityAgent()
 	}
-	agent, err := agents.GetAgentByName(ctx, name)
+	agent, err := agents.GetAgentByID(ctx, agentID)
+	if errors.Is(err, ErrUtilityAgentNotFound) {
+		return "", status.Errorf(codes.FailedPrecondition, "configured utility agent %q not found", agentID)
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "", status.FromContextError(err).Err()
+	}
 	if err != nil {
-		return "", status.Errorf(codes.FailedPrecondition, "configured utility agent %q not found", name)
+		return "", fmt.Errorf("plugins: load configured utility agent %q: %w", agentID, err)
 	}
 	if !agent.Enabled {
-		return "", status.Errorf(codes.FailedPrecondition, "configured utility agent %q is disabled", name)
+		return "", status.Errorf(codes.FailedPrecondition, "configured utility agent %q is disabled", agentID)
 	}
 	return runner.ExecutePrompt(ctx, agent.AgentID, agent.Model, "", prompt)
 }

@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
+import { useUtilityAgents } from "@/hooks/domains/settings/use-utility-agents";
 import type { PluginConfigField } from "@/lib/plugins/config-schema";
-import { listUtilityAgents, type UtilityAgent } from "@/lib/api/domains/utility-api";
 
 /** Sentinel for the "Not set" select item — an actual enum option can never
  * collide with it, and Radix rejects value="" items. */
 const ENUM_UNSET_SENTINEL = "__kandev_enum_unset__";
+const UTILITY_AGENT_UNSET_SENTINEL = "__kandev_utility_agent_unset__";
 
 type PluginConfigFormProps = {
   fields: PluginConfigField[];
@@ -144,6 +144,7 @@ function ConfigFieldControl({
         field={field}
         inputId={inputId}
         value={value}
+        isDirty={isDirty}
         disabled={disabled}
         onChange={onChange}
       />
@@ -171,29 +172,40 @@ function UtilityAgentSelect({
   field,
   inputId,
   value,
+  isDirty,
   disabled,
   onChange,
 }: ConfigFieldControlProps) {
-  const [agents, setAgents] = useState<UtilityAgent[]>([]);
-  useEffect(() => {
-    listUtilityAgents({ cache: "no-store" })
-      .then((response) => setAgents(response.agents))
-      .catch(() => setAgents([]));
-  }, []);
+  const { agents, loading, error } = useUtilityAgents();
+  const selectedID = typeof value === "string" ? value : "";
+  const selectedAgent = agents.find((agent) => agent.id === selectedID);
+  const selectedLabel = selectedAgent?.name ?? selectedUtilityAgentFallback(selectedID, loading);
+  const placeholder = utilityAgentPlaceholder(loading, error);
+
   return (
     <Select
-      value={typeof value === "string" ? value : ""}
-      disabled={disabled}
-      onValueChange={(next) => onChange(field.name, next)}
+      value={selectedID}
+      disabled={disabled || loading || error !== null}
+      onValueChange={(next) =>
+        onChange(field.name, next === UTILITY_AGENT_UNSET_SENTINEL ? "" : next)
+      }
     >
-      <SelectTrigger id={inputId} className="max-w-md cursor-pointer">
-        <SelectValue placeholder="Select a utility agent..." />
+      <SelectTrigger id={inputId} className="max-w-md cursor-pointer" data-settings-dirty={isDirty}>
+        <SelectValue placeholder={placeholder}>{selectedLabel}</SelectValue>
       </SelectTrigger>
       <SelectContent>
+        {!field.required && (
+          <SelectItem
+            value={UTILITY_AGENT_UNSET_SENTINEL}
+            className="cursor-pointer text-muted-foreground"
+          >
+            Not set
+          </SelectItem>
+        )}
         {agents.map((agent) => (
           <SelectItem
             key={agent.id}
-            value={agent.name}
+            value={agent.id}
             className="cursor-pointer"
             disabled={!agent.enabled}
           >
@@ -203,6 +215,17 @@ function UtilityAgentSelect({
       </SelectContent>
     </Select>
   );
+}
+
+function selectedUtilityAgentFallback(selectedID: string, loading: boolean): string | undefined {
+  if (selectedID === "") return undefined;
+  return loading ? "Loading selected utility agent..." : "Selected utility agent unavailable";
+}
+
+function utilityAgentPlaceholder(loading: boolean, error: Error | null): string {
+  if (loading) return "Loading utility agents...";
+  if (error) return "Utility agents unavailable";
+  return "Select a utility agent...";
 }
 
 function inputType(field: PluginConfigField): string {
