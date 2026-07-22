@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -13,6 +15,19 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
+
+// isLocalGitRepo reports whether path looks like a valid local git checkout,
+// i.e. it has a ".git" entry that is either a directory (regular repo) or a
+// regular file (worktree gitdir pointer). Mirrors worktree.Manager.isGitRepo
+// in internal/worktree/manager_git.go; kept local since that method is
+// unexported on a different package's type.
+func isLocalGitRepo(path string) bool {
+	info, err := os.Stat(filepath.Join(path, ".git"))
+	if err != nil {
+		return false
+	}
+	return info.IsDir() || info.Mode().IsRegular()
+}
 
 // isAgentAlreadyRunningError checks whether LaunchAgent refused because the
 // lifecycle manager's in-memory store already has an execution for this session.
@@ -110,8 +125,12 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 		return nil, err
 	}
 
-	// Clone provider-backed repos that have no local path yet
-	if repo.LocalPath == "" && repo.ProviderOwner != "" && repo.ProviderName != "" {
+	// Clone provider-backed repos that have no local path yet, or whose stored
+	// local path has gone stale (moved, deleted, or never actually a git repo
+	// — e.g. a leftover placeholder directory). Only overwrite repo.LocalPath
+	// when the clone actually returns a path; never blank an already-set one.
+	if repo.ProviderOwner != "" && repo.ProviderName != "" &&
+		(repo.LocalPath == "" || !isLocalGitRepo(repo.LocalPath)) {
 		if localPath, cloneErr := e.ensureRepoCloned(ctx, repo); cloneErr != nil {
 			return nil, cloneErr
 		} else if localPath != "" {

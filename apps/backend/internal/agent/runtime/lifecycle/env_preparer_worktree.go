@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -11,6 +12,18 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/worktree"
 )
+
+// isGitRepoPath reports whether path has a ".git" entry that is either a
+// directory (regular repo) or a regular file (worktree gitdir pointer).
+// Mirrors worktree.Manager.isGitRepo in internal/worktree/manager_git.go;
+// kept local since that method is unexported on a different package's type.
+func isGitRepoPath(path string) bool {
+	info, err := os.Stat(filepath.Join(path, ".git"))
+	if err != nil {
+		return false
+	}
+	return info.IsDir() || info.Mode().IsRegular()
+}
 
 // copyFilesStep builds the "Copy N ignored files" prepare step shown after a
 // worktree's CopyFiles spec has been applied. repoLabel is appended for
@@ -143,6 +156,12 @@ func (p *WorktreePreparer) validateWorktreeRequest(
 	}
 	if p.worktreeMgr == nil {
 		completeStepError(&step, "worktree manager not available")
+		steps = append(steps, step)
+		reportProgress(onProgress, step, stepIdx, totalSteps)
+		return steps, false
+	}
+	if !isGitRepoPath(req.RepositoryPath) {
+		completeStepError(&step, fmt.Sprintf("repository path is not a git repository: %s", req.RepositoryPath))
 		steps = append(steps, step)
 		reportProgress(onProgress, step, stepIdx, totalSteps)
 		return steps, false
