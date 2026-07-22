@@ -55,6 +55,8 @@ type PillProps = {
   onRefresh?: () => void;
   /** Show the refresh icon as spinning + disabled while a refresh is in flight. */
   refreshing?: boolean;
+  /** Accessible label used for the optional refresh action. */
+  refreshLabel?: string;
   /**
    * Render without its own border/bg so the pill blends into a wrapping
    * grouped container (used by RepoChip to draw one rectangle around
@@ -72,7 +74,7 @@ type PillProps = {
    * base) without depending on the user reading a tooltip.
    */
   prefix?: string;
-  /** Optional cmdk-native action shown above the selectable values. */
+  /** Optional icon action rendered beside the search input. */
   action?: PillAction;
 };
 
@@ -87,33 +89,15 @@ function PillCommandList({
   onSelect,
   setOpen,
   emptyMessage,
-  action,
 }: {
   options: PillOption[];
   onSelect: (value: string) => void;
   setOpen: (open: boolean) => void;
   emptyMessage: string;
-  action?: PillAction;
 }) {
   return (
     <CommandList>
       <CommandEmpty>{emptyMessage}</CommandEmpty>
-      {action ? (
-        <CommandGroup>
-          <CommandItem
-            forceMount
-            value={action.label}
-            className="min-h-12 cursor-pointer"
-            onSelect={() => {
-              action.onSelect();
-              setOpen(false);
-            }}
-          >
-            {action.icon}
-            {action.label}
-          </CommandItem>
-        </CommandGroup>
-      ) : null}
       <CommandGroup>
         {options.map((option) => (
           <CommandItem
@@ -176,6 +160,7 @@ function PillPopoverContent({
   searchPlaceholder,
   onRefresh,
   refreshing,
+  refreshLabel,
   options,
   onSelect,
   setOpen,
@@ -187,6 +172,7 @@ function PillPopoverContent({
   searchPlaceholder: string;
   onRefresh?: () => void;
   refreshing?: boolean;
+  refreshLabel?: string;
   options: PillOption[];
   onSelect: (value: string) => void;
   setOpen: (open: boolean) => void;
@@ -195,18 +181,48 @@ function PillPopoverContent({
   action?: PillAction;
 }) {
   return (
-    <PopoverContent className="w-[360px] p-0" align="start" portalContainer={portalContainer}>
+    <PopoverContent
+      className="w-[min(480px,calc(100vw-2rem))] p-0"
+      align="start"
+      portalContainer={portalContainer}
+    >
       <Command filter={filter}>
-        <div className="flex items-center gap-1 px-2 pt-1">
+        <div className="flex min-h-11 items-center gap-1 px-2 pt-1">
           <CommandInput placeholder={searchPlaceholder} className="h-9 flex-1" />
-          {onRefresh && <BranchRefreshButton onRefresh={onRefresh} refreshing={refreshing} />}
+          {onRefresh ? (
+            <BranchRefreshButton
+              onRefresh={onRefresh}
+              refreshing={refreshing}
+              label={refreshLabel}
+              testId={refreshLabel === "repositories" ? "repo-refresh-button" : undefined}
+              touchTarget={refreshLabel === "repositories"}
+            />
+          ) : null}
+          {action ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={action.label}
+                  data-testid="create-local-repository-button"
+                  onClick={() => {
+                    action.onSelect();
+                    setOpen(false);
+                  }}
+                  className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+                >
+                  {action.icon}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{action.label}</TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
         <PillCommandList
           options={options}
           onSelect={onSelect}
           setOpen={setOpen}
           emptyMessage={emptyMessage}
-          action={action}
         />
       </Command>
     </PopoverContent>
@@ -260,6 +276,7 @@ export function Pill({
   testId,
   onRefresh,
   refreshing,
+  refreshLabel,
   flat = false,
   filter,
   tooltip,
@@ -297,14 +314,13 @@ export function Pill({
     },
     [],
   );
-  const hasValue = !!value;
   const triggerButton = renderPillTriggerButton({
     icon,
     value,
     placeholder,
     disabled,
     flat,
-    hasValue,
+    hasValue: Boolean(value),
     testId,
     prefix,
   });
@@ -332,6 +348,7 @@ export function Pill({
         searchPlaceholder={searchPlaceholder}
         onRefresh={onRefresh}
         refreshing={refreshing}
+        refreshLabel={refreshLabel}
         options={options}
         onSelect={onSelect}
         setOpen={setOpen}

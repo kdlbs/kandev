@@ -130,6 +130,8 @@ function CreateModeBody(props: DialogFormBodyProps) {
     onToggleFreshBranch,
     workflowAgentLocked,
     repositories,
+    onRefreshRepositories,
+    repositoriesRefreshing,
     freshBranchAvailable,
     isLocalExecutor,
     localRepositoryCreation,
@@ -155,6 +157,8 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onToggleNoRepository={props.onToggleNoRepository}
         onWorkspacePathChange={props.onWorkspacePathChange}
         localRepositoryCreation={localRepositoryCreation}
+        onRefreshRepositories={onRefreshRepositories}
+        repositoriesRefreshing={repositoriesRefreshing}
       />
       {showTaskName && (
         <InlineTaskName
@@ -404,6 +408,7 @@ export function useTaskCreateDialogSetup(
     snapshots,
     repositories,
     repositoriesLoading,
+    refreshRepositories,
     taskCreateLastUsed,
     userSettingsLoaded,
     computed,
@@ -470,6 +475,7 @@ export function useTaskCreateDialogSetup(
     snapshots,
     repositories,
     repositoriesLoading,
+    refreshRepositories,
     computed,
     handlers,
     submitHandlers,

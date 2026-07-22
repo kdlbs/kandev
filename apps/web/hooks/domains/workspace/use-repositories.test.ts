@@ -75,4 +75,14 @@ describe("useRepositories", () => {
     await Promise.resolve();
     expect(mockListRepositories).not.toHaveBeenCalled();
   });
+
+  it("refreshes an already-loaded workspace when requested", async () => {
+    setup(/* loaded */ true);
+    const { result } = renderHook(() => useRepositories("ws-1"));
+
+    await result.current.refresh();
+
+    expect(mockListRepositories).toHaveBeenCalledWith("ws-1", undefined, { cache: "no-store" });
+    expect(mockSetRepositories).toHaveBeenCalledWith("ws-1", [{ id: "r1", name: "Repo One" }]);
+  });
 });

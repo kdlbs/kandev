@@ -56,6 +56,8 @@ type RepoChipsRowProps = {
     executorSelection: DirectLocalExecutorSelection | null;
     onCreated: (rowKey: string, repository: Repository) => void;
   };
+  onRefreshRepositories?: () => void;
+  repositoriesRefreshing?: boolean;
 };
 
 export function RepoChipsRow({
@@ -75,6 +77,8 @@ export function RepoChipsRow({
   lastUsedBranch,
   userSettingsLoaded,
   localRepositoryCreation,
+  onRefreshRepositories,
+  repositoriesRefreshing,
 }: RepoChipsRowProps) {
   const chipRowRef = useRef<HTMLDivElement>(null);
   const [creatingForRowKey, setCreatingForRowKey] = useState<string | null>(null);
@@ -140,6 +144,8 @@ export function RepoChipsRow({
         lastUsedBranch={lastUsedBranch}
         userSettingsLoaded={userSettingsLoaded}
         onCreateRepository={localRepositoryCreation ? setCreatingForRowKey : undefined}
+        onRefreshRepositories={onRefreshRepositories}
+        repositoriesRefreshing={repositoriesRefreshing}
       />
       <SourceModeSwitch
         useRemote={fs.useRemote}
@@ -179,6 +185,8 @@ function ModeBody({
   lastUsedBranch,
   userSettingsLoaded,
   onCreateRepository,
+  onRefreshRepositories,
+  repositoriesRefreshing,
 }: {
   fs: DialogFormState;
   repositories: Repository[];
@@ -196,6 +204,8 @@ function ModeBody({
   lastUsedBranch?: string | null;
   userSettingsLoaded?: boolean;
   onCreateRepository?: (key: string) => void;
+  onRefreshRepositories?: () => void;
+  repositoriesRefreshing?: boolean;
 }) {
   if (fs.noRepository) {
     return (
@@ -237,6 +247,8 @@ function ModeBody({
       lastUsedBranch={lastUsedBranch}
       userSettingsLoaded={userSettingsLoaded}
       onCreateRepository={onCreateRepository}
+      onRefreshRepositories={onRefreshRepositories}
+      repositoriesRefreshing={repositoriesRefreshing}
       freshBranchToggle={
         // Multi-repo runs use worktrees, so the existing-vs-fork choice
         // is irrelevant — only surface the toggle for single-repo flows.

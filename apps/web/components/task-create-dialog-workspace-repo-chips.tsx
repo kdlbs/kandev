@@ -45,6 +45,8 @@ type WorkspaceRepoChipsProps = {
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
   onCreateRepository?: (key: string) => void;
+  onRefreshRepositories?: () => void;
+  repositoriesRefreshing?: boolean;
   lastUsedBranch?: string | null;
   userSettingsLoaded?: boolean;
 };
@@ -74,6 +76,8 @@ export function WorkspaceRepoChips({
   onRowRepositoryChange,
   onRowBranchChange,
   onCreateRepository,
+  onRefreshRepositories,
+  repositoriesRefreshing,
   lastUsedBranch,
   userSettingsLoaded,
 }: WorkspaceRepoChipsProps) {
@@ -109,6 +113,8 @@ export function WorkspaceRepoChips({
           onCreateRepository={
             rows.length === 1 && onCreateRepository ? () => onCreateRepository(row.key) : undefined
           }
+          onRefreshRepositories={rows.length === 1 ? onRefreshRepositories : undefined}
+          repositoriesRefreshing={repositoriesRefreshing}
           onRemove={() => onRemove(row.key)}
         />
       ))}
@@ -217,6 +223,8 @@ type RepoChipProps = {
   onBranchChange: (value: string) => void;
   onRemove: () => void;
   onCreateRepository?: () => void;
+  onRefreshRepositories?: () => void;
+  repositoriesRefreshing?: boolean;
 };
 
 function useRepoChipData({
@@ -371,6 +379,8 @@ function RepoChip({
   onBranchChange,
   onRemove,
   onCreateRepository,
+  onRefreshRepositories,
+  repositoriesRefreshing,
 }: RepoChipProps) {
   const { repoOptions, branchOptions, branchesLoading, refreshBranches } = useRepoChipData({
     row,
@@ -416,6 +426,9 @@ function RepoChip({
         tooltip={repoTooltip}
         filter={scoreRepo}
         action={buildCreateRepositoryAction(onCreateRepository)}
+        onRefresh={onRefreshRepositories}
+        refreshing={repositoriesRefreshing}
+        refreshLabel="repositories"
         flat
       />
       <Pill

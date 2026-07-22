@@ -35,7 +35,7 @@ async function openCreateTask(page: Page): Promise<void> {
 async function openCreationDrawer(page: Page): Promise<Locator> {
   const trigger = page.getByTestId("repo-chip-trigger");
   await trigger.click();
-  const action = page.getByRole("option", { name: "Create new repository" });
+  const action = page.getByTestId("create-local-repository-button");
   await expect(action).toBeVisible();
   const actionBox = await action.boundingBox();
   expect(actionBox).not.toBeNull();

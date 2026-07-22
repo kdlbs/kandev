@@ -72,6 +72,8 @@ export function buildDialogFormBodyProps(
     enhance: setup.enhance,
     workflowAgentLocked: computed.workflowAgentLocked,
     repositories: setup.repositories,
+    onRefreshRepositories: setup.refreshRepositories,
+    repositoriesRefreshing: setup.repositoriesLoading,
     lastUsedBranch: setup.taskCreateLastUsed.branch,
     userSettingsLoaded: setup.userSettingsLoaded,
     freshBranchAvailable: setup.freshBranchAvailable,

@@ -433,6 +433,8 @@ export type DialogFormBodyProps = {
   workflowAgentLocked: boolean;
   /** Workspace repositories — driven into the chip row for repo + branch picks. */
   repositories: Repository[];
+  onRefreshRepositories?: () => void;
+  repositoriesRefreshing?: boolean;
   lastUsedBranch?: string | null;
   userSettingsLoaded?: boolean;
   /** Computed in the parent: single-row + local executor + not URL mode. */

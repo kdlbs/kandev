@@ -38,6 +38,8 @@ import {
   Pill,
 } from "./task-create-dialog-pill";
 
+const CREATE_REPOSITORY = "Create new repository";
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -196,7 +198,7 @@ describe("Pill popover", () => {
     expect(screen.getByTestId("clipping-host").contains(content)).toBe(false);
   });
 
-  it("activates an optional command action with a pointer", () => {
+  it("activates an optional toolbar action with a pointer", () => {
     const onAction = vi.fn();
     render(
       <Pill
@@ -207,17 +209,17 @@ describe("Pill popover", () => {
         onSelect={vi.fn()}
         searchPlaceholder="Search repositories..."
         emptyMessage="No repositories"
-        action={{ label: "Create new repository", onSelect: onAction }}
+        action={{ label: CREATE_REPOSITORY, onSelect: onAction }}
       />,
     );
 
     fireEvent.click(screen.getByText("repository"));
-    fireEvent.click(screen.getByText("Create new repository"));
+    fireEvent.click(screen.getByRole("button", { name: CREATE_REPOSITORY }));
 
     expect(onAction).toHaveBeenCalledOnce();
   });
 
-  it("activates an optional command action from the keyboard", () => {
+  it("renders an optional toolbar action outside the option list", () => {
     const onAction = vi.fn();
     render(
       <Pill
@@ -228,15 +230,13 @@ describe("Pill popover", () => {
         onSelect={vi.fn()}
         searchPlaceholder="Search repositories..."
         emptyMessage="No repositories"
-        action={{ label: "Create new repository", onSelect: onAction }}
+        action={{ label: CREATE_REPOSITORY, onSelect: onAction }}
       />,
     );
 
     fireEvent.click(screen.getByText("repository"));
-    const search = screen.getByPlaceholderText("Search repositories...");
-    fireEvent.keyDown(search, { key: "ArrowDown" });
-    fireEvent.keyDown(search, { key: "Enter" });
-
-    expect(onAction).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: CREATE_REPOSITORY })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: CREATE_REPOSITORY })).toBeNull();
+    expect(onAction).not.toHaveBeenCalled();
   });
 });

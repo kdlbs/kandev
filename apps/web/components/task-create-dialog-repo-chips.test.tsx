@@ -493,9 +493,31 @@ describe("WorkspaceRepoChips", () => {
     );
 
     fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
-    fireEvent.click(screen.getByText("Create new repository"));
+    fireEvent.click(screen.getByTestId("create-local-repository-button"));
 
     expect(onCreateRepository).toHaveBeenCalledWith("r0");
+  });
+
+  it("refreshes repositories from the selector toolbar", () => {
+    const onRefreshRepositories = vi.fn();
+    renderInProvider(
+      <WorkspaceRepoChips
+        rows={[rows[0]]}
+        repositories={repositories}
+        workspaceId="ws-1"
+        canAddMore
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        onRefreshRepositories={onRefreshRepositories}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
+    fireEvent.click(screen.getByTestId("repo-refresh-button"));
+
+    expect(onRefreshRepositories).toHaveBeenCalledOnce();
   });
 
   it("does not expose repository creation for multi-repository tasks", () => {

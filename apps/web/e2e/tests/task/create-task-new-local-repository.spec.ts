@@ -38,7 +38,7 @@ async function openCreateTask(page: Page): Promise<void> {
 
 async function openRepositoryCreation(page: Page): Promise<void> {
   await page.getByTestId("repo-chip-trigger").click();
-  const action = page.getByRole("option", { name: "Create new repository" });
+  const action = page.getByTestId("create-local-repository-button");
   await expect(action).toBeVisible();
   await action.click();
   await expect(page.getByTestId("create-local-repository-dialog")).toBeVisible();
