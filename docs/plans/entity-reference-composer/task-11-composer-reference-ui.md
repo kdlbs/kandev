@@ -13,7 +13,7 @@ spec: "../../specs/ui/entity-reference-composer.md"
 ## Acceptance
 
 - Valid `#` triggers in task/Quick Chat open descriptor-driven grouped search, including a generic unknown-provider fallback; arrows + Enter/Tab and touch insert a non-sending atom with trailing space.
-- Passthrough stays literal; new task search leaves `@`, while legacy `@task` draft/send parsing remains compatible.
+- Passthrough stays literal; Kandev task discovery remains under `@`, while `#` defensively omits any Kandev-task group returned by the search service.
 - Draft/history and reverse-search entries round-trip generated Markdown plus metadata, without converting ordinary links; popup stays visual-viewport-contained with one scroll owner and 44 px rows.
 
 ## Verification

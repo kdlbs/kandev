@@ -15,7 +15,6 @@ import (
 	"github.com/kandev/kandev/internal/mentions"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
-	taskservice "github.com/kandev/kandev/internal/task/service"
 	api "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -29,7 +28,6 @@ type MentionComponents struct {
 
 type mentionWorkspaceResolver interface {
 	GetWorkspace(context.Context, string) (*models.Workspace, error)
-	GetTask(context.Context, string) (*models.Task, error)
 }
 
 type mentionConversationResolver interface {
@@ -84,31 +82,13 @@ func (s *workspaceValidatingMentionSearcher) Search(
 	if workspace == nil || workspace.ID != request.WorkspaceID {
 		return nil, mentions.ErrWorkspaceNotFound
 	}
-	if request.ExcludeTaskID != "" {
-		task, err := s.workspaces.GetTask(ctx, request.ExcludeTaskID)
-		if errors.Is(err, repository.ErrTaskNotFound) {
-			return nil, mentions.ErrInvalidRequest
-		}
-		if err != nil {
-			return nil, fmt.Errorf("validate excluded mention task: %w", err)
-		}
-		if task == nil || task.WorkspaceID != request.WorkspaceID {
-			return nil, mentions.ErrInvalidRequest
-		}
-	}
 	return s.searcher.Search(ctx, request)
 }
 
 func builtinMentionProviders(
-	taskSvc *taskservice.Service,
 	services *Services,
 	gitLabRepositories gitLabMentionRepositoryResolver,
 ) []mentions.MentionProvider {
-	var taskSearcher mentions.TaskMentionSearcher
-	if taskSvc != nil {
-		taskSearcher = taskSvc
-	}
-	providers := []mentions.MentionProvider{mentions.NewTaskProvider(taskSearcher)}
 	if services == nil {
 		services = &Services{}
 	}
@@ -117,7 +97,7 @@ func builtinMentionProviders(
 	if services.Jira != nil {
 		jiraService = services.Jira
 	}
-	providers = append(providers, mentions.NewJiraProvider(jiraService))
+	providers := []mentions.MentionProvider{mentions.NewJiraProvider(jiraService)}
 
 	var linearService mentions.LinearMentionService
 	if services.Linear != nil {

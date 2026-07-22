@@ -36,7 +36,7 @@ Task 09 endpoint contract.
 
 ## Inputs
 
-Spec API/state/failure sections; command-panel abort/debounce task search pattern.
+Spec API/state/failure sections; command-panel abort/debounce search pattern.
 
 ## Output contract
 

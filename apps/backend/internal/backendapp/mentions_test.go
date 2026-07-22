@@ -18,7 +18,6 @@ import (
 
 type fakeMentionScopeResolver struct {
 	workspaces map[string]*models.Workspace
-	tasks      map[string]*models.Task
 	err        error
 }
 
@@ -31,17 +30,6 @@ func (r *fakeMentionScopeResolver) GetWorkspace(_ context.Context, id string) (*
 		return nil, repository.ErrWorkspaceNotFound
 	}
 	return workspace, nil
-}
-
-func (r *fakeMentionScopeResolver) GetTask(_ context.Context, id string) (*models.Task, error) {
-	if r.err != nil {
-		return nil, r.err
-	}
-	task, ok := r.tasks[id]
-	if !ok {
-		return nil, repository.ErrTaskNotFound
-	}
-	return task, nil
 }
 
 func (r *fakeMentionScopeResolver) ResolveWorkspace(_ context.Context, sessionID, _ string) (string, error) {
@@ -169,19 +157,6 @@ func TestMentionHTTPCompositionValidatesWorkspaceBeforeMixedProviderFanout(t *te
 		)
 	}
 
-	foreignExclude := httptest.NewRecorder()
-	router.ServeHTTP(foreignExclude, httptest.NewRequest(
-		http.MethodGet,
-		"/api/v1/workspaces/workspace-1/mentions/search?q=auth&exclude_task_id=foreign-task",
-		nil,
-	))
-	if foreignExclude.Code != http.StatusBadRequest {
-		t.Fatalf("foreign exclude status = %d, body = %s", foreignExclude.Code, foreignExclude.Body.String())
-	}
-	if success.calls != 1 || failure.calls != 1 || timeout.calls != 1 {
-		t.Fatal("providers called after foreign exclude task")
-	}
-
 	resolver.err = errors.New("database unavailable")
 	infrastructureFailure := httptest.NewRecorder()
 	router.ServeHTTP(infrastructureFailure, httptest.NewRequest(
@@ -260,12 +235,11 @@ func TestMentionHTTPCompositionPropagatesRequestCancellation(t *testing.T) {
 }
 
 func TestBuiltinMentionProvidersRemainDescriptorDrivenWhenIntegrationsAreNil(t *testing.T) {
-	providers := builtinMentionProviders(nil, &Services{}, nil)
+	providers := builtinMentionProviders(&Services{}, nil)
 	want := []struct {
 		source string
 		order  int
 	}{
-		{"kandev_tasks", 0},
 		{"jira_issues", 20},
 		{"linear_issues", 30},
 		{"github_issues", 40},

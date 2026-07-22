@@ -323,7 +323,7 @@ func searchProviderWithinContext(
 		if len(group.Results) == request.Limit {
 			break
 		}
-		candidate, ok := normalizeCandidate(registered.descriptor, candidate)
+		candidate, ok := normalizeCandidate(candidate)
 		if !ok {
 			continue
 		}
@@ -367,7 +367,7 @@ func safeFailureStatus(status Status) bool {
 	}
 }
 
-func normalizeCandidate(descriptor ProviderDescriptor, candidate Candidate) (Candidate, bool) {
+func normalizeCandidate(candidate Candidate) (Candidate, bool) {
 	candidate.ID = strings.TrimSpace(candidate.ID)
 	candidate.Scope = strings.TrimSpace(candidate.Scope)
 	if !validIdentity(candidate.ID) || !validIdentity(candidate.Scope) {
@@ -380,7 +380,7 @@ func normalizeCandidate(descriptor ProviderDescriptor, candidate Candidate) (Can
 		return Candidate{}, false
 	}
 	candidate.URL = strings.TrimSpace(candidate.URL)
-	if !safeMentionURL(descriptor, candidate.ID, candidate.URL) {
+	if !safeMentionURL(candidate.URL) {
 		return Candidate{}, false
 	}
 	return candidate, true
@@ -405,16 +405,13 @@ func normalizeDisplayText(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
-func safeMentionURL(descriptor ProviderDescriptor, resourceID, raw string) bool {
+func safeMentionURL(raw string) bool {
 	if raw == "" || !utf8.ValidString(raw) || utf8.RuneCountInString(raw) > 2048 {
 		return false
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.User != nil {
 		return false
-	}
-	if descriptor.Provider == mentionProviderKandev && descriptor.Kind == mentionKindTask {
-		return raw == "/t/"+url.PathEscape(resourceID)
 	}
 	if parsed.Scheme == "" && parsed.Host == "" {
 		return false
@@ -425,12 +422,8 @@ func safeMentionURL(descriptor ProviderDescriptor, resourceID, raw string) bool 
 func normalizeRequest(request SearchRequest) (SearchRequest, error) {
 	request.WorkspaceID = strings.TrimSpace(request.WorkspaceID)
 	request.Query = strings.TrimSpace(request.Query)
-	request.ExcludeTaskID = strings.TrimSpace(request.ExcludeTaskID)
 	if !validIdentity(request.WorkspaceID) {
 		return SearchRequest{}, fmt.Errorf("%w: workspace ID is required", ErrInvalidRequest)
-	}
-	if request.ExcludeTaskID != "" && !validIdentity(request.ExcludeTaskID) {
-		return SearchRequest{}, fmt.Errorf("%w: excluded task ID is invalid", ErrInvalidRequest)
 	}
 	if !utf8.ValidString(request.Query) {
 		return SearchRequest{}, fmt.Errorf("%w: query must be valid UTF-8", ErrInvalidRequest)

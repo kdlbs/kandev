@@ -45,8 +45,7 @@ func TestHandlerSearch_ReturnsNormalizedResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	NewHandler(fakeSearcher{search: func(_ context.Context, request SearchRequest) (*apiv1.MentionSearchResponse, error) {
-		if request.WorkspaceID != "workspace-1" || request.Query != "auth" || request.Limit != MaxLimit ||
-			request.ExcludeTaskID != "task-1" {
+		if request.WorkspaceID != "workspace-1" || request.Query != "auth" || request.Limit != MaxLimit {
 			t.Fatalf("request = %+v", request)
 		}
 		return &apiv1.MentionSearchResponse{
@@ -60,7 +59,7 @@ func TestHandlerSearch_ReturnsNormalizedResponse(t *testing.T) {
 	}}).RegisterRoutes(router)
 
 	request := httptest.NewRequest(http.MethodGet,
-		"/api/v1/workspaces/workspace-1/mentions/search?q=auth&limit=99&exclude_task_id=task-1", nil)
+		"/api/v1/workspaces/workspace-1/mentions/search?q=auth&limit=99", nil)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 

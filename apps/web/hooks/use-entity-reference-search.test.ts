@@ -67,7 +67,6 @@ describe("useEntityReferenceSearch request lifecycle", () => {
         workspaceId: WORKSPACE_ID,
         sessionId: "session-1",
         query: "auth",
-        excludeTaskId: "task-1",
         limit: 5,
       }),
     );
@@ -85,7 +84,6 @@ describe("useEntityReferenceSearch request lifecycle", () => {
       {
         workspaceId: WORKSPACE_ID,
         query: "auth",
-        excludeTaskId: "task-1",
         limit: 5,
       },
       { cache: "no-store", init: { signal: expect.any(AbortSignal) } },

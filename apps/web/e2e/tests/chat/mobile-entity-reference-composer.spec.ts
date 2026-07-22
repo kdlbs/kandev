@@ -5,6 +5,8 @@ import { SessionPage } from "../../pages/session-page";
 import type { CreateTaskResponse } from "../../../lib/types/http";
 import type { EntityReference } from "../../../lib/types/entity-reference";
 
+const LINEAR_SCOPE = "mock-org";
+
 function taskReference(workspaceId: string, taskId: string, title: string): EntityReference {
   return {
     version: 1,
@@ -18,19 +20,19 @@ function taskReference(workspaceId: string, taskId: string, title: string): Enti
   };
 }
 
-function githubIssueReference(index: number): EntityReference {
-  const id = `github-issue-${index}`;
-  const scope = "github.example.test/acme/widgets";
+function linearIssueReference(index: number): EntityReference {
+  const id = `linear-issue-${index}`;
+  const key = `MOB-${100 + index}`;
   return {
     version: 1,
-    ref: `mention:v1:github:issue:${encodeURIComponent(scope)}:${id}`,
-    provider: "github",
+    ref: `mention:v1:linear:issue:${LINEAR_SCOPE}:${id}`,
+    provider: "linear",
     kind: "issue",
     id,
-    key: String(100 + index),
-    title: `Mobile Reference GitHub ${String(index).padStart(2, "0")}`,
-    url: `https://github.example.test/acme/widgets/issues/${100 + index}`,
-    scope,
+    key,
+    title: `Mobile Reference Linear ${String(index).padStart(2, "0")}`,
+    url: `https://linear.app/${LINEAR_SCOPE}/issue/${key}`,
+    scope: LINEAR_SCOPE,
   };
 }
 
@@ -59,10 +61,14 @@ async function openTaskChat(page: Page, taskId: string): Promise<SessionPage> {
   return session;
 }
 
+function visibleEditor(scope: Locator | Page): Locator {
+  return scope.locator(".tiptap.ProseMirror:visible").first();
+}
+
 async function expectPersistedReference(
   apiClient: ApiClient,
   sessionId: string,
-  taskId: string,
+  referenceId: string,
 ): Promise<void> {
   await expect
     .poll(
@@ -76,22 +82,18 @@ async function expectPersistedReference(
               (reference) =>
                 typeof reference === "object" &&
                 reference !== null &&
-                (reference as Record<string, unknown>).id === taskId,
+                (reference as Record<string, unknown>).id === referenceId,
             )
           );
         });
       },
-      { timeout: 15_000, message: `Wait for mobile reference to task ${taskId}` },
+      { timeout: 15_000, message: `Wait for mobile reference ${referenceId}` },
     )
     .toBe(true);
 }
 
-function visibleEditor(scope: Locator | Page): Locator {
-  return scope.locator(".tiptap.ProseMirror:visible").first();
-}
-
 test.describe("Mobile entity reference composer", () => {
-  test("touch selection stays viewport-contained, scrollable, and sends durable metadata", async ({
+  test("touch selection stays viewport-contained, excludes Kandev tasks, and persists", async ({
     testPage,
     apiClient,
     seedData,
@@ -105,7 +107,16 @@ test.describe("Mobile entity reference composer", () => {
       });
       references.push(taskReference(seedData.workspaceId, task.task_id, title));
     }
-    const githubReferences = [1, 2, 3].map(githubIssueReference);
+    const linearReferences = Array.from({ length: 8 }, (_, index) =>
+      linearIssueReference(index + 1),
+    );
+    await apiClient.setLinearConfig({
+      secret: "lin_api_mobile_entity_refs",
+      workspaceId: seedData.workspaceId,
+    });
+    await apiClient.waitForIntegrationAuthHealthy("linear", {
+      workspaceId: seedData.workspaceId,
+    });
     const active = await createReadyTask(apiClient, seedData);
     if (!active.session_id) throw new Error("createTaskWithAgent did not return a session_id");
     const session = await openTaskChat(testPage, active.id);
@@ -128,13 +139,13 @@ test.describe("Mobile entity reference composer", () => {
               results: references,
             },
             {
-              source: "github_issues",
-              provider: "github",
+              source: "linear_issues",
+              provider: "linear",
               kind: "issue",
-              display_name: "GitHub issues",
+              display_name: "Linear",
               kind_label: "Issue",
               status: "ok",
-              results: githubReferences,
+              results: linearReferences,
             },
           ],
         }),
@@ -148,10 +159,10 @@ test.describe("Mobile entity reference composer", () => {
 
     const menu = testPage.getByTestId("entity-reference-menu");
     await expect(menu).toBeVisible({ timeout: 10_000 });
-    await expect(menu.getByRole("option")).toHaveCount(
-      references.length + githubReferences.length,
-      { timeout: 10_000 },
-    );
+    await expect(menu.getByRole("option")).toHaveCount(linearReferences.length, {
+      timeout: 10_000,
+    });
+    await expect(menu.getByText("Kandev tasks", { exact: true })).toHaveCount(0);
     const [menuBox, editorBox] = await Promise.all([menu.boundingBox(), editor.boundingBox()]);
     expect(menuBox).not.toBeNull();
     expect(editorBox).not.toBeNull();
@@ -192,11 +203,13 @@ test.describe("Mobile entity reference composer", () => {
     expect(geometry.listOverflowY).toMatch(/auto|scroll/);
     expect(geometry.documentScrollWidth).toBeLessThanOrEqual(geometry.documentClientWidth);
 
-    const selected = references[0];
+    const selected = linearReferences[0];
     const option = testPage.getByRole("option").filter({ hasText: selected.title });
     await option.tap();
     await expect(menu).not.toBeVisible();
-    await expect(editor.getByTestId("entity-reference-chip")).toHaveText(selected.title);
+    await expect(editor.getByTestId("entity-reference-chip")).toContainText(
+      selected.key ?? selected.title,
+    );
     await expect(editor).toBeFocused();
 
     await session.activeChat().getByTestId("submit-message-button").tap();
@@ -206,7 +219,7 @@ test.describe("Mobile entity reference composer", () => {
         .activeChat()
         .locator(".chat-message-list:visible")
         .getByTestId("entity-reference-chip")
-        .filter({ hasText: selected.title }),
+        .filter({ hasText: selected.key ?? selected.title }),
     ).toBeVisible({ timeout: 10_000 });
   });
 });

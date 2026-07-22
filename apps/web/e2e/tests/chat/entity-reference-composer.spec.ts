@@ -9,6 +9,7 @@ import type {
 } from "../../../lib/types/entity-reference";
 
 const REFERENCE_QUERY = "E2E Reference";
+const LINEAR_SCOPE = "mock-org";
 
 function taskReference(workspaceId: string, taskId: string, title: string): EntityReference {
   return {
@@ -23,7 +24,21 @@ function taskReference(workspaceId: string, taskId: string, title: string): Enti
   };
 }
 
-function taskSearchResponse(
+function linearReference(id: string, key: string, title: string): EntityReference {
+  return {
+    version: 1,
+    ref: `mention:v1:linear:issue:${LINEAR_SCOPE}:${id}`,
+    provider: "linear",
+    kind: "issue",
+    id,
+    key,
+    title,
+    url: `https://linear.app/${LINEAR_SCOPE}/issue/${key}`,
+    scope: LINEAR_SCOPE,
+  };
+}
+
+function externalSearchResponse(
   query: string,
   references: EntityReference[],
   includeTimedOutProvider = false,
@@ -37,6 +52,15 @@ function taskSearchResponse(
         kind: "task",
         display_name: "Kandev tasks",
         kind_label: "Task",
+        status: "ok",
+        results: [taskReference("workspace-stale", "task-stale", "Hidden Kandev task")],
+      },
+      {
+        source: "linear_issues",
+        provider: "linear",
+        kind: "issue",
+        display_name: "Linear",
+        kind_label: "Issue",
         status: "ok",
         results: references,
       },
@@ -99,10 +123,10 @@ async function typeReferenceQuery(editor: Locator, query: string): Promise<void>
   await editor.pressSequentially(`#${query}`);
 }
 
-async function expectPersistedTaskReference(
+async function expectPersistedReference(
   apiClient: ApiClient,
   sessionId: string,
-  taskId: string,
+  referenceId: string,
 ): Promise<EntityReference> {
   await expect
     .poll(
@@ -117,12 +141,12 @@ async function expectPersistedTaskReference(
               (reference) =>
                 typeof reference === "object" &&
                 reference !== null &&
-                (reference as Record<string, unknown>).id === taskId,
+                (reference as Record<string, unknown>).id === referenceId,
             )
           );
         });
       },
-      { timeout: 15_000, message: `Wait for persisted reference to task ${taskId}` },
+      { timeout: 15_000, message: `Wait for persisted reference ${referenceId}` },
     )
     .toBe(true);
 
@@ -134,11 +158,16 @@ async function expectPersistedTaskReference(
       (candidate) =>
         typeof candidate === "object" &&
         candidate !== null &&
-        (candidate as Record<string, unknown>).id === taskId,
+        (candidate as Record<string, unknown>).id === referenceId,
     );
     if (reference) return reference as EntityReference;
   }
-  throw new Error(`Persisted entity reference to task ${taskId} disappeared`);
+  throw new Error(`Persisted entity reference ${referenceId} disappeared`);
+}
+
+async function configureLinear(apiClient: ApiClient, workspaceId: string): Promise<void> {
+  await apiClient.setLinearConfig({ secret: "lin_api_entity_refs", workspaceId });
+  await apiClient.waitForIntegrationAuthHealthy("linear", { workspaceId });
 }
 
 async function openQuickChatWithAgent(page: Page): Promise<{
@@ -195,21 +224,32 @@ async function createPassthroughProfile(apiClient: ApiClient): Promise<string> {
 }
 
 test.describe("Entity reference composer", () => {
+  test("keeps Kandev task suggestions under @", async ({ testPage, apiClient, seedData }) => {
+    const targetTitle = "At-Mention-Task-Target";
+    await apiClient.seedTask(seedData.workspaceId, targetTitle, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const active = await createReadyTask(apiClient, seedData, "At Mention Active Task");
+    const session = await openTaskChat(testPage, active.id);
+    const editor = visibleEditor(session.activeChat());
+
+    await editor.fill("");
+    await editor.pressSequentially(`@${targetTitle}`);
+
+    await expect(testPage.getByRole("option").filter({ hasText: targetTitle })).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
   test("task chat restores a keyboard-selected draft and explicitly sends durable metadata", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const alphaTitle = `${REFERENCE_QUERY} Alpha`;
-    const alpha = await apiClient.seedTask(seedData.workspaceId, alphaTitle, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
-    const betaTitle = `${REFERENCE_QUERY} Beta`;
-    const beta = await apiClient.seedTask(seedData.workspaceId, betaTitle, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
+    const alpha = linearReference("linear-alpha", "ENG-101", `${REFERENCE_QUERY} Alpha`);
+    const beta = linearReference("linear-beta", "ENG-102", `${REFERENCE_QUERY} Beta`);
+    await configureLinear(apiClient, seedData.workspaceId);
     const active = await createReadyTask(apiClient, seedData, "Entity Reference Active Task");
     if (!active.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
@@ -222,12 +262,7 @@ test.describe("Entity reference composer", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(
-          taskSearchResponse(query, [
-            taskReference(seedData.workspaceId, alpha.task_id, alphaTitle),
-            taskReference(seedData.workspaceId, beta.task_id, betaTitle),
-          ]),
-        ),
+        body: JSON.stringify(externalSearchResponse(query, [alpha, beta])),
       });
     });
     await typeReferenceQuery(editor, REFERENCE_QUERY);
@@ -235,19 +270,20 @@ test.describe("Entity reference composer", () => {
     const menu = testPage.getByTestId("entity-reference-menu");
     await expect(menu).toBeVisible({ timeout: 10_000 });
     await expect(menu.getByRole("listbox", { name: "Reference work items" })).toBeVisible();
-    await expect(referenceOption(testPage, alphaTitle)).toHaveAttribute("aria-selected", "true");
+    await expect(referenceOption(testPage, alpha.title)).toHaveAttribute("aria-selected", "true");
+    await expect(referenceOption(testPage, "Hidden Kandev task")).toHaveCount(0);
     await expectMenuAnchoredToEditor(menu, editor);
 
     await editor.press("ArrowDown");
-    const betaOption = referenceOption(testPage, betaTitle);
+    const betaOption = referenceOption(testPage, beta.title);
     await expect(betaOption).toHaveAttribute("aria-selected", "true");
     await editor.press("Tab");
 
     await expect(menu).not.toBeVisible();
     await expect(editor).toBeFocused();
-    await expect(editor.getByTestId("entity-reference-chip")).toHaveText(betaTitle);
+    await expect(editor.getByTestId("entity-reference-chip")).toContainText(beta.key ?? beta.title);
     await editor.pressSequentially("needs follow-up");
-    await expect(editor).toHaveText(/E2E Reference Beta\s+needs follow-up/);
+    await expect(editor).toHaveText(/ENG-102\s+needs follow-up/);
     await expect(
       session
         .activeChat()
@@ -263,36 +299,32 @@ test.describe("Entity reference composer", () => {
     await expect(restoredEditor).toHaveAttribute("contenteditable", "true", {
       timeout: 30_000,
     });
-    await expect(restoredEditor.getByTestId("entity-reference-chip")).toHaveText(betaTitle);
-    await expect(restoredEditor).toHaveText(/E2E Reference Beta\s+needs follow-up/);
+    await expect(restoredEditor.getByTestId("entity-reference-chip")).toContainText(
+      beta.key ?? beta.title,
+    );
+    await expect(restoredEditor).toHaveText(/ENG-102\s+needs follow-up/);
 
     await session.activeChat().getByTestId("submit-message-button").click();
-    const persisted = await expectPersistedTaskReference(
-      apiClient,
-      active.session_id,
-      beta.task_id,
-    );
+    const persisted = await expectPersistedReference(apiClient, active.session_id, beta.id);
     expect(persisted).toMatchObject({
       version: 1,
-      provider: "kandev",
-      kind: "task",
-      id: beta.task_id,
-      title: betaTitle,
-      url: `/t/${beta.task_id}`,
-      scope: seedData.workspaceId,
+      provider: "linear",
+      kind: "issue",
+      id: beta.id,
+      key: beta.key,
+      title: beta.title,
+      url: beta.url,
+      scope: LINEAR_SCOPE,
     });
 
     const sentChip = session
       .activeChat()
       .locator(".chat-message-list:visible")
       .getByTestId("entity-reference-chip")
-      .filter({ hasText: betaTitle });
+      .filter({ hasText: beta.key });
     await expect(sentChip).toBeVisible({ timeout: 10_000 });
-    await expect(sentChip).toHaveAttribute("href", `/t/${beta.task_id}`);
+    await expect(sentChip).toHaveAttribute("href", beta.url);
     expect(pageErrors).toEqual([]);
-
-    await sentChip.click();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${beta.task_id}$`));
   });
 
   test("keeps successful results visible when another provider times out", async ({
@@ -300,11 +332,7 @@ test.describe("Entity reference composer", () => {
     apiClient,
     seedData,
   }) => {
-    const targetTitle = "Partial Result Target";
-    const target = await apiClient.seedTask(seedData.workspaceId, targetTitle, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
+    const target = linearReference("linear-partial", "ENG-201", "Partial Result Target");
     const active = await createReadyTask(apiClient, seedData, "Partial Result Active Task");
     await openTaskChat(testPage, active.id);
     await testPage.route("**/api/v1/workspaces/*/mentions/search?*", async (route) => {
@@ -312,56 +340,60 @@ test.describe("Entity reference composer", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(
-          taskSearchResponse(
-            query,
-            [taskReference(seedData.workspaceId, target.task_id, targetTitle)],
-            true,
-          ),
-        ),
+        body: JSON.stringify(externalSearchResponse(query, [target], true)),
       });
     });
 
     await typeReferenceQuery(visibleEditor(testPage), "Partial Result");
     const menu = testPage.getByTestId("entity-reference-menu");
-    await expect(referenceOption(testPage, targetTitle)).toBeVisible({ timeout: 10_000 });
+    await expect(referenceOption(testPage, target.title)).toBeVisible({ timeout: 10_000 });
+    await expect(referenceOption(testPage, "Hidden Kandev task")).toHaveCount(0);
     await expect(menu.getByText("GitHub issues", { exact: true })).toBeVisible();
     await expect(menu.getByText("Search timed out", { exact: true })).toBeVisible();
   });
 
-  test("Quick Chat searches, inserts without auto-send, and explicitly sends a task reference", async ({
+  test("Quick Chat searches, inserts without auto-send, and explicitly sends an external reference", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const targetTitle = "Quick Chat Reference Target";
-    const target = await apiClient.seedTask(seedData.workspaceId, targetTitle, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
+    const target = linearReference("linear-quick-chat", "ENG-301", "Quick Chat Reference Target");
+    await configureLinear(apiClient, seedData.workspaceId);
     const { dialog, sessionId } = await openQuickChatWithAgent(testPage);
     const editor = visibleEditor(dialog);
 
+    await testPage.route("**/api/v1/workspaces/*/mentions/search?*", async (route) => {
+      const query = new URL(route.request().url()).searchParams.get("q") ?? "";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(externalSearchResponse(query, [target])),
+      });
+    });
+
     await typeReferenceQuery(editor, "Quick Chat Reference");
-    await expect(referenceOption(testPage, targetTitle)).toBeVisible({ timeout: 10_000 });
+    await expect(referenceOption(testPage, target.title)).toBeVisible({ timeout: 10_000 });
+    await expect(referenceOption(testPage, "Hidden Kandev task")).toHaveCount(0);
     await editor.press("Enter");
 
-    await expect(editor.getByTestId("entity-reference-chip")).toHaveText(targetTitle);
+    await expect(editor.getByTestId("entity-reference-chip")).toContainText(
+      target.key ?? target.title,
+    );
     await expect(editor).toBeFocused();
     await expect(
       dialog
         .getByTestId("quick-chat-messages")
         .getByTestId("entity-reference-chip")
-        .filter({ hasText: targetTitle }),
+        .filter({ hasText: target.key ?? target.title }),
     ).not.toBeVisible();
 
     await dialog.getByTestId("submit-message-button").click();
-    await expectPersistedTaskReference(apiClient, sessionId, target.task_id);
+    await expectPersistedReference(apiClient, sessionId, target.id);
     await expect(
       dialog
         .getByTestId("quick-chat-messages")
         .getByTestId("entity-reference-chip")
-        .filter({ hasText: targetTitle }),
+        .filter({ hasText: target.key ?? target.title }),
     ).toBeVisible({ timeout: 10_000 });
   });
 

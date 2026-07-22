@@ -177,7 +177,7 @@ describe("entity reference suggestion lifecycle", () => {
 });
 
 describe("createMentionSuggestion", () => {
-  it("keeps new task discovery out of the @ menu", async () => {
+  it("keeps Kandev task discovery in the @ menu", async () => {
     const file: MentionItem = {
       id: "src/app.ts",
       kind: "file",
@@ -204,9 +204,9 @@ describe("createMentionSuggestion", () => {
     );
 
     const items = await (suggestion.items as (args: { query: string }) => Promise<MentionItem[]>)({
-      query: "",
+      query: "Follow",
     });
 
-    expect(items).toEqual([file]);
+    expect(items).toEqual([task, file]);
   });
 });

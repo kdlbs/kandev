@@ -168,7 +168,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	mentionComponents, err := newMentionComponents(
 		taskSvc,
 		taskSvc,
-		builtinMentionProviders(taskSvc, services, repos.Task)...,
+		builtinMentionProviders(services, repos.Task)...,
 	)
 	if err != nil {
 		return nil, nil, err

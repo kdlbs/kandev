@@ -39,10 +39,9 @@ func (h *Handler) search(c *gin.Context) {
 		return
 	}
 	response, err := h.searcher.Search(c.Request.Context(), SearchRequest{
-		WorkspaceID:   c.Param("id"),
-		Query:         c.Query("q"),
-		Limit:         limit,
-		ExcludeTaskID: c.Query("exclude_task_id"),
+		WorkspaceID: c.Param("id"),
+		Query:       c.Query("q"),
+		Limit:       limit,
 	})
 	if err != nil {
 		writeSearchError(c, err)

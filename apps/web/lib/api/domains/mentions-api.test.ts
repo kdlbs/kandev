@@ -69,13 +69,12 @@ describe("mentions API", () => {
         workspaceId: "workspace / one",
         query: "auth & oauth",
         limit: 7,
-        excludeTaskId: "task / one",
       },
       { cache: "no-store", init: { signal: controller.signal } },
     );
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      "http://api.test/api/v1/workspaces/workspace%20%2F%20one/mentions/search?q=auth+%26+oauth&limit=7&exclude_task_id=task+%2F+one",
+      "http://api.test/api/v1/workspaces/workspace%20%2F%20one/mentions/search?q=auth+%26+oauth&limit=7",
       expect.objectContaining({ cache: "no-store", signal: controller.signal }),
     );
     expect(result).toEqual(response);

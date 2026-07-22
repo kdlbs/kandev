@@ -36,6 +36,50 @@ const unavailableSearchGroups: EntityReferenceSearchGroup[] = [
   },
 ];
 
+const kandevTaskGroup: EntityReferenceSearchGroup = {
+  source: "kandev_tasks",
+  provider: "kandev",
+  kind: "task",
+  display_name: "Kandev tasks",
+  kind_label: "Task",
+  status: "ok",
+  results: [
+    {
+      version: 1,
+      ref: "mention:v1:kandev:task:workspace-1:task-1",
+      provider: "kandev",
+      kind: "task",
+      id: "task-1",
+      key: "",
+      title: "Existing task",
+      url: "/t/task-1",
+      scope: "workspace-1",
+    },
+  ],
+};
+
+const githubIssueGroup: EntityReferenceSearchGroup = {
+  source: "github_issues",
+  provider: "github",
+  kind: "issue",
+  display_name: "GitHub",
+  kind_label: "Issue",
+  status: "ok",
+  results: [
+    {
+      version: 1,
+      ref: "mention:v1:github:issue:octo%2Frepo:7",
+      provider: "github",
+      kind: "issue",
+      id: "7",
+      key: "#7",
+      title: "External issue",
+      url: "https://github.com/octo/repo/issues/7",
+      scope: "octo/repo",
+    },
+  ],
+};
+
 describe("EntityReferenceMenu", () => {
   it("provides a menu distinct from @ context mentions", () => {
     expect(typeof (entityReferenceMenus as Record<string, unknown>).EntityReferenceMenu).toBe(
@@ -118,5 +162,20 @@ describe("EntityReferenceMenu", () => {
         unavailableSearchGroups,
       ),
     ).toEqual([unavailableSearchGroups[2]]);
+  });
+
+  it("keeps Kandev tasks out of # work item search", () => {
+    expect(entityReferenceMenus.visibleEntityReferenceGroups([kandevTaskGroup])).toEqual([]);
+
+    const selectableEntityReferences = (entityReferenceMenus as Record<string, unknown>)
+      .selectableEntityReferences;
+    expect(selectableEntityReferences).toBeTypeOf("function");
+    if (typeof selectableEntityReferences !== "function") return;
+    expect(
+      (selectableEntityReferences as (value: EntityReferenceSearchGroup[]) => unknown)([
+        kandevTaskGroup,
+        githubIssueGroup,
+      ]),
+    ).toEqual(githubIssueGroup.results);
   });
 });

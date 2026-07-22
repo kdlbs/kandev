@@ -7,7 +7,16 @@ import type {
   EntityReferenceGroupStatus,
   EntityReferenceSearchGroup,
 } from "@/lib/types/entity-reference";
+import {
+  selectableEntityReferences,
+  visibleEntityReferenceGroups,
+} from "./entity-reference-groups";
 import { PopupMenu, PopupMenuItem, useMenuItemRefs } from "./popup-menu";
+
+export {
+  selectableEntityReferences,
+  visibleEntityReferenceGroups,
+} from "./entity-reference-groups";
 
 type EntityReferenceMenuProps = {
   isOpen: boolean;
@@ -38,21 +47,6 @@ function entityReferenceIcon(kind: string) {
     return <IconGitPullRequest className="h-4 w-4" />;
   }
   return <IconLink className="h-4 w-4" data-testid="entity-reference-generic-icon" />;
-}
-
-function selectableReferences(groups: readonly EntityReferenceSearchGroup[]): EntityReference[] {
-  return groups.flatMap((group) => (group.status === "ok" ? group.results : []));
-}
-
-export function visibleEntityReferenceGroups(
-  groups: readonly EntityReferenceSearchGroup[],
-): EntityReferenceSearchGroup[] {
-  return groups.filter(
-    (group) =>
-      group.status !== "not_configured" &&
-      group.status !== "unsupported_scope" &&
-      (group.status !== "ok" || group.results.length > 0),
-  );
 }
 
 function entityReferenceEmptyState(
@@ -94,7 +88,7 @@ export function EntityReferenceMenu({
   setSelectedIndex,
 }: EntityReferenceMenuProps) {
   const { setItemRef } = useMenuItemRefs(selectedIndex);
-  const selectable = selectableReferences(groups);
+  const selectable = selectableEntityReferences(groups);
   let itemIndex = 0;
   const visibleGroups = visibleEntityReferenceGroups(groups);
   const hasContent = visibleGroups.length > 0;

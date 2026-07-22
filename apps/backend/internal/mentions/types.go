@@ -12,10 +12,7 @@ const (
 	DefaultLimit = 5
 	MaxLimit     = 10
 
-	mentionProviderKandev    = "kandev"
-	mentionKindTask          = "task"
 	mentionKindIssue         = "issue"
-	mentionLabelTask         = "Task"
 	mentionLabelIssue        = "Issue"
 	mentionLabelWorkItem     = "Work item"
 	mentionIssuesPathSegment = "issues"
@@ -82,10 +79,9 @@ type ProviderDescriptor struct {
 
 // SearchRequest is the plain-text boundary shared by every provider.
 type SearchRequest struct {
-	WorkspaceID   string
-	Query         string
-	Limit         int
-	ExcludeTaskID string
+	WorkspaceID string
+	Query       string
+	Limit       int
 }
 
 // Candidate is untrusted provider-local data. Registry identity is intentionally absent.

@@ -8,6 +8,7 @@ import {
   handleEntityReferenceMenuKeyDown,
 } from "./tiptap-entity-reference-suggestion";
 import type { MenuState } from "./tiptap-suggestion";
+import { selectableEntityReferences } from "./entity-reference-groups";
 
 const EMPTY_REFERENCE_MENU: MenuState<EntityReference> = {
   isOpen: false,
@@ -21,14 +22,12 @@ type UseEntityReferenceComposerOptions = {
   enabled: boolean;
   workspaceId: string | null;
   sessionId: string | null;
-  taskId: string | null;
 };
 
 export function useEntityReferenceComposer({
   enabled,
   workspaceId,
   sessionId,
-  taskId,
 }: UseEntityReferenceComposerOptions) {
   const [menu, setMenu] = useState<MenuState<EntityReference>>(EMPTY_REFERENCE_MENU);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -38,13 +37,9 @@ export function useEntityReferenceComposer({
     workspaceId,
     sessionId,
     query: menu.query,
-    excludeTaskId: taskId,
     enabled: searchEnabled,
   });
-  const items = useMemo(
-    () => search.groups.flatMap((group) => (group.status === "ok" ? group.results : [])),
-    [search.groups],
-  );
+  const items = useMemo(() => selectableEntityReferences(search.groups), [search.groups]);
   const clampedSelectedIndex = Math.min(selectedIndex, Math.max(0, items.length - 1));
   const itemsRef = useRef(items);
   const selectedIndexRef = useRef(clampedSelectedIndex);

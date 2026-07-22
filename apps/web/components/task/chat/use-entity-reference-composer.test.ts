@@ -21,7 +21,6 @@ describe("useEntityReferenceComposer lifecycle", () => {
         enabled: true,
         workspaceId: null,
         sessionId: "session-1",
-        taskId: "task-1",
       }),
     );
 
@@ -35,7 +34,6 @@ describe("useEntityReferenceComposer lifecycle", () => {
         enabled: false,
         workspaceId: "workspace-1",
         sessionId: "session-1",
-        taskId: "task-1",
       }),
     );
 

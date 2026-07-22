@@ -72,10 +72,7 @@ export function createMentionSuggestion(
     pluginKey: MentionSuggestionPluginKey,
     allowSpaces: false,
 
-    items: async ({ query }) => {
-      const items = await callbacks.getItems(query);
-      return items.filter((item) => item.kind !== "task");
-    },
+    items: ({ query }) => callbacks.getItems(query),
 
     command: ({ editor, range, props: mentionAttrs }) => {
       editor

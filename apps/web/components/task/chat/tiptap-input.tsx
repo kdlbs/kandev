@@ -11,7 +11,7 @@ import {
 } from "react";
 import { EditorContent } from "@tiptap/react";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { EditorContextProvider } from "./editor-context";
@@ -19,6 +19,7 @@ import { EntityReferenceMenu } from "./entity-reference-menu";
 import { MentionMenu } from "./mention-menu";
 import { MessageHistorySearch } from "./message-history-search";
 import { SlashCommandMenu } from "./slash-command-menu";
+import { buildTaskMentionItems } from "./task-mention-items";
 import { createMessageHistorySelector, type MessageHistoryEntry } from "./message-history";
 import { useDrainOlderMessages } from "./use-drain-older-messages";
 import {
@@ -124,10 +125,12 @@ async function fetchFileResults(
   return results;
 }
 
-function useMentionItems(sessionId: string | null) {
+function useMentionItems(sessionId: string | null, taskId: string | null) {
   const { prompts } = useCustomPrompts();
+  const storeApi = useAppStoreApi();
   const promptsRef = useRef(prompts);
   const sessionIdRef = useRef(sessionId);
+  const taskIdRef = useRef(taskId);
   const lastFileSearchRef = useRef<{ query: string; results: string[] }>({
     query: "",
     results: [],
@@ -135,51 +138,57 @@ function useMentionItems(sessionId: string | null) {
   useLayoutEffect(() => {
     promptsRef.current = prompts;
     sessionIdRef.current = sessionId;
+    taskIdRef.current = taskId;
   });
 
-  return useCallback(async (query: string): Promise<MentionItem[]> => {
-    const allItems: MentionItem[] = [];
-    allItems.push({
-      id: "__plan__",
-      kind: "plan",
-      label: "Plan",
-      description: "Include the plan as context",
-      onSelect: () => {},
-    });
-    for (const p of promptsRef.current) {
+  return useCallback(
+    async (query: string): Promise<MentionItem[]> => {
+      const allItems: MentionItem[] = [];
+      allItems.push(...buildTaskMentionItems(storeApi.getState(), taskIdRef.current));
       allItems.push({
-        id: p.id,
-        kind: "prompt",
-        label: p.name,
-        description: p.content.length > 100 ? p.content.slice(0, 100) + "..." : p.content,
+        id: "__plan__",
+        kind: "plan",
+        label: "Plan",
+        description: "Include the plan as context",
         onSelect: () => {},
       });
-    }
-    const sid = sessionIdRef.current;
-    if (sid) {
-      try {
-        const files = await fetchFileResults(sid, query, lastFileSearchRef.current);
-        for (const filePath of files) {
-          allItems.push({
-            id: filePath,
-            kind: "file",
-            label: filePath,
-            description: "File",
-            onSelect: () => {},
-          });
-        }
-      } catch {
-        // ignore
+      for (const p of promptsRef.current) {
+        allItems.push({
+          id: p.id,
+          kind: "prompt",
+          label: p.name,
+          description: p.content.length > 100 ? p.content.slice(0, 100) + "..." : p.content,
+          onSelect: () => {},
+        });
       }
-    }
-    return filterItems(allItems, query);
-  }, []);
+      const sid = sessionIdRef.current;
+      if (sid) {
+        try {
+          const files = await fetchFileResults(sid, query, lastFileSearchRef.current);
+          for (const filePath of files) {
+            allItems.push({
+              id: filePath,
+              kind: "file",
+              label: filePath,
+              description: "File",
+              onSelect: () => {},
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return filterItems(allItems, query);
+    },
+    [storeApi],
+  );
 }
 
 // ── Suggestion configs hook ──────────────────────────────────────────
 
 type SuggestionConfigsInput = {
   sessionId: string | null;
+  taskId: string | null;
   onMentionKeyDown: (event: KeyboardEvent) => boolean;
   onSlashKeyDown: (event: KeyboardEvent) => boolean;
   setMentionMenu: React.Dispatch<React.SetStateAction<MenuState<MentionItem>>>;
@@ -188,6 +197,7 @@ type SuggestionConfigsInput = {
 
 function useSuggestionConfigs({
   sessionId,
+  taskId,
   onMentionKeyDown,
   onSlashKeyDown,
   setMentionMenu,
@@ -209,7 +219,7 @@ function useSuggestionConfigs({
       }));
   }, [agentCommands]);
 
-  const getMentionItems = useMentionItems(sessionId);
+  const getMentionItems = useMentionItems(sessionId, taskId);
   const mentionCallbacks = useMemo(
     (): MentionSuggestionCallbacks => ({ getItems: getMentionItems }),
     [getMentionItems],
@@ -363,6 +373,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   const menu = useMenuHandlers();
   const { mentionSuggestion, slashSuggestion, slashCommands } = useSuggestionConfigs({
     sessionId,
+    taskId: taskId ?? null,
     onMentionKeyDown: menu.onMentionKeyDown,
     onSlashKeyDown: menu.onSlashKeyDown,
     setMentionMenu: menu.setMentionMenu,
@@ -372,7 +383,6 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     enabled: entityReferencesEnabled,
     workspaceId,
     sessionId,
-    taskId: taskId ?? null,
   });
   const isSuggestionMenuOpen =
     (menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0) ||

@@ -10,7 +10,6 @@ export type UseEntityReferenceSearchOptions = {
   workspaceId: string | null | undefined;
   sessionId?: string | null;
   query: string;
-  excludeTaskId?: string | null;
   limit?: number;
   enabled?: boolean;
 };
@@ -41,7 +40,6 @@ export function useEntityReferenceSearch({
   workspaceId,
   sessionId,
   query,
-  excludeTaskId,
   limit,
   enabled = true,
 }: UseEntityReferenceSearchOptions) {
@@ -63,7 +61,6 @@ export function useEntityReferenceSearch({
           workspaceId,
           query: normalizedQuery,
           limit,
-          excludeTaskId: excludeTaskId || undefined,
         },
         { cache: "no-store", init: { signal: controller.signal } },
       ).then(
@@ -83,7 +80,7 @@ export function useEntityReferenceSearch({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [enabled, excludeTaskId, limit, query, retrySequence, sessionId, workspaceId]);
+  }, [enabled, limit, query, retrySequence, sessionId, workspaceId]);
 
   const retry = useCallback(() => setRetrySequence((sequence) => sequence + 1), []);
   return { ...state, retry };

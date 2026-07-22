@@ -229,7 +229,6 @@ func TestServiceSearch_RejectsInvalidWorkspaceAndQuery(t *testing.T) {
 		{WorkspaceID: "", Query: "auth"},
 		{WorkspaceID: "workspace\x00admin", Query: "auth"},
 		{WorkspaceID: "workspace-1", Query: "  "},
-		{WorkspaceID: "workspace-1", Query: "auth", ExcludeTaskID: "task\x00other"},
 		{WorkspaceID: "workspace-1", Query: "auth\x00admin"},
 		{WorkspaceID: "workspace-1", Query: strings.Repeat("界", 201)},
 	}
@@ -279,15 +278,15 @@ func TestServiceSearch_ClampsPerSourceLimitAndOutput(t *testing.T) {
 func TestServiceSearch_DropsUnsafeCandidatesAndDeduplicatesRefs(t *testing.T) {
 	registry := NewRegistry()
 	if err := registry.Register(fakeProvider{
-		descriptor: ProviderDescriptor{Source: "tasks", Provider: "kandev", Kind: "task"},
+		descriptor: ProviderDescriptor{Source: "issues", Provider: "acme", Kind: "issue"},
 		search: func(context.Context, SearchRequest) ([]Candidate, error) {
 			return []Candidate{
-				{ID: "", Title: "Missing ID", URL: "/t/missing", Scope: "workspace-1"},
-				{ID: "bad-scope", Title: "Missing scope", URL: "/t/bad-scope"},
-				{ID: "bad-title", URL: "/t/bad-title", Scope: "workspace-1"},
+				{ID: "", Title: "Missing ID", URL: "https://acme.test/issues/missing", Scope: "workspace-1"},
+				{ID: "bad-scope", Title: "Missing scope", URL: "https://acme.test/issues/bad-scope"},
+				{ID: "bad-title", URL: "https://acme.test/issues/bad-title", Scope: "workspace-1"},
 				{ID: "bad-url", Title: "Bad URL", URL: "javascript:alert(1)", Scope: "workspace-1"},
-				{ID: "task-1", Key: " KAN-1\n", Title: "  Login\n\t failure  ", URL: "/t/task-1", Scope: " workspace-1 "},
-				{ID: "task-1", Key: "KAN-1", Title: "Duplicate", URL: "/t/task-1", Scope: "workspace-1"},
+				{ID: "issue-1", Key: " ACME-1\n", Title: "  Login\n\t failure  ", URL: "https://acme.test/issues/1", Scope: " workspace-1 "},
+				{ID: "issue-1", Key: "ACME-1", Title: "Duplicate", URL: "https://acme.test/issues/1", Scope: "workspace-1"},
 			}, nil
 		},
 	}); err != nil {
@@ -305,12 +304,12 @@ func TestServiceSearch_DropsUnsafeCandidatesAndDeduplicatesRefs(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("results = %#v, want one safe unique result", results)
 	}
-	if results[0].Title != "Login failure" || results[0].Key != "KAN-1" || results[0].Scope != "workspace-1" {
+	if results[0].Title != "Login failure" || results[0].Key != "ACME-1" || results[0].Scope != "workspace-1" {
 		t.Fatalf("sanitized result = %#v", results[0])
 	}
 }
 
-func TestServiceSearch_RestrictsInternalRoutesToKandevTasks(t *testing.T) {
+func TestServiceSearch_DropsInternalRoutesFromEveryProvider(t *testing.T) {
 	registry := NewRegistry()
 	providers := []fakeProvider{
 		{
@@ -346,8 +345,8 @@ func TestServiceSearch_RestrictsInternalRoutesToKandevTasks(t *testing.T) {
 	if len(groups["plugin_tasks"].Results) != 0 {
 		t.Fatalf("plugin internal-route results = %#v, want none", groups["plugin_tasks"].Results)
 	}
-	if len(groups["kandev_tasks"].Results) != 1 || groups["kandev_tasks"].Results[0].URL != "/t/task-1" {
-		t.Fatalf("Kandev task results = %#v, want allowed internal route", groups["kandev_tasks"].Results)
+	if len(groups["kandev_tasks"].Results) != 0 {
+		t.Fatalf("Kandev internal-route results = %#v, want none", groups["kandev_tasks"].Results)
 	}
 }
 

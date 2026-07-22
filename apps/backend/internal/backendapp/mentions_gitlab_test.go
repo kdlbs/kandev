@@ -53,7 +53,7 @@ func TestBuiltinGitLabMentionsSyncWorkspaceRepositoryScopeBeforeSearch(t *testin
 			ProviderRepoID: "other/private", ProviderOwner: "other", ProviderName: "private",
 		},
 	}}
-	providers := builtinMentionProviders(nil, &Services{GitLab: service}, repositories)
+	providers := builtinMentionProviders(&Services{GitLab: service}, repositories)
 	var issueProvider mentions.MentionProvider
 	for _, provider := range providers {
 		if provider.Descriptor().Source == "gitlab_issues" {

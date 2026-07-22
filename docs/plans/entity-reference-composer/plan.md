@@ -13,7 +13,7 @@ Build a backend-normalized, workspace-scoped provider registry first, then add e
 
 ## Backend
 
-### Normalized search contract and Kandev tasks
+### Normalized search contract
 
 Files:
 
@@ -23,13 +23,8 @@ Files:
 - `apps/backend/internal/mentions/handler.go` (new)
 - `apps/backend/internal/mentions/service_test.go` (new)
 - `apps/backend/internal/mentions/handler_test.go` (new)
-- `apps/backend/internal/mentions/provider_tasks.go` (new)
-- `apps/backend/internal/task/repository/interface.go`
-- `apps/backend/internal/task/repository/sqlite/task_mentions.go` (new)
-- `apps/backend/internal/task/repository/sqlite/task_mentions_test.go` (new)
-- `apps/backend/internal/task/service/service_mentions.go` (new)
 
-Define `MentionProvider.Descriptor()` plus `MentionProvider.Search(ctx, SearchRequest)`, normalized groups/results/statuses, validation, deterministic group order, bounded concurrent all-settled execution, per-provider timeouts, safe errors, and the HTTP handler. Core registry code accepts arbitrary validated source/provider/kind IDs and uses descriptor labels/generic fallbacks; it contains no native-provider type switch. The registry owns provider identity and canonical `ref` construction, while adapters return bounded untrusted candidates with provider-local identity. Each unique `(provider, kind)` may also register a `ReferenceAuthorizer`; search filtering and later submission validation dispatch through that same provider-owned seam. Add a lightweight title-only task query with prefix-first ranking, workspace isolation, current-task exclusion, and no archived/ephemeral rows. Do not reuse full task listing because it hydrates repositories/sessions and applies PR-number augmentation.
+Define `MentionProvider.Descriptor()` plus `MentionProvider.Search(ctx, SearchRequest)`, normalized groups/results/statuses, validation, deterministic group order, bounded concurrent all-settled execution, per-provider timeouts, safe errors, and the HTTP handler. Core registry code accepts arbitrary validated source/provider/kind IDs and uses descriptor labels/generic fallbacks; it contains no native-provider type switch. The registry owns provider identity and canonical `ref` construction, while adapters return bounded untrusted candidates with provider-local identity. Each unique `(provider, kind)` may also register a `ReferenceAuthorizer`; search filtering and later submission validation dispatch through that same provider-owned seam. Do not register Kandev tasks in this search contract: existing Kandev task discovery remains owned by `@`, while `#` is external-integration search only.
 
 ### External provider adapters
 
@@ -96,7 +91,7 @@ Files:
 - `apps/web/hooks/use-entity-reference-search.ts` (new)
 - `apps/web/hooks/use-entity-reference-search.test.ts` (new)
 
-Add normalized types/client and a 250 ms debounced, abortable/generation-guarded hook. Search only with an active workspace and non-empty query, passing the active task as `exclude_task_id`. Preserve grouped partial results and a safe retryable aggregate error state.
+Add normalized types/client and a 250 ms debounced, abortable/generation-guarded hook. Search only with an active workspace and non-empty query. Preserve grouped partial results and a safe retryable aggregate error state.
 
 ### Composer and mobile interaction
 
@@ -115,7 +110,7 @@ Files:
 - `apps/web/components/task/chat/chat-input-area.tsx`
 - `apps/web/components/task/passthrough-chat-composer.tsx`
 
-Add a separate `entityReference` atom/plugin/menu; do not widen `MentionItem` or `ContextMention`. Explicitly enable `#` in task chat and Quick Chat and leave passthrough disabled. Remove new task discovery from `@` while retaining legacy node parsing. Serialize safe generated Markdown links, preserve draft JSON, carry reference metadata in history/reverse-search entries so only generated links rehydrate, and expose structured references from the editor handle.
+Add a separate `entityReference` atom/plugin/menu; do not widen `MentionItem` or `ContextMention`. Explicitly enable `#` in task chat and Quick Chat and leave passthrough disabled. Keep Kandev task discovery under `@`, including legacy node parsing, and defensively omit any Kandev-task group returned to the external-only `#` menu. Serialize safe generated Markdown links, preserve draft JSON, carry reference metadata in history/reverse-search entries so only generated links rehydrate, and expose structured references from the editor handle.
 
 Improve the shared popup's visual-viewport clamping, internal scroll owner, semantic listbox/option roles, pointer outside-dismiss, wrapping/truncation, and `min-h-11` touch rows.
 
@@ -151,7 +146,6 @@ Replace the growing positional composer callback with a named submit payload, th
 ## Tests
 
 - Aggregator unit tests: deterministic groups, validation/caps, timeout/cancellation, partial errors, and sanitized statuses in `internal/mentions/service_test.go`.
-- Task repository tests: title ranking, workspace isolation, current/archived/ephemeral exclusion in `task_mentions_test.go`.
 - One focused adapter suite per provider for stable identity, workspace scope, escaping, fan-out bounds, cancellation, and error mapping.
 - Handler/composition integration tests: HTTP request through real service registry with mixed fake adapters.
 - Message/queue tests: direct persistence, queue update replacement, restart round-trip, drain, deduplication, unsafe metadata, metadata projection, and prompt-block sanitization.

@@ -5,28 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/repository"
 )
 
-var (
-	errTaskMentionSearchUnavailable = errors.New("task mention search is unavailable")
-	errReferenceConversationScope   = errors.New("reference conversation scope is invalid")
-)
-
-// SearchMentionTasks delegates to the repository's lightweight mention lookup.
-func (s *Service) SearchMentionTasks(
-	ctx context.Context,
-	workspaceID, query, excludeTaskID string,
-	limit int,
-) ([]*models.Task, error) {
-	mentionRepo, ok := s.tasks.(repository.TaskMentionRepository)
-	if !ok {
-		return nil, errTaskMentionSearchUnavailable
-	}
-	return mentionRepo.SearchMentionTasks(ctx, workspaceID, query, excludeTaskID, limit)
-}
+var errReferenceConversationScope = errors.New("reference conversation scope is invalid")
 
 // ResolveWorkspace derives trusted reference scope from the persisted session
 // and task. assertedTaskID is optional for queue updates that identify only a
