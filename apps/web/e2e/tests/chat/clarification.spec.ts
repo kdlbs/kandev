@@ -86,6 +86,33 @@ test.describe("Clarification flow", () => {
     await expect(session.chat).not.toContainText("linesecond line");
   });
 
+  test("custom answer row ignores a hidden stale session chat", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Active Chat Locator",
+      "clarification",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // Dockview can retain a prior session's chat in the DOM after its tab is
+    // hidden. The custom-answer row must come from the visible chat only.
+    await testPage.locator("body").evaluate((body) => {
+      body.insertAdjacentHTML(
+        "beforeend",
+        '<div data-testid="session-chat" style="display: none"><div data-testid="clarification-custom-input">stale custom answer</div></div>',
+      );
+    });
+
+    await expect(session.clarificationCustomInput()).toHaveCount(1);
+  });
+
   test("skip clarification", async ({ testPage, apiClient, seedData }) => {
     const session = await seedClarificationTask(
       testPage,
