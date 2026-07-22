@@ -143,6 +143,32 @@ func TestPublishTaskActivityIfChanged_EmitsOnlyOnAggregateChange(t *testing.T) {
 	}
 }
 
+func TestPublishTaskActivityIfChanged_BackgroundToEmptyEmitsExplicitNull(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	createRunningSession(t, ctx, repo, "s1", "task-1", models.TaskSessionStateWaitingForInput)
+	provider := &fakeActivityProvider{byID: map[string]v1.ForegroundActivity{
+		"s1": v1.ForegroundActivityBackground,
+	}}
+	svc.SetForegroundActivityProvider(provider)
+
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	if got := foregroundActivityField(t, singlePublishedEventData(t, eventBus)); got != "background" {
+		t.Fatalf("baseline foreground_activity=%#v, want background", got)
+	}
+
+	provider.byID["s1"] = v1.ForegroundActivityGenerating
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	data := singlePublishedEventData(t, eventBus)
+	value, present := data["foreground_activity"]
+	if !present || value != nil {
+		t.Fatalf("background->empty must emit explicit foreground_activity null, got %#v", data)
+	}
+}
+
 func assertForegroundActivityAbsent(t *testing.T, data map[string]interface{}) {
 	t.Helper()
 	if v, ok := data["foreground_activity"]; ok {

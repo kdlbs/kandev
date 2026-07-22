@@ -387,3 +387,151 @@ func TestForegroundClaim_StaleTokenCannotCompleteOrReleaseNewClaim(t *testing.T)
 		t.Fatal("the newer claim must remain active after stale token operations")
 	}
 }
+
+func TestForegroundDispatch_FailedDispatchRollsBackForRetry(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	const sessionID = "session-dispatch-rollback"
+	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("first dispatch must claim the background-idle turn")
+	}
+	dispatch := svc.beginForegroundDispatch(sessionID, claim)
+	if dispatch == nil {
+		t.Fatal("first dispatch must establish its cycle before provider entry")
+	}
+
+	rollbackNow := make(chan struct{})
+	rollbackDone := make(chan bool, 1)
+	go func() {
+		<-rollbackNow
+		rollbackDone <- svc.rollbackForegroundDispatch(dispatch)
+	}()
+	close(rollbackNow)
+	if restored := <-rollbackDone; !restored {
+		t.Fatal("an unobserved synchronous dispatch failure must restore background-idle")
+	}
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("failed dispatch must reopen immediate input, got %q", got)
+	}
+
+	retryClaim := svc.claimForegroundTurn(sessionID)
+	if retryClaim == nil {
+		t.Fatal("retry must claim the foreground after rollback")
+	}
+	retryDispatch := svc.beginForegroundDispatch(sessionID, retryClaim)
+	if retryDispatch == nil {
+		t.Fatal("retry must establish a new dispatch token")
+	}
+	if retryDispatch.generation <= dispatch.generation {
+		t.Fatalf("retry must receive a fresh immutable generation: retry=%d failed=%d",
+			retryDispatch.generation, dispatch.generation)
+	}
+	if svc.acceptForegroundDispatch(retryDispatch) {
+		t.Fatal("accepting a retry does not expose background work before foreground idle")
+	}
+	svc.markForegroundIdle(sessionID)
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("accepted retry must retain its own completion/idle identity, got %q", got)
+	}
+}
+
+func TestForegroundDispatch_StaleRollbackCannotClobberRetry(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	const sessionID = "session-stale-dispatch-rollback"
+	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
+	firstClaim := svc.claimForegroundTurn(sessionID)
+	first := svc.beginForegroundDispatch(sessionID, firstClaim)
+	if first == nil || !svc.rollbackForegroundDispatch(first) {
+		t.Fatal("first failed dispatch must roll back")
+	}
+	secondClaim := svc.claimForegroundTurn(sessionID)
+	second := svc.beginForegroundDispatch(sessionID, secondClaim)
+	if second == nil {
+		t.Fatal("retry must establish its cycle")
+	}
+
+	retryEstablished := make(chan struct{})
+	staleRollbackDone := make(chan bool, 1)
+	go func() {
+		<-retryEstablished
+		staleRollbackDone <- svc.rollbackForegroundDispatch(first)
+	}()
+	close(retryEstablished)
+	if rolledBack := <-staleRollbackDone; rolledBack {
+		t.Fatal("stale failure token must not roll back the retry")
+	}
+	if svc.acceptForegroundDispatch(second) {
+		t.Fatal("acceptance alone must not expose background work")
+	}
+	if !svc.markForegroundIdle(sessionID) {
+		t.Fatal("retry's current idle event must expose its background work")
+	}
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("stale rollback clobbered retry activity: got %q", got)
+	}
+}
+
+func TestForegroundDispatch_ClaimlessRollbackRestoresOnlyExactUnobservedStart(t *testing.T) {
+	t.Run("synchronous failure restores prior background idle", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		const sessionID = "session-claimless-rollback"
+		svc.registerBackgroundTask(sessionID, "background-1")
+		svc.markForegroundIdle(sessionID)
+		dispatch := svc.beginForegroundDispatch(sessionID, nil)
+		if dispatch == nil || svc.ForegroundActivity(sessionID) != v1.ForegroundActivityGenerating {
+			t.Fatal("begin must atomically establish claimless successor ownership")
+		}
+		if !svc.rollbackForegroundDispatch(dispatch) {
+			t.Fatal("exact unobserved failure must restore prior background idle")
+		}
+		if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+			t.Fatalf("rollback restored %q, want background", got)
+		}
+	})
+
+	t.Run("provider output prevents restoration", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		const sessionID = "session-claimless-observed"
+		svc.registerBackgroundTask(sessionID, "background-1")
+		svc.markForegroundIdle(sessionID)
+		dispatch := svc.beginForegroundDispatch(sessionID, nil)
+		svc.markForegroundGenerating(sessionID)
+		if svc.rollbackForegroundDispatch(dispatch) {
+			t.Fatal("provider-observed cycle must not roll back")
+		}
+		if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+			t.Fatalf("provider output lost successor ownership: got %q", got)
+		}
+	})
+
+	t.Run("stale failure cannot restore over retry", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		const sessionID = "session-claimless-retry"
+		svc.registerBackgroundTask(sessionID, "background-1")
+		svc.markForegroundIdle(sessionID)
+		first := svc.beginForegroundDispatch(sessionID, nil)
+		if !svc.rollbackForegroundDispatch(first) {
+			t.Fatal("first synchronous failure must restore background")
+		}
+		retry := svc.beginForegroundDispatch(sessionID, nil)
+		if retry == nil {
+			t.Fatal("retry must establish successor ownership")
+		}
+		if svc.rollbackForegroundDispatch(first) {
+			t.Fatal("stale failure token must not restore over retry")
+		}
+		if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+			t.Fatalf("stale rollback displaced retry: got %q", got)
+		}
+	})
+}

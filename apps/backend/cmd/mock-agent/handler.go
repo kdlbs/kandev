@@ -274,9 +274,51 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitBackgroundWork(e, cmd)
 	case strings.EqualFold(cmd, "/detached-background") || strings.HasPrefix(strings.ToLower(cmd), "/detached-background "):
 		emitDetachedBackgroundWork(e, cmd)
+	case strings.EqualFold(cmd, "/async-subagent-lifecycle") || strings.HasPrefix(strings.ToLower(cmd), "/async-subagent-lifecycle "):
+		emitAsyncSubagentLifecycle(e, cmd, true)
+	case strings.EqualFold(cmd, "/async-subagent-teardown"):
+		emitAsyncSubagentLifecycle(e, cmd, false)
 	default:
 		emitRandomResponse(e, cmd, model)
 	}
+}
+
+const asyncSubagentAgentID = "agent_e2e_async_lifecycle"
+
+// emitAsyncSubagentLifecycle replays the ordering emitted by a detached Claude
+// Agent rather than the shell-oriented /detached-background sequence:
+//
+//  1. Agent tool launch acknowledgement with a stable agentId
+//  2. human-origin usage boundary (foreground idle)
+//  3. final thought and assistant output from the same prompt
+//  4. Prompt returns to its caller, completing the foreground turn
+//  5. optional ID-less task-notification boundary after the child finishes
+//
+// The teardown variant intentionally omits step 5 so execution termination is
+// the only evidence available to reconcile the registration.
+func emitAsyncSubagentLifecycle(e *emitter, cmd string, emitCompletion bool) {
+	d := parseBackgroundDuration(cmd, 20*time.Second)
+	toolCallID := nextToolID()
+	e.launchAsyncSubagentTool(
+		toolCallID,
+		"Async subagent exploration",
+		"Continue independently after the foreground turn ends",
+		"general-purpose",
+	)
+	e.foregroundIdle()
+	e.thought("The child is launched; I can return control to the operator.")
+	e.text("Foreground response after async launch.")
+
+	if !emitCompletion {
+		return
+	}
+	backgroundEmitter := &emitter{ctx: context.Background(), conn: e.conn, sid: e.sid}
+	go func() {
+		time.Sleep(d)
+		// Claude's async Agent invocation is terminal at launch. The later
+		// completion is a task-notification usage frame, not a second tool update.
+		backgroundEmitter.completeDetachedWork()
+	}()
 }
 
 // emitDetachedBackgroundWork launches work that outlives this prompt response.

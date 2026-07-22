@@ -168,3 +168,19 @@ Wave 8:
 Wave 9:
 
 - [x] [Task 09: Follow-up review and verification](task-09-follow-up-review-and-verification.md)
+
+Wave 10:
+
+- [x] [Task 10: Preserve prompt-cycle foreground identity](task-10-preserve-prompt-cycle-identity.md)
+
+Wave 11:
+
+- [x] [Task 11: Account for async-subagent completion](task-11-account-async-subagent-completion.md)
+
+Wave 12:
+
+- [x] [Task 12: Faithful async-subagent browser coverage](task-12-async-subagent-browser-coverage.md)
+
+Wave 13:
+
+- [x] [Task 13: Async lifecycle review and verification](task-13-async-lifecycle-review-and-verification.md)

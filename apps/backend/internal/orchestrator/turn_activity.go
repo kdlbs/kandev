@@ -30,8 +30,10 @@ import (
 // session that has no background work outstanding.
 type turnActivity struct {
 	mu         sync.Mutex
-	background map[string]struct{} // outstanding background/spawned tool-call IDs
-	yielded    bool                // foreground handed off to background work
+	publishMu  sync.Mutex                // serializes event/task publication for this session
+	revision   uint64                    // invalidates delayed publications after newer mutations
+	background map[string]backgroundWork // outstanding work keyed by launch tool-call ID
+	yielded    bool                      // foreground handed off to background work
 
 	// promptInFlight marks an admitted prompt that has claimed the foreground turn
 	// but has not yet been handed to the agent. It is deliberately independent of
@@ -44,15 +46,32 @@ type turnActivity struct {
 	claimGeneration uint64 // identifies the current admission owner
 	foregroundEpoch uint64 // increments on genuine foreground output
 
-	// foregroundGeneration identifies the prompt cycle that currently owns the
-	// foreground. Provider-idle records that immutable generation so a delayed
-	// completion from the old cycle cannot yield a successor cycle that has since
-	// claimed the same session.
-	foregroundGeneration           uint64
+	// promptCycleGeneration identifies the accepted prompt cycle that currently
+	// owns the foreground. It advances only when a successor prompt is accepted;
+	// output resuming after an idle frame remains part of the same immutable cycle.
+	// Provider-idle records this generation so a delayed predecessor completion
+	// cannot yield a successor cycle that has since claimed the same session.
+	promptCycleGeneration          uint64
 	pendingCompletionGeneration    uint64
 	hasPendingCompletionGeneration bool
 	completedGeneration            uint64
 	hasCompletedGeneration         bool
+}
+
+// backgroundWork binds a detached workload to the execution that launched it.
+// workID is a provider-owned stable identity when the launch envelope exposes
+// one (Claude's async Task result calls this agentId). The current Claude ACP
+// task-notification usage frame exposes only origin.kind, so workID is often
+// available at launch but absent at completion.
+type backgroundWork struct {
+	executionID string
+	workID      string
+}
+
+type activityPublication struct {
+	activity *turnActivity
+	revision uint64
+	value    interface{}
 }
 
 type foregroundYieldSource uint8
@@ -71,6 +90,20 @@ type foregroundClaim struct {
 	foregroundEpoch uint64
 }
 
+// foregroundDispatch binds provider events to a prompt cycle before the
+// provider can emit them. Its generation is also the rollback token: a failed
+// dispatch may restore the predecessor only while this exact, unobserved cycle
+// is still current.
+type foregroundDispatch struct {
+	activity              *turnActivity
+	generation            uint64
+	foregroundEpoch       uint64
+	claimGeneration       uint64
+	claimedBackgroundTurn bool
+	yieldedBeforeBegin    bool
+	accepted              bool
+}
+
 // turnActivityFor returns the per-session activity record, creating it when
 // create is true. Returns nil when the record is absent and create is false.
 func (s *Service) turnActivityFor(sessionID string, create bool) *turnActivity {
@@ -80,7 +113,7 @@ func (s *Service) turnActivityFor(sessionID string, create bool) *turnActivity {
 	if !create {
 		return nil
 	}
-	ta := &turnActivity{background: make(map[string]struct{})}
+	ta := &turnActivity{background: make(map[string]backgroundWork)}
 	actual, _ := s.foregroundActivity.LoadOrStore(sessionID, ta)
 	return actual.(*turnActivity)
 }
@@ -100,7 +133,7 @@ func (s *Service) markForegroundGenerating(sessionID string) bool {
 	changed := ta.yielded
 	ta.yielded = false
 	if changed {
-		ta.foregroundGeneration++
+		ta.revision++
 	}
 	// Real foreground output redefines ownership of the turn: it invalidates any
 	// outstanding claim's epoch, so a prompt that later fails cannot release the
@@ -131,6 +164,7 @@ func (ta *turnActivity) markForegroundIdleLocked() bool {
 		return false
 	}
 	ta.yielded = true
+	ta.revision++
 	return true
 }
 
@@ -170,14 +204,14 @@ func (s *Service) transitionForegroundToBackground(sessionID string, source fore
 	defer ta.mu.Unlock()
 
 	if source == foregroundYieldProviderIdle {
-		if !ta.hasCompletedGeneration || ta.completedGeneration != ta.foregroundGeneration {
-			ta.pendingCompletionGeneration = ta.foregroundGeneration
+		if !ta.hasCompletedGeneration || ta.completedGeneration != ta.promptCycleGeneration {
+			ta.pendingCompletionGeneration = ta.promptCycleGeneration
 			ta.hasPendingCompletionGeneration = true
 		}
 		return ta.markForegroundIdleLocked()
 	}
 
-	completionGeneration := ta.foregroundGeneration
+	completionGeneration := ta.promptCycleGeneration
 	if ta.hasPendingCompletionGeneration {
 		completionGeneration = ta.pendingCompletionGeneration
 		ta.hasPendingCompletionGeneration = false
@@ -187,7 +221,7 @@ func (s *Service) transitionForegroundToBackground(sessionID string, source fore
 	}
 	ta.completedGeneration = completionGeneration
 	ta.hasCompletedGeneration = true
-	if completionGeneration != ta.foregroundGeneration {
+	if completionGeneration != ta.promptCycleGeneration {
 		return false
 	}
 	return ta.markForegroundIdleLocked()
@@ -199,12 +233,27 @@ func (s *Service) transitionForegroundToBackground(sessionID string, source fore
 // still generating, and foreground activity must retain precedence. A later
 // foreground-idle boundary exposes the outstanding work.
 func (s *Service) registerBackgroundTask(sessionID, toolCallID string) {
+	s.registerBackgroundWork(sessionID, toolCallID, "", "")
+}
+
+func (s *Service) registerBackgroundWork(sessionID, toolCallID, executionID, workID string) {
 	if sessionID == "" || toolCallID == "" {
 		return
 	}
 	ta := s.turnActivityFor(sessionID, true)
 	ta.mu.Lock()
-	ta.background[toolCallID] = struct{}{}
+	current, exists := ta.background[toolCallID]
+	updated := current
+	if executionID != "" {
+		updated.executionID = executionID
+	}
+	if workID != "" {
+		updated.workID = workID
+	}
+	if !exists || current != updated {
+		ta.revision++
+	}
+	ta.background[toolCallID] = updated
 	ta.mu.Unlock()
 }
 
@@ -230,6 +279,10 @@ func (s *Service) hasBackgroundTask(sessionID, toolCallID string) bool {
 // out of the background-idle substate (the last outstanding task finished),
 // so the caller publishes the activity signal only on that final completion.
 func (s *Service) completeBackgroundTask(sessionID, toolCallID string) bool {
+	return s.completeBackgroundTaskForExecution(sessionID, toolCallID, "")
+}
+
+func (s *Service) completeBackgroundTaskForExecution(sessionID, toolCallID, executionID string) bool {
 	if sessionID == "" || toolCallID == "" {
 		return false
 	}
@@ -238,7 +291,13 @@ func (s *Service) completeBackgroundTask(sessionID, toolCallID string) bool {
 		return false
 	}
 	ta.mu.Lock()
+	work, exists := ta.background[toolCallID]
+	if !exists || (executionID != "" && work.executionID != "" && work.executionID != executionID) {
+		ta.mu.Unlock()
+		return false
+	}
 	delete(ta.background, toolCallID)
+	ta.revision++
 	changed := false
 	if len(ta.background) == 0 && ta.yielded {
 		ta.yielded = false
@@ -248,26 +307,109 @@ func (s *Service) completeBackgroundTask(sessionID, toolCallID string) bool {
 	return changed
 }
 
-// completeOneBackgroundTask retires one outstanding workload when the provider
-// reports a task-notification completion without exposing its task ID. The
-// indicator only depends on whether any work remains, so arbitrary retirement
-// is safe; one completion can never clear more than one registration.
-func (s *Service) completeOneBackgroundTask(sessionID string) bool {
+// completeBackgroundWork retires a provider completion. Identified completions
+// remove only their exact execution-scoped registration, making duplicate
+// delivery harmless. An ID-less completion is accepted only when exactly one
+// workload exists for the session. With multiple candidates there is no
+// accountable choice: fail closed and let a later identified event or execution
+// teardown reconcile them. In particular, never range a Go map and pretend its
+// intentionally-random iteration order is completion ordering.
+func (s *Service) completeBackgroundWorkSnapshot(
+	sessionID, executionID, workID string,
+	value interface{},
+) (activityPublication, bool) {
 	ta := s.turnActivityFor(sessionID, false)
 	if ta == nil {
-		return false
+		return activityPublication{}, false
 	}
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
-	for toolCallID := range ta.background {
-		delete(ta.background, toolCallID)
-		if len(ta.background) == 0 && ta.yielded {
-			ta.yielded = false
-			return true
+
+	matchedToolCallID := ""
+	for toolCallID, work := range ta.background {
+		if workID != "" {
+			// Identified completion remains execution-scoped: a delayed exact event
+			// from an old execution must never consume similarly-identified work
+			// owned by its successor.
+			if executionID != "" && work.executionID != "" && work.executionID != executionID {
+				continue
+			}
+			if work.workID == workID || toolCallID == workID {
+				matchedToolCallID = toolCallID
+				break
+			}
+			continue
 		}
+		// Claude attributes an ID-less task-notification to the ACP cycle that
+		// receives it, not necessarily the execution/cycle that launched the async
+		// child. Search session-wide, but retire only a sole unambiguous candidate.
+		if matchedToolCallID != "" {
+			// More than one uncorrelated candidate is ambiguous.
+			return activityPublication{}, false
+		}
+		matchedToolCallID = toolCallID
+	}
+	if matchedToolCallID == "" {
+		return activityPublication{}, false
+	}
+	delete(ta.background, matchedToolCallID)
+	ta.revision++
+	if !ta.clearYieldWhenEmptyLocked() {
+		return activityPublication{}, false
+	}
+	return activityPublication{activity: ta, revision: ta.revision, value: value}, true
+}
+
+// clearExecutionBackgroundWork removes every registration owned by one
+// terminal execution, preserving any successor execution already using the
+// same task session. It returns true only for a visible background->default
+// transition; callers publish after the tracker lock is released.
+func (s *Service) clearExecutionBackgroundWorkSnapshot(
+	sessionID, executionID string,
+) (activityPublication, bool) {
+	if sessionID == "" || executionID == "" {
+		return activityPublication{}, false
+	}
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil {
+		return activityPublication{}, false
+	}
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	removed := false
+	for toolCallID, work := range ta.background {
+		if work.executionID == executionID {
+			delete(ta.background, toolCallID)
+			removed = true
+		}
+	}
+	if !removed {
+		return activityPublication{}, false
+	}
+	ta.revision++
+	changed := ta.clearYieldWhenEmptyLocked()
+	if !changed {
+		return activityPublication{}, false
+	}
+	return activityPublication{activity: ta, revision: ta.revision, value: nil}, true
+}
+
+func (ta *turnActivity) clearYieldWhenEmptyLocked() bool {
+	if len(ta.background) != 0 || !ta.yielded {
 		return false
 	}
-	return false
+	ta.yielded = false
+	return true
+}
+
+func (s *Service) clearExecutionBackgroundWorkAndPublish(
+	ctx context.Context,
+	taskID, sessionID, executionID string,
+) {
+	publication, changed := s.clearExecutionBackgroundWorkSnapshot(sessionID, executionID)
+	if changed {
+		s.publishForegroundActivitySnapshot(ctx, taskID, sessionID, publication)
+	}
 }
 
 // clearTurnActivity drops all tracked activity for a session. Foreground turn
@@ -349,6 +491,7 @@ func (s *Service) claimForegroundTurn(sessionID string) *foregroundClaim {
 	ta.yielded = false
 	ta.promptInFlight = true
 	ta.claimGeneration++
+	ta.revision++
 	return &foregroundClaim{
 		activity:        ta,
 		claimGeneration: ta.claimGeneration,
@@ -378,18 +521,136 @@ func (s *Service) isForegroundClaimCurrent(sessionID string, claim *foregroundCl
 // yield it back to background-idle). It reports whether background work hidden by
 // the active claim became visible, so the caller can publish that transition.
 func (s *Service) completeForegroundClaim(claim *foregroundClaim) bool {
-	if claim == nil || claim.activity == nil {
-		return false
+	return s.acceptForegroundDispatch(s.beginForegroundDispatch("", claim))
+}
+
+// beginForegroundDispatch atomically establishes both immutable prompt-cycle
+// identity and foreground-generating ownership before calling agentctl. Keeping
+// generation, yielded, and revision in one mutation prevents old cleanup from
+// creating a newer null snapshot between "begin" and a later foreground flip.
+// agentctl starts its prompt goroutine before returning the accepted response,
+// so provider frames can also beat onDispatched.
+func (s *Service) beginForegroundDispatch(sessionID string, claim *foregroundClaim) *foregroundDispatch {
+	var ta *turnActivity
+	if claim != nil {
+		ta = claim.activity
+		if ta == nil {
+			return nil
+		}
+	} else {
+		if sessionID == "" {
+			return nil
+		}
+		ta = s.turnActivityFor(sessionID, true)
 	}
-	ta := claim.activity
+
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
-	if !ta.promptInFlight || ta.claimGeneration != claim.claimGeneration {
+	if claim != nil && (!ta.promptInFlight || ta.claimGeneration != claim.claimGeneration) {
+		return nil
+	}
+	yieldedBeforeBegin := ta.yielded
+	ta.yielded = false
+	ta.promptCycleGeneration++
+	// Starting any successor cycle invalidates delayed terminal/background
+	// publications, including claimless prompts admitted from a settled state.
+	ta.revision++
+	return &foregroundDispatch{
+		activity:              ta,
+		generation:            ta.promptCycleGeneration,
+		foregroundEpoch:       ta.foregroundEpoch,
+		claimGeneration:       ta.claimGeneration,
+		claimedBackgroundTurn: claim != nil,
+		yieldedBeforeBegin:    yieldedBeforeBegin,
+	}
+}
+
+// acceptForegroundDispatch closes a background-idle admission claim after
+// agentctl acknowledges the prompt. The cycle itself was already established by
+// beginForegroundDispatch, so pre-callback provider events own the right token.
+func (s *Service) acceptForegroundDispatch(dispatch *foregroundDispatch) bool {
+	if dispatch == nil || dispatch.activity == nil {
+		return false
+	}
+	ta := dispatch.activity
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	if dispatch.accepted || ta.promptCycleGeneration != dispatch.generation {
+		return false
+	}
+	dispatch.accepted = true
+	if !dispatch.claimedBackgroundTurn || !ta.promptInFlight ||
+		ta.claimGeneration != dispatch.claimGeneration {
 		return false
 	}
 	ta.promptInFlight = false
-	ta.foregroundGeneration++
-	return ta.yielded
+	if ta.yielded {
+		return true
+	}
+	completedCurrent := ta.hasCompletedGeneration && ta.completedGeneration == dispatch.generation
+	idleCurrentWithoutLaterOutput := ta.hasPendingCompletionGeneration &&
+		ta.pendingCompletionGeneration == dispatch.generation &&
+		ta.foregroundEpoch == dispatch.foregroundEpoch
+	if completedCurrent || idleCurrentWithoutLaterOutput {
+		return ta.markForegroundIdleLocked()
+	}
+	return false
+}
+
+func (s *Service) acceptedForegroundDispatchClaim(dispatch *foregroundDispatch) bool {
+	if dispatch == nil || dispatch.activity == nil {
+		return false
+	}
+	ta := dispatch.activity
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	return dispatch.accepted && dispatch.claimedBackgroundTurn
+}
+
+// rollbackForegroundDispatch releases a failed, unobserved admission. Prompt
+// generations are never reused: leaving the failed generation consumed makes a
+// stale rollback distinguishable after a retry establishes its successor.
+// Generation, epoch, pending-completion, and completed-generation checks make
+// the rollback token-aware, so failure cannot clobber provider work that arrived.
+func (s *Service) rollbackForegroundDispatch(dispatch *foregroundDispatch) bool {
+	if dispatch == nil || dispatch.activity == nil {
+		return false
+	}
+	ta := dispatch.activity
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	if !ta.dispatchRollbackIsCurrentLocked(dispatch) || !ta.releaseDispatchClaimLocked(dispatch) {
+		return false
+	}
+	restoreBackground := dispatch.claimedBackgroundTurn || dispatch.yieldedBeforeBegin
+	if len(ta.background) == 0 || !restoreBackground {
+		return false
+	}
+	ta.yielded = true
+	ta.revision++
+	return true
+}
+
+func (ta *turnActivity) dispatchRollbackIsCurrentLocked(dispatch *foregroundDispatch) bool {
+	if dispatch.accepted || ta.promptCycleGeneration != dispatch.generation ||
+		ta.foregroundEpoch != dispatch.foregroundEpoch {
+		return false
+	}
+	if ta.hasPendingCompletionGeneration && ta.pendingCompletionGeneration == dispatch.generation {
+		return false
+	}
+	return !ta.hasCompletedGeneration || ta.completedGeneration != dispatch.generation
+}
+
+func (ta *turnActivity) releaseDispatchClaimLocked(dispatch *foregroundDispatch) bool {
+	if !dispatch.claimedBackgroundTurn {
+		return true
+	}
+	if !ta.promptInFlight || ta.claimGeneration != dispatch.claimGeneration {
+		return false
+	}
+	ta.promptInFlight = false
+	return true
 }
 
 // releaseForegroundClaim hands a claimForegroundTurn claim back when the prompt
@@ -456,13 +717,48 @@ func (s *Service) ForegroundActivity(sessionID string) v1.ForegroundActivity {
 // it only when a flip actually happened (the mark/register/complete helpers
 // return that), so it never fires per background frame.
 func (s *Service) publishForegroundActivityChanged(ctx context.Context, taskID, sessionID string) {
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil {
+		s.publishForegroundActivityNow(ctx, taskID, sessionID, string(v1.ForegroundActivityGenerating))
+		return
+	}
+	ta.publishMu.Lock()
+	defer ta.publishMu.Unlock()
+	s.publishForegroundActivityNow(ctx, taskID, sessionID, string(s.foregroundActivityValue(sessionID)))
+}
+
+func (s *Service) publishForegroundActivitySnapshot(
+	ctx context.Context,
+	taskID, sessionID string,
+	publication activityPublication,
+) {
+	ta := publication.activity
+	if ta == nil {
+		return
+	}
+	ta.publishMu.Lock()
+	defer ta.publishMu.Unlock()
+	ta.mu.Lock()
+	current := ta.revision == publication.revision
+	ta.mu.Unlock()
+	if !current {
+		return
+	}
+	s.publishForegroundActivityNow(ctx, taskID, sessionID, publication.value)
+}
+
+func (s *Service) publishForegroundActivityNow(
+	ctx context.Context,
+	taskID, sessionID string,
+	value interface{},
+) {
 	if s.eventBus == nil || taskID == "" || sessionID == "" {
 		return
 	}
 	eventData := map[string]interface{}{
 		metaKeyTaskID:         taskID,
 		metaKeySessionID:      sessionID,
-		"foreground_activity": string(s.foregroundActivityValue(sessionID)),
+		"foreground_activity": value,
 	}
 	if err := s.eventBus.Publish(ctx, events.TaskSessionActivityChanged,
 		bus.NewEvent(events.TaskSessionActivityChanged, "task-session", eventData)); err != nil {

@@ -254,7 +254,7 @@ export type TaskSessionStateChangedPayload = {
   task_environment_id?: string;
   // Fine-grained busy substate (see ADR-0049), carried on coarse transitions;
   // live flips arrive on session.activity_changed.
-  foreground_activity?: ForegroundActivity;
+  foreground_activity?: ForegroundActivity | null;
 };
 
 /**
@@ -265,7 +265,7 @@ export type TaskSessionStateChangedPayload = {
 export type TaskSessionActivityChangedPayload = {
   task_id: string;
   session_id: string;
-  foreground_activity: ForegroundActivity;
+  foreground_activity: ForegroundActivity | null;
 };
 
 export type TaskSessionWaitingForInputPayload = {

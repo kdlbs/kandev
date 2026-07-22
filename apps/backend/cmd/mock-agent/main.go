@@ -381,6 +381,8 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "slow", Description: "Run a slow response (default 5s)", Input: hint("duration (e.g. 10s)")},
 		{Name: "background", Description: "Spawn a subagent and stay foreground-idle (default 8s)", Input: hint("duration (e.g. 8s)")},
 		{Name: "detached-background", Description: "Launch work that outlives the foreground turn (default 8s)", Input: hint("duration (e.g. 8s)")},
+		{Name: "async-subagent-lifecycle", Description: "Replay an async Agent lifecycle (default 20s)", Input: hint("duration (e.g. 20s)")},
+		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
 		{Name: "error", Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},

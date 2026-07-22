@@ -50,6 +50,91 @@ async function seedTaskAndWaitForIdle(
 test.describe("Fine-grained busy signal — composer + status", () => {
   test.describe.configure({ retries: 1 });
 
+  test("async subagent accepts a new foreground turn and clears on singleton ID-less completion", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Async subagent lifecycle",
+    );
+
+    // This replay is deliberately ordered like Claude's async Agent path:
+    // Agent launch (with agentId) -> human-origin foreground idle -> final
+    // same-prompt thought/message -> prompt completion -> Claude's ID-less
+    // task-notification completion. It is not the shell-background ordering
+    // covered below. Exact-ID completion is pinned by backend unit coverage;
+    // this browser path exercises the safe singleton fallback Claude requires.
+    await session.sendMessage("/async-subagent-lifecycle 20s");
+    await expect(testPage.getByText("Foreground response after async launch.")).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+    const backgroundIndicator = session
+      .sidebarTaskItem("Async subagent lifecycle")
+      .getByTestId("task-state-background-running");
+    await expect(backgroundIndicator).toBeVisible();
+
+    // A prompt submitted while only the async child remains must be admitted
+    // immediately. Foreground activity temporarily wins over the child.
+    await session.sendMessage("/slow 2s");
+    await expect(testPage.getByText("/slow 2s")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "generating");
+
+    // The older async child remains visible after the second foreground yields,
+    // then its singleton ID-less task-notification removes the final registration.
+    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+    await waitForActiveSessionForegroundActivity(testPage, null);
+    await expect(backgroundIndicator).not.toBeVisible();
+  });
+
+  test("execution teardown clears an async child whose completion never arrives", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Async subagent teardown",
+      seedData.agentProfileId,
+      {
+        description: "/async-subagent-teardown",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("auto-started task did not return a session id");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
+    await expect(session.agentStatus()).toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+
+    // No child completion is emitted by this scenario. The terminal execution
+    // boundary must reconcile its owned registration instead.
+    await apiClient.stopSession({
+      session_id: task.session_id,
+      reason: "e2e teardown",
+      force: true,
+    });
+    await expect(session.agentStatus()).not.toBeVisible({ timeout: 20_000 });
+    await waitForActiveSessionForegroundActivity(testPage, null);
+    await expect(session.agentStatus()).not.toBeVisible();
+  });
+
   test("background-idle session shows working AND accepts input, then flips to done", async ({
     testPage,
     apiClient,
