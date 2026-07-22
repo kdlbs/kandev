@@ -334,7 +334,24 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         fs.writeFileSync(
           shimPath,
           `#!/bin/sh
-if [ -f "$KANDEV_E2E_GIT_DELAY_FILE" ] && { [ "$1" = "fetch" ] || [ "$1" = "pull" ]; }; then
+# The worktree manager invokes Git with -c core.longpaths=true. Inspect the
+# subcommand in a subshell so skipping its option/value pair does not change
+# the original arguments passed through to the real Git binary below.
+git_subcommand=$(
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -c)
+        shift
+        [ "$#" -gt 0 ] && shift
+        ;;
+      *)
+        printf '%s\\n' "$1"
+        exit 0
+        ;;
+    esac
+  done
+)
+if [ -f "$KANDEV_E2E_GIT_DELAY_FILE" ] && { [ "$git_subcommand" = "fetch" ] || [ "$git_subcommand" = "pull" ]; }; then
   delay_ms=$(cat "$KANDEV_E2E_GIT_DELAY_FILE" 2>/dev/null)
   case "$delay_ms" in
     ''|*[!0-9]*) ;;
@@ -347,7 +364,7 @@ if [ -f "$KANDEV_E2E_GIT_DELAY_FILE" ] && { [ "$1" = "fetch" ] || [ "$1" = "pull
       ;;
   esac
 fi
-if [ "$1" = "push" ] && [ -f "$KANDEV_E2E_GITLAB_PUSH_FILE" ]; then
+if [ "$git_subcommand" = "push" ] && [ -f "$KANDEV_E2E_GITLAB_PUSH_FILE" ]; then
   expected_remote=$(cat "$KANDEV_E2E_GITLAB_PUSH_FILE" 2>/dev/null)
   actual_remote=$(PATH="$KANDEV_E2E_ORIGINAL_PATH" git config --get remote.origin.url 2>/dev/null)
   if [ -n "$expected_remote" ] && [ "$actual_remote" = "$expected_remote" ]; then

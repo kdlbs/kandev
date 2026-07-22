@@ -749,6 +749,12 @@ func deleteBranchRefIfOwned(ctx context.Context, repoPath string, snapshot newBr
 	return runGitCmdCombinedOutput(ctx, cmd)
 }
 
+func restoreBranchRefIfDeleted(ctx context.Context, repoPath string, snapshot newBranchAddSnapshot) ([]byte, error) {
+	cmd := newGitCommand(ctx, "update-ref", snapshot.branchRef, snapshot.branchOID, strings.Repeat("0", len(snapshot.branchOID)))
+	cmd.Dir = repoPath
+	return runGitCmdCombinedOutput(ctx, cmd)
+}
+
 func (m *Manager) rollbackFailedNewBranchAdd(
 	ctx context.Context,
 	repoPath, branchName, worktreePath string,
@@ -759,7 +765,7 @@ func (m *Manager) rollbackFailedNewBranchAdd(
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.inspectTimeout)
 	defer cancel()
-	registrationOwned, inspectErr := inspectWorktreeRegistrationOwnership(
+	registrationOwnership, inspectErr := inspectWorktreeRegistrationOwnership(
 		cleanupCtx, repoPath, worktreePath, snapshot.branchRef, snapshot.branchOID,
 	)
 	if inspectErr != nil {
@@ -767,7 +773,24 @@ func (m *Manager) rollbackFailedNewBranchAdd(
 			zap.String("path", worktreePath), zap.Error(inspectErr))
 		return
 	}
-	if !registrationOwned {
+	switch registrationOwnership {
+	case worktreeRegistrationAbsent:
+		// git may fail before it registers a worktree (for example when the
+		// target is non-empty). The branch was created with a zero-OID CAS, so
+		// this matching delete only removes our still-unmodified ref. Never
+		// touch the target path: it was not registered as ours.
+		if output, err := deleteBranchRefIfOwned(cleanupCtx, repoPath, snapshot); err != nil {
+			m.logger.Warn("failed to roll back unregistered worktree branch",
+				zap.String("branch", branchName),
+				zap.String("output", string(output)),
+				zap.Error(err))
+		}
+		return
+	case worktreeRegistrationCompeting:
+		return
+	case worktreeRegistrationOwned:
+		// Continue below.
+	default:
 		return
 	}
 	// Delete the exact ref while the owned worktree registration still blocks
@@ -780,9 +803,36 @@ func (m *Manager) rollbackFailedNewBranchAdd(
 			zap.Error(err))
 		return
 	}
-	if err := m.removeWorktreeDir(cleanupCtx, worktreePath, repoPath); err != nil {
+	removeErr := m.removeWorktreeDir(cleanupCtx, worktreePath, repoPath)
+	registrationOwnership, inspectErr = inspectWorktreeRegistrationOwnership(
+		cleanupCtx, repoPath, worktreePath, snapshot.branchRef, snapshot.branchOID,
+	)
+	// Git's removal command can report an error even when its filesystem/prune
+	// fallback completed the registration cleanup. The post-cleanup ownership
+	// inspection is authoritative for whether deleting the ref remains safe.
+	if inspectErr == nil && registrationOwnership == worktreeRegistrationAbsent {
+		return
+	}
+	if removeErr != nil {
 		m.logger.Warn("failed to roll back partial worktree",
-			zap.String("path", worktreePath), zap.Error(err))
+			zap.String("path", worktreePath), zap.Error(removeErr))
+	}
+	if inspectErr != nil {
+		m.logger.Warn("failed to verify worktree registration after partial cleanup",
+			zap.String("path", worktreePath), zap.Error(inspectErr))
+	} else {
+		m.logger.Warn("partial worktree registration remains after cleanup",
+			zap.String("path", worktreePath), zap.Uint8("registration_ownership", uint8(registrationOwnership)))
+	}
+	// A branch registration prevents ordinary worktree creation from adopting
+	// this ref while cleanup runs. If cleanup did not prove that registration
+	// is gone, restore the exact OID with a zero-OID CAS before returning so a
+	// registered worktree can never be left pointing at a missing branch.
+	if output, err := restoreBranchRefIfDeleted(cleanupCtx, repoPath, snapshot); err != nil {
+		m.logger.Warn("failed to restore branch after partial worktree cleanup",
+			zap.String("branch", branchName),
+			zap.String("output", string(output)),
+			zap.Error(err))
 	}
 }
 

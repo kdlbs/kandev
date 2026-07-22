@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -76,24 +78,32 @@ func worktreeRegistrationExists(ctx context.Context, repoPath, worktreePath stri
 	return false, nil
 }
 
+type worktreeRegistrationOwnership uint8
+
+const (
+	worktreeRegistrationAbsent worktreeRegistrationOwnership = iota
+	worktreeRegistrationOwned
+	worktreeRegistrationCompeting
+)
+
 func inspectWorktreeRegistrationOwnership(
 	ctx context.Context, repoPath, worktreePath, branchRef, headOID string,
-) (bool, error) {
+) (worktreeRegistrationOwnership, error) {
 	cmd := newGitCommand(ctx, "worktree", "list", "--porcelain", "-z")
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
-		return false, err
+		return worktreeRegistrationAbsent, err
 	}
 	wantPath, err := normalizedWorktreeTargetPath(worktreePath)
 	if err != nil {
-		return false, err
+		return worktreeRegistrationAbsent, err
 	}
-	var exactTarget, branchElsewhere bool
+	var exactTarget, branchElsewhere, targetClaimed bool
 	var normalizationErr error
 	var currentPath, currentHead, currentBranch string
 	inspectRegistration := func() {
-		if currentBranch != branchRef || normalizationErr != nil {
+		if currentPath == "" || normalizationErr != nil {
 			return
 		}
 		currentPathKey, normalizeErr := normalizedWorktreeTargetPath(currentPath)
@@ -101,11 +111,17 @@ func inspectWorktreeRegistrationOwnership(
 			normalizationErr = normalizeErr
 			return
 		}
-		if currentPathKey == wantPath && currentHead == headOID {
+		if currentPathKey != wantPath {
+			if currentBranch == branchRef {
+				branchElsewhere = true
+			}
+			return
+		}
+		if currentBranch == branchRef && currentHead == headOID {
 			exactTarget = true
 			return
 		}
-		branchElsewhere = true
+		targetClaimed = true
 	}
 	for _, field := range strings.Split(string(output), "\x00") {
 		switch {
@@ -122,9 +138,15 @@ func inspectWorktreeRegistrationOwnership(
 	}
 	inspectRegistration()
 	if normalizationErr != nil {
-		return false, normalizationErr
+		return worktreeRegistrationAbsent, normalizationErr
 	}
-	return exactTarget && !branchElsewhere, nil
+	if exactTarget && !branchElsewhere && !targetClaimed {
+		return worktreeRegistrationOwned, nil
+	}
+	if branchElsewhere || targetClaimed {
+		return worktreeRegistrationCompeting, nil
+	}
+	return worktreeRegistrationAbsent, nil
 }
 
 // RemoveByID removes a specific worktree by its ID and optionally its branch.
@@ -448,12 +470,15 @@ func (m *Manager) tryRemoveEmptyTaskDir(worktreePath string) {
 }
 
 // forceRemoveDir removes a directory, retrying transient filesystem failures.
-// It intentionally remains within Go's portable filesystem API so cleanup also
-// works in native Windows environments where a Unix rm binary is unavailable.
+// Native Windows cleanup intentionally stays within Go's portable filesystem
+// APIs. Unix hosts get a final non-shell rm fallback for persistent removal
+// failures caused by filesystems that reject os.RemoveAll while allowing rm.
 func (m *Manager) forceRemoveDir(dir string) error {
 	const maxRetries = 3
 	const retryDelay = 200 * time.Millisecond
-	return m.removeDirWithRetries(dir, maxRetries, retryDelay, os.RemoveAll)
+	return m.removeDirWithRetriesAndFallback(
+		dir, maxRetries, retryDelay, os.RemoveAll, forceRemoveDirUnix, isUnixLikeOS(runtime.GOOS),
+	)
 }
 
 func (m *Manager) removeDirWithRetries(
@@ -475,4 +500,40 @@ func (m *Manager) removeDirWithRetries(
 		}
 	}
 	return fmt.Errorf("remove directory %s after %d attempts: %w", dir, maxRetries, lastErr)
+}
+
+func (m *Manager) removeDirWithRetriesAndFallback(
+	dir string, maxRetries int, retryDelay time.Duration,
+	removeAll, fallback func(string) error,
+	useFallback bool,
+) error {
+	err := m.removeDirWithRetries(dir, maxRetries, retryDelay, removeAll)
+	if err == nil || !useFallback {
+		return err
+	}
+	if fallbackErr := fallback(dir); fallbackErr != nil {
+		return fmt.Errorf("remove directory %s with Unix fallback: %w", dir, errors.Join(err, fallbackErr))
+	}
+	return nil
+}
+
+func forceRemoveDirUnix(dir string) error {
+	if strings.TrimSpace(dir) == "" {
+		return errors.New("refusing to remove an empty directory path")
+	}
+	cmd := exec.Command("rm", "-rf", "--", dir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("rm -rf -- %q: %w: %s", dir, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func isUnixLikeOS(goos string) bool {
+	switch goos {
+	case "aix", "android", "darwin", "dragonfly", "freebsd", "illumos", "ios", "linux", "netbsd", "openbsd", "solaris":
+		return true
+	default:
+		return false
+	}
 }

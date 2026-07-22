@@ -171,6 +171,63 @@ func TestGitAddWorktree_FailurePreservesPreexistingBranchAndDirectory(t *testing
 	}
 }
 
+func TestGitAddWorktree_PreRegistrationFailureRollsBackOwnedBranch(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	worktreePath := filepath.Join(t.TempDir(), "preexisting-target")
+	if err := os.Mkdir(worktreePath, 0755); err != nil {
+		t.Fatalf("create preexisting worktree target: %v", err)
+	}
+	marker := filepath.Join(worktreePath, "keep.txt")
+	if err := os.WriteFile(marker, []byte("keep"), 0600); err != nil {
+		t.Fatalf("create target marker: %v", err)
+	}
+
+	_, err = mgr.gitAddWorktree(context.Background(), repoPath, "feature/pre-registration-failure", worktreePath, "main")
+	if err == nil {
+		t.Fatal("gitAddWorktree() error = nil, want pre-registration failure")
+	}
+	exists, existsErr := mgr.branchExists(context.Background(), repoPath, "feature/pre-registration-failure")
+	if existsErr != nil {
+		t.Fatalf("check owned branch after pre-registration failure: %v", existsErr)
+	}
+	if exists {
+		t.Fatal("owned branch remains after pre-registration failure")
+	}
+	if got, readErr := os.ReadFile(marker); readErr != nil || string(got) != "keep" {
+		t.Fatalf("preexisting target was changed: contents=%q err=%v", got, readErr)
+	}
+}
+
+func TestGitAddWorktree_RegisteredCleanupFailureRestoresOwnedBranch(t *testing.T) {
+	branchState := filepath.Join(t.TempDir(), "branch-created")
+	registrationState := filepath.Join(t.TempDir(), "worktree-registered")
+	scriptDir := writeFakeGitScript(t, failedWorktreeAddGitScript)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("KD_BRANCH_STATE", branchState)
+	t.Setenv("KD_REGISTRATION_STATE", registrationState)
+	t.Setenv("KD_WORKTREE_REMOVE_FAIL", "1")
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	worktreePath := filepath.Join(t.TempDir(), "registered-worktree")
+	_, err = mgr.gitAddWorktree(context.Background(), t.TempDir(), "feature/new", worktreePath, "main")
+	if err == nil {
+		t.Fatal("gitAddWorktree() error = nil, want checkout failure")
+	}
+	if _, statErr := os.Stat(registrationState); statErr != nil {
+		t.Fatalf("registered worktree unexpectedly removed: %v", statErr)
+	}
+	if _, statErr := os.Stat(branchState); statErr != nil {
+		t.Fatalf("registered worktree points at a deleted owned branch: %v", statErr)
+	}
+}
+
 const failedWorktreeAddGitScript = `
 while [ "${1:-}" = "-c" ]; do
   shift 2
@@ -229,6 +286,10 @@ case "${1:-} ${2:-}" in
     exit 128
     ;;
   "worktree remove")
+		if [ -n "${KD_WORKTREE_REMOVE_FAIL:-}" ]; then
+			echo "forced worktree remove failure" >&2
+			exit 1
+		fi
     rm -rf "${4:?}"
     rm -f "${KD_REGISTRATION_STATE:?}"
     exit 0
