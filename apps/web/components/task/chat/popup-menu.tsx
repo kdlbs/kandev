@@ -32,10 +32,7 @@ export function computePopupMenuStyle(args: {
       ? Math.max(0, args.position.y - args.viewport.offsetTop - margin * 2)
       : Math.max(0, viewportBottom - args.position.y - margin * 2);
   const maxHeight = Math.min(MENU_HEIGHT, availableHeight);
-  const top =
-    args.placement === "above"
-      ? Math.max(args.viewport.offsetTop + margin, args.position.y - margin - maxHeight)
-      : args.position.y + margin;
+  const top = args.placement === "above" ? args.position.y - margin : args.position.y + margin;
   return {
     position: "fixed",
     left,
@@ -45,6 +42,7 @@ export function computePopupMenuStyle(args: {
     maxHeight,
     zIndex: 60,
     pointerEvents: "auto",
+    transform: args.placement === "above" ? "translateY(-100%)" : undefined,
   };
 }
 

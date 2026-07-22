@@ -86,6 +86,13 @@ function referenceOption(page: Page, title: string): Locator {
   return page.getByRole("option").filter({ hasText: title });
 }
 
+async function expectMenuAnchoredToEditor(menu: Locator, editor: Locator): Promise<void> {
+  const [menuBox, editorBox] = await Promise.all([menu.boundingBox(), editor.boundingBox()]);
+  expect(menuBox).not.toBeNull();
+  expect(editorBox).not.toBeNull();
+  expect(Math.abs(menuBox!.y + menuBox!.height - editorBox!.y)).toBeLessThanOrEqual(4);
+}
+
 async function typeReferenceQuery(editor: Locator, query: string): Promise<void> {
   await editor.click();
   await editor.fill("");
@@ -193,7 +200,8 @@ test.describe("Entity reference composer", () => {
     apiClient,
     seedData,
   }) => {
-    await apiClient.seedTask(seedData.workspaceId, `${REFERENCE_QUERY} Alpha`, {
+    const alphaTitle = `${REFERENCE_QUERY} Alpha`;
+    const alpha = await apiClient.seedTask(seedData.workspaceId, alphaTitle, {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
@@ -209,15 +217,26 @@ test.describe("Entity reference composer", () => {
     testPage.on("pageerror", (error) => pageErrors.push(error.message));
     const session = await openTaskChat(testPage, active.id);
     const editor = visibleEditor(session.activeChat());
+    await testPage.route("**/api/v1/workspaces/*/mentions/search?*", async (route) => {
+      const query = new URL(route.request().url()).searchParams.get("q") ?? "";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          taskSearchResponse(query, [
+            taskReference(seedData.workspaceId, alpha.task_id, alphaTitle),
+            taskReference(seedData.workspaceId, beta.task_id, betaTitle),
+          ]),
+        ),
+      });
+    });
     await typeReferenceQuery(editor, REFERENCE_QUERY);
 
     const menu = testPage.getByTestId("entity-reference-menu");
     await expect(menu).toBeVisible({ timeout: 10_000 });
     await expect(menu.getByRole("listbox", { name: "Reference work items" })).toBeVisible();
-    await expect(referenceOption(testPage, `${REFERENCE_QUERY} Alpha`)).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    await expect(referenceOption(testPage, alphaTitle)).toHaveAttribute("aria-selected", "true");
+    await expectMenuAnchoredToEditor(menu, editor);
 
     await editor.press("ArrowDown");
     const betaOption = referenceOption(testPage, betaTitle);

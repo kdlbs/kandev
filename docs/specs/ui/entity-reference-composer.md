@@ -13,7 +13,7 @@ Users discuss Kandev tasks and external work items in agent chat, but plain titl
 ## What
 
 - Task chat and Quick Chat support a `#` entity-reference trigger in their shared TipTap composer. Passthrough, task creation, comments, plans, Office text inputs, and other editors remain unchanged.
-- Typing `#` at the start of a text block or after whitespace opens a search menu above the composer. A `#` inside another token or a code block remains literal text.
+- Typing `#` at the start of a text block or after whitespace opens a search menu directly above the composer. Its rendered bottom edge stays anchored to the composer even when only a short result set is visible. A `#` inside another token or a code block remains literal text.
 - After the user types at least one query character, search covers the active workspace's connected, searchable sources:
   - Kandev tasks;
   - Jira tickets;
@@ -23,7 +23,7 @@ Users discuss Kandev tasks and external work items in agent chat, but plain titl
   - Azure DevOps work items and pull requests; and
   - Sentry issues.
 - Kandev task results match title, exclude the current task, and exclude archived and ephemeral tasks. External results respect the provider configuration and scope owned by the active workspace.
-- Results are grouped by provider and work-item kind. Provider order and ordering within each group are deterministic; Kandev does not present unrelated provider scores as globally comparable relevance.
+- Results are grouped by provider and work-item kind. Provider order and ordering within each group are deterministic; Kandev does not present unrelated provider scores as globally comparable relevance. Sources that are not configured or cannot search the active workspace are omitted from the menu rather than rendered as empty unavailable sections.
 - Search groups carry provider-neutral display descriptors. Composer, message, and queue code use normalized fields and a generic fallback rather than exhaustive switches over native integrations, so a future plugin bridge can supply the same contract.
 - Search is debounced, cancels or ignores stale requests, and caps work per provider. One disconnected, slow, rate-limited, or failing provider never hides successful results from other providers.
 - Arrow Up and Arrow Down move the active result. Tab or Enter selects it. Pointer or touch selection has the same behavior. Escape closes the menu without changing or sending the draft.
@@ -101,7 +101,7 @@ The editor's `entityReference` atom stores the same presentation and identity fi
 
 - Group status is one of `ok`, `not_configured`, `unauthorized`, `rate_limited`, `timeout`, `upstream_error`, or `unsupported_scope`.
 - `source` is an opaque stable source ID. `display_name` and `kind_label` let the UI render a provider without importing its native model; unknown providers use a generic work-item icon.
-- Disconnected sources may be omitted from the menu, but their safe status remains available in the response. Raw provider errors are never returned.
+- Sources with `not_configured` or `unsupported_scope` status are omitted from the menu, but their safe status remains available in the response. Transient failures from configured sources may be shown non-disruptively. Raw provider errors are never returned.
 - Invalid query/limit returns 400. An unknown workspace returns 404. Aggregate infrastructure failure returns 500.
 
 ### Message submission
@@ -146,6 +146,8 @@ Typing updates Primed/Searching/Results/Empty. Escape, moving outside the trigge
 ## Scenarios
 
 - **GIVEN** task chat in workspace A with connected Jira and GitHub providers, **WHEN** the user types `#auth`, **THEN** the menu above the composer shows grouped workspace-A task, Jira, and GitHub hits without workspace-B results.
+- **GIVEN** a search returns only one short result group, **WHEN** the menu renders, **THEN** its bottom edge remains directly anchored to the composer instead of reserving unused menu height.
+- **GIVEN** GitLab is not configured or cannot search the active workspace, **WHEN** another source returns results, **THEN** the menu omits GitLab rather than showing an unavailable GitLab section.
 - **GIVEN** Quick Chat and a matching Linear issue, **WHEN** the user presses Arrow Down and Tab, **THEN** the active range becomes one inline reference chip, focus stays in the composer, and no message is sent.
 - **GIVEN** the menu is open on a phone viewport, **WHEN** the user taps a result, **THEN** the same chip is inserted and every required row is touch reachable without horizontal document overflow.
 - **GIVEN** GitHub times out while Kandev and Jira return hits, **WHEN** search finishes, **THEN** Kandev and Jira results remain selectable and GitHub exposes only a safe timeout state.

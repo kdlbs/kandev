@@ -152,6 +152,10 @@ test.describe("Mobile entity reference composer", () => {
       references.length + githubReferences.length,
       { timeout: 10_000 },
     );
+    const [menuBox, editorBox] = await Promise.all([menu.boundingBox(), editor.boundingBox()]);
+    expect(menuBox).not.toBeNull();
+    expect(editorBox).not.toBeNull();
+    expect(Math.abs(menuBox!.y + menuBox!.height - editorBox!.y)).toBeLessThanOrEqual(4);
     const geometry = await menu.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const viewport = window.visualViewport;

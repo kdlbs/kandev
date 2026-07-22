@@ -6,6 +6,36 @@ import * as entityReferenceMenus from "./entity-reference-menu";
 
 afterEach(cleanup);
 
+const unavailableSearchGroups: EntityReferenceSearchGroup[] = [
+  {
+    source: "gitlab_issues",
+    provider: "gitlab",
+    kind: "issue",
+    display_name: "GitLab",
+    kind_label: "Issue",
+    status: "unsupported_scope",
+    results: [],
+  },
+  {
+    source: "linear_issues",
+    provider: "linear",
+    kind: "issue",
+    display_name: "Linear",
+    kind_label: "Issue",
+    status: "not_configured",
+    results: [],
+  },
+  {
+    source: "github_issues",
+    provider: "github",
+    kind: "issue",
+    display_name: "GitHub",
+    kind_label: "Issue",
+    status: "timeout",
+    results: [],
+  },
+];
+
 describe("EntityReferenceMenu", () => {
   it("provides a menu distinct from @ context mentions", () => {
     expect(typeof (entityReferenceMenus as Record<string, unknown>).EntityReferenceMenu).toBe(
@@ -75,5 +105,18 @@ describe("EntityReferenceMenu", () => {
     expect(row.className).toContain("min-h-11");
     fireEvent.click(row);
     expect(onSelect).toHaveBeenCalledWith(reference);
+  });
+
+  it("omits sources that are not searchable in the active workspace", () => {
+    const visibleEntityReferenceGroups = (entityReferenceMenus as Record<string, unknown>)
+      .visibleEntityReferenceGroups;
+    expect(visibleEntityReferenceGroups).toBeTypeOf("function");
+    if (typeof visibleEntityReferenceGroups !== "function") return;
+
+    expect(
+      (visibleEntityReferenceGroups as (value: EntityReferenceSearchGroup[]) => unknown)(
+        unavailableSearchGroups,
+      ),
+    ).toEqual([unavailableSearchGroups[2]]);
   });
 });

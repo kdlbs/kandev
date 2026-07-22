@@ -22,8 +22,10 @@ describe("popup menu geometry", () => {
 
     expect(style.left).toBe(20);
     expect(style.width).toBe(344);
-    expect(style.top).toBe(272);
+    expect(style.top).toBe(552);
     expect(style.maxHeight).toBe(280);
+    expect(Number(style.top) - Number(style.maxHeight)).toBe(272);
+    expect(style.transform).toBe("translateY(-100%)");
     expect(style.bottom).toBeUndefined();
   });
 
@@ -35,6 +37,17 @@ describe("popup menu geometry", () => {
     });
 
     expect(style.width).toBe(420);
+  });
+
+  it("anchors the rendered bottom edge instead of reserving unused maximum height", () => {
+    const style = computePopupMenuStyle({
+      position: { x: 100, y: 700 },
+      placement: "above",
+      viewport: { offsetLeft: 0, offsetTop: 0, width: 1200, height: 800 },
+    });
+
+    expect(style.top).toBe(692);
+    expect(style.transform).toBe("translateY(-100%)");
   });
 
   it("reflows while the mobile visual viewport changes", () => {

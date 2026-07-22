@@ -44,6 +44,17 @@ function selectableReferences(groups: readonly EntityReferenceSearchGroup[]): En
   return groups.flatMap((group) => (group.status === "ok" ? group.results : []));
 }
 
+export function visibleEntityReferenceGroups(
+  groups: readonly EntityReferenceSearchGroup[],
+): EntityReferenceSearchGroup[] {
+  return groups.filter(
+    (group) =>
+      group.status !== "not_configured" &&
+      group.status !== "unsupported_scope" &&
+      (group.status !== "ok" || group.results.length > 0),
+  );
+}
+
 function entityReferenceEmptyState(
   query: string,
   isSearching: boolean,
@@ -85,10 +96,7 @@ export function EntityReferenceMenu({
   const { setItemRef } = useMenuItemRefs(selectedIndex);
   const selectable = selectableReferences(groups);
   let itemIndex = 0;
-  const visibleGroups = groups.filter(
-    (group) =>
-      group.status !== "not_configured" && (group.status !== "ok" || group.results.length > 0),
-  );
+  const visibleGroups = visibleEntityReferenceGroups(groups);
   const hasContent = visibleGroups.length > 0;
   return (
     <PopupMenu
