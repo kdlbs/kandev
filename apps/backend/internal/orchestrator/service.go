@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -1561,23 +1562,52 @@ func (s *Service) matchingTaskPRState(ctx context.Context, taskID, repositoryID,
 			zap.Error(err))
 		return ""
 	}
-	matchingState := ""
-	for _, pr := range prsByTask[taskID] {
+	prs := prsByTask[taskID]
+	if state, found := taskPRState(prs, repositoryID, branch); found {
+		return state
+	}
+	state, found := taskPRState(prs, "", branch)
+	if !found || !s.hasOnlyTaskRepository(lookupCtx, taskID, repositoryID) {
+		return ""
+	}
+	return state
+}
+
+func taskPRState(prs []*github.TaskPR, repositoryID, branch string) (string, bool) {
+	matched := false
+	state := ""
+	for _, pr := range prs {
 		if pr == nil || strings.TrimSpace(pr.RepositoryID) != repositoryID || strings.TrimSpace(pr.HeadBranch) != branch {
 			continue
 		}
-		if matchingState != "" {
-			return ""
+		if matched {
+			return "", true
 		}
-		state := strings.ToLower(strings.TrimSpace(pr.State))
-		switch state {
-		case "open", "closed", "merged":
-			matchingState = state
-		default:
-			return ""
+		matched = true
+		state = strings.ToLower(strings.TrimSpace(pr.State))
+		if state != "open" && state != "closed" && state != "merged" {
+			return "", true
 		}
 	}
-	return matchingState
+	return state, matched
+}
+
+func (s *Service) hasOnlyTaskRepository(ctx context.Context, taskID, repositoryID string) bool {
+	store, ok := s.repo.(interface {
+		ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
+	})
+	if !ok {
+		return false
+	}
+	repositories, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		s.logger.Debug("failed to load task repositories for legacy PR guidance",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return false
+	}
+	return len(repositories) == 1 && repositories[0] != nil &&
+		strings.TrimSpace(repositories[0].RepositoryID) == repositoryID
 }
 
 func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, sessionID, repositoryID string, launchErr error) {

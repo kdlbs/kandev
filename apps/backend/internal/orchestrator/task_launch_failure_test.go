@@ -364,6 +364,119 @@ func TestHandleSessionLaunchFailed_ClosedPRInAnotherRepositoryCreatesNeutralGuid
 	}
 }
 
+func TestHandleSessionLaunchFailed_SingleRepositoryLegacyPRCreatesMissingBranchGuidance(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-a", WorkspaceID: "ws1", Name: "repo-a", SourceType: "local",
+	}); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-a", TaskID: "task1", RepositoryID: "repo-a", Position: 0,
+	}); err != nil {
+		t.Fatalf("link task repository: %v", err)
+	}
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+	svc.SetGitHubService(&mockGitHubService{taskPRs: []*github.TaskPR{
+		{TaskID: "task1", HeadBranch: "feature/foo", State: "closed"},
+	}})
+
+	err := errors.New("environment preparation failed: branch \"feature/foo\" not found locally or on remote")
+	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "repo-a", err)
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("expected 1 missing-branch guidance message, got %d", len(mc.sessionMessages))
+	}
+	msg := mc.sessionMessages[0]
+	if !strings.Contains(msg.content, "feature/foo") || !strings.Contains(msg.content, "no longer exists") {
+		t.Fatalf("expected authoritative missing-branch guidance, got %q", msg.content)
+	}
+	if actions, ok := msg.metadata["actions"].([]map[string]interface{}); !ok || len(actions) != 2 {
+		t.Fatalf("expected archive/delete actions, got %#v", msg.metadata["actions"])
+	}
+}
+
+func TestHandleSessionLaunchFailed_LegacyPRForDifferentRepositoryCreatesNeutralGuidance(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-a", WorkspaceID: "ws1", Name: "repo-a", SourceType: "local",
+	}); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-a", TaskID: "task1", RepositoryID: "repo-a", Position: 0,
+	}); err != nil {
+		t.Fatalf("link task repository: %v", err)
+	}
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+	svc.SetGitHubService(&mockGitHubService{taskPRs: []*github.TaskPR{
+		{TaskID: "task1", HeadBranch: "feature/foo", State: "closed"},
+	}})
+
+	err := errors.New("environment preparation failed: branch \"feature/foo\" not found locally or on remote")
+	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "repo-b", err)
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("expected 1 neutral fetch-failure guidance message, got %d", len(mc.sessionMessages))
+	}
+	msg := mc.sessionMessages[0]
+	if kind := msg.metadata["failure_kind"]; kind != "branch_fetch_failed" {
+		t.Fatalf("expected neutral failure kind, got %#v", kind)
+	}
+	if _, ok := msg.metadata["actions"]; ok {
+		t.Fatalf("expected no destructive actions for a legacy PR linked to another repository, got %#v", msg.metadata["actions"])
+	}
+}
+
+func TestHandleSessionLaunchFailed_MultipleRepositoriesLegacyPRCreatesNeutralGuidance(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	for position, repositoryID := range []string{"repo-a", "repo-b"} {
+		if err := repo.CreateRepository(ctx, &models.Repository{
+			ID: repositoryID, WorkspaceID: "ws1", Name: repositoryID, SourceType: "local",
+		}); err != nil {
+			t.Fatalf("create repository %q: %v", repositoryID, err)
+		}
+		if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+			ID: "task-repo-" + repositoryID, TaskID: "task1", RepositoryID: repositoryID, Position: position,
+		}); err != nil {
+			t.Fatalf("link task repository %q: %v", repositoryID, err)
+		}
+	}
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+	svc.SetGitHubService(&mockGitHubService{taskPRs: []*github.TaskPR{
+		{TaskID: "task1", HeadBranch: "feature/foo", State: "closed"},
+	}})
+
+	err := errors.New("environment preparation failed: branch \"feature/foo\" not found locally or on remote")
+	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "repo-a", err)
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("expected 1 neutral fetch-failure guidance message, got %d", len(mc.sessionMessages))
+	}
+	msg := mc.sessionMessages[0]
+	if kind := msg.metadata["failure_kind"]; kind != "branch_fetch_failed" {
+		t.Fatalf("expected neutral failure kind, got %#v", kind)
+	}
+	if _, ok := msg.metadata["actions"]; ok {
+		t.Fatalf("expected no destructive actions for an unscoped multi-repository PR, got %#v", msg.metadata["actions"])
+	}
+}
+
 func TestHandleSessionLaunchFailed_EmptyRepositoryIDCreatesNeutralGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
