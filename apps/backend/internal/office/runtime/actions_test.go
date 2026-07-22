@@ -465,6 +465,28 @@ func TestActionsUpdateTaskStatusDeniesUnscopedTask(t *testing.T) {
 	}
 }
 
+func TestActionsUpdateTaskStatusPreservesTypedValidationError(t *testing.T) {
+	validationErr := &statusValidationTestError{message: "unknown status: invalid"}
+	updater := &recordingStatusUpdater{err: validationErr}
+	actions := NewActions(ActionDependencies{TaskStatus: updater})
+	runCtx := RunContext{
+		AgentID: "agent-1",
+		TaskID:  "task-1",
+		Capabilities: Capabilities{
+			CanUpdateTaskStatus: true,
+		},
+	}
+
+	err := actions.UpdateTaskStatus(context.Background(), runCtx, "task-1", "invalid", "")
+	var typed StatusValidationError
+	if !errors.As(err, &typed) {
+		t.Fatalf("error = %v, want StatusValidationError", err)
+	}
+	if len(updater.calls) != 1 {
+		t.Fatalf("status updater calls = %d, want 1", len(updater.calls))
+	}
+}
+
 func TestCapabilitiesAllowsByKey(t *testing.T) {
 	caps := Capabilities{
 		CanCreateAgents:   true,
@@ -961,6 +983,7 @@ func (c *recordingTaskCreator) CreateOfficeSubtaskAsAgent(
 
 type recordingStatusUpdater struct {
 	calls []TaskStatusUpdate
+	err   error
 }
 
 func (u *recordingStatusUpdater) UpdateTaskStatusAsAgent(
@@ -968,7 +991,7 @@ func (u *recordingStatusUpdater) UpdateTaskStatusAsAgent(
 	update TaskStatusUpdate,
 ) error {
 	u.calls = append(u.calls, update)
-	return nil
+	return u.err
 }
 
 type recordingAgentCreator struct {

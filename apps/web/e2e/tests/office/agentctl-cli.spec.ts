@@ -547,7 +547,7 @@ test.describe("agentctl kandev CLI", () => {
     // scope for the CLI smoke suite.
   });
 
-  test("tasks archive removes the task from the active list", async ({
+  test("tasks archive fails closed and leaves the task active", async ({
     apiClient,
     backend,
     officeSeed,
@@ -581,15 +581,15 @@ test.describe("agentctl kandev CLI", () => {
     };
 
     const res = runCLI(env, ["tasks", "archive", "--id", created.id as string]);
-    expect(res.exitCode, `archive stderr=${res.stderr}`).toBe(0);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr).toContain(
+      "tasks archive is unavailable to Office agents; ask a human or admin to archive the task",
+    );
 
-    // Verify the row is gone from the active list — the office API
-    // hides archived tasks by default. A regression in the cascade
-    // (the original 500 from missing tasks.archived_by_cascade_id)
-    // would have failed `runCLI` above with a non-zero exit code, so
-    // checking the listing also rules out a "200 OK but no-op" path.
+    // Office agents do not have a signed runtime capability for archival, so
+    // the CLI must reject the command locally without mutating the task.
     const { tasks } = await apiClient.listTasks(officeSeed.workspaceId);
-    expect(tasks.find((t) => t.id === created.id)).toBeUndefined();
+    expect(tasks.find((t) => t.id === created.id)).toBeDefined();
   });
 
   test.skip("approvals decide — not exercised: self-approval guard blocks single-agent setup", () => {

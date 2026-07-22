@@ -153,7 +153,7 @@ func (h *Handler) updateTaskStatus(c *gin.Context) {
 		req.Status,
 		req.Comment,
 	); err != nil {
-		h.respondRuntimeError(c, runCtx, "update_task_status", "task", c.Param("id"), err)
+		h.respondTaskStatusError(c, runCtx, c.Param("id"), err)
 		return
 	}
 	h.appendActionRunEvent(c.Request.Context(), runCtx, "update_task_status", "task", c.Param("id"))
@@ -419,6 +419,51 @@ func (h *Handler) respondRuntimeError(
 		return
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+}
+
+func (h *Handler) respondTaskStatusError(c *gin.Context, runCtx RunContext, taskID string, err error) {
+	if errors.Is(err, shared.ErrForbidden) {
+		h.respondRuntimeError(c, runCtx, "update_task_status", "task", taskID, err)
+		return
+	}
+	var pending PendingApprovalsError
+	if errors.As(err, &pending) {
+		h.appendActionRunEvent(c.Request.Context(), runCtx, "update_task_status", "task", taskID)
+		c.JSON(http.StatusConflict, gin.H{
+			"error":             err.Error(),
+			"pending_approvers": h.resolvePendingApprovers(c.Request.Context(), pending.PendingApproverIDs()),
+			"status":            "in_review",
+		})
+		return
+	}
+	var validation StatusValidationError
+	if errors.As(err, &validation) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	h.respondRuntimeError(c, runCtx, "update_task_status", "task", taskID, err)
+}
+
+type pendingApproverResponse struct {
+	AgentProfileID string `json:"agent_profile_id"`
+	Name           string `json:"name,omitempty"`
+}
+
+func (h *Handler) resolvePendingApprovers(ctx context.Context, ids []string) []pendingApproverResponse {
+	approvers := make([]pendingApproverResponse, len(ids))
+	for i, id := range ids {
+		approvers[i] = pendingApproverResponse{AgentProfileID: id, Name: id}
+		if h.agentSvc == nil || id == "" {
+			continue
+		}
+		agent, err := h.agentSvc.GetAgentInstance(ctx, id)
+		if err == nil && agent != nil && agent.ID == id {
+			if name := strings.TrimSpace(agent.Name); name != "" {
+				approvers[i].Name = name
+			}
+		}
+	}
+	return approvers
 }
 
 func (h *Handler) appendDeniedRunEvent(

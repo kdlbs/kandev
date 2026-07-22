@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,12 +45,35 @@ func (r *handlerCommentWriter) CreateComment(_ context.Context, comment *models.
 
 type recordingTaskStatusUpdater struct {
 	updates []TaskStatusUpdate
+	err     error
 }
 
 func (r *recordingTaskStatusUpdater) UpdateTaskStatusAsAgent(_ context.Context, update TaskStatusUpdate) error {
 	r.updates = append(r.updates, update)
-	return nil
+	return r.err
 }
+
+type pendingApprovalsTestError struct {
+	ids []string
+}
+
+func (e *pendingApprovalsTestError) Error() string {
+	return "approvals pending"
+}
+
+func (e *pendingApprovalsTestError) PendingApproverIDs() []string {
+	return e.ids
+}
+
+type statusValidationTestError struct {
+	message string
+}
+
+func (e *statusValidationTestError) Error() string {
+	return e.message
+}
+
+func (e *statusValidationTestError) IsTaskStatusValidationError() {}
 
 type handlerTaskCreator struct {
 	calls          int
@@ -621,6 +646,96 @@ func TestRuntimeHandler_DeniesMissingCapabilityAndLogsRunEvent(t *testing.T) {
 	}
 	if len(h.status.updates) != 0 {
 		t.Fatalf("status updates = %d, want 0", len(h.status.updates))
+	}
+	assertDeniedRunEvent(t, h.runEvents, "update_task_status", "task", "task-1")
+}
+
+func TestRuntimeHandler_UpdateTaskStatusReturnsApprovalConflict(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{
+		CanUpdateTaskStatus: true,
+	}.WithTaskScope("task-1"))
+	approver := &models.AgentInstance{
+		ID:          "approver-1",
+		WorkspaceID: "ws-1",
+		Name:        "Reviewer",
+		Role:        models.AgentRoleWorker,
+	}
+	if err := h.repository.CreateAgentInstance(context.Background(), approver); err != nil {
+		t.Fatalf("create approver: %v", err)
+	}
+	h.status.err = &pendingApprovalsTestError{ids: []string{"approver-1"}}
+
+	resp := h.request(t, http.MethodPost, "/runtime/tasks/task-1/status", map[string]string{
+		"status": "done",
+	})
+
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusConflict, resp.Body.String())
+	}
+	var body struct {
+		Error            string `json:"error"`
+		Status           string `json:"status"`
+		PendingApprovers []struct {
+			AgentProfileID string `json:"agent_profile_id"`
+			Name           string `json:"name"`
+		} `json:"pending_approvers"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error != "approvals pending" || body.Status != "in_review" {
+		t.Fatalf("response = %#v", body)
+	}
+	if len(body.PendingApprovers) != 1 ||
+		body.PendingApprovers[0].AgentProfileID != "approver-1" ||
+		body.PendingApprovers[0].Name != "Reviewer" {
+		t.Fatalf("pending approvers = %#v", body.PendingApprovers)
+	}
+	assertActionRunEvent(t, h.runEvents, "update_task_status", "task", "task-1")
+}
+
+func TestRuntimeHandler_UpdateTaskStatusReturnsValidationError(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{
+		CanUpdateTaskStatus: true,
+	}.WithTaskScope("task-1"))
+	h.status.err = &statusValidationTestError{message: "unknown status: invalid"}
+
+	resp := h.request(t, http.MethodPost, "/runtime/tasks/task-1/status", map[string]string{
+		"status": "invalid",
+	})
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusBadRequest, resp.Body.String())
+	}
+}
+
+func TestRuntimeHandler_UpdateTaskStatusReturnsInternalErrorForOperationalFailure(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{
+		CanUpdateTaskStatus: true,
+	}.WithTaskScope("task-1"))
+	h.status.err = errors.New("update task state: database unavailable")
+
+	resp := h.request(t, http.MethodPost, "/runtime/tasks/task-1/status", map[string]string{
+		"status": "done",
+	})
+
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusInternalServerError, resp.Body.String())
+	}
+}
+
+func TestRuntimeHandler_UpdateTaskStatusAuditsWrappedAuthorizationFailure(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{
+		CanUpdateTaskStatus: true,
+	}.WithTaskScope("task-1"))
+	h.status.err = fmt.Errorf("status update denied: %w", ErrTaskOutOfScope)
+
+	resp := h.request(t, http.MethodPost, "/runtime/tasks/task-1/status", map[string]string{
+		"status": "done",
+	})
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusForbidden, resp.Body.String())
 	}
 	assertDeniedRunEvent(t, h.runEvents, "update_task_status", "task", "task-1")
 }

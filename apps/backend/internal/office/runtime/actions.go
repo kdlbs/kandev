@@ -162,6 +162,19 @@ type TaskStatusUpdater interface {
 	UpdateTaskStatusAsAgent(ctx context.Context, update TaskStatusUpdate) error
 }
 
+// PendingApprovalsError identifies a status update redirected to review because
+// one or more required approvers have not approved it yet.
+type PendingApprovalsError interface {
+	error
+	PendingApproverIDs() []string
+}
+
+// StatusValidationError identifies caller-correctable task status input.
+type StatusValidationError interface {
+	error
+	IsTaskStatusValidationError()
+}
+
 // AgentCreator is the agent mutation dependency used by runtime actions.
 type AgentCreator interface {
 	CreateAgentInstanceWithCaller(
