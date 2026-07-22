@@ -1,6 +1,6 @@
 ---
 title: "Sessions and Review"
-description: "Run named parallel agent sessions, inspect changes, review diffs, create walkthroughs, and follow pull requests."
+description: "Run named parallel agent sessions, inspect changes, review diffs, create walkthroughs, and follow pull or merge requests."
 ---
 
 # Sessions and Review
@@ -105,7 +105,7 @@ Changes are grouped by repository and then by state:
 - **Staged** changes selected for the next commit;
 - **Commits** on the task branch.
 
-From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
+From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
 
 ## Review a diff
 
@@ -156,17 +156,20 @@ When the agent publishes the walkthrough:
 
 A task stores one walkthrough. Publishing another replaces the current one. Kandev validates that each step has text, a file, and a positive line range, but it does not verify that the file exists or that the explanation matches current code. Anchors can drift as files change, and a PR-only file may be available only in the review diff. A walkthrough is an explanation, not test or review evidence.
 
-## Commit and open a pull request
+## Commit and open a change request
 
 The commit dialog commits staged changes by default. Enter a title and optional body. **Stage all changes before committing** is off by default; enable it only after checking every unstaged file. Utility agents can propose commit text, but you remain responsible for the result.
 
-The create-PR dialog requires a title, defaults it from the task title, accepts an optional body, and creates a draft by default. Kandev first runs `git push --set-upstream origin HEAD`, then uses the provider CLI detected from the repository's `origin`:
+The creation dialog requires a title, defaults it from the task title, accepts an optional body, and creates a draft by default. Kandev first runs `git push --set-upstream origin HEAD`, then selects the provider from the repository's `origin`:
 
 - GitHub uses `gh pr create` and requires an installed, authenticated GitHub CLI.
+- GitLab uses `glab mr create` when available or the matching workspace connection's token through GitLab REST. It supports `gitlab.com` and configured self-managed HTTPS or SSH remotes, resolves an omitted target from the project default, and attempts to link the resulting MR back to the task repository.
 - Azure Repos uses `az repos pr create` and requires Azure CLI, the `azure-devops` extension, and either `az login` or `AZURE_DEVOPS_EXT_PAT`.
-- Other Git hosts do not have a built-in create-PR path. Use that host's tooling from the terminal.
+- Other Git hosts do not have a built-in creation path. Use that host's tooling from the terminal.
 
 GitHub has the complete in-app PR review path. A linked PR detail panel shows checks, reviews, comments, conflicts, and merge readiness. It can add PR feedback to agent context, submit an approval when allowed, ask an agent to address conflicts, and merge using a method allowed by the repository. Branch protection remains authoritative; merge is enabled only when required checks, review state, and mergeability are ready.
+
+GitLab has a provider-specific linked-MR panel. It shows overview and branch state, approvals and pipeline rollup, files, commits, reviewers, assignees, labels, and threaded discussions. It can add selected feedback to agent context, reply or resolve discussions, approve or unapprove, update people and labels, toggle MR notifications, merge, refresh, and unlink. GitLab permissions and project policy remain authoritative. See [Integrations](integrations.md#gitlab) for linking and watch limits.
 
 ### GitHub PR automation
 

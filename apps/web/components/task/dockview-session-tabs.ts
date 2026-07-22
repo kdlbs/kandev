@@ -17,6 +17,10 @@ import type { TaskSession } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prTaskKey } from "@/components/github/pr-utils";
+import {
+  shouldActivateSessionPanel,
+  shouldPreserveActivePanel,
+} from "./dockview-session-tab-activation";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -345,7 +349,7 @@ export function useAutoPRPanel() {
  * variant `<id>|<key>` (multi-repo PR panels use `pr-detail|owner/repo/N`,
  * see `addPRPanel` in dockview-panel-actions.ts).
  */
-const SESSION_ANCHOR_PANEL_IDS = ["pr-detail"];
+const SESSION_ANCHOR_PANEL_IDS = ["pr-detail", "mr-detail"];
 
 export function findSessionAnchorGroupId(api: DockviewApi): string | null {
   for (const id of SESSION_ANCHOR_PANEL_IDS) {
@@ -516,55 +520,6 @@ export function ensureSessionTabPrecedesNonSessionTabs(api: DockviewApi, session
   }
 }
 
-/**
- * Decide whether to force-activate the session panel after it (and any
- * sibling tabs) have been ensured.
- *
- * - It was just created by `ensureSessionPanel` (no prior dockview state
- *   to honor), or
- * - The hook is mounting for the first time (initial page load) AND
- *   dockview did not restore a different active panel from the saved
- *   layout — fall back to focusing the agent tab so chat is visible, or
- * - The user switched sessions within the same task (intra-task switch
- *   where dockview hasn't re-activated the new session for us).
- *
- * After an env (task) switch the prev refs are populated and the task
- * changed — the saved layout's active panel has already been restored for
- * the incoming task, so calling setActive here would override it and force
- * the agent tab on top of whatever the user had focused.
- *
- * On first mount when the session panel was already in the restored layout,
- * respect dockview's restored active panel (e.g. a file diff the user had
- * focused before refresh) instead of forcing the agent tab on top.
- */
-export function shouldActivateSessionPanel(args: {
-  sessionPanelExistedBefore: boolean;
-  prevTaskId: string | null;
-  prevSessionId: string | null;
-  currentTaskId: string | null;
-  currentSessionId: string;
-  currentActivePanelId: string | null;
-}): boolean {
-  const {
-    sessionPanelExistedBefore,
-    prevTaskId,
-    prevSessionId,
-    currentTaskId,
-    currentSessionId,
-    currentActivePanelId,
-  } = args;
-  if (!sessionPanelExistedBefore) return true;
-  const isFirstMount = prevTaskId === null && prevSessionId === null;
-  if (isFirstMount) {
-    const sessionPanelId = `session:${currentSessionId}`;
-    if (!currentActivePanelId || currentActivePanelId === sessionPanelId) return true;
-    return false;
-  }
-  const taskChanged = prevTaskId !== currentTaskId;
-  const sessionChanged = prevSessionId !== currentSessionId;
-  return sessionChanged && !taskChanged;
-}
-
 type AutoSessionTabRefs = {
   sessionTabCreatedRef: MutableRefObject<Set<string>>;
   prevTaskIdRef: MutableRefObject<string | null>;
@@ -706,6 +661,49 @@ function logAutoSessionTabEffectEntry(
   });
 }
 
+function logPendingSessionReset(
+  api: DockviewApi,
+  effectiveSessionId: string | null,
+  currentSessionIds: string[],
+): void {
+  if (!isDebug()) return;
+  debug("useAutoSessionTab: release default for pending session", {
+    effectiveSessionId,
+    currentSessionIds,
+    currentLayoutEnvId: useDockviewStore.getState().currentLayoutEnvId,
+    livePanelIds: api.panels.map((panel) => panel.id),
+  });
+}
+
+function logSessionPanelEnsure(
+  effectiveSessionId: string,
+  sessionPanelExistedBefore: boolean,
+  initialPosition: AddPanelOptions["position"],
+): void {
+  if (!isDebug()) return;
+  debug("useAutoSessionTab: ensuring active session panel", {
+    effectiveSessionId,
+    sessionPanelExistedBefore,
+    initialPosition: JSON.stringify(initialPosition),
+  });
+}
+
+function logAutoSessionTabEffectExit(
+  api: DockviewApi,
+  effectiveSessionId: string,
+  siblingsCreated: string[],
+  activePanel: ReturnType<DockviewApi["getPanel"]>,
+): void {
+  if (!isDebug()) return;
+  debug("useAutoSessionTab: effect exit", {
+    effectiveSessionId,
+    siblingsCreated,
+    livePanelIdsAfter: api.panels.map((panel) => panel.id),
+    activeGroupId: activePanel?.group.id ?? null,
+    liveActivePanelId: api.activePanel?.id ?? null,
+  });
+}
+
 function updateAutoSessionTabRefs(
   refs: AutoSessionTabRefs,
   tid: string | null,
@@ -732,14 +730,7 @@ export function runAutoSessionTabEffect(
   logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
 
   if (shouldRebuildDefaultForPendingSession(api, effectiveSessionId, currentSessionIds)) {
-    if (isDebug()) {
-      debug("useAutoSessionTab: release default for pending session", {
-        effectiveSessionId,
-        currentSessionIds,
-        currentLayoutEnvId: useDockviewStore.getState().currentLayoutEnvId,
-        livePanelIds: api.panels.map((p) => p.id),
-      });
-    }
+    logPendingSessionReset(api, effectiveSessionId, currentSessionIds);
     releaseLayoutToDefault(useDockviewStore.getState().currentLayoutEnvId);
     updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
@@ -772,20 +763,19 @@ export function runAutoSessionTabEffect(
 
   const initialPosition = resolveInitialPosition(api);
   const sessionPanelExistedBefore = !!api.getPanel(`session:${effectiveSessionId}`);
+  const activePanelIdBeforeEnsure = api.activePanel?.id ?? null;
+  const preserveActivePanel = shouldPreserveActivePanel(
+    sessionPanelExistedBefore,
+    activePanelIdBeforeEnsure,
+  );
 
-  if (isDebug()) {
-    debug("useAutoSessionTab: ensuring active session panel", {
-      effectiveSessionId,
-      sessionPanelExistedBefore,
-      initialPosition: JSON.stringify(initialPosition),
-    });
-  }
+  logSessionPanelEnsure(effectiveSessionId, sessionPanelExistedBefore, initialPosition);
 
   ensureSessionPanel(
     api,
     effectiveSessionId,
     initialPosition,
-    false,
+    preserveActivePanel,
     refs.sessionTabCreatedRef.current,
   );
 
@@ -815,15 +805,7 @@ export function runAutoSessionTabEffect(
     refs.sessionTabCreatedRef.current,
   );
 
-  if (isDebug()) {
-    debug("useAutoSessionTab: effect exit", {
-      effectiveSessionId,
-      siblingsCreated,
-      livePanelIdsAfter: api.panels.map((p) => p.id),
-      activeGroupId: activePanel?.group.id ?? null,
-      liveActivePanelId: api.activePanel?.id ?? null,
-    });
-  }
+  logAutoSessionTabEffectExit(api, effectiveSessionId, siblingsCreated, activePanel);
 
   updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
 }

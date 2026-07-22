@@ -21,6 +21,7 @@ const CENTER_EXTRA_COMPONENTS = new Set([
   "browser",
   "vscode",
   "pr-detail",
+  "mr-detail",
   "file-editor",
   "commit-detail",
   "diff-viewer",

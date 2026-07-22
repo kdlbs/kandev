@@ -7,6 +7,13 @@ description: Improve Kandev's AI harness from session learnings or explicit requ
 
 Use this skill to turn lessons from real agent sessions into durable harness changes: skills, agents, subagents, commands, scripts, and always-on instruction files.
 
+## Planner Entry
+
+In a user-started primary session, inventory and
+plan the harness change, then delegate file edits and validation to a native
+`implementer` subagent. Do not use Kandev MCP task/session APIs to launch that
+worker. An explicitly assigned worker continues below and does not spawn agents.
+
 ## Choose The Artifact
 
 Before editing, classify the requested improvement:
@@ -18,7 +25,7 @@ Before editing, classify the requested improvement:
 - **AGENTS.md / CLAUDE.md / rules:** always-on or path-scoped instruction. Read `references/instructions.md`.
 - **Cross-platform migration:** preserving behavior across Claude, Codex, Cursor, and OpenCode. Read the relevant platform files in `references/platforms/`.
 
-If the user names a target platform for a skill, command, or instruction file, load only that platform reference. For subagents/agents, the default is cross-platform sync: update every existing platform mirror (`.agents/agents`, `.codex/agents`, `.claude/agents`, `.opencode/agents`) unless the user explicitly says to update only one platform.
+If the user names a target platform for a skill, command, or instruction file, load only that platform reference. For subagents/agents, the default is cross-platform sync: update every existing platform mirror (`.agents/agents`, `.codex/agents`, `.claude/agents`, `.cursor/agents`, `.opencode/agents`) unless the user explicitly says to update only one platform.
 
 ## Workflow
 
@@ -26,7 +33,8 @@ If the user names a target platform for a skill, command, or instruction file, l
    - Use `rg --files` to find existing `.agents/skills`, `.agents/agents`, `.claude`, `.codex`, `.cursor`, `.opencode`, `AGENTS.md`, and `CLAUDE.md` files.
    - For platform-specific formats, read the bundled files under `references/platforms/` before consulting external docs. Treat those files as the first source of truth for Claude, Codex, Cursor, and OpenCode harness layout.
    - Check for duplicate or superseded skills/agents before adding new ones.
-   - For subagent/agent edits, map the role across all platform directories before editing so mirrors stay aligned.
+   - For subagent/agent edits, map the role across all platform directories,
+     including `.cursor/agents`, before editing so mirrors stay aligned.
    - Prefer updating the existing artifact when the behavior belongs to an existing workflow.
 
 2. **Normalize the learning**

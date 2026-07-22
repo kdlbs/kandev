@@ -285,6 +285,14 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 	})
 }
 
+// ListMessagesForPlugin returns messages matching the plugin Host data API
+// filter (ADR 0047), backing internal/plugins' capability-gated
+// Messages().List reader. Reads go through the service layer, never a
+// repository directly, per ADR 0043.
+func (s *Service) ListMessagesForPlugin(ctx context.Context, filter models.PluginMessageFilter) ([]*models.Message, error) {
+	return s.messages.ListMessagesForPlugin(ctx, filter)
+}
+
 // SearchMessages returns messages whose content matches the query in the given session.
 func (s *Service) SearchMessages(ctx context.Context, sessionID, query string, limit int) ([]*models.Message, error) {
 	return s.messages.SearchMessages(ctx, sessionID, models.SearchMessagesOptions{

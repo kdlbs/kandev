@@ -50,6 +50,29 @@ describe("parseConfigSchema", () => {
     expect(parseConfigSchema({})).toEqual([]);
     expect(parseConfigSchema({ properties: "nope" })).toEqual([]);
   });
+
+  it("maps the utility-agent format to a utility agent picker field", () => {
+    const fields = parseConfigSchema({
+      type: "object",
+      required: ["utility_agent"],
+      properties: {
+        utility_agent: {
+          type: "string",
+          format: "utility-agent",
+          title: "Utility agent",
+        },
+      },
+    });
+
+    expect(fields).toEqual([
+      expect.objectContaining({
+        name: "utility_agent",
+        type: "utility_agent",
+        label: "Utility agent",
+        required: true,
+      }),
+    ]);
+  });
 });
 
 describe("buildInitialValues", () => {

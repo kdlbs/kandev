@@ -2291,9 +2291,14 @@ func TestRepositoryCloneURL(t *testing.T) {
 			want: "https://github.com/acme/app.git",
 		},
 		{
-			name: "gitlab repo",
+			name: "gitlab self-managed repo",
+			repo: &models.Repository{Provider: "gitlab", ProviderHost: "http://gitlab.internal", ProviderOwner: "group/subgroup", ProviderName: "app"},
+			want: "http://gitlab.internal/group/subgroup/app.git",
+		},
+		{
+			name: "gitlab unknown host fails closed",
 			repo: &models.Repository{Provider: "gitlab", ProviderOwner: "acme", ProviderName: "app"},
-			want: "https://gitlab.com/acme/app.git",
+			want: "",
 		},
 		{
 			name: "bitbucket repo",
@@ -2341,14 +2346,14 @@ type recordingAuthenticatedCloner struct {
 	password    string
 }
 
-func (c *recordingAuthenticatedCloner) EnsureCloned(
-	_ context.Context, _, _, _ string,
+func (c *recordingAuthenticatedCloner) EnsureClonedForProvider(
+	_ context.Context, _, _, _, _, _, _, _ string,
 ) (string, error) {
 	c.normalCalls++
 	return "/repos/normal", nil
 }
 
-func (c *recordingAuthenticatedCloner) BuildCloneURL(_, _, _ string) (string, error) {
+func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_, _, _, _ string) (string, error) {
 	return "", nil
 }
 

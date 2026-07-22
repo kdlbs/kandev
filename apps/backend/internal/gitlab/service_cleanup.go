@@ -36,6 +36,31 @@ func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
 	return s.sweepReviewMRTasks(ctx, tasks, deleter, checker), nil
 }
 
+// CleanupReviewTasksForWorkspace sweeps only tasks owned by review watches in
+// workspaceID and resolves that workspace's GitLab client.
+func (s *Service) CleanupReviewTasksForWorkspace(ctx context.Context, workspaceID string) (int, error) {
+	store := s.requireStore()
+	if store == nil {
+		return 0, errStoreUnavailable
+	}
+	s.mu.RLock()
+	deleter := s.taskDeleter
+	checker := s.taskSessionChecker
+	s.mu.RUnlock()
+	if deleter == nil {
+		return 0, errors.New("task deleter not configured")
+	}
+	tasks, err := store.ListReviewMRTasksForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return s.sweepReviewMRTasksWithClient(ctx, tasks, client, deleter, checker), nil
+}
+
 // deleteTaskWithReason deletes a task, threading the cleanup reason through to
 // the task.deleted event when the wired deleter supports it (see
 // TaskDeleterWithReason). Falls back to plain DeleteTask otherwise.
@@ -51,6 +76,10 @@ func (s *Service) sweepReviewMRTasks(ctx context.Context, tasks []*ReviewMRTask,
 	if client == nil {
 		return 0
 	}
+	return s.sweepReviewMRTasksWithClient(ctx, tasks, client, deleter, checker)
+}
+
+func (s *Service) sweepReviewMRTasksWithClient(ctx context.Context, tasks []*ReviewMRTask, client Client, deleter TaskDeleter, checker TaskSessionChecker) int {
 	policies := s.resolveReviewWatchPolicies(ctx, tasks)
 	deleted := 0
 	for _, t := range tasks {
@@ -149,11 +178,40 @@ func (s *Service) CleanupAllIssueTasks(ctx context.Context) (int, error) {
 	return s.sweepIssueWatchTasks(ctx, tasks, deleter, checker), nil
 }
 
+// CleanupIssueTasksForWorkspace sweeps only tasks owned by issue watches in
+// workspaceID and resolves that workspace's GitLab client.
+func (s *Service) CleanupIssueTasksForWorkspace(ctx context.Context, workspaceID string) (int, error) {
+	store := s.requireStore()
+	if store == nil {
+		return 0, errStoreUnavailable
+	}
+	s.mu.RLock()
+	deleter := s.taskDeleter
+	checker := s.taskSessionChecker
+	s.mu.RUnlock()
+	if deleter == nil {
+		return 0, errors.New("task deleter not configured")
+	}
+	tasks, err := store.ListIssueWatchTasksForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return s.sweepIssueWatchTasksWithClient(ctx, tasks, client, deleter, checker), nil
+}
+
 func (s *Service) sweepIssueWatchTasks(ctx context.Context, tasks []*IssueWatchTask, deleter TaskDeleter, checker TaskSessionChecker) int {
 	client := s.Client()
 	if client == nil {
 		return 0
 	}
+	return s.sweepIssueWatchTasksWithClient(ctx, tasks, client, deleter, checker)
+}
+
+func (s *Service) sweepIssueWatchTasksWithClient(ctx context.Context, tasks []*IssueWatchTask, client Client, deleter TaskDeleter, checker TaskSessionChecker) int {
 	policies := s.resolveIssueWatchPolicies(ctx, tasks)
 	deleted := 0
 	for _, t := range tasks {

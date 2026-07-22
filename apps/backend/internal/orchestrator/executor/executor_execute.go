@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -484,8 +485,6 @@ func shouldUseWorktree(executorType string) bool {
 	return models.ExecutorType(executorType) == models.ExecutorTypeWorktree
 }
 
-const providerGitHub = "github"
-
 // repositoryCloneURL builds a clone URL for the repository. It prefers the
 // provider info when present (HTTPS GitHub/GitLab/Bitbucket URL); otherwise
 // it inspects the local checkout's `origin` remote. The latter lets local-only
@@ -496,18 +495,16 @@ func repositoryCloneURL(repo *models.Repository) string {
 		return strings.TrimSpace(repo.RemoteURL)
 	}
 	if repo.ProviderOwner != "" && repo.ProviderName != "" {
-		var host string
-		switch strings.ToLower(repo.Provider) {
-		case providerGitHub, "":
-			host = "github.com"
-		case "gitlab":
-			host = "gitlab.com"
-		case "bitbucket":
-			host = "bitbucket.org"
-		default:
+		if strings.EqualFold(repo.Provider, "gitlab") && strings.TrimSpace(repo.ProviderHost) == "" {
 			return ""
 		}
-		return fmt.Sprintf("https://%s/%s/%s.git", host, repo.ProviderOwner, repo.ProviderName)
+		cloneURL, err := repoclone.CloneURLWithHost(
+			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName, repoclone.ProtocolHTTPS,
+		)
+		if err != nil {
+			return ""
+		}
+		return cloneURL
 	}
 	if repo.LocalPath == "" {
 		return ""
@@ -1066,6 +1063,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if executorNeedsResolvedCredentials(execConfig.ExecutorType) {
 		e.applyContainerCredentials(ctx, req, metadata)
 	}
+	e.injectGitLabWorkspaceCredentials(ctx, req)
 	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
 
 	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
@@ -1371,8 +1369,10 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 			// Non-fatal: agent may start without description
 		}
 	}
-	if len(env) > 0 {
-		if err := e.agentManager.SetExecutionEnv(ctx, executionID, env); err != nil {
+	credentialReq := &LaunchAgentRequest{WorkspaceID: task.WorkspaceID, Env: cloneStringMap(env)}
+	e.injectGitLabWorkspaceCredentials(ctx, credentialReq)
+	if len(credentialReq.Env) > 0 {
+		if err := e.agentManager.SetExecutionEnv(ctx, executionID, credentialReq.Env); err != nil {
 			e.logger.Warn("failed to set execution env for existing workspace",
 				zap.String("session_id", session.ID),
 				zap.String("agent_execution_id", executionID),

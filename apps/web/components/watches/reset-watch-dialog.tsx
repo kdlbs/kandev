@@ -11,6 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { Button } from "@kandev/ui/button";
 
 // previewLoader fetches the count of tasks that would be deleted. The
 // dialog calls it once when it opens; the result is cached for the
@@ -29,6 +30,7 @@ type ResetWatchDialogProps = {
   integrationLabel: string;
   previewLoader: PreviewLoader;
   onConfirm: ConfirmHandler;
+  requirePreviewSuccess?: boolean;
 };
 
 // ResetWatchDialog is the shared confirmation dialog for the destructive
@@ -46,11 +48,13 @@ export function ResetWatchDialog({
   integrationLabel,
   previewLoader,
   onConfirm,
+  requirePreviewSuccess = false,
 }: ResetWatchDialogProps) {
   const [count, setCount] = useState<number | null>(null);
   const [previewError, setPreviewError] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
 
   useEffect(() => {
     if (!open) {
@@ -60,6 +64,7 @@ export function ResetWatchDialog({
       setPreviewError(false);
       setPreviewLoading(false);
       setConfirming(false);
+      setPreviewAttempt(0);
       return;
     }
     let ignore = false;
@@ -80,10 +85,16 @@ export function ResetWatchDialog({
     return () => {
       ignore = true;
     };
-  }, [open, previewLoader]);
+  }, [open, previewLoader, previewAttempt]);
 
-  const description = renderDescription({ previewLoading, previewError, count });
-  const confirmDisabled = previewLoading || confirming;
+  const description = renderDescription({
+    previewLoading,
+    previewError,
+    count,
+    requirePreviewSuccess,
+  });
+  const confirmDisabled =
+    previewLoading || confirming || (requirePreviewSuccess && (previewError || count === null));
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -95,6 +106,16 @@ export function ResetWatchDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
+          {previewError && requirePreviewSuccess && (
+            <Button
+              type="button"
+              variant="outline"
+              className="cursor-pointer"
+              onClick={() => setPreviewAttempt((attempt) => attempt + 1)}
+            >
+              Retry preview
+            </Button>
+          )}
           <AlertDialogCancel className="cursor-pointer" disabled={confirming}>
             Cancel
           </AlertDialogCancel>
@@ -189,19 +210,21 @@ function renderDescription({
   previewLoading,
   previewError,
   count,
+  requirePreviewSuccess,
 }: {
   previewLoading: boolean;
   previewError: boolean;
   count: number | null;
+  requirePreviewSuccess: boolean;
 }): string {
   const tail =
     " The watch's polling cursor is also cleared so the next check re-imports every currently-matching item. This cannot be undone.";
   if (previewLoading) return "Checking how many tasks would be deleted…";
   if (previewError) {
-    return (
-      "This will delete every task previously created by the watch, including archived tasks." +
-      tail
-    );
+    return requirePreviewSuccess
+      ? "Could not load the affected task count. Retry the preview before resetting this watch."
+      : "This will delete every task previously created by the watch, including archived tasks." +
+          tail;
   }
   if (count === 0) {
     return (

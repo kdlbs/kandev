@@ -5,6 +5,14 @@ description: Add a new third-party integration (Jira/Linear-style) — per-works
 
 # Adding a new third-party integration
 
+## Planner Entry
+
+Load `/spec-driven-development`. The user-started
+primary session plans the integration and delegates each backend, frontend,
+test, and documentation task to bounded workers. It does not scaffold or verify
+the integration directly. An explicitly assigned implementer follows the
+relevant sections below and does not spawn other workers.
+
 Jira and Linear are the model: per-workspace credentials, a 90s auth-health poller, a settings page with status banner + reconnect CTA, link/import buttons that gate on availability. New integrations should **reuse the shared shapes** rather than copying either.
 
 ## Backend (`apps/backend/internal/<name>/`)

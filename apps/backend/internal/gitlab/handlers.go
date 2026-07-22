@@ -21,9 +21,10 @@ const (
 // adding a sibling function so callers can pass a dispatcher.
 func RegisterRoutesWithDispatcher(router *gin.Engine, dispatcher *ws.Dispatcher, svc *Service, log *logger.Logger) {
 	NewController(svc, log).RegisterHTTPRoutes(router)
-	if dispatcher != nil {
-		registerWSHandlers(dispatcher, svc, log)
-	}
+	// GitLab requests are workspace-scoped on the HTTP surface. The legacy
+	// WebSocket handlers predate workspace-owned connections and cannot carry
+	// the same authorization boundary, so they intentionally remain unmounted.
+	_ = dispatcher
 }
 
 // RegisterMockRoutes registers mock control endpoints if the underlying

@@ -6,7 +6,10 @@ alwaysApply: false
 
 # Kandev PR Fixup
 
-Use `.agents/skills/pr-fixup/SKILL.md` for PR fixups.
+Use `.agents/skills/pr-fixup/SKILL.md` for PR fixups. In a user-started primary
+session, delegate polling, remediation, verification, and delivery as separate
+bounded assignments. The commands below are worker procedures, not a fallback
+for the primary planner.
 
 The helper scripts are at `<worktree>/scripts/...`, not under the skill directory. Prefer:
 

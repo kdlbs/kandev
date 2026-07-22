@@ -520,6 +520,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     seedData,
   }) => {
     await seedAccessibleRepos(apiClient);
+    await apiClient.configureGitLab(seedData.workspaceId);
     await apiClient.mockAzureDevOpsSeed({
       authenticated: true,
       projects: [{ id: "project-1", name: "Platform" }],
@@ -546,6 +547,8 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
 
     const tabs = testPage.getByTestId("remote-repo-provider-tabs");
     await expect(tabs.getByRole("tab", { name: "GitHub" })).toBeVisible();
+    await expect(tabs.getByRole("tab", { name: "GitLab" })).toBeVisible();
+    await expect(tabs.getByRole("tab", { name: "Azure DevOps" })).toBeVisible();
     const tabOverflow = await tabs.evaluate((element) => ({
       overflowY: getComputedStyle(element).overflowY,
       scrollHeight: element.scrollHeight,
@@ -559,6 +562,11 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await expect(
       testPage.getByTestId("remote-repo-option").filter({ hasText: "Platform/api" }),
     ).toHaveCount(0);
+
+    await tabs.getByRole("tab", { name: "GitLab" }).click();
+    await expect(
+      testPage.getByTestId("remote-repo-option").filter({ hasText: "kandev/sample" }),
+    ).toBeVisible();
 
     await tabs.getByRole("tab", { name: "Azure DevOps" }).click();
     const azureOption = testPage

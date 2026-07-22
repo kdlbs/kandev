@@ -91,12 +91,38 @@ For PR review/fixup workflows, prefer the repo helpers before manually querying 
 
 When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow. Some task messaging and platform helpers are exposed on demand.
 
+### Planner and Worker Execution
+
+The user-started primary session is the planner. It may clarify intent, read
+repository context, create planning artifacts, delegate bounded work, review
+results, and report status. It must not implement or edit application, test, or
+harness code; run tests or verification; commit or push changes; or create PRs.
+
+All execution must be delegated through the current coding harness's native
+subagent tools. Never use Kandev MCP task/session APIs as a delegation fallback.
+Each delegated worker executes one bounded work packet and must not spawn other
+agents. If native delegation is unavailable, stop and report that limitation.
+Detailed work-packet and model-selection rules live in the
+`planner-orchestration` skill.
+
 ### Kandev Task Creation
 
-When creating follow-up or delegated Kandev work from an active task, use `create_task_kandev` with `parent_id: "self"` when the work is related. That preserves workspace, workflow, repository, agent profile, and executor context from the current task. For genuinely unrelated top-level tasks, do not rely on workspace defaults when the user expects continuity; explicitly preserve the current task's `agent_profile_id` / `executor_profile_id`, or ask if the intended profile is ambiguous.
+Use Kandev task/session MCP APIs only when the user explicitly asks to create or
+manage persistent Kandev platform tasks or sessions. Planner-to-worker
+delegation must use the active coding harness's native subagent tools; never use
+`create_task_kandev`, `spawn_session_kandev`, or `message_task_kandev` as a
+worker mechanism or fallback.
 
-For remediation discovered while reviewing a PR that must start after the PR
-merges, create a related subtask with `parent_id: "self"`,
+When the user explicitly requests related Kandev follow-up work, use
+`create_task_kandev` with `parent_id: "self"`. That preserves workspace,
+workflow, repository, agent profile, and executor context from the current
+task. For genuinely unrelated top-level tasks, do not rely on workspace
+defaults when the user expects continuity; explicitly preserve the current
+task's `agent_profile_id` / `executor_profile_id`, or ask if the intended
+profile is ambiguous.
+
+When the user requests a persistent remediation task discovered during PR
+review that must start after merge, create it with `parent_id: "self"`,
 `workspace_mode: "new_workspace"`, and the reviewed PR's base branch; otherwise
 a same-repository subtask inherits the reviewed branch. Set `start_agent: false`
 when the follow-up is intentionally queued until merge.
@@ -135,4 +161,4 @@ For developing in ephemeral cloud VMs (Cursor Cloud, Codex, GitHub Codespaces, e
 
 ---
 
-**Last Updated**: 2026-07-20
+**Last Updated**: 2026-07-21

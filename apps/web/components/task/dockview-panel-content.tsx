@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect } from "react";
-import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
+import { ReviewDetailPanelComponent } from "./review-detail-panel";
+import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
@@ -221,7 +222,14 @@ export function renderPanel(
     case "plan":
       return <PlanContent />;
     case "pr-detail":
-      return <PRDetailPanelComponent panelId={panelId} params={params} />;
+      return <ReviewDetailPanelComponent panelId={panelId} params={params} />;
+    case "mr-detail":
+      return (
+        <MRDetailPanelComponent
+          panelId={panelId}
+          params={{ mrKey: typeof params.mrKey === "string" ? params.mrKey : undefined }}
+        />
+      );
     default:
       return <div className="p-4 text-muted-foreground">Unknown panel: {component}</div>;
   }

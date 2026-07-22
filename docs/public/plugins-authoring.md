@@ -161,6 +161,16 @@ type Host interface {
 	Workflows() WorkflowReader
 	AgentProfiles() AgentProfileReader
 	Repositories() RepositoryReader
+
+	// Messages reads historical user/agent conversation content
+	// (capability api_read:messages). kandev-injected system blocks are
+	// stripped; raw system prompts are never returned.
+	Messages() MessageReader
+
+	// InvokeUtilityAgent runs a one-shot completion using this plugin's
+	// selected utility agent (capability agent_invoke). No API key of your
+	// own; FailedPrecondition when no valid enabled agent is selected.
+	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
 }
 ```
 
@@ -191,15 +201,55 @@ The data-reader accessors return typed, paginated readers — e.g.
 `([]Task, *PageInfo, error)` with an opaque `PageInfo.NextCursor` for the
 next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
 `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`, `Repository`,
-`Session`, and filter/page types.
+`Session`, `Message`, and filter/page types.
+
+`host.Messages().List(ctx, MessageFilter{...}, Page{...})` reads historical
+conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
+`TaskIDs`, a `Since`/`Until` `created_at` window (RFC3339; `Since` inclusive,
+`Until` exclusive — the natural way to fetch "yesterday"), and message
+`Types`. Each `Message` carries `id`, `session_id`, `task_id`, `turn_id`,
+`author_type` (`user` or `agent`), `content`, `type`, and `created_at`.
+`content` has kandev's injected `<kandev-system>` blocks stripped — a plugin
+never sees raw system prompts.
+
+`host.InvokeUtilityAgent(ctx, prompt)` runs a one-shot, non-interactive LLM
+completion using the utility agent selected for this plugin in **Settings >
+Plugins > `<plugin>`** (capability `agent_invoke`), and returns its text. Declare
+the selector in `manifest.yaml`:
+
+```yaml
+capabilities:
+  agent_invoke: true
+
+config_schema:
+  type: object
+  properties:
+    utility_agent:
+      type: string
+      format: utility-agent
+      title: Utility Agent
+      description: Agent used for this plugin's LLM calls
+  required: ["utility_agent"]
+```
+
+The picker displays configured built-in and custom agent names but stores the
+selected agent's stable ID. Omit `utility_agent` from `required` only when the
+plugin supports operating without LLM delegation; optional selectors include a
+**Not set** choice. The plugin needs no provider API key because it delegates to
+a kandev-configured agent. A missing, deleted, or disabled selection returns
+gRPC `FailedPrecondition`, so handle that as "ask the operator to configure
+one" rather than a transient failure. This is the LLM step behind, e.g., a
+"summarize yesterday" plugin: read the conversation with `host.Messages()`,
+then summarize it with `host.InvokeUtilityAgent(...)`.
 
 **Capability gating.** Every Host RPC except `GetConfig` and `EmitEvent` is
 checked against your manifest's `capabilities` before the handler runs:
 `GetState`/`SetState`/`DeleteState`/`ListState` require
 `capabilities.state: true`; `GetSecret`/`SetSecret`/`DeleteSecret`/
-`RevealSecret` require `capabilities.secrets: true`; each data-reader
-accessor requires its resource in `capabilities.api_read` (e.g. `tasks`,
-`sessions`, `workspaces`, `workflows`, `agent_profiles`, `repositories`).
+`RevealSecret` require `capabilities.secrets: true`; `InvokeUtilityAgent`
+requires `capabilities.agent_invoke: true`; each data-reader accessor requires
+its resource in `capabilities.api_read` (e.g. `tasks`, `sessions`, `messages`,
+`workspaces`, `workflows`, `agent_profiles`, `repositories`).
 Calling one without the declared capability returns gRPC `PermissionDenied`
 with a message naming the missing capability — declare what you use.
 

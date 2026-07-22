@@ -35,6 +35,22 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 }
 
 const createTablesSQL = `
+	CREATE TABLE IF NOT EXISTS gitlab_configs (
+		workspace_id TEXT PRIMARY KEY,
+		host TEXT NOT NULL,
+		auth_method TEXT NOT NULL,
+		username TEXT NOT NULL DEFAULT '',
+		last_ok INTEGER NOT NULL DEFAULT 0,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_checked_at DATETIME,
+		revision INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+		-- The workspaces table is created before integration stores in production.
+		-- Isolated package tests may omit it, which SQLite permits at DDL time.
+		, FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+	);
+
 	CREATE TABLE IF NOT EXISTS gitlab_task_mrs (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
@@ -92,11 +108,18 @@ const createTablesSQL = `
 		agent_profile_id TEXT NOT NULL,
 		executor_profile_id TEXT NOT NULL,
 		prompt TEXT DEFAULT '',
+		repository_id TEXT NOT NULL DEFAULT '',
+		base_branch TEXT NOT NULL DEFAULT '',
 		review_scope TEXT NOT NULL DEFAULT 'user_and_teams',
 		custom_query TEXT NOT NULL DEFAULT '',
 		enabled BOOLEAN DEFAULT 1,
 		poll_interval_seconds INTEGER DEFAULT 300,
 		cleanup_policy TEXT NOT NULL DEFAULT 'auto',
+		max_inflight_tasks INTEGER,
+		generation INTEGER NOT NULL DEFAULT 1,
+		deleting BOOLEAN NOT NULL DEFAULT 0,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
 		last_polled_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
@@ -110,6 +133,7 @@ const createTablesSQL = `
 		mr_iid INTEGER NOT NULL,
 		mr_url TEXT NOT NULL,
 		task_id TEXT NOT NULL,
+		generation INTEGER NOT NULL DEFAULT 1,
 		created_at DATETIME NOT NULL,
 		UNIQUE(review_watch_id, project_path, mr_iid)
 	);
@@ -123,11 +147,18 @@ const createTablesSQL = `
 		agent_profile_id TEXT NOT NULL,
 		executor_profile_id TEXT NOT NULL,
 		prompt TEXT DEFAULT '',
+		repository_id TEXT NOT NULL DEFAULT '',
+		base_branch TEXT NOT NULL DEFAULT '',
 		labels TEXT NOT NULL DEFAULT '[]',
 		custom_query TEXT NOT NULL DEFAULT '',
 		enabled BOOLEAN DEFAULT 1,
 		poll_interval_seconds INTEGER DEFAULT 300,
 		cleanup_policy TEXT NOT NULL DEFAULT 'auto',
+		max_inflight_tasks INTEGER,
+		generation INTEGER NOT NULL DEFAULT 1,
+		deleting BOOLEAN NOT NULL DEFAULT 0,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
 		last_polled_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
@@ -141,6 +172,7 @@ const createTablesSQL = `
 		issue_iid INTEGER NOT NULL,
 		issue_url TEXT NOT NULL,
 		task_id TEXT NOT NULL,
+		generation INTEGER NOT NULL DEFAULT 1,
 		created_at DATETIME NOT NULL,
 		UNIQUE(issue_watch_id, project_path, issue_iid)
 	);
@@ -154,8 +186,87 @@ const createTablesSQL = `
 `
 
 func (s *Store) createTables() error {
-	_, err := s.db.Exec(createTablesSQL)
-	return err
+	if _, err := s.db.Exec(createTablesSQL); err != nil {
+		return err
+	}
+	if err := s.migrateConfigRevision(); err != nil {
+		return err
+	}
+	return s.migrateWatchColumns()
+}
+
+func (s *Store) migrateConfigRevision() error {
+	existing, err := s.tableColumns("gitlab_configs")
+	if err != nil {
+		return err
+	}
+	if _, ok := existing["revision"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE gitlab_configs ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`); err != nil {
+		return fmt.Errorf("migrate gitlab_configs.revision: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) migrateWatchColumns() error {
+	columns := []struct {
+		name string
+		ddl  string
+	}{
+		{"repository_id", "TEXT NOT NULL DEFAULT ''"},
+		{"base_branch", "TEXT NOT NULL DEFAULT ''"},
+		{"max_inflight_tasks", "INTEGER"},
+		{"last_error", "TEXT NOT NULL DEFAULT ''"},
+		{"last_error_at", "DATETIME"},
+		{"generation", "INTEGER NOT NULL DEFAULT 1"},
+		{"deleting", "BOOLEAN NOT NULL DEFAULT 0"},
+	}
+	for _, table := range []string{"gitlab_review_watches", "gitlab_issue_watches"} {
+		existing, err := s.tableColumns(table)
+		if err != nil {
+			return err
+		}
+		for _, column := range columns {
+			if _, ok := existing[column.name]; ok {
+				continue
+			}
+			if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column.name, column.ddl)); err != nil {
+				return fmt.Errorf("migrate %s.%s: %w", table, column.name, err)
+			}
+		}
+	}
+	for _, table := range []string{"gitlab_review_mr_tasks", "gitlab_issue_watch_tasks"} {
+		existing, err := s.tableColumns(table)
+		if err != nil {
+			return err
+		}
+		if _, ok := existing["generation"]; !ok {
+			if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN generation INTEGER NOT NULL DEFAULT 1", table)); err != nil {
+				return fmt.Errorf("migrate %s.generation: %w", table, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	columns := make(map[string]struct{})
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return nil, err
+		}
+		columns[name] = struct{}{}
+	}
+	return columns, rows.Err()
 }
 
 // taskMRSelectCols is the projection used by every SELECT so dev DBs that
@@ -184,22 +295,13 @@ const taskMRSelectColsQualified = `gtm.id, gtm.task_id, gtm.repository_id,
 func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 	now := time.Now().UTC()
 	tm.UpdatedAt = now
-	existing, err := s.findTaskMR(ctx, tm.TaskID, tm.RepositoryID, tm.ProjectPath, tm.MRIID)
-	if err != nil {
-		return err
-	}
-	if existing != nil {
-		tm.ID = existing.ID
-		tm.CreatedAt = existing.CreatedAt
-		return s.updateTaskMR(ctx, tm)
-	}
 	if tm.ID == "" {
 		tm.ID = uuid.New().String()
 	}
 	if tm.CreatedAt.IsZero() {
 		tm.CreatedAt = now
 	}
-	_, err = s.db.NamedExecContext(ctx, `
+	rows, err := s.db.NamedQueryContext(ctx, `
 		INSERT INTO gitlab_task_mrs (
 			id, task_id, repository_id, host, project_path, mr_iid, mr_url, mr_title,
 			head_branch, base_branch, author_username, state, approval_state, pipeline_state,
@@ -212,39 +314,31 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 			:merge_status, :draft, :approval_count, :required_approvals,
 			:pipeline_jobs_total, :pipeline_jobs_pass,
 			:created_at, :merged_at, :closed_at, :last_synced_at, :updated_at
-		)`, tm)
-	return err
-}
-
-func (s *Store) updateTaskMR(ctx context.Context, tm *TaskMR) error {
-	_, err := s.db.NamedExecContext(ctx, `
-		UPDATE gitlab_task_mrs SET
-			host = :host, mr_url = :mr_url, mr_title = :mr_title,
-			head_branch = :head_branch, base_branch = :base_branch,
-			author_username = :author_username, state = :state,
-			approval_state = :approval_state, pipeline_state = :pipeline_state,
-			merge_status = :merge_status, draft = :draft,
-			approval_count = :approval_count, required_approvals = :required_approvals,
-			pipeline_jobs_total = :pipeline_jobs_total, pipeline_jobs_pass = :pipeline_jobs_pass,
-			merged_at = :merged_at, closed_at = :closed_at,
-			last_synced_at = :last_synced_at, updated_at = :updated_at
-		WHERE id = :id`, tm)
-	return err
-}
-
-func (s *Store) findTaskMR(ctx context.Context, taskID, repositoryID, projectPath string, iid int) (*TaskMR, error) {
-	var tm TaskMR
-	err := s.ro.GetContext(ctx, &tm,
-		`SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
-		 WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?
-		 LIMIT 1`, taskID, repositoryID, projectPath, iid)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+		)
+		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
+			host = excluded.host, mr_url = excluded.mr_url, mr_title = excluded.mr_title,
+			head_branch = excluded.head_branch, base_branch = excluded.base_branch,
+			author_username = excluded.author_username, state = excluded.state,
+			approval_state = excluded.approval_state, pipeline_state = excluded.pipeline_state,
+			merge_status = excluded.merge_status, draft = excluded.draft,
+			approval_count = excluded.approval_count,
+			required_approvals = excluded.required_approvals,
+			pipeline_jobs_total = excluded.pipeline_jobs_total,
+			pipeline_jobs_pass = excluded.pipeline_jobs_pass,
+			merged_at = excluded.merged_at, closed_at = excluded.closed_at,
+			last_synced_at = excluded.last_synced_at, updated_at = excluded.updated_at
+		RETURNING id, created_at, updated_at`, tm)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return &tm, nil
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return errors.New("upsert task MR returned no row")
+	}
+	return rows.Scan(&tm.ID, &tm.CreatedAt, &tm.UpdatedAt)
 }
 
 // ListTaskMRsByTask returns every MR association for a task, oldest first.

@@ -41,10 +41,11 @@ export type MobileKanbanState = {
   isSearchOpen: boolean;
 };
 
-export type MobileSessionPanel = "chat" | "plan" | "changes" | "files" | "terminal";
+export type MobileSessionPanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
 
 export type MobileSessionState = {
   activePanelBySessionId: Record<string, MobileSessionPanel>;
+  reviewMRKeyBySessionId: Record<string, string>;
   isTaskSwitcherOpen: boolean;
 };
 
@@ -191,6 +192,7 @@ export type UISliceActions = {
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
+  setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setReviewPRSelection: (taskId: string, selectedKey: string) => void;

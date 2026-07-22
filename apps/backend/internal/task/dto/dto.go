@@ -51,6 +51,7 @@ type RepositoryDTO struct {
 	LocalPath              string                `json:"local_path"`
 	Provider               string                `json:"provider"`
 	ProviderRepoID         string                `json:"provider_repo_id"`
+	ProviderHost           string                `json:"provider_host"`
 	ProviderOwner          string                `json:"provider_owner"`
 	ProviderName           string                `json:"provider_name"`
 	DefaultBranch          string                `json:"default_branch"`
@@ -472,6 +473,7 @@ func FromRepository(repository *models.Repository) RepositoryDTO {
 		LocalPath:              repository.LocalPath,
 		Provider:               repository.Provider,
 		ProviderRepoID:         repository.ProviderRepoID,
+		ProviderHost:           repository.ProviderHost,
 		ProviderOwner:          repository.ProviderOwner,
 		ProviderName:           repository.ProviderName,
 		DefaultBranch:          repository.DefaultBranch,

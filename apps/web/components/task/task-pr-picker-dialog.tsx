@@ -13,11 +13,13 @@ import { cn } from "@/lib/utils";
 import { getPRStatusColor } from "@/components/github/pr-task-icon";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import type { TaskPR } from "@/lib/types/github";
+import type { TaskMR } from "@/lib/types/gitlab";
 
 type TaskPRPickerDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   prs: TaskPR[];
+  mrs?: TaskMR[];
 };
 
 /**
@@ -25,11 +27,15 @@ type TaskPRPickerDialogProps = {
  * PRs. A scrollable list of rows; ArrowUp/ArrowDown move focus (wrapping),
  * Enter or click opens the focused PR on GitHub and closes the dialog.
  */
-export function TaskPRPickerDialog({ open, onOpenChange, prs }: TaskPRPickerDialogProps) {
+export function TaskPRPickerDialog({ open, onOpenChange, prs, mrs = [] }: TaskPRPickerDialogProps) {
   const listRef = useRef<HTMLDivElement>(null);
 
   const openPR = (pr: TaskPR) => {
     void openExternalLink(pr.pr_url).catch(() => undefined);
+    onOpenChange(false);
+  };
+  const openMR = (mr: TaskMR) => {
+    void openExternalLink(mr.mr_url).catch(() => undefined);
     onOpenChange(false);
   };
 
@@ -61,9 +67,11 @@ export function TaskPRPickerDialog({ open, onOpenChange, prs }: TaskPRPickerDial
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg" onOpenAutoFocus={focusFirstRow}>
         <DialogHeader>
-          <DialogTitle>Open pull request</DialogTitle>
+          <DialogTitle>{mrs.length ? "Open code review" : "Open pull request"}</DialogTitle>
           <DialogDescription>
-            This task has {prs.length} linked pull requests. Choose one to open on GitHub.
+            {mrs.length
+              ? "Choose a linked pull request or merge request to open at its provider."
+              : `This task has ${prs.length} linked pull requests. Choose one to open on GitHub.`}
           </DialogDescription>
         </DialogHeader>
         <div
@@ -89,6 +97,25 @@ export function TaskPRPickerDialog({ open, onOpenChange, prs }: TaskPRPickerDial
                 <span className="text-muted-foreground">{pr.pr_title}</span>
               </span>
               <span className="shrink-0 text-xs capitalize text-muted-foreground">{pr.state}</span>
+            </button>
+          ))}
+          {mrs.map((mr) => (
+            <button
+              key={mr.id}
+              type="button"
+              data-pr-row
+              data-testid={`task-mr-picker-row-${mr.id}`}
+              onClick={() => openMR(mr)}
+              className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-transparent px-2 py-2 text-left text-sm transition-colors hover:border-border hover:bg-accent/40 focus:border-primary/70 focus:outline-none"
+            >
+              <IconGitPullRequest className="h-4 w-4 shrink-0 text-orange-500" />
+              <span className="min-w-0 flex-1 truncate">
+                <span className="font-medium">
+                  {mr.project_path} !{mr.mr_iid}
+                </span>{" "}
+                <span className="text-muted-foreground">{mr.mr_title}</span>
+              </span>
+              <span className="shrink-0 text-xs capitalize text-muted-foreground">{mr.state}</span>
             </button>
           ))}
         </div>

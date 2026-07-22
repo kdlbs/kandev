@@ -77,6 +77,10 @@ mocks:
     prod: ""
     dev:  ""
     e2e:  "true"
+  KANDEV_MOCK_GITLAB:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
   KANDEV_MOCK_JIRA:
     prod: ""
     dev:  ""

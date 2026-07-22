@@ -86,7 +86,7 @@ Per-workspace credentials and triage triggers for external services.
 | [azure-devops-integration](azure-devops-integration/spec.md) | shipped |
 | [slack](integrations/slack.md) | shipped |
 | [external-mcp](integrations/external-mcp.md) | draft |
-| [gitlab-integration](gitlab-integration/spec.md) | shipped |
+| [gitlab-integration](gitlab-integration/spec.md) | building |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
 
 ## workspaces/ — workspace lifecycle

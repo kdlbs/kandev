@@ -2,7 +2,8 @@
 name: simplify
 description: Simplify recently changed code — inline one-off abstractions, remove speculative code, reduce nesting, replace cleverness with clarity. Run after implementing a feature.
 tools: Bash, Read, Edit, Write, Grep, Glob
-model: opus
+model: sonnet
+effort: medium
 permissionMode: acceptEdits
 ---
 
@@ -49,14 +50,11 @@ Work through each changed file. For each simplification, verify tests still pass
 - Empty error handlers, unused catch variables
 - Leftover debug logging
 
-### 3. Verify
+### 3. Targeted check
 
-Run the full verification pipeline to ensure all tests, lints, and typechecks still pass:
-- `make -C apps/backend fmt` then `cd apps && pnpm format`
-- `make -C apps/backend test lint`
-- `cd apps && pnpm --filter @kandev/web typecheck && pnpm --filter @kandev/web lint`
-
-If anything breaks, the simplification changed behavior — revert it.
+Run the narrowest existing tests that cover the simplified behavior. Report the
+commands and results to the planner. Full format, typecheck, test, and lint are
+a separate `verify` assignment; do not run that pipeline from this role.
 
 ### 4. Summary
 
@@ -64,3 +62,5 @@ Report what was simplified:
 - Files modified
 - What was removed/inlined/simplified
 - Lines removed (net)
+
+Do not spawn subagents. Report required full verification to the planner.

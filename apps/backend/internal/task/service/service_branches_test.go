@@ -455,7 +455,7 @@ func TestAddBranchToTask_ResolvesGitHubURL(t *testing.T) {
 	// returns the existing row instead of creating a duplicate.
 	_ = repo.CreateRepository(ctx, &models.Repository{
 		ID: "repo-target", WorkspaceID: "ws-1", Name: "acme/widgets",
-		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
+		Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "acme", ProviderName: "widgets",
 		DefaultBranch: "main",
 	})
 	_ = repo.CreateRepository(ctx, &models.Repository{

@@ -3,6 +3,9 @@ package gitlab
 import (
 	"context"
 	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
 )
 
 // GetActionPresetsOrDefault returns the workspace's stored presets, falling
@@ -46,10 +49,10 @@ func (s *Service) UpdateActionPresets(ctx context.Context, req *UpdateActionPres
 		current = &ActionPresets{WorkspaceID: req.WorkspaceID}
 	}
 	if req.MR != nil {
-		current.MR = *req.MR
+		current.MR = normalizeActionPresets(*req.MR)
 	}
 	if req.Issue != nil {
-		current.Issue = *req.Issue
+		current.Issue = normalizeActionPresets(*req.Issue)
 	}
 	if err := store.UpsertActionPresets(ctx, current); err != nil {
 		return nil, fmt.Errorf("upsert action presets: %w", err)
@@ -57,6 +60,25 @@ func (s *Service) UpdateActionPresets(ctx context.Context, req *UpdateActionPres
 	// Return the rendered view (defaults substituted) so the caller sees the
 	// same shape the read endpoint produces.
 	return s.GetActionPresetsOrDefault(ctx, req.WorkspaceID)
+}
+
+func normalizeActionPresets(presets []ActionPreset) []ActionPreset {
+	out := make([]ActionPreset, 0, len(presets))
+	for _, preset := range presets {
+		preset.ID = strings.TrimSpace(preset.ID)
+		preset.Label = strings.TrimSpace(preset.Label)
+		preset.Hint = strings.TrimSpace(preset.Hint)
+		preset.Icon = strings.TrimSpace(preset.Icon)
+		preset.PromptTemplate = strings.TrimSpace(preset.PromptTemplate)
+		if preset.Label == "" || preset.PromptTemplate == "" {
+			continue
+		}
+		if preset.ID == "" {
+			preset.ID = uuid.NewString()
+		}
+		out = append(out, preset)
+	}
+	return out
 }
 
 // ResetActionPresets removes a workspace's stored presets, falling back to defaults.

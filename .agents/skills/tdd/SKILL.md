@@ -5,14 +5,21 @@ description: Implement changes using Test-Driven Development (Red-Green-Refactor
 
 # TDD
 
+## Execution Context
+
+The user-started primary session delegates TDD
+work to an `implementer` or `test-engineer` worker and does not continue below.
+An explicitly assigned worker follows this procedure and does not spawn other
+workers.
+
 Implement code changes using strict Red-Green-Refactor. Iron law: **no production code without a failing test first.**
 
 Wrote code before a test? Delete it. Start over from a failing test.
 
 ## Available skills and subagents
 
-- **`/e2e`** — Use when the change needs a Playwright E2E test instead of a unit test.
-- **`/verify`** — Run after completing all TDD cycles to ensure everything passes across the monorepo.
+- **`/e2e`** — Follow this procedure when the assigned packet explicitly owns Playwright E2E coverage.
+- **`/verify`** — The planner launches this as a separate assignment after the worker's targeted checks pass.
 
 ## When to use
 
@@ -34,7 +41,7 @@ For UI rendering bugs, prefer extracting or using a pure helper and testing that
   ```bash
   cd apps && pnpm --filter @kandev/web test -- --run path/to/file.test.ts
   ```
-- **Web E2E** (`apps/web/e2e/`): delegate to `/e2e` for Playwright tests.
+- **Web E2E** (`apps/web/e2e/`): follow `/e2e` only when the work packet owns Playwright tests; otherwise report the need to the planner.
 
 Choose the right level:
 - **Unit:** pure logic or isolated service behavior.
@@ -88,7 +95,8 @@ Return to step 1 for the next behavior or edge case. Continue until the feature 
 
 ### 5. Final verification
 
-Run `/verify` to ensure all formatters, linters, typechecks, and tests pass across the monorepo.
+Run the targeted tests named in the work packet and report their results. The
+planner launches a separate `verify` assignment for the monorepo pipeline.
 
 ## Testing anti-patterns
 

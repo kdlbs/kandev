@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement, type ReactNode } from "react";
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import type { GitLabStatus, TaskMR } from "@/lib/types/gitlab";
 
 const fetchGitLabStatusMock = vi.fn<() => Promise<GitLabStatus | null>>();
 const listWorkspaceTaskMRsMock =
   vi.fn<(workspaceId: string) => Promise<{ task_mrs: Record<string, TaskMR[]> } | null>>();
+const EMPTY_TASK_MRS: Record<string, TaskMR[]> = {};
+const WORKSPACE_MRS_TEST_ID = "workspace-mrs";
 
 vi.mock("@/lib/api/domains/gitlab-api", () => ({
   fetchGitLabStatus: () => fetchGitLabStatusMock(),
@@ -16,7 +18,10 @@ vi.mock("@/lib/api/domains/gitlab-api", () => ({
 import { useGitLabAvailable, useTaskMRs, useWorkspaceMRs } from "./use-task-mr";
 
 function wrapper({ children }: { children: ReactNode }) {
-  return createElement(StateProvider, null, children);
+  return createElement(StateProvider, {
+    initialState: { workspaces: { items: [], activeId: "ws-1" } },
+    children,
+  });
 }
 
 afterEach(() => cleanup());
@@ -60,6 +65,19 @@ function makeStatus(overrides: Partial<GitLabStatus> = {}): GitLabStatus {
   };
 }
 
+function WorkspaceMRProbe({ workspaceId }: { workspaceId: string }) {
+  useWorkspaceMRs(workspaceId);
+  const mrs = useAppStore((state) => state.taskMRs.byWorkspaceId[workspaceId] ?? EMPTY_TASK_MRS);
+  return createElement("output", { "data-testid": WORKSPACE_MRS_TEST_ID }, JSON.stringify(mrs));
+}
+
+function workspaceProbe(workspaceId: string) {
+  return createElement(StateProvider, {
+    initialState: { workspaces: { items: [], activeId: workspaceId } },
+    children: createElement(WorkspaceMRProbe, { key: workspaceId, workspaceId }),
+  });
+}
+
 describe("useWorkspaceMRs", () => {
   beforeEach(() => {
     listWorkspaceTaskMRsMock.mockReset();
@@ -72,7 +90,7 @@ describe("useWorkspaceMRs", () => {
     const { result } = renderHook(
       () => {
         useWorkspaceMRs("ws-1");
-        return useAppStore((s) => s.taskMRs.byTaskId);
+        return useAppStore((s) => s.taskMRs.byWorkspaceId["ws-1"] ?? EMPTY_TASK_MRS);
       },
       { wrapper },
     );
@@ -106,7 +124,7 @@ describe("useWorkspaceMRs", () => {
     const { result, rerender } = renderHook(
       ({ ws }: { ws: string | null }) => {
         useWorkspaceMRs(ws);
-        return useAppStore((s) => s.taskMRs.byTaskId);
+        return useAppStore((s) => s.taskMRs.byWorkspaceId["ws-1"] ?? EMPTY_TASK_MRS);
       },
       { wrapper, initialProps: { ws: "ws-1" as string | null } },
     );
@@ -114,7 +132,7 @@ describe("useWorkspaceMRs", () => {
     // Pre-populate the store so we can observe it being cleared.
     const setInitial = renderHook(() => useAppStore((s) => s.setTaskMRs), { wrapper });
     act(() => {
-      setInitial.result.current({ "task-1": [makeMR()] });
+      setInitial.result.current("ws-1", { "task-1": [makeMR()] });
     });
 
     rerender({ ws: null });
@@ -128,6 +146,35 @@ describe("useWorkspaceMRs", () => {
     });
     await new Promise((r) => setTimeout(r, 10));
     expect(result.current).toEqual({});
+  });
+
+  it("clears workspace A immediately while workspace B fetch is deferred", async () => {
+    const workspaceAMR = makeMR({ id: "a", task_id: "task-a", host: "https://a.gitlab.test" });
+    let resolveWorkspaceB: (v: { task_mrs: Record<string, TaskMR[]> }) => void = () => {};
+    const workspaceBPromise = new Promise<{ task_mrs: Record<string, TaskMR[]> }>((resolve) => {
+      resolveWorkspaceB = resolve;
+    });
+    listWorkspaceTaskMRsMock
+      .mockResolvedValueOnce({ task_mrs: { "task-a": [workspaceAMR] } })
+      .mockReturnValueOnce(workspaceBPromise);
+
+    const { result, rerender } = renderHook(
+      ({ ws }: { ws: string }) => {
+        useWorkspaceMRs(ws);
+        return useAppStore((state) => state.taskMRs.byWorkspaceId[ws] ?? EMPTY_TASK_MRS);
+      },
+      { wrapper, initialProps: { ws: "ws-a" } },
+    );
+    await waitFor(() => expect(result.current["task-a"]).toEqual([workspaceAMR]));
+
+    rerender({ ws: "ws-b" });
+    await waitFor(() => expect(result.current).toEqual({}));
+
+    const workspaceBMR = makeMR({ id: "b", task_id: "task-b", host: "https://b.gitlab.test" });
+    await act(async () => {
+      resolveWorkspaceB({ task_mrs: { "task-b": [workspaceBMR] } });
+    });
+    await waitFor(() => expect(result.current["task-b"]).toEqual([workspaceBMR]));
   });
 
   it("clears fetchedRef on failure so a workspace switch can retry that id later", async () => {
@@ -148,6 +195,34 @@ describe("useWorkspaceMRs", () => {
     listWorkspaceTaskMRsMock.mockResolvedValueOnce({ task_mrs: {} });
     rerender({ ws: "ws-1" });
     await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(3));
+  });
+});
+
+describe("useWorkspaceMRs cleanup", () => {
+  it("ignores workspace A's deferred fetch after its loader unmounts and B loads", async () => {
+    let resolveWorkspaceA: (v: { task_mrs: Record<string, TaskMR[]> }) => void = () => {};
+    const workspaceAPromise = new Promise<{ task_mrs: Record<string, TaskMR[]> }>((resolve) => {
+      resolveWorkspaceA = resolve;
+    });
+    const workspaceBMR = makeMR({ id: "b", task_id: "task-b" });
+    listWorkspaceTaskMRsMock.mockReset();
+    listWorkspaceTaskMRsMock
+      .mockReturnValueOnce(workspaceAPromise)
+      .mockResolvedValueOnce({ task_mrs: { "task-b": [workspaceBMR] } });
+
+    const view = render(workspaceProbe("ws-a"));
+    await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledWith("ws-a"));
+    view.rerender(workspaceProbe("ws-b"));
+    await waitFor(() =>
+      expect(screen.getByTestId(WORKSPACE_MRS_TEST_ID).textContent).toContain('"id":"b"'),
+    );
+
+    await act(async () => {
+      resolveWorkspaceA({ task_mrs: { "task-a": [makeMR({ id: "late-a" })] } });
+    });
+
+    expect(screen.getByTestId(WORKSPACE_MRS_TEST_ID).textContent).toContain('"id":"b"');
+    expect(screen.getByTestId(WORKSPACE_MRS_TEST_ID).textContent).not.toContain("late-a");
   });
 });
 
@@ -173,9 +248,52 @@ describe("useTaskMRs", () => {
       { wrapper },
     );
     act(() => {
-      result.current.setTaskMRs({ "task-1": [mr] });
+      result.current.setTaskMRs("ws-1", { "task-1": [mr] });
     });
     expect(result.current.mrs).toEqual([mr]);
+  });
+
+  it("hides workspace A's cached MRs on the first render for workspace B", () => {
+    const workspaceAMR = makeMR({ task_id: "task-1" });
+    const { result, rerender } = renderHook(
+      ({ ws }: { ws: string }) => {
+        const setTaskMRs = useAppStore((state) => state.setTaskMRs);
+        const mrs = useTaskMRs("task-1", ws);
+        return { setTaskMRs, mrs };
+      },
+      { wrapper, initialProps: { ws: "ws-a" } },
+    );
+    act(() => {
+      result.current.setTaskMRs("ws-a", { "task-1": [workspaceAMR] });
+    });
+    expect(result.current.mrs).toEqual([workspaceAMR]);
+
+    rerender({ ws: "ws-b" });
+
+    expect(result.current.mrs).toEqual([]);
+  });
+
+  it("keeps workspace B's selected MRs stable after a delayed workspace A link", () => {
+    const workspaceBMR = makeMR({ id: "b", task_id: "task-b" });
+    const { result } = renderHook(
+      () => {
+        const setTaskMRs = useAppStore((state) => state.setTaskMRs);
+        const setTaskMR = useAppStore((state) => state.setTaskMR);
+        const mrs = useTaskMRs("task-b", "ws-b");
+        return { setTaskMRs, setTaskMR, mrs };
+      },
+      { wrapper },
+    );
+    act(() => {
+      result.current.setTaskMRs("ws-b", { "task-b": [workspaceBMR] });
+    });
+    expect(result.current.mrs).toEqual([workspaceBMR]);
+
+    act(() => {
+      result.current.setTaskMR("ws-a", "task-a", makeMR({ id: "late-a" }));
+    });
+
+    expect(result.current.mrs).toEqual([workspaceBMR]);
   });
 });
 

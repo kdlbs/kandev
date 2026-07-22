@@ -104,6 +104,12 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_sessions.name", `ALTER TABLE task_sessions ADD COLUMN name TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.remote_url", `ALTER TABLE repositories ADD COLUMN remote_url TEXT DEFAULT ''`)
+	r.migrate.Apply("repositories.provider_host", `ALTER TABLE repositories ADD COLUMN provider_host TEXT DEFAULT ''`)
+	r.migrate.Apply("repositories.provider_host.github_backfill", `
+		UPDATE repositories
+		SET provider_host = 'https://github.com'
+		WHERE LOWER(TRIM(provider)) = 'github'
+			AND TRIM(COALESCE(provider_host, '')) = ''`)
 	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}'`)
 	r.migrate.Apply("repositories.worktree_branch_template.backfill", `UPDATE repositories SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'`)
 	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)

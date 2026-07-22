@@ -12,7 +12,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/watchreset"
 )
 
 // secretNameToken is the canonical secret-store name for the GitLab PAT.
@@ -30,6 +32,14 @@ type SecretManager interface {
 	Create(ctx context.Context, name, value string) (id string, err error)
 	Update(ctx context.Context, id, value string) error
 	Delete(ctx context.Context, id string) error
+}
+
+// WorkspaceSecretStore persists deterministic workspace-owned secret IDs.
+type WorkspaceSecretStore interface {
+	Reveal(ctx context.Context, id string) (string, error)
+	Set(ctx context.Context, id, name, value string) error
+	Delete(ctx context.Context, id string) error
+	Exists(ctx context.Context, id string) (bool, error)
 }
 
 // HostStore persists the configured GitLab host.
@@ -56,20 +66,44 @@ type TaskSessionChecker interface {
 	HasUserAuthoredMessage(ctx context.Context, taskID string) (bool, error)
 }
 
+// RepositoryLookup validates optional watch repository bindings.
+type RepositoryLookup interface {
+	GetRepository(ctx context.Context, id string) (workspaceID, defaultBranch string, ok bool)
+}
+
+// WatchDependencyValidator validates the non-repository references stored on
+// an automation watch. Workflow steps are checked together with their parent
+// workflow so a valid step from another workflow cannot be smuggled in.
+type WatchDependencyValidator interface {
+	WorkflowStepBelongs(ctx context.Context, workspaceID, workflowID, stepID string) (bool, error)
+	AgentProfileBelongs(ctx context.Context, workspaceID, profileID string) (bool, error)
+	ExecutorProfileBelongs(ctx context.Context, workspaceID, profileID string) (bool, error)
+}
+
 // Service coordinates GitLab integration operations.
 type Service struct {
-	mu                 sync.RWMutex
-	host               string
-	client             Client
-	authMethod         string
-	secrets            SecretProvider
-	secretManager      SecretManager
-	hostStore          HostStore
-	store              *Store
-	eventBus           bus.EventBus
-	taskDeleter        TaskDeleter
-	taskSessionChecker TaskSessionChecker
-	logger             *logger.Logger
+	mu                   sync.RWMutex
+	configMutationMu     sync.Mutex
+	host                 string
+	client               Client
+	authMethod           string
+	secrets              SecretProvider
+	secretManager        SecretManager
+	workspaceSecrets     WorkspaceSecretStore
+	workspaceClientFn    WorkspaceClientFactory
+	glabTokenFn          func(context.Context, string) (string, error)
+	workspaceClients     map[string]Client
+	workspaceClientRevs  map[string]int64
+	environmentTokenHost string
+	hostStore            HostStore
+	store                *Store
+	eventBus             bus.EventBus
+	taskDeleter          TaskDeleter
+	cascadeTaskDeleter   watchreset.TaskDeleter
+	taskSessionChecker   TaskSessionChecker
+	repositoryLookup     RepositoryLookup
+	dependencyValidator  WatchDependencyValidator
+	logger               *logger.Logger
 }
 
 // SetEventBus wires the event bus for publishing review/issue/feedback events.
@@ -86,11 +120,84 @@ func (s *Service) SetTaskDeleter(d TaskDeleter) {
 	s.taskDeleter = d
 }
 
+// SetCascadeTaskDeleter wires destructive watch reset to task tree deletion.
+func (s *Service) SetCascadeTaskDeleter(d watchreset.TaskDeleter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cascadeTaskDeleter = d
+}
+
 // SetTaskSessionChecker wires the user-engagement check used by cleanup.
 func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.taskSessionChecker = c
+}
+
+func (s *Service) SetRepositoryLookup(lookup RepositoryLookup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.repositoryLookup = lookup
+}
+
+func (s *Service) SetWatchDependencyValidator(validator WatchDependencyValidator) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dependencyValidator = validator
+}
+
+func (s *Service) validateWatchDependencies(ctx context.Context, workspaceID, workflowID, stepID, agentProfileID, executorProfileID string) error {
+	if strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(workflowID) == "" ||
+		strings.TrimSpace(stepID) == "" || strings.TrimSpace(agentProfileID) == "" ||
+		strings.TrimSpace(executorProfileID) == "" {
+		return fmt.Errorf("%w: invalid watch dependencies", ErrInvalidConfig)
+	}
+	s.mu.RLock()
+	validator := s.dependencyValidator
+	s.mu.RUnlock()
+	if validator == nil {
+		return nil
+	}
+	checks := []func() (bool, error){
+		func() (bool, error) { return validator.WorkflowStepBelongs(ctx, workspaceID, workflowID, stepID) },
+		func() (bool, error) { return validator.AgentProfileBelongs(ctx, workspaceID, agentProfileID) },
+		func() (bool, error) { return validator.ExecutorProfileBelongs(ctx, workspaceID, executorProfileID) },
+	}
+	for _, check := range checks {
+		valid, err := check()
+		if err != nil {
+			return fmt.Errorf("validate watch dependencies: %w", err)
+		}
+		if !valid {
+			return fmt.Errorf("%w: invalid watch dependencies", ErrInvalidConfig)
+		}
+	}
+	return nil
+}
+
+func (s *Service) resolveWatchRepository(ctx context.Context, workspaceID, repositoryID, baseBranch string) (string, string, error) {
+	repositoryID = strings.TrimSpace(repositoryID)
+	baseBranch = strings.TrimSpace(baseBranch)
+	if repositoryID == "" {
+		return "", "", nil
+	}
+	if baseBranch != "" && !securityutil.IsValidBaseBranchRef(baseBranch) {
+		return "", "", fmt.Errorf("%w: base branch %q is not a valid git ref", ErrInvalidConfig, baseBranch)
+	}
+	s.mu.RLock()
+	lookup := s.repositoryLookup
+	s.mu.RUnlock()
+	if lookup == nil {
+		return repositoryID, baseBranch, nil
+	}
+	repoWorkspace, defaultBranch, ok := lookup.GetRepository(ctx, repositoryID)
+	if !ok || repoWorkspace != workspaceID {
+		return "", "", fmt.Errorf("%w: repository %q not found in workspace", ErrInvalidConfig, repositoryID)
+	}
+	if baseBranch == "" {
+		baseBranch = defaultBranch
+	}
+	return repositoryID, baseBranch, nil
 }
 
 // SetStore wires the task↔MR persistence layer. Optional — when nil the
@@ -101,18 +208,30 @@ func (s *Service) SetStore(store *Store) {
 	s.store = store
 }
 
+// SetWorkspaceSecretStore wires deterministic per-workspace credential storage.
+func (s *Service) SetWorkspaceSecretStore(secrets WorkspaceSecretStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaceSecrets = secrets
+}
+
 // NewService builds a Service from an already-resolved client. Callers
 // typically use Provide() instead of constructing this directly.
 func NewService(host string, client Client, authMethod string, secrets SecretProvider, log *logger.Logger) *Service {
 	if host == "" {
 		host = DefaultHost
 	}
+	trustedEnvironmentHost := trustedEnvironmentTokenHost(host)
 	return &Service{
-		host:       host,
-		client:     client,
-		authMethod: authMethod,
-		secrets:    secrets,
-		logger:     log,
+		host:                 host,
+		client:               client,
+		authMethod:           authMethod,
+		secrets:              secrets,
+		workspaceClients:     make(map[string]Client),
+		workspaceClientRevs:  make(map[string]int64),
+		environmentTokenHost: trustedEnvironmentHost,
+		glabTokenFn:          glabReadToken,
+		logger:               log,
 	}
 }
 
@@ -192,7 +311,7 @@ func (s *Service) GetStatus(ctx context.Context) (*Status, error) {
 		// failure (network, 5xx, parse error) the user needs to see as
 		// "GitLab unreachable" rather than "not connected", so they don't
 		// delete a valid token during a transient outage.
-		status.ConnectionError = authErr.Error()
+		status.ConnectionError = connectionUnavailable
 	}
 	if g, ok := client.(*GLabClient); ok {
 		status.GLabVersion = g.Version()
@@ -385,16 +504,19 @@ func (s *Service) findTokenSecret(ctx context.Context) (bool, string, error) {
 // projectPath is the GitLab namespace/path. iid is the MR's per-project id.
 func (s *Service) SyncTaskMR(ctx context.Context, taskID, repositoryID, projectPath string, iid int) (*TaskMR, error) {
 	s.mu.RLock()
-	client := s.client
 	store := s.store
-	host := s.host
 	s.mu.RUnlock()
 	if store == nil {
 		return nil, errors.New("gitlab store not configured")
 	}
+	client, err := s.clientForTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
 	if client == nil {
 		return nil, ErrNoClient
 	}
+	host := client.Host()
 	status, err := client.GetMRStatus(ctx, projectPath, iid)
 	if err != nil {
 		return nil, fmt.Errorf("fetch MR status: %w", err)

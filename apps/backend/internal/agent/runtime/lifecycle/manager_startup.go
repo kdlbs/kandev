@@ -352,6 +352,7 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 		m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlError, execution, err.Error())
 		return
 	}
+	execution.MarkAgentctlReady()
 
 	elapsed := time.Since(opStart)
 	if elapsed > 10*time.Second {

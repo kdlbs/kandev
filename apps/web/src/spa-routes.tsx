@@ -403,7 +403,14 @@ function ExternalDataRoute({
         />
       );
     case "gitlab":
-      return <GitLabPageClient workspaceId={workspaceId} />;
+      return (
+        <GitLabPageClient
+          workspaceId={workspaceId}
+          workflows={data.workflows}
+          steps={data.steps}
+          repositories={data.repositories}
+        />
+      );
     case "azure-devops":
       return (
         <AzureDevOpsPageClient

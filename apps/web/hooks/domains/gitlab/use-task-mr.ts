@@ -31,16 +31,21 @@ export function useWorkspaceMRs(workspaceId: string | null) {
     if (fetchedRef.current === workspaceId) return;
     const requestId = ++requestRef.current;
     fetchedRef.current = workspaceId;
+    resetTaskMRs(workspaceId);
     listWorkspaceTaskMRs(workspaceId, { cache: "no-store" })
       .then((response) => {
         if (requestRef.current !== requestId) return;
-        setTaskMRs(response?.task_mrs ?? {});
+        setTaskMRs(workspaceId, response?.task_mrs ?? {});
       })
       .catch(() => {
         if (requestRef.current === requestId) {
           fetchedRef.current = null; // allow retry on failure
         }
       });
+    return () => {
+      if (requestRef.current === requestId) requestRef.current += 1;
+      if (fetchedRef.current === workspaceId) fetchedRef.current = null;
+    };
   }, [workspaceId, setTaskMRs, resetTaskMRs]);
 }
 
@@ -50,10 +55,13 @@ export function useWorkspaceMRs(workspaceId: string | null) {
 const EMPTY_MRS: TaskMR[] = [];
 
 /** Return MRs linked to a task. Reads directly from the store. */
-export function useTaskMRs(taskId: string | null): TaskMR[] {
-  return useAppStore((state) =>
-    taskId ? (state.taskMRs.byTaskId[taskId] ?? EMPTY_MRS) : EMPTY_MRS,
-  );
+export function useTaskMRs(taskId: string | null, requestedWorkspaceId?: string | null): TaskMR[] {
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceId = requestedWorkspaceId === undefined ? activeWorkspaceId : requestedWorkspaceId;
+  return useAppStore((state) => {
+    if (!taskId || !workspaceId) return EMPTY_MRS;
+    return state.taskMRs.byWorkspaceId[workspaceId]?.[taskId] ?? EMPTY_MRS;
+  });
 }
 
 /**

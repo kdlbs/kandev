@@ -128,11 +128,11 @@ const sessionUpdatedAtPayloadKey = "updated_at"
 //
 // Non-blocking by design — sendSessionData runs in the WS read loop, so a
 // network probe here would delay every subscribe/focus ACK by its timeout.
-// Instead, treat the workspace stream's presence as the cached readiness
-// signal: streamManager only attaches it AFTER waitForAgentctlReady's Health
-// check succeeds. If the stream is wired we emit `agentctl_ready`; otherwise
-// `agentctl_starting`. The subsequent waitForAgentctlReady event (or its
-// error) will correct the status if the snapshot picked the wrong one.
+// Instead, replay the readiness cached by waitForAgentctlReady's successful
+// health check. Agent process and workspace stream state are deliberately not
+// used here: prepared sessions have a healthy agentctl before either exists.
+// The subsequent waitForAgentctlReady event (or its error) corrects the status
+// if the snapshot runs while startup is still in progress.
 //
 // Emits no message when the session has no live execution — the lazy
 // create-on-terminal-connect path publishes events normally in that case.
@@ -162,7 +162,7 @@ func appendAgentctlStatusMessage(
 		payload["worktree_path"] = execution.WorkspacePath
 	}
 	action := ws.ActionSessionAgentctlStarting
-	if execution.GetWorkspaceStream() != nil {
+	if execution.IsAgentctlReady() {
 		action = ws.ActionSessionAgentctlReady
 	}
 
@@ -542,11 +542,20 @@ func registerRoutes(p routeParams) {
 	if p.services.GitHub != nil {
 		p.services.GitHub.SetCascadeTaskDeleter(handoffSvc)
 	}
+	if p.services.GitLab != nil {
+		p.services.GitLab.SetCascadeTaskDeleter(handoffSvc)
+	}
 	// repoLookup validates a watcher's optional repository binding (workspace
 	// ownership + default-branch fill) on create/update. Shared across the three
 	// repo-less watchers; one concrete adapter satisfies each package's
 	// structurally-identical RepositoryLookup interface.
 	repoLookup := &repositoryLookupAdapter{svc: p.taskSvc}
+	if p.services.GitLab != nil {
+		p.services.GitLab.SetRepositoryLookup(repoLookup)
+		p.services.GitLab.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
+			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
+		})
+	}
 	if p.services.Jira != nil {
 		p.services.Jira.SetTaskDeleter(handoffSvc)
 		p.services.Jira.SetRepositoryLookup(repoLookup)
@@ -787,7 +796,7 @@ func resolveRepositoryIDForSubpath(ctx context.Context, taskRepo *sqliterepo.Rep
 		if err != nil || repo == nil {
 			continue
 		}
-		if repo.Name == subpath {
+		if repo.Name == subpath || worktree.SanitizeRepoDirName(repo.Name) == subpath {
 			return link.RepositoryID
 		}
 	}
@@ -1027,7 +1036,9 @@ func registerSecondaryRoutes(
 	if p.services.Automation != nil {
 		automationSvc = p.services.Automation.Service
 	}
-	registerE2EResetRoutes(p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.log)
+	registerE2EResetRoutes(
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.log,
+	)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService

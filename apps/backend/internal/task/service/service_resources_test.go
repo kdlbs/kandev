@@ -208,6 +208,44 @@ func TestService_CreateRepositoryAllowsPathlessProvider(t *testing.T) {
 	if created.LocalPath != "" {
 		t.Fatalf("LocalPath = %q, want empty", created.LocalPath)
 	}
+	if created.ProviderHost != "https://github.com" {
+		t.Fatalf("ProviderHost = %q, want GitHub default", created.ProviderHost)
+	}
+}
+
+func TestService_FindOrCreateRepositoryMatchesGitHubRepositoryWithoutExplicitHost(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	repoPath := filepath.Join(t.TempDir(), "github-repo")
+	makeRepo(t, repoPath)
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Name:          "owner/repo",
+		LocalPath:     repoPath,
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	resolved, wasCreated, err := svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Provider:      "github",
+		ProviderHost:  "https://github.com",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+	})
+	if err != nil {
+		t.Fatalf("FindOrCreateRepository: %v", err)
+	}
+	if wasCreated || resolved.ID != created.ID {
+		t.Fatalf("resolved repository = %q (created=%t), want existing %q", resolved.ID, wasCreated, created.ID)
+	}
 }
 
 func TestService_FindOrCreateRepositoryRejectsInvalidLocalPathBackfill(t *testing.T) {

@@ -72,6 +72,85 @@ func TestRepositoryCopyFiles_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestRepositoryProviderHost_RoundTrip(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-provider-host")
+	in := &models.Repository{
+		ID: "repo-gitlab", WorkspaceID: "ws-provider-host", Name: "group/subgroup/project",
+		SourceType: "provider", Provider: "gitlab", ProviderHost: "http://gitlab.internal:8080",
+		ProviderOwner: "group/subgroup", ProviderName: "project",
+	}
+	if err := repo.CreateRepository(ctx, in); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	got, err := repo.GetRepository(ctx, in.ID)
+	if err != nil {
+		t.Fatalf("get repository: %v", err)
+	}
+	if got.ProviderHost != in.ProviderHost {
+		t.Fatalf("provider_host = %q, want %q", got.ProviderHost, in.ProviderHost)
+	}
+	got.ProviderHost = "https://gitlab.internal"
+	if err := repo.UpdateRepository(ctx, got); err != nil {
+		t.Fatalf("update repository: %v", err)
+	}
+	updated, err := repo.GetRepository(ctx, in.ID)
+	if err != nil || updated.ProviderHost != "https://gitlab.internal" {
+		t.Fatalf("updated provider_host = %q, err = %v", updated.ProviderHost, err)
+	}
+}
+
+func TestGetRepositoryByProviderInfoSeparatesGitLabHosts(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-host-collision")
+	for _, item := range []*models.Repository{
+		{ID: "repo-public", WorkspaceID: "ws-host-collision", Name: "public", SourceType: "provider", Provider: "gitlab", ProviderHost: "https://gitlab.com", ProviderOwner: "group/subgroup", ProviderName: "project"},
+		{ID: "repo-private", WorkspaceID: "ws-host-collision", Name: "private", SourceType: "provider", Provider: "gitlab", ProviderHost: "https://gitlab.internal", ProviderOwner: "group/subgroup", ProviderName: "project"},
+	} {
+		if err := repo.CreateRepository(ctx, item); err != nil {
+			t.Fatalf("create repository %s: %v", item.ID, err)
+		}
+	}
+	got, err := repo.GetRepositoryByProviderInfo(
+		ctx, "ws-host-collision", "gitlab", "https://gitlab.internal", "group/subgroup", "project",
+	)
+	if err != nil || got == nil || got.ID != "repo-private" {
+		t.Fatalf("host-aware lookup = %+v, err = %v; want repo-private", got, err)
+	}
+}
+
+func TestRepositoryProviderHostMigrationBackfillsOnlyUnambiguousGitHubRows(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-provider-upgrade")
+	for _, item := range []*models.Repository{
+		{ID: "legacy-github", WorkspaceID: "ws-provider-upgrade", Name: "org/repo", SourceType: "provider", Provider: "github", ProviderOwner: "org", ProviderName: "repo"},
+		{ID: "legacy-gitlab", WorkspaceID: "ws-provider-upgrade", Name: "group/repo", SourceType: "provider", Provider: "gitlab", ProviderOwner: "group", ProviderName: "repo"},
+	} {
+		if err := repo.CreateRepository(ctx, item); err != nil {
+			t.Fatalf("create legacy repository %s: %v", item.ID, err)
+		}
+	}
+
+	if err := repo.initSchema(); err != nil {
+		t.Fatalf("first upgrade replay: %v", err)
+	}
+	if err := repo.initSchema(); err != nil {
+		t.Fatalf("second upgrade replay: %v", err)
+	}
+
+	githubRepo, err := repo.GetRepository(ctx, "legacy-github")
+	if err != nil || githubRepo.ProviderHost != "https://github.com" {
+		t.Fatalf("GitHub provider_host = %q, err = %v", githubRepo.ProviderHost, err)
+	}
+	gitlabRepo, err := repo.GetRepository(ctx, "legacy-gitlab")
+	if err != nil || gitlabRepo.ProviderHost != "" {
+		t.Fatalf("GitLab provider_host = %q, err = %v; want unknown", gitlabRepo.ProviderHost, err)
+	}
+}
+
 func TestGetRepositoryReturnsNotFoundError(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	_, err := repo.GetRepository(context.Background(), "missing")

@@ -21,6 +21,7 @@ import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-stor
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { startProcess } from "@/lib/api";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
@@ -71,6 +72,7 @@ function useLeftHeaderState(
     return state.taskSessions.items[activeSessionId]?.is_passthrough === true;
   });
   const { prs } = useTaskPR(taskId);
+  const mrs = useTaskMRs(taskId);
   const hasChanges = Boolean(
     containerApi.getPanel("changes") ?? containerApi.getPanel("diff-files"),
   );
@@ -82,6 +84,7 @@ function useLeftHeaderState(
     taskId,
     isPassthrough,
     prs,
+    mrs,
     hasChanges,
     hasFiles,
   };
