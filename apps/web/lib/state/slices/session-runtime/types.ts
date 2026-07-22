@@ -49,6 +49,8 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  /** Exact old-side ref for cumulative committed diffs. */
+  base_ref?: string;
   /**
    * Repository this file belongs to in multi-repo task workspaces. Stamped
    * by useSessionGit when aggregating per-repo statuses; empty for single-

@@ -102,7 +102,7 @@ function useAutoLoadExpansion(
   const hasValidData = !!(
     state.fileDiffMetadata?.deletionLines?.length && state.fileDiffMetadata?.additionLines?.length
   );
-  return enableExpansion && isExpansionContentLoaded && hasValidData;
+  return enableExpansion && isExpansionContentLoaded && state.canExpand && hasValidData;
 }
 
 function arePropsEqual(prevProps: DiffViewerProps, nextProps: DiffViewerProps): boolean {

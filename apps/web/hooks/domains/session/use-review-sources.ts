@@ -43,6 +43,7 @@ type CumulativeFile = {
   additions?: number;
   deletions?: number;
   repository_name?: string;
+  base_ref?: string;
   /**
    * Repo-relative path. Stamped by the backend's multi-repo cumulative-diff
    * merge (`mergeCumulativeFiles` in agentctl); single-repo payloads omit
@@ -80,6 +81,7 @@ function addCumulativeFiles(
   files: Record<string, CumulativeFile>,
   uncommittedPaths: Set<string>,
   useRepositoryKeys: boolean,
+  defaultBaseRef?: string,
 ) {
   for (const [mapKey, file] of Object.entries(files)) {
     // Multi-repo cumulative payloads use a NUL-composite `<repo>\x00<path>`
@@ -104,6 +106,7 @@ function addCumulativeFiles(
       old_path: file.old_path,
       diff_skip_reason: file.diff_skip_reason,
       repository_name: repositoryName,
+      base_ref: file.base_ref ?? defaultBaseRef,
     });
   }
 }
@@ -172,7 +175,10 @@ export type BuildReviewSourcesInput = {
   statusByRepo:
     | Array<{ repository_name: string; status: { files?: Record<string, UncommittedFile> } }>
     | undefined;
-  cumulativeDiff: { files?: Record<string, CumulativeFile> } | null;
+  cumulativeDiff: {
+    base_commit?: string;
+    files?: Record<string, CumulativeFile>;
+  } | null;
   prDiffFiles: PRDiffFile[] | undefined;
   /** Repository name for the primary PR — used to composite-key PR files so
    *  same-named files in different repos are not incorrectly deduped. */
@@ -257,7 +263,13 @@ export function buildReviewSources(input: BuildReviewSourcesInput): BuildReviewS
   }
 
   if (cumulativeDiff?.files) {
-    addCumulativeFiles(fileMap, cumulativeDiff.files, uncommittedPaths, useRepositoryKeys);
+    addCumulativeFiles(
+      fileMap,
+      cumulativeDiff.files,
+      uncommittedPaths,
+      useRepositoryKeys,
+      cumulativeDiff.base_commit,
+    );
   }
 
   if (prDiffFiles && prDiffFiles.length > 0)
@@ -347,7 +359,7 @@ export function useReviewSources(sessionId: string | null | undefined): UseRevie
       buildReviewSources({
         gitStatus: normalizedGitStatus,
         statusByRepo: normalizedStatusByRepo,
-        cumulativeDiff: cumulativeDiff as { files?: Record<string, CumulativeFile> } | null,
+        cumulativeDiff,
         prDiffFiles: prDiffFiles.length > 0 ? prDiffFiles : undefined,
         prRepoName,
         useRepositoryKeys,

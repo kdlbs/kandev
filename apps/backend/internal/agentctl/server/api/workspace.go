@@ -154,13 +154,13 @@ func (s *Server) handleFileContentAtRef(c *gin.Context) {
 		return
 	}
 
-	scopedPath, err := s.procMgr.JoinRepoPath(c.Query("repo"), path)
+	tracker, err := s.procMgr.GetWorkspaceTrackerFor(c.Query("repo"))
 	if err != nil {
 		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error()})
 		return
 	}
 
-	content, size, isBinary, err := s.procMgr.GetWorkspaceTracker().GetFileContentAtRef(c.Request.Context(), scopedPath, ref)
+	content, size, isBinary, err := tracker.GetFileContentAtRef(c.Request.Context(), path, ref)
 	if err != nil {
 		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
 		return

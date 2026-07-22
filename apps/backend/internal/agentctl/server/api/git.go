@@ -1012,7 +1012,7 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 		}
 		anyOK = true
 		merged.TotalCommits += result.TotalCommits
-		mergeCumulativeFiles(merged.Files, result.Files, sub)
+		mergeCumulativeFiles(merged.Files, result.Files, sub, result.BaseCommit)
 	}
 	if !anyOK {
 		merged.Success = false
@@ -1034,13 +1034,14 @@ func (s *Server) resolvePerRepoBase(c *gin.Context, repo string) string {
 
 // mergeCumulativeFiles copies per-repo files into the merged map under a
 // `<repo> <path>` key (NUL-separated) and decorates each file payload
-// with `repository_name` + a `path` field carrying the repo-relative path.
+// with `repository_name`, the repo-relative `path`, and the exact old-side
+// `base_ref` used to produce its cumulative diff.
 // The composite key keeps `README.md` in two repos from clashing in the map;
 // the frontend reads `path` and `repository_name` off the payload so the
 // file tree groups under the repo header without the prefix bleeding into
 // the displayed path. NUL is impossible in real paths, so the key is
 // always uniquely splittable and the displayed path is unaffected.
-func mergeCumulativeFiles(dst, src map[string]interface{}, repo string) {
+func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string) {
 	for path, payload := range src {
 		m, ok := payload.(map[string]interface{})
 		if !ok {
@@ -1050,16 +1051,19 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo string) {
 			dst[fmt.Sprintf("%s\x00%s", repo, path)] = payload
 			continue
 		}
-		// Shallow-copy the per-file map before stamping repository_name +
-		// path so the caller's source map isn't mutated. Earlier code wrote
-		// directly to `m`, which permanently rewrote the per-repo result
+		// Shallow-copy the per-file map before stamping repository_name,
+		// path, and base_ref so the caller's source map isn't mutated. Earlier
+		// code wrote directly to `m`, which permanently rewrote the per-repo result
 		// before it could be reused (e.g. emitted to a second consumer).
-		copied := make(map[string]interface{}, len(m)+2)
+		copied := make(map[string]interface{}, len(m)+3)
 		for k, v := range m {
 			copied[k] = v
 		}
 		copied["repository_name"] = repo
 		copied["path"] = path
+		if baseRef != "" {
+			copied["base_ref"] = baseRef
+		}
 		dst[fmt.Sprintf("%s\x00%s", repo, path)] = copied
 	}
 }

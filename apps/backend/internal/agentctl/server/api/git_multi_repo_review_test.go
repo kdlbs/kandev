@@ -17,6 +17,7 @@ import (
 func TestMultiRepoReviewEndpointsUseStoredBaseBranches(t *testing.T) {
 	taskRoot := t.TempDir()
 	bases := map[string]string{"frontend": "develop", "backend": "release"}
+	baseCommits := make(map[string]string, len(bases))
 	baseCommit := ""
 	for repo, baseBranch := range bases {
 		repoDir := filepath.Join(taskRoot, repo)
@@ -29,8 +30,10 @@ func TestMultiRepoReviewEndpointsUseStoredBaseBranches(t *testing.T) {
 		writeFileAPI(t, repoDir, "README.md", "base\n")
 		runGitAPI(t, repoDir, "add", ".")
 		runGitAPI(t, repoDir, "commit", "-m", "initial")
+		repoBaseCommit := strings.TrimSpace(runGitAPI(t, repoDir, "rev-parse", "HEAD"))
+		baseCommits[repo] = repoBaseCommit
 		if baseCommit == "" {
-			baseCommit = strings.TrimSpace(runGitAPI(t, repoDir, "rev-parse", "HEAD"))
+			baseCommit = repoBaseCommit
 		}
 		runGitAPI(t, repoDir, "checkout", "-b", "feature/review")
 		writeFileAPI(t, repoDir, "changed.txt", repo+" change\n")
@@ -81,8 +84,44 @@ func TestMultiRepoReviewEndpointsUseStoredBaseBranches(t *testing.T) {
 		t.Fatalf("cumulative diff files = %d, want %d: %s", len(diff.Files), len(bases), diffResponse.Body.String())
 	}
 	for repo := range bases {
-		if _, ok := diff.Files[repo+"\x00changed.txt"]; !ok {
+		payload, ok := diff.Files[repo+"\x00changed.txt"]
+		if !ok {
 			t.Errorf("cumulative diff missing %s/changed.txt: %s", repo, diffResponse.Body.String())
+			continue
+		}
+		file, ok := payload.(map[string]interface{})
+		if !ok {
+			t.Fatalf("cumulative diff payload for %s has type %T", repo, payload)
+		}
+		if got := file["base_ref"]; got != baseCommits[repo] {
+			t.Errorf("cumulative diff base_ref for %s = %v, want %s", repo, got, baseCommits[repo])
+		}
+	}
+
+	for repo, baseBranch := range bases {
+		contentResponse := httptest.NewRecorder()
+		path := "/api/v1/workspace/file/content-at-ref?repo=" + repo +
+			"&path=README.md&ref=" + baseBranch
+		srv.Router().ServeHTTP(
+			contentResponse,
+			httptest.NewRequest(http.MethodGet, path, nil),
+		)
+		if contentResponse.Code != http.StatusOK {
+			t.Fatalf(
+				"file content at ref for %s status = %d: %s",
+				repo,
+				contentResponse.Code,
+				contentResponse.Body.String(),
+			)
+		}
+		var content struct {
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(contentResponse.Body.Bytes(), &content); err != nil {
+			t.Fatalf("decode file content at ref for %s: %v", repo, err)
+		}
+		if content.Content != "base\n" {
+			t.Errorf("file content at ref for %s = %q, want %q", repo, content.Content, "base\n")
 		}
 	}
 }

@@ -389,8 +389,9 @@ function useScrollIntoViewOnSelect(
  * (controls-less) render:
  *
  *  - uncommitted rows: diff is working-tree-vs-HEAD, so baseRef="HEAD".
- *  - committed rows: diff is base-branch-vs-HEAD, so baseRef is the repo's
- *    base branch. HEAD already contains the commits, so expanding against it
+ *  - committed rows: diff is base-vs-HEAD, so baseRef is the exact old-side
+ *    commit carried by the file. Legacy payloads fall back to the repo's base
+ *    branch. HEAD already contains the commits, so expanding against it
  *    pairs identical old/new content and yields no controls (the bug behind
  *    "expansion stopped working in the review screen"). With no known base
  *    branch we can't fetch the pre-change content, so expansion is disabled
@@ -405,7 +406,7 @@ function useScrollIntoViewOnSelect(
  * the renderer, so enabling expansion here is always safe.
  */
 export function resolveDiffExpansion(
-  file: Pick<ReviewFile, "source" | "status" | "repository_name">,
+  file: Pick<ReviewFile, "source" | "status" | "repository_name" | "base_ref">,
   baseBranchByRepo: Record<string, string>,
   fallbackBaseBranch?: string,
 ): { enableExpansion: boolean; baseRef: string } {
@@ -413,6 +414,7 @@ export function resolveDiffExpansion(
     return { enableExpansion: false, baseRef: "HEAD" };
   }
   if (file.source === "committed") {
+    if (file.base_ref) return { enableExpansion: true, baseRef: file.base_ref };
     const repoName = file.repository_name ?? "";
     // Exact per-repo base wins. Fall back to the task's sole base branch ONLY
     // for single-repo files (no repository_name) — a multi-repo file whose repo
