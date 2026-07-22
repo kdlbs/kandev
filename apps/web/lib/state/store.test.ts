@@ -28,4 +28,23 @@ describe("createAppStore", () => {
     expect(store.getState().sidebarViews.activeViewId).toBe("server");
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["task-1"]);
   });
+
+  it("starts with no task-scoped Review PR overrides", () => {
+    const store = createAppStore();
+
+    expect(store.getState().reviewPRSelection).toEqual({ selectedKeyByTaskId: {} });
+  });
+
+  it("stores Review PR overrides independently by task", () => {
+    const store = createAppStore();
+    const state = store.getState();
+
+    state.setReviewPRSelection("task-1", "acme/widget/1");
+    state.setReviewPRSelection("task-2", "acme/widget/2");
+
+    expect(store.getState().reviewPRSelection.selectedKeyByTaskId).toEqual({
+      "task-1": "acme/widget/1",
+      "task-2": "acme/widget/2",
+    });
+  });
 });

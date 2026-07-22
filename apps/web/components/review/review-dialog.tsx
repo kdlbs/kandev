@@ -1,24 +1,26 @@
 "use client";
 
-import { memo, useMemo, useCallback, createRef, useState, useRef, useEffect } from "react";
-import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
+import { memo, useMemo, useCallback, createRef, useState, useEffect } from "react";
 import type { DiffComment } from "@/lib/diff/types";
 import type { FileInfo, CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
-import type { PRDiffFile } from "@/lib/types/github";
+import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import type { Comment } from "@/lib/state/slices/comments";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { walkthroughStepMatchesFile } from "@/lib/diff/walkthrough-match";
-import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
 import { normalizeFileChangeStatus } from "@/lib/utils/file-change-status";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
-import { ReviewTopBar } from "./review-top-bar";
-import { ReviewFileTree } from "./review-file-tree";
-import { ReviewDiffList } from "./review-diff-list";
+import { ReviewDialogSurface } from "./review-dialog-surface";
+import {
+  reviewDialogSourceKey,
+  usePRKeyedReviewFileSelection,
+  useReviewDialogAutoClose,
+  useReviewDialogTransientState,
+} from "./review-dialog-pr-state";
 import type { ReviewFile } from "./types";
 import {
   hashDiff,
@@ -155,7 +157,7 @@ export function filterPendingDiffCommentsForSession(
   );
 }
 
-type ReviewDialogProps = {
+export type ReviewDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessionId: string;
@@ -164,7 +166,14 @@ type ReviewDialogProps = {
   onOpenFile?: (filePath: string) => void;
   gitStatusFiles: Record<string, FileInfo> | null;
   cumulativeDiff: CumulativeDiff | null;
+  prs?: TaskPR[];
+  selectedPR?: TaskPR | null;
+  selectedPRKey?: string | null;
+  onSelectPR?: (pr: TaskPR) => void;
   prDiffFiles?: PRDiffFile[];
+  prDiffLoading?: boolean;
+  prDiffError?: string | null;
+  onRetryPRDiff?: () => void;
   prRepoName?: string;
   useRepositoryKeys?: boolean;
 };
@@ -336,11 +345,15 @@ function useReviewDialogState(props: ReviewDialogProps) {
     onSendComments,
     gitStatusFiles,
     cumulativeDiff,
+    selectedPRKey = null,
     prDiffFiles,
+    prDiffLoading = false,
     prRepoName,
     useRepositoryKeys = true,
   } = props;
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const reviewSourceKey = reviewDialogSourceKey(sessionId, selectedPRKey);
+  const { selectedFile, filter, setSelectedFile, setFilter } =
+    useReviewDialogTransientState(reviewSourceKey);
   const [splitView, setSplitView] = useState(() =>
     typeof window === "undefined" ? false : localStorage.getItem("diff-view-mode") === "split",
   );
@@ -355,7 +368,6 @@ function useReviewDialogState(props: ReviewDialogProps) {
   }, [getStorePendingComments, sessionId]);
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
 
-  const [filter, setFilter] = useState("");
   const allFiles = useMemo<ReviewFile[]>(
     () => buildAllFiles(gitStatusFiles, cumulativeDiff, prDiffFiles, prRepoName, useRepositoryKeys),
     [gitStatusFiles, cumulativeDiff, prDiffFiles, prRepoName, useRepositoryKeys],
@@ -382,13 +394,7 @@ function useReviewDialogState(props: ReviewDialogProps) {
     for (const file of allFiles) refs.set(reviewFileKey(file), createRef<HTMLDivElement>());
     return refs;
   }, [allFiles]);
-  const prevCountRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const prevCount = prevCountRef.current;
-    if (open && prevCount !== null && prevCount > 0 && allFiles.length === 0) onOpenChange(false);
-    prevCountRef.current = allFiles.length;
-  }, [open, allFiles.length, onOpenChange]);
+  useReviewDialogAutoClose({ open, fileCount: allFiles.length, prDiffLoading, onOpenChange });
 
   const handlers = useReviewDialogHandlers({
     allFiles,
@@ -405,12 +411,13 @@ function useReviewDialogState(props: ReviewDialogProps) {
     },
     [handlers.handleToggleSplitView],
   );
-  const handleSelectFile = useCallback(
-    (path: string) => handlers.handleSelectFile(path, setSelectedFile),
-    [handlers.handleSelectFile],
+  const handleSelectFile = usePRKeyedReviewFileSelection(
+    handlers.handleSelectFile,
+    setSelectedFile,
   );
 
   return {
+    reviewSourceKey,
     selectedFile,
     splitView,
     wordWrap,
@@ -434,6 +441,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
     handleDiscard: handlers.handleDiscard,
   };
 }
+
+export type ReviewDialogViewState = ReturnType<typeof useReviewDialogState>;
 
 /**
  * Drives review file-selection from the active walkthrough step: when the tour
@@ -480,95 +489,41 @@ function useReviewDialogWalkthroughRequest({
 }
 
 export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps) {
-  const { open, onOpenChange, sessionId, baseBranch, onOpenFile } = props;
+  const {
+    open,
+    onOpenChange,
+    sessionId,
+    baseBranch,
+    onOpenFile,
+    prs = [],
+    selectedPR = null,
+    onSelectPR,
+    prDiffLoading = false,
+    prDiffError = null,
+    onRetryPRDiff,
+  } = props;
   const s = useReviewDialogState(props);
   const handleRequestWalkthrough = useReviewDialogWalkthroughRequest({
     sessionId,
     allFiles: s.allFiles,
   });
-  const splitRowRef = useRef<HTMLDivElement>(null);
-  const sidebar = useReviewSidebarResize(splitRowRef, open);
   useWalkthroughFileSelection(open, s.allFiles, s.filter, s.setFilter, s.handleSelectFile);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="!max-w-[100vw] !w-[100vw] sm:!max-w-[80vw] sm:!w-[80vw] max-h-[85vh] h-[85vh] p-0 gap-0 flex flex-col shadow-2xl"
-        showCloseButton={false}
-        // Use a fixed black tint (not a theme token) so the backdrop reads
-        // as "a little dark" in both light and dark mode — `foreground/N`
-        // would invert to a light overlay in dark mode.
-        overlayClassName="bg-black/40"
-      >
-        <DialogTitle className="sr-only">Review Changes</DialogTitle>
-        <ReviewTopBar
-          sessionId={sessionId}
-          reviewedCount={s.reviewedFiles.size}
-          totalCount={s.allFiles.length}
-          commentCount={s.totalCommentCount}
-          baseBranch={baseBranch}
-          splitView={s.splitView}
-          onToggleSplitView={s.handleToggleSplitView}
-          wordWrap={s.wordWrap}
-          onToggleWordWrap={s.setWordWrap}
-          onSendComments={s.handleSendComments}
-          onClose={() => onOpenChange(false)}
-          onRequestWalkthrough={handleRequestWalkthrough}
-          requestWalkthroughDisabled={s.allFiles.length === 0}
-          getPendingComments={s.getPendingComments}
-          markCommentsSent={s.markCommentsSent}
-        />
-        <div ref={splitRowRef} className="flex flex-1 min-h-0">
-          <div
-            data-testid="review-dialog-sidebar"
-            className="border-r border-border flex-shrink-0 overflow-hidden hidden sm:flex flex-col"
-            style={{ width: `${sidebar.width}px` }}
-          >
-            <ReviewFileTree
-              files={s.filteredFiles}
-              reviewedFiles={s.reviewedFiles}
-              staleFiles={s.staleFiles}
-              commentCountByFile={s.commentCountByFile}
-              selectedFile={s.selectedFile}
-              filter={s.filter}
-              onFilterChange={s.setFilter}
-              onSelectFile={s.handleSelectFile}
-              onToggleReviewed={s.handleToggleReviewed}
-            />
-          </div>
-          <button
-            data-testid="review-dialog-sidebar-resize"
-            type="button"
-            tabIndex={-1}
-            aria-label="Resize file list"
-            className="hidden sm:block w-1 bg-border hover:bg-primary cursor-col-resize flex-shrink-0 relative group transition-colors p-0"
-            {...sidebar.resizeHandleProps}
-          >
-            <span className="absolute inset-y-0 -left-1 -right-1" />
-          </button>
-          <div className="flex-1 min-w-0 overflow-hidden">
-            {s.filteredFiles.length > 0 ? (
-              <ReviewDiffList
-                files={s.filteredFiles}
-                selectedFile={s.selectedFile}
-                reviewedFiles={s.reviewedFiles}
-                staleFiles={s.staleFiles}
-                sessionId={sessionId}
-                autoMarkOnScroll={s.autoMarkOnScroll}
-                wordWrap={s.wordWrap}
-                onToggleReviewed={s.handleToggleReviewed}
-                onDiscard={s.handleDiscard}
-                onOpenFile={onOpenFile}
-                fileRefs={s.fileRefs}
-              />
-            ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                {s.filter.trim() ? "No files match the filter" : "No changes to review"}
-              </div>
-            )}
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <ReviewDialogSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      sessionId={sessionId}
+      baseBranch={baseBranch}
+      onOpenFile={onOpenFile}
+      prs={prs}
+      selectedPR={selectedPR}
+      onSelectPR={onSelectPR}
+      prDiffLoading={prDiffLoading}
+      prDiffError={prDiffError}
+      onRetryPRDiff={onRetryPRDiff}
+      onRequestWalkthrough={handleRequestWalkthrough}
+      state={s}
+    />
   );
 });

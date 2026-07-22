@@ -8,9 +8,7 @@ import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
 import { TaskChatPanel } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
 import { MobileChangesPanel } from "./mobile-changes-panel";
-import { ReviewDialog } from "@/components/review/review-dialog";
-import { WalkthroughOverlay } from "@/components/review/walkthrough-overlay";
-import { useReviewDialog } from "../use-review-dialog";
+import { TaskReviewDialogMount } from "../dockview-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughToolbar } from "../passthrough-toolbar";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
@@ -234,42 +232,6 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
   );
 }
 
-function MobileReviewDialogMount({
-  sessionId,
-  review,
-  activeTaskId,
-  onSelectWalkthroughFile,
-}: {
-  sessionId: string | null;
-  review: ReturnType<typeof useReviewDialog>;
-  activeTaskId: string | null;
-  onSelectWalkthroughFile: (path: string, repo?: string) => void;
-}) {
-  if (!sessionId) return null;
-  return (
-    <>
-      <ReviewDialog
-        open={review.reviewDialogOpen}
-        onOpenChange={review.setReviewDialogOpen}
-        sessionId={sessionId}
-        baseBranch={review.baseBranch}
-        onSendComments={review.handleReviewSendComments}
-        onOpenFile={review.reviewOpenFile}
-        gitStatusFiles={review.reviewGitStatusFiles}
-        cumulativeDiff={review.reviewCumulativeDiff}
-        prDiffFiles={review.reviewPRDiffFiles}
-        prRepoName={review.reviewPRRepoName}
-        useRepositoryKeys={review.reviewUseRepositoryKeys}
-      />
-      <WalkthroughOverlay
-        taskId={activeTaskId}
-        sessionId={sessionId}
-        onSelectFile={onSelectWalkthroughFile}
-      />
-    </>
-  );
-}
-
 export function useMobilePanelHandlers({
   effectiveSessionId,
   handlePanelChange,
@@ -398,8 +360,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
   const { selectedFile, handleOpenFileFromChat, handleOpenFile, handlePanelChangeAndClearSheet } =
     useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
 
-  const review = useReviewDialog(effectiveSessionId);
-
   return (
     <div className="h-dvh relative bg-background">
       <MobileTopBarSticky
@@ -460,10 +420,9 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         presentation="drawer"
       />
 
-      <MobileReviewDialogMount
+      <TaskReviewDialogMount
         sessionId={effectiveSessionId}
-        review={review}
-        activeTaskId={activeTaskId}
+        taskId={activeTaskId}
         onSelectWalkthroughFile={handleOpenFileFromChat}
       />
     </div>

@@ -290,11 +290,12 @@ function buildFileDiffAction(get: StoreGet) {
       groupId?: string;
       source?: string;
       repositoryName?: string;
+      prKey?: string;
     },
   ) => {
     const { api, centerGroupId } = get();
     if (!api) return;
-    const itemId = buildRepoScopedItemId(path, opts?.repositoryName);
+    const itemId = buildRepoScopedItemId(path, opts?.prKey ?? opts?.repositoryName);
     openOrReplacePreview({
       api,
       type: "file-diff",
@@ -306,6 +307,7 @@ function buildFileDiffAction(get: StoreGet) {
         content: opts?.content,
         source: opts?.source,
         repositoryName: opts?.repositoryName,
+        prKey: opts?.prKey,
       },
       groupId: opts?.groupId ?? centerGroupId,
       quiet: opts?.quiet,

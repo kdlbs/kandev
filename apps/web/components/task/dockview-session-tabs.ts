@@ -16,7 +16,7 @@ import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { TaskSession } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
-import { prTaskKey } from "@/components/github/pr-detail-panel";
+import { prTaskKey } from "@/components/github/pr-utils";
 
 const debug = createDebugLogger("dockview:session-tabs");
 

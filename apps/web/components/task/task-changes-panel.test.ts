@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { renderHook } from "@testing-library/react";
+import { scrollToFileAndClear } from "./task-changes-panel";
 import {
-  shouldCloseFileDiffPanel,
   filterVisibleFiles,
-  scrollToFileAndClear,
-} from "./task-changes-panel";
+  shouldDeferReviewStateForPR,
+  shouldCloseFileDiffPanel,
+  useAutoCloseWhenEmpty,
+} from "./task-changes-panel-state";
 import type { ReviewFile } from "@/components/review/types";
 
 const PATH = "src/foo.ts";
@@ -160,6 +163,54 @@ describe("filterVisibleFiles", () => {
     expect(result).toHaveLength(1);
     expect(result[0].repository_name).toBe("frontend");
     expect(result[0].source).toBe("pr");
+  });
+
+  it("exact PR identity wins when the timeline group label is not the repository name", () => {
+    const rawPRFiles = [{ ...file("README.md", "pr"), repository_name: "widgets" }];
+    const result = filterVisibleFiles(
+      [],
+      fileOpts("README.md", "pr", "widgets · feat/second", {
+        rawPRFiles,
+        prKey: "acme/widgets/42",
+      }),
+    );
+
+    expect(result).toEqual(rawPRFiles);
+  });
+});
+
+describe("shouldDeferReviewStateForPR", () => {
+  it("defers review marks while the visible source is waiting for PR files", () => {
+    expect(shouldDeferReviewStateForPR(true, true, "all")).toBe(true);
+    expect(shouldDeferReviewStateForPR(true, true, "pr")).toBe(true);
+  });
+
+  it("keeps local review marks stable during an unrelated PR fetch", () => {
+    expect(shouldDeferReviewStateForPR(true, true, "uncommitted")).toBe(false);
+    expect(shouldDeferReviewStateForPR(true, true, "committed")).toBe(false);
+  });
+});
+
+describe("useAutoCloseWhenEmpty", () => {
+  it("keeps a PR-backed panel open across a loading-to-empty transition", () => {
+    const onBecameEmpty = vi.fn();
+    const initialProps = {
+      mode: "all" as const,
+      filePath: undefined,
+      sourceFilter: "all" as const,
+      gitStatus: undefined,
+      visibleCount: 1,
+      prDiffLoading: false,
+      onBecameEmpty,
+    };
+    const { rerender } = renderHook((props) => useAutoCloseWhenEmpty(props), {
+      initialProps,
+    });
+
+    rerender({ ...initialProps, visibleCount: 0, prDiffLoading: true });
+    rerender({ ...initialProps, visibleCount: 0, prDiffLoading: false });
+
+    expect(onBecameEmpty).not.toHaveBeenCalled();
   });
 });
 

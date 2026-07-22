@@ -142,6 +142,7 @@ type DockviewStore = {
       groupId?: string;
       source?: string;
       repositoryName?: string;
+      prKey?: string;
     },
   ) => void;
   addCommitDetailPanel: (

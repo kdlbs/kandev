@@ -111,6 +111,8 @@ From this panel you can stage or unstage files, discard working-tree changes, co
 
 Select **Review** in the Changes header. Kandev builds a repository-aware file list by merging available uncommitted, cumulative committed, and linked-PR files. When a path occurs in more than one source, the uncommitted version wins deduplication.
 
+When a task has multiple linked pull requests, use the PR selector in the Changes diff header or Review toolbar to inspect one PR revision at a time. The selection is scoped to that task for the current app session. Switching PRs replaces only the remote PR contribution; uncommitted and committed sources keep their normal precedence. Selecting a file from a specific PR row opens that exact PR revision, even when a sibling PR changes the same path.
+
 <DocsVideo
   webm="./media/feature-guides/diff-line-feedback.webm"
   mp4="./media/feature-guides/diff-line-feedback.mp4"

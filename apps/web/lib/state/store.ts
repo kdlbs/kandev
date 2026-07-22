@@ -238,6 +238,7 @@ export type AppState = {
   mobileKanban: (typeof defaultUIState)["mobileKanban"];
   mobileSession: (typeof defaultUIState)["mobileSession"];
   chatInput: (typeof defaultUIState)["chatInput"];
+  reviewPRSelection: (typeof defaultUIState)["reviewPRSelection"];
   documentPanel: (typeof defaultUIState)["documentPanel"];
   systemHealth: (typeof defaultUIState)["systemHealth"];
   quickChat: (typeof defaultUIState)["quickChat"];
@@ -380,6 +381,7 @@ export type AppState = {
   setMobileSessionPanel: (sessionId: string, panel: UISliceTypes.MobileSessionPanel) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setReviewPRSelection: UIA["setReviewPRSelection"];
   setActiveDocument: (sessionId: string, doc: UISliceTypes.ActiveDocument | null) => void;
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;

@@ -94,6 +94,7 @@ function DiffViewerContent({
   const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
   const selectedRepositoryName =
     panelKind === "file" ? (params?.repositoryName as string | undefined) : undefined;
+  const selectedPRKey = panelKind === "file" ? (params?.prKey as string | undefined) : undefined;
   const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
   const handleClosePanel = useCallback(() => {
@@ -107,6 +108,7 @@ function DiffViewerContent({
       mode={panelKind as "all" | "file"}
       filePath={selectedPath}
       fileRepositoryName={selectedRepositoryName}
+      prKey={selectedPRKey}
       sourceFilter={sourceFilter}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
@@ -138,7 +140,11 @@ function ChangesContent({ panelId }: { panelId: string }) {
   );
   const handleOpenDiffFile = useCallback(
     (path: string, options?: OpenDiffOptions) =>
-      addFileDiffPanel(path, { source: options?.source, repositoryName: options?.repositoryName }),
+      addFileDiffPanel(path, {
+        source: options?.source,
+        repositoryName: options?.repositoryName,
+        prKey: options?.prKey,
+      }),
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(

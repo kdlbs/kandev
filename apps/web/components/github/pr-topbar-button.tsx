@@ -33,8 +33,7 @@ import {
   isPRReadyToMerge,
   isPRWaitingOnBranchProtection,
 } from "@/components/github/pr-task-icon";
-import { prTaskKey } from "@/components/github/pr-detail-panel";
-import { prIdentitySlug } from "@/components/github/pr-utils";
+import { prIdentitySlug, prTaskKey } from "@/components/github/pr-utils";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";

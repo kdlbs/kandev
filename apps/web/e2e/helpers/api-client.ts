@@ -1097,6 +1097,14 @@ export class ApiClient {
     await this.request("POST", "/api/v1/github/mock/task-prs", data);
   }
 
+  async associateGitHubTaskPR(data: {
+    task_id: string;
+    repository_id: string;
+    pr_url: string;
+  }): Promise<void> {
+    await this.request("POST", "/api/v1/github/task-prs", data);
+  }
+
   async getTaskCIAutomationOptions(taskId: string): Promise<TaskCIAutomationOptions> {
     return this.request("GET", `/api/v1/github/tasks/${encodeURIComponent(taskId)}/ci-options`);
   }
