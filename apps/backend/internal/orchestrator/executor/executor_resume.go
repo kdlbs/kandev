@@ -29,6 +29,14 @@ func isLocalGitRepo(path string) bool {
 	return info.IsDir() || info.Mode().IsRegular()
 }
 
+// sourceTypeLocal is the Repository.SourceType value for on-machine repos.
+// Mirrors the constant of the same name in internal/task/service (unexported
+// there too) — a repo can carry a ProviderOwner/ProviderName (the origin it
+// was imported from) while still being SourceType "local", and such a repo's
+// on-disk checkout is the user's, not a managed clone we're allowed to
+// silently replace.
+const sourceTypeLocal = "local"
+
 // isAgentAlreadyRunningError checks whether LaunchAgent refused because the
 // lifecycle manager's in-memory store already has an execution for this session.
 // The error is ambiguous on its own — it fires both when the execution is live
@@ -125,17 +133,8 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 		return nil, err
 	}
 
-	// Clone provider-backed repos that have no local path yet, or whose stored
-	// local path has gone stale (moved, deleted, or never actually a git repo
-	// — e.g. a leftover placeholder directory). Only overwrite repo.LocalPath
-	// when the clone actually returns a path; never blank an already-set one.
-	if repo.ProviderOwner != "" && repo.ProviderName != "" &&
-		(repo.LocalPath == "" || !isLocalGitRepo(repo.LocalPath)) {
-		if localPath, cloneErr := e.ensureRepoCloned(ctx, repo); cloneErr != nil {
-			return nil, cloneErr
-		} else if localPath != "" {
-			repo.LocalPath = localPath
-		}
+	if err := e.ensureRepoLocalPath(ctx, repo); err != nil {
+		return nil, err
 	}
 
 	// Backfill default_branch from the local clone when missing. This fires for
@@ -156,6 +155,33 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 		info.BaseBranch = repo.DefaultBranch
 	}
 	return info, nil
+}
+
+// ensureRepoLocalPath re-clones a repo's local checkout in place when it's
+// missing or has gone stale (moved, deleted, or never actually a git repo —
+// e.g. a leftover placeholder directory), but ONLY for genuinely
+// provider-backed repositories: SourceType must not be "local" and both
+// ProviderOwner/ProviderName must be set. A repo can carry those provider
+// fields (the origin it was imported from) while still being a local
+// checkout the user manages themselves; re-cloning over such a repo would
+// silently redirect future launches away from the user's saved path. Mutates
+// repo.LocalPath only when the clone actually returns a path — never blanks
+// an already-set one.
+func (e *Executor) ensureRepoLocalPath(ctx context.Context, repo *models.Repository) error {
+	if repo.SourceType == sourceTypeLocal || repo.ProviderOwner == "" || repo.ProviderName == "" {
+		return nil
+	}
+	if repo.LocalPath != "" && isLocalGitRepo(repo.LocalPath) {
+		return nil
+	}
+	localPath, cloneErr := e.ensureRepoCloned(ctx, repo)
+	if cloneErr != nil {
+		return cloneErr
+	}
+	if localPath != "" {
+		repo.LocalPath = localPath
+	}
+	return nil
 }
 
 // ensureRepoCloned clones a provider-backed repository to local disk and updates its local path in the database.
@@ -719,6 +745,14 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 			zap.String("task_id", task.ID),
 			zap.String("repository_id", repositoryID),
 			zap.Error(err))
+		return "", err
+	}
+
+	// Self-heal a stale/missing provider-backed local path before using it,
+	// mirroring the guard in resolveTaskRepoInfo — otherwise a single-repo
+	// resume with a stale path skips re-cloning and fails downstream in the
+	// worktree preparer.
+	if err := e.ensureRepoLocalPath(ctx, repository); err != nil {
 		return "", err
 	}
 

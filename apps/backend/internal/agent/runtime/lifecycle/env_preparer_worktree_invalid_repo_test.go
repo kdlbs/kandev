@@ -53,3 +53,44 @@ func TestWorktreePreparer_ValidateRepository_FailsOnNonGitPath(t *testing.T) {
 		t.Errorf("ErrorMessage = %q, want it to name the offending path %q", res.ErrorMessage, notAGitRepo)
 	}
 }
+
+// TestWorktreePreparer_MultiRepo_ValidateRepository_FailsOnNonGitPath is the
+// regression guard for the Greptile review finding that the multi-repo path
+// (prepareMultiRepo -> prepareOneRepo) didn't run the same non-git-path
+// validation as the single-repo Prepare. Previously a stale secondary repo
+// (RepositoryPath set but no ".git" inside) passed prepareOneRepo's
+// validation and failed later, deep inside worktree.Manager.Create, with the
+// less actionable ErrRepoNotGit. It should now fail fast during "Validate
+// <repo> repository" with the same clear message the single-repo path uses.
+func TestWorktreePreparer_MultiRepo_ValidateRepository_FailsOnNonGitPath(t *testing.T) {
+	repoA := initBareGitRepo(t, "primary")
+	staleSecondary := t.TempDir() // exists on disk, but has no .git inside
+
+	preparer, _ := newPreparerForTest(t)
+
+	req := &EnvPrepareRequest{
+		TaskID:       "task-multi-bad-secondary",
+		SessionID:    "sess-multi-bad-secondary",
+		TaskTitle:    "Multi Repo Stale Secondary",
+		ExecutorType: executor.NameStandalone,
+		TaskDirName:  "multi-bad-secondary_eee",
+		Repositories: []RepoPrepareSpec{
+			{RepositoryID: "repo-primary", RepositoryPath: repoA, RepoName: "primary", BaseBranch: "main"},
+			{RepositoryID: "repo-secondary", RepositoryPath: staleSecondary, RepoName: "secondary", BaseBranch: "main"},
+		},
+	}
+
+	res, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("prepare returned hard error: %v", err)
+	}
+	if res.Success {
+		t.Fatal("expected prepare to fail when the secondary repo path has no .git directory")
+	}
+	if !strings.Contains(res.ErrorMessage, "not a git repository") {
+		t.Errorf("ErrorMessage = %q, want it to mention the path is not a git repository", res.ErrorMessage)
+	}
+	if !strings.Contains(res.ErrorMessage, staleSecondary) {
+		t.Errorf("ErrorMessage = %q, want it to name the offending path %q", res.ErrorMessage, staleSecondary)
+	}
+}

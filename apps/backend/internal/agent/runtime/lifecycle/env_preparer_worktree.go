@@ -459,6 +459,13 @@ func (p *WorktreePreparer) prepareOneRepo(
 		reportProgress(onProgress, validateStep, stepIdx, totalSteps)
 		return nil, steps, stepIdx + 1, fmt.Errorf("repo %q: no repository path", repoLabel)
 	}
+	if !isGitRepoPath(spec.RepositoryPath) {
+		errMsg := fmt.Sprintf("repository path is not a git repository: %s", spec.RepositoryPath)
+		completeStepError(&validateStep, errMsg)
+		steps = append(steps, validateStep)
+		reportProgress(onProgress, validateStep, stepIdx, totalSteps)
+		return nil, steps, stepIdx + 1, fmt.Errorf("repo %q: %s", repoLabel, errMsg)
+	}
 	completeStepSuccess(&validateStep)
 	steps = append(steps, validateStep)
 	reportProgress(onProgress, validateStep, stepIdx, totalSteps)
