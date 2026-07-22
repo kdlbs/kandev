@@ -321,6 +321,7 @@ These startup-only variables are supported by specific runtime components but ar
 |---|---:|---|
 | `KANDEV_GH_MAX_CONCURRENT` | `8` | Positive integer process-wide cap for `gh` subprocesses; invalid/non-positive uses default. |
 | `KANDEV_GIT_MAX_CONCURRENT` | `12` | Positive integer process-wide cap for `git` subprocesses; invalid/non-positive uses default. |
+| `KANDEV_LSP_MAX_CONNECTIONS` | `8` | Positive integer process-wide cap for active browser-to-task-host language-server streams; invalid/non-positive uses default. |
 | `KANDEV_QUEUE_MAX_PER_SESSION` | `10` | Queued user messages per session. Invalid uses default; zero/negative disables the cap. |
 | `KANDEV_ACP_IDLE_TIMEOUT` | `1h` | Go duration after which idle agentctl instances are reaped; `0` disables. Invalid uses default. |
 | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | `1m` | Go duration between idle scans. Intended mainly for testing; use the default in production. |

@@ -66,7 +66,8 @@ function LspLanguageCards({
         <div className="text-sm font-medium text-foreground">Language Servers</div>
         <div className="text-xs text-muted-foreground">
           Auto-start language servers when opening files to get diagnostics, hover info, and
-          go-to-definition. You can also toggle each server on/off per file.
+          go-to-definition. You can also toggle each server on/off per file. Language servers run in
+          desktop file editors; the mobile file viewer does not start them.
           <br />
           When enabled, install your project&apos;s dependencies (e.g.{" "}
           <code className="text-[11px] bg-muted px-1 rounded">npm install</code> via repository
@@ -86,6 +87,7 @@ function LspLanguageCards({
               key={lang.id}
               className="rounded-lg border border-border/60 bg-background px-4 py-3 space-y-2.5"
               data-settings-dirty={autoStartDirty || autoInstallDirty}
+              data-testid={`lsp-language-card-${lang.id}`}
             >
               <div>
                 <div className="text-sm font-medium text-foreground">{lang.label}</div>
@@ -97,6 +99,8 @@ function LspLanguageCards({
                   checked={lspAutoStartLanguages.includes(lang.id)}
                   onCheckedChange={(checked) => toggleAutoStart(lang.id, checked === true)}
                   data-settings-dirty={autoStartDirty}
+                  data-testid={`lsp-auto-start-${lang.id}`}
+                  aria-label={`Auto-start ${lang.label} language server`}
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -107,6 +111,7 @@ function LspLanguageCards({
                     onCheckedChange={(checked) => toggleAutoInstall(lang.id, checked === true)}
                     className="h-3.5 w-3.5"
                     data-settings-dirty={autoInstallDirty}
+                    data-testid={`lsp-auto-install-${lang.id}`}
                   />
                 )}
                 {autoInstallSupported ? (
@@ -128,6 +133,14 @@ function LspLanguageCards({
                   </TooltipContent>
                 </Tooltip>
               </div>
+              {!autoInstallSupported && (
+                <p
+                  className="text-[11px] leading-relaxed text-muted-foreground"
+                  data-testid={`lsp-install-guidance-${lang.id}`}
+                >
+                  {lang.installHint}
+                </p>
+              )}
             </div>
           );
         })}

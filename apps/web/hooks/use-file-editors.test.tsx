@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { modelUriForDocument } from "@/lib/lsp/file-uri";
 
 const getMonacoInstance = vi.hoisted(() => vi.fn());
 const APP_PATH = "src/app.ts";
@@ -19,9 +20,18 @@ import {
   useOpenFileAtLine,
 } from "./use-file-editors";
 
-function createEditor(modelPath: string | null) {
+function createEditor(modelPath: string | null, modelUri?: string) {
   return {
-    getModel: vi.fn(() => (modelPath ? { uri: { path: modelPath } } : null)),
+    getModel: vi.fn(() =>
+      modelPath
+        ? {
+            uri: {
+              path: modelPath,
+              toString: () => modelUri ?? `file://${modelPath}`,
+            },
+          }
+        : null,
+    ),
     setPosition: vi.fn(),
     revealLineInCenter: vi.fn(),
     focus: vi.fn(),
@@ -70,7 +80,7 @@ describe("scrollEditorIfMounted", () => {
     });
     setPendingCursorPosition(APP_PATH, 12, 1, REPO);
 
-    expect(scrollEditorIfMounted(APP_PATH, null, 42, 3, REPO)).toBe(true);
+    expect(scrollEditorIfMounted(APP_PATH, null, 42, 3, { repo: REPO })).toBe(true);
 
     expect(wrongRepoEditor.setPosition).not.toHaveBeenCalled();
     expect(repoEditor.setPosition).toHaveBeenCalledWith({ lineNumber: 42, column: 3 });
@@ -82,7 +92,7 @@ describe("scrollEditorIfMounted", () => {
     getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });
     setPendingCursorPosition(APP_PATH, 12, 1, REPO);
 
-    expect(scrollEditorIfMounted(APP_PATH, null, 42, 3, REPO)).toBe(false);
+    expect(scrollEditorIfMounted(APP_PATH, null, 42, 3, { repo: REPO })).toBe(false);
 
     expect(editor.setPosition).not.toHaveBeenCalled();
     expect(consumePendingCursorPosition(APP_PATH, REPO)).toEqual({ line: 12, column: 1 });
@@ -97,6 +107,26 @@ describe("scrollEditorIfMounted", () => {
 
     expect(editor.setPosition).not.toHaveBeenCalled();
     expect(consumePendingCursorPosition(MISSING_PATH)).toEqual({ line: 5, column: 1 });
+  });
+
+  it("scrolls only the model owned by the requested task session", () => {
+    const documentUri = "file:///workspace/src/app.ts";
+    const firstModelUri = modelUriForDocument(documentUri, "first-session");
+    const secondModelUri = modelUriForDocument(documentUri, "second-session");
+    const firstEditor = createEditor(new URL(firstModelUri).pathname, firstModelUri);
+    const secondEditor = createEditor(new URL(secondModelUri).pathname, secondModelUri);
+    getMonacoInstance.mockReturnValue({
+      editor: { getEditors: () => [firstEditor, secondEditor] },
+    });
+
+    expect(
+      scrollEditorIfMounted(APP_PATH, "file:///workspace", 42, 3, {
+        sessionId: "second-session",
+      }),
+    ).toBe(true);
+
+    expect(firstEditor.setPosition).not.toHaveBeenCalled();
+    expect(secondEditor.setPosition).toHaveBeenCalledWith({ lineNumber: 42, column: 3 });
   });
 });
 

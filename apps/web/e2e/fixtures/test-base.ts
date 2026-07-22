@@ -172,6 +172,9 @@ export const test = backendFixture.extend<
       mcp_task_agent_profile_default: "current_task",
       sidebar_views: [],
       saved_layouts: [],
+      lsp_auto_start_languages: [],
+      lsp_auto_install_languages: [],
+      lsp_server_configs: {},
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",
@@ -256,6 +259,9 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     mcp_task_agent_profile_default: "current_task",
     sidebar_views: [],
     saved_layouts: [],
+    lsp_auto_start_languages: [],
+    lsp_auto_install_languages: [],
+    lsp_server_configs: {},
     kanban_view_mode: "",
     task_create_last_used: {
       repository_id: seedData.repositoryId,

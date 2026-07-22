@@ -1,6 +1,14 @@
 import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
 import { walkthroughFileMatches } from "@/lib/diff/walkthrough-match";
 import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
+import {
+  canonicalFileUri,
+  documentUriForModel,
+  filePathToUri,
+  fileUrisEqual,
+  isSessionModelUri,
+  joinFileUri,
+} from "@/lib/lsp/file-uri";
 
 const pendingCursorPositions = new Map<string, { line: number; column: number }>();
 
@@ -47,25 +55,56 @@ function editorModelMatches(modelPath: string, monacoPath: string, path: string,
   return exactMatch || walkthroughFileMatches(modelPath, path);
 }
 
+type EditorFileScope = { repo?: string; sessionId?: string };
+
+type ModelMatchContext = EditorFileScope & {
+  targetUri: string | null;
+  monacoPath: string;
+  path: string;
+};
+
+function editorModelMatchesTarget(
+  model: { uri: { path: string; toString(): string } },
+  context: ModelMatchContext,
+): boolean {
+  const { targetUri, sessionId, monacoPath, path, repo } = context;
+  if (targetUri && sessionId) {
+    const modelDocumentUri = documentUriForModel(model.uri.toString(), sessionId);
+    return modelDocumentUri !== null && fileUrisEqual(modelDocumentUri, targetUri);
+  }
+
+  const modelUri = canonicalFileUri(model.uri.toString());
+  if (targetUri && modelUri && !isSessionModelUri(model.uri.toString())) {
+    return fileUrisEqual(modelUri, targetUri);
+  }
+  return editorModelMatches(model.uri.path, monacoPath, path, repo);
+}
+
 export function scrollEditorIfMounted(
   path: string,
   worktreePath: string | null,
   line: number,
   column: number,
-  repo?: string,
+  scope: EditorFileScope = {},
 ): boolean {
+  const { repo } = scope;
   const monaco = getMonacoInstance();
   if (!monaco) return false;
 
-  const monacoPath = worktreePath ? `${worktreePath}/${path}` : path;
+  let targetUri: string | null = null;
+  if (worktreePath) {
+    try {
+      const workspaceUri = canonicalFileUri(worktreePath) ?? filePathToUri(worktreePath);
+      targetUri = joinFileUri(workspaceUri, repo, path);
+    } catch {
+      targetUri = null;
+    }
+  }
+  const monacoPath = worktreePath ? `${worktreePath}/${repo ? `${repo}/` : ""}${path}` : path;
   for (const editor of monaco.editor.getEditors()) {
     const model = editor.getModel();
     if (!model) continue;
-    const modelPath = model.uri.path;
-    const matches = worktreePath
-      ? modelPath === `/${monacoPath}` || modelPath === monacoPath
-      : editorModelMatches(modelPath, monacoPath, path, repo);
-    if (matches) {
+    if (editorModelMatchesTarget(model, { targetUri, monacoPath, path, ...scope })) {
       consumePendingCursorPosition(path, repo);
       editor.setPosition({ lineNumber: line, column });
       editor.revealLineInCenter(line);

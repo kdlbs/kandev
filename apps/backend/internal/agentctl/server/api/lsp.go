@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -32,6 +33,8 @@ const (
 	lspStatusInstallFailed  = "install_failed"
 	lspStatusReady          = "ready"
 	lspWorkspacePathJSONKey = "workspacePath"
+	lspWorkspaceURIJSONKey  = "workspaceUri"
+	lspRepoSubpathsJSONKey  = "repoSubpaths"
 )
 
 type lspServerProcess struct {
@@ -150,13 +153,76 @@ func (s *Server) handleLSPBridge(conn *websocket.Conn, language, binaryPath stri
 		return
 	}
 
-	if err := writeLSPJSONMessage(conn, map[string]string{lspStatusKey: lspStatusReady, lspWorkspacePathJSONKey: s.cfg.WorkDir}); err != nil {
+	ready := map[string]any{
+		lspStatusKey:            lspStatusReady,
+		lspWorkspacePathJSONKey: s.cfg.WorkDir,
+		lspWorkspaceURIJSONKey:  workspaceFileURI(s.cfg.WorkDir),
+		lspRepoSubpathsJSONKey:  s.procMgr.RepoSubpaths(),
+	}
+	if err := writeLSPJSONMessage(conn, ready); err != nil {
 		s.stopLSPServer(server)
 		_ = conn.Close()
 		return
 	}
 
 	s.runLSPBridge(conn, language, server)
+}
+
+// workspaceFileURI converts the task host's native workspace path into the
+// canonical file URI consumed by both the language server and browser editor.
+// Detecting drive and UNC forms here keeps path semantics on the task host
+// instead of accidentally applying the browser machine's operating system.
+func workspaceFileURI(path string) string {
+	normalized := path
+	isDrivePath := len(path) >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/')
+	isUNCPath := strings.HasPrefix(path, `\\`)
+	if isDrivePath || isUNCPath {
+		normalized = strings.ReplaceAll(path, `\`, "/")
+	}
+	if strings.HasPrefix(normalized, "//") {
+		parts := strings.Split(strings.TrimPrefix(normalized, "//"), "/")
+		if len(parts) >= 2 && parts[0] != "" {
+			return strictFileURL(parts[0], "/"+strings.Join(parts[1:], "/"), false)
+		}
+	}
+	isDriveURI := len(normalized) >= 3 && normalized[1] == ':' && normalized[2] == '/'
+	if isDriveURI {
+		normalized = "/" + normalized
+	}
+	return strictFileURL("", normalized, isDriveURI)
+}
+
+func strictFileURL(host, filePath string, preserveDriveColon bool) string {
+	segments := strings.Split(filePath, "/")
+	encoded := make([]string, len(segments))
+	for i, segment := range segments {
+		encoded[i] = strictURISegment(segment)
+	}
+	if preserveDriveColon && len(segments) > 1 {
+		encoded[1] = segments[1]
+	}
+	return (&url.URL{
+		Scheme:  "file",
+		Host:    host,
+		Path:    filePath,
+		RawPath: strings.Join(encoded, "/"),
+	}).String()
+}
+
+func strictURISegment(segment string) string {
+	const hex = "0123456789ABCDEF"
+	var encoded strings.Builder
+	for _, value := range []byte(segment) {
+		if (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
+			(value >= '0' && value <= '9') || strings.ContainsRune("-._~", rune(value)) {
+			encoded.WriteByte(value)
+			continue
+		}
+		encoded.WriteByte('%')
+		encoded.WriteByte(hex[value>>4])
+		encoded.WriteByte(hex[value&0x0f])
+	}
+	return encoded.String()
 }
 
 func (s *Server) startLSPServer(language, binaryPath string) (*lspServerProcess, error) {

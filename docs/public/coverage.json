@@ -142,6 +142,26 @@
       ]
     },
     {
+      "id": "language-server-intelligence",
+      "audiences": ["user", "operator"],
+      "stability": "experimental",
+      "docs": ["developer-tools", "feature-status", "configuration"],
+      "sources": [
+        "apps/backend/internal/gateway/websocket/lsp_handler.go",
+        "apps/backend/internal/agentctl/server/api/lsp.go",
+        "apps/web/lib/lsp/lsp-client-manager.ts"
+      ],
+      "tests": [
+        "apps/backend/internal/gateway/websocket/lsp_handler_test.go",
+        "apps/backend/internal/agentctl/server/api/lsp_test.go",
+        "apps/web/lib/lsp/lsp-client-manager.test.ts",
+        "apps/web/e2e/tests/lsp/lsp-file-intelligence.spec.ts",
+        "apps/web/e2e/tests/lsp/mobile-lsp-file-intelligence.spec.ts",
+        "apps/web/e2e/tests/docker/lsp-file-intelligence.spec.ts",
+        "apps/web/e2e/tests/ssh/lsp-unsupported-executor.spec.ts"
+      ]
+    },
+    {
       "id": "agents-profiles-and-prompts",
       "audiences": ["user"],
       "stability": "stable",
