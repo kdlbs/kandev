@@ -2,6 +2,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useTask } from "@/hooks/use-task";
 import type { TaskSession } from "@/lib/types/http";
+import { deriveSessionInputMode } from "./session-input-mode";
 
 export function deriveSessionFlags(session: TaskSession | null | undefined) {
   const state = session?.state;
@@ -17,13 +18,14 @@ export function deriveSessionFlags(session: TaskSession | null | undefined) {
   // substate defaults to generating, preserving the historical
   // reject-while-RUNNING contract.
   const hasBackgroundWork = session?.foreground_activity === "background";
-  const isAgentBusy = isRunning && !hasBackgroundWork;
+  const inputMode = deriveSessionInputMode(session);
+  const isAgentBusy = inputMode === "queue";
   // `isWorking` drives the spinner/affordance: any live turn (generating OR
   // background-idle) plus STARTING — it must stay up through (b).
   const isWorking = isStarting || isRunning || hasBackgroundWork;
   const isFailed = state === "FAILED" || state === "CANCELLED";
   const needsRecovery = state === "WAITING_FOR_INPUT" && !!errorMessage;
-  return { isStarting, isWorking, isAgentBusy, isFailed, needsRecovery };
+  return { inputMode, isStarting, isWorking, isAgentBusy, isFailed, needsRecovery };
 }
 
 type UseSessionStateOptions = {

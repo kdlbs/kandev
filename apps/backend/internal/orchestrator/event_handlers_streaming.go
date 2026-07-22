@@ -95,9 +95,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.handleSessionInfoEvent(ctx, payload)
 
 	case streams.EventTypeForegroundIdle:
-		if s.markForegroundIdle(sessionID) {
-			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+		if !s.foregroundIdleOwnsCurrentPrompt(payload) {
+			return
 		}
+		s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldProviderIdle)
 
 	case streams.EventTypeBackgroundComplete:
 		if s.completeOneBackgroundTask(sessionID) {
@@ -116,6 +117,30 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "log":
 		s.handleAgentLogEvent(ctx, payload)
 	}
+}
+
+func (s *Service) foregroundIdleOwnsCurrentPrompt(payload *lifecycle.AgentStreamEventPayload) bool {
+	// Generation zero is the compatibility path for legacy and
+	// generation-unaware providers. Those events retain their historical ordered-
+	// delivery semantics and cannot be protected from stale cross-prompt delivery;
+	// generation-bearing providers fail closed below.
+	if payload == nil || payload.Data == nil || payload.Data.PromptGeneration == 0 {
+		return true
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	if ok && generationOwner.OwnsPromptGeneration(
+		payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration,
+	) {
+		return true
+	}
+	s.logger.Debug("ignoring foreground idle for superseded prompt generation",
+		zap.String("task_id", payload.TaskID),
+		zap.String("session_id", payload.SessionID),
+		zap.String("agent_execution_id", payload.ExecutionID),
+		zap.Uint64("event_prompt_generation", payload.Data.PromptGeneration))
+	return false
 }
 
 // handleAgentErrorEvent handles agentEventError events by creating an error message and completing the turn.
@@ -146,7 +171,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 				zap.Error(err))
 		}
 	}
-	s.completeTurnForSession(ctx, sessionID)
+	s.completeTurnForTaskSession(ctx, taskID, sessionID)
 }
 
 // handleSessionStatusEvent handles session_status events by storing resume token and creating a status message.
@@ -1548,7 +1573,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	s.saveAgentTextIfPresent(ctx, payload)
 	s.publishAgentPlanIfPresent(ctx, payload)
 	s.persistTurnPromptMetadata(ctx, payload, session)
-	s.completeTurnForSession(ctx, payload.SessionID)
+	s.completeTurnForTaskSession(ctx, payload.TaskID, payload.SessionID)
 
 	// Publish agent turn message event so the office comment bridge can
 	// auto-post the agent's response as a task comment. Published here

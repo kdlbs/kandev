@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 
 // Mobile (Pixel 5) coverage for ADR-0049. Filename matches
 // /mobile-.*\.spec\.ts/ so the `mobile-chrome` project picks it up. The composer
@@ -16,7 +17,7 @@ test.describe("Mobile fine-grained busy signal", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
 
     // Drive the background window via the auto-started first turn (the task
     // description) rather than a sendMessage follow-up: the live turn reliably
@@ -27,7 +28,7 @@ test.describe("Mobile fine-grained busy signal", () => {
       "Mobile busy signal",
       seedData.agentProfileId,
       {
-        description: "/detached-background 12s",
+        description: "/detached-background 30s",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
@@ -46,6 +47,22 @@ test.describe("Mobile fine-grained busy signal", () => {
     // visible at once at mobile width.
     await expect(session.idleInput()).toBeVisible({ timeout: 25_000 });
     await expect(session.agentStatus()).toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+
+    // A mobile button submission during the background-only window must start
+    // a new foreground turn immediately, never divert the prompt to the queue.
+    await session.sendMessageViaButton("/slow 5s");
+    await expect(testPage.getByText("/slow 5s")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
+    await expect(session.idleInput()).not.toBeVisible({ timeout: 5_000 });
+    await waitForActiveSessionForegroundActivity(testPage, "generating");
+
+    // Foreground completion exposes the older detached work again until its
+    // own lifecycle completion arrives.
+    await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
+    await expect(session.agentStatus()).toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+
     // After the detached task completes, the working affordance clears.
     await expect(session.agentStatus()).not.toBeVisible({ timeout: 40_000 });
     await expect(session.idleInput()).toBeVisible({ timeout: 10_000 });

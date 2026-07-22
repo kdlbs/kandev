@@ -4,6 +4,7 @@ type E2EStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
       taskSessions: { items: Record<string, Record<string, unknown>> };
+      tasks: { activeSessionId: string | null };
       setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
     };
     setState: (
@@ -19,6 +20,23 @@ type AvailableCommand = {
   description?: string;
   input_hint?: string;
 };
+
+export async function waitForActiveSessionForegroundActivity(
+  page: Page,
+  activity: "generating" | "background",
+): Promise<void> {
+  await page.waitForFunction(
+    (expected) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) return false;
+      const state = store.getState();
+      const sessionId = state.tasks.activeSessionId;
+      return !!sessionId && state.taskSessions.items[sessionId]?.foreground_activity === expected;
+    },
+    activity,
+    { timeout: 20_000 },
+  );
+}
 
 /**
  * Simulate a lean session-list / partial WS update: preserve `is_passthrough`

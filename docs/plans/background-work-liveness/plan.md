@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/fine-grained-background-running-status-indicator/spec.md
 created: 2026-07-21
-status: completed
+status: in_progress
 ---
 
 # Implementation Plan: Background work liveness
@@ -152,3 +152,19 @@ Wave 4:
 Wave 5:
 
 - [x] [Task 05: Review and verification](task-05-review-and-verification.md)
+
+Wave 6:
+
+- [x] [Task 06: Publish completion-time foreground yield](task-06-publish-completion-foreground-yield.md)
+
+Wave 7:
+
+- [x] [Task 07: Consolidate session input mode](task-07-consolidate-session-input-mode.md)
+
+Wave 8:
+
+- [x] [Task 08: Required behavior coverage audit](task-08-required-behavior-coverage-audit.md)
+
+Wave 9:
+
+- [ ] [Task 09: Follow-up review and verification](task-09-follow-up-review-and-verification.md)

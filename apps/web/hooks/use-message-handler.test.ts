@@ -1,5 +1,5 @@
-import { renderHook } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import {
   buildContextFilesContext,
   buildTaskMentionsContext,
@@ -11,20 +11,26 @@ import type { TaskMentionData } from "./use-inline-mention";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
 const getWebSocketClientMock = vi.hoisted(() => vi.fn());
-const queueMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const queueMock = vi.hoisted(() => vi.fn());
+const addMessageMock = vi.hoisted(() => vi.fn());
+const storeState = vi.hoisted(() => ({
+  current: {
+    taskSessions: { items: {} as Record<string, unknown> },
+    addMessage: addMessageMock,
+  },
+}));
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: getWebSocketClientMock,
 }));
 
-vi.mock("@/hooks/domains/session/use-queue", () => ({
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({ getState: () => storeState.current }),
+}));
+
+vi.mock("./domains/session/use-queue", () => ({
   useQueue: () => ({ queue: queueMock }),
 }));
-
-vi.mock("@/components/state-provider", () => ({
-  useAppStoreApi: () => ({ getState: () => ({}) }),
-}));
-
 const IMPROVE_HARNESS_PROMPT = "improve-harness";
 const IMPROVE_HARNESS_CONTENT = "Review this session for durable harness improvements.";
 
@@ -284,5 +290,106 @@ describe("useMessageHandler", () => {
       expect.objectContaining({ content: "Queue this after I answer", taskId: "task-1" }),
     );
     expect(request).not.toHaveBeenCalled();
+  });
+});
+
+function selectedSession(state: string, foregroundActivity?: string) {
+  storeState.current.taskSessions.items = {
+    "session-1": { state, foreground_activity: foregroundActivity },
+    "other-session": { state: "RUNNING", foreground_activity: "generating" },
+  };
+}
+
+function renderMessageHandler() {
+  return renderHook(() =>
+    useMessageHandler({
+      resolvedSessionId: "session-1",
+      taskId: "task-1",
+      sessionModel: null,
+      activeModel: null,
+    }),
+  );
+}
+
+describe("useMessageHandler input routing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getWebSocketClientMock.mockReturnValue({ request: vi.fn().mockResolvedValue(undefined) });
+  });
+
+  it("sends directly for RUNNING background work despite another generating session", async () => {
+    selectedSession("RUNNING", "background");
+    const { result } = renderMessageHandler();
+
+    await act(async () => {
+      await result.current.handleSendMessage("follow up");
+    });
+
+    expect(getWebSocketClientMock().request).toHaveBeenCalledWith(
+      "message.add",
+      expect.objectContaining({ session_id: "session-1", content: "follow up" }),
+      10000,
+    );
+    expect(queueMock).not.toHaveBeenCalled();
+  });
+
+  it("reads the selected session at action time instead of capturing an earlier mode", async () => {
+    selectedSession("RUNNING", "generating");
+    const { result } = renderMessageHandler();
+    selectedSession("RUNNING", "background");
+
+    await act(async () => {
+      await result.current.handleSendMessage("fresh state");
+    });
+
+    expect(getWebSocketClientMock().request).toHaveBeenCalled();
+    expect(queueMock).not.toHaveBeenCalled();
+  });
+
+  it("queues for RUNNING generating based on fresh selected-session state", async () => {
+    selectedSession("RUNNING", "generating");
+    const { result } = renderMessageHandler();
+
+    await act(async () => {
+      await result.current.handleSendMessage("next");
+    });
+
+    expect(queueMock).toHaveBeenCalledWith("task-1", "next", undefined, false, undefined);
+    expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
+  });
+
+  it("sends the first prompt directly for a CREATED session", async () => {
+    selectedSession("CREATED");
+    const { result } = renderMessageHandler();
+
+    await act(async () => {
+      await result.current.handleSendMessage("start");
+    });
+
+    expect(getWebSocketClientMock().request).toHaveBeenCalled();
+    expect(queueMock).not.toHaveBeenCalled();
+  });
+
+  it("queues while the selected session is STARTING", async () => {
+    selectedSession("STARTING");
+    const { result } = renderMessageHandler();
+
+    await act(async () => {
+      await result.current.handleSendMessage("after setup");
+    });
+
+    expect(queueMock).toHaveBeenCalled();
+    expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unavailable selected session without sending or queueing", async () => {
+    selectedSession("COMPLETED");
+    const { result } = renderMessageHandler();
+
+    await expect(result.current.handleSendMessage("too late")).rejects.toMatchObject({
+      code: "session-unavailable",
+    });
+    expect(queueMock).not.toHaveBeenCalled();
+    expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
   });
 });

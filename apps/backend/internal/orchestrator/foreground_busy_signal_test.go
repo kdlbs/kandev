@@ -181,7 +181,11 @@ func TestCompleteTurnPreservesBackgroundActivity(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
-	const s = "session-turn"
+	const (
+		taskID = "task-turn"
+		s      = "session-turn"
+	)
+	seedTaskAndSession(t, repo, taskID, s, models.TaskSessionStateRunning)
 	svc.registerBackgroundTask(s, "t1")
 	if !svc.isForegroundTurnGenerating(s) {
 		t.Fatal("precondition: registration alone must retain foreground precedence")

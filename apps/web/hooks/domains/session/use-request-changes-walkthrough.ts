@@ -10,16 +10,13 @@ import {
 } from "@/lib/walkthrough-request";
 import type { Message } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
+import { deriveSessionInputMode } from "./session-input-mode";
 
 type UseRequestChangesWalkthroughParams = {
   taskId: string | null | undefined;
   sessionId: string | null | undefined;
   ready?: boolean;
 };
-
-function isAgentBusy(state: string | undefined): boolean {
-  return state === "STARTING" || state === "RUNNING";
-}
 
 function planModePayload(enabled: boolean): { plan_mode?: true } {
   return enabled ? { plan_mode: true } : {};
@@ -84,16 +81,20 @@ export function useRequestChangesWalkthrough({
 
     const state = storeApi.getState();
     const activeSession = state.taskSessions.items[sessionId] ?? null;
-    const shouldQueue = isAgentBusy(activeSession?.state);
+    const inputMode = deriveSessionInputMode(activeSession);
     const planModeEnabled = state.chatInput.planModeBySessionId[sessionId] ?? false;
     if (!ready) {
       toast({ title: "Changes are still loading", variant: "error" });
       return;
     }
+    if (inputMode === "unavailable") {
+      toast({ title: "Session is not available for input", variant: "error" });
+      return;
+    }
     try {
       const template = await loadChangesWalkthroughPromptTemplate();
       const content = buildChangesWalkthroughPrompt(template);
-      if (shouldQueue) {
+      if (inputMode === "queue") {
         await queueWalkthroughRequest({
           taskId,
           sessionId,
