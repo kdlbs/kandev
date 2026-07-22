@@ -39,6 +39,13 @@ interface MonacoDiffViewerProps {
   wordWrap?: boolean;
   editable?: boolean;
   onModifiedContentChange?: (filePath: string, content: string) => void;
+  repo?: string;
+  taskId?: string | null;
+  repositoryId?: string | null;
+  status?: string | null;
+  previousPath?: string | null;
+  publishedBranch?: string | null;
+  externalBaseBranch?: string | null;
 }
 
 function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
@@ -170,6 +177,14 @@ export function MonacoDiffViewer(props: MonacoDiffViewerProps) {
           onCopyDiff={() => navigator.clipboard.writeText(state.diff ?? "")}
           onOpenFile={onOpenFile}
           onRevert={onRevert}
+          sessionId={props.sessionId}
+          taskId={props.taskId}
+          repositoryId={props.repositoryId}
+          repositoryName={props.repo}
+          status={props.status}
+          previousPath={props.previousPath}
+          publishedBranch={props.publishedBranch}
+          baseBranch={props.externalBaseBranch}
         />
       )}
       <div

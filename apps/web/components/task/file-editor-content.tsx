@@ -40,6 +40,7 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
         sessionId={props.sessionId}
         taskId={props.taskId}
         repositoryId={props.repositoryId}
+        repositoryName={props.repo}
         enableComments={props.enableComments}
         onTogglePreview={props.onToggleMarkdownPreview}
       />

@@ -16,6 +16,12 @@ vi.mock("@/components/editors/file-actions-dropdown", () => ({
   FileActionsDropdown: () => null,
 }));
 
+// External link resolution is unrelated to grouping and requires a fully
+// hydrated repository store, which this focused test intentionally omits.
+vi.mock("@/components/editors/external-vcs-file-link", () => ({
+  ExternalVcsFileLink: () => null,
+}));
+
 vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => null }));
 vi.mock("@/lib/ws/workspace-files", () => ({
   requestFileContent: vi.fn(),

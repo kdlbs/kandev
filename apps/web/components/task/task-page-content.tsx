@@ -12,6 +12,7 @@ import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl
 import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
+import { useExternalVcsFileLinkHydration } from "@/hooks/domains/workspace/use-external-vcs-file-link";
 import { fetchTask } from "@/lib/api";
 import { useTasks } from "@/hooks/use-tasks";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -283,6 +284,7 @@ function useTaskPageData(
     agent,
     effectiveSessionId,
     repository,
+    repositories: effectiveRepositories,
     ensureSession,
     onTaskUnarchived,
   };
@@ -310,9 +312,11 @@ export function TaskPageContent({
     agent,
     effectiveSessionId,
     repository,
+    repositories,
     ensureSession,
     onTaskUnarchived,
   } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
+  useExternalVcsFileLinkHydration(task, repositories);
 
   const workflowSteps = useWorkflowStepsMapped();
   const sessionPanel = useSessionPanelState(effectiveSessionId);

@@ -11,6 +11,10 @@ import { FileBinaryViewer } from "../file-binary-viewer";
 import { getFileCategory } from "@/lib/utils/file-types";
 import { useAppStore } from "@/components/state-provider";
 import type { OpenFileTab } from "@/lib/types/backend";
+import {
+  ExternalVcsFileLink,
+  useExternalVcsFileStatus,
+} from "@/components/editors/external-vcs-file-link";
 
 type MobileFileViewerPanelProps = {
   file: OpenFileTab;
@@ -28,6 +32,54 @@ function resolveViewerKind(file: OpenFileTab): "image" | "binary" | "text" {
   return getFileCategory(file.path) === "image" ? "image" : "binary";
 }
 
+function MobileViewerBody({
+  file,
+  viewerKind,
+  markdownFile,
+  markdownPreview,
+  worktreePath,
+  sessionId,
+  taskId,
+  repositoryId,
+  onToggleMarkdownPreview,
+}: {
+  file: OpenFileTab;
+  viewerKind: "image" | "binary" | "text";
+  markdownFile: boolean;
+  markdownPreview: boolean;
+  worktreePath?: string;
+  sessionId: string | null;
+  taskId: string | null;
+  repositoryId?: string;
+  onToggleMarkdownPreview: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col" data-testid="mobile-file-viewer-content">
+      {viewerKind === "image" && (
+        <FileImageViewer path={file.path} content={file.content} worktreePath={worktreePath} />
+      )}
+      {viewerKind === "binary" && <FileBinaryViewer path={file.path} worktreePath={worktreePath} />}
+      {viewerKind === "text" &&
+        (markdownFile && markdownPreview ? (
+          <MarkdownPreviewContent
+            path={file.path}
+            content={file.content}
+            worktreePath={worktreePath}
+            sessionId={sessionId ?? undefined}
+            taskId={taskId}
+            repositoryId={repositoryId}
+            repositoryName={file.repo}
+            enableComments={!!sessionId}
+            showExternalVcsLink={false}
+            onTogglePreview={onToggleMarkdownPreview}
+          />
+        ) : (
+          <FileViewerContent path={file.path} repo={file.repo} content={file.content} />
+        ))}
+    </div>
+  );
+}
+
 export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileViewerPanelProps) {
   const activeSession = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
@@ -35,12 +87,12 @@ export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileVi
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const worktreePath = activeSession?.worktree_path ?? undefined;
   const repositoryId = activeSession?.repository_id ?? undefined;
+  const fileStatus = useExternalVcsFileStatus(file.path, sessionId, file.repo);
   const viewerKind = useMemo(() => resolveViewerKind(file), [file]);
   const markdownFile = isMarkdownFile(file.path);
 
   const [markdownPreview, setMarkdownPreview] = useState(false);
   const [lastPath, setLastPath] = useState(file.path);
-  const content = file.content;
 
   // Reset preview mode when the file changes so reopening a markdown file
   // always starts in editor view, not the previous preview state.
@@ -53,9 +105,20 @@ export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileVi
   return (
     <PanelRoot data-testid="mobile-file-viewer-panel">
       <PanelHeaderBarSplit
+        className="h-11 px-2"
         left={<span className="truncate font-mono text-xs">{file.path}</span>}
         right={
           <div className="flex items-center gap-1">
+            <ExternalVcsFileLink
+              filePath={file.path}
+              previousPath={fileStatus?.old_path}
+              status={fileStatus?.status}
+              taskId={activeTaskId}
+              sessionId={sessionId}
+              repositoryId={file.repo ? undefined : repositoryId}
+              repositoryName={file.repo}
+              size="touch"
+            />
             {markdownFile && !markdownPreview && (
               <Button
                 variant="ghost"
@@ -75,29 +138,17 @@ export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileVi
         }
       />
       <PanelBody padding={false} scroll={false} className="overflow-hidden">
-        <div className="flex h-full min-h-0 flex-col" data-testid="mobile-file-viewer-content">
-          {viewerKind === "image" && (
-            <FileImageViewer path={file.path} content={file.content} worktreePath={worktreePath} />
-          )}
-          {viewerKind === "binary" && (
-            <FileBinaryViewer path={file.path} worktreePath={worktreePath} />
-          )}
-          {viewerKind === "text" &&
-            (markdownFile && markdownPreview ? (
-              <MarkdownPreviewContent
-                path={file.path}
-                content={content}
-                worktreePath={worktreePath}
-                sessionId={sessionId ?? undefined}
-                taskId={activeTaskId}
-                repositoryId={repositoryId}
-                enableComments={!!sessionId}
-                onTogglePreview={() => setMarkdownPreview((current) => !current)}
-              />
-            ) : (
-              <FileViewerContent path={file.path} repo={file.repo} content={content} />
-            ))}
-        </div>
+        <MobileViewerBody
+          file={file}
+          viewerKind={viewerKind}
+          markdownFile={markdownFile}
+          markdownPreview={markdownPreview}
+          worktreePath={worktreePath}
+          sessionId={sessionId}
+          taskId={activeTaskId}
+          repositoryId={repositoryId}
+          onToggleMarkdownPreview={() => setMarkdownPreview((current) => !current)}
+        />
       </PanelBody>
     </PanelRoot>
   );

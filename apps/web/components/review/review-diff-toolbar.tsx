@@ -15,7 +15,9 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { FileActionsDropdown } from "@/components/editors/file-actions-dropdown";
+import { ExternalVcsFileLink } from "@/components/editors/external-vcs-file-link";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
 const iconBtnActive = "h-6 w-6 p-0 cursor-pointer opacity-100 bg-muted";
@@ -28,8 +30,14 @@ function isMarkdownPath(filePath: string): boolean {
 export type FileDiffToolbarProps = {
   diff: string;
   filePath: string;
+  previousPath?: string | null;
+  status?: string | null;
+  taskId?: string | null;
   sessionId: string;
+  repositoryId?: string | null;
   source: string;
+  publishedBranch?: string | null;
+  baseBranch?: string | null;
   wordWrap: boolean;
   expandUnchanged: boolean;
   onDiscard: () => void;
@@ -79,8 +87,14 @@ export function FileDiffToolbar(props: FileDiffToolbarProps) {
   const {
     diff,
     filePath,
+    previousPath,
+    status,
+    taskId,
     sessionId,
+    repositoryId,
     source,
+    publishedBranch,
+    baseBranch,
     wordWrap,
     expandUnchanged,
     onDiscard,
@@ -90,6 +104,7 @@ export function FileDiffToolbar(props: FileDiffToolbarProps) {
     onToggleWordWrap,
     repo,
   } = props;
+  const { isMobile } = useResponsiveBreakpoint();
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
   const handleCopyDiff = useCallback(() => {
     navigator.clipboard.writeText(diff || "");
@@ -103,6 +118,18 @@ export function FileDiffToolbar(props: FileDiffToolbarProps) {
       <ToolbarIconBtn onClick={handleCopyDiff} tooltip="Copy diff">
         <IconCopy className="h-3.5 w-3.5" />
       </ToolbarIconBtn>
+      <ExternalVcsFileLink
+        filePath={filePath}
+        previousPath={previousPath}
+        status={status}
+        taskId={taskId}
+        sessionId={sessionId}
+        repositoryId={repositoryId}
+        repositoryName={repo}
+        publishedBranch={publishedBranch}
+        baseBranch={baseBranch}
+        size={isMobile ? "touch" : "xs"}
+      />
       <ToolbarIconBtn
         onClick={onToggleExpandUnchanged}
         tooltip={expandUnchanged ? "Collapse unchanged" : "Expand all"}

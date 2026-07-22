@@ -51,6 +51,66 @@ func TestHTTPCreateRepositoryRejectsInvalidLocalPathWithoutPersistence(t *testin
 	}
 }
 
+func TestHTTPCreateRepositoryIgnoresRemoteURL(t *testing.T) {
+	router, repo := newRepositoryHTTPTestRouter(t)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/workspaces/ws-1/repositories",
+		strings.NewReader(`{"name":"owner/repo","source_type":"provider","remote_url":"https://github.com/owner/repo.git"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+	repositories, err := repo.ListRepositories(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(repositories) != 1 {
+		t.Fatalf("repositories = %d, want 1", len(repositories))
+	}
+	if repositories[0].RemoteURL != "" {
+		t.Errorf("RemoteURL = %q, want empty; generic repository creation must not accept clone URLs", repositories[0].RemoteURL)
+	}
+}
+
+func TestHTTPUpdateRepositoryIgnoresRemoteURL(t *testing.T) {
+	router, repo := newRepositoryHTTPTestRouter(t)
+	if err := repo.CreateRepository(context.Background(), &models.Repository{
+		ID:          "provider-repo",
+		WorkspaceID: "ws-1",
+		Name:        "owner/repo",
+		SourceType:  "provider",
+		RemoteURL:   "https://github.com/owner/old.git",
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	request := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/repositories/provider-repo",
+		strings.NewReader(`{"remote_url":"https://github.com/owner/repo.git"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	repository, err := repo.GetRepository(context.Background(), "provider-repo")
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if repository.RemoteURL != "https://github.com/owner/old.git" {
+		t.Errorf("RemoteURL = %q, want original value %q", repository.RemoteURL, "https://github.com/owner/old.git")
+	}
+}
+
 type repositoryHandlerRemoteLister struct {
 	calls int
 }
