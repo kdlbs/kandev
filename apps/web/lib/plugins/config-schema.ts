@@ -12,7 +12,13 @@
 /** Mirror of the backend's configSecretMask (internal/plugins/config.go). */
 export const SECRET_MASK = "********";
 
-export type PluginConfigFieldType = "string" | "boolean" | "number" | "integer" | "enum";
+export type PluginConfigFieldType =
+  | "string"
+  | "boolean"
+  | "number"
+  | "integer"
+  | "enum"
+  | "utility_agent";
 
 export interface PluginConfigField {
   name: string;
@@ -39,6 +45,7 @@ function asObject(value: unknown): SchemaObject | null {
 }
 
 function fieldType(prop: SchemaObject): PluginConfigFieldType {
+  if (prop.format === "utility-agent") return "utility_agent";
   const enumValues = prop.enum;
   if (Array.isArray(enumValues) && enumValues.length > 0) return "enum";
   const type = prop.type;

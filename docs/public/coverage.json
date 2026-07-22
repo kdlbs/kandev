@@ -267,8 +267,7 @@
         "/settings/system/logs",
         "/settings/system/status",
         "/settings/system/storage",
-        "/settings/system/updates",
-        "/settings/system/utility-agent"
+        "/settings/system/updates"
       ]
     },
     {

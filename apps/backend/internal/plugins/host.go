@@ -71,7 +71,7 @@ type pluginHost struct {
 	// lifetime. Reading live (under Service.mu) lets the later SetUtilityAgent
 	// wiring take effect without a plugin restart. nil on a bare test host.
 	// See host_utility.go.
-	utilityDeps func() (utilitySettingsSource, utilityRunner)
+	utilityDeps func() (utilityAgentSource, utilityRunner)
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)

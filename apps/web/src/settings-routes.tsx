@@ -22,7 +22,6 @@ import IntegrationsSlackPage from "@/app/settings/integrations/slack/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import StoragePage from "@/app/settings/system/storage/page";
-import UtilityAgentPage from "@/app/settings/system/utility-agent/page";
 import UtilityAgentsSettingsPage from "@/app/settings/utility-agents/page";
 import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
@@ -217,7 +216,6 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   ),
   "/settings/system/storage": () => <StoragePage />,
   "/settings/system/updates": renderUpdatesRoute,
-  "/settings/system/utility-agent": () => <UtilityAgentPage />,
   "/settings/changelog": () => <SettingsRedirect to="/settings/system/updates" />,
 };
 

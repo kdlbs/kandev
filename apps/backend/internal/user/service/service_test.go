@@ -140,38 +140,6 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
-func TestApplyBasicSettingsUtilityAgentProfileID(t *testing.T) {
-	t.Run("omission preserves saved value", func(t *testing.T) {
-		settings := &models.UserSettings{UtilityAgentProfileID: "profile-1"}
-		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
-			t.Fatalf("apply settings: %v", err)
-		}
-		if settings.UtilityAgentProfileID != "profile-1" {
-			t.Fatalf("UtilityAgentProfileID = %q, want profile-1", settings.UtilityAgentProfileID)
-		}
-	})
-
-	t.Run("explicit value is trimmed and set", func(t *testing.T) {
-		settings := &models.UserSettings{}
-		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{UtilityAgentProfileID: ptr("  profile-42  ")}); err != nil {
-			t.Fatalf("apply settings: %v", err)
-		}
-		if settings.UtilityAgentProfileID != "profile-42" {
-			t.Fatalf("UtilityAgentProfileID = %q, want profile-42 (trimmed)", settings.UtilityAgentProfileID)
-		}
-	})
-
-	t.Run("explicit empty clears the selection", func(t *testing.T) {
-		settings := &models.UserSettings{UtilityAgentProfileID: "profile-1"}
-		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{UtilityAgentProfileID: ptr("")}); err != nil {
-			t.Fatalf("apply settings: %v", err)
-		}
-		if settings.UtilityAgentProfileID != "" {
-			t.Fatalf("UtilityAgentProfileID = %q, want empty", settings.UtilityAgentProfileID)
-		}
-	})
-}
-
 func TestApplyBasicSettingsMCPTaskAgentProfileDefault(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
 		settings := &models.UserSettings{MCPTaskAgentProfileDefault: models.MCPTaskAgentProfileDefaultWorkspaceDefault}

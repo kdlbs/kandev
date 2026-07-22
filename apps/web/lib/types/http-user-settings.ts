@@ -74,7 +74,6 @@ export type UserSettings = {
   gitlab_saved_presets?: unknown;
   default_utility_agent_id?: string;
   default_utility_model?: string;
-  utility_agent_profile_id?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminal_link_behavior?: string;
   terminal_font_family?: string;
@@ -122,7 +121,6 @@ export type UserSettingsUpdatePayload = {
   gitlab_saved_presets?: unknown[] | null;
   default_utility_agent_id?: string;
   default_utility_model?: string;
-  utility_agent_profile_id?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminal_link_behavior?: "new_tab" | "browser_panel";
   terminal_font_family?: string;

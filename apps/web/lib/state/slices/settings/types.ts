@@ -172,7 +172,6 @@ export type UserSettingsState = {
   githubDefaultQueryPresets: unknown;
   gitlabSavedPresets: unknown;
   defaultUtilityAgentId: string | null;
-  utilityAgentProfileId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminalLinkBehavior: "new_tab" | "browser_panel";
   terminalFontFamily: string | null;

@@ -58,7 +58,6 @@ type UserSettings struct {
 	GitLabSavedPresets          json.RawMessage                   `json:"gitlab_saved_presets"`
 	DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
 	DefaultUtilityModel         string                            `json:"default_utility_model"`    // Default model for utility agents
-	UtilityAgentProfileID       string                            `json:"utility_agent_profile_id"` // Agent profile plugins delegate one-shot LLM calls to (ADR 0048)
 	KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts"`       // User-configured keyboard shortcut overrides
 	TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`   // "new_tab" | "browser_panel"
 	TerminalFontFamily          string                            `json:"terminal_font_family"`

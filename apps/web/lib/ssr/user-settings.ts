@@ -106,7 +106,6 @@ function buildIdentityFields(s: UserSettingsData) {
     preferredShell: s.preferred_shell || null,
     defaultEditorId: s.default_editor_id || null,
     defaultUtilityAgentId: s.default_utility_agent_id || null,
-    utilityAgentProfileId: s.utility_agent_profile_id || null,
   };
 }
 
@@ -191,7 +190,6 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       githubDefaultQueryPresets: undefined,
       gitlabSavedPresets: undefined,
       defaultUtilityAgentId: null,
-      utilityAgentProfileId: null,
       keyboardShortcuts: {} as Record<string, { key: string; modifiers?: Record<string, boolean> }>,
       terminalLinkBehavior: "new_tab" as const,
       terminalFontFamily: null,

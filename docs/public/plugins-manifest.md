@@ -55,7 +55,8 @@ config_schema:
     bot_token:  { type: string, secret: true, title: "Bot Token", description: "Slack bot OAuth token" }
     default_channel:  { type: string, description: "Default channel for notifications" }
     notify_on_task_created: { type: boolean, default: true }
-  required: ["bot_token", "default_channel"]
+    utility_agent: { type: string, format: utility-agent, title: "Utility Agent", description: "Agent used for plugin LLM calls" }
+  required: ["bot_token", "default_channel", "utility_agent"]
 
 ui:                                           # optional native frontend plugin
   bundle: "/ui/bundle.js"                    # root-relative
@@ -83,7 +84,7 @@ ui:                                           # optional native frontend plugin
 | `capabilities.api_write` | no | string[] | **Reserved for future Host RPCs.** Declared but not enforced by anything today — no Host RPC currently writes kandev's own data. |
 | `capabilities.state` | no | bool | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `capabilities.secrets` | no | bool | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
-| `capabilities.agent_invoke` | no | bool | Gates `Host.InvokeUtilityAgent` — a one-shot completion run by the operator-configured utility agent (Settings > System). Calling it without this set to `true` returns gRPC `PermissionDenied`; calling it when no utility agent is configured returns gRPC `FailedPrecondition`. See ADR 0048. |
+| `capabilities.agent_invoke` | no | bool | Gates `Host.InvokeUtilityAgent` — a one-shot completion run by the utility agent selected for this plugin. Declare a `utility_agent` config property with `type: string` and `format: utility-agent`; Settings > Plugins renders the picker. Calling without this capability returns gRPC `PermissionDenied`; calling without a valid enabled selection returns gRPC `FailedPrecondition`. See ADR 0048. |
 | `webhooks[].key` | yes | string | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`. |
 | `webhooks[].description` | no | string | Free-form. |
 | `webhooks[].method` | no | string | **Informational only** — kandev does not validate or enforce the inbound HTTP method against this value. |
@@ -151,6 +152,11 @@ persisting:
 - `type` (`string`, `boolean`, `number`, or `integer`) is checked against
   the submitted value.
 - `enum` membership is checked when present.
+- A string property with `format: utility-agent` is rendered as a picker of
+  configured built-in and custom utility agents. The UI displays agent names
+  but persists the selected agent's stable ID. Add the property to `required`
+  when the plugin must always have a selection; optional fields include a
+  **Not set** choice.
 - A property with `secret: true`, or `format: "password"`, is treated as a
   **secret field** and must be `type: string` (or untyped) — a non-string
   secret is rejected. Secret values are moved into kandev's encrypted vault;

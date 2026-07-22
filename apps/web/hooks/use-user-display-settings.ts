@@ -52,7 +52,6 @@ function carryForwardLspSettings(current: DisplaySettings) {
 function carryForwardUtilitySettings(current: DisplaySettings) {
   return {
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
-    utilityAgentProfileId: current.utilityAgentProfileId ?? null,
     keyboardShortcuts: current.keyboardShortcuts ?? {},
   };
 }

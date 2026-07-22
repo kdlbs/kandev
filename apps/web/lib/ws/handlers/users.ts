@@ -33,7 +33,6 @@ function buildUserSettingsState(state: AppState, payload: UserSettingsUpdatedPay
     ...buildLspSettings(payload),
     ...buildSyncedLocalSettings(state, payload),
     defaultUtilityAgentId: payload.default_utility_agent_id || null,
-    utilityAgentProfileId: payload.utility_agent_profile_id || null,
     keyboardShortcuts: payload.keyboard_shortcuts ?? {},
     changesPanelLayout: parseChangesPanelLayout(payload.changes_panel_layout),
     systemMetricsDisplay: parseSystemMetricsDisplay(payload.system_metrics_display),

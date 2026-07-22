@@ -5,20 +5,30 @@ import (
 	"errors"
 	"testing"
 
-	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type fakeUtilitySettingsSource struct {
-	profileID string
-	err       error
+type fakeUtilityAgentSource struct {
+	agent       *UtilityAgent
+	err         error
+	calls       int
+	gotSelector string
 }
 
-func (f *fakeUtilitySettingsSource) UtilityAgentProfileID(context.Context) (string, error) {
-	return f.profileID, f.err
+func (f *fakeUtilityAgentSource) GetAgentByID(_ context.Context, selector string) (*UtilityAgent, error) {
+	f.calls++
+	f.gotSelector = selector
+	return f.agent, f.err
 }
+
+type fakeConfigReader struct {
+	configs map[string]any
+	err     error
+}
+
+func (f *fakeConfigReader) GetConfig(string) (map[string]any, error) { return f.configs, f.err }
 
 type fakeUtilityRunner struct {
 	calls        int
@@ -36,129 +46,90 @@ func (f *fakeUtilityRunner) ExecutePrompt(_ context.Context, agentType, model, m
 	return f.text, f.err
 }
 
-// profileFixture wires the agent-profiles data source to hold one profile with
-// the given id, agent type, and model — the shape resolveUtilityAgentProfile
-// scans.
-func (d *testDataHost) profileFixture(profileID, agentType, model string) {
-	d.profiles.resp = &agentsettingsdto.ListAgentsResponse{
-		Agents: []agentsettingsdto.AgentDTO{{
-			ID: "agent-1",
-			Profiles: []agentsettingsdto.AgentProfileDTO{{
-				ID: profileID, AgentID: agentType, Model: model,
-			}},
-		}},
-	}
+func configuredUtilityHost(t *testing.T) *testDataHost {
+	t.Helper()
+	d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
+	d.host.configs = &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}}
+	d.utilAgents.agent = &UtilityAgent{Name: "summarizer", AgentID: "claude-acp", Model: "claude-opus-4-8", Enabled: true}
+	d.utilRun.text = "the summary"
+	return d
 }
 
 func TestPluginHost_InvokeUtilityAgent_DeniedWithoutCapability(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{})
 	_, err := d.host.InvokeUtilityAgent(context.Background(), "hi")
 	assertPermissionDenied(t, err, "agent_invoke")
-	if d.utilRun.calls != 0 {
-		t.Fatalf("runner called %d times, want 0 when capability denied", d.utilRun.calls)
+	if d.utilAgents.calls != 0 || d.utilRun.calls != 0 {
+		t.Fatalf("unauthorized call touched agent lookup %d times and runner %d times", d.utilAgents.calls, d.utilRun.calls)
 	}
 }
 
-func TestPluginHost_InvokeUtilityAgent_UsesConfiguredProfile(t *testing.T) {
-	d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
-	d.utilCfg.profileID = "profile-42"
-	d.profileFixture("profile-42", "claude-acp", "claude-opus-4-8")
-	d.utilRun.text = "the summary"
-
+func TestPluginHost_InvokeUtilityAgent_UsesPluginConfiguredUtilityAgent(t *testing.T) {
+	d := configuredUtilityHost(t)
 	got, err := d.host.InvokeUtilityAgent(context.Background(), "summarize yesterday")
-	if err != nil {
-		t.Fatalf("InvokeUtilityAgent() unexpected error: %v", err)
+	if err != nil || got != "the summary" {
+		t.Fatalf("InvokeUtilityAgent() = (%q, %v)", got, err)
 	}
-	if got != "the summary" {
-		t.Fatalf("text = %q, want %q", got, "the summary")
-	}
-	// The configured profile's agent type + model must reach the runner.
 	if d.utilRun.gotAgentType != "claude-acp" || d.utilRun.gotModel != "claude-opus-4-8" {
-		t.Fatalf("runner got (%q, %q), want (claude-acp, claude-opus-4-8)", d.utilRun.gotAgentType, d.utilRun.gotModel)
+		t.Fatalf("runner got (%q, %q)", d.utilRun.gotAgentType, d.utilRun.gotModel)
 	}
-	if d.utilRun.gotPrompt != "summarize yesterday" {
-		t.Fatalf("runner prompt = %q", d.utilRun.gotPrompt)
+	if d.utilAgents.gotSelector != "utility-agent-42" {
+		t.Fatalf("looked up utility agent %q", d.utilAgents.gotSelector)
 	}
 }
 
 func TestPluginHost_InvokeUtilityAgent_NotConfigured(t *testing.T) {
-	d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
-	d.utilCfg.profileID = "" // no utility agent selected
-
+	d := configuredUtilityHost(t)
+	d.host.configs = &fakeConfigReader{configs: map[string]any{}}
 	_, err := d.host.InvokeUtilityAgent(context.Background(), "hi")
-	st, ok := status.FromError(err)
-	if !ok || st.Code() != codes.FailedPrecondition {
-		t.Fatalf("err = %v, want FailedPrecondition", err)
-	}
-	if d.utilRun.calls != 0 {
-		t.Fatalf("runner called %d times, want 0 when unconfigured", d.utilRun.calls)
+	if status.Code(err) != codes.FailedPrecondition || d.utilRun.calls != 0 {
+		t.Fatalf("err = %v, calls = %d", err, d.utilRun.calls)
 	}
 }
 
-func TestPluginHost_InvokeUtilityAgent_ProfileMissing(t *testing.T) {
-	d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
-	d.utilCfg.profileID = "profile-gone"
-	d.profileFixture("profile-still-here", "claude-acp", "m") // different id
-
-	_, err := d.host.InvokeUtilityAgent(context.Background(), "hi")
-	st, ok := status.FromError(err)
-	if !ok || st.Code() != codes.FailedPrecondition {
-		t.Fatalf("err = %v, want FailedPrecondition for a stale profile id", err)
-	}
-	if d.utilRun.calls != 0 {
-		t.Fatalf("runner called %d times, want 0 when profile missing", d.utilRun.calls)
-	}
-}
-
-// TestPluginHost_InvokeUtilityAgent_LateWiringReachesSpawnedHost proves the
-// boot-ordering fix: a host built before SetUtilityAgent runs (as happens for
-// boot-active plugins, spawned before hostUtilityMgr exists) still resolves the
-// utility deps once they are wired, because utilityDeps reads them live from the
-// Service rather than snapshotting at spawn time.
-func TestPluginHost_InvokeUtilityAgent_LateWiringReachesSpawnedHost(t *testing.T) {
-	svc, _, _ := newTestService(t)
-	profiles := &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{
-		Agents: []agentsettingsdto.AgentDTO{{
-			ID:       "agent-1",
-			Profiles: []agentsettingsdto.AgentProfileDTO{{ID: "p1", AgentID: "claude-acp", Model: "m"}},
-		}},
-	}}
-	// A host as hostForPlugin would build it: utilityDeps bound to the service,
-	// which has NOT been wired with a utility agent yet.
-	host := &pluginHost{
-		capabilities:  manifest.Capabilities{AgentInvoke: true},
-		agentProfiles: profiles,
-		utilityDeps:   svc.utilityAgentDeps,
-	}
-
-	// Before wiring: Unimplemented (deps still nil on the service).
-	if _, err := host.InvokeUtilityAgent(context.Background(), "hi"); status.Code(err) != codes.Unimplemented {
-		t.Fatalf("pre-wiring code = %v, want Unimplemented", status.Code(err))
-	}
-
-	// Wire late, exactly as backendapp does after plugins have already spawned.
-	runner := &fakeUtilityRunner{text: "done"}
-	svc.SetUtilityAgent(&fakeUtilitySettingsSource{profileID: "p1"}, runner)
-
-	// The already-built host now resolves the freshly-wired deps.
-	got, err := host.InvokeUtilityAgent(context.Background(), "hi")
-	if err != nil {
-		t.Fatalf("post-wiring error: %v", err)
-	}
-	if got != "done" || runner.gotAgentType != "claude-acp" {
-		t.Fatalf("got %q via %q, want done via claude-acp", got, runner.gotAgentType)
+func TestPluginHost_InvokeUtilityAgent_MissingOrDisabled(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		agent *UtilityAgent
+		err   error
+	}{
+		{"missing", nil, ErrUtilityAgentNotFound},
+		{"disabled", &UtilityAgent{Name: "summarizer"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := configuredUtilityHost(t)
+			d.utilAgents.agent, d.utilAgents.err = tc.agent, tc.err
+			_, err := d.host.InvokeUtilityAgent(context.Background(), "hi")
+			if status.Code(err) != codes.FailedPrecondition || d.utilRun.calls != 0 {
+				t.Fatalf("err = %v, calls = %d", err, d.utilRun.calls)
+			}
+		})
 	}
 }
 
-func TestPluginHost_InvokeUtilityAgent_SettingError(t *testing.T) {
-	d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
-	d.utilCfg.err = errors.New("db down")
+func TestPluginHost_InvokeUtilityAgent_PreservesLookupFailure(t *testing.T) {
+	storeErr := status.Error(codes.Unavailable, "utility agent store unavailable")
+	d := configuredUtilityHost(t)
+	d.utilAgents.err = storeErr
 
 	_, err := d.host.InvokeUtilityAgent(context.Background(), "hi")
-	if err == nil {
-		t.Fatal("expected error when settings read fails")
+	if !errors.Is(err, storeErr) {
+		t.Fatalf("InvokeUtilityAgent() error = %v, want wrapped store error", err)
+	}
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("InvokeUtilityAgent() status = %s, want %s", status.Code(err), codes.Unavailable)
 	}
 	if d.utilRun.calls != 0 {
-		t.Fatalf("runner called %d times, want 0 when settings read fails", d.utilRun.calls)
+		t.Fatalf("runner calls = %d, want 0", d.utilRun.calls)
+	}
+}
+
+func TestPluginHost_InvokeUtilityAgent_PreservesLookupCancellation(t *testing.T) {
+	d := configuredUtilityHost(t)
+	d.utilAgents.err = context.Canceled
+
+	_, err := d.host.InvokeUtilityAgent(context.Background(), "hi")
+	if status.Code(err) != codes.Canceled {
+		t.Fatalf("InvokeUtilityAgent() status = %s, want %s", status.Code(err), codes.Canceled)
 	}
 }

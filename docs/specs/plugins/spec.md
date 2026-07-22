@@ -321,13 +321,16 @@ service Host {
   internal event bus for delivery to subscribers (replaces the old
   `POST /api/plugins/{plugin_id}/events/emit` HTTP endpoint).
 - `InvokeUtilityAgent(prompt)` runs a one-shot, non-interactive completion using
-  the operator-configured **utility agent** (an agent profile chosen in Settings
-  > System, stored as the `utility_agent_profile_id` user setting) and returns
-  its text. Requires `capabilities.agent_invoke: true`. It reuses kandev's
+  the utility agent selected in the plugin's `utility_agent` config field and
+  returns its text. Plugins declaring `capabilities.agent_invoke: true` must
+  declare that field in `config_schema` with `type: string` and
+  `format: utility-agent`; Settings > Plugins then renders a picker containing
+  the configured built-in and custom utility agents. The picker displays the
+  agent name and persists its stable ID. It reuses kandev's
   sessionless host-utility inference tier (ADR 0002) — no task, session, or
   workspace — so a plugin can delegate a lightweight LLM step without holding a
   provider API key. Returns gRPC `FailedPrecondition` when no utility agent is
-  configured (or the selected profile was deleted). See
+  configured, selected agent was deleted, or it is disabled. See
   [ADR 0048](../../decisions/0048-plugin-host-utility-agent-invoke.md).
 
 Every Host RPC is capability-gated: `GetState`/`SetState`/`DeleteState`/`ListState`
