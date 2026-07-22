@@ -17,8 +17,6 @@ const (
 	subcmdList   = "list"
 	subcmdCreate = "create"
 	subcmdGet    = "get"
-
-	workspaceModeSharedGroup = "shared_group"
 )
 
 // runKandevCLI dispatches the kandev subcommand to the appropriate handler.

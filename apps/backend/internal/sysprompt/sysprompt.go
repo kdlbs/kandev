@@ -55,19 +55,26 @@ const officeContextMarker = "KANDEV OFFICE MCP TOOLS"
 type contextKind uint8
 
 const (
-	contextNone contextKind = iota
+	contextUnknown contextKind = iota
 	contextTask
 	contextOffice
+	contextTrusted
 )
 
-func contextKindForBlock(block string) contextKind {
+func contextKindForBlock(block string, trustedContents []string) contextKind {
 	if strings.Contains(block, officeContextMarker) {
 		return contextOffice
 	}
 	if strings.Contains(block, kandevContextMarker) {
 		return contextTask
 	}
-	return contextNone
+	trimmedBlock := strings.TrimSpace(block)
+	for _, content := range trustedContents {
+		if trimmedBlock == strings.TrimSpace(Wrap(content)) {
+			return contextTrusted
+		}
+	}
+	return contextUnknown
 }
 
 // OfficeContext returns the restricted first-turn prompt used by Office runs.
@@ -84,7 +91,11 @@ func FormatOfficeContext(taskID, sessionID string) string {
 
 // InjectOfficeContext ensures a first-turn prompt has the restricted Office context.
 func InjectOfficeContext(taskID, sessionID, prompt string) string {
-	return canonicalizeKandevContext(FormatOfficeContext(taskID, sessionID), prompt)
+	return canonicalizeKandevContext(
+		FormatOfficeContext(taskID, sessionID),
+		prompt,
+		trustedContextContents(sessionID),
+	)
 }
 
 // PlanMode returns the system prompt prepended when plan mode is enabled.
@@ -198,17 +209,28 @@ func InjectKandevContext(taskID, sessionID, prompt string, requiresCompletionSig
 
 // InjectKandevContextWithOptions prepends capability-aware Kandev context.
 func InjectKandevContextWithOptions(taskID, sessionID, prompt string, options KandevContextOptions) string {
-	return canonicalizeKandevContext(FormatKandevContextWithOptions(taskID, sessionID, options), prompt)
+	return canonicalizeKandevContext(
+		FormatKandevContextWithOptions(taskID, sessionID, options),
+		prompt,
+		trustedContextContents(sessionID),
+	)
 }
 
-func canonicalizeKandevContext(content, prompt string) string {
+func trustedContextContents(sessionID string) []string {
+	return []string{FormatConfigContext(sessionID), PlanMode(), DefaultPlanPrefix()}
+}
+
+func canonicalizeKandevContext(content, prompt string, trustedContents []string) string {
 	replaced := false
 	result := systemTagRegex.ReplaceAllStringFunc(prompt, func(block string) string {
-		if contextKindForBlock(block) == contextNone {
-			return block
-		}
 		end := strings.Index(block, TagEnd) + len(TagEnd)
 		suffix := block[end:]
+		switch contextKindForBlock(block, trustedContents) {
+		case contextUnknown:
+			return suffix
+		case contextTrusted:
+			return block
+		}
 		if !replaced {
 			replaced = true
 			return Wrap(content) + suffix
@@ -218,7 +240,7 @@ func canonicalizeKandevContext(content, prompt string) string {
 	if replaced {
 		return result
 	}
-	return Wrap(content) + "\n\n" + prompt
+	return Wrap(content) + "\n\n" + result
 }
 
 // DefaultPlanPrefix returns the planning instruction prompt used when plan mode

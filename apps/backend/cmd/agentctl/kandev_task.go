@@ -117,10 +117,6 @@ func taskCreate(args []string) int {
 		cliError("--title is required")
 		return 1
 	}
-	if strings.TrimSpace(*workspaceMode) == workspaceModeSharedGroup && strings.TrimSpace(*workspaceGroupID) == "" {
-		cliError("--workspace-group-id is required when --workspace-mode=%s", workspaceModeSharedGroup)
-		return 1
-	}
 	unsupported := []struct {
 		name  string
 		value string

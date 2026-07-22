@@ -160,7 +160,7 @@ After an accepted stop, Kandev attempts to move an unarchived, non-Office task f
 
 `add_branch_to_task_kandev` works only with the Worktree executor. It can add another branch of the same repository or a second repository entirely. Select at most one of `repository_id`, `repository_url`, or `local_path`; `repository_url` accepts a GitHub repository URL, while the URL/path forms find or create that repository in the task's workspace. A locator is optional for a single-repository task and required to disambiguate a multi-repository task. The new repository/branch receives its own worktree. `update_repository_base_branch_kandev` changes the base used for Kandev's diff, not a pull request's target branch.
 
-`step_complete_kandev` matters only for an auto-advance action configured to require an explicit signal. Kandev includes the completion instruction only on those Kanban steps, where the tool is available through normal client discovery. A user message arriving before transition can cancel that automatic move.
+`step_complete_kandev` is registered and discoverable in every task-mode session. Kandev includes its completion instruction, and acts on its signal, only on Kanban steps whose auto-advance action explicitly requires that signal. A user message arriving before transition can cancel that automatic move.
 
 The task server runs inside agentctl's local runtime boundary. Its MCP routes do not use a separate bearer token. Do not expose agentctl ports; rely on the executor's process/network isolation and Kandev's session scoping.
 

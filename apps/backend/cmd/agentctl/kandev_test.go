@@ -325,10 +325,9 @@ func TestTaskCreate_NoExecutionPolicyOrBlockedBy_OmitsFields(t *testing.T) {
 	}
 }
 
-// TestTaskCreate_SharedGroupRequiresGroupID pins the CLI-side validation
-// that guards against missing or whitespace-only --workspace-group-id when
-// the caller asks for shared_group mode.
-func TestTaskCreate_SharedGroupRequiresGroupID(t *testing.T) {
+// TestTaskCreate_SharedGroupReportsUnsupported ensures legacy workspace policy
+// flags produce one actionable error instead of contradictory validation.
+func TestTaskCreate_SharedGroupReportsUnsupported(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
@@ -344,9 +343,25 @@ func TestTaskCreate_SharedGroupRequiresGroupID(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("pipe: %v", err)
+			}
+			oldStderr := os.Stderr
+			os.Stderr = w
 			code := runKandevCLI(tc.args)
+			_ = w.Close()
+			os.Stderr = oldStderr
+			output, readErr := io.ReadAll(r)
+			_ = r.Close()
+			if readErr != nil {
+				t.Fatalf("read stderr: %v", readErr)
+			}
 			if code == 0 {
-				t.Fatal("expected non-zero exit when --workspace-group-id is invalid for shared_group")
+				t.Fatal("expected unsupported workspace mode to fail")
+			}
+			if !strings.Contains(string(output), "--workspace-mode is not supported by Office runtime task create") {
+				t.Fatalf("stderr = %q, want unsupported workspace mode", output)
 			}
 		})
 	}

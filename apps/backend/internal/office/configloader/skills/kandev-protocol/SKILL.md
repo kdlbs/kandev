@@ -168,7 +168,7 @@ No other task creation options are supported by the Office runtime.
 
 ### comment
 
-```
+```text
 tasks message [--id ID] --prompt P    Post an agent-authored comment
                                       Use --prompt - to read from stdin
 ```

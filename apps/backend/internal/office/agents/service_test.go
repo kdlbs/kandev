@@ -147,8 +147,10 @@ func TestCreateAgentInstance_PreservesExplicitSystemSkills(t *testing.T) {
 		SkillIDs:      `["explicit-memory-id"]`,
 	}
 
+	expectedDesiredSkills := agent.DesiredSkills
+	expectedSkillIDs := agent.SkillIDs
 	stored := createAndGetAgent(t, svc, repo, agent)
-	if stored.DesiredSkills != agent.DesiredSkills || stored.SkillIDs != agent.SkillIDs {
+	if stored.DesiredSkills != expectedDesiredSkills || stored.SkillIDs != expectedSkillIDs {
 		t.Fatalf("explicit skills changed: desired=%s ids=%s", stored.DesiredSkills, stored.SkillIDs)
 	}
 	assertSkillSlugMembership(t, stored.DesiredSkills, "kandev-projects", false)

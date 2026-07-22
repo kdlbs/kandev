@@ -211,7 +211,7 @@ Each scheduler-launched agent turn has a runtime context with workspace, agent, 
 
 ### Capabilities
 
-A run carries an explicit capability scope. Capabilities include: post comment, update task status, create task or subtask, create project, request approval, read/write memory, inspect assigned skills.
+A run carries an explicit capability scope. Capabilities include: post comment, update task status, `create_task`, `create_subtask`, create project, request approval, read/write memory, inspect assigned skills.
 
 - Runtime actions check capabilities before mutating state.
 - Runtime actions attach agent/run/session identity to emitted records whenever the underlying feature supports it.

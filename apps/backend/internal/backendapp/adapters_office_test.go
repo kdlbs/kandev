@@ -90,21 +90,18 @@ func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservic
 		t.Fatalf("open sqlite: %v", err)
 	}
 	database := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = database.Close() })
 	repo, cleanup, err := repository.Provide(database, database, nil)
 	if err != nil {
 		t.Fatalf("task repository: %v", err)
 	}
+	t.Cleanup(func() { _ = cleanup() })
 	if _, err := worktree.NewSQLiteStore(database, database); err != nil {
 		t.Fatalf("worktree store: %v", err)
 	}
 	if _, err := officesqlite.NewWithDB(database, database, nil); err != nil {
 		t.Fatalf("office migrations: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = database.Close()
-		_ = cleanup()
-	})
-
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	if err != nil {
 		t.Fatalf("logger: %v", err)
