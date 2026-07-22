@@ -27,19 +27,20 @@ const (
 	lspCloseBinaryNotFound = 4001
 	lspCloseInstallFailed  = 4003
 
-	lspLanguageTypeScript   = "typescript"
-	lspLanguagePython       = "python"
-	lspLanguageGo           = "go"
-	lspLanguageRust         = "rust"
-	lspLanguageKey          = "language"
-	lspStatusKey            = "status"
-	lspStatusInstalling     = "installing"
-	lspStatusInstalled      = "installed"
-	lspStatusInstallFailed  = "install_failed"
-	lspStatusReady          = "ready"
-	lspWorkspacePathJSONKey = "workspacePath"
-	lspWorkspaceURIJSONKey  = "workspaceUri"
-	lspRepoSubpathsJSONKey  = "repoSubpaths"
+	lspLanguageTypeScript    = "typescript"
+	lspLanguagePython        = "python"
+	lspLanguageGo            = "go"
+	lspLanguageRust          = "rust"
+	lspLanguageKey           = "language"
+	lspStatusKey             = "status"
+	lspStatusInstalling      = "installing"
+	lspStatusInstalled       = "installed"
+	lspStatusInstallFailed   = "install_failed"
+	lspStatusReady           = "ready"
+	lspWorkspacePathJSONKey  = "workspacePath"
+	lspWorkspaceURIJSONKey   = "workspaceUri"
+	lspRepoSubpathsJSONKey   = "repoSubpaths"
+	lspWebSocketWriteTimeout = 5 * time.Second
 )
 
 type lspServerProcess struct {
@@ -341,10 +342,14 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 				if err != io.EOF {
 					s.logger.Debug("LSP stdout read error", zap.String("language", language), zap.Error(err))
 				}
-				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "language server exited"))
+				_ = writeLSPForwarderMessage(
+					conn,
+					websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "language server exited"),
+				)
 				return
 			}
-			if wErr := conn.WriteMessage(websocket.TextMessage, msg); wErr != nil {
+			if wErr := writeLSPForwarderMessage(conn, websocket.TextMessage, msg); wErr != nil {
 				s.logger.Debug("LSP WebSocket write error", zap.String("language", language), zap.Error(wErr))
 				return
 			}
@@ -371,7 +376,15 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 		}
 	}
 
+	_ = conn.Close()
 	s.stopLSPServer(server)
+}
+
+func writeLSPForwarderMessage(conn *websocket.Conn, messageType int, data []byte) error {
+	if err := conn.SetWriteDeadline(time.Now().Add(lspWebSocketWriteTimeout)); err != nil {
+		return err
+	}
+	return conn.WriteMessage(messageType, data)
 }
 
 func (s *Server) awaitOrInstallLSP(ctx context.Context, language string) (string, error) {

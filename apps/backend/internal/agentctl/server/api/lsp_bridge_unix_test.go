@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -38,6 +39,70 @@ func (c *writeFailingConn) Write(data []byte) (int, error) {
 type writeFailingListener struct {
 	net.Listener
 	accepted chan *writeFailingConn
+}
+
+type writeDeadlineObservation struct {
+	deadline   time.Time
+	observedAt time.Time
+}
+
+type closeReleasesWriteConn struct {
+	net.Conn
+	blockWrites     atomic.Bool
+	writeStarted    chan struct{}
+	writeReleased   chan struct{}
+	writeDeadline   chan writeDeadlineObservation
+	closed          chan struct{}
+	writeOnce       sync.Once
+	releaseOnce     sync.Once
+	deadlineSetOnce sync.Once
+	closeOnce       sync.Once
+}
+
+func newCloseReleasesWriteConn(conn net.Conn) *closeReleasesWriteConn {
+	return &closeReleasesWriteConn{
+		Conn: conn, writeStarted: make(chan struct{}), writeReleased: make(chan struct{}),
+		writeDeadline: make(chan writeDeadlineObservation, 1), closed: make(chan struct{}),
+	}
+}
+
+func (c *closeReleasesWriteConn) Write(data []byte) (int, error) {
+	if !c.blockWrites.Load() {
+		return c.Conn.Write(data)
+	}
+	c.writeOnce.Do(func() { close(c.writeStarted) })
+	<-c.closed
+	c.releaseOnce.Do(func() { close(c.writeReleased) })
+	return 0, net.ErrClosed
+}
+
+func (c *closeReleasesWriteConn) SetWriteDeadline(deadline time.Time) error {
+	if c.blockWrites.Load() {
+		c.deadlineSetOnce.Do(func() {
+			c.writeDeadline <- writeDeadlineObservation{deadline: deadline, observedAt: time.Now()}
+		})
+	}
+	return c.Conn.SetWriteDeadline(deadline)
+}
+
+func (c *closeReleasesWriteConn) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return c.Conn.Close()
+}
+
+type closeReleasesWriteListener struct {
+	net.Listener
+	accepted chan *closeReleasesWriteConn
+}
+
+func (l *closeReleasesWriteListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	wrapped := newCloseReleasesWriteConn(conn)
+	l.accepted <- wrapped
+	return wrapped, nil
 }
 
 func (l *writeFailingListener) Accept() (net.Conn, error) {
@@ -181,6 +246,89 @@ func TestHandleLSPStreamStopsProcessWhenForwardingToWebSocketFails(t *testing.T)
 	}
 	if processes := procMgr.ListProcesses(cfg.SessionID); len(processes) != 0 {
 		t.Fatalf("LSP process remains tracked after forwarder exit: %v", processes)
+	}
+}
+
+func TestHandleLSPStreamPeerCloseReleasesBlockedForwarderWrite(t *testing.T) {
+	binDir := t.TempDir()
+	serverPath := filepath.Join(binDir, "kotlin-lsp")
+	script := "#!/bin/sh\nIFS= read -r _\nprintf 'Content-Length: 2\\r\\n\\r\\n{}'\nexec /bin/cat >/dev/null\n"
+	if err := os.WriteFile(serverPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", binDir)
+
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "session-blocked-write"}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = procMgr.StopForTeardown(ctx)
+	})
+	server := NewServer(cfg, procMgr, nil, nil, log)
+	handlerReturned := make(chan struct{})
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		server.router.ServeHTTP(writer, request)
+		close(handlerReturned)
+	})
+	httpServer := httptest.NewUnstartedServer(handler)
+	listener := &closeReleasesWriteListener{
+		Listener: httpServer.Listener,
+		accepted: make(chan *closeReleasesWriteConn, 1),
+	}
+	httpServer.Listener = listener
+	httpServer.Start()
+	t.Cleanup(httpServer.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(httpServer.URL, "http")+"/api/v1/lsp/stream?language=kotlin",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("dial lsp stream: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	serverConn := <-listener.accepted
+	t.Cleanup(func() { _ = serverConn.Close() })
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read ready: %v", err)
+	}
+	serverConn.blockWrites.Store(true)
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{}`)); err != nil {
+		t.Fatalf("write trigger payload: %v", err)
+	}
+	select {
+	case <-serverConn.writeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("LSP forwarder did not enter the blocked write")
+	}
+	_ = conn.Close()
+
+	select {
+	case <-serverConn.writeReleased:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server connection close did not release the blocked writer")
+	}
+	select {
+	case observation := <-serverConn.writeDeadline:
+		duration := observation.deadline.Sub(observation.observedAt)
+		if duration <= 0 || duration > lspWebSocketWriteTimeout+time.Second {
+			t.Fatalf("forwarder write deadline has unexpected duration %v", duration)
+		}
+	default:
+		t.Fatal("forwarder write did not set a deadline")
+	}
+	select {
+	case <-handlerReturned:
+	case <-time.After(7 * time.Second):
+		t.Fatal("LSP handler remained blocked after its peer closed and released the writer")
+	}
+	if processes := procMgr.ListProcesses(cfg.SessionID); len(processes) != 0 {
+		t.Fatalf("LSP process remains tracked after peer close: %v", processes)
 	}
 }
 
