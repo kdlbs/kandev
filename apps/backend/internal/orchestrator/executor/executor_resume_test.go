@@ -72,19 +72,21 @@ func setupLiveResumeTestFixture(repo *mockRepository) {
 
 func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing.T) {
 	tests := []struct {
-		name           string
-		officeAssignee string
-		metadata       map[string]interface{}
-		wantMode       string
+		name         string
+		isFromOffice bool
+		assignee     string
+		metadata     map[string]interface{}
+		wantMode     string
 	}{
 		{name: "regular task", wantMode: ""},
-		{name: "Office task", officeAssignee: "office-agent", wantMode: McpModeOffice},
+		{name: "unassigned Office task", isFromOffice: true, wantMode: McpModeOffice},
+		{name: "assigned Kanban task", assignee: "assigned-agent", wantMode: ""},
 		{name: "Config session", metadata: map[string]interface{}{"config_mode": true}, wantMode: McpModeConfig},
 		{
-			name:           "Config session takes precedence for Office task",
-			officeAssignee: "office-agent",
-			metadata:       map[string]interface{}{"config_mode": true},
-			wantMode:       McpModeConfig,
+			name:         "Config session takes precedence for Office task",
+			isFromOffice: true,
+			metadata:     map[string]interface{}{"config_mode": true},
+			wantMode:     McpModeConfig,
 		},
 	}
 
@@ -92,7 +94,8 @@ func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
 			setupLiveResumeTestFixture(repo)
-			repo.tasks["task-1"].AssigneeAgentProfileID = tt.officeAssignee
+			repo.tasks["task-1"].IsFromOffice = tt.isFromOffice
+			repo.tasks["task-1"].AssigneeAgentProfileID = tt.assignee
 			repo.sessions["sess-1"].Metadata = tt.metadata
 
 			var capturedReq *LaunchAgentRequest

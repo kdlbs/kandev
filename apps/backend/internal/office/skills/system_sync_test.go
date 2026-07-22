@@ -149,6 +149,189 @@ func TestSyncSystemSkills_InsertsBundledSkillsForFreshWorkspace(t *testing.T) {
 	}
 }
 
+func TestBundledProjectSkillDefaultsOnlyToCEO(t *testing.T) {
+	specs, err := skills.LoadBundledSystemSkills()
+	if err != nil {
+		t.Fatalf("LoadBundledSystemSkills: %v", err)
+	}
+	for _, spec := range specs {
+		if spec.Slug != "kandev-projects" {
+			continue
+		}
+		if len(spec.DefaultForRoles) != 1 || spec.DefaultForRoles[0] != "ceo" {
+			t.Fatalf("kandev-projects default roles = %v, want [ceo]", spec.DefaultForRoles)
+		}
+		if !strings.Contains(spec.Content, "$KANDEV_CLI kandev projects create") {
+			t.Fatalf("kandev-projects does not document project creation: %q", spec.Content)
+		}
+		if !strings.Contains(spec.Content, "$KANDEV_CLI kandev task create") ||
+			!strings.Contains(spec.Content, "--project") {
+			t.Fatalf("kandev-projects does not document project task creation: %q", spec.Content)
+		}
+		return
+	}
+	t.Fatal("kandev-projects bundled system skill not found")
+}
+
+func TestBundledTaskCreateSkillContract(t *testing.T) {
+	specs, err := skills.LoadBundledSystemSkills()
+	if err != nil {
+		t.Fatalf("LoadBundledSystemSkills: %v", err)
+	}
+
+	contents := make(map[string]string)
+	for _, spec := range specs {
+		if strings.Contains(spec.Content, "task create") {
+			contents[spec.Slug] = spec.Content
+		}
+	}
+	if len(contents) == 0 {
+		t.Fatal("no bundled system skill documents task create")
+	}
+	for slug, content := range contents {
+		for _, flag := range []string{
+			"--priority",
+			"--blocked-by",
+			"--workspace-mode",
+			"--workspace-group-id",
+			"--default-child-workspace",
+			"--default-child-ordering",
+		} {
+			if strings.Contains(content, flag) {
+				t.Errorf("%s advertises unsupported task create flag %s", slug, flag)
+			}
+		}
+	}
+
+	expectedFlags := map[string][]string{
+		"kandev-escalation": {"--title", "--description"},
+		"kandev-projects":   {"--title", "--project", "--assignee"},
+		"kandev-protocol":   {"--title", "--description", "--parent", "--assignee", "--project"},
+	}
+	for slug, flags := range expectedFlags {
+		content, ok := contents[slug]
+		if !ok {
+			t.Errorf("%s bundled system skill does not document task create", slug)
+			continue
+		}
+		for _, flag := range flags {
+			if !strings.Contains(content, flag) {
+				t.Errorf("%s omits supported task create flag %s", slug, flag)
+			}
+		}
+	}
+}
+
+func TestBundledEscalationSkillUsesSupportedTaskWorkflow(t *testing.T) {
+	specs, err := skills.LoadBundledSystemSkills()
+	if err != nil {
+		t.Fatalf("LoadBundledSystemSkills: %v", err)
+	}
+
+	for _, spec := range specs {
+		if spec.Slug != "kandev-escalation" {
+			continue
+		}
+		for _, expected := range []string{
+			"HUMAN_TASK_ID=$(echo \"$HUMAN_TASK\" | jq -r '.task_id')",
+			"kandev tasks message --id \"$KANDEV_TASK_ID\"",
+			"kandev task update --status blocked",
+			"`task_blockers_resolved` wake reason will NOT occur",
+		} {
+			if !strings.Contains(spec.Content, expected) {
+				t.Errorf("kandev-escalation omits supported workflow fragment %q", expected)
+			}
+		}
+		for _, unsupported := range []string{
+			"jq -r '.id'",
+			"--add-blocker",
+			"tasks message --id \"$HUMAN_TASK_ID\"",
+			"/api/v1/office/tasks/",
+			"author_type",
+		} {
+			if strings.Contains(spec.Content, unsupported) {
+				t.Errorf("kandev-escalation advertises unsupported workflow fragment %q", unsupported)
+			}
+		}
+		createAt := strings.Index(spec.Content, "$KANDEV_CLI kandev task create")
+		parseAt := strings.Index(spec.Content, "jq -r '.task_id'")
+		messageAt := strings.Index(spec.Content, "kandev tasks message --id \"$KANDEV_TASK_ID\"")
+		blockedAt := strings.Index(spec.Content, "kandev task update --status blocked")
+		if createAt >= parseAt || parseAt >= messageAt || messageAt >= blockedAt {
+			t.Errorf("kandev-escalation command order is unsafe: create=%d parse=%d message=%d blocked=%d",
+				createAt, parseAt, messageAt, blockedAt)
+		}
+		if count := strings.Count(spec.Content, "$KANDEV_CLI kandev tasks message"); count != 1 {
+			t.Errorf("kandev-escalation message commands = %d, want only the blocked-task backlink", count)
+		}
+		return
+	}
+	t.Fatal("kandev-escalation bundled system skill not found")
+}
+
+func TestBundledSkillCLIExamplesAvoidKnownUnsupportedOperations(t *testing.T) {
+	specs, err := skills.LoadBundledSystemSkills()
+	if err != nil {
+		t.Fatalf("LoadBundledSystemSkills: %v", err)
+	}
+
+	unsupported := []string{
+		"/api/v1/office/tasks/",
+		"author_id",
+		"author_type",
+		"--add-blocker",
+		"--blocked-by",
+		"--default-child-ordering",
+		"--default-child-workspace",
+		"--priority",
+		"--workspace-group-id",
+		"--workspace-mode",
+		"$KANDEV_CLI kandev task message",
+		"$KANDEV_CLI kandev comment add",
+		"$KANDEV_CLI kandev tasks create",
+		"$KANDEV_CLI kandev tasks update",
+		"$KANDEV_CLI kandev tasks move",
+		"$KANDEV_CLI kandev tasks archive",
+	}
+	for _, spec := range specs {
+		content := spec.Content + "\n" + spec.FileInventory
+		for _, fragment := range unsupported {
+			if strings.Contains(content, fragment) {
+				t.Errorf("%s advertises unsupported CLI operation %q", spec.Slug, fragment)
+			}
+		}
+	}
+}
+
+func TestBundledProtocolSkillDocumentsScopedTaskMessages(t *testing.T) {
+	specs, err := skills.LoadBundledSystemSkills()
+	if err != nil {
+		t.Fatalf("LoadBundledSystemSkills: %v", err)
+	}
+
+	for _, spec := range specs {
+		if spec.Slug != "kandev-protocol" {
+			continue
+		}
+		for _, expected := range []string{
+			"tasks message [--id ID] --prompt P",
+			"Use --prompt - to read from stdin",
+			"signed runtime scope",
+			"derives the agent attribution from the run token",
+			"task update [--id ID] --status S [--comment C]",
+		} {
+			if !strings.Contains(spec.Content, expected) {
+				t.Errorf("kandev-protocol omits secure message contract %q", expected)
+			}
+		}
+		if strings.Contains(spec.Content, "task update [--id ID] --comment C") {
+			t.Error("kandev-protocol advertises unsupported comment-only task update")
+		}
+		return
+	}
+	t.Fatal("kandev-protocol bundled system skill not found")
+}
+
 // TestSyncSystemSkills_UpdatesChangedContentInPlace pins that a
 // content drift triggers an in-place UpdateSkill, preserving the
 // row ID (and thereby per-agent desired_skills references).

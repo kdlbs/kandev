@@ -47,7 +47,10 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.POST("/runtime/comments", h.postComment)
 	group.POST("/runtime/tasks/:id/status", h.updateTaskStatus)
 	group.POST("/runtime/tasks/:id/subtasks", h.createSubtask)
+	group.POST("/runtime/tasks", h.createTask)
 	group.POST("/runtime/agents", h.createAgent)
+	group.GET("/runtime/projects", h.listProjects)
+	group.POST("/runtime/projects", h.createProject)
 	group.PATCH("/runtime/agents/:id", h.modifyAgent)
 	group.POST("/runtime/agents/:id/runs", h.spawnAgentRun)
 	group.POST("/runtime/approvals", h.requestApproval)
@@ -55,6 +58,59 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.PUT("/runtime/memory/*path", h.putMemory)
 	group.GET("/runtime/skills", h.listSkills)
 	group.DELETE("/runtime/skills/:id", h.deleteSkill)
+}
+
+func (h *Handler) createTask(c *gin.Context) {
+	runCtx, _, ok := h.contextFromRequest(c)
+	if !ok {
+		return
+	}
+	var req CreateTaskInput
+	if !bindJSON(c, &req) {
+		return
+	}
+	if field := req.unsupportedField(); field != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": field + " is not supported by Office runtime task create"})
+		return
+	}
+	taskID, err := h.actions.CreateTask(c.Request.Context(), runCtx, req)
+	if err != nil {
+		h.respondRuntimeError(c, runCtx, "create_task", "task", req.ParentTaskID, err)
+		return
+	}
+	h.appendActionRunEvent(c.Request.Context(), runCtx, "create_task", "task", taskID)
+	c.JSON(http.StatusCreated, gin.H{"task_id": taskID})
+}
+
+func (h *Handler) listProjects(c *gin.Context) {
+	runCtx, _, ok := h.contextFromRequest(c)
+	if !ok {
+		return
+	}
+	projects, err := h.actions.ListProjects(c.Request.Context(), runCtx)
+	if err != nil {
+		h.respondRuntimeError(c, runCtx, "list_projects", "projects", runCtx.WorkspaceID, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"projects": projects})
+}
+
+func (h *Handler) createProject(c *gin.Context) {
+	runCtx, _, ok := h.contextFromRequest(c)
+	if !ok {
+		return
+	}
+	var req CreateProjectInput
+	if !bindJSON(c, &req) {
+		return
+	}
+	project, err := h.actions.CreateProject(c.Request.Context(), runCtx, req)
+	if err != nil {
+		h.respondRuntimeError(c, runCtx, "create_project", "project", req.LeadAgentProfileID, err)
+		return
+	}
+	h.appendActionRunEvent(c.Request.Context(), runCtx, "create_project", "project", project.ID)
+	c.JSON(http.StatusCreated, gin.H{"project": project})
 }
 
 func (h *Handler) postComment(c *gin.Context) {
@@ -352,6 +408,11 @@ func (h *Handler) respondRuntimeError(
 	targetID string,
 	err error,
 ) {
+	if errors.Is(err, errTaskTitleRequired) {
+		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if errors.Is(err, shared.ErrForbidden) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})

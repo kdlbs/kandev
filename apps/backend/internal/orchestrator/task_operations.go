@@ -433,17 +433,20 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 
 	// Wrap the first prompt with the Kandev MCP system block. See the
 	// matching block in startTask for the rationale (DB stores wrapped form;
-	// Message.ToAPI strips for display). Idempotent — upstream call sites that
-	// record the user message themselves (wsAddMessage on CREATED sessions)
-	// wrap first, and the HasKandevContext guard prevents a second wrap here.
+	// Message.ToAPI strips for display). The injectors canonicalize any upstream
+	// wrap from current server state before launch.
 	// Passthrough profiles skip the wrap: the prompt is typed straight into the
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
-	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !session.IsPassthrough {
-		effectivePrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
-			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
-			IncludeCoordinatorTaskControls: !isOfficeTask && !configMode,
-		})
+	if (effectivePrompt != "" || len(attachments) > 0) && !session.IsPassthrough {
+		if isOfficeTask {
+			effectivePrompt = sysprompt.InjectOfficeContext(taskID, sessionID, effectivePrompt)
+		} else {
+			effectivePrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
+				RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+				IncludeCoordinatorTaskControls: !configMode,
+			})
+		}
 	}
 
 	executorID := session.ExecutorID
@@ -700,8 +703,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// rely on the agent CLI's conversation history retaining it.
 	// Idempotent: upstream call sites (wsAddMessage on CREATED sessions,
 	// recordAutoStartMessage) wrap before recording the user message so the DB
-	// row carries the block; the HasKandevContext guard makes this orchestrator
-	// pass a no-op in those cases instead of double-wrapping.
+	// row carries the block; the mode-aware injector canonicalizes it instead of
+	// double-wrapping.
 	// Passthrough sessions skip the wrap: the prompt is typed straight into the
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello". Use the session snapshot, not a
@@ -715,11 +718,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// repo lookup pulls the canonical step. Using the workflowStepID parameter
 	// directly is wrong because it can be empty on manual user-initiated starts
 	// while the task is already bound to a signal-gated step in the DB.
-	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !skipKandevMCPWrap {
-		effectivePrompt = sysprompt.InjectKandevContextWithOptions(task.ID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
-			RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, task.ID),
-			IncludeCoordinatorTaskControls: !isOfficeTask && !configMode,
-		})
+	if (effectivePrompt != "" || len(attachments) > 0) && !skipKandevMCPWrap {
+		if isOfficeTask {
+			effectivePrompt = sysprompt.InjectOfficeContext(task.ID, sessionID, effectivePrompt)
+		} else {
+			effectivePrompt = sysprompt.InjectKandevContextWithOptions(task.ID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
+				RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, task.ID),
+				IncludeCoordinatorTaskControls: !configMode,
+			})
+		}
 	}
 
 	// Office tasks restrict the MCP toolset: kanban tools (move/update/list
@@ -758,8 +765,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	return execution, nil
 }
 
-// isOfficeTask returns true when the task has an assignee agent profile, which
-// identifies it as an office-managed task (as opposed to a kanban / quick-chat task).
+// isOfficeTask returns the repository's canonical Office ownership projection.
 func (s *Service) isOfficeTask(ctx context.Context, taskID string) bool {
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	return err == nil && isOfficeTask
@@ -770,7 +776,7 @@ func (s *Service) lookupOfficeTask(ctx context.Context, taskID string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	return dbTask != nil && dbTask.AssigneeAgentProfileID != "", nil
+	return dbTask != nil && dbTask.IsFromOffice, nil
 }
 
 // prepareSessionForStart creates the session for a launch and propagates any
@@ -795,7 +801,7 @@ func (s *Service) prepareSessionForStart(
 }
 
 // createStartSession picks the right session-creation path for the task:
-// office tasks with an assignee use the per-(task, agent) EnsureSessionForAgent
+// Office tasks with an assignee use the per-(task, agent) EnsureSessionForAgent
 // (so runs reuse one row across turns); kanban / quick-chat fall through to
 // the per-launch PrepareSession used since day one.
 func (s *Service) createStartSession(
@@ -803,7 +809,7 @@ func (s *Service) createStartSession(
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
-	if err == nil && dbTask != nil && dbTask.AssigneeAgentProfileID != "" {
+	if err == nil && dbTask != nil && dbTask.IsFromOffice && dbTask.AssigneeAgentProfileID != "" {
 		session, ensureErr := s.executor.EnsureSessionForAgent(
 			ctx, task, dbTask.AssigneeAgentProfileID, agentProfileID, executorID, executorProfileID,
 		)

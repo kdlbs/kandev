@@ -1507,6 +1507,89 @@ func TestWriteTaskReviewStateOnCancelSkipsWhenSessionListFails(t *testing.T) {
 		"cancel REVIEW writes must fail closed when sibling session reconciliation fails")
 }
 
+func TestRuntimeStateOwnershipUsesCanonicalOfficeProjection(t *testing.T) {
+	tests := []struct {
+		name           string
+		isFromOffice   bool
+		assignee       string
+		wantReview     bool
+		wantInProgress bool
+	}{
+		{name: "unassigned Office task", isFromOffice: true},
+		{name: "assigned Kanban task", assignee: "assigned-agent", wantReview: true, wantInProgress: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "")
+			session, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			session.State = models.TaskSessionStateWaitingForInput
+			require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+			taskRepo := newMockTaskRepo()
+			seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+			svc := createTestService(repo, newMockStepGetter(), taskRepo)
+			svc.repo = ownershipOverrideRepo{
+				sessionExecutorStore: repo,
+				tasks: map[string]*models.Task{"t1": {
+					ID: "t1", IsFromOffice: tt.isFromOffice, AssigneeAgentProfileID: tt.assignee,
+				}},
+			}
+
+			svc.writeTaskReviewState(ctx, "t1", "s1")
+			reviewWritten := taskRepo.updatedStates["t1"] == v1.TaskStateReview
+			require.Equal(t, tt.wantReview, reviewWritten)
+
+			taskRepo.updatedStates = make(map[string]v1.TaskState)
+			require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateStarting, ""))
+			require.NoError(t, svc.reconcileTaskStateForRuntime(ctx, "t1", "s1", v1.TaskStateInProgress))
+			inProgressWritten := taskRepo.updatedStates["t1"] == v1.TaskStateInProgress
+			require.Equal(t, tt.wantInProgress, inProgressWritten)
+		})
+	}
+}
+
+func TestCancelStateOwnershipUsesCanonicalOfficeProjection(t *testing.T) {
+	tests := []struct {
+		name         string
+		isFromOffice bool
+		assignee     string
+		wantReview   bool
+	}{
+		{name: "unassigned Office task", isFromOffice: true},
+		{name: "assigned Kanban task", assignee: "assigned-agent", wantReview: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "")
+			session, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			session.State = models.TaskSessionStateWaitingForInput
+			require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+			taskRepo := newMockTaskRepo()
+			seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+			svc := createTestService(repo, newMockStepGetter(), taskRepo)
+			svc.repo = ownershipOverrideRepo{
+				sessionExecutorStore: repo,
+				tasks: map[string]*models.Task{"t1": {
+					ID: "t1", IsFromOffice: tt.isFromOffice, AssigneeAgentProfileID: tt.assignee,
+				}},
+			}
+
+			svc.writeTaskReviewStateOnCancel(ctx, "t1", "s1")
+			reviewWritten := taskRepo.updatedStates["t1"] == v1.TaskStateReview
+			require.Equal(t, tt.wantReview, reviewWritten)
+		})
+	}
+}
+
 func TestToolUpdateFromFailedExecutionDoesNotCreateMessage(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

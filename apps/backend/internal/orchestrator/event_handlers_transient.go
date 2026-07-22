@@ -113,11 +113,10 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 	if data.SessionID == "" || !routingerr.IsTransientProviderError(data.ErrorMessage) {
 		return false
 	}
-	// Genuine office tasks (those with an assignee agent profile) render their
+	// Genuine Office-owned tasks render their
 	// own structured error UI — keep them on the existing path rather than the
-	// kanban-style yellow retry card. Note: we intentionally check the task's
-	// assignee, NOT isOfficeSession (session.AgentProfileID), which is also set
-	// for ordinary kanban tasks started with an agent profile.
+	// kanban-style yellow retry card. The canonical task projection avoids
+	// treating ordinary Kanban tasks with an assigned profile as Office tasks.
 	if s.isOfficeTask(ctx, data.TaskID) {
 		return false
 	}

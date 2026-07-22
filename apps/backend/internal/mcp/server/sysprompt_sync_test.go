@@ -13,18 +13,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// kandevToolRef matches any `<name>_kandev` identifier appearing in a prompt.
-// The regex enforces snake_case and requires the _kandev suffix at a word boundary.
-var kandevToolRef = regexp.MustCompile(`\b[a-z][a-z0-9_]*_kandev\b`)
+// kandevToolRef captures the canonical `<name>_kandev` identifier from either
+// its protocol form or the known `mcp__kandev__` client-qualified alias.
+var kandevToolRef = regexp.MustCompile(`\b(?:mcp__kandev__)?([a-z][a-z0-9_]*_kandev)\b`)
 
 // extractKandevTools returns the unique set of "<name>_kandev" tool names
 // referenced anywhere inside the given prompt text.
 func extractKandevTools(prompt string) map[string]struct{} {
 	out := make(map[string]struct{})
-	for _, m := range kandevToolRef.FindAllString(prompt, -1) {
-		out[m] = struct{}{}
+	for _, match := range kandevToolRef.FindAllStringSubmatch(prompt, -1) {
+		out[match[1]] = struct{}{}
 	}
 	return out
+}
+
+func TestExtractKandevTools_NormalizesClientQualifiedAliases(t *testing.T) {
+	referenced := extractKandevTools(
+		"Canonical step_complete_kandev may appear as mcp__kandev__step_complete_kandev.",
+	)
+	assert.Equal(t, map[string]struct{}{"step_complete_kandev": {}}, referenced)
 }
 
 // findBareToolReferences scans `prompt` for any whole-word occurrence of a
@@ -190,6 +197,26 @@ func TestSyspromptToolNames_MatchMCPConfigMode(t *testing.T) {
 	}
 }
 
+func TestSyspromptToolNames_ExactlyMatchMCPOfficeMode(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
+	require.NotNil(t, s)
+
+	registered := make(map[string]struct{})
+	for _, name := range getRegisteredToolNames(s) {
+		registered[name] = struct{}{}
+	}
+	referenced := extractKandevTools(sysprompt.OfficeContext())
+
+	assert.Equal(t, registered, referenced,
+		"Office first-turn context must advertise exactly the ModeOffice tool inventory")
+	assert.NotContains(t, referenced, "step_complete_kandev")
+	assert.NotContains(t, sysprompt.OfficeContext(), "mcp__kandev__step_complete_kandev")
+}
+
 // TestSyspromptToolNames_NoBareToolReferences catches the opposite drift: a
 // prompt that mentions a registered tool by its bare name (without the
 // `_kandev` suffix). Without this check, a typo like
@@ -217,6 +244,7 @@ func TestSyspromptToolNames_NoBareToolReferences(t *testing.T) {
 	cases := map[string]string{
 		"PlanMode":          sysprompt.PlanMode(),
 		"KandevContext":     sysprompt.KandevContext(),
+		"OfficeContext":     sysprompt.OfficeContext(),
 		"DefaultPlanPrefix": sysprompt.DefaultPlanPrefix(),
 		"ConfigContext":     sysprompt.ConfigContext(),
 	}

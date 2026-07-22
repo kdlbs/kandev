@@ -123,13 +123,23 @@ type taskCreatorAdapter struct {
 }
 
 func (a *taskCreatorAdapter) CreateOfficeTask(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (string, error) {
+	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginOnboarding)
+}
+
+func (a *taskCreatorAdapter) CreateOfficeTaskAsAgent(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (string, error) {
+	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginAgentCreated)
+}
+
+func (a *taskCreatorAdapter) createOfficeTask(
+	ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description, origin string,
+) (string, error) {
 	task, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
 		Title:                  title,
 		Description:            description,
 		ProjectID:              projectID,
 		AssigneeAgentProfileID: assigneeAgentID,
-		Origin:                 models.TaskOriginOnboarding,
+		Origin:                 origin,
 	})
 	if err != nil {
 		return "", err

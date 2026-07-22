@@ -632,6 +632,18 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 	}
 }
 
+type ownershipOverrideRepo struct {
+	sessionExecutorStore
+	tasks map[string]*models.Task
+}
+
+func (r ownershipOverrideRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	if task, ok := r.tasks[id]; ok {
+		return task, nil
+	}
+	return r.sessionExecutorStore.GetTask(ctx, id)
+}
+
 // seedExecutorRunning attaches an executors_running row to a session so the
 // post-refactor "session has been launched" / GetExecutionIDForSession lookups
 // resolve. Pre-refactor tests set session.AgentExecutionID directly; that field
@@ -2313,6 +2325,45 @@ func TestHandleRecoverableFailure(t *testing.T) {
 			t.Error("expected cleanup to call StopAgentWithReason")
 		}
 	})
+}
+
+func TestIsOfficeSessionUsesCanonicalTaskOwnership(t *testing.T) {
+	tests := []struct {
+		name         string
+		isFromOffice bool
+		sessionAgent string
+		want         bool
+	}{
+		{name: "unassigned Office task", isFromOffice: true, want: true},
+		{name: "assigned Kanban session", sessionAgent: "assigned-agent", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "")
+			session, err := repo.GetTaskSession(ctx, "s1")
+			if err != nil {
+				t.Fatalf("get session: %v", err)
+			}
+			session.AgentProfileID = tt.sessionAgent
+			if err := repo.UpdateTaskSession(ctx, session); err != nil {
+				t.Fatalf("update session: %v", err)
+			}
+
+			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+			svc.repo = ownershipOverrideRepo{
+				sessionExecutorStore: repo,
+				tasks: map[string]*models.Task{"t1": {
+					ID: "t1", IsFromOffice: tt.isFromOffice,
+				}},
+			}
+			if got := svc.isOfficeSession(ctx, "s1"); got != tt.want {
+				t.Fatalf("isOfficeSession = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestHandleAgentStartFailed(t *testing.T) {

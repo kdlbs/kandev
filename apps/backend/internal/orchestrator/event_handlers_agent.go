@@ -1060,7 +1060,7 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 		s.createRecoveryStatusMessage(ctx, data)
 	}
 
-	// Set session state. Office tasks (those with an assignee_agent_profile_id)
+	// Set session state. Office-owned tasks
 	// transition to FAILED so the chat correctly stops rendering "Agent
 	// working" and the topbar spinner clears. Kanban / quick-chat tasks
 	// keep the legacy WAITING_FOR_INPUT path so the user can resume via
@@ -1160,9 +1160,8 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	}
 }
 
-// isOfficeSession returns true when the session row carries an
-// agent_profile_id — the office indicator. Best-effort: a missing
-// session falls back to the legacy kanban path.
+// isOfficeSession resolves Office ownership through the session's task.
+// Best-effort: a missing session or task falls back to the Kanban path.
 func (s *Service) isOfficeSession(ctx context.Context, sessionID string) bool {
 	if sessionID == "" {
 		return false
@@ -1171,7 +1170,8 @@ func (s *Service) isOfficeSession(ctx context.Context, sessionID string) bool {
 	if err != nil || session == nil {
 		return false
 	}
-	return session.AgentProfileID != ""
+	task, err := s.repo.GetTask(ctx, session.TaskID)
+	return err == nil && task != nil && task.IsFromOffice
 }
 
 // handleAgentStartFailed is called by the executor when StartAgentProcess fails.

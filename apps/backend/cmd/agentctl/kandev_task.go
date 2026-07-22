@@ -51,7 +51,7 @@ func taskGet(args []string) int {
 	return handleResponse(body, status, err)
 }
 
-// taskUpdate patches a task with optional status and comment fields.
+// taskUpdate changes task status through the authenticated Office runtime API.
 func taskUpdate(args []string) int {
 	fs := flag.NewFlagSet("task update", flag.ContinueOnError)
 	id := fs.String("id", "", "Task ID (defaults to $KANDEV_TASK_ID)")
@@ -59,6 +59,15 @@ func taskUpdate(args []string) int {
 	comment := fs.String("comment", "", "Comment to add")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
+		return 1
+	}
+
+	if strings.TrimSpace(*status) == "" {
+		if strings.TrimSpace(*comment) != "" {
+			cliError("--status is required; use `kandev tasks message` for comment-only updates")
+		} else {
+			cliError("nothing to update: pass --status")
+		}
 		return 1
 	}
 
@@ -74,30 +83,25 @@ func taskUpdate(args []string) int {
 		return 1
 	}
 
-	payload := make(map[string]string)
-	if *status != "" {
-		payload["status"] = *status
-	}
+	payload := map[string]string{"status": *status}
 	if *comment != "" {
 		payload["comment"] = *comment
 	}
-	if len(payload) == 0 {
-		cliError("nothing to update: pass --status and/or --comment")
-		return 1
-	}
 
-	body, statusCode, err := client.do(http.MethodPatch,
-		fmt.Sprintf("/api/v1/office/tasks/%s", taskID), payload)
+	body, statusCode, err := client.do(http.MethodPost,
+		fmt.Sprintf("/api/v1/office/runtime/tasks/%s/status", taskID), payload)
 	return handleResponse(body, statusCode, err)
 }
 
-// taskCreate creates a new task via the kanban task API.
+// taskCreate creates a new task through the authenticated Office runtime API.
 func taskCreate(args []string) int {
 	fs := flag.NewFlagSet("task create", flag.ContinueOnError)
 	title := fs.String("title", "", "Task title (required)")
+	description := fs.String("description", "", "Task description")
 	parent := fs.String("parent", "", "Parent task ID")
 	assignee := fs.String("assignee", "", "Assignee agent ID")
 	priority := fs.String("priority", "", "Priority value")
+	project := fs.String("project", "", "Project ID")
 	blockedBy := fs.String("blocked-by", "", "Comma-separated task IDs that must complete before this task")
 	workspaceMode := fs.String("workspace-mode", "", "Workspace mode for this task: inherit_parent, new_workspace, or shared_group")
 	workspaceGroupID := fs.String("workspace-group-id", "", "Workspace group ID to join (required when --workspace-mode=shared_group)")
@@ -108,7 +112,8 @@ func taskCreate(args []string) int {
 		return 1
 	}
 
-	if *title == "" {
+	normalizedTitle := strings.TrimSpace(*title)
+	if normalizedTitle == "" {
 		cliError("--title is required")
 		return 1
 	}
@@ -116,46 +121,46 @@ func taskCreate(args []string) int {
 		cliError("--workspace-group-id is required when --workspace-mode=%s", workspaceModeSharedGroup)
 		return 1
 	}
+	unsupported := []struct {
+		name  string
+		value string
+	}{
+		{"priority", *priority},
+		{"blocked-by", *blockedBy},
+		{"workspace-mode", *workspaceMode},
+		{"workspace-group-id", *workspaceGroupID},
+		{"default-child-workspace", *defaultChildWorkspace},
+		{"default-child-ordering", *defaultChildOrdering},
+	}
+	for _, field := range unsupported {
+		if strings.TrimSpace(field.value) != "" {
+			cliError("--%s is not supported by Office runtime task create", field.name)
+			return 1
+		}
+	}
 
 	client, err := newKandevClient()
 	if err != nil {
 		cliError("%v", err)
 		return 1
 	}
-
-	payload := map[string]interface{}{"title": *title}
+	payload := map[string]interface{}{
+		"title": normalizedTitle,
+	}
+	if *description != "" {
+		payload["description"] = *description
+	}
 	if *parent != "" {
 		payload["parent_id"] = *parent
 	}
 	if *assignee != "" {
 		payload["assignee"] = *assignee
 	}
-	if *priority != "" {
-		payload["priority"] = *priority
-	}
-	if *blockedBy != "" {
-		ids := strings.Split(*blockedBy, ",")
-		for i, id := range ids {
-			ids[i] = strings.TrimSpace(id)
-		}
-		payload["blocked_by"] = ids
-	}
-	// Workspace-policy fields (office task-handoffs). Empty values fall
-	// through so the backend resolves defaults / parent inheritance.
-	if m := strings.TrimSpace(*workspaceMode); m != "" {
-		payload["workspace_mode"] = m
-	}
-	if gid := strings.TrimSpace(*workspaceGroupID); gid != "" {
-		payload["workspace_group_id"] = gid
-	}
-	if dcw := strings.TrimSpace(*defaultChildWorkspace); dcw != "" {
-		payload["default_child_workspace"] = dcw
-	}
-	if dco := strings.TrimSpace(*defaultChildOrdering); dco != "" {
-		payload["default_child_ordering"] = dco
+	if *project != "" {
+		payload["project_id"] = *project
 	}
 
-	body, status, err := client.do(http.MethodPost, "/api/v1/tasks", payload)
+	body, status, err := client.do(http.MethodPost, "/api/v1/office/runtime/tasks", payload)
 	return handleResponse(body, status, err)
 }
 

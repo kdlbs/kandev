@@ -113,6 +113,10 @@ Implementation summary:
 EOF
 ```
 
+`tasks message` uses the signed runtime scope. The server verifies that the task
+is writable by this run and derives the agent attribution from the run token.
+Do not use another comment command or supply author fields yourself.
+
 ### Step 6: Update task status
 
 Mark the task as done (or in_review if reviewers are assigned):
@@ -130,6 +134,7 @@ If the task is too large, decompose it into subtasks:
 
 ```bash
 $KANDEV_CLI kandev task create --title "Implement Google OAuth provider" \
+  --description "Add the provider flow, callback handling, and tests." \
   --parent "$KANDEV_TASK_ID" --assignee "worker-agent-id"
 ```
 
@@ -153,18 +158,19 @@ agent-ID headers are handled automatically from environment variables.
 
 ```
 task get [--id ID]                    Read task details (defaults to $KANDEV_TASK_ID)
-task update [--id ID] --status S      Update task status
-task update [--id ID] --comment C     Add a status-change comment
-task create --title T [--parent ID]   Create a task or subtask
-         [--assignee A] [--priority P]
+task update [--id ID] --status S [--comment C]
+                                      Update status with an optional status-change comment
+task create --title T [--description D] Create a task or subtask
+         [--parent ID] [--assignee A] [--project ID]
 ```
+
+No other task creation options are supported by the Office runtime.
 
 ### comment
 
 ```
 tasks message [--id ID] --prompt P    Post an agent-authored comment
-comment add [--task ID] --body BODY   Simulate a user comment for fixtures
-comment list [--task ID] [--limit N]  List comments on a task
+                                      Use --prompt - to read from stdin
 ```
 
 ### agents
@@ -227,7 +233,9 @@ fi
 
 4. **If you cannot complete a task because a human decision is required** (design
    choice, access credentials, ambiguous requirements), use the `kandev-escalation`
-   skill to create a human task and block your task on it. For all other cases
+   skill to create a human task, cross-reference it, and mark your task blocked.
+   The current CLI cannot create a blocker relationship, so recovery requires a
+   normal human comment or task update. For all other cases
    (missing permissions, external dependency), post a comment explaining why and
    exit. Do not set the task to done if it is not actually done.
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -311,12 +313,36 @@ func (r *messageAddSwitchRepo) CreateTurn(_ context.Context, turn *models.Turn) 
 	return nil
 }
 
-func TestWSAddMessage_CreatedOfficeSessionOmitsCoordinatorTaskControls(t *testing.T) {
+func TestWSAddMessage_CreatedUnassignedOfficeSessionUsesOfficeContext(t *testing.T) {
+	now := time.Now().UTC()
+	content := runCreatedMessageContextTest(t, &models.Task{
+		ID:           "t1",
+		State:        v1.TaskStateInProgress,
+		IsFromOffice: true,
+		UpdatedAt:    now,
+	}, &models.TaskSession{
+		ID:             "s1",
+		TaskID:         "t1",
+		State:          models.TaskSessionStateCreated,
+		AgentProfileID: "profile-1",
+		UpdatedAt:      now,
+	}, sysprompt.InjectOfficeContext("wrong-task", "wrong-session", "Do the work"))
+	assert.Contains(t, content, "KANDEV OFFICE MCP TOOLS")
+	assert.Contains(t, content, "$KANDEV_CLI")
+	assert.NotContains(t, content, "stop_task_kandev",
+		"Office pre-wrap must not persist a task-mode-only tool")
+	assert.NotContains(t, content, "list_workspaces_kandev")
+	assert.NotContains(t, content, "wrong-task")
+	assert.Equal(t, 1, strings.Count(content, sysprompt.TagStart))
+}
+
+func TestWSAddMessage_CreatedAssignedKanbanSessionUsesTaskContext(t *testing.T) {
 	now := time.Now().UTC()
 	content := runCreatedMessageContextTest(t, &models.Task{
 		ID:                     "t1",
 		State:                  v1.TaskStateInProgress,
-		AssigneeAgentProfileID: "office-agent",
+		AssigneeAgentProfileID: "assigned-agent",
+		IsFromOffice:           false,
 		UpdatedAt:              now,
 	}, &models.TaskSession{
 		ID:             "s1",
@@ -324,9 +350,30 @@ func TestWSAddMessage_CreatedOfficeSessionOmitsCoordinatorTaskControls(t *testin
 		State:          models.TaskSessionStateCreated,
 		AgentProfileID: "profile-1",
 		UpdatedAt:      now,
-	})
-	assert.NotContains(t, content, "stop_task_kandev",
-		"Office pre-wrap must not persist a task-mode-only tool")
+	}, "Do the work")
+	assert.Contains(t, content, "KANDEV MCP TOOLS")
+	assert.NotContains(t, content, "KANDEV OFFICE MCP TOOLS")
+}
+
+func TestWSAddMessage_CreatedTaskSessionCanonicalizesStaleTaskContext(t *testing.T) {
+	now := time.Now().UTC()
+	content := runCreatedMessageContextTest(t, &models.Task{
+		ID:        "t1",
+		State:     v1.TaskStateInProgress,
+		UpdatedAt: now,
+	}, &models.TaskSession{
+		ID:             "s1",
+		TaskID:         "t1",
+		State:          models.TaskSessionStateCreated,
+		AgentProfileID: "profile-1",
+		UpdatedAt:      now,
+	}, sysprompt.InjectKandevContext("wrong-task", "wrong-session", "Do the work", true))
+	assert.Contains(t, content, "Kandev Task ID: t1")
+	assert.Contains(t, content, "Session ID: s1")
+	assert.NotContains(t, content, "wrong-task")
+	assert.NotContains(t, content, "wrong-session")
+	assert.NotContains(t, content, "step_complete_kandev")
+	assert.Equal(t, 1, strings.Count(content, sysprompt.TagStart))
 }
 
 func TestWSAddMessage_CreatedConfigSessionOmitsCoordinatorTaskControls(t *testing.T) {
@@ -342,12 +389,12 @@ func TestWSAddMessage_CreatedConfigSessionOmitsCoordinatorTaskControls(t *testin
 		AgentProfileID: "profile-1",
 		Metadata:       map[string]interface{}{"config_mode": true},
 		UpdatedAt:      now,
-	})
+	}, "Do the work")
 	assert.NotContains(t, content, "stop_task_kandev",
 		"Config pre-wrap must not persist a task-mode-only tool")
 }
 
-func runCreatedMessageContextTest(t *testing.T, task *models.Task, session *models.TaskSession) string {
+func runCreatedMessageContextTest(t *testing.T, task *models.Task, session *models.TaskSession, content string) string {
 	t.Helper()
 	repo := &messageAddSwitchRepo{
 		tasks:     map[string]*models.Task{task.ID: task},
@@ -368,7 +415,7 @@ func runCreatedMessageContextTest(t *testing.T, task *models.Task, session *mode
 	req, err := ws.NewRequest("req-office", ws.ActionMessageAdd, map[string]interface{}{
 		"task_id":    task.ID,
 		"session_id": session.ID,
-		"content":    "Do the work",
+		"content":    content,
 	})
 	require.NoError(t, err)
 	resp, err := h.wsAddMessage(context.Background(), req)

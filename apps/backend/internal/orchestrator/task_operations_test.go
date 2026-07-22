@@ -686,8 +686,8 @@ func TestCancelAgent_TaskStateReconcile(t *testing.T) {
 
 			if tc.office {
 				seedOfficeSession(t, repo, taskID, sessionID, "")
-				// Seed the mock so a missing office guard would fail the test: without
-				// AssigneeAgentProfileID early-return, UpdateTaskStateIfCurrentIn would
+				// Seed the mock so a missing Office ownership guard would fail the test:
+				// without the IsFromOffice early-return, UpdateTaskStateIfCurrentIn would
 				// run against this IN_PROGRESS row and write updatedStates.
 				taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: tc.taskState}
 			} else {
@@ -2299,7 +2299,7 @@ func TestStartCreatedSession_EmptyProfileFallsBackToWorkflowDefault(t *testing.T
 	}
 }
 
-func TestStartCreatedSession_OfficeTaskSkipsSchedulingState(t *testing.T) {
+func TestStartCreatedSession_UnassignedProjectTaskUsesOfficeMode(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
@@ -2311,7 +2311,7 @@ func TestStartCreatedSession_OfficeTaskSkipsSchedulingState(t *testing.T) {
 	}
 	dbTask.State = v1.TaskStateReview
 	dbTask.WorkflowStepID = "step-office"
-	dbTask.AssigneeAgentProfileID = "office-agent"
+	dbTask.ProjectID = "project-office"
 	if err := repo.UpdateTask(ctx, dbTask); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
@@ -2325,12 +2325,18 @@ func TestStartCreatedSession_OfficeTaskSkipsSchedulingState(t *testing.T) {
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 
-	if _, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Do the work", false, false, true, nil); err != nil {
+	preWrapped := sysprompt.InjectKandevContext("wrong-task", "wrong-session", "Do the work", true)
+	if _, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", preWrapped, false, false, true, nil); err != nil {
 		t.Fatalf("StartCreatedSession: %v", err)
 	}
 	require.Len(t, messages.userMessages, 1)
+	assert.Contains(t, messages.userMessages[0].content, "KANDEV OFFICE MCP TOOLS")
+	assert.Contains(t, messages.userMessages[0].content, "$KANDEV_CLI")
 	assert.NotContains(t, messages.userMessages[0].content, "stop_task_kandev",
 		"Office first-turn context must not advertise a task-mode-only tool")
+	assert.NotContains(t, messages.userMessages[0].content, "list_workspaces_kandev")
+	assert.NotContains(t, messages.userMessages[0].content, "wrong-task")
+	assert.Equal(t, 1, strings.Count(messages.userMessages[0].content, sysprompt.TagStart))
 	agentMgr.mu.Lock()
 	mcpModeCalls := append([]sessionModeCall(nil), agentMgr.mcpModeCalls...)
 	agentMgr.mu.Unlock()
@@ -2365,6 +2371,35 @@ func TestStartCreatedSession_ConfigModeOmitsCoordinatorTaskControls(t *testing.T
 	assert.Contains(t, messages.userMessages[0].content, "KANDEV CONFIG MCP TOOLS")
 	assert.NotContains(t, messages.userMessages[0].content, "stop_task_kandev",
 		"Config first-turn context must not advertise a task-mode-only tool")
+}
+
+func TestStartCreatedSession_AssignedKanbanTaskUsesTaskMode(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	dbTask, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	dbTask.AssigneeAgentProfileID = "assigned-agent"
+	require.NoError(t, repo.UpdateTask(ctx, dbTask))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Kanban Task", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	_, err = svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Do the work", false, false, false, nil)
+	require.NoError(t, err)
+	require.Len(t, messages.userMessages, 1)
+	assert.Contains(t, messages.userMessages[0].content, "KANDEV MCP TOOLS")
+	assert.NotContains(t, messages.userMessages[0].content, "KANDEV OFFICE MCP TOOLS")
+	agentMgr.mu.Lock()
+	mcpModeCalls := append([]sessionModeCall(nil), agentMgr.mcpModeCalls...)
+	agentMgr.mu.Unlock()
+	require.Empty(t, mcpModeCalls)
 }
 
 // --- recordInitialMessage ---
@@ -2813,6 +2848,66 @@ func TestStartCreatedSession_DoesNotDoubleWrapPreWrappedPrompt(t *testing.T) {
 	if !strings.Contains(content, "Build me a feature") {
 		t.Errorf("expected user text preserved, got %q", content)
 	}
+}
+
+func TestStartCreatedSession_ReplacesOfficeContextForSignalGatedTask(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	dbTask, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	dbTask.WorkflowStepID = "step-signal"
+	require.NoError(t, repo.UpdateTask(ctx, dbTask))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Task", State: v1.TaskStateInProgress}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-signal"] = &wfmodels.WorkflowStep{
+		ID: "step-signal", WorkflowID: "wf1", AutoAdvanceRequiresSignal: true,
+	}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	preWrapped := sysprompt.InjectOfficeContext("wrong-task", "wrong-session", "Do the work")
+	_, err = svc.StartCreatedSession(ctx, "task1", "session1", "profile1", preWrapped, false, false, false, nil)
+	require.NoError(t, err)
+	require.Len(t, messages.userMessages, 1)
+	content := messages.userMessages[0].content
+	assert.Contains(t, content, "KANDEV MCP TOOLS")
+	assert.Contains(t, content, "step_complete_kandev")
+	assert.NotContains(t, content, "KANDEV OFFICE MCP TOOLS")
+	assert.NotContains(t, content, "wrong-task")
+	assert.Equal(t, 1, strings.Count(content, sysprompt.TagStart))
+}
+
+func TestStartCreatedSession_CanonicalizesStaleTaskContextAndCapabilities(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Task", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	preWrapped := sysprompt.InjectKandevContext("wrong-task", "wrong-session", "Do the work", true)
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", preWrapped, false, false, false, nil)
+	require.NoError(t, err)
+	require.Len(t, messages.userMessages, 1)
+	content := messages.userMessages[0].content
+	assert.Contains(t, content, "Kandev Task ID: task1")
+	assert.Contains(t, content, "Session ID: session1")
+	assert.NotContains(t, content, "wrong-task")
+	assert.NotContains(t, content, "wrong-session")
+	assert.NotContains(t, content, "step_complete_kandev")
+	assert.Equal(t, 1, strings.Count(content, sysprompt.TagStart))
 }
 
 // TestStartCreatedSession_EmptyPromptSkipsWrap verifies the orchestrator does
@@ -3887,7 +3982,7 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 
 // --- ensureSessionRunning: prepared workspace ---
 
-func TestEnsureSessionRunning_PreparedOfficeWorkspaceSetsMCPMode(t *testing.T) {
+func TestEnsureSessionRunning_UnassignedProjectWorkspaceSetsMCPMode(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 
@@ -3898,7 +3993,7 @@ func TestEnsureSessionRunning_PreparedOfficeWorkspaceSetsMCPMode(t *testing.T) {
 		t.Fatalf("failed to load task: %v", err)
 	}
 	dbTask.WorkflowStepID = "step-office"
-	dbTask.AssigneeAgentProfileID = "office-agent"
+	dbTask.ProjectID = "project-office"
 	if err := repo.UpdateTask(ctx, dbTask); err != nil {
 		t.Fatalf("failed to mark task as Office-owned: %v", err)
 	}

@@ -102,6 +102,94 @@ func newTestAgentServiceWithProfileStore(
 	return svc, repo, profileStore
 }
 
+func TestCreateAgentInstance_CEOReceivesProjectSkillByDefault(t *testing.T) {
+	svc, repo := newTestAgentService(t)
+	agent := &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "CEO",
+		Role:        models.AgentRoleCEO,
+	}
+
+	stored := createAndGetAgent(t, svc, repo, agent)
+	assertSkillSlugMembership(t, stored.DesiredSkills, "kandev-projects", true)
+}
+
+func TestCreateAgentInstance_NonCEORolesDoNotReceiveProjectSkillByDefault(t *testing.T) {
+	for _, role := range []models.AgentRole{
+		models.AgentRoleWorker,
+		models.AgentRoleSpecialist,
+		models.AgentRoleAssistant,
+		models.AgentRoleSecurity,
+		models.AgentRoleQA,
+		models.AgentRoleDevOps,
+	} {
+		t.Run(string(role), func(t *testing.T) {
+			svc, repo := newTestAgentService(t)
+			agent := &models.AgentInstance{
+				WorkspaceID: "ws-1",
+				Name:        string(role),
+				Role:        role,
+			}
+
+			stored := createAndGetAgent(t, svc, repo, agent)
+			assertSkillSlugMembership(t, stored.DesiredSkills, "kandev-projects", false)
+		})
+	}
+}
+
+func TestCreateAgentInstance_PreservesExplicitSystemSkills(t *testing.T) {
+	svc, repo := newTestAgentService(t)
+	agent := &models.AgentInstance{
+		WorkspaceID:   "ws-1",
+		Name:          "CEO",
+		Role:          models.AgentRoleCEO,
+		DesiredSkills: `["memory"]`,
+		SkillIDs:      `["explicit-memory-id"]`,
+	}
+
+	stored := createAndGetAgent(t, svc, repo, agent)
+	if stored.DesiredSkills != agent.DesiredSkills || stored.SkillIDs != agent.SkillIDs {
+		t.Fatalf("explicit skills changed: desired=%s ids=%s", stored.DesiredSkills, stored.SkillIDs)
+	}
+	assertSkillSlugMembership(t, stored.DesiredSkills, "kandev-projects", false)
+}
+
+func createAndGetAgent(
+	t *testing.T,
+	svc *AgentService,
+	repo *sqlite.Repository,
+	agent *models.AgentInstance,
+) *models.AgentInstance {
+	t.Helper()
+	if err := svc.CreateAgentInstance(context.Background(), agent); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+	stored, err := repo.GetAgentInstance(context.Background(), agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance: %v", err)
+	}
+	return stored
+}
+
+func assertSkillSlugMembership(t *testing.T, raw, slug string, want bool) {
+	t.Helper()
+	var slugs []string
+	if err := json.Unmarshal([]byte(raw), &slugs); err != nil {
+		t.Fatalf("decode desired_skills %q: %v", raw, err)
+	}
+	for _, got := range slugs {
+		if got == slug {
+			if !want {
+				t.Fatalf("desired_skills %v unexpectedly contains %q", slugs, slug)
+			}
+			return
+		}
+	}
+	if want {
+		t.Fatalf("desired_skills %v does not contain %q", slugs, slug)
+	}
+}
+
 func TestCreateAgentInstance_RollsBackWhenCanonicalProfileUpdateFails(t *testing.T) {
 	svc, _ := newTestAgentService(t)
 	svc.SetProfileStore(failingProfileStore{})

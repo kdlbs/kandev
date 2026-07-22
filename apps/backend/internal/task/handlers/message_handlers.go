@@ -279,14 +279,14 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// the agent" path. Wrap with the Kandev MCP system block before persisting
 	// so the DB row matches what the agent receives (and "Show formatted"
 	// reveals it). The orchestrator's wrap in StartCreatedSession is
-	// idempotent (HasKandevContext guard), so passing the wrapped content
-	// through dispatchPromptAsync does not double-wrap downstream.
-	// NOTE: req.Content is user-controlled — do NOT guard this wrap on
-	// HasKandevContext. A malicious or naive client could craft a body
+	// mode-aware and canonicalizing, so passing the wrapped content through
+	// dispatchPromptAsync does not double-wrap downstream.
+	// NOTE: req.Content is user-controlled. A
+	// malicious or naive client could craft a body
 	// containing a fake "<kandev-system>KANDEV MCP TOOLS</kandev-system>"
 	// block and bypass server-side injection of the canonical task/session/
-	// tool context. Wrap unconditionally; the orchestrator's own guard sees
-	// our wrap downstream and skips its second pass.
+	// tool context. The injector replaces it with server-generated context here
+	// and canonicalizes it again from server state downstream.
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
@@ -299,10 +299,14 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
 		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
-		storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, req.Content, sysprompt.KandevContextOptions{
-			RequiresCompletionSignal:       requiresSignal,
-			IncludeCoordinatorTaskControls: task.AssigneeAgentProfileID == "" && !configMode,
-		})
+		if task.IsFromOffice {
+			storedContent = sysprompt.InjectOfficeContext(req.TaskID, req.TaskSessionID, req.Content)
+		} else {
+			storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, req.Content, sysprompt.KandevContextOptions{
+				RequiresCompletionSignal:       requiresSignal,
+				IncludeCoordinatorTaskControls: !configMode,
+			})
+		}
 		req.Content = storedContent
 	}
 

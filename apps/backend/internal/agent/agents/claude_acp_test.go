@@ -1,9 +1,28 @@
 package agents
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestClaudeACPCommandsUseUnversionedBridgePackage(t *testing.T) {
+	want := []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp"}
+	agent := NewClaudeACP()
+
+	if got := agent.BuildCommand(CommandOptions{}).Args(); !reflect.DeepEqual(got, want) {
+		t.Errorf("BuildCommand() = %q, want %q", got, want)
+	}
+	if got := agent.Runtime().Cmd.Args(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Runtime().Cmd = %q, want %q", got, want)
+	}
+	if got := agent.InferenceConfig().Command.Args(); !reflect.DeepEqual(got, want) {
+		t.Errorf("InferenceConfig().Command = %q, want %q", got, want)
+	}
+	if got := agent.InstallScript(); got != "npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp" {
+		t.Errorf("InstallScript() = %q, want unversioned Claude ACP package", got)
+	}
+}
 
 func TestClaudeACPPermissionSettingsSkipPermissions(t *testing.T) {
 	settings := NewClaudeACP().PermissionSettings()
