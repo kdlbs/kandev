@@ -12,6 +12,7 @@ describe("SessionMobileBottomNav", () => {
         activePanel="chat"
         onPanelChange={onPanelChange}
         hasReview
+        showStatus
         onOpenStatus={vi.fn()}
       />,
     );
@@ -24,7 +25,12 @@ describe("SessionMobileBottomNav", () => {
 
   it("does not consume navigation space without a linked merge request", () => {
     render(
-      <SessionMobileBottomNav activePanel="chat" onPanelChange={vi.fn()} onOpenStatus={vi.fn()} />,
+      <SessionMobileBottomNav
+        activePanel="chat"
+        onPanelChange={vi.fn()}
+        showStatus
+        onOpenStatus={vi.fn()}
+      />,
     );
     expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
   });
@@ -37,6 +43,7 @@ describe("SessionMobileBottomNav", () => {
       <SessionMobileBottomNav
         activePanel="chat"
         onPanelChange={onPanelChange}
+        showStatus
         onOpenStatus={onOpenStatus}
       />,
     );
@@ -45,5 +52,18 @@ describe("SessionMobileBottomNav", () => {
 
     expect(onOpenStatus).toHaveBeenCalledOnce();
     expect(onPanelChange).not.toHaveBeenCalled();
+  });
+
+  it("does not reserve navigation space when Status is disabled", () => {
+    render(
+      <SessionMobileBottomNav
+        activePanel="chat"
+        onPanelChange={vi.fn()}
+        showStatus={false}
+        onOpenStatus={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Status" })).toBeNull();
   });
 });

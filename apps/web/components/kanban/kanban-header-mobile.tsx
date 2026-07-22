@@ -4,6 +4,7 @@ import { Button } from "@kandev/ui/button";
 import { IconMenu2, IconMessageCircle, IconSearch } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
 import { PageTopbar } from "@/components/page-topbar";
+import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { useAppStore } from "@/components/state-provider";
@@ -61,6 +62,7 @@ function MobileHeaderActions({
         workspaceLabel={workspaceLabel}
         currentPage={currentPage}
       />
+      <TopbarMetrics size="lg" />
       {workspaceId && (
         <Button
           variant="outline"

@@ -56,7 +56,7 @@ export function AppStatusDrawerTrigger({
       type="button"
       variant={buttonProps.variant ?? "ghost"}
       size={buttonProps.size ?? "icon"}
-      className={cn("h-11 w-11 cursor-pointer md:hidden", className)}
+      className={cn("h-11 w-11 cursor-pointer sm:hidden", className)}
       aria-label={label}
       onClick={drawer.openStatusDrawer}
       data-testid="app-status-drawer-trigger"
@@ -74,14 +74,17 @@ export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const appStatusBarEnabled = useFeature("appStatusBar");
   const { isMobile, isFullDesktop } = useResponsiveBreakpoint();
+  const drawerEnabled = appStatusBarEnabled && isMobile;
   const drawer = useMemo<AppStatusDrawerContextValue>(
     () => ({
-      enabled: appStatusBarEnabled,
+      enabled: drawerEnabled,
       drawerOpen,
-      openStatusDrawer: () => setStatusDrawerOpen(true),
+      openStatusDrawer: () => {
+        if (drawerEnabled) setStatusDrawerOpen(true);
+      },
       setStatusDrawerOpen,
     }),
-    [appStatusBarEnabled, drawerOpen],
+    [drawerEnabled, drawerOpen],
   );
   const surfaceProps = {
     pathname,

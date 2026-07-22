@@ -20,6 +20,7 @@ type SessionMobileBottomNavProps = {
   planBadge?: boolean;
   changesBadge?: number;
   hasReview?: boolean;
+  showStatus: boolean;
   onOpenStatus: () => void;
 };
 
@@ -35,6 +36,7 @@ export function SessionMobileBottomNav({
   planBadge = false,
   changesBadge = 0,
   hasReview = false,
+  showStatus,
   onOpenStatus,
 }: SessionMobileBottomNavProps) {
   const items: NavItem[] = useMemo(
@@ -85,13 +87,17 @@ export function SessionMobileBottomNav({
         label: "Terminal",
         icon: <IconTerminal2 className="h-5 w-5" />,
       },
-      {
-        label: "Status",
-        icon: <IconActivity className="h-5 w-5" />,
-        onClick: onOpenStatus,
-      },
+      ...(showStatus
+        ? [
+            {
+              label: "Status",
+              icon: <IconActivity className="h-5 w-5" />,
+              onClick: onOpenStatus,
+            },
+          ]
+        : []),
     ],
-    [planBadge, changesBadge, hasReview, onOpenStatus],
+    [planBadge, changesBadge, hasReview, showStatus, onOpenStatus],
   );
 
   return (

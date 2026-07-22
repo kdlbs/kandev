@@ -379,6 +379,7 @@ type SessionMobileFooterProps = {
   planBadge: boolean;
   changesBadge: number;
   hasReview: boolean;
+  showStatus: boolean;
   onOpenStatus: () => void;
 };
 
@@ -389,6 +390,7 @@ function SessionMobileFooter({
   planBadge,
   changesBadge,
   hasReview,
+  showStatus,
   onOpenStatus,
 }: SessionMobileFooterProps) {
   return (
@@ -404,6 +406,7 @@ function SessionMobileFooter({
         planBadge={planBadge}
         changesBadge={changesBadge}
         hasReview={hasReview}
+        showStatus={showStatus}
         onOpenStatus={onOpenStatus}
       />
     </>
@@ -413,7 +416,7 @@ function SessionMobileFooter({
 export const SessionMobileLayout = memo(function SessionMobileLayout(
   props: SessionMobileLayoutProps,
 ) {
-  const { openStatusDrawer } = useAppStatusDrawer();
+  const { enabled: statusDrawerEnabled, openStatusDrawer } = useAppStatusDrawer();
   const {
     activeTaskId,
     effectiveSessionId,
@@ -471,6 +474,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         planBadge={hasUnseenPlanUpdate}
         changesBadge={totalChangesCount}
         hasReview={mobileMR.mrs.length > 0}
+        showStatus={statusDrawerEnabled}
         onOpenStatus={openStatusDrawer}
       />
 

@@ -256,7 +256,7 @@ function MobileUtilityActions({
   onOpenHealthDialog: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { openStatusDrawer } = useAppStatusDrawer();
+  const { enabled: statusDrawerEnabled, openStatusDrawer } = useAppStatusDrawer();
   const closeSheet = () => onOpenChange(false);
   const openHealth = () => {
     closeSheet();
@@ -270,16 +270,18 @@ function MobileUtilityActions({
   return (
     <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-border">
       <div className={mobileSectionTitleClass}>Utilities</div>
-      <Button
-        type="button"
-        variant="outline"
-        className="h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm"
-        onClick={openStatus}
-        data-testid="mobile-home-status-button"
-      >
-        <IconActivity className={mobileControlIconClass} />
-        Status
-      </Button>
+      {statusDrawerEnabled && (
+        <Button
+          type="button"
+          variant="outline"
+          className="h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm"
+          onClick={openStatus}
+          data-testid="mobile-home-status-button"
+        >
+          <IconActivity className={mobileControlIconClass} />
+          Status
+        </Button>
+      )}
       <Button
         asChild
         variant="outline"

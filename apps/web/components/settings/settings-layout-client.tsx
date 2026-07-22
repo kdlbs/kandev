@@ -143,7 +143,7 @@ function IntegrationCopyConfigAction() {
 
 function SettingsMobileMenu({ pathname }: { pathname: string }) {
   const [open, setOpen] = useState(false);
-  const { openStatusDrawer } = useAppStatusDrawer();
+  const { enabled: statusDrawerEnabled, openStatusDrawer } = useAppStatusDrawer();
 
   const closeOnLinkClick = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target instanceof Element && event.target.closest("a[href]")) {
@@ -178,16 +178,18 @@ function SettingsMobileMenu({ pathname }: { pathname: string }) {
           <SheetTitle>Settings</SheetTitle>
         </SheetHeader>
         <nav className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-11 cursor-pointer justify-start gap-2.5 px-2.5"
-            onClick={openStatus}
-            data-testid="settings-mobile-status-button"
-          >
-            <IconActivity className="h-4 w-4 shrink-0" />
-            <span>Status</span>
-          </Button>
+          {statusDrawerEnabled && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-11 cursor-pointer justify-start gap-2.5 px-2.5"
+              onClick={openStatus}
+              data-testid="settings-mobile-status-button"
+            >
+              <IconActivity className="h-4 w-4 shrink-0" />
+              <span>Status</span>
+            </Button>
+          )}
           <Link
             href="/"
             className="flex h-10 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"

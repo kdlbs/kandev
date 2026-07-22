@@ -27,6 +27,7 @@ import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
+import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import type { ComponentProps, RefObject } from "react";
 
 type KanbanHeaderProps = {
@@ -190,6 +191,7 @@ function TabletHeader({
             workspaceLabel={workspaceLabel}
             currentPage={currentPage}
           />
+          <TopbarMetrics size="lg" />
           {workspaceId && (
             <Button
               variant="outline"
@@ -286,6 +288,7 @@ function DesktopHeader({
             workspaceLabel={workspaceLabel}
             currentPage={currentPage}
           />
+          <TopbarMetrics size="lg" />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>

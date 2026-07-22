@@ -3,20 +3,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { AppStatusDrawerTrigger, AppStatusSurfaceProvider } from "./app-status-surface-provider";
 
-const responsiveState = vi.hoisted(() => ({ isMobile: false }));
+const responsiveState = vi.hoisted(() => ({
+  breakpoint: "desktop" as "mobile" | "tablet" | "desktop",
+}));
 const featureState = vi.hoisted(() => ({ appStatusBar: true }));
+const STATUS_BAR_TEST_ID = "app-status-bar";
 const STATUS_DRAWER_TEST_ID = "app-status-drawer";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
-    breakpoint: responsiveState.isMobile ? "mobile" : "desktop",
-    isMobile: responsiveState.isMobile,
-    isTablet: false,
-    isDesktop: !responsiveState.isMobile,
+    breakpoint: responsiveState.breakpoint,
+    isMobile: responsiveState.breakpoint === "mobile",
+    isTablet: responsiveState.breakpoint === "tablet",
+    isDesktop: responsiveState.breakpoint === "desktop",
     isCompactDesktop: false,
-    isFullDesktop: !responsiveState.isMobile,
-    isFinePointer: !responsiveState.isMobile,
-    usesDesktopWorkbench: !responsiveState.isMobile,
+    isFullDesktop: responsiveState.breakpoint === "desktop",
+    isFinePointer: responsiveState.breakpoint !== "mobile",
+    usesDesktopWorkbench: responsiveState.breakpoint === "desktop",
   }),
 }));
 
@@ -25,7 +28,7 @@ vi.mock("@/hooks/domains/features/use-feature", () => ({
 }));
 
 vi.mock("./app-status-bar", () => ({
-  AppStatusBar: () => <div data-testid="app-status-bar" />,
+  AppStatusBar: () => <div data-testid={STATUS_BAR_TEST_ID} />,
 }));
 
 vi.mock("./app-status-drawer", () => ({
@@ -46,7 +49,7 @@ function renderSurface() {
 
 describe("AppStatusSurfaceProvider", () => {
   beforeEach(() => {
-    responsiveState.isMobile = false;
+    responsiveState.breakpoint = "desktop";
     featureState.appStatusBar = true;
   });
 
@@ -55,15 +58,15 @@ describe("AppStatusSurfaceProvider", () => {
   it("mounts only desktop status bar outside phone breakpoint", () => {
     renderSurface();
 
-    expect(screen.getByTestId("app-status-bar")).toBeTruthy();
+    expect(screen.getByTestId(STATUS_BAR_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
   });
 
   it("mounts only phone drawer and opens it from native trigger", () => {
-    responsiveState.isMobile = true;
+    responsiveState.breakpoint = "mobile";
     renderSurface();
 
-    expect(screen.queryByTestId("app-status-bar")).toBeNull();
+    expect(screen.queryByTestId(STATUS_BAR_TEST_ID)).toBeNull();
     expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("false");
 
     fireEvent.click(screen.getByRole("button", { name: "Open status" }));
@@ -71,11 +74,20 @@ describe("AppStatusSurfaceProvider", () => {
   });
 
   it("hides both presentations when the app-status-bar feature is disabled", () => {
-    responsiveState.isMobile = true;
+    responsiveState.breakpoint = "mobile";
     featureState.appStatusBar = false;
     renderSurface();
 
-    expect(screen.queryByTestId("app-status-bar")).toBeNull();
+    expect(screen.queryByTestId(STATUS_BAR_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("app-status-drawer-trigger")).toBeNull();
+  });
+
+  it("does not expose a drawer trigger at the tablet breakpoint", () => {
+    responsiveState.breakpoint = "tablet";
+    renderSurface();
+
+    expect(screen.getByTestId(STATUS_BAR_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
     expect(screen.queryByTestId("app-status-drawer-trigger")).toBeNull();
   });
