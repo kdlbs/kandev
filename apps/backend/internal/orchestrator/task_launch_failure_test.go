@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
@@ -150,6 +151,62 @@ func TestHandleSessionLaunchFailed_OpenMatchingPRDoesNotCreateMissingBranchGuida
 	}
 	if _, ok := svc.suppressToast.Load("session1"); ok {
 		t.Fatal("expected the ordinary launch error path to remain available")
+	}
+}
+
+func TestHandleSessionLaunchFailed_SecondaryOpenPRDoesNotUsePrimaryTerminalPR(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+	svc.SetGitHubService(&mockGitHubService{taskPRs: []*github.TaskPR{
+		{TaskID: "task1", RepositoryID: "repo-primary", HeadBranch: "feature/foo", State: "closed"},
+		{TaskID: "task1", RepositoryID: "repo-secondary", HeadBranch: "feature/foo", State: "open"},
+	}})
+
+	err := errors.New("environment preparation failed: branch \"feature/foo\" not found locally or on remote")
+	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "repo-secondary", err)
+
+	if len(mc.sessionMessages) != 0 {
+		t.Fatalf("expected no missing-branch guidance for the secondary repository's open PR, got %d messages", len(mc.sessionMessages))
+	}
+}
+
+func TestHandleSessionLaunchFailed_BoundsBlockingPRStateLookup(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+	var lookupHadDeadline bool
+	svc.SetGitHubService(&mockGitHubService{taskPRListFunc: func(ctx context.Context, _ []string) (map[string][]*github.TaskPR, error) {
+		_, lookupHadDeadline = ctx.Deadline()
+		if !lookupHadDeadline {
+			return nil, errors.New("missing lookup deadline")
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}})
+
+	started := time.Now()
+	err := errors.New("environment preparation failed: branch \"feature/foo\" not found locally or on remote")
+	svc.handleSessionLaunchFailed(context.Background(), "task1", "session1", "repo-a", err)
+
+	if !lookupHadDeadline {
+		t.Fatal("expected task PR lookup to have a deadline")
+	}
+	if elapsed := time.Since(started); elapsed > 1500*time.Millisecond {
+		t.Fatalf("blocking task PR lookup took %s, want no more than 1.5s", elapsed)
+	}
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("expected neutral guidance after task PR lookup timeout, got %d messages", len(mc.sessionMessages))
+	}
+	if _, ok := mc.sessionMessages[0].metadata["actions"]; ok {
+		t.Fatalf("expected no destructive actions after task PR lookup timeout, got %#v", mc.sessionMessages[0].metadata["actions"])
 	}
 }
 

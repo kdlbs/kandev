@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"maps"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -887,7 +888,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Call the AgentManager to launch the container
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
 	if err != nil {
-		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, primaryRepo.RepositoryID, err)
+		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, failingLaunchRepositoryID(req, err), err)
 	}
 
 	// Create or update the task environment with launch results
@@ -904,6 +905,59 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}(sessionID)
 
 	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg)
+}
+
+// failingLaunchRepositoryID identifies the repository that caused a
+// multi-repository branch-fetch failure. A lifecycle launch error only carries
+// the failed branch name, so correlate it with the unique per-repository
+// checkout branch in the request. Ambiguous or unrecognized branches fail
+// closed: no repository-scoped destructive guidance can be offered.
+func failingLaunchRepositoryID(req *LaunchAgentRequest, launchErr error) string {
+	if req == nil {
+		return ""
+	}
+	if len(req.Repositories) == 0 {
+		return req.RepositoryID
+	}
+
+	branch := extractLaunchFailureBranch(launchErr)
+	if branch == "" {
+		return ""
+	}
+	var repositoryID string
+	for _, spec := range req.Repositories {
+		if strings.TrimSpace(spec.CheckoutBranch) != branch {
+			continue
+		}
+		if repositoryID != "" {
+			return ""
+		}
+		repositoryID = spec.RepositoryID
+	}
+	return repositoryID
+}
+
+var (
+	launchQuotedBranchPattern   = regexp.MustCompile(`branch "([^"]+)"`)
+	launchRemoteRefPattern      = regexp.MustCompile(`remote ref ([^\s]+)`)
+	launchPathspecBranchPattern = regexp.MustCompile(`pathspec '([^']+)'`)
+)
+
+func extractLaunchFailureBranch(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	for _, pattern := range []*regexp.Regexp{
+		launchQuotedBranchPattern,
+		launchRemoteRefPattern,
+		launchPathspecBranchPattern,
+	} {
+		if match := pattern.FindStringSubmatch(message); len(match) == 2 {
+			return strings.TrimSpace(match[1])
+		}
+	}
+	return ""
 }
 
 func resumeTokenForExecutionProfile(running *models.ExecutorRunning, profileID string) string {

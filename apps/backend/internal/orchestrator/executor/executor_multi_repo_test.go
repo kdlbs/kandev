@@ -101,11 +101,12 @@ func TestLaunchPreparedSession_MultiRepo_PopulatesRequestRepositories(t *testing
 	}
 }
 
-func TestLaunchPreparedSession_MultiRepo_LaunchFailureReportsPrimaryRepositoryID(t *testing.T) {
+func TestLaunchPreparedSession_MultiRepo_LaunchFailureReportsFailingSecondaryRepositoryID(t *testing.T) {
 	repo := newMockRepository()
 	const taskID = "task-multi-launch-failure"
 	const sessionID = "session-multi-launch-failure"
 	seedMultiRepoTask(t, repo, taskID)
+	repo.taskRepositories["tr-2"].CheckoutBranch = "feature/foo"
 	repo.sessions[sessionID] = &models.TaskSession{
 		ID:             sessionID,
 		TaskID:         taskID,
@@ -139,8 +140,50 @@ func TestLaunchPreparedSession_MultiRepo_LaunchFailureReportsPrimaryRepositoryID
 	if !errors.Is(err, launchErr) {
 		t.Fatalf("LaunchPreparedSession error = %v, want %v", err, launchErr)
 	}
-	if callbackRepositoryID != "repo-front" {
-		t.Fatalf("launch failure repository ID = %q, want primary repository %q", callbackRepositoryID, "repo-front")
+	if callbackRepositoryID != "repo-back" {
+		t.Fatalf("launch failure repository ID = %q, want failing secondary repository %q", callbackRepositoryID, "repo-back")
+	}
+}
+
+func TestFailingLaunchRepositoryID_UsesExactBranchToken(t *testing.T) {
+	req := &LaunchAgentRequest{Repositories: []RepoSpec{{
+		RepositoryID:   "repo-secondary",
+		CheckoutBranch: "feature/foo",
+	}}}
+
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "remote ref exact match",
+			err:  errors.New("fatal: couldn't find remote ref feature/foo"),
+			want: "repo-secondary",
+		},
+		{
+			name: "quoted branch exact match",
+			err:  errors.New("branch \"feature/foo\" not found locally or on remote"),
+			want: "repo-secondary",
+		},
+		{
+			name: "pathspec exact match",
+			err:  errors.New("error: pathspec 'feature/foo' did not match any file(s) known to git"),
+			want: "repo-secondary",
+		},
+		{
+			name: "remote ref prefix collision",
+			err:  errors.New("fatal: couldn't find remote ref feature/foo-deleted"),
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := failingLaunchRepositoryID(req, tt.err); got != tt.want {
+				t.Fatalf("failingLaunchRepositoryID() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

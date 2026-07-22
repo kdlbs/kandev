@@ -1528,6 +1528,8 @@ var (
 	pathspecBranchPattern = regexp.MustCompile(`pathspec '([^']+)'`)
 )
 
+const launchFailurePRLookupTimeout = time.Second
+
 func extractMissingBranchName(err error) string {
 	if err == nil {
 		return ""
@@ -1550,7 +1552,9 @@ func (s *Service) matchingTaskPRState(ctx context.Context, taskID, repositoryID,
 	if s.githubService == nil || repositoryID == "" || branch == "" {
 		return ""
 	}
-	prsByTask, err := s.githubService.ListTaskPRs(ctx, []string{taskID})
+	lookupCtx, cancel := context.WithTimeout(ctx, launchFailurePRLookupTimeout)
+	defer cancel()
+	prsByTask, err := s.githubService.ListTaskPRs(lookupCtx, []string{taskID})
 	if err != nil {
 		s.logger.Debug("failed to load task PR state for missing branch guidance",
 			zap.String("task_id", taskID),
