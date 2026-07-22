@@ -35,10 +35,23 @@ async function openCreateTask(page: Page): Promise<void> {
 async function openCreationDrawer(page: Page): Promise<Locator> {
   const trigger = page.getByTestId("repo-chip-trigger");
   await trigger.click();
+  const search = page.getByPlaceholder("Search repositories...");
+  const refresh = page.getByTestId("repo-refresh-button");
   const action = page.getByTestId("create-local-repository-button");
+  await expect(search).toBeVisible();
+  await expect(refresh).toBeVisible();
   await expect(action).toBeVisible();
-  const actionBox = await action.boundingBox();
+  const [searchBox, refreshBox, actionBox] = await Promise.all([
+    search.boundingBox(),
+    refresh.boundingBox(),
+    action.boundingBox(),
+  ]);
+  expect(searchBox).not.toBeNull();
+  expect(refreshBox).not.toBeNull();
   expect(actionBox).not.toBeNull();
+  expect(searchBox!.width).toBeGreaterThanOrEqual(200);
+  expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(refreshBox!.x);
+  expect(refreshBox!.height).toBeGreaterThanOrEqual(44);
   expect(actionBox!.height).toBeGreaterThanOrEqual(44);
   await action.click();
   const drawer = page.getByTestId("create-local-repository-drawer");
@@ -144,6 +157,9 @@ test.describe("Create task with a new local repository on mobile", () => {
 
     drawer = await openCreationDrawer(testPage);
     await expectDrawerGeometry(testPage, drawer);
+    await drawer
+      .getByRole("textbox", { name: "Parent directory" })
+      .fill(path.dirname(repositoryPath));
     const nameInput = testPage.getByRole("textbox", { name: "Repository name" });
     await nameInput.fill(repositoryName);
     await expect(testPage.getByTitle(repositoryPath)).toBeVisible();

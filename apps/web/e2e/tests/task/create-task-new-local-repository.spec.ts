@@ -38,13 +38,29 @@ async function openCreateTask(page: Page): Promise<void> {
 
 async function openRepositoryCreation(page: Page): Promise<void> {
   await page.getByTestId("repo-chip-trigger").click();
+  const search = page.getByPlaceholder("Search repositories...");
+  const refresh = page.getByTestId("repo-refresh-button");
   const action = page.getByTestId("create-local-repository-button");
+  await expect(search).toBeVisible();
+  await expect(refresh).toBeVisible();
   await expect(action).toBeVisible();
+  const [searchBox, refreshBox, actionBox] = await Promise.all([
+    search.boundingBox(),
+    refresh.boundingBox(),
+    action.boundingBox(),
+  ]);
+  expect(searchBox).not.toBeNull();
+  expect(refreshBox).not.toBeNull();
+  expect(actionBox).not.toBeNull();
+  expect(searchBox!.width).toBeGreaterThanOrEqual(280);
+  expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(refreshBox!.x);
+  expect(refreshBox!.x + refreshBox!.width).toBeLessThanOrEqual(actionBox!.x);
   await action.click();
   await expect(page.getByTestId("create-local-repository-dialog")).toBeVisible();
 }
 
 async function createRepository(page: Page, name: string, targetPath: string): Promise<void> {
+  await page.getByRole("textbox", { name: "Parent directory" }).fill(path.dirname(targetPath));
   await page.getByRole("textbox", { name: "Repository name" }).fill(name);
   await expect(page.getByTitle(targetPath)).toBeVisible();
   await page.getByRole("button", { name: "Create repository" }).click();

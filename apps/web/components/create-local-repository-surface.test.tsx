@@ -28,6 +28,7 @@ import {
 
 const REPOSITORY_NAME = "alpha";
 const REPOSITORY_NAME_LABEL = "Repository name";
+const PARENT_DIRECTORY_LABEL = "Parent directory";
 const CREATE_BUTTON_NAME = "Create repository";
 
 const createdRepository = {
@@ -107,6 +108,50 @@ describe("CreateLocalRepositorySurface", () => {
     expect(props.onCreated).toHaveBeenCalledWith(createdRepository);
   });
 
+  it("submits a manually entered parent directory without browsing to it", async () => {
+    mocks.initialize.mockResolvedValue(createdRepository);
+    renderSurface();
+
+    fireEvent.change(await screen.findByLabelText(REPOSITORY_NAME_LABEL), {
+      target: { value: REPOSITORY_NAME },
+    });
+    fireEvent.change(screen.getByLabelText(PARENT_DIRECTORY_LABEL), {
+      target: { value: "/work/manual-parent" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: CREATE_BUTTON_NAME }));
+
+    await waitFor(() => {
+      expect(mocks.initialize).toHaveBeenCalledWith("ws-1", {
+        name: REPOSITORY_NAME,
+        parentPath: "/work/manual-parent",
+      });
+    });
+  });
+
+  it("updates the parent directory input when browsing folders", async () => {
+    mocks.listDirectory.mockImplementation(async (path: string) => {
+      if (path === "") {
+        return {
+          path: "/work",
+          parent: "/",
+          entries: [{ name: "projects", path: "/work/projects" }],
+        };
+      }
+      return { path, parent: "/work", entries: [] };
+    });
+    renderSurface();
+
+    fireEvent.click(await screen.findByTestId("folder-picker-entry"));
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(PARENT_DIRECTORY_LABEL) as HTMLInputElement).value).toBe(
+        "/work/projects",
+      );
+    });
+  });
+});
+
+describe("CreateLocalRepositorySurface submission", () => {
   it("does not submit the parent task form", async () => {
     mocks.initialize.mockResolvedValue(createdRepository);
     const parentSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());

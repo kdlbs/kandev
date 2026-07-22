@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { IconFolderPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -59,6 +59,59 @@ function executorNotice(selection: DirectLocalExecutorSelection | null): string 
   return `This empty repository will run with “${selection.executorProfileName}” on this machine.`;
 }
 
+type RepositoryLocationFieldsProps = {
+  name: string;
+  parentPath: string;
+  targetPath: string;
+  onNameChange: (name: string) => void;
+  onParentPathChange: (path: string) => void;
+  onLoadTypedDirectory: () => void;
+};
+
+function RepositoryLocationFields({
+  name,
+  parentPath,
+  targetPath,
+  onNameChange,
+  onParentPathChange,
+  onLoadTypedDirectory,
+}: RepositoryLocationFieldsProps) {
+  return (
+    <>
+      <label className="block space-y-2.5 text-xs font-medium">
+        <span>Repository name</span>
+        <Input
+          value={name}
+          onChange={(event) => onNameChange(event.target.value)}
+          placeholder="new-project"
+          autoFocus
+        />
+      </label>
+      <label className="block space-y-2 text-xs font-medium">
+        <span>Parent directory</span>
+        <Input
+          value={parentPath}
+          onChange={(event) => onParentPathChange(event.target.value)}
+          onBlur={onLoadTypedDirectory}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            onLoadTypedDirectory();
+          }}
+          placeholder="/Users/you/Projects"
+          className="font-mono"
+        />
+      </label>
+      <div className="min-w-0 rounded-md border border-border/70 bg-muted/30 px-3 py-2">
+        <p className="text-[11px] text-muted-foreground">Repository destination</p>
+        <p className="truncate font-mono text-xs" title={targetPath || parentPath}>
+          {targetPath || parentPath || "Loading folder…"}
+        </p>
+      </div>
+    </>
+  );
+}
+
 function CreateRepositoryForm({
   open,
   workspaceId,
@@ -67,10 +120,20 @@ function CreateRepositoryForm({
   onDismiss,
 }: CreateLocalRepositorySurfaceProps & { onDismiss: () => void }) {
   const [name, setName] = useState("");
+  const [parentPath, setParentPath] = useState("");
+  const [editingParentPath, setEditingParentPath] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const { listing, loading, error: listingError, load } = useDirectoryListing(open, "");
-  const parentPath = listing?.path ?? "";
+  useEffect(() => {
+    if (!open) {
+      setParentPath("");
+      setEditingParentPath(false);
+      return;
+    }
+    if (listing && !editingParentPath) setParentPath(listing.path);
+  }, [editingParentPath, listing, open]);
+
   const nameError = validateLocalRepositoryName(name);
   const targetPath =
     parentPath && !nameError ? buildLocalRepositoryTargetPath(parentPath, name) : "";
@@ -99,24 +162,32 @@ function CreateRepositoryForm({
     }
   };
 
+  const handleDirectoryNavigation = (path: string) => {
+    setParentPath(path);
+    setEditingParentPath(false);
+    void load(path);
+  };
+
+  const loadTypedDirectory = () => {
+    if (parentPath) void load(parentPath);
+  };
+
+  const handleParentPathChange = (path: string) => {
+    setParentPath(path);
+    setEditingParentPath(true);
+  };
+
   return (
     <form onSubmit={(event) => void handleSubmit(event)} className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 space-y-3 px-4 pb-3">
-        <label className="block space-y-1.5 text-xs font-medium">
-          <span>Repository name</span>
-          <Input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="new-project"
-            autoFocus
-          />
-        </label>
-        <div className="min-w-0 rounded-md border border-border/70 bg-muted/30 px-3 py-2">
-          <p className="text-[11px] text-muted-foreground">Repository path</p>
-          <p className="truncate font-mono text-xs" title={targetPath || parentPath}>
-            {targetPath || parentPath || "Loading folder…"}
-          </p>
-        </div>
+        <RepositoryLocationFields
+          name={name}
+          parentPath={parentPath}
+          targetPath={targetPath}
+          onNameChange={setName}
+          onParentPathChange={handleParentPathChange}
+          onLoadTypedDirectory={loadTypedDirectory}
+        />
         <p
           className={
             executorSelection ? "text-xs text-muted-foreground" : "text-xs text-destructive"
@@ -134,7 +205,7 @@ function CreateRepositoryForm({
         listing={listing}
         loading={loading}
         error={listingError}
-        onNavigate={(path) => void load(path)}
+        onNavigate={handleDirectoryNavigation}
         touchRows
         fillAvailableHeight
       />

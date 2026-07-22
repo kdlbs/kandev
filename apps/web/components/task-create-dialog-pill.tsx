@@ -188,7 +188,9 @@ function PillPopoverContent({
     >
       <Command filter={filter}>
         <div className="flex min-h-11 items-center gap-1 px-2 pt-1">
-          <CommandInput placeholder={searchPlaceholder} className="h-9 flex-1" />
+          <div className="min-w-0 flex-1">
+            <CommandInput placeholder={searchPlaceholder} className="h-9 w-full" />
+          </div>
           {onRefresh ? (
             <BranchRefreshButton
               onRefresh={onRefresh}
