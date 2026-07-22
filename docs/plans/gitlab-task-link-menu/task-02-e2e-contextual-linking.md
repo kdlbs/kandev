@@ -1,7 +1,7 @@
 ---
 id: "02-e2e-contextual-linking"
 title: "GitLab contextual linking E2E"
-status: in_progress
+status: done
 wave: 2
 depends_on: ["01-frontend-link-menu"]
 plan: "plan.md"
@@ -57,11 +57,10 @@ cd apps/web && pnpm e2e:run tests/gitlab/gitlab-parity.spec.ts tests/gitlab/mobi
 
 ## Verification Status
 
-The desktop and mobile coverage is implemented and passes Prettier, ESLint,
-and `git diff --check`. The managed runner rebuilt the backend and frontend,
-but Playwright could not start its worker backend because the sandbox denied
-loopback listeners. An elevated retry was requested and declined, so the task
-remains `in_progress` until the runtime scenarios can execute.
+The targeted desktop and mobile GitLab Playwright scenarios pass (6/6).
+Desktop and mobile screenshots were validated, along with mobile menu touch
+targets and viewport containment. Aggregate format, typecheck, unit, and lint
+checks pass, and aggregate tests pass with `TMPDIR=/tmp`.
 
 ## Output Contract
 

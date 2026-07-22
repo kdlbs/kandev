@@ -95,9 +95,7 @@ Wave 1:
 
 Wave 2:
 
-- [ ] [task-02-e2e-contextual-linking](task-02-e2e-contextual-linking.md) —
-  coverage authored; execution blocked by sandbox loopback restrictions after
-  the elevated retry was declined.
+- [x] [task-02-e2e-contextual-linking](task-02-e2e-contextual-linking.md)
 
 ## Verification
 
@@ -111,11 +109,10 @@ make typecheck test lint
 
 ## Verification Status
 
-- Focused frontend unit tests, web typecheck, aggregate lint, E2E static lint,
-  Prettier, and `git diff --check` pass.
-- Aggregate backend tests and the GitLab Playwright specs require loopback
-  listeners. This sandbox rejected those listeners, and the requested elevated
-  retry was declined, so those runtime checks remain pending.
+- Targeted desktop and mobile GitLab Playwright coverage passes (6/6), including
+  validated screenshots, mobile touch targets, and viewport containment.
+- Aggregate format, typecheck, unit, and lint checks pass. Aggregate tests pass
+  with `TMPDIR=/tmp`.
 
 ## Risks
 
