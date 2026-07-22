@@ -236,10 +236,11 @@ describe("task.updated primary-session focus follow", () => {
   });
 });
 
-// Regression: even when the user happens to be sitting on the previous
-// primary, an explicit pin on it must override primary-follow-focus —
-// otherwise a workflow profile switch silently yanks them off the session
-// they deliberately clicked into.
+// Regression for the workflow-step agent-profile switch bug: pinning the
+// session you're on must NOT strand you there when the backend retires that
+// exact session and promotes a new primary (a step move to a different agent
+// profile). The pin is on the session being swapped away, so focus follows the
+// swap. Only a *different* still-live pinned session (drift) may override it.
 describe("task.updated primary-session focus follow (pinning)", () => {
   let store: ReturnType<typeof makeStore>;
   let setActiveSessionAuto: ReturnType<typeof vi.fn<(taskId: string, sessionId: string) => void>>;
@@ -249,7 +250,11 @@ describe("task.updated primary-session focus follow (pinning)", () => {
     vi.mocked(removeRecentTask).mockClear();
   });
 
-  it("does NOT follow focus when the user has pinned the previous primary", () => {
+  it("follows focus when the pinned session IS the previous primary being swapped away", () => {
+    // Reporter's case: user clicked into the Spec/Opus session (pinning it),
+    // then moved the task to a step with a different agent profile. The backend
+    // completed the old session and promoted a new one; the UI must follow to
+    // the new agent's session instead of leaving the user on the dead session.
     store = makeStore({
       kanban: {
         workflowId: "wf1",
@@ -268,7 +273,8 @@ describe("task.updated primary-session focus follow (pinning)", () => {
     const handlers = registerTasksHandlers(store);
     handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
 
-    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+    expect(setActiveSessionAuto).toHaveBeenCalledTimes(1);
+    expect(setActiveSessionAuto).toHaveBeenCalledWith("t1", "sess-new");
   });
 
   it("does NOT follow focus when active-session drift orphaned a non-terminal pin", () => {

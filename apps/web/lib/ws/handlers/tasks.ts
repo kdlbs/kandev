@@ -339,26 +339,47 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
     return;
   }
 
-  // Follow focus to the new primary when:
-  //  - the user is currently viewing this task,
-  //  - the user was sitting on the previous primary,
-  //  - they do NOT have a non-terminal pinned session for this task, and
-  //  - the primary actually changed.
-  // This makes workflow profile switches transparent for unpinned users
-  // without yanking users off a live session they deliberately selected.
+  // Follow focus to the new primary when the user is sitting on the exact
+  // session the backend just replaced (e.g. a workflow step move to a step with
+  // a different agent profile). See shouldFollowPrimarySwap for the full rule.
   const afterState = store.getState();
   logTaskMerge("task.updated", beforeState, afterState, message.payload);
   const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
-  if (
-    newPrimary &&
-    newPrimary !== previousPrimary &&
-    afterState.tasks.activeTaskId === taskId &&
-    afterState.tasks.activeSessionId === previousPrimary &&
-    !shouldPreservePinnedSessionForTask(afterState, taskId)
-  ) {
+  if (newPrimary && shouldFollowPrimarySwap(afterState, taskId, previousPrimary, newPrimary)) {
     clearPinnedSessionIfOverridden(store, newPrimary);
     afterState.setActiveSessionAuto(taskId, newPrimary);
   }
+}
+
+/**
+ * Decide whether the chat UI should follow a primary-session swap carried by a
+ * task.updated event.
+ *
+ * We follow when the user is viewing this task and sitting on the *previous*
+ * primary — i.e. the exact session the backend just replaced. A workflow step
+ * move to a step with a different agent profile completes the old session and
+ * promotes a new one; the user expects to land on the new agent's session.
+ *
+ * Crucially we follow even when that previous primary was explicitly *pinned*:
+ * the pin is on the session being retired, so honoring it would strand the user
+ * on a now-completed session (still showing the old agent / plan mode). The
+ * only pin that must win is a *different* still-live session (active-session
+ * drift) — one the user deliberately selected that is not the one being swapped
+ * away.
+ */
+function shouldFollowPrimarySwap(
+  state: AppState,
+  taskId: string,
+  previousPrimary: string | null,
+  newPrimary: string,
+): boolean {
+  if (newPrimary === previousPrimary) return false;
+  if (state.tasks.activeTaskId !== taskId) return false;
+  if (state.tasks.activeSessionId !== previousPrimary) return false;
+  const pinnedSessionId = state.tasks.pinnedSessionId;
+  const hasProtectedDifferentPin =
+    pinnedSessionId !== previousPrimary && shouldPreservePinnedSessionForTask(state, taskId);
+  return !hasProtectedDifferentPin;
 }
 
 function handleTaskUpsert(
