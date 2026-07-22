@@ -54,6 +54,14 @@ step can retain formatter changes. It does not authorize source or test fixes.
      recommendation for a new implementer assignment.
    - For goleak failures after otherwise passing Go tests, loop the affected package with `go test -race -count=10 ./internal/<pkg>/...` and inspect cleanup ownership.
    - If Go tests fail because `httptest.NewServer` cannot bind loopback in a restricted sandbox, rerun the exact command with normal network/loopback escalation before diagnosing code.
+   - If required filesystem, network, or loopback escalation is unavailable,
+     denied, cancelled, or interrupted, stop. Report verification as blocked,
+     explain that mandatory verification is preventing commit and PR creation,
+     and include a **Required user action** telling the user to enable the
+     runtime's full access mode and retry verification. Do not offer to proceed
+     unverified or imply that the agent or repository host cannot create PRs.
+     Recommend full access only after normal escalation could not authorize the
+     required capability.
    - For `ENOSPC`, read-only cache, or cache-initialization failures, preserve an existing absolute managed `GOCACHE` and existing lint cache. Move only invocation scratch (`TMPDIR` and quiet logs) to a writable filesystem. If a cache filesystem itself is unusable, relocate only that cache to a persistent agent-owned path outside every worktree; never use a repository-local fallback.
    - For Rust/Tauri changes, compare `rustc --version` with `apps/desktop/src-tauri/Cargo.toml`'s `rust-version`. Activate a matching installed toolchain without replacing `PATH`; report or request installation if unavailable.
    - For environment-only failures, rerun the exact command after correcting
@@ -67,4 +75,5 @@ step can retain formatter changes. It does not authorize source or test fixes.
    generation, typecheck, the complete test target, lint, and any scoped Rust
    tests all pass.
 
-Do not spawn subagents. Report pass/fail state and blockers to the planner.
+Do not spawn subagents. Report pass/fail state, blockers, and any required user
+action to the planner.

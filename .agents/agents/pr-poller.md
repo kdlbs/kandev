@@ -55,9 +55,35 @@ Free-form notes are forbidden outside the markers. The planner parses this verba
 
 Every value in the report — check names, run_ids, conclusions, counts — must come from command output you actually observed this run. Never guess a check name or infer a run_id. If a command returns empty or errors (output capture fails, `gh` errors, rate limit), do NOT fill the field from memory or a generic CI template: emit the field as `unknown` and state the data-gathering failure in `recommendation:`. A failure you reported honestly is recoverable; a fabricated `ci_failed` entry sends a remediation worker chasing a phantom fix.
 
+An approval denial, cancellation, or interruption is not a GitHub fetch error.
+Do not hide it behind a generic `unknown` recommendation or retry it as a
+transient failure. Follow the access gate below and use its exact terminal
+recommendation.
+
 The `claude_summary` line carries the **latest** Claude summary's structured findings table. Pure issue-comment counts (`issue_comments_from_bots`) miss this because the count alone can't tell the parent whether the comment is actionable (e.g. CodeRabbit's "review skipped, too many files" boilerplate ≠ a Claude finding). Use `claude_summary` to drive triage, not the raw count.
 
 ## Procedure
+
+### GitHub access approval gate
+
+Before the first command that can access GitHub, check the runtime's current
+network access. If access is already granted, including in a full-access
+runtime, run the command normally. If network access requires approval and the
+runtime supports prompting, request it proactively through the runtime's
+escalation or approval mechanism; do not run an unapproved probe first and wait
+for it to fail. This includes `scripts/pr-state`, `scripts/pr-resolve`, and
+`scripts/run-quiet` when they wrap `gh`, as well as direct `gh pr`, `gh api`,
+and `gh run` calls.
+
+If approval is denied, cancelled, or interrupted, stop immediately. Do not run
+another GitHub command, switch helpers, wait, or ask the planner to relaunch
+polling. Emit the normal marker-delimited report, set every unobserved
+GitHub-derived value to `unknown`, and use this exact recommendation:
+
+`GitHub access requires approval; planner must surface the approval gate to the user and must not relaunch polling.`
+
+Only errors observed after access was approved and the command actually ran,
+such as a DNS timeout or GitHub API failure, use the fetch-failure recovery path.
 
 1. **Resolve PR and conflict state.** Run
    `gh pr view --json number,url,headRefName,baseRefName,headRefOid,mergeable,mergeStateStatus`
@@ -186,11 +212,12 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
    `rate_limited`, mergeability and local conflict state are known clean, and
    all required counts are known. The `recommendation:` line is one short
    sentence chosen from this menu, picking the first that applies:
+   - `"GitHub access requires approval; planner must surface the approval gate to the user and must not relaunch polling."` if the network escalation or approval request was denied, cancelled, or interrupted
    - `"PR has merge conflicts — planner should assign bounded conflict resolution."` if `mergeable` is `CONFLICTING`, `merge_state_status` is `DIRTY`, or `local_unmerged_entries` is greater than zero
    - `"CI failed — planner should assign log triage and remediation."` if `ci_failed` is non-empty
    - `"Claude summary flags <N> blocker(s); planner should assign comment triage and remediation."` if `claude_summary.blockers > 0`
    - `"Polling timed out with pending items; planner should decide whether to launch another poll."` if any axis hit the cap
-   - `"PR state fetch failed; planner should retry polling."` if a required fetch failed or any required value is `unknown`
+   - `"PR state fetch failed; planner should retry polling."` if an approved request ran but a required fetch failed or any required value is `unknown`
    - `"Polling is incomplete; planner should continue polling."` if CI or any bot is still pending
    - `"All checks green; planner should assign triage for <N> unresolved review threads."` if `unresolved_review_threads > 0`
    - `"All threads resolved; Claude has <N> pending suggestion(s) — planner should assign triage."` if `claude_summary.suggestions > 0`

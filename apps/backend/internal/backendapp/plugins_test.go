@@ -108,6 +108,53 @@ func installTestPluginForBoot(t *testing.T, svc *plugins.Service, id string, wit
 	return rec
 }
 
+// testPluginPackageVersioned mirrors testPluginPackage but lets the caller
+// pin a specific manifest version, so tests can simulate an update (same id,
+// bumped version) via a second Install call.
+func testPluginPackageVersioned(t *testing.T, id, version string) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: %q
+display_name: Test Plugin %s
+capabilities:
+  events: ["task.created"]
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+ui:
+  bundle: "/ui/bundle.js"
+  styles: ["/ui/style.css"]
+`, id, version, id, platformKey)
+
+	var buf bytes.Buffer
+	files := map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+		"ui/bundle.js":  []byte("export default {};"),
+		"ui/style.css":  []byte("body{}"),
+	}
+	if err := pkgtartest.WritePackage(&buf, files); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
+}
+
+// installTestPluginPackageForBoot installs (or, on a repeat call with a new
+// version, updates) the plugin with an explicit version — used to prove
+// bootActivePlugins keys BundleURL on the installed version.
+func installTestPluginPackageForBoot(t *testing.T, svc *plugins.Service, id, version string) *store.Record {
+	t.Helper()
+	rec, err := svc.Install(context.Background(), testPluginPackageVersioned(t, id, version))
+	if err != nil {
+		t.Fatalf("Install(%q@%s): %v", id, version, err)
+	}
+	return rec
+}
+
 func TestBootActivePluginsGatedOnFeatureFlag(t *testing.T) {
 	svc := newTestPluginsService(t)
 	installTestPluginForBoot(t, svc, "kandev-plugin-hello", true)
@@ -143,11 +190,69 @@ func TestBootActivePluginsPopulatesFromActiveUIPlugins(t *testing.T) {
 	if entry.ID != "kandev-plugin-hello" {
 		t.Fatalf("entry.ID = %q, want %q", entry.ID, "kandev-plugin-hello")
 	}
-	if entry.BundleURL != "/api/plugins/kandev-plugin-hello/bundle" {
-		t.Fatalf("entry.BundleURL = %q, want %q", entry.BundleURL, "/api/plugins/kandev-plugin-hello/bundle")
+	if entry.BundleURL != "/api/plugins/kandev-plugin-hello/bundle?v=1.0.0" {
+		t.Fatalf("entry.BundleURL = %q, want %q", entry.BundleURL, "/api/plugins/kandev-plugin-hello/bundle?v=1.0.0")
 	}
 	if len(entry.StyleURLs) != 1 || entry.StyleURLs[0] != "/api/plugins/kandev-plugin-hello/ui/ui/style.css" {
 		t.Fatalf("entry.StyleURLs = %v, want [/api/plugins/kandev-plugin-hello/ui/ui/style.css]", entry.StyleURLs)
+	}
+}
+
+// TestBootActivePluginsBundleURLChangesWithVersion proves the fix for the
+// same-tab plugin-update bug: unloadPlugin(id, {evictCache:true}) evicts the
+// cached bundle registration on update, but a same-tab re-import() of the
+// same URL returns the browser's already-evaluated ES module without
+// re-running its top-level registerKandevPlugin() call — leaving the plugin
+// active but unregistered. Keying BundleURL on the installed version forces
+// a real re-import (new module specifier) whenever the version changes,
+// while keeping an unchanged version's URL byte-identical across boots.
+func TestBootActivePluginsBundleURLChangesWithVersion(t *testing.T) {
+	dir := t.TempDir()
+	fsStore := store.NewFSStore(dir)
+	registry := plugins.NewRegistry()
+	if err := registry.Load(fsStore); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	svc := plugins.NewService(fsStore, registry, nil, testPluginsLogger(t))
+	svc.SetPluginsDir(dir)
+	svc.SetRuntime(alwaysUpRuntime{})
+
+	installTestPluginPackageForBoot(t, svc, "kandev-plugin-hello", "1.0.0")
+	first := bootActivePlugins(routeParams{
+		features: config.FeaturesConfig{Plugins: true},
+		services: &Services{Plugins: svc},
+	})
+	if len(first) != 1 {
+		t.Fatalf("bootActivePlugins() len = %d, want 1: %+v", len(first), first)
+	}
+	firstURL := first[0].BundleURL
+	if firstURL != "/api/plugins/kandev-plugin-hello/bundle?v=1.0.0" {
+		t.Fatalf("first BundleURL = %q, want %q", firstURL, "/api/plugins/kandev-plugin-hello/bundle?v=1.0.0")
+	}
+
+	// Same version reinstalled (no-op update) must resolve to the identical
+	// URL — no needless cache-busting.
+	repeat := bootActivePlugins(routeParams{
+		features: config.FeaturesConfig{Plugins: true},
+		services: &Services{Plugins: svc},
+	})
+	if repeat[0].BundleURL != firstURL {
+		t.Fatalf("repeat BundleURL = %q, want unchanged %q", repeat[0].BundleURL, firstURL)
+	}
+
+	// Update to a new version: the URL must differ so the browser re-imports
+	// and re-executes the bundle's registerKandevPlugin() side effect.
+	installTestPluginPackageForBoot(t, svc, "kandev-plugin-hello", "1.0.1")
+	updated := bootActivePlugins(routeParams{
+		features: config.FeaturesConfig{Plugins: true},
+		services: &Services{Plugins: svc},
+	})
+	updatedURL := updated[0].BundleURL
+	if updatedURL == firstURL {
+		t.Fatalf("updated BundleURL = %q, want different from %q after a version bump", updatedURL, firstURL)
+	}
+	if updatedURL != "/api/plugins/kandev-plugin-hello/bundle?v=1.0.1" {
+		t.Fatalf("updated BundleURL = %q, want %q", updatedURL, "/api/plugins/kandev-plugin-hello/bundle?v=1.0.1")
 	}
 }
 

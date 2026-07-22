@@ -23,12 +23,25 @@ function record(overrides: Partial<PluginRecord> = {}): PluginRecord {
 }
 
 describe("toActivePlugin", () => {
-  it("builds the bundle URL from the plugin id, mirroring the backend's boot payload mapping", () => {
+  it("builds the bundle URL from the plugin id and version, mirroring the backend's boot payload mapping", () => {
     const result = toActivePlugin(record());
     expect(result).not.toBeNull();
-    expect(result?.bundleUrl).toBe("/api/plugins/acme-tools/bundle");
+    expect(result?.bundleUrl).toBe("/api/plugins/acme-tools/bundle?v=1.0.0");
     expect(result?.id).toBe("acme-tools");
     expect(result?.name).toBe("Acme Tools");
+  });
+
+  it("appends the plugin's version as a cache-busting query param, so an updated version resolves to a new module specifier", () => {
+    const before = toActivePlugin(record({ version: "1.0.0" }));
+    const after = toActivePlugin(record({ version: "1.0.1" }));
+    expect(before?.bundleUrl).not.toBe(after?.bundleUrl);
+    expect(after?.bundleUrl).toBe("/api/plugins/acme-tools/bundle?v=1.0.1");
+  });
+
+  it("resolves to the identical bundleUrl on a plain unchanged reload (no needless cache-busting)", () => {
+    const first = toActivePlugin(record({ version: "1.0.0" }));
+    const second = toActivePlugin(record({ version: "1.0.0" }));
+    expect(first?.bundleUrl).toBe(second?.bundleUrl);
   });
 
   it("maps ui.styles to /api/plugins/:id/ui/:style, mirroring pluginStyleURLs on the backend", () => {

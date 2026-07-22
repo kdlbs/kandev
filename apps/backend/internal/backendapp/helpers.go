@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -713,11 +714,25 @@ func bootActivePlugins(p routeParams) []webapp.ActivePluginPayload {
 		out = append(out, webapp.ActivePluginPayload{
 			ID:        rec.ID,
 			Name:      rec.DisplayName,
-			BundleURL: "/api/plugins/" + rec.ID + "/bundle",
+			BundleURL: pluginBundleURL(rec),
 			StyleURLs: pluginStyleURLs(rec),
 		})
 	}
 	return out
+}
+
+// pluginBundleURL builds the browser-facing bundle URL, mirrored on the
+// frontend by lib/plugins/active-plugin.ts's toActivePlugin. The `?v=`
+// query param keys the URL on the installed version so an updated plugin
+// resolves to a *different* module specifier: without it,
+// unloadPlugin(id, {evictCache: true}) (apps/web/lib/plugins/host.ts) drops
+// the cached bundle registration on update, but a same-tab re-import() of
+// the identical URL returns the browser's already-evaluated ES module
+// without re-running its top-level registerKandevPlugin() call — leaving
+// the plugin active but unregistered. An unchanged version keeps the same
+// URL across boots, so normal (non-update) loads stay cache-friendly.
+func pluginBundleURL(rec pluginstore.Record) string {
+	return "/api/plugins/" + rec.ID + "/bundle?v=" + url.QueryEscape(rec.Version)
 }
 
 // pluginStyleURLs maps a plugin's root-relative ui.styles paths to

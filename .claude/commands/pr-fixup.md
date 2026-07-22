@@ -14,3 +14,8 @@ checks to `verify`, and commit/push to a bounded delivery assignment. Review
 each compact result and launch another bounded assignment when needed. Do not
 run GitHub, edit, test, commit, or push commands in this primary session. If a
 required worker cannot be launched, stop and report the blocked phase.
+
+If `pr-poller` reports that GitHub access requires approval, surface that gate
+to the user and stop. Do not relaunch polling after approval is denied,
+cancelled, or interrupted; follow `.agents/skills/pr-fixup/SKILL.md` for the
+full distinction between approval gates and transient fetch failures.
