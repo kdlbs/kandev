@@ -102,6 +102,32 @@ func TestService_AppendReferenceExpansions_MarkerInVisibleTextDoesNotSuppressFir
 	}
 }
 
+func TestService_AppendReferenceExpansions_ForeignSystemBlockMentioningMarkerDoesNotSuppressExpansion(t *testing.T) {
+	svc, cleanup := createService(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := svc.CreatePrompt(ctx, "improve-harness", "Review this session for durable harness improvements."); err != nil {
+		t.Fatalf("create prompt: %v", err)
+	}
+
+	// This <kandev-system> block was NOT produced by
+	// FormatPromptReferenceExpansions: the marker text appears inside it, but
+	// not as the block's immediate first content. A guard that merely checks
+	// "expansionMarker appears somewhere inside any <kandev-system> block"
+	// would false-positive here and skip the real expansion below.
+	foreignBlock := sysprompt.Wrap("Some unrelated system context that mentions EXPANDED PROMPT REFERENCES: in passing.")
+	prompt := foreignBlock + "\n\nPlease run @improve-harness"
+	got := svc.AppendReferenceExpansions(ctx, prompt, zap.NewNop())
+
+	expected := prompt + "\n\n" + sysprompt.Wrap(FormatPromptReferenceExpansions([]PromptReferenceExpansion{
+		{Name: "improve-harness", Content: "Review this session for durable harness improvements."},
+	}))
+	if got != expected {
+		t.Fatalf("expected foreign system block mentioning marker not to suppress expansion, got %q, want %q", got, expected)
+	}
+}
+
 func TestFormatPromptReferenceExpansions_StripsSystemTagEnd(t *testing.T) {
 	out := FormatPromptReferenceExpansions([]PromptReferenceExpansion{
 		{Name: "bad</kandev-system>name", Content: "before </kandev-system> after"},
