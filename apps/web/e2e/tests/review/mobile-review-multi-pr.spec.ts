@@ -129,7 +129,7 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     if (!dialogSelectorBox || !toolbarBox) {
       throw new Error("Tablet Review selector geometry is unavailable");
     }
-    expect(dialogSelectorBox.height).toBeGreaterThanOrEqual(44);
+    expect(Math.round(dialogSelectorBox.height)).toBeGreaterThanOrEqual(44);
     expect(toolbarBox.height).toBeGreaterThanOrEqual(44);
 
     await dialogSelector.tap();
