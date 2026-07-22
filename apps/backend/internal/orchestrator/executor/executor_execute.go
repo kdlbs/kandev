@@ -887,7 +887,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Call the AgentManager to launch the container
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
 	if err != nil {
-		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, err)
+		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, primaryRepo.RepositoryID, err)
 	}
 
 	// Create or update the task environment with launch results
@@ -915,7 +915,7 @@ func resumeTokenForExecutionProfile(running *models.ExecutorRunning, profileID s
 }
 
 // handleLaunchFailure marks the session and task as FAILED and returns the original error.
-func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error) error {
+func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID, repositoryID string, launchErr error) error {
 	// Detach from caller context so failure bookkeeping completes even if the
 	// original request context was cancelled.
 	failCtx := context.WithoutCancel(ctx)
@@ -925,7 +925,7 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID st
 	// Call onLaunchFailed before state updates so it can set the suppressToast
 	// flag that updateSessionState will propagate to the frontend.
 	if e.onLaunchFailed != nil {
-		e.onLaunchFailed(failCtx, taskID, sessionID, launchErr)
+		e.onLaunchFailed(failCtx, taskID, sessionID, repositoryID, launchErr)
 	}
 	if updateErr := e.updateSessionState(failCtx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error()); updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",

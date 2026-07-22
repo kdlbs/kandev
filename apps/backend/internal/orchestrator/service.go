@@ -1512,7 +1512,7 @@ func canResumeRunning(running *models.ExecutorRunning) bool {
 	return models.IsAlwaysResumableRuntime(running.Runtime)
 }
 
-func isMissingMergedPRBranchError(err error) bool {
+func isMissingBranchError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -1545,21 +1545,66 @@ func extractMissingBranchName(err error) string {
 	return ""
 }
 
-func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, sessionID string, launchErr error) {
-	if s.messageCreator == nil || !isMissingMergedPRBranchError(launchErr) {
+func (s *Service) matchingTaskPRState(ctx context.Context, taskID, repositoryID, branch string) string {
+	repositoryID = strings.TrimSpace(repositoryID)
+	if s.githubService == nil || repositoryID == "" || branch == "" {
+		return ""
+	}
+	prsByTask, err := s.githubService.ListTaskPRs(ctx, []string{taskID})
+	if err != nil {
+		s.logger.Debug("failed to load task PR state for missing branch guidance",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return ""
+	}
+	matchingState := ""
+	for _, pr := range prsByTask[taskID] {
+		if pr == nil || strings.TrimSpace(pr.RepositoryID) != repositoryID || strings.TrimSpace(pr.HeadBranch) != branch {
+			continue
+		}
+		if matchingState != "" {
+			return ""
+		}
+		state := strings.ToLower(strings.TrimSpace(pr.State))
+		switch state {
+		case "open", "closed", "merged":
+			matchingState = state
+		default:
+			return ""
+		}
+	}
+	return matchingState
+}
+
+func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, sessionID, repositoryID string, launchErr error) {
+	if s.messageCreator == nil || !isMissingBranchError(launchErr) {
 		return
 	}
 
 	branch := extractMissingBranchName(launchErr)
-	content := "This task references a PR branch that no longer exists on remote (likely merged and deleted)."
+	prState := s.matchingTaskPRState(ctx, taskID, repositoryID, branch)
+	if prState == "open" {
+		return
+	}
+	content := "Kandev couldn't fetch the requested branch from the configured repository. Verify the task's repository branch or PR link, then retry."
 	if branch != "" {
-		content = "The remote PR branch \"" + branch + "\" no longer exists (likely merged and deleted)."
+		content = "Kandev couldn't fetch branch \"" + branch + "\" from the configured repository. Verify the task's repository branch or PR link, then retry."
+	}
+	authoritativeMissingBranch := prState == "closed" || prState == "merged"
+	if authoritativeMissingBranch {
+		content = "This task references a PR branch that no longer exists on remote."
+		if branch != "" {
+			content = "The remote PR branch \"" + branch + "\" no longer exists."
+		}
 	}
 	metadata := map[string]interface{}{
 		"variant":        "warning",
-		"failure_kind":   "missing_pr_branch",
+		"failure_kind":   "branch_fetch_failed",
 		"missing_branch": branch,
-		"actions": []map[string]interface{}{
+	}
+	if authoritativeMissingBranch {
+		metadata["failure_kind"] = "missing_pr_branch"
+		metadata["actions"] = []map[string]interface{}{
 			{
 				actionMetaKeyType:    "archive_task",
 				actionMetaKeyLabel:   "Archive task",
@@ -1575,7 +1620,7 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 				actionMetaKeyIcon:    "trash",
 				actionMetaKeyTestID:  "missing-branch-delete-button",
 			},
-		},
+		}
 	}
 	s.suppressToast.Store(sessionID, true)
 	msgCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

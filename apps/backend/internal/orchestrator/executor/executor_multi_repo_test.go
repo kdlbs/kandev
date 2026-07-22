@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -97,6 +98,49 @@ func TestLaunchPreparedSession_MultiRepo_PopulatesRequestRepositories(t *testing
 	// Legacy single-repo top-level fields stay populated from the primary.
 	if captured.RepositoryPath != "/repos/frontend" {
 		t.Errorf("expected primary repo path on top-level field, got %q", captured.RepositoryPath)
+	}
+}
+
+func TestLaunchPreparedSession_MultiRepo_LaunchFailureReportsPrimaryRepositoryID(t *testing.T) {
+	repo := newMockRepository()
+	const taskID = "task-multi-launch-failure"
+	const sessionID = "session-multi-launch-failure"
+	seedMultiRepoTask(t, repo, taskID)
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         taskID,
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	launchErr := errors.New("fatal: couldn't find remote ref feature/foo")
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	var callbackRepositoryID string
+	exec.SetOnLaunchFailed(func(_ context.Context, callbackTaskID, callbackSessionID, repositoryID string, callbackErr error) {
+		if callbackTaskID != taskID || callbackSessionID != sessionID {
+			t.Errorf("unexpected callback target: task=%q session=%q", callbackTaskID, callbackSessionID)
+		}
+		if !errors.Is(callbackErr, launchErr) {
+			t.Errorf("unexpected callback error: %v", callbackErr)
+		}
+		callbackRepositoryID = repositoryID
+	})
+
+	_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID: taskID, WorkspaceID: "ws-1", Title: "Multi",
+	}, sessionID, LaunchOptions{AgentProfileID: "profile-123", StartAgent: false})
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("LaunchPreparedSession error = %v, want %v", err, launchErr)
+	}
+	if callbackRepositoryID != "repo-front" {
+		t.Fatalf("launch failure repository ID = %q, want primary repository %q", callbackRepositoryID, "repo-front")
 	}
 }
 
