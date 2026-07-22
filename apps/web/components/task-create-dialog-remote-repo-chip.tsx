@@ -35,46 +35,20 @@ import {
   RemoteRepositoryProviderIcon,
   RemoteRepoProviderTabs,
 } from "@/components/task-create-dialog-remote-repo-provider-tabs";
+import { remoteRepositoryMatchesSelection } from "./task-create-dialog-remote-repo-identity";
+
+export { selectedRemoteRepositoryIdentity } from "./task-create-dialog-remote-repo-identity";
 
 const TRUNCATE_THRESHOLD = 30;
 
-/**
- * Props for the per-row remote-repo chip used in the Remote tab of the
- * task-create dialog. The chip itself is presentational — branches and the
- * loading flag are passed in by the parent row (which keys them off the
- * row's URL via `branchesByUrl`), and writes happen through the supplied
- * callbacks.
- *
- * `onURLChange` receives the new URL plus how it was produced. The "picker"
- * arm also carries the canonical `owner/name`, provider, and the repo's
- * `default_branch` so the parent can pre-fill the row's branch without
- * waiting for the branch list to load; the "paste" arm leaves metadata
- * undefined so the row drops any stale picker data and the user picks
- * their own branch.
- */
 export type RemoteRepoChipProps = {
   row: TaskRemoteRepoRow;
   branches: Branch[];
   branchesLoading: boolean;
-  /**
-   * PR info for the row's URL (when the URL is a PR URL and the info has
-   * loaded). Drives the per-row PR-head auto-select effect: if the row's
-   * branch is empty, the chip writes the PR head branch into it. The
-   * dialog separately reads the first row's `suggestedTitle` to autofill
-   * the task title.
-   */
   prInfo?: PRInfo;
-  /**
-   * Shared `useAccessibleRepos` result hoisted up to the chips-row level so
-   * one backend request serves every chip in the row (previously each open
-   * popover fired its own request). Each chip still keeps its own local
-   * search-text state — the hoisted hook only owns the in-flight fetch and
-   * the cache. When two popovers happen to be open at once with different
-   * search texts, both see the same `repos` (the last `search(q)` wins);
-   * that's acceptable because in practice only one popover is open at a
-   * time.
-   */
   accessibleRepos: UseRemoteRepositoriesResult;
+  /** Identities selected by other rows. Matching entries remain selectable. */
+  selectedRepositoryIdentities?: string[];
   onURLChange: (
     url: string,
     source: "picker" | "paste",
@@ -107,6 +81,7 @@ export function RemoteRepoChip({
   branchesLoading,
   prInfo,
   accessibleRepos,
+  selectedRepositoryIdentities = [],
   onURLChange,
   onBranchChange,
   onRemove,
@@ -118,7 +93,12 @@ export function RemoteRepoChip({
       data-testid="remote-repo-chip"
       data-remote-url={row.url}
     >
-      <RemoteRepoPill row={row} accessibleRepos={accessibleRepos} onURLChange={onURLChange} />
+      <RemoteRepoPill
+        row={row}
+        accessibleRepos={accessibleRepos}
+        selectedRepositoryIdentities={selectedRepositoryIdentities}
+        onURLChange={onURLChange}
+      />
       <RemoteBranchPill
         url={row.url}
         branch={row.branch}
@@ -209,10 +189,12 @@ function computeAutoSelectedBranch(prInfo: PRInfo | undefined, branches: Branch[
 function RemoteRepoPill({
   row,
   accessibleRepos,
+  selectedRepositoryIdentities,
   onURLChange,
 }: {
   row: TaskRemoteRepoRow;
   accessibleRepos: UseRemoteRepositoriesResult;
+  selectedRepositoryIdentities: string[];
   onURLChange: RemoteRepoChipProps["onURLChange"];
 }) {
   const [open, setOpen] = useState(false);
@@ -243,6 +225,7 @@ function RemoteRepoPill({
       >
         <RemoteRepoPopoverContent
           accessible={accessibleRepos}
+          selectedRepositoryIdentities={selectedRepositoryIdentities}
           onPick={(repo) => {
             onURLChange(repo.url, "picker", {
               provider: repo.provider,
@@ -297,10 +280,12 @@ function truncateMiddle(value: string, max: number): string {
 
 function RemoteRepoPopoverContent({
   accessible,
+  selectedRepositoryIdentities,
   onPick,
   onPaste,
 }: {
   accessible: UseRemoteRepositoriesResult;
+  selectedRepositoryIdentities: string[];
   onPick: (repo: RemoteRepository) => void;
   onPaste: (value: string) => void;
 }) {
@@ -311,7 +296,6 @@ function RemoteRepoPopoverContent({
   useEffect(() => {
     triggerSearch(value);
   }, [value, triggerSearch]);
-
   const commitURL = (candidate: string) => {
     const trimmed = candidate.trim();
     if (!parseGitHubAnyUrl(trimmed) && !looksLikeSupportedRemoteURL(trimmed)) {
@@ -325,20 +309,14 @@ function RemoteRepoPopoverContent({
     return true;
   };
   const visibleUrlError = accessible.unavailable ? null : urlError;
-  const showProviderTabs = accessible.availableProviders.length > 1;
-  const selectedProvider =
-    activeProvider && accessible.availableProviders.includes(activeProvider)
-      ? activeProvider
-      : accessible.availableProviders[0];
-  const visibleRepos = showProviderTabs
-    ? accessible.repos.filter((repo) => repo.provider === selectedProvider)
-    : accessible.repos;
-
+  const { showProviderTabs, selectedProvider, visibleRepos } = visibleProviderRepositories(
+    accessible,
+    activeProvider,
+  );
   return (
     <div className="flex flex-col">
       <input
         autoFocus
-        type="text"
         value={value}
         onChange={(event) => {
           setValue(event.target.value);
@@ -384,6 +362,7 @@ function RemoteRepoPopoverContent({
       />
       <PickerList
         accessible={{ ...accessible, repos: visibleRepos }}
+        selectedRepositoryIdentities={selectedRepositoryIdentities}
         onPick={onPick}
         urlError={visibleUrlError}
       />
@@ -396,6 +375,21 @@ function RemoteRepoPopoverContent({
       ) : null}
     </div>
   );
+}
+
+function visibleProviderRepositories(
+  accessible: UseRemoteRepositoriesResult,
+  activeProvider: RemoteRepositoryProvider | null,
+) {
+  const showProviderTabs = accessible.availableProviders.length > 1;
+  const selectedProvider =
+    activeProvider && accessible.availableProviders.includes(activeProvider)
+      ? activeProvider
+      : accessible.availableProviders[0];
+  const visibleRepos = showProviderTabs
+    ? accessible.repos.filter((repo) => repo.provider === selectedProvider)
+    : accessible.repos;
+  return { showProviderTabs, selectedProvider, visibleRepos };
 }
 
 function looksLikeURL(value: string): boolean {
@@ -423,10 +417,12 @@ function looksLikeSupportedRemoteURL(value: string): boolean {
 
 function PickerList({
   accessible,
+  selectedRepositoryIdentities,
   onPick,
   urlError,
 }: {
   accessible: UseRemoteRepositoriesResult;
+  selectedRepositoryIdentities: string[];
   onPick: (repo: RemoteRepository) => void;
   urlError: string | null;
 }) {
@@ -457,7 +453,14 @@ function PickerList({
         </div>
       ) : null}
       {repos.map((repo) => (
-        <RepoOption key={`${repo.provider}:${repo.id}`} repo={repo} onPick={onPick} />
+        <RepoOption
+          key={`${repo.provider}:${repo.id}`}
+          repo={repo}
+          alreadyAdded={selectedRepositoryIdentities.some((identity) =>
+            remoteRepositoryMatchesSelection(repo, identity),
+          )}
+          onPick={onPick}
+        />
       ))}
     </div>
   );
@@ -465,9 +468,11 @@ function PickerList({
 
 function RepoOption({
   repo,
+  alreadyAdded,
   onPick,
 }: {
   repo: RemoteRepository;
+  alreadyAdded: boolean;
   onPick: (repo: RemoteRepository) => void;
 }) {
   return (
@@ -484,11 +489,18 @@ function RepoOption({
         <RemoteRepositoryProviderIcon provider={repo.provider} />
         <span className="truncate">{repo.fullName}</span>
       </span>
-      {repo.private ? (
-        <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
-          private
-        </Badge>
-      ) : null}
+      <span className="flex shrink-0 items-center gap-1">
+        {alreadyAdded ? (
+          <Badge variant="outline" className="text-[10px] text-muted-foreground">
+            Already added
+          </Badge>
+        ) : null}
+        {repo.private ? (
+          <Badge variant="outline" className="text-[10px] text-muted-foreground">
+            private
+          </Badge>
+        ) : null}
+      </span>
     </button>
   );
 }
