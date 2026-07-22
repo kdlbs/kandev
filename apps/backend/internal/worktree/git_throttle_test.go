@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -71,6 +72,15 @@ func TestRunGitCmd_RunsToCompletionWhenCapacityAvailable(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestNewNonInteractiveGitCmd_EnablesLongPathsPerCommand(t *testing.T) {
+	cmd := (&Manager{}).newNonInteractiveGitCmd(context.Background(), t.TempDir(), "status", "--short")
+
+	want := []string{"git", "-c", "core.longpaths=true", "status", "--short"}
+	if !slices.Equal(cmd.Args, want) {
+		t.Fatalf("git command args = %q, want %q", cmd.Args, want)
+	}
 }
 
 // Cap parsing tests live in internal/common/subproc/shared_test.go now

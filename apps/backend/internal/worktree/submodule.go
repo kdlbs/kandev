@@ -69,7 +69,7 @@ func (m *Manager) newSubmoduleUpdateCmd(ctx context.Context, dir string) *exec.C
 // It reads from the git object store (git ls-tree), so it works in --no-checkout worktrees.
 // Returns nil (not an error) if there are no submodules.
 func getSubmodulePaths(ctx context.Context, dir string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "ls-tree", "-r", "HEAD")
+	cmd := newGitCommand(ctx, "ls-tree", "-r", "HEAD")
 	cmd.Dir = dir
 	output, err := runGitCmdOutput(ctx, cmd)
 	if err != nil {

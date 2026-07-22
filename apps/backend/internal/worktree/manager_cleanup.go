@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -47,7 +46,7 @@ func (m *Manager) pruneQuarantinedWorktree(ctx context.Context, wt *Worktree) er
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
 
-	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", wt.Path)
+	cmd := newGitCommand(ctx, "worktree", "remove", "--force", wt.Path)
 	cmd.Dir = wt.RepositoryPath
 	if _, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 		present, inspectErr := worktreeRegistrationExists(ctx, wt.RepositoryPath, wt.Path)
@@ -62,7 +61,7 @@ func (m *Manager) pruneQuarantinedWorktree(ctx context.Context, wt *Worktree) er
 }
 
 func worktreeRegistrationExists(ctx context.Context, repoPath, worktreePath string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain", "-z")
+	cmd := newGitCommand(ctx, "worktree", "list", "--porcelain", "-z")
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
@@ -75,6 +74,57 @@ func worktreeRegistrationExists(ctx context.Context, repoPath, worktreePath stri
 		}
 	}
 	return false, nil
+}
+
+func inspectWorktreeRegistrationOwnership(
+	ctx context.Context, repoPath, worktreePath, branchRef, headOID string,
+) (bool, error) {
+	cmd := newGitCommand(ctx, "worktree", "list", "--porcelain", "-z")
+	cmd.Dir = repoPath
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
+	if err != nil {
+		return false, err
+	}
+	wantPath, err := normalizedWorktreeTargetPath(worktreePath)
+	if err != nil {
+		return false, err
+	}
+	var exactTarget, branchElsewhere bool
+	var normalizationErr error
+	var currentPath, currentHead, currentBranch string
+	inspectRegistration := func() {
+		if currentBranch != branchRef || normalizationErr != nil {
+			return
+		}
+		currentPathKey, normalizeErr := normalizedWorktreeTargetPath(currentPath)
+		if normalizeErr != nil {
+			normalizationErr = normalizeErr
+			return
+		}
+		if currentPathKey == wantPath && currentHead == headOID {
+			exactTarget = true
+			return
+		}
+		branchElsewhere = true
+	}
+	for _, field := range strings.Split(string(output), "\x00") {
+		switch {
+		case strings.HasPrefix(field, "worktree "):
+			inspectRegistration()
+			currentPath = strings.TrimPrefix(field, "worktree ")
+			currentHead = ""
+			currentBranch = ""
+		case strings.HasPrefix(field, "HEAD "):
+			currentHead = strings.TrimPrefix(field, "HEAD ")
+		case strings.HasPrefix(field, "branch "):
+			currentBranch = strings.TrimPrefix(field, "branch ")
+		}
+	}
+	inspectRegistration()
+	if normalizationErr != nil {
+		return false, normalizationErr
+	}
+	return exactTarget && !branchElsewhere, nil
 }
 
 // RemoveByID removes a specific worktree by its ID and optionally its branch.
@@ -126,7 +176,7 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 			zap.String("branch", wt.Branch),
 			zap.String("repository_path", wt.RepositoryPath))
 
-		cmd := exec.CommandContext(ctx, "git", "branch", "-D", wt.Branch)
+		cmd := newGitCommand(ctx, "branch", "-D", wt.Branch)
 		cmd.Dir = wt.RepositoryPath
 		if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 			m.logger.Warn("failed to delete branch from main repository",
@@ -343,19 +393,19 @@ func (m *Manager) OnTaskDeleted(ctx context.Context, taskID string) error {
 // still has siblings or contains workspace-scoped content.
 func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath string) error {
 	// First try git worktree remove
-	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", worktreePath)
+	cmd := newGitCommand(ctx, "worktree", "remove", "--force", worktreePath)
 	cmd.Dir = repoPath
 	if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
-		m.logger.Debug("git worktree remove failed, falling back to rm",
+		m.logger.Debug("git worktree remove failed, falling back to filesystem removal",
 			zap.String("output", string(output)),
 			zap.Error(err))
 
-		if err := m.forceRemoveDir(ctx, worktreePath); err != nil {
+		if err := m.forceRemoveDir(worktreePath); err != nil {
 			return err
 		}
 
 		// Prune stale worktree entries
-		pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
+		pruneCmd := newGitCommand(ctx, "worktree", "prune")
 		pruneCmd.Dir = repoPath
 		if err := runGitCmd(ctx, pruneCmd); err != nil {
 			m.logger.Debug("git worktree prune failed", zap.Error(err))
@@ -397,32 +447,32 @@ func (m *Manager) tryRemoveEmptyTaskDir(worktreePath string) {
 	}
 }
 
-// forceRemoveDir removes a directory, retrying on transient failures.
-// On macOS, os.RemoveAll can fail with "directory not empty" when files
-// have special attributes or were recently released by other processes
-// (e.g. .next/dev build cache). Falls back to rm -rf as a last resort.
-func (m *Manager) forceRemoveDir(ctx context.Context, dir string) error {
+// forceRemoveDir removes a directory, retrying transient filesystem failures.
+// It intentionally remains within Go's portable filesystem API so cleanup also
+// works in native Windows environments where a Unix rm binary is unavailable.
+func (m *Manager) forceRemoveDir(dir string) error {
 	const maxRetries = 3
 	const retryDelay = 200 * time.Millisecond
+	return m.removeDirWithRetries(dir, maxRetries, retryDelay, os.RemoveAll)
+}
+
+func (m *Manager) removeDirWithRetries(
+	dir string, maxRetries int, retryDelay time.Duration, removeAll func(string) error,
+) error {
+	var lastErr error
 
 	for i := range maxRetries {
-		err := os.RemoveAll(dir)
-		if err == nil {
+		lastErr = removeAll(dir)
+		if lastErr == nil {
 			return nil
 		}
 		if i < maxRetries-1 {
 			m.logger.Debug("os.RemoveAll failed, retrying",
 				zap.String("path", dir),
 				zap.Int("attempt", i+1),
-				zap.Error(err))
+				zap.Error(lastErr))
 			time.Sleep(retryDelay)
 		}
 	}
-
-	// Last resort: shell out to rm -rf which handles macOS edge cases better
-	cmd := exec.CommandContext(ctx, "rm", "-rf", dir)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("rm -rf failed: %w (output: %s)", err, string(output))
-	}
-	return nil
+	return fmt.Errorf("remove directory %s after %d attempts: %w", dir, maxRetries, lastErr)
 }

@@ -725,7 +725,9 @@ func writeFakeGitScript(t *testing.T, scriptBody string) string {
 
 	scriptDir := t.TempDir()
 	scriptPath := filepath.Join(scriptDir, "git")
-	content := "#!/bin/sh\nset -eu\n\n" + scriptBody + "\n"
+	content := "#!/bin/sh\nset -eu\n\n" +
+		"while [ \"${1:-}\" = \"-c\" ] && [ \"${2:-}\" = \"core.longpaths=true\" ]; do shift 2; done\n\n" +
+		scriptBody + "\n"
 	if err := os.WriteFile(scriptPath, []byte(content), 0755); err != nil {
 		t.Fatalf("failed to write fake git script: %v", err)
 	}
