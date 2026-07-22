@@ -19,8 +19,8 @@ spec: "../../specs/ui/external-vcs-file-links.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- components/diff/diff-header-toolbar.test.tsx components/review/review-diff-toolbar.test.tsx components/editors/external-vcs-file-link.test.tsx
-cd apps/web && pnpm run typecheck
+(cd apps && pnpm --filter @kandev/web test -- components/diff/diff-header-toolbar.test.tsx components/review/review-diff-toolbar.test.tsx components/editors/external-vcs-file-link.test.tsx)
+(cd apps/web && pnpm run typecheck)
 ```
 
 ## Files likely touched
@@ -50,3 +50,10 @@ cd apps/web && pnpm run typecheck
 ## Output contract
 
 Report summary, files changed, tests/commands with results, blockers, visual/mobile risks, and any divergence. Update only this task file's `status` to `in_progress` at start and `done` after acceptance and verification pass; do not edit `plan.md`.
+
+## Completion report
+
+- **Summary:** Wired the shared provider action into Pierre Changes/commit and Review diffs, Monaco editing, Markdown preview, and the dedicated mobile file viewer. File status, old path, repository, session, and published-branch context now reach the resolver without cross-repository fallback.
+- **Changed scope:** Diff context/header wiring; Review file toolbar/context; Monaco, Markdown, and mobile file-viewer toolbars; adjacent component tests.
+- **Focused verification:** `(cd apps && pnpm --filter @kandev/web test -- components/diff/diff-header-toolbar.test.tsx components/review/review-diff-toolbar.test.tsx components/editors/external-vcs-file-link.test.tsx)` passed with the adjacent toolbar coverage (32 tests total); `(cd apps/web && pnpm run typecheck)` passed; targeted ESLint and `git diff --check` also passed.
+- **Risks/divergence:** Dense mobile headers retained a touch-sized action, but real-browser overflow/reachability remained the follow-up risk addressed by browser coverage.

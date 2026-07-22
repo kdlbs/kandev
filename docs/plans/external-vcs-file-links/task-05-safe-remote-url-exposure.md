@@ -3,7 +3,7 @@ id: "05-safe-remote-url-exposure"
 title: "Safe remote URL exposure"
 status: done
 wave: remediation
-depends_on: ["04-repository-remote-url-contract"]
+depends_on: []
 plan: "plan.md"
 spec: "../../specs/ui/external-vcs-file-links.md"
 ---
@@ -20,3 +20,10 @@ spec: "../../specs/ui/external-vcs-file-links.md"
 ## Output contract
 
 Report RED/GREEN evidence, changed files, exact focused results, and any remaining clone-URL trust boundary.
+
+## Completion report
+
+- **Summary:** Replaced the rejected generic write-through with a read-only repository DTO contract and a trusted provider/task fixture path for browser setup.
+- **Changed scope:** Repository DTO serialization and regression tests; generic repository handler/service request regression tests; E2E provider/task repository setup used by the desktop and mobile specs.
+- **Focused verification:** `(cd apps/backend && go test ./internal/task/handlers ./internal/task/dto ./internal/task/service)` passed; the external-file-link desktop and mobile Playwright specs passed using provider/task-seeded repositories.
+- **Trusted clone-URL boundary:** Generic repository create/update JSON ignores `remote_url`; only already-persisted values are exposed through the DTO. Provider/task resolution remains the trusted writer, so this work intentionally does not create a generic clone-target update API.

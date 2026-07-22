@@ -191,9 +191,12 @@ function githubPRMatches(pr: TaskPR, repository: Repository): boolean {
 
 function gitlabMRMatches(mr: TaskMR, repository: Repository): boolean {
   if (mr.repository_id) return mr.repository_id === repository.id;
+  const mergeRequestOrigin = normalizeOrigin(mr.host);
+  const repositoryOrigin = normalizeOrigin(repository.provider_host);
   return (
     repository.provider === "gitlab" &&
-    normalizeOrigin(mr.host) === normalizeOrigin(repository.provider_host) &&
+    Boolean(mergeRequestOrigin && repositoryOrigin) &&
+    mergeRequestOrigin === repositoryOrigin &&
     mr.project_path === `${repository.provider_owner}/${repository.provider_name}`
   );
 }

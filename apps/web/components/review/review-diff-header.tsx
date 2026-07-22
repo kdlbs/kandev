@@ -55,10 +55,7 @@ export function ReviewDiffHeader({
   publishedPRRepositoryId,
 }: ReviewDiffHeaderProps) {
   const hasPublishedPR =
-    file.source === "pr" &&
-    (!file.repository_id ||
-      !publishedPRRepositoryId ||
-      file.repository_id === publishedPRRepositoryId);
+    file.source === "pr" && (!file.repository_id || file.repository_id === publishedPRRepositoryId);
   const publishedBranch = hasPublishedPR ? publishedPRBranch : undefined;
   const publishedPullRequestNumber = hasPublishedPR ? publishedPRNumber : undefined;
   const baseBranch =

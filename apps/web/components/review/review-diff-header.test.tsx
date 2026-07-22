@@ -58,6 +58,33 @@ describe("ReviewDiffHeader external context", () => {
     expect(props).not.toHaveProperty("publishedBranch");
   });
 
+  it("does not inherit a published PR without a matching published repository", () => {
+    render(
+      <ReviewDiffHeader
+        file={file}
+        isReviewed={false}
+        isStale={false}
+        sessionId="session-1"
+        collapsed={false}
+        wordWrap={false}
+        expandUnchanged={false}
+        baseBranchByRepo={{ frontend: "develop" }}
+        taskId="task-1"
+        publishedPRBranch="feature/unknown-repository"
+        publishedPRNumber={42}
+        onCheckboxChange={vi.fn()}
+        onDiscard={vi.fn()}
+        onToggleCollapse={vi.fn()}
+        onToggleExpandUnchanged={vi.fn()}
+        onToggleWordWrap={vi.fn()}
+      />,
+    );
+
+    const props = JSON.parse(screen.getByTestId("review-toolbar-props").dataset.props ?? "{}");
+    expect(props).not.toHaveProperty("publishedBranch");
+    expect(props).not.toHaveProperty("publishedPullRequestNumber");
+  });
+
   it("forwards the GitHub PR number with its published branch", () => {
     render(
       <ReviewDiffHeader
