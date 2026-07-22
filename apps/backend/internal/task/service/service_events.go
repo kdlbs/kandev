@@ -243,6 +243,7 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 			data["session_count"] = count
 		}
 	}
+	s.addTaskPendingActionEventField(ctx, taskID, data)
 
 	primarySessionInfoMap, err := s.GetPrimarySessionInfoForTasks(ctx, []string{taskID})
 	if err != nil {
@@ -280,6 +281,44 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	}
 	if execType != "" {
 		data["is_remote_executor"] = models.IsRemoteExecutorType(models.ExecutorType(execType))
+	}
+}
+
+func (s *Service) addTaskPendingActionEventField(ctx context.Context, taskID string, data map[string]interface{}) {
+	sessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to list sessions for task pending action", zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput) {
+			sessionIDs = append(sessionIDs, session.ID)
+		}
+	}
+	if len(sessionIDs) == 0 {
+		data["task_pending_action"] = nil
+		return
+	}
+	actions, err := s.GetPendingActionsForSessions(ctx, sessionIDs)
+	if err != nil {
+		s.logger.Warn("failed to load task pending action", zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	var clarification bool
+	for _, sessionID := range sessionIDs {
+		switch actions[sessionID] {
+		case models.TaskPendingActionPermission:
+			data["task_pending_action"] = string(models.TaskPendingActionPermission)
+			return
+		case models.TaskPendingActionClarification:
+			clarification = true
+		}
+	}
+	if clarification {
+		data["task_pending_action"] = string(models.TaskPendingActionClarification)
+	} else {
+		data["task_pending_action"] = nil
 	}
 }
 

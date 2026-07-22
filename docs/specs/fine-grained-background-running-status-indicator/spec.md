@@ -45,6 +45,14 @@ foreground becomes idle does outstanding background work select
 recognized background work is active. Ending the foreground turn does not, by
 itself, end or hide background work that outlives that turn.
 
+An actionable request for operator input sits above this work-state hierarchy.
+When the current turn has a pending AskUser/clarification or permission request,
+every task- and session-level indicator shows the corresponding needs-input
+affordance even if foreground or background activity is also reported. A
+permission request takes precedence when both pending variants are present.
+Starting and terminal sessions ignore stale pending flags; only a current,
+input-capable session can override its work-state indicator this way.
+
 The background-running affordance is visually separable from *both* the
 generating affordance *and* the done affordance, and the separation does not
 rely on hue alone: an operator distinguishes it by shape or motion, so it

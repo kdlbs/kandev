@@ -153,6 +153,7 @@ type TaskDTO struct {
 	PrimaryWorkingDirectory     *string             `json:"primary_working_directory,omitempty"`
 	PrimarySessionState         *string             `json:"primary_session_state,omitempty"`
 	PrimarySessionPendingAction *string             `json:"primary_session_pending_action"`
+	TaskPendingAction           *string             `json:"task_pending_action"`
 	// ForegroundActivity is the task-level MOST-ACTIVE-WINS activity aggregate
 	// across the task's sessions (§spec:task-level-indicator): "generating" when
 	// any session is generating, "background" when none is generating but at

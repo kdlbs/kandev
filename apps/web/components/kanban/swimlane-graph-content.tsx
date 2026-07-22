@@ -75,6 +75,8 @@ function DraggableTaskChip({
   });
   const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
+    taskId: task.id,
+    taskPendingAction: task.taskPendingAction,
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
@@ -111,6 +113,8 @@ function DraggableTaskChip({
 
 function TaskChipPreview({ task }: { task: Task }) {
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
+    taskId: task.id,
+    taskPendingAction: task.taskPendingAction,
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });

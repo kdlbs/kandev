@@ -48,6 +48,12 @@ function mergeTaskUpdate(
   ) {
     merged.primarySessionPendingAction = existing.primarySessionPendingAction;
   }
+  if (
+    !hasPayloadField(payload, "task_pending_action") &&
+    nextTask.taskPendingAction === undefined
+  ) {
+    merged.taskPendingAction = existing.taskPendingAction;
+  }
   // Preserve the task-level activity aggregate only when the event omits it
   // entirely (e.g. a lightweight kanban.update). A task.updated that carries an
   // explicit null clears a stale background-running reading, so it must win.

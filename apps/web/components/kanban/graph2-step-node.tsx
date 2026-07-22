@@ -102,6 +102,8 @@ export function Graph2StepNode({
   const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
+    taskId: task.id,
+    taskPendingAction: task.taskPendingAction,
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });

@@ -185,11 +185,20 @@ function TaskStateIcon({
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
 }) {
-  if (foregroundActivity === "background") {
+  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return (
-      <span data-testid="task-state-background-running" className="mt-[1px] flex shrink-0">
-        {getSessionStateIcon("RUNNING", "h-3.5 w-3.5", "background")}
-      </span>
+      <IconShieldQuestion
+        data-testid="task-state-pending-permission"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-amber-500"
+      />
+    );
+  }
+  if (hasPendingClarification) {
+    return (
+      <IconMessageQuestion
+        data-testid="task-state-waiting-for-input"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500"
+      />
     );
   }
   if (foregroundActivity === "generating") {
@@ -201,19 +210,18 @@ function TaskStateIcon({
       />
     );
   }
-  if (shouldUseQuestionTaskIcon(state, hasPendingClarification)) {
+  if (foregroundActivity === "background") {
+    return (
+      <span data-testid="task-state-background-running" className="mt-[1px] flex shrink-0">
+        {getSessionStateIcon("RUNNING", "h-3.5 w-3.5", "background")}
+      </span>
+    );
+  }
+  if (shouldUseQuestionTaskIcon(state)) {
     return (
       <IconMessageQuestion
         data-testid="task-state-waiting-for-input"
         className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500"
-      />
-    );
-  }
-  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
-    return (
-      <IconShieldQuestion
-        data-testid="task-state-pending-permission"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-amber-500"
       />
     );
   }

@@ -384,6 +384,8 @@ function TaskListRow({
   // boot-payload snapshot fallback) instead of collapsing to the coarse state
   // (§spec:waiting-for-input-parity).
   const pendingInput = useTaskPendingInput(task.primary_session_id, {
+    taskId: task.id,
+    taskPendingAction: task.task_pending_action,
     primarySessionState: task.primary_session_state,
     primarySessionPendingAction: task.primary_session_pending_action,
   });

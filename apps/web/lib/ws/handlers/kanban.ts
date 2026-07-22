@@ -61,6 +61,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               primarySessionId: existing?.primarySessionId,
               primarySessionState: existing?.primarySessionState,
               primarySessionPendingAction: existing?.primarySessionPendingAction,
+              taskPendingAction: existing?.taskPendingAction,
               foregroundActivity: existing?.foregroundActivity,
             };
           });
@@ -94,6 +95,10 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
                 t.primarySessionPendingAction === undefined
                   ? fallback?.primarySessionPendingAction
                   : t.primarySessionPendingAction,
+              taskPendingAction:
+                t.taskPendingAction === undefined
+                  ? fallback?.taskPendingAction
+                  : t.taskPendingAction,
               foregroundActivity:
                 t.foregroundActivity === undefined
                   ? fallback?.foregroundActivity

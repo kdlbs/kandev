@@ -24,6 +24,11 @@ describe("shouldShowReopenStateIcon", () => {
     expect(shouldShowReopenStateIcon("STARTING", null)).toBe(false);
   });
 
+  it("ignores stale pending input while a session is still STARTING", () => {
+    expect(shouldShowReopenStateIcon("STARTING", null, true, false)).toBe(false);
+    expect(shouldShowReopenStateIcon("STARTING", null, false, true)).toBe(false);
+  });
+
   it("now surfaces the waiting-for-input affordance (§spec:waiting-for-input-parity)", () => {
     // Previously WAITING_FOR_INPUT was silent; it now shows the "needs me" icon
     // so the reopen menu distinguishes waiting from done and running.

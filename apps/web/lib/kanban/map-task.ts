@@ -41,6 +41,7 @@ export type TaskLike = {
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | string | null;
   primary_session_pending_action?: TaskPendingAction | null;
+  task_pending_action?: TaskPendingAction | null;
   foreground_activity?: ForegroundActivity | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
@@ -115,6 +116,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
     primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),
+    taskPendingAction: pickPendingAction(source.task_pending_action),
     foregroundActivity: source.foreground_activity ?? undefined,
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,

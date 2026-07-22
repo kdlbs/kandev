@@ -118,6 +118,20 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     ).toBeUndefined();
   });
 
+  it("maps valid task-wide pending actions from HTTP and WS shapes", () => {
+    const pendingAction = { task_pending_action: "permission" } as Partial<TaskLike>;
+    expect(toKanbanTask(httpDTO(pendingAction)).taskPendingAction).toBe("permission");
+    expect(toKanbanTask(wsPayload(pendingAction)).taskPendingAction).toBe("permission");
+  });
+
+  it("drops unrecognized task-wide pending action values", () => {
+    const invalid = {
+      task_pending_action: "unknown",
+    } as Record<string, unknown> as Partial<TaskLike>;
+    expect(toKanbanTask(httpDTO(invalid)).taskPendingAction).toBeUndefined();
+    expect(toKanbanTask(wsPayload(invalid)).taskPendingAction).toBeUndefined();
+  });
+
   it("missing repository on either shape: repositoryId is undefined", () => {
     const http = httpDTO({ repositories: undefined });
     const ws = wsPayload({ repository_id: undefined, repositories: undefined });

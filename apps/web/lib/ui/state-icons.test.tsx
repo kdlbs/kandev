@@ -73,12 +73,31 @@ describe("getTaskStateIcon — waiting-for-input variants (§spec:waiting-for-in
     expect(clarification).not.toBe(permission);
   });
 
-  it("keeps foreground activity ahead of the waiting variants (a generating task still generates)", () => {
-    // A genuinely generating/background task is not "waiting on me"; activity
-    // wins so a stale pending flag can't paint a needs-me icon over live work.
+  it("lets pending permission win over clarification and foreground activity", () => {
     expect(
       iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, true, "generating", true)),
-    ).toBe(IconLoader2);
+    ).toBe(IconShieldQuestion);
+  });
+
+  it.each(["generating", "background"] as const)(
+    "lets a pending clarification win over %s activity",
+    (activity) => {
+      expect(
+        iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, true, activity, false)),
+      ).toBe(IconMessageQuestion);
+    },
+  );
+
+  it("lets generating activity win over a coarse waiting state without pending input", () => {
+    expect(iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, false, "generating"))).toBe(
+      IconLoader2,
+    );
+  });
+
+  it("lets background activity win over a coarse waiting state without pending input", () => {
+    expect(iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, false, "background"))).toBe(
+      IconLoader,
+    );
   });
 });
 
@@ -224,19 +243,26 @@ describe("getSessionStateIcon — waiting-for-input variants (§spec:waiting-for
     );
   });
 
-  it("keeps background-running ahead of a waiting flag (still working in background)", () => {
-    // Session-level background is the emerald IconLoader2 spinner (ADR-0049),
-    // distinct from the task-level violet IconLoader.
+  it.each(["generating", "background"] as const)(
+    "lets a pending clarification win over %s activity",
+    (activity) => {
+      expect(iconType(getSessionStateIcon("RUNNING", undefined, activity, true, false))).toBe(
+        IconMessageQuestion,
+      );
+    },
+  );
+
+  it("lets pending permission win over clarification and background activity", () => {
     expect(
-      iconType(getSessionStateIcon("WAITING_FOR_INPUT", undefined, "background", true, false)),
-    ).toBe(IconLoader2);
+      iconType(getSessionStateIcon("WAITING_FOR_INPUT", undefined, "background", true, true)),
+    ).toBe(IconShieldQuestion);
   });
 
   it("does not let stale pending input mask starting or terminal session states", () => {
-    expect(iconType(getSessionStateIcon("STARTING", undefined, null, true, true))).toBe(
+    expect(iconType(getSessionStateIcon("STARTING", undefined, "background", true, true))).toBe(
       IconLoader2,
     );
-    expect(iconType(getSessionStateIcon("COMPLETED", undefined, null, true, true))).toBe(
+    expect(iconType(getSessionStateIcon("COMPLETED", undefined, "generating", true, true))).toBe(
       IconCircleCheck,
     );
   });

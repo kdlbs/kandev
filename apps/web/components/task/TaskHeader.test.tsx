@@ -6,6 +6,9 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { TaskHeader } from "./TaskHeader";
 
+const WAITING_FOR_INPUT = "WAITING_FOR_INPUT";
+const WAITING_FOR_INPUT_LABEL = "Waiting for input";
+
 afterEach(cleanup);
 
 describe("TaskHeader", () => {
@@ -53,21 +56,21 @@ describe("TaskHeader", () => {
   // §spec:waiting-for-input-parity: the header badge carries the sidebar's rich
   // "needs me" reading, distinct from done and from running.
   it("reads a plain WAITING_FOR_INPUT state as 'Waiting for input'", () => {
-    render(<TaskHeader title="t" state="WAITING_FOR_INPUT" />);
-    expect(screen.getByText("Waiting for input")).toBeTruthy();
-    expect(screen.queryByText("WAITING_FOR_INPUT")).toBeNull();
+    render(<TaskHeader title="t" state={WAITING_FOR_INPUT} />);
+    expect(screen.getByText(WAITING_FOR_INPUT_LABEL)).toBeTruthy();
+    expect(screen.queryByText(WAITING_FOR_INPUT)).toBeNull();
   });
 
   it("reads a pending clarification as 'Waiting for input' even over a non-waiting coarse state", () => {
     render(<TaskHeader title="t" state="IN_PROGRESS" hasPendingClarification />);
-    expect(screen.getByText("Waiting for input")).toBeTruthy();
+    expect(screen.getByText(WAITING_FOR_INPUT_LABEL)).toBeTruthy();
   });
 
   it("reads a pending permission as 'Permission requested', taking precedence over clarification", () => {
     render(
       <TaskHeader
         title="t"
-        state="WAITING_FOR_INPUT"
+        state={WAITING_FOR_INPUT}
         hasPendingClarification
         hasPendingPermission
       />,
@@ -75,16 +78,41 @@ describe("TaskHeader", () => {
     expect(screen.getByText("Permission requested")).toBeTruthy();
   });
 
-  it("keeps live activity ahead of a waiting flag in the badge", () => {
+  it("lets a pending permission take precedence over live activity in the badge", () => {
     render(
       <TaskHeader
         title="t"
-        state="WAITING_FOR_INPUT"
+        state={WAITING_FOR_INPUT}
         foregroundActivity="background"
         hasPendingPermission
       />,
     );
+    expect(screen.getByText("Permission requested")).toBeTruthy();
+    expect(screen.queryByText("Background running")).toBeNull();
+  });
+
+  it("lets a pending clarification take precedence over generating in the badge", () => {
+    render(
+      <TaskHeader
+        title="t"
+        state={WAITING_FOR_INPUT}
+        foregroundActivity="generating"
+        hasPendingClarification
+      />,
+    );
+    expect(screen.getByText(WAITING_FOR_INPUT_LABEL)).toBeTruthy();
+    expect(screen.queryByText("Generating")).toBeNull();
+  });
+
+  it("lets generating activity win over a coarse waiting state without pending input", () => {
+    render(<TaskHeader title="t" state={WAITING_FOR_INPUT} foregroundActivity="generating" />);
+    expect(screen.getByText("Generating")).toBeTruthy();
+    expect(screen.queryByText(WAITING_FOR_INPUT_LABEL)).toBeNull();
+  });
+
+  it("lets background activity win over a coarse waiting state without pending input", () => {
+    render(<TaskHeader title="t" state={WAITING_FOR_INPUT} foregroundActivity="background" />);
     expect(screen.getByText("Background running")).toBeTruthy();
-    expect(screen.queryByText("Permission requested")).toBeNull();
+    expect(screen.queryByText(WAITING_FOR_INPUT_LABEL)).toBeNull();
   });
 });

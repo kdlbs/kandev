@@ -69,15 +69,15 @@ describe("TaskItem status icon", () => {
     expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
   });
 
-  it("prefers clarification icon over permission icon when both are pending", () => {
+  it("prefers permission icon over clarification icon when both are pending", () => {
     renderTaskItem({
       sessionState: "WAITING_FOR_INPUT",
       hasPendingClarification: true,
       hasPendingPermission: true,
     });
 
-    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
-    expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
   });
 
   it("shows a slower muted spinner while the workflow is scheduling", () => {
@@ -207,7 +207,7 @@ describe("TaskItem background-running indicator", () => {
     expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
   });
 
-  it("keeps background-running visible while the foreground waits for input", () => {
+  it("shows pending clarification instead of background-running", () => {
     renderTaskItem({
       state: "WAITING_FOR_INPUT",
       sessionState: "WAITING_FOR_INPUT",
@@ -215,19 +215,47 @@ describe("TaskItem background-running indicator", () => {
       hasPendingClarification: true,
     });
 
-    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).not.toBeNull();
-    expect(screen.queryByTestId("task-state-waiting-for-input")).toBeNull();
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
   });
 
-  it("keeps foreground-running visible while a waiting flag is present", () => {
+  it("shows pending permission instead of foreground-running", () => {
     renderTaskItem({
       state: "WAITING_FOR_INPUT",
-      sessionState: "WAITING_FOR_INPUT",
+      sessionState: "RUNNING",
       foregroundActivity: "generating",
       hasPendingClarification: true,
+      hasPendingPermission: true,
     });
 
-    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("shows task-wide pending permission when the selected session is still starting", () => {
+    renderTaskItem({
+      state: "IN_PROGRESS",
+      sessionState: "STARTING",
+      foregroundActivity: null,
+      hasPendingPermission: true,
+    });
+
+    expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("shows task-wide pending input when the selected session is terminal", () => {
+    renderTaskItem({
+      state: "REVIEW",
+      sessionState: "COMPLETED",
+      foregroundActivity: null,
+      hasPendingClarification: true,
+      hasPendingPermission: true,
+    });
+
+    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).not.toBeNull();
     expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
   });
 

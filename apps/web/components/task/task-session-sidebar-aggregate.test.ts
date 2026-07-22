@@ -3,6 +3,7 @@ import {
   aggregateSidebarTasks,
   buildPendingFlags,
   readPendingFlags,
+  readTaskPendingFlags,
   type SidebarStepInfo,
   type WorkflowSnapshotMap,
 } from "./task-session-sidebar-aggregate";
@@ -220,5 +221,28 @@ describe("buildPendingFlags / readPendingFlags", () => {
         primarySessionPendingAction: "clarification",
       }),
     ).toEqual({ clarification: false, permission: false });
+  });
+
+  it("aggregates permission from a secondary waiting session", () => {
+    const flags = buildPendingFlags(
+      { primary: [], secondary: [makePermissionRequest("secondary-permission")] },
+      ["primary", "secondary"],
+    );
+    expect(
+      readTaskPendingFlags(flags, [
+        { id: "primary", state: "STARTING" },
+        { id: "secondary", state: "WAITING_FOR_INPUT" },
+      ]),
+    ).toEqual({ clarification: false, permission: true });
+  });
+
+  it("excludes stale pending input from non-input-capable sessions", () => {
+    const flags = buildPendingFlags({ starting: [makePermissionRequest("stale-permission")] }, [
+      "starting",
+    ]);
+    expect(readTaskPendingFlags(flags, [{ id: "starting", state: "STARTING" }])).toEqual({
+      clarification: false,
+      permission: false,
+    });
   });
 });

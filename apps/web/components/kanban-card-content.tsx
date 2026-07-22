@@ -265,6 +265,8 @@ function KanbanCardActions({
   const debugEnabled = isDebug();
   const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
+    taskId: task.id,
+    taskPendingAction: task.taskPendingAction,
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });

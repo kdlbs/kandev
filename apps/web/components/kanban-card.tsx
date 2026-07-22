@@ -54,6 +54,7 @@ export interface Task {
    */
   primarySessionState?: string | null;
   primarySessionPendingAction?: TaskPendingAction | null;
+  taskPendingAction?: TaskPendingAction | null;
   /**
    * Task-level MOST-ACTIVE-WINS activity aggregate (§spec:task-level-indicator);
    * undefined/null when no session is running. Drives the background-running

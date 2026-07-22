@@ -47,6 +47,14 @@ func (r primarySessionInfoRepository) GetSessionCountsByTaskIDs(ctx context.Cont
 	return map[string]int{}, nil
 }
 
+func (r primarySessionInfoRepository) ListActiveTaskSessionsByTaskID(_ context.Context, taskID string) ([]*models.TaskSession, error) {
+	info := r.info[taskID]
+	if info == nil {
+		return nil, nil
+	}
+	return []*models.TaskSession{info}, nil
+}
+
 // TestPublishTaskUpdated_FallbackRepositoryID exercises the DB fallback in
 // taskRepositoriesForEvent: orchestrator-originated events load the task via the
 // raw repo.GetTask, which does not populate Repositories. The publisher must
@@ -208,6 +216,63 @@ func TestPublishTaskUpdated_EmitsPrimarySessionPendingAction(t *testing.T) {
 	data := singlePublishedEventData(t, eventBus)
 	if value := data["primary_session_pending_action"]; value != "clarification" {
 		t.Fatalf("primary_session_pending_action = %#v, want clarification", value)
+	}
+}
+
+func TestPublishTaskUpdated_EmitsTaskPendingPermissionFromSecondarySession(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	requireTaskEventFixture(t, ctx, repo)
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "T", Priority: "medium"}
+	for _, session := range []*models.TaskSession{
+		{ID: "primary", TaskID: task.ID, State: models.TaskSessionStateRunning, IsPrimary: true, StartedAt: now, UpdatedAt: now},
+		{ID: "secondary", TaskID: task.ID, State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now},
+		{ID: "stale-starting", TaskID: task.ID, State: models.TaskSessionStateStarting, StartedAt: now, UpdatedAt: now},
+	} {
+		if err := repo.CreateTaskSession(ctx, session); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", session.ID, err)
+		}
+	}
+	for _, turn := range []*models.Turn{
+		{ID: "primary-turn", TaskSessionID: "primary", TaskID: task.ID},
+		{ID: "secondary-turn", TaskSessionID: "secondary", TaskID: task.ID},
+		{ID: "stale-turn", TaskSessionID: "stale-starting", TaskID: task.ID},
+	} {
+		if err := repo.CreateTurn(ctx, turn); err != nil {
+			t.Fatalf("CreateTurn(%s): %v", turn.ID, err)
+		}
+	}
+	for _, message := range []*models.Message{
+		{ID: "primary-clarification", TaskSessionID: "primary", TaskID: task.ID, TurnID: "primary-turn", AuthorType: models.MessageAuthorAgent, Type: models.MessageTypeClarificationRequest, Metadata: map[string]interface{}{"status": "pending"}, CreatedAt: now},
+		{ID: "secondary-permission", TaskSessionID: "secondary", TaskID: task.ID, TurnID: "secondary-turn", AuthorType: models.MessageAuthorAgent, Type: models.MessageTypePermissionRequest, Metadata: map[string]interface{}{"status": "pending"}, CreatedAt: now},
+		{ID: "stale-clarification", TaskSessionID: "stale-starting", TaskID: task.ID, TurnID: "stale-turn", AuthorType: models.MessageAuthorAgent, Type: models.MessageTypeClarificationRequest, Metadata: map[string]interface{}{"status": "pending"}, CreatedAt: now},
+	} {
+		if err := repo.CreateMessage(ctx, message); err != nil {
+			t.Fatalf("CreateMessage(%s): %v", message.ID, err)
+		}
+	}
+	eventBus.ClearEvents()
+
+	svc.PublishTaskUpdated(ctx, task)
+
+	data := singlePublishedEventData(t, eventBus)
+	if value := data["task_pending_action"]; value != "permission" {
+		t.Fatalf("task_pending_action = %#v, want permission", value)
+	}
+}
+
+func requireTaskEventFixture(t *testing.T, ctx context.Context, repo taskEventTestRepository) {
+	t.Helper()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "T", Priority: "medium"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
 	}
 }
 

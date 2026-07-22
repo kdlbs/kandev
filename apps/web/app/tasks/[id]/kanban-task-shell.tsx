@@ -100,25 +100,39 @@ export function KanbanTaskShell({
 // background-running task reads distinctly and never as done (§spec:task-level-indicator),
 // and carry the sidebar's rich "needs me" reading — pending clarification /
 // permission — so the header distinguishes waiting-for-input (§spec:waiting-for-input-parity).
+function simpleTaskHeaderData(task: Task | null) {
+  return {
+    primarySessionId: task?.primary_session_id,
+    pendingFallback: {
+      taskId: task?.id,
+      taskPendingAction: task?.task_pending_action,
+      primarySessionState: task?.primary_session_state,
+      primarySessionPendingAction: task?.primary_session_pending_action,
+    },
+    identifier: task?.id?.slice(0, 8),
+    title: task?.title ?? "Loading...",
+    state: task?.state ?? null,
+    foregroundActivity: task?.foreground_activity,
+  };
+}
+
 function SimpleTaskHeaderRow({ task }: { task: Task | null }) {
-  const pendingInput = useTaskPendingInput(task?.primary_session_id, {
-    primarySessionState: task?.primary_session_state,
-    primarySessionPendingAction: task?.primary_session_pending_action,
-  });
+  const data = simpleTaskHeaderData(task);
+  const pendingInput = useTaskPendingInput(data.primarySessionId, data.pendingFallback);
   return (
     <div className="flex items-center gap-2">
       <TaskStateActions
-        state={task?.state ?? undefined}
+        state={data.state ?? undefined}
         className="shrink-0"
-        foregroundActivity={task?.foreground_activity}
+        foregroundActivity={data.foregroundActivity}
         hasPendingClarification={pendingInput.clarification}
         hasPendingPermission={pendingInput.permission}
       />
       <TaskHeader
-        identifier={task?.id?.slice(0, 8)}
-        title={task?.title ?? "Loading..."}
-        state={task?.state ?? null}
-        foregroundActivity={task?.foreground_activity}
+        identifier={data.identifier}
+        title={data.title}
+        state={data.state}
+        foregroundActivity={data.foregroundActivity}
         hasPendingClarification={pendingInput.clarification}
         hasPendingPermission={pendingInput.permission}
       />

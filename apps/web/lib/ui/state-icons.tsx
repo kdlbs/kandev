@@ -183,19 +183,18 @@ function getTaskStateIconConfig(
   foregroundActivity?: ForegroundActivity | null,
   hasPendingPermission = false,
 ): IconConfig {
-  // The task-level MOST-ACTIVE-WINS aggregate sits ABOVE the coarse task state
-  // (§spec:task-level-indicator): a task whose foreground turns are idle while
-  // spawned background work runs reads as background-running, never as done; and a
-  // task with any generating session reads as generating even if its coarse state
-  // (e.g. a finished primary session) would otherwise render done.
-  if (foregroundActivity === "background") return TASK_BACKGROUND_ICON;
-  if (foregroundActivity === "generating") return TASK_GENERATING_ICON;
   if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return PENDING_PERMISSION_ICON;
   }
-  if (shouldUseQuestionTaskIcon(state, hasPendingClarification)) {
+  if (hasPendingClarification) {
     return TASK_STATE_ICONS.WAITING_FOR_INPUT;
   }
+  // Explicit pending input wins first. Without it, the task-level
+  // MOST-ACTIVE-WINS aggregate sits above the coarse task state, including a
+  // stale WAITING_FOR_INPUT state (§spec:task-level-indicator).
+  if (foregroundActivity === "generating") return TASK_GENERATING_ICON;
+  if (foregroundActivity === "background") return TASK_BACKGROUND_ICON;
+  if (isWaitingForInputState(state)) return TASK_STATE_ICONS.WAITING_FOR_INPUT;
   if (!state) return DEFAULT_TASK_ICON;
   return TASK_STATE_ICONS[state] ?? DEFAULT_TASK_ICON;
 }
@@ -222,18 +221,12 @@ function getSessionStateIconConfig(
   hasPendingClarification = false,
   hasPendingPermission = false,
 ): IconConfig {
-  // (b) background-running wins over the coarse foreground state:
-  // while the foreground turn waits on spawned background work the session must
-  // read as "working in background", never as done (ADR-0049).
-  if (
-    (state === "RUNNING" || state === "WAITING_FOR_INPUT") &&
-    foregroundActivity === "background"
-  ) {
-    return SESSION_BACKGROUND_ICON;
-  }
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
   if (canRequestInput && hasPendingPermission) return PENDING_PERMISSION_ICON;
   if (canRequestInput && hasPendingClarification) return SESSION_STATE_ICONS.WAITING_FOR_INPUT;
+  // Without pending input, background-running wins over the coarse foreground
+  // state so the session never reads as done while detached work remains live.
+  if (canRequestInput && foregroundActivity === "background") return SESSION_BACKGROUND_ICON;
   if (!state) return DEFAULT_SESSION_ICON;
   return SESSION_STATE_ICONS[state] ?? DEFAULT_SESSION_ICON;
 }

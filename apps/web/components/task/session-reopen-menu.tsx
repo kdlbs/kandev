@@ -23,14 +23,11 @@ type AgentInfo = { label: string; agentName: string };
 /**
  * Whether the reopen-menu row should render a state icon for `session`.
  *
- * A pending "needs me" prompt (clarification / permission) always surfaces — it
- * is actionable even mid-turn. Background-running (`background` while RUNNING
- * or WAITING_FOR_INPUT) also
- * reads distinctly (the shared background spinner), never as done, and
- * waiting-for-input now shows its "needs me" affordance too
- * (§spec:waiting-for-input-parity). Only STARTING stays icon-less (still
- * launching); a generating RUNNING session with no pending prompt also stays
- * silent. Terminal states (COMPLETED / FAILED / CANCELLED) keep their icons.
+ * An actionable pending prompt surfaces for RUNNING and WAITING_FOR_INPUT
+ * sessions. Background-running also reads distinctly (the shared background
+ * spinner), never as done. STARTING stays icon-less, and stale pending data
+ * cannot override terminal lifecycle icons. A generating RUNNING session with
+ * no pending prompt also stays silent.
  */
 export function shouldShowReopenStateIcon(
   state: TaskSessionState,
@@ -38,10 +35,12 @@ export function shouldShowReopenStateIcon(
   hasPendingClarification = false,
   hasPendingPermission = false,
 ): boolean {
-  if (hasPendingClarification || hasPendingPermission) return true;
-  if (foregroundActivity === "background") return true;
+  if (state === "STARTING") return false;
+  const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
+  if (canRequestInput && (hasPendingClarification || hasPendingPermission)) return true;
+  if (canRequestInput && foregroundActivity === "background") return true;
   if (state === "RUNNING") return false;
-  return state !== "STARTING";
+  return true;
 }
 
 function resolveAgentInfo(

@@ -42,22 +42,20 @@ export type TaskHeaderProps = {
   hasPendingPermission?: boolean;
 };
 
-// The badge reflects the task-level activity aggregate ABOVE the coarse workflow
-// state (§spec:task-level-indicator), mirroring getTaskStateIcon: background-running
-// and generating each read distinctly and never fall back to a done coarse state.
-// The waiting-for-input variants (§spec:waiting-for-input-parity) sit below live
-// activity but above the coarse state, with pending-permission taking precedence
-// over the generic waiting/clarification reading.
+// Pending input is the most actionable state and sits above live activity, with
+// pending permission taking precedence over clarification. Without pending input,
+// the task-level activity aggregate sits above the coarse workflow state.
 function resolveBadgeLabel(
   state: string | null | undefined,
   foregroundActivity: ForegroundActivity | null | undefined,
   hasPendingClarification: boolean,
   hasPendingPermission: boolean,
 ): string | null {
-  if (foregroundActivity === "background") return "Background running";
-  if (foregroundActivity === "generating") return "Generating";
   if (hasPendingPermission) return "Permission requested";
-  if (hasPendingClarification || state === "WAITING_FOR_INPUT") return "Waiting for input";
+  if (hasPendingClarification) return "Waiting for input";
+  if (foregroundActivity === "generating") return "Generating";
+  if (foregroundActivity === "background") return "Background running";
+  if (state === "WAITING_FOR_INPUT") return "Waiting for input";
   return state ?? null;
 }
 

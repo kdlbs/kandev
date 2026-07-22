@@ -49,7 +49,9 @@ const PILL_TESTID = "mobile-sessions-pill";
 const ICON_CIRCLE_CHECK = "tabler-icon-circle-check";
 const SESSION_A = "session-a";
 const SESSION_BG = "session-bg";
+const TASK_ID = "task-1";
 const START_TIME = "2026-01-01T00:00:00Z";
+const SECOND_TIME = "2026-01-01T00:01:00Z";
 
 function session(
   id: string,
@@ -59,7 +61,7 @@ function session(
 ): TaskSession {
   return {
     id,
-    task_id: "task-1",
+    task_id: TASK_ID,
     agent_profile_id: profileId,
     state: "WAITING_FOR_INPUT",
     started_at: startedAt,
@@ -84,7 +86,7 @@ beforeEach(() => {
   mocks.activeSessionId = SESSION_A;
   mocks.sessions = [
     session(SESSION_A, "profile-a", START_TIME),
-    session("session-b", "profile-b", "2026-01-01T00:01:00Z"),
+    session("session-b", "profile-b", SECOND_TIME),
   ];
   mocks.agentProfiles = [
     profile("profile-a", "Alpha", "claude"),
@@ -92,9 +94,9 @@ beforeEach(() => {
   ];
 });
 
-describe("MobileSessionsPicker", () => {
+describe("MobileSessionsPicker selection", () => {
   it("uses the effective layout session instead of a stale store session", () => {
-    render(<MobileSessionsPicker taskId="task-1" sessionId="session-b" fullWidth />);
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
 
     expect(
       screen.getByRole("button", { name: "Active session: Beta. Tap to switch." }),
@@ -111,13 +113,15 @@ describe("MobileSessionsPicker", () => {
 
   it("shows the effective session agent icon beside its label", () => {
     mocks.activeSessionId = "session-b";
-    render(<MobileSessionsPicker taskId="task-1" sessionId="session-b" fullWidth />);
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
 
     const pill = screen.getByTestId(PILL_TESTID);
     expect(within(pill).getByTestId("mobile-session-agent-icon")).toBeTruthy();
     expect(within(pill).getByTestId("agent-logo-codex")).toBeTruthy();
   });
+});
 
+describe("MobileSessionsPicker activity precedence", () => {
   it("renders background-running distinctly — matching desktop, not a done check", () => {
     // §spec:session-level-truth / §spec:state-vocabulary: a session whose
     // foreground turn is idle while spawned background work runs (RUNNING +
@@ -132,7 +136,7 @@ describe("MobileSessionsPicker", () => {
         state: "WAITING_FOR_INPUT",
         foreground_activity: "background",
       }),
-      session("session-gen", "profile-b", "2026-01-01T00:01:00Z", {
+      session("session-gen", "profile-b", SECOND_TIME, {
         state: "RUNNING",
         foreground_activity: "generating",
       }),
@@ -140,7 +144,7 @@ describe("MobileSessionsPicker", () => {
         state: "COMPLETED",
       }),
     ];
-    render(<MobileSessionsPicker taskId="task-1" sessionId={SESSION_BG} fullWidth />);
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_BG} fullWidth />);
     fireEvent.click(screen.getByTestId(PILL_TESTID));
 
     const bg = screen.getByTestId("mobile-session-state-session-bg");
@@ -164,7 +168,7 @@ describe("MobileSessionsPicker", () => {
     expect(svgClass(done)).toContain(ICON_CIRCLE_CHECK);
   });
 
-  it("keeps the background-running label while the foreground has a pending prompt", () => {
+  it("shows pending clarification instead of background-running", () => {
     mocks.activeSessionId = SESSION_BG;
     mocks.sessions = [
       session(SESSION_BG, "profile-a", START_TIME, {
@@ -176,11 +180,68 @@ describe("MobileSessionsPicker", () => {
       [SESSION_BG]: [{ type: "clarification_request", metadata: { status: "pending" } }],
     };
 
-    render(<MobileSessionsPicker taskId="task-1" sessionId={SESSION_BG} fullWidth />);
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_BG} fullWidth />);
     fireEvent.click(screen.getByTestId(PILL_TESTID));
 
-    expect(screen.getByTestId("mobile-session-state-session-bg").textContent).toMatch(
-      /background/i,
+    const state = screen.getByTestId("mobile-session-state-session-bg");
+    expect(state.textContent).toMatch(/waiting for input/i);
+    expect(state.querySelector("svg")?.getAttribute("class")).toContain(
+      "tabler-icon-message-question",
+    );
+    mocks.messagesBySession = {};
+  });
+
+  it("shows pending permission ahead of clarification and generating", () => {
+    mocks.activeSessionId = SESSION_A;
+    mocks.sessions = [
+      session(SESSION_A, "profile-a", START_TIME, {
+        state: "RUNNING",
+        foreground_activity: "generating",
+      }),
+    ];
+    mocks.messagesBySession = {
+      [SESSION_A]: [
+        { type: "clarification_request", metadata: { status: "pending" } },
+        { type: "permission_request", metadata: { status: "pending" } },
+      ],
+    };
+
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+
+    const state = screen.getByTestId("mobile-session-state-session-a");
+    expect(state.textContent).toMatch(/permission requested/i);
+    expect(state.querySelector("svg")?.getAttribute("class")).toContain(
+      "tabler-icon-shield-question",
+    );
+    mocks.messagesBySession = {};
+  });
+});
+
+describe("MobileSessionsPicker pending lifecycle", () => {
+  it("does not let stale pending input mask starting or terminal labels", () => {
+    mocks.activeSessionId = SESSION_A;
+    mocks.sessions = [
+      session(SESSION_A, "profile-a", START_TIME, {
+        state: "STARTING",
+        foreground_activity: "background",
+      }),
+      session("session-done", "profile-b", SECOND_TIME, {
+        state: "COMPLETED",
+        foreground_activity: "generating",
+      }),
+    ];
+    mocks.messagesBySession = {
+      [SESSION_A]: [{ type: "permission_request", metadata: { status: "pending" } }],
+      "session-done": [{ type: "clarification_request", metadata: { status: "pending" } }],
+    };
+
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+
+    expect(screen.getByTestId("mobile-session-state-session-a").textContent).toMatch(/starting/i);
+    expect(screen.getByTestId("mobile-session-state-session-done").textContent).toMatch(
+      /completed/i,
     );
     mocks.messagesBySession = {};
   });
@@ -194,7 +255,7 @@ describe("MobileSessionsPicker", () => {
       session("session-clar", "profile-a", START_TIME, {
         state: "WAITING_FOR_INPUT",
       }),
-      session("session-perm", "profile-b", "2026-01-01T00:01:00Z", {
+      session("session-perm", "profile-b", SECOND_TIME, {
         state: "WAITING_FOR_INPUT",
       }),
     ];
@@ -202,7 +263,7 @@ describe("MobileSessionsPicker", () => {
       "session-clar": [{ type: "clarification_request", metadata: { status: "pending" } }],
       "session-perm": [{ type: "permission_request", metadata: { status: "pending" } }],
     };
-    render(<MobileSessionsPicker taskId="task-1" sessionId="session-clar" fullWidth />);
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-clar" fullWidth />);
     fireEvent.click(screen.getByTestId(PILL_TESTID));
 
     const clar = screen.getByTestId("mobile-session-state-session-clar");

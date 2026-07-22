@@ -91,14 +91,12 @@ function sessionStateLabel(
   foregroundActivity: ForegroundActivity | null,
   pending: PendingInput,
 ): string {
-  if (
-    (state === "RUNNING" || state === "WAITING_FOR_INPUT") &&
-    foregroundActivity === "background"
-  ) {
-    return BACKGROUND_RUNNING_LABEL;
+  const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
+  if (canRequestInput && pending.permission) return "Permission requested";
+  if (canRequestInput && pending.clarification) {
+    return formatTaskSessionStateLabel("WAITING_FOR_INPUT");
   }
-  if (pending.permission) return "Permission requested";
-  if (pending.clarification) return formatTaskSessionStateLabel("WAITING_FOR_INPUT");
+  if (canRequestInput && foregroundActivity === "background") return BACKGROUND_RUNNING_LABEL;
   return formatTaskSessionStateLabel(state);
 }
 

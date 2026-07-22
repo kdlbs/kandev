@@ -317,6 +317,7 @@ export type Task = {
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
+  task_pending_action?: TaskPendingAction | null;
   /**
    * Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions
    * (§spec:task-level-indicator): "generating" when any session is generating,

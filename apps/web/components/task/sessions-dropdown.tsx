@@ -58,11 +58,13 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
 
 // The session-icon tooltip reflects the message-derived "needs me" reading
 // (§spec:waiting-for-input-parity): a pending permission / clarification prompt
-// names itself even when the coarse status is still "running" mid-turn.
-function sessionStatusTooltip(status: SessionStatus, pending: PendingInput): string {
-  if (pending.permission) return "Permission requested";
-  if (pending.clarification) return "Waiting for input";
-  return STATUS_LABELS[status];
+// names itself even when the coarse status is still "running" mid-turn. Stale
+// pending data cannot replace a starting or terminal lifecycle label.
+export function sessionStatusTooltip(state: TaskSessionState, pending: PendingInput): string {
+  const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
+  if (canRequestInput && pending.permission) return "Permission requested";
+  if (canRequestInput && pending.clarification) return "Waiting for input";
+  return STATUS_LABELS[mapSessionStatus(state)];
 }
 
 function mapSessionStatus(state: TaskSessionState): SessionStatus {
@@ -453,7 +455,9 @@ function SessionRow({
               )}
             </div>
           </TooltipTrigger>
-          <TooltipContent side="left">{sessionStatusTooltip(status, pending)}</TooltipContent>
+          <TooltipContent side="left">
+            {sessionStatusTooltip(session.state, pending)}
+          </TooltipContent>
         </Tooltip>
       </div>
     </div>
