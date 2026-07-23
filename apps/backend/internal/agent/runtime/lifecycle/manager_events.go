@@ -507,6 +507,12 @@ func (m *Manager) handleStreamDisconnect(execution *AgentExecution, err error) {
 		zap.String("session_id", execution.SessionID),
 		zap.Error(err))
 
+	// The stream callback may race with the caller starting another prompt
+	// after promptDoneCh is signaled. Drain the partial assistant transcript
+	// here as well as at prompt setup; the shared buffer lock makes either
+	// path the single owner and prevents a later reset from dropping it.
+	m.flushAssistantHistory(execution)
+
 	if err := m.UpdateStatus(execution.ID, v1.AgentStatusFailed); err != nil {
 		m.logger.Warn("failed to persist stream disconnect failed status",
 			zap.String("execution_id", execution.ID),

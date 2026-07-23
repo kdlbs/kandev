@@ -451,6 +451,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		exec.needsResumeContext = false
 		exec.resumeContextInjected = false
 
+		m.flushAssistantHistory(exec)
 		exec.messageMu.Lock()
 		exec.resetStreamingStateLocked()
 		exec.messageMu.Unlock()
@@ -666,6 +667,7 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		exec.AgentCommand = freshCmd
 		exec.ContinueCommand = freshContinueCmd
 
+		m.flushAssistantHistory(exec)
 		exec.messageMu.Lock()
 		exec.resetStreamingStateLocked()
 		exec.messageMu.Unlock()

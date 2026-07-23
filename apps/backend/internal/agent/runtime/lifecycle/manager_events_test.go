@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -383,6 +384,125 @@ func TestHandleAgentEvent_ProtocolAssistantHistoryPersistedOnceInWireOrder(t *te
 	execution.messageMu.Unlock()
 	if historyBufferLen != 0 {
 		t.Fatalf("assistant history accumulator length = %d after completion, want 0", historyBufferLen)
+	}
+}
+
+func TestStreamDisconnect_PersistsPartialAssistantHistoryExactlyOnce(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:              "message_chunk",
+		Text:              "partial response",
+		ProtocolMessageID: "message-a",
+	})
+	mgr.handleStreamDisconnect(execution, errors.New("connection lost"))
+
+	// A later prompt or reset must not discard or duplicate the segment.
+	flushAssistantHistory(execution, history, mgr.logger)
+	execution.messageMu.Lock()
+	execution.resetStreamingStateLocked()
+	execution.messageMu.Unlock()
+	mgr.flushAssistantHistory(execution)
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Type != "agent_message" ||
+		entries[0].Content != "partial response" {
+		t.Fatalf("disconnect history = %+v, want one partial assistant message", entries)
+	}
+
+	messageEvents := streamEventsOfType(eventBus, "message_streaming")
+	if len(messageEvents) != 1 || messageEvents[0].Data.Text != "partial response" {
+		t.Fatalf("visible messages = %+v, want the original chunk exactly once", messageEvents)
+	}
+}
+
+func TestPromptResetWinsDisconnectRaceWithoutDroppingHistory(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "response before disconnect callback",
+	})
+
+	// connectUpdatesStream signals promptDoneCh before invoking the disconnect
+	// callback. Model a next prompt claiming the buffer first.
+	flushAssistantHistory(execution, history, mgr.logger)
+	execution.messageMu.Lock()
+	execution.resetStreamingStateLocked()
+	execution.messageMu.Unlock()
+	mgr.handleStreamDisconnect(execution, errors.New("connection lost"))
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Content != "response before disconnect callback" {
+		t.Fatalf("disconnect-race history = %+v, want one partial assistant message", entries)
+	}
+}
+
+func TestStreamDisconnect_DiscardsHistoryWhenRecordingUnavailable(t *testing.T) {
+	tests := []struct {
+		name           string
+		historyManager bool
+		historyEnabled bool
+		sessionID      string
+	}{
+		{name: "history manager unavailable", historyEnabled: true, sessionID: "session-1"},
+		{name: "history disabled", historyManager: true, sessionID: "session-1"},
+		{name: "session unavailable", historyManager: true, historyEnabled: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mgr, _ := createTestManagerWithTracking()
+			mgr.historyManager = nil
+			if test.historyManager {
+				history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+				if err != nil {
+					t.Fatalf("create history manager: %v", err)
+				}
+				mgr.historyManager = history
+			}
+			execution := createTestExecution("exec-1", "task-1", test.sessionID)
+			execution.historyEnabled = test.historyEnabled
+			execution.assistantHistoryBuffer.WriteString("discard me")
+			if err := mgr.executionStore.Add(execution); err != nil {
+				t.Fatalf("add execution: %v", err)
+			}
+
+			mgr.handleStreamDisconnect(execution, errors.New("connection lost"))
+
+			execution.messageMu.Lock()
+			buffered := execution.assistantHistoryBuffer.Len()
+			execution.messageMu.Unlock()
+			if buffered != 0 {
+				t.Fatalf("assistant history buffer length = %d, want discarded", buffered)
+			}
+		})
 	}
 }
 

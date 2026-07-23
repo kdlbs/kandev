@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ const (
 var (
 	errReplayBurstProducerStalled            = errors.New("replay burst producer stalled")
 	errReplayBurstProducerBeforeWriteStalled = errors.New("replay burst producer stalled before writer entry")
+	errReplayLoadFailed                      = errors.New("replay load failed")
 )
 
 // burstAgent is a minimal acp.Agent stub used by the load-replay regression
@@ -73,7 +75,8 @@ func (burstAgent) SetSessionMode(context.Context, acp.SetSessionModeRequest) (ac
 
 type replayLoadAgent struct {
 	burstAgent
-	conn *acp.AgentSideConnection
+	conn    *acp.AgentSideConnection
+	loadErr error
 }
 
 func (a *replayLoadAgent) Initialize(_ context.Context, req acp.InitializeRequest) (acp.InitializeResponse, error) {
@@ -101,7 +104,14 @@ func (a *replayLoadAgent) LoadSession(ctx context.Context, req acp.LoadSessionRe
 	}); err != nil {
 		return acp.LoadSessionResponse{}, err
 	}
-	return acp.LoadSessionResponse{}, nil
+	if a.loadErr != nil {
+		for i := range 3 {
+			if err := a.conn.SessionUpdate(ctx, makeReplayNotification(string(req.SessionId), i)); err != nil {
+				return acp.LoadSessionResponse{}, err
+			}
+		}
+	}
+	return acp.LoadSessionResponse{}, a.loadErr
 }
 
 // burstClient is a minimal acp.Client stub that forwards SessionUpdate
@@ -428,6 +438,145 @@ func TestLoadSession_DrainsBackedUpReplayBeforeClearingSuppression(t *testing.T)
 	if !replayPlanSeen {
 		t.Fatal("captured replay plan was not re-emitted after queue drain")
 	}
+}
+
+func TestLoadSession_FailureDrainsReplayBeforeClearingSuppression(t *testing.T) {
+	a, fake, ctx := setupReplayLoadTest(t)
+	fake.loadErr = errReplayLoadFailed
+
+	workerBlocked, releaseWorker := blockReplayWorker(t, a)
+	loadDone := make(chan error, 1)
+	go func() { loadDone <- a.LoadSession(ctx, "failed-replay-session", nil) }()
+
+	select {
+	case <-workerBlocked:
+	case <-ctx.Done():
+		t.Fatal("failed-load replay did not reach blocked update worker")
+	}
+	select {
+	case err := <-loadDone:
+		t.Fatalf("LoadSession returned before failed replay queue drained: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	releaseWorker()
+	err := <-loadDone
+	if err == nil || !strings.Contains(err.Error(), errReplayLoadFailed.Error()) {
+		t.Fatalf("LoadSession error = %v, want original RPC error %v", err, errReplayLoadFailed)
+	}
+
+	a.mu.RLock()
+	loading := a.isLoadingSession
+	replayPlan := a.loadReplayPlan
+	a.mu.RUnlock()
+	if loading {
+		t.Fatal("load suppression remained active after failed-load replay barrier")
+	}
+	if replayPlan != nil {
+		t.Fatal("failed load retained replay plan after queue drain")
+	}
+
+	for _, event := range drainEvents(a) {
+		switch event.Type {
+		case streams.EventTypeMessageChunk, streams.EventTypeToolCall, streams.EventTypePlan:
+			t.Fatalf("failed-load replay leaked as live %q event: %+v", event.Type, event)
+		}
+	}
+}
+
+func TestLoadSession_FailureBarrierUnblocksOnClose(t *testing.T) {
+	a, fake, ctx := setupReplayLoadTest(t)
+	fake.loadErr = errReplayLoadFailed
+
+	workerBlocked, releaseWorker := blockReplayWorker(t, a)
+	loadDone := make(chan error, 1)
+	go func() { loadDone <- a.LoadSession(ctx, "closing-replay-session", nil) }()
+
+	select {
+	case <-workerBlocked:
+	case <-ctx.Done():
+		t.Fatal("failed-load replay did not reach blocked update worker")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- a.Close() }()
+
+	select {
+	case err := <-loadDone:
+		if err == nil || !strings.Contains(err.Error(), errReplayLoadFailed.Error()) {
+			t.Fatalf("LoadSession error = %v, want original RPC error %v", err, errReplayLoadFailed)
+		}
+	case <-ctx.Done():
+		t.Fatal("LoadSession failure barrier did not unblock during Close")
+	}
+
+	a.mu.RLock()
+	loading := a.isLoadingSession
+	replayPlan := a.loadReplayPlan
+	a.mu.RUnlock()
+	if loading || replayPlan != nil {
+		t.Fatalf("failed load state after Close = loading:%t plan:%v, want cleared", loading, replayPlan)
+	}
+
+	releaseWorker()
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("Close did not finish after blocked worker was released")
+	}
+}
+
+func setupReplayLoadTest(t *testing.T) (*Adapter, *replayLoadAgent, context.Context) {
+	t.Helper()
+
+	a := newTestAdapter()
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	t.Cleanup(func() {
+		_ = a.Close()
+		_ = c2aR.Close()
+		_ = c2aW.Close()
+		_ = a2cR.Close()
+		_ = a2cW.Close()
+	})
+	if err := a.Connect(c2aW, a2cR); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	fake := &replayLoadAgent{}
+	fake.conn = acp.NewAgentSideConnection(fake, a2cW, c2aR)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	if err := a.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	drainEvents(a)
+	return a, fake, ctx
+}
+
+func blockReplayWorker(t *testing.T, a *Adapter) (<-chan struct{}, func()) {
+	t.Helper()
+
+	workerBlocked := make(chan struct{})
+	releaseWorker := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			close(releaseWorker)
+		})
+	}
+	t.Cleanup(release)
+	a.dialect.suppressNotification = func(n acp.SessionNotification) bool {
+		if n.Update.UsageUpdate != nil {
+			close(workerBlocked)
+			<-releaseWorker
+		}
+		return false
+	}
+	return workerBlocked, release
 }
 
 // TestLoadReplayBurst_HandlesLargeReplay is a regression test for the

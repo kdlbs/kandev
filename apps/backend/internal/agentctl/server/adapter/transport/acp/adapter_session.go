@@ -332,10 +332,21 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	})
 
 	if err != nil {
-		a.mu.Lock()
-		a.isLoadingSession = false
-		a.loadReplayPlan = nil
-		a.mu.Unlock()
+		// Notifications sent before the failed RPC response may still be queued
+		// on the adapter worker. Clear replay suppression only at a FIFO barrier,
+		// otherwise those frames can escape as live messages, tools, or plans
+		// after LoadSession returns its error.
+		clearFailedLoad := func() {
+			a.mu.Lock()
+			a.isLoadingSession = false
+			a.loadReplayPlan = nil
+			a.mu.Unlock()
+		}
+		if !a.syncNotifQueueThen(clearFailedLoad) {
+			// Close cancels lifetimeCtx and drops the remaining queue. The
+			// barrier callback will not run in that case, so clean up directly.
+			clearFailedLoad()
+		}
 		span.RecordError(err)
 		return fmt.Errorf("failed to load session: %w", err)
 	}

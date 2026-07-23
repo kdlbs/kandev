@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
 
@@ -58,16 +59,27 @@ func (m *Manager) appendAssistantHistoryChunk(execution *AgentExecution, content
 // history boundary. It is independent from visible-stream flushing so a
 // subagent tool can retain UI nesting while history still follows wire order.
 func (m *Manager) flushAssistantHistory(execution *AgentExecution) {
+	flushAssistantHistory(execution, m.historyManager, m.logger)
+}
+
+// flushAssistantHistory drains the pending assistant segment exactly once.
+// Draining also deliberately discards the segment when history recording is
+// unavailable or disabled, so stale text cannot leak into a later prompt.
+func flushAssistantHistory(
+	execution *AgentExecution,
+	historyManager *SessionHistoryManager,
+	log *logger.Logger,
+) {
 	execution.messageMu.Lock()
 	content := execution.assistantHistoryBuffer.String()
 	execution.assistantHistoryBuffer.Reset()
 	execution.messageMu.Unlock()
 
-	if content == "" || m.historyManager == nil || !execution.historyEnabled || execution.SessionID == "" {
+	if content == "" || historyManager == nil || !execution.historyEnabled || execution.SessionID == "" {
 		return
 	}
-	if err := m.historyManager.AppendAgentMessage(execution.SessionID, content); err != nil {
-		m.logger.Warn("failed to store agent message to history", zap.Error(err))
+	if err := historyManager.AppendAgentMessage(execution.SessionID, content); err != nil {
+		log.Warn("failed to store agent message to history", zap.Error(err))
 	}
 }
 

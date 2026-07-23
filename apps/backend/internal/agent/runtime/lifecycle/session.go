@@ -691,8 +691,14 @@ func (sm *SessionManager) SendPrompt(
 		promptGeneration = beginExecutionPrompt(execution)
 	}
 
-	// Clear buffers and streaming state before starting prompt
-	// This ensures each prompt starts fresh and doesn't append to previous message
+	// A disconnect can release the prior SendPrompt before its disconnect
+	// callback has persisted a partial assistant response. Drain that history
+	// segment before resetting the streaming state; the callback uses the same
+	// locked drain, so the segment is persisted at most once.
+	flushAssistantHistory(execution, sm.historyManager, sm.logger)
+
+	// Clear buffers and streaming state before starting prompt. This ensures
+	// each prompt starts fresh and doesn't append to the previous message.
 	execution.messageMu.Lock()
 	execution.resetStreamingStateLocked()
 	execution.messageMu.Unlock()
