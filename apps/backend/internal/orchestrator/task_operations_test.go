@@ -3476,6 +3476,10 @@ func TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully(t *testing
 	session.ErrorMessage = models.SessionArchiveTreeCancelReason
 	_ = repo.UpdateTaskSession(ctx, session)
 
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session1"); !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		t.Fatalf("precondition: expected no executors_running row for session1 (archive cleanup should have removed it), got err=%v", err)
+	}
+
 	if _, err := svc.ResumeTaskSession(ctx, "task1", "session1"); err != nil {
 		t.Fatalf("ResumeTaskSession on archive-cancelled session returned: %v", err)
 	}
