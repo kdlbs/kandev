@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -35,6 +36,17 @@ const (
 const maxFileSize = 10 * 1024 * 1024 // 10MB
 
 var errPathTraversal = errors.New("path traversal detected")
+
+// workspaceMutationBarrier provides a deterministic synchronization point for
+// filesystem-race regression tests. It is unset in production.
+var workspaceMutationBarrier atomic.Value // func()
+
+func runWorkspaceMutationBarrier() {
+	barrier, _ := workspaceMutationBarrier.Load().(func())
+	if barrier != nil {
+		barrier()
+	}
+}
 
 func isRootOwnershipMarkerPath(path string) bool {
 	return filepath.Clean(filepath.FromSlash(path)) == storageworkspaces.OwnershipMarkerFilename
@@ -428,6 +440,7 @@ func isHomeShorthand(path string) bool {
 
 func readFileContent(safePath string) (string, int64, bool, error) {
 	// Check if file exists and is a regular file
+	// codeql[go/path-injection] safePath is canonical containment-validated by resolveSafePath; read-only external paths reach here only through absoluteReadPath validation.
 	info, err := os.Stat(safePath)
 	if err != nil {
 		return "", 0, false, fmt.Errorf("file not found: %w", err)
@@ -518,7 +531,7 @@ func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedD
 	currentHash := calculateSHA256(currentContent)
 	if originalHash != "" && currentHash != originalHash {
 		if desiredContent != nil {
-			return wt.writeDesiredContent(safePath, cleanWorkDir, reqPath, *desiredContent, currentHash)
+			return wt.writeDesiredContent(reqPath, *desiredContent, currentHash)
 		}
 		return "", "", fmt.Errorf("conflict detected: file has been modified (expected hash %s, got %s)", originalHash, currentHash)
 	}
@@ -550,7 +563,7 @@ func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedD
 			return "", "", fmt.Errorf("git apply cancelled: %w", err)
 		}
 		if desiredContent != nil {
-			return wt.writeDesiredContent(safePath, cleanWorkDir, reqPath, *desiredContent, currentHash)
+			return wt.writeDesiredContent(reqPath, *desiredContent, currentHash)
 		}
 		return "", "", fmt.Errorf("git apply failed: %w\nOutput: %s", err, string(output))
 	}
@@ -608,14 +621,20 @@ func (wt *WorkspaceTracker) resolveSymlinkForDiff(
 // writeDesiredContent writes the desired content directly to the file as a fallback
 // when the diff cannot be applied. Returns the new hash and "overwritten" resolution.
 func (wt *WorkspaceTracker) writeDesiredContent(
-	safePath, cleanWorkDir, reqPath, desiredContent, oldHash string,
+	reqPath, desiredContent, oldHash string,
 ) (string, string, error) {
-	if err := os.WriteFile(safePath, []byte(desiredContent), 0o644); err != nil {
+	path, err := wt.resolveMutationPath(reqPath)
+	if err != nil {
+		return "", "", err
+	}
+	defer func() { _ = path.root.Close() }()
+	runWorkspaceMutationBarrier()
+	if err := path.root.WriteFile(path.rel, []byte(desiredContent), 0o644); err != nil {
 		return "", "", fmt.Errorf("failed to write desired content: %w", err)
 	}
 
 	newHash := calculateSHA256(desiredContent)
-	relPath := strings.TrimPrefix(safePath, cleanWorkDir+string(os.PathSeparator))
+	relPath := wt.mutationNotificationPath(path.safe)
 	wt.notifyFileChange(relPath, types.FileOpWrite)
 
 	wt.logger.Warn("overwrote file with desired content (conflict fallback)",
@@ -656,19 +675,20 @@ func replaceDiffPath(line, prefix, oldPath, newPath string) string {
 
 // CreateFile creates a new file in the workspace
 func (wt *WorkspaceTracker) CreateFile(reqPath string) error {
-	safePath, err := wt.resolveSafePath(reqPath)
+	path, err := wt.resolveMutationPath(reqPath)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = path.root.Close() }()
+	runWorkspaceMutationBarrier()
 
 	// Create intermediate directories
-	dir := filepath.Dir(safePath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := path.root.MkdirAll(filepath.Dir(path.rel), 0o755); err != nil {
 		return fmt.Errorf("failed to create directories: %w", err)
 	}
 
 	// Atomically create the file, failing if it already exists
-	f, err := os.OpenFile(safePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := path.root.OpenFile(path.rel, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		if os.IsExist(err) {
 			return fmt.Errorf("file already exists: %s", reqPath)
@@ -678,30 +698,29 @@ func (wt *WorkspaceTracker) CreateFile(reqPath string) error {
 	_ = f.Close()
 
 	// Notify with the relative path
-	cleanWorkDir := filepath.Clean(wt.workDir)
-	relPath := strings.TrimPrefix(safePath, cleanWorkDir+string(os.PathSeparator))
-	wt.notifyFileChange(relPath, types.FileOpCreate)
+	wt.notifyFileChange(wt.mutationNotificationPath(path.safe), types.FileOpCreate)
 
 	return nil
 }
 
 // DeleteFile deletes a file or directory from the workspace.
 func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
-	safePath, err := wt.resolveSafePath(reqPath)
+	path, err := wt.resolveMutationPath(reqPath)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = path.root.Close() }()
 
-	cleanWorkDir := wt.resolvedWorkDir()
-	if safePath == cleanWorkDir {
+	if path.rel == "." {
+		if path.rootPath != wt.resolvedWorkDir() {
+			return fmt.Errorf("path outside workspace")
+		}
 		return fmt.Errorf("cannot delete workspace root")
 	}
-	if err := wt.validateWorkspacePaths(safePath); err != nil {
-		return err
-	}
+	runWorkspaceMutationBarrier()
 
 	// Check if file exists
-	info, err := os.Stat(safePath)
+	info, err := path.root.Stat(path.rel)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("file does not exist: %s", reqPath)
@@ -710,17 +729,16 @@ func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
 	}
 
 	if info.IsDir() {
-		if err := os.RemoveAll(safePath); err != nil {
+		if err := path.root.RemoveAll(path.rel); err != nil {
 			return fmt.Errorf("failed to delete directory: %w", err)
 		}
 	} else {
-		if err := os.Remove(safePath); err != nil {
+		if err := path.root.Remove(path.rel); err != nil {
 			return fmt.Errorf("failed to delete file: %w", err)
 		}
 	}
 
-	relPath := strings.TrimPrefix(safePath, cleanWorkDir+string(os.PathSeparator))
-	wt.notifyFileChange(relPath, types.FileOpRemove)
+	wt.notifyFileChange(wt.mutationNotificationPath(path.safe), types.FileOpRemove)
 
 	return nil
 }
@@ -731,67 +749,93 @@ func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
 		return fmt.Errorf("old_path and new_path are required")
 	}
 
-	oldSafePath, err := wt.resolveSafePath(oldPath)
+	oldResolved, err := wt.resolveMutationPath(oldPath)
 	if err != nil {
 		return err
 	}
-	newSafePath, err := wt.resolveSafePath(newPath)
+	defer func() { _ = oldResolved.root.Close() }()
+	newResolved, err := wt.resolveMutationPath(newPath)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = newResolved.root.Close() }()
 
-	if err := wt.validateWorkspacePaths(oldSafePath, newSafePath); err != nil {
-		return err
-	}
-	if oldSafePath == newSafePath {
+	if oldResolved.rootPath == newResolved.rootPath && oldResolved.rel == newResolved.rel {
 		return nil
 	}
+	if oldResolved.rootPath != newResolved.rootPath {
+		return fmt.Errorf("cannot rename across workspace roots")
+	}
+	runWorkspaceMutationBarrier()
 
-	if err := validateSourceExists(oldSafePath, oldPath); err != nil {
+	if err := validateSourceExistsRooted(oldResolved.root, oldResolved.rel, oldPath); err != nil {
 		return err
 	}
-	if err := validateTargetAvailable(newSafePath, newPath); err != nil {
+	if err := validateTargetAvailableRooted(newResolved.root, newResolved.rel, newPath); err != nil {
 		return err
 	}
 
-	parentDir := filepath.Dir(newSafePath)
-	if err := os.MkdirAll(parentDir, 0o755); err != nil {
+	if err := oldResolved.root.MkdirAll(filepath.Dir(newResolved.rel), 0o755); err != nil {
 		return fmt.Errorf("failed to create target parent directories: %w", err)
 	}
 
-	if err := os.Rename(oldSafePath, newSafePath); err != nil {
+	if err := oldResolved.root.Rename(oldResolved.rel, newResolved.rel); err != nil {
 		return fmt.Errorf("failed to rename path: %w", err)
 	}
 
-	cleanWorkDir := wt.resolvedWorkDir()
-	oldRelPath := strings.TrimPrefix(oldSafePath, cleanWorkDir+string(os.PathSeparator))
-	newRelPath := strings.TrimPrefix(newSafePath, cleanWorkDir+string(os.PathSeparator))
+	wt.notifyRename(oldResolved.safe, newResolved.safe)
+
+	return nil
+}
+
+func (wt *WorkspaceTracker) notifyRename(oldSafePath, newSafePath string) {
+	oldRelPath := wt.mutationNotificationPath(oldSafePath)
+	newRelPath := wt.mutationNotificationPath(newSafePath)
 	wt.notifyFileChange(oldRelPath, types.FileOpRename)
 	if newRelPath != oldRelPath {
 		wt.notifyFileChange(newRelPath, types.FileOpRename)
 	}
-
-	return nil
 }
 
-// validateWorkspacePaths checks that all provided paths are strictly inside the workspace.
-func (wt *WorkspaceTracker) validateWorkspacePaths(paths ...string) error {
-	cleanWorkDir := wt.resolvedWorkDir()
-	workDirPrefix := cleanWorkDir + string(os.PathSeparator)
-	for _, p := range paths {
-		if strings.HasPrefix(p, workDirPrefix) {
-			continue
-		}
-		root, rel, err := wt.allowedSourcePath(p)
-		if err != nil || rel == "." || p == root {
-			return fmt.Errorf("path outside workspace")
+type rootedMutationPath struct {
+	root     *os.Root
+	rootPath string
+	rel      string
+	safe     string
+}
+
+// resolveMutationPath anchors a mutation at the canonical workspace or a
+// registered durable-source root. Root methods retain that directory handle and
+// reject symlink traversal outside it, including after this resolution returns.
+func (wt *WorkspaceTracker) resolveMutationPath(reqPath string) (*rootedMutationPath, error) {
+	safePath, err := wt.resolveSafePath(reqPath)
+	if err != nil {
+		return nil, err
+	}
+
+	rootPath := wt.resolvedWorkDir()
+	rel, err := filepath.Rel(rootPath, safePath)
+	if err != nil || pathEscapesRoot(rel) {
+		rootPath, rel, err = wt.allowedSourcePath(safePath)
+		if err != nil {
+			return nil, fmt.Errorf("path outside workspace")
 		}
 	}
-	return nil
+
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open workspace root: %w", err)
+	}
+	return &rootedMutationPath{root: root, rootPath: rootPath, rel: rel, safe: safePath}, nil
 }
 
-func validateSourceExists(safePath, reqPath string) error {
-	_, err := os.Stat(safePath)
+func (wt *WorkspaceTracker) mutationNotificationPath(safePath string) string {
+	cleanWorkDir := wt.resolvedWorkDir()
+	return strings.TrimPrefix(safePath, cleanWorkDir+string(os.PathSeparator))
+}
+
+func validateSourceExistsRooted(root *os.Root, relPath, reqPath string) error {
+	_, err := root.Stat(relPath)
 	if err == nil {
 		return nil
 	}
@@ -801,8 +845,8 @@ func validateSourceExists(safePath, reqPath string) error {
 	return fmt.Errorf("failed to stat path: %w", err)
 }
 
-func validateTargetAvailable(safePath, reqPath string) error {
-	_, err := os.Stat(safePath)
+func validateTargetAvailableRooted(root *os.Root, relPath, reqPath string) error {
+	_, err := root.Stat(relPath)
 	if err == nil {
 		return fmt.Errorf("target already exists: %s", reqPath)
 	}

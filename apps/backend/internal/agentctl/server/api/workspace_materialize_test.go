@@ -144,6 +144,32 @@ func TestWorkspaceMaterializeRepository_RejectsLocalLocators(t *testing.T) {
 	}
 }
 
+func TestWorkspaceMaterializeRepository_RejectsUnsafeBranches(t *testing.T) {
+	s := newMaterializeTestServer(t, t.TempDir())
+	for _, tc := range []struct {
+		name    string
+		request MaterializeRepositoryRequest
+	}{
+		{name: "base branch", request: MaterializeRepositoryRequest{RepositoryURL: "https://github.com/kdlbs/kandev.git", Destination: "repo", BaseBranch: "main^{commit}"}},
+		{name: "checkout branch", request: MaterializeRepositoryRequest{RepositoryURL: "https://github.com/kdlbs/kandev.git", Destination: "repo", BaseBranch: "main", CheckoutBranch: "feature;unsafe"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(tc.request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/materialize-repository", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer test-token")
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			s.router.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d (body: %s)", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestMaterializeRepository_CancelledCloneLeavesNoDestination(t *testing.T) {
 	origin := createMaterializeOrigin(t)
 	workDir := t.TempDir()
@@ -188,6 +214,47 @@ func TestMaterializeRepository_RejectsExistingCheckoutOnWrongNamedBranch(t *test
 	reused, err := materializeRepository(context.Background(), origin, destination, "main", "feature/work")
 	if reused || !errors.Is(err, errMaterializeCollision) {
 		t.Fatalf("wrong branch reuse = reused:%t err:%v; want collision", reused, err)
+	}
+}
+
+func TestMaterializeRepository_RejectsSymlinkedExistingCheckout(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	workDir := t.TempDir()
+	target := filepath.Join(workDir, "target")
+	if _, err := materializeRepository(context.Background(), origin, target, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(workDir, "second-repo")
+	if err := os.Symlink(target, destination); err != nil {
+		t.Fatal(err)
+	}
+
+	reused, err := materializeRepository(context.Background(), origin, destination, "main", "")
+
+	if reused || !errors.Is(err, errMaterializeCollision) {
+		t.Fatalf("symlinked checkout = reused:%t err:%v; want collision", reused, err)
+	}
+}
+
+func TestMaterializeRepository_RejectsSymlinkedGitMetadata(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	destination := filepath.Join(t.TempDir(), "second-repo")
+	if _, err := materializeRepository(context.Background(), origin, destination, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+	gitDir := filepath.Join(destination, ".git")
+	metadataTarget := filepath.Join(t.TempDir(), "metadata")
+	if err := os.Rename(gitDir, metadataTarget); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(metadataTarget, gitDir); err != nil {
+		t.Fatal(err)
+	}
+
+	reused, err := materializeRepository(context.Background(), origin, destination, "main", "")
+
+	if reused || !errors.Is(err, errMaterializeCollision) {
+		t.Fatalf("symlinked git metadata = reused:%t err:%v; want collision", reused, err)
 	}
 }
 
@@ -260,6 +327,108 @@ func TestWorkspaceRemoveMaterializedRepository_RejectsUnownedDestination(t *test
 				t.Fatalf("unowned destination was deleted: %v", err)
 			}
 		})
+	}
+}
+
+func TestWorkspaceRemoveMaterializedRepository_RejectsSymlinkedGitMetadata(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	workDir := t.TempDir()
+	destination := filepath.Join(workDir, "second-repo")
+	if _, err := materializeRepository(context.Background(), origin, destination, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+	gitDir := filepath.Join(destination, ".git")
+	metadataTarget := filepath.Join(t.TempDir(), "metadata")
+	if err := os.Rename(gitDir, metadataTarget); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(metadataTarget, gitDir); err != nil {
+		t.Fatal(err)
+	}
+	s := newMaterializeTestServer(t, workDir)
+
+	w := removeMaterializedRepositoryRequest(t, s, RemoveMaterializedRepositoryRequest{RepositoryURL: origin, Destination: "second-repo"})
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d (body: %s)", w.Code, w.Body.String())
+	}
+	if _, err := os.Lstat(destination); err != nil {
+		t.Fatalf("checkout was removed: %v", err)
+	}
+}
+
+func TestWorkspaceRemoveMaterializedRepository_RestoresSwappedReplacement(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	workDir := t.TempDir()
+	destination := filepath.Join(workDir, "second-repo")
+	if _, err := materializeRepository(context.Background(), origin, destination, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+	ownedCheckout := filepath.Join(workDir, "owned-checkout")
+	beforeMaterializeQuarantineRename = func() {
+		if err := os.Rename(destination, ownedCheckout); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(destination, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(destination, "unrelated"), []byte("keep"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { beforeMaterializeQuarantineRename = func() {} })
+
+	removed, err := removeMaterializedRepository(context.Background(), workDir, destination, origin)
+
+	if removed || !errors.Is(err, errMaterializeCollision) {
+		t.Fatalf("swapped removal = removed:%t err:%v; want collision", removed, err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(destination, "unrelated")); err != nil || string(contents) != "keep" {
+		t.Fatalf("replacement was not restored: contents:%q err:%v", contents, err)
+	}
+	if _, err := os.Lstat(ownedCheckout); err != nil {
+		t.Fatalf("original checkout was deleted: %v", err)
+	}
+}
+
+func TestWorkspaceRemoveMaterializedRepository_RejectsPostQuarantineReplacement(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	workDir := t.TempDir()
+	destination := filepath.Join(workDir, "second-repo")
+	if _, err := materializeRepository(context.Background(), origin, destination, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+	capturedCheckout := filepath.Join(workDir, "captured-checkout")
+	var replacementPath string
+	afterMaterializeQuarantineOpen = func(quarantine string) {
+		quarantinePath := filepath.Join(workDir, quarantine)
+		if err := os.Rename(quarantinePath, capturedCheckout); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(quarantinePath, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		replacementPath = quarantinePath
+		config := "[remote \"origin\"]\n\turl = " + origin + "\n"
+		if err := os.WriteFile(filepath.Join(quarantinePath, ".git", "config"), []byte(config), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(quarantinePath, "unrelated"), []byte("keep"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { afterMaterializeQuarantineOpen = func(string) {} })
+
+	removed, err := removeMaterializedRepository(context.Background(), workDir, destination, origin)
+
+	if removed || !errors.Is(err, errMaterializeCollision) {
+		t.Fatalf("post-quarantine replacement = removed:%t err:%v; want collision", removed, err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(replacementPath, "unrelated")); err != nil || string(contents) != "keep" {
+		t.Fatalf("replacement was validated or recursively deleted: contents:%q err:%v", contents, err)
+	}
+	if _, err := os.Lstat(capturedCheckout); err != nil {
+		t.Fatalf("captured checkout was removed through replacement path: %v", err)
 	}
 }
 

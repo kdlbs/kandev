@@ -13,6 +13,156 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+func TestScanRepositorySubdirs_RejectsUnregisteredRepositoryLink(t *testing.T) {
+	taskRoot := t.TempDir()
+	source := t.TempDir()
+	initGitRepoAt(t, source)
+	if err := os.Symlink(source, filepath.Join(taskRoot, "linked-repository")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	if children := scanRepositorySubdirs(taskRoot, nil); len(children) != 0 {
+		t.Fatalf("repository links outside registered source roots = %+v, want none", children)
+	}
+}
+
+func TestScanRepositorySubdirs_AcceptsRegisteredRepositoryLink(t *testing.T) {
+	taskRoot := t.TempDir()
+	source := t.TempDir()
+	initGitRepoAt(t, source)
+	if err := os.Symlink(source, filepath.Join(taskRoot, "linked-repository")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	children := scanRepositorySubdirs(taskRoot, []string{source})
+	if len(children) != 1 || children[0].name != "linked-repository" {
+		t.Fatalf("registered repository links = %+v, want linked-repository", children)
+	}
+}
+
+func TestRebindWorkspaceWithSourceRoots_PinsRegisteredRepositoryLinkTarget(t *testing.T) {
+	oldRoot := t.TempDir()
+	initGitRepoAt(t, oldRoot)
+	newRoot := t.TempDir()
+	firstSource := t.TempDir()
+	secondSource := t.TempDir()
+	initGitRepoAt(t, firstSource)
+	initGitRepoAt(t, secondSource)
+	link := filepath.Join(newRoot, "linked-repository")
+	if err := os.Symlink(firstSource, link); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := NewManager(&config.InstanceConfig{WorkDir: oldRoot}, log)
+	defer m.stopWorkspaceTrackers()
+	if err := m.RebindWorkspaceWithSourceRoots(context.Background(), newRoot, []string{firstSource}); err != nil {
+		t.Fatalf("rebind workspace: %v", err)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secondSource, link); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.repoTrackers) != 1 || m.repoTrackers[0].workDir != firstSource {
+		t.Fatalf("repository tracker after link swap = %+v, want pinned target %q", m.repoTrackers, firstSource)
+	}
+}
+
+func TestRebindWorkspaceWithSourceRoots_UsesProposedRootsForDiscovery(t *testing.T) {
+	oldRoot := t.TempDir()
+	initGitRepoAt(t, oldRoot)
+	newRoot := t.TempDir()
+	source := t.TempDir()
+	initGitRepoAt(t, source)
+	if err := os.Symlink(source, filepath.Join(newRoot, "linked-repository")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := NewManager(&config.InstanceConfig{WorkDir: oldRoot}, log)
+	defer m.stopWorkspaceTrackers()
+	if err := m.RebindWorkspaceWithSourceRoots(context.Background(), newRoot, []string{source}); err != nil {
+		t.Fatalf("rebind workspace: %v", err)
+	}
+	if len(m.repoTrackers) != 1 || m.repoTrackers[0].RepositoryName() != "linked-repository" {
+		t.Fatalf("rebind repository trackers = %+v, want linked-repository", m.repoTrackers)
+	}
+	if len(m.workspaceSourceRoots) != 1 || m.workspaceSourceRoots[0] != source {
+		t.Fatalf("rebind source roots = %q, want %q", m.workspaceSourceRoots, source)
+	}
+}
+
+func TestRescanRepositoriesWithSourceRoots_ReplacesRepointedRepositoryLink(t *testing.T) {
+	workspace := t.TempDir()
+	firstSource := t.TempDir()
+	secondSource := t.TempDir()
+	initGitRepoAt(t, workspace)
+	initGitRepoAt(t, firstSource)
+	initGitRepoAt(t, secondSource)
+	link := filepath.Join(workspace, "linked-repository")
+	if err := os.Symlink(firstSource, link); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := NewManager(&config.InstanceConfig{WorkDir: workspace}, log)
+	defer m.stopWorkspaceTrackers()
+	if err := m.RescanRepositoriesWithSourceRoots(context.Background(), "", []string{firstSource}); err != nil {
+		t.Fatalf("initial source-root rescan: %v", err)
+	}
+	oldTracker := m.repoTrackers[0]
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secondSource, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := m.RescanRepositoriesWithSourceRoots(context.Background(), "", []string{secondSource}); err != nil {
+		t.Fatalf("repointed source-root rescan: %v", err)
+	}
+	if len(m.repoTrackers) != 1 || m.repoTrackers[0] == oldTracker || m.repoTrackers[0].workDir != secondSource {
+		t.Fatalf("repointed tracker = %+v, want replacement pinned to %q", m.repoTrackers, secondSource)
+	}
+	select {
+	case <-oldTracker.stopCh:
+	default:
+		t.Fatal("repointed tracker was not stopped")
+	}
+}
+
+func TestRescanRepositoriesWithSourceRoots_RemovesRevokedRepositoryLink(t *testing.T) {
+	workspace := t.TempDir()
+	source := t.TempDir()
+	initGitRepoAt(t, workspace)
+	initGitRepoAt(t, source)
+	if err := os.Symlink(source, filepath.Join(workspace, "linked-repository")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := NewManager(&config.InstanceConfig{WorkDir: workspace}, log)
+	defer m.stopWorkspaceTrackers()
+	if err := m.RescanRepositoriesWithSourceRoots(context.Background(), "", []string{source}); err != nil {
+		t.Fatalf("initial source-root rescan: %v", err)
+	}
+	oldTracker := m.repoTrackers[0]
+
+	if err := m.RescanRepositoriesWithSourceRoots(context.Background(), "", []string{}); err != nil {
+		t.Fatalf("revoked source-root rescan: %v", err)
+	}
+	if len(m.repoTrackers) != 0 {
+		t.Fatalf("repository trackers after source revocation = %+v, want none", m.repoTrackers)
+	}
+	select {
+	case <-oldTracker.stopCh:
+	default:
+		t.Fatal("revoked tracker was not stopped")
+	}
+}
+
 // TestRescanRepositories_TransitionsSingleToMultiRepo simulates the
 // MCP add_branch flow: the agent launched as single-repo with WorkDir set
 // to the primary worktree, then a sibling worktree appears at the task

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -180,6 +181,204 @@ func TestWorkspaceFileOperationsAllowRegisteredLinkedSource(t *testing.T) {
 	}
 	if err := wt.CreateFile(filepath.Join("linked", "escape.txt")); err == nil {
 		t.Fatal("CreateFile through mutated link unexpectedly succeeded")
+	}
+}
+
+func TestWorkspaceFileMutationsRejectDescendantSymlinkSwap(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		prepare func(t *testing.T, workspace, external string, wt *WorkspaceTracker) error
+		assert  func(t *testing.T, workspace, external string)
+	}{
+		{
+			name: "create",
+			prepare: func(_ *testing.T, _ string, _ string, wt *WorkspaceTracker) error {
+				return wt.CreateFile(filepath.Join("switchable", "created.txt"))
+			},
+			assert: func(t *testing.T, _ string, external string) {
+				if _, err := os.Stat(filepath.Join(external, "created.txt")); !os.IsNotExist(err) {
+					t.Fatalf("create escaped through swapped symlink: %v", err)
+				}
+			},
+		},
+		{
+			name: "write",
+			prepare: func(t *testing.T, workspace, _ string, wt *WorkspaceTracker) error {
+				path := filepath.Join(workspace, "switchable", "file.txt")
+				if err := os.WriteFile(path, []byte("original"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				_, _, err := wt.ApplyFileDiff(context.Background(), filepath.Join("switchable", "file.txt"), "", "invalid diff", stringPtr("updated"))
+				return err
+			},
+			assert: func(t *testing.T, _ string, external string) {
+				content, err := os.ReadFile(filepath.Join(external, "file.txt"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(content) != "external" {
+					t.Fatalf("write escaped through swapped symlink = %q", content)
+				}
+			},
+		},
+		{
+			name: "delete",
+			prepare: func(t *testing.T, workspace, _ string, wt *WorkspaceTracker) error {
+				if err := os.WriteFile(filepath.Join(workspace, "switchable", "file.txt"), []byte("original"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return wt.DeleteFile(filepath.Join("switchable", "file.txt"))
+			},
+			assert: func(t *testing.T, _ string, external string) {
+				if _, err := os.Stat(filepath.Join(external, "file.txt")); err != nil {
+					t.Fatalf("delete escaped through swapped symlink: %v", err)
+				}
+			},
+		},
+		{
+			name: "rename",
+			prepare: func(t *testing.T, workspace, external string, wt *WorkspaceTracker) error {
+				if err := os.WriteFile(filepath.Join(workspace, "switchable", "from.txt"), []byte("original"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(external, "from.txt"), []byte("external"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return wt.RenameFile(filepath.Join("switchable", "from.txt"), filepath.Join("switchable", "to.txt"))
+			},
+			assert: func(t *testing.T, _ string, external string) {
+				if _, err := os.Stat(filepath.Join(external, "from.txt")); err != nil {
+					t.Fatalf("rename escaped through swapped symlink: %v", err)
+				}
+				if _, err := os.Stat(filepath.Join(external, "to.txt")); !os.IsNotExist(err) {
+					t.Fatalf("rename escaped through swapped symlink: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			external := t.TempDir()
+			switchable := filepath.Join(workspace, "switchable")
+			if err := os.Mkdir(switchable, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(external, "file.txt"), []byte("external"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			wt := &WorkspaceTracker{workDir: workspace}
+			workspaceMutationBarrier.Store(func() {
+				if err := os.Rename(switchable, filepath.Join(workspace, "original")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(external, switchable); err != nil {
+					t.Fatal(err)
+				}
+			})
+			t.Cleanup(func() { workspaceMutationBarrier.Store((func())(nil)) })
+
+			if err := tc.prepare(t, workspace, external, wt); err == nil {
+				t.Fatal("mutation unexpectedly succeeded after descendant directory became an external symlink")
+			}
+			tc.assert(t, workspace, external)
+		})
+	}
+}
+
+func TestRenameFileRejectsCrossRootFileMove(t *testing.T) {
+	workspace := t.TempDir()
+	source := t.TempDir()
+	if err := os.Symlink(source, filepath.Join(workspace, "linked")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+	if err := os.WriteFile(filepath.Join(source, "source.txt"), []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wt := &WorkspaceTracker{workDir: workspace}
+	wt.SetAllowedSourceRoots([]string{source})
+
+	if err := wt.RenameFile(filepath.Join("linked", "source.txt"), "workspace.txt"); err == nil || !strings.Contains(err.Error(), "across workspace roots") {
+		t.Fatalf("RenameFile cross-root error = %v", err)
+	}
+	assertFileContent(t, filepath.Join(source, "source.txt"), "source")
+	if _, err := os.Stat(filepath.Join(workspace, "workspace.txt")); !os.IsNotExist(err) {
+		t.Fatalf("cross-root move created destination: %v", err)
+	}
+}
+
+func TestRenameFileRejectsCrossRootSameRelativePath(t *testing.T) {
+	workspace := t.TempDir()
+	source := t.TempDir()
+	if err := os.Symlink(source, filepath.Join(workspace, "linked")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+	if err := os.WriteFile(filepath.Join(source, "foo"), []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wt := &WorkspaceTracker{workDir: workspace}
+	wt.SetAllowedSourceRoots([]string{source})
+
+	if err := wt.RenameFile(filepath.Join("linked", "foo"), "foo"); err == nil || !strings.Contains(err.Error(), "across workspace roots") {
+		t.Fatalf("RenameFile cross-root same-relative error = %v", err)
+	}
+	assertFileContent(t, filepath.Join(source, "foo"), "source")
+	if _, err := os.Stat(filepath.Join(workspace, "foo")); !os.IsNotExist(err) {
+		t.Fatalf("cross-root same-relative move created destination: %v", err)
+	}
+}
+
+func TestRenameFileRejectsCrossRootDirectoryMove(t *testing.T) {
+	workspace := t.TempDir()
+	source := t.TempDir()
+	if err := os.Symlink(source, filepath.Join(workspace, "linked")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+	if err := os.MkdirAll(filepath.Join(source, "directory", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "directory", "nested", "file.txt"), []byte("content"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	wt := &WorkspaceTracker{workDir: workspace}
+	wt.SetAllowedSourceRoots([]string{source})
+
+	if err := wt.RenameFile(filepath.Join("linked", "directory"), "moved"); err == nil || !strings.Contains(err.Error(), "across workspace roots") {
+		t.Fatalf("RenameFile cross-root directory error = %v", err)
+	}
+	assertFileContent(t, filepath.Join(source, "directory", "nested", "file.txt"), "content")
+	if _, err := os.Stat(filepath.Join(workspace, "moved")); !os.IsNotExist(err) {
+		t.Fatalf("cross-root directory move created destination: %v", err)
+	}
+}
+
+func TestRenameFileCrossRootCollisionLeavesBothPathsUntouched(t *testing.T) {
+	workspace := t.TempDir()
+	source := t.TempDir()
+	if err := os.Symlink(source, filepath.Join(workspace, "linked")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+	if err := os.WriteFile(filepath.Join(source, "source.txt"), []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "destination.txt"), []byte("destination"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wt := &WorkspaceTracker{workDir: workspace}
+	wt.SetAllowedSourceRoots([]string{source})
+
+	err := wt.RenameFile(filepath.Join("linked", "source.txt"), "destination.txt")
+	if err == nil || !strings.Contains(err.Error(), "across workspace roots") {
+		t.Fatalf("RenameFile collision error = %v", err)
+	}
+	assertFileContent(t, filepath.Join(source, "source.txt"), "source")
+	assertFileContent(t, filepath.Join(workspace, "destination.txt"), "destination")
+}
+
+func assertFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil || string(content) != want {
+		t.Fatalf("file %q = %q, %v", path, content, err)
 	}
 }
 
