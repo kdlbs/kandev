@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Deeply review changed Kandev code for correctness, security, architecture, scope, and missing tests.
+description: Frontier-review Kandev changes with architecture, cross-cutting, high-risk, or stale/incomplete external-review risk.
 model: grok-4.5
 readonly: true
 ---

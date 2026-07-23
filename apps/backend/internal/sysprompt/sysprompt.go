@@ -47,28 +47,56 @@ func HasSystemContent(text string) bool {
 	return systemTagRegex.MatchString(text)
 }
 
-// kandevContextMarker is a stable string from kandev-context.md that lets
-// callers detect a prompt that has already been wrapped with the Kandev MCP
-// system block. Used by [HasKandevContext] to make the wrap step idempotent
-// across the multiple call sites that record first-turn prompts (WS handler,
-// workflow auto-start, orchestrator).
+// These markers distinguish task and Office context from other system blocks.
 const kandevContextMarker = "KANDEV MCP TOOLS"
 
-// HasKandevContext reports whether the prompt already contains the Kandev MCP
-// system block produced by [InjectKandevContext]. Use this to gate a wrap at
-// any call site so the same prompt never gets double-wrapped on its way down
-// to the agent or the DB.
-//
-// The marker is matched only inside a <kandev-system>...</kandev-system>
-// block — a user message body that happens to mention "KANDEV MCP TOOLS"
-// would not falsely signal that the wrap is already applied.
-func HasKandevContext(text string) bool {
-	for _, block := range systemTagRegex.FindAllString(text, -1) {
-		if strings.Contains(block, kandevContextMarker) {
-			return true
+const officeContextMarker = "KANDEV OFFICE MCP TOOLS"
+
+type contextKind uint8
+
+const (
+	contextUnknown contextKind = iota
+	contextTask
+	contextOffice
+	contextTrusted
+)
+
+func contextKindForBlock(block string, trustedContents []string) contextKind {
+	if strings.Contains(block, officeContextMarker) {
+		return contextOffice
+	}
+	if strings.Contains(block, kandevContextMarker) {
+		return contextTask
+	}
+	trimmedBlock := strings.TrimSpace(block)
+	for _, content := range trustedContents {
+		if trimmedBlock == strings.TrimSpace(Wrap(content)) {
+			return contextTrusted
 		}
 	}
-	return false
+	return contextUnknown
+}
+
+// OfficeContext returns the restricted first-turn prompt used by Office runs.
+// Its tool inventory must stay exactly aligned with MCP ModeOffice.
+func OfficeContext() string { return prompts.Get("office-context") }
+
+// FormatOfficeContext injects the active task and session IDs into the Office context.
+func FormatOfficeContext(taskID, sessionID string) string {
+	return Resolve("office-context", map[string]string{
+		"task_id":    taskID,
+		"session_id": sessionID,
+	})
+}
+
+// InjectOfficeContext ensures a first-turn prompt has the restricted Office context.
+// trustedContents must contain only exact server-generated system block contents.
+func InjectOfficeContext(taskID, sessionID, prompt string, trustedContents ...string) string {
+	return canonicalizeKandevContext(
+		FormatOfficeContext(taskID, sessionID),
+		prompt,
+		trustedContextContents(sessionID, trustedContents...),
+	)
 }
 
 // PlanMode returns the system prompt prepended when plan mode is enabled.
@@ -97,6 +125,8 @@ func KandevContext() string {
 // merges the two bullets onto one line; the omit path (empty string) is
 // unaffected since the next line in the template already starts the bullet.
 const stepCompleteSection = "- step_complete_kandev: Signal that every user-stated requirement for the CURRENT workflow step is satisfied. " +
+	"This is the canonical MCP protocol name; a client registry may display the client-specific alias mcp__kandev__step_complete_kandev for the same tool. " +
+	"If the tool is not already visible, use the client's tool search/discovery with the canonical name. " +
 	"Call this as the LAST action of the step (after the final tool call / commit / answer). " +
 	"Idempotent — a second call within the same step is a no-op. " +
 	"Do NOT call when asking a question, mid-conversation, or on partial progress. " +
@@ -172,12 +202,57 @@ func InjectConfigContext(sessionID, prompt string) string {
 // when the current workflow step has `auto_advance_requires_signal` enabled (ADR 0015) so the
 // step_complete_kandev tool description is exposed; otherwise the tool is hidden from the agent.
 func InjectKandevContext(taskID, sessionID, prompt string, requiresCompletionSignal bool) string {
-	return Wrap(FormatKandevContext(taskID, sessionID, requiresCompletionSignal)) + "\n\n" + prompt
+	return InjectKandevContextWithOptions(taskID, sessionID, prompt, KandevContextOptions{
+		RequiresCompletionSignal:       requiresCompletionSignal,
+		IncludeCoordinatorTaskControls: true,
+	})
 }
 
 // InjectKandevContextWithOptions prepends capability-aware Kandev context.
-func InjectKandevContextWithOptions(taskID, sessionID, prompt string, options KandevContextOptions) string {
-	return Wrap(FormatKandevContextWithOptions(taskID, sessionID, options)) + "\n\n" + prompt
+// trustedContents must contain only exact server-generated system block contents.
+func InjectKandevContextWithOptions(
+	taskID, sessionID, prompt string,
+	options KandevContextOptions,
+	trustedContents ...string,
+) string {
+	return canonicalizeKandevContext(
+		FormatKandevContextWithOptions(taskID, sessionID, options),
+		prompt,
+		trustedContextContents(sessionID, trustedContents...),
+	)
+}
+
+func trustedContextContents(sessionID string, additional ...string) []string {
+	contents := []string{FormatConfigContext(sessionID), PlanMode(), DefaultPlanPrefix()}
+	for _, content := range additional {
+		if content != "" {
+			contents = append(contents, content)
+		}
+	}
+	return contents
+}
+
+func canonicalizeKandevContext(content, prompt string, trustedContents []string) string {
+	replaced := false
+	result := systemTagRegex.ReplaceAllStringFunc(prompt, func(block string) string {
+		end := strings.Index(block, TagEnd) + len(TagEnd)
+		suffix := block[end:]
+		switch contextKindForBlock(block, trustedContents) {
+		case contextUnknown:
+			return suffix
+		case contextTrusted:
+			return block
+		}
+		if !replaced {
+			replaced = true
+			return Wrap(content) + suffix
+		}
+		return suffix
+	})
+	if replaced {
+		return result
+	}
+	return Wrap(content) + "\n\n" + result
 }
 
 // DefaultPlanPrefix returns the planning instruction prompt used when plan mode

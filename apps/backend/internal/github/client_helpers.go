@@ -35,17 +35,45 @@ func getPRFeedback(ctx context.Context, c Client, owner, repo string, number int
 	if err != nil {
 		return nil, err
 	}
-	reviews, err := c.ListPRReviews(ctx, owner, repo, number)
-	if err != nil {
-		return nil, err
+	fetchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type feedbackResult struct {
+		reviews  []PRReview
+		comments []PRComment
+		checks   []CheckRun
+		err      error
 	}
-	comments, err := c.ListPRComments(ctx, owner, repo, number, nil)
-	if err != nil {
-		return nil, err
-	}
-	checks, err := c.ListCheckRuns(ctx, owner, repo, pr.HeadSHA)
-	if err != nil {
-		return nil, err
+	results := make(chan feedbackResult, 3)
+	go func() {
+		value, callErr := c.ListPRReviews(fetchCtx, owner, repo, number)
+		results <- feedbackResult{reviews: value, err: callErr}
+	}()
+	go func() {
+		value, callErr := c.ListPRComments(fetchCtx, owner, repo, number, nil)
+		results <- feedbackResult{comments: value, err: callErr}
+	}()
+	go func() {
+		value, callErr := c.ListCheckRuns(fetchCtx, owner, repo, pr.HeadSHA)
+		results <- feedbackResult{checks: value, err: callErr}
+	}()
+
+	var reviews []PRReview
+	var comments []PRComment
+	var checks []CheckRun
+	for range 3 {
+		result := <-results
+		if result.err != nil {
+			return nil, result.err
+		}
+		if result.reviews != nil {
+			reviews = result.reviews
+		}
+		if result.comments != nil {
+			comments = result.comments
+		}
+		if result.checks != nil {
+			checks = result.checks
+		}
 	}
 	// Ensure non-nil slices so JSON serialization produces [] instead of null.
 	if reviews == nil {
@@ -403,7 +431,7 @@ func isNewerCheck(a, b CheckRun) bool {
 // non-empty pull_request.merged_at; promote those to the "merged" state so the
 // UI renders the purple merged icon instead of the red closed one.
 func convertSearchItemToPR(
-	number int, title, htmlURL, state, authorLogin, repositoryURL, mergedAt string,
+	id int64, nodeID string, number int, title, htmlURL, state, authorLogin, repositoryURL, mergedAt string,
 	draft bool, createdAt, updatedAt time.Time,
 ) *PR {
 	owner, repo := parseRepoURL(repositoryURL)
@@ -411,6 +439,8 @@ func convertSearchItemToPR(
 		state = prStateMerged
 	}
 	return &PR{
+		ID:          id,
+		NodeID:      nodeID,
 		Number:      number,
 		Title:       title,
 		HTMLURL:     htmlURL,
@@ -482,6 +512,8 @@ func buildSearchQuery(typeQualifier, filter, customQuery string) string {
 
 // issueSearchItem is an issue item from the GitHub search API.
 type issueSearchItem struct {
+	ID            int64     `json:"id"`
+	NodeID        string    `json:"node_id"`
 	Number        int       `json:"number"`
 	Title         string    `json:"title"`
 	Body          string    `json:"body"`
@@ -517,6 +549,8 @@ func convertSearchItemToIssue(item issueSearchItem) *Issue {
 		assignees[i] = a.Login
 	}
 	issue := &Issue{
+		ID:          item.ID,
+		NodeID:      item.NodeID,
 		Number:      item.Number,
 		Title:       item.Title,
 		Body:        item.Body,

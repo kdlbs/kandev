@@ -1,9 +1,232 @@
 package github
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
+
+func TestGetPRFeedbackStartsIndependentRequestsConcurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	started := make(chan string, 3)
+	release := make(chan struct{})
+	pr := &PR{Number: 1, HeadSHA: "head-sha"}
+	reviews := []PRReview{{ID: 1, State: reviewStateChangesRequested}}
+	comments := []PRComment{{ID: 2, Body: "please fix"}}
+	checks := []CheckRun{{Name: "lint", Status: checkStatusCompleted, Conclusion: checkConclusionFail}}
+	client := feedbackConcurrencyClient{
+		started:  started,
+		release:  release,
+		pr:       pr,
+		reviews:  reviews,
+		comments: comments,
+		checks:   checks,
+	}
+	result := make(chan struct {
+		feedback *PRFeedback
+		err      error
+	}, 1)
+	go func() {
+		feedback, err := getPRFeedback(ctx, &client, "owner", "repo", 1)
+		result <- struct {
+			feedback *PRFeedback
+			err      error
+		}{feedback: feedback, err: err}
+	}()
+
+	assertStartedRequests(t, ctx, started)
+	close(release)
+
+	got := <-result
+	if got.err != nil {
+		t.Fatalf("getPRFeedback() error = %v", got.err)
+	}
+	if got.feedback.PR != pr {
+		t.Error("getPRFeedback() did not preserve the PR")
+	}
+	if len(got.feedback.Reviews) != 1 || got.feedback.Reviews[0] != reviews[0] {
+		t.Errorf("getPRFeedback() reviews = %#v, want %#v", got.feedback.Reviews, reviews)
+	}
+	if len(got.feedback.Comments) != 1 || got.feedback.Comments[0] != comments[0] {
+		t.Errorf("getPRFeedback() comments = %#v, want %#v", got.feedback.Comments, comments)
+	}
+	if len(got.feedback.Checks) != 1 || got.feedback.Checks[0] != checks[0] {
+		t.Errorf("getPRFeedback() checks = %#v, want %#v", got.feedback.Checks, checks)
+	}
+	if !got.feedback.HasIssues {
+		t.Error("getPRFeedback() HasIssues = false, want true")
+	}
+}
+
+func TestGetPRFeedbackNormalizesNilResponses(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	started := make(chan string, 3)
+	release := make(chan struct{})
+	client := feedbackConcurrencyClient{
+		started: started,
+		release: release,
+		pr:      &PR{HeadSHA: "head-sha"},
+	}
+	result := make(chan struct {
+		feedback *PRFeedback
+		err      error
+	}, 1)
+	go func() {
+		feedback, err := getPRFeedback(ctx, &client, "owner", "repo", 1)
+		result <- struct {
+			feedback *PRFeedback
+			err      error
+		}{feedback: feedback, err: err}
+	}()
+
+	assertStartedRequests(t, ctx, started)
+	close(release)
+	got := <-result
+	if got.err != nil {
+		t.Fatalf("getPRFeedback() error = %v", got.err)
+	}
+	if got.feedback.Reviews == nil || got.feedback.Comments == nil || got.feedback.Checks == nil {
+		t.Errorf("getPRFeedback() slices = %#v, want non-nil empty slices", got.feedback)
+	}
+	if got.feedback.HasIssues {
+		t.Error("getPRFeedback() HasIssues = true, want false")
+	}
+}
+
+func TestGetPRFeedbackReturnsWorkerErrorWithoutWaitingForBlockedSibling(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	failure := errors.New("checks failed")
+	started := make(chan string, 3)
+	release := make(chan struct{})
+	cancelled := make(chan string, 2)
+	client := feedbackConcurrencyClient{
+		started:   started,
+		release:   release,
+		cancelled: cancelled,
+		pr:        &PR{HeadSHA: "head-sha"},
+		fail:      "checks",
+		failure:   failure,
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := getPRFeedback(ctx, &client, "owner", "repo", 1)
+		result <- err
+	}()
+
+	assertStartedRequests(t, ctx, started)
+	close(release)
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, failure) {
+			t.Fatalf("getPRFeedback() error = %v, want %v", err, failure)
+		}
+	case <-ctx.Done():
+		t.Fatal("getPRFeedback() waited for blocked sibling")
+	}
+	assertCancelledRequests(t, ctx, cancelled)
+}
+
+func assertStartedRequests(t *testing.T, ctx context.Context, started <-chan string) {
+	t.Helper()
+	want := map[string]bool{"reviews": true, "comments": true, "checks": true}
+	for range 3 {
+		select {
+		case request := <-started:
+			if !want[request] {
+				t.Fatalf("unexpected or duplicate request start %q", request)
+			}
+			delete(want, request)
+		case <-ctx.Done():
+			t.Fatalf("requests that did not start: %v", want)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("requests that did not start: %v", want)
+	}
+}
+
+func assertCancelledRequests(t *testing.T, ctx context.Context, cancelled <-chan string) {
+	t.Helper()
+	want := map[string]bool{"reviews": true, "comments": true}
+	for range 2 {
+		select {
+		case request := <-cancelled:
+			if !want[request] {
+				t.Fatalf("unexpected or duplicate request cancellation %q", request)
+			}
+			delete(want, request)
+		case <-ctx.Done():
+			t.Fatalf("requests that were not cancelled: %v", want)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("requests that were not cancelled: %v", want)
+	}
+}
+
+type feedbackConcurrencyClient struct {
+	Client
+	started   chan<- string
+	release   <-chan struct{}
+	cancelled chan<- string
+	pr        *PR
+	reviews   []PRReview
+	comments  []PRComment
+	checks    []CheckRun
+	fail      string
+	failure   error
+}
+
+func (c *feedbackConcurrencyClient) GetPR(context.Context, string, string, int) (*PR, error) {
+	return c.pr, nil
+}
+
+func (c *feedbackConcurrencyClient) ListPRReviews(ctx context.Context, _ string, _ string, _ int) ([]PRReview, error) {
+	if err := c.wait(ctx, "reviews"); err != nil {
+		return nil, err
+	}
+	return c.reviews, nil
+}
+
+func (c *feedbackConcurrencyClient) ListPRComments(ctx context.Context, _ string, _ string, _ int, _ *time.Time) ([]PRComment, error) {
+	if err := c.wait(ctx, "comments"); err != nil {
+		return nil, err
+	}
+	return c.comments, nil
+}
+
+func (c *feedbackConcurrencyClient) ListCheckRuns(ctx context.Context, _ string, _ string, _ string) ([]CheckRun, error) {
+	if err := c.wait(ctx, "checks"); err != nil {
+		return nil, err
+	}
+	return c.checks, nil
+}
+
+func (c *feedbackConcurrencyClient) wait(ctx context.Context, request string) error {
+	c.started <- request
+	if c.fail != "" && c.fail != request {
+		<-ctx.Done()
+		c.cancelled <- request
+		return ctx.Err()
+	}
+	select {
+	case <-c.release:
+		if c.fail == request {
+			return c.failure
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 func TestBuildReviewSearchQuery(t *testing.T) {
 	tests := []struct {
@@ -321,6 +544,7 @@ func TestIsNewerCheck(t *testing.T) {
 func TestConvertSearchItemToPR(t *testing.T) {
 	now := time.Now()
 	pr := convertSearchItemToPR(
+		101, "PR_kwDOA",
 		42, "Fix bug", "https://github.com/owner/repo/pull/42", "open",
 		"alice", "https://api.github.com/repos/myorg/myrepo", "", false,
 		now, now,
@@ -328,6 +552,9 @@ func TestConvertSearchItemToPR(t *testing.T) {
 
 	if pr.Number != 42 {
 		t.Errorf("expected number 42, got %d", pr.Number)
+	}
+	if pr.ID != 101 || pr.NodeID != "PR_kwDOA" {
+		t.Errorf("identity = (%d, %q), want (101, PR_kwDOA)", pr.ID, pr.NodeID)
 	}
 	if pr.Title != "Fix bug" {
 		t.Errorf("expected title 'Fix bug', got %s", pr.Title)
@@ -350,6 +577,7 @@ func TestConvertSearchItemToPRMerged(t *testing.T) {
 	now := time.Now()
 	mergedAt := "2025-01-02T03:04:05Z"
 	pr := convertSearchItemToPR(
+		102, "PR_kwDOB",
 		7, "Land feature", "https://github.com/owner/repo/pull/7", "closed",
 		"bob", "https://api.github.com/repos/myorg/myrepo", mergedAt, false,
 		now, now,

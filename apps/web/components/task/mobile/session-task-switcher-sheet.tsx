@@ -62,6 +62,7 @@ export function MobileTaskList({
   onDetachTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkMergeRequest,
   onLinkJiraTicket,
   onLinkLinearIssue,
   onLinkSentryIssue,
@@ -80,6 +81,7 @@ export function MobileTaskList({
   onDetachTask: (taskId: string) => Promise<void> | void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkIssue?: (taskId: string, taskTitle?: string) => void;
+  onLinkMergeRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkJiraTicket?: (taskId: string, taskTitle?: string) => void;
   onLinkLinearIssue?: (taskId: string, taskTitle?: string) => void;
   onLinkSentryIssue?: (taskId: string, taskTitle?: string) => void;
@@ -129,6 +131,7 @@ export function MobileTaskList({
       onDetachTask={onDetachTask}
       onLinkPullRequest={onLinkPullRequest}
       onLinkIssue={onLinkIssue}
+      onLinkMergeRequest={onLinkMergeRequest}
       onLinkJiraTicket={onLinkJiraTicket}
       onLinkLinearIssue={onLinkLinearIssue}
       onLinkSentryIssue={onLinkSentryIssue}
@@ -288,6 +291,11 @@ function TaskSwitcherSurfaceContent({
             presentation,
             onOpenChange,
             linking.taskListHandlers.onLinkIssue,
+          )}
+          onLinkMergeRequest={surfaceAction(
+            presentation,
+            onOpenChange,
+            linking.taskListHandlers.onLinkMergeRequest,
           )}
           onLinkJiraTicket={surfaceAction(
             presentation,

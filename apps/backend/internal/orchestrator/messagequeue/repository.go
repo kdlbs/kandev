@@ -46,6 +46,11 @@ type Repository interface {
 	// ErrEntryNotFound when no row matches all guards.
 	UpdateContent(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error
 
+	// UpdateContentAndMetadata atomically replaces content/attachments and
+	// applies metadata key updates. A nil update value removes that key while
+	// unrelated metadata remains unchanged.
+	UpdateContentAndMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error
+
 	// DeleteByID removes a single entry. The session scope (`AND session_id = ?`)
 	// is mandatory so a caller can't delete an entry by guessing its UUID across
 	// sessions — the queue_full MCP payload deliberately discloses sibling-task
@@ -76,4 +81,22 @@ type Repository interface {
 	// TakePendingMove returns and removes the deferred move for a session.
 	// Returns nil, nil if absent.
 	TakePendingMove(ctx context.Context, sessionID string) (*PendingMove, error)
+}
+
+func applyMetadataUpdates(current, updates map[string]interface{}) map[string]interface{} {
+	merged := make(map[string]interface{}, len(current)+len(updates))
+	for key, value := range current {
+		merged[key] = value
+	}
+	for key, value := range updates {
+		if value == nil {
+			delete(merged, key)
+			continue
+		}
+		merged[key] = value
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
 }

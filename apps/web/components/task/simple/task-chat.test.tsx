@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
+import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
+import { render, screen, cleanup, fireEvent, within, act, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import type {
@@ -19,16 +19,43 @@ vi.mock("@/app/office/tasks/[id]/advanced-panels/chat-panel", () => ({
   ),
 }));
 
+const { enhancePromptMock, toastSuccessMock, toastErrorMock, deliveryToastMock } = vi.hoisted(
+  () => ({
+    enhancePromptMock: vi.fn(),
+    toastSuccessMock: vi.fn(),
+    toastErrorMock: vi.fn(),
+    deliveryToastMock: vi.fn(),
+  }),
+);
+
+vi.mock("sonner", () => ({
+  toast: {
+    success: toastSuccessMock,
+    error: toastErrorMock,
+  },
+}));
+
 vi.mock("@/components/enhance-prompt-button", () => ({
-  EnhancePromptButton: () => null,
+  EnhancePromptButton: ({ onClick }: { onClick: () => void }) => (
+    <button type="button" data-testid="enhance-prompt-button" onClick={onClick}>
+      Enhance
+    </button>
+  ),
 }));
 
 vi.mock("@/hooks/use-is-utility-configured", () => ({
-  useIsUtilityConfigured: () => false,
+  useIsUtilityConfigured: () => true,
 }));
 
 vi.mock("@/hooks/use-utility-agent-generator", () => ({
-  useUtilityAgentGenerator: () => ({ enhancePrompt: () => {}, isEnhancingPrompt: false }),
+  useUtilityAgentGenerator: () => ({
+    enhancePrompt: enhancePromptMock,
+    isEnhancingPrompt: false,
+  }),
+}));
+
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: deliveryToastMock }),
 }));
 
 vi.mock("./markdown-comment", () => ({
@@ -83,13 +110,26 @@ vi.mock("@kandev/ui/button", () => ({
 }));
 
 import { TaskChat } from "./task-chat";
+import { synchronizeInputValue } from "./synchronize-input-value";
 import { ActiveSessionRefProvider } from "./components/active-session-ref-context";
 
 afterEach(() => cleanup());
 
+beforeEach(() => {
+  enhancePromptMock.mockReset();
+  toastSuccessMock.mockReset();
+  toastErrorMock.mockReset();
+  deliveryToastMock.mockReset();
+});
+
 const T_10 = "2026-05-01T10:00:00Z";
 const T_11 = "2026-05-01T11:00:00Z";
 const T_AGENT_A1 = "2026-05-01T10:30:00Z";
+const ORIGINAL_PROMPT = "Original prompt";
+const IMPROVED_PROMPT = "Improved prompt";
+const USER_EDIT = "User edit";
+const COMMENT_PLACEHOLDER = "Add a comment...";
+const PROMPT_RESULT_RECOVERY_TEST_ID = "prompt-result-recovery";
 
 function makeComment(id: string, createdAt: string, content = `c-${id}`): TaskComment {
   return {
@@ -190,12 +230,12 @@ describe("TaskChat unified timeline", () => {
 
   it("renders the input area when not read-only", () => {
     render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={[]} />));
-    expect(screen.getByPlaceholderText("Add a comment...")).toBeTruthy();
+    expect(screen.getByPlaceholderText(COMMENT_PLACEHOLDER)).toBeTruthy();
   });
 
   it("hides the input area when read-only", () => {
     render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={[]} readOnly />));
-    expect(screen.queryByPlaceholderText("Add a comment...")).toBeNull();
+    expect(screen.queryByPlaceholderText(COMMENT_PLACEHOLDER)).toBeNull();
   });
 });
 
@@ -297,6 +337,96 @@ describe("TaskChat decisions in timeline", () => {
     expect(engIdx).toBeGreaterThan(ceoIdx);
     expect(lateIdx).toBeGreaterThan(engIdx);
     expect(html).toContain("please update the docs");
+  });
+});
+
+describe("TaskChat prompt enhancement", () => {
+  it("synchronizes an edit before scheduling the state update", () => {
+    const inputValueRef = { current: ORIGINAL_PROMPT };
+    const setInput = vi.fn(() => {
+      expect(inputValueRef.current).toBe(USER_EDIT);
+    });
+
+    synchronizeInputValue(inputValueRef, setInput, USER_EDIT);
+
+    expect(setInput).toHaveBeenCalledWith(USER_EDIT);
+    expect(inputValueRef.current).toBe(USER_EDIT);
+  });
+
+  it("applies the enhanced prompt immediately when the input is unchanged", async () => {
+    let deliver: ((result: { content: string }) => boolean | Promise<boolean>) | undefined;
+    enhancePromptMock.mockImplementation(
+      (_source: string, onSuccess: (result: { content: string }) => boolean | Promise<boolean>) => {
+        deliver = onSuccess;
+      },
+    );
+
+    render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={[]} />));
+
+    const textarea = screen.getByPlaceholderText(COMMENT_PLACEHOLDER) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ORIGINAL_PROMPT } });
+    fireEvent.click(screen.getByTestId("enhance-prompt-button"));
+
+    expect(enhancePromptMock).toHaveBeenCalledWith(ORIGINAL_PROMPT, expect.any(Function));
+
+    await act(async () => {
+      await deliver?.({ content: IMPROVED_PROMPT });
+    });
+
+    await waitFor(() => expect(textarea.value).toBe(IMPROVED_PROMPT));
+    expect(screen.queryByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeNull();
+    expect(toastSuccessMock).toHaveBeenCalledWith("Enhanced prompt inserted.");
+  });
+
+  it("retains a user edit and offers recovery until Apply is clicked", async () => {
+    let deliver: ((result: { content: string }) => boolean | Promise<boolean>) | undefined;
+    enhancePromptMock.mockImplementation(
+      (_source: string, onSuccess: (result: { content: string }) => boolean | Promise<boolean>) => {
+        deliver = onSuccess;
+      },
+    );
+
+    render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={[]} />));
+
+    const textarea = screen.getByPlaceholderText(COMMENT_PLACEHOLDER) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ORIGINAL_PROMPT } });
+    fireEvent.click(screen.getByTestId("enhance-prompt-button"));
+    fireEvent.change(textarea, { target: { value: USER_EDIT } });
+
+    await act(async () => {
+      await deliver?.({ content: IMPROVED_PROMPT });
+    });
+
+    await waitFor(() => expect(textarea.value).toBe(USER_EDIT));
+    expect(screen.getByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => expect(textarea.value).toBe(IMPROVED_PROMPT));
+    expect(screen.queryByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeNull();
+  });
+
+  it("retains an edit made in the same turn as result delivery", async () => {
+    let deliver: ((result: { content: string }) => boolean | Promise<boolean>) | undefined;
+    enhancePromptMock.mockImplementation(
+      (_source: string, onSuccess: (result: { content: string }) => boolean | Promise<boolean>) => {
+        deliver = onSuccess;
+      },
+    );
+
+    render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={[]} />));
+
+    const textarea = screen.getByPlaceholderText(COMMENT_PLACEHOLDER) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ORIGINAL_PROMPT } });
+    fireEvent.click(screen.getByTestId("enhance-prompt-button"));
+
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: USER_EDIT } });
+      await deliver?.({ content: IMPROVED_PROMPT });
+    });
+
+    expect(textarea.value).toBe(USER_EDIT);
+    expect(screen.getByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeTruthy();
   });
 });
 

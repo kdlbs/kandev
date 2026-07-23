@@ -1,6 +1,14 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   IconCheck,
   IconChevronDown,
@@ -29,8 +37,14 @@ import {
   workflowMessageInfoFromMetadata,
   type WorkflowStepMessageInfo,
 } from "@/components/task/chat/messages/workflow-step-message-badge";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import { remarkPlugins } from "@/components/shared/markdown-components";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import type { EntityReference } from "@/lib/types/entity-reference";
+import {
+  entityReferencesFromMetadata,
+  survivingEntityReferences,
+} from "@/lib/entity-references/message-references";
+import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/messages/entity-reference-chip";
 
 type QueuedAttachment = NonNullable<QueuedMessage["attachments"]>[number];
 
@@ -239,6 +253,7 @@ function EditView({
 
 type DisplayViewProps = {
   entry: QueuedMessage;
+  entityReferences: readonly EntityReference[];
   positionLabel: string;
   canEdit: boolean;
   onStartEdit: () => void;
@@ -255,13 +270,24 @@ function shouldOfferExpand(text: string): boolean {
   return text.length > EXPAND_THRESHOLD || text.includes("\n");
 }
 
-function DisplayView({ entry, positionLabel, canEdit, onStartEdit, onRemove }: DisplayViewProps) {
+function DisplayView({
+  entry,
+  entityReferences,
+  positionLabel,
+  canEdit,
+  onStartEdit,
+  onRemove,
+}: DisplayViewProps) {
   const visible = stripSystemTags(entry.content);
   const attachments = (entry.attachments ?? []) as QueuedAttachment[];
   const senderTask = getSenderTaskInfo(entry);
   const workflowMessage = getWorkflowMessageInfo(entry);
   const [expanded, setExpanded] = useState(false);
   const canExpand = shouldOfferExpand(visible);
+  const referenceMarkdownComponents = useMemo(
+    () => buildEntityReferenceMarkdownComponents(entityReferences),
+    [entityReferences],
+  );
   return (
     <div className="group flex items-start gap-2 py-1.5">
       <span className="flex items-center gap-1.5 mt-0.5 text-muted-foreground">
@@ -287,7 +313,7 @@ function DisplayView({ entry, positionLabel, canEdit, onStartEdit, onRemove }: D
               expanded ? "max-h-[40rem]" : "max-h-[2.75rem]",
             )}
           >
-            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+            <ReactMarkdown remarkPlugins={remarkPlugins} components={referenceMarkdownComponents}>
               {visible}
             </ReactMarkdown>
           </div>
@@ -356,7 +382,7 @@ type QueuedGhostMessageProps = {
    * entry's queued_by. Inter-task entries are visible but read-only.
    */
   canEdit: boolean;
-  onSave: (content: string) => Promise<void>;
+  onSave: (content: string, entityReferences: EntityReference[]) => Promise<void>;
   onRemove: () => void | Promise<void>;
   /** Called after edit save/cancel so the parent can refocus the chat input. */
   onEditComplete?: () => void;
@@ -368,6 +394,10 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
     const [value, setValue] = useState(entry.content);
     const [saving, setSaving] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const entityReferences = useMemo(
+      () => entityReferencesFromMetadata(entry.metadata),
+      [entry.metadata],
+    );
 
     useEffect(() => {
       if (!editing) setValue(entry.content);
@@ -404,7 +434,7 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
       }
       setSaving(true);
       try {
-        await onSave(trimmed);
+        await onSave(trimmed, survivingEntityReferences(trimmed, entityReferences));
         setEditing(false);
         onEditComplete?.();
       } catch (err) {
@@ -422,7 +452,7 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
       } finally {
         setSaving(false);
       }
-    }, [value, entry.content, onSave, onEditComplete]);
+    }, [value, entry.content, onSave, onEditComplete, entityReferences]);
 
     const positionNumber = entry.position ?? (index ?? 0) + 1;
     const positionLabel = `#${positionNumber}`;
@@ -447,6 +477,7 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
         ) : (
           <DisplayView
             entry={entry}
+            entityReferences={entityReferences}
             positionLabel={positionLabel}
             canEdit={canEdit}
             onStartEdit={startEdit}

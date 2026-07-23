@@ -573,6 +573,45 @@ describe("session.state_changed → respects user-pinned session", () => {
     expect(store.getState().setActiveSession).not.toHaveBeenCalled();
   });
 
+  it("hands off to the promoted primary when the new session is not yet in the per-task list", () => {
+    // Race that produced the reported bug: a workflow step switch to a step
+    // with a different agent profile promotes the new primary via task.updated
+    // (reflected on the kanban task) BEFORE the old session's terminal
+    // state_changed arrives, so s-new is not yet present in taskSessionsByTask.
+    // pickReplacementSessionId finds no in-list successor, so focus must follow
+    // the switch by falling back to the task's authoritative primary session.
+    const store = makeStore({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-old",
+        pinnedSessionId: "s-old",
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          "t-1": [
+            { id: "s-old", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
+          ],
+        },
+      },
+      kanban: { tasks: [{ id: "t-1", primarySessionId: "s-new" }] },
+      kanbanMulti: { snapshots: {} },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
+    });
+
+    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
+  });
+
   it("does not hand off when a pinned terminal session receives a replay state_changed", () => {
     // Replay: the session was already COMPLETED (previousState terminal) and
     // the backend re-emits the same terminal state. The user clicked this

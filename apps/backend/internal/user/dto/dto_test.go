@@ -2,10 +2,42 @@ package dto
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/kandev/kandev/internal/user/models"
 )
+
+func TestAppStatusBarOrderDTOAndPatchSemantics(t *testing.T) {
+	want := models.AppStatusBarOrder{
+		LeftItemIDs:  []string{"builtin:connection", "plugin:left"},
+		RightItemIDs: []string{"builtin:metrics"},
+	}
+	got := FromUserSettings(&models.UserSettings{AppStatusBarOrder: want}).AppStatusBarOrder
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AppStatusBarOrder = %#v, want %#v", got, want)
+	}
+
+	t.Run("omitted value stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.AppStatusBarOrder != nil {
+			t.Fatalf("AppStatusBarOrder = %#v, want nil", req.AppStatusBarOrder)
+		}
+	})
+
+	t.Run("explicit replacement is retained", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"app_status_bar_order":{"left_item_ids":["left"],"right_item_ids":[]}}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.AppStatusBarOrder == nil || !reflect.DeepEqual(req.AppStatusBarOrder.LeftItemIDs, []string{"left"}) {
+			t.Fatalf("AppStatusBarOrder = %#v, want explicit replacement", req.AppStatusBarOrder)
+		}
+	})
+}
 
 func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
 	for _, want := range []bool{true, false} {

@@ -7,28 +7,43 @@ import type { PRDiffFile } from "@/lib/types/github";
 
 const debug = createDebugLogger("review:pr-diff");
 
-type PRDiffState = {
+type PRDiffView = {
   files: PRDiffFile[];
   loading: boolean;
   error: string | null;
 };
 
-const INITIAL_STATE: PRDiffState = {
+export type KeyedPRDiffState = PRDiffView & {
+  sourceKey: string;
+};
+
+const INITIAL_STATE: KeyedPRDiffState = {
+  sourceKey: "",
   files: [],
   loading: false,
   error: null,
 };
 
+export function resolvePRDiffView(state: KeyedPRDiffState, requestedKey: string): PRDiffView {
+  if (state.sourceKey === requestedKey) {
+    return { files: state.files, loading: state.loading, error: state.error };
+  }
+  return { files: [], loading: requestedKey !== "", error: null };
+}
+
 async function fetchPRFiles(
   owner: string,
   repo: string,
   prNumber: number,
-  setState: (s: PRDiffState) => void,
+  sourceKey: string,
+  setState: (s: KeyedPRDiffState) => void,
 ) {
   const client = getWebSocketClient();
-  if (!client) return;
-
-  setState({ files: [], loading: true, error: null });
+  setState({ sourceKey, files: [], loading: true, error: null });
+  if (!client) {
+    setState({ sourceKey, files: [], loading: false, error: null });
+    return;
+  }
   debug("fetch.start", { owner, repo, prNumber });
   try {
     const response = await client.request<{ files?: PRDiffFile[] }>("github.pr_files.get", {
@@ -37,11 +52,11 @@ async function fetchPRFiles(
       number: prNumber,
     });
     const files = response?.files ?? [];
-    setState({ files, loading: false, error: null });
+    setState({ sourceKey, files, loading: false, error: null });
     debug("fetch.success", { owner, repo, prNumber, fileCount: files.length });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch PR files";
-    setState({ files: [], loading: false, error: message });
+    setState({ sourceKey, files: [], loading: false, error: message });
     debug("fetch.error", { owner, repo, prNumber, error: message });
   }
 }
@@ -56,36 +71,34 @@ export function usePRDiff(
   prNumber: number | null,
   refreshKey?: string | null,
 ) {
-  const [state, setState] = useState<PRDiffState>(INITIAL_STATE);
+  const [state, setState] = useState<KeyedPRDiffState>(INITIAL_STATE);
   const hasParams = !!owner && !!repo && !!prNumber;
+  const sourceKey = hasParams ? `${owner}/${repo}/${prNumber}/${refreshKey ?? ""}` : "";
   const paramsKeyRef = useRef<string>("");
   const requestIdRef = useRef(0);
 
   const refresh = useCallback(() => {
     if (!owner || !repo || !prNumber) return;
     const requestId = ++requestIdRef.current;
-    void fetchPRFiles(owner, repo, prNumber, (next) => {
+    void fetchPRFiles(owner, repo, prNumber, sourceKey, (next) => {
       if (requestId !== requestIdRef.current) return;
       setState(next);
     });
-  }, [owner, repo, prNumber]);
+  }, [owner, repo, prNumber, sourceKey]);
 
   useEffect(() => {
-    const key = hasParams ? `${owner}/${repo}/${prNumber}/${refreshKey ?? ""}` : "";
-    if (key === paramsKeyRef.current) return;
-    paramsKeyRef.current = key;
+    if (sourceKey === paramsKeyRef.current) return;
+    paramsKeyRef.current = sourceKey;
     if (!owner || !repo || !prNumber) {
       requestIdRef.current++; // invalidate in-flight responses
       return;
     }
     const requestId = ++requestIdRef.current;
-    void fetchPRFiles(owner, repo, prNumber, (next) => {
+    void fetchPRFiles(owner, repo, prNumber, sourceKey, (next) => {
       if (requestId !== requestIdRef.current) return;
       setState(next);
     });
-  }, [owner, repo, prNumber, hasParams, refreshKey]);
+  }, [owner, repo, prNumber, sourceKey]);
 
-  // Return initial state when params are null to clear stale data
-  if (!hasParams) return { ...INITIAL_STATE, refresh };
-  return { ...state, refresh };
+  return { ...resolvePRDiffView(state, sourceKey), refresh };
 }

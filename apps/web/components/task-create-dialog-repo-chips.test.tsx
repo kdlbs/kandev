@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import type { Branch, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -26,6 +26,7 @@ vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
 // branching logic (workspace chips vs. remote chips vs. folder picker).
 vi.mock("./task-create-dialog-remote-repo-chip", () => ({
   RemoteRepoChip: () => <div data-testid="remote-repo-chip" />,
+  selectedRemoteRepositoryIdentity: () => null,
 }));
 
 import { RepoChipsRow } from "./task-create-dialog-repo-chips";
@@ -36,6 +37,8 @@ afterEach(cleanup);
 const REPO_FRONT_ID = "repo-front";
 const REPO_BACK_ID = "repo-back";
 const REPO_CHIP_TRIGGER = "repo-chip-trigger";
+const ALREADY_ADDED_MARKER = "already-added-repository-marker";
+const DISCOVERED_REPO_PATH = "/home/me/projects/local-project";
 
 function makeRepo(id: string, name: string): Repository {
   return {
@@ -290,7 +293,7 @@ describe("RepoChipsRow", () => {
         fs={makeFs({
           repositories: [row({ key: "r0" })],
           discoveredRepositories: [
-            { path: "/home/me/projects/local-project", name: "local-project" },
+            { path: DISCOVERED_REPO_PATH, name: "local-project" },
             // Same path as a workspace repo — should NOT appear (dedup by path).
             { path: "/repos/frontend", name: "frontend-dup" },
           ] as unknown as DialogFormState["discoveredRepositories"],
@@ -319,7 +322,7 @@ describe("RepoChipsRow", () => {
         fs={makeFs({
           repositories: [row({ key: "r0" })],
           discoveredRepositories: [
-            { path: "/home/me/projects/local-project", name: "local-project" },
+            { path: DISCOVERED_REPO_PATH, name: "local-project" },
           ] as unknown as DialogFormState["discoveredRepositories"],
         })}
         repositories={[]}
@@ -331,7 +334,7 @@ describe("RepoChipsRow", () => {
     );
     fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
     fireEvent.click(screen.getByText("~/projects/local-project"));
-    expect(onRowRepositoryChange).toHaveBeenCalledWith("r0", "/home/me/projects/local-project");
+    expect(onRowRepositoryChange).toHaveBeenCalledWith("r0", DISCOVERED_REPO_PATH);
   });
 
   // Regression: discovered (path-keyed) rows used to call the branch loader
@@ -405,29 +408,38 @@ describe("RepoChipsRow", () => {
   });
 });
 
-describe("WorkspaceRepoChips", () => {
-  const repositories = [makeRepo(REPO_FRONT_ID, "frontend"), makeRepo(REPO_BACK_ID, "backend")];
-  const rows = [
-    row({ key: "r0", repositoryId: REPO_FRONT_ID, branch: "main" }),
-    row({ key: "r1", branch: "develop" }),
-  ];
+const workspaceRepositories = [
+  makeRepo(REPO_FRONT_ID, "frontend"),
+  makeRepo(REPO_BACK_ID, "backend"),
+];
+const workspaceRows = [
+  row({ key: "r0", repositoryId: REPO_FRONT_ID, branch: "main" }),
+  row({ key: "r1", branch: "develop" }),
+];
 
-  function renderWorkspaceChips(allowDuplicateRepositories: boolean) {
-    return renderInProvider(
-      <WorkspaceRepoChips
-        rows={rows}
-        repositories={repositories}
-        workspaceId="ws-1"
-        canAddMore
-        allowDuplicateRepositories={allowDuplicateRepositories}
-        onAdd={vi.fn()}
-        onRemove={vi.fn()}
-        onRowRepositoryChange={NOOP}
-        onRowBranchChange={NOOP}
-      />,
-    );
-  }
+function renderWorkspaceChips(
+  allowDuplicateRepositories: boolean,
+  chipRows: TaskRepoRow[] = workspaceRows,
+  discoveredRepositories: DialogFormState["discoveredRepositories"] = [],
+  onRowRepositoryChange = NOOP,
+) {
+  return renderInProvider(
+    <WorkspaceRepoChips
+      rows={chipRows}
+      repositories={workspaceRepositories}
+      discoveredRepositories={discoveredRepositories}
+      workspaceId="ws-1"
+      canAddMore
+      allowDuplicateRepositories={allowDuplicateRepositories}
+      onAdd={vi.fn()}
+      onRemove={vi.fn()}
+      onRowRepositoryChange={onRowRepositoryChange}
+      onRowBranchChange={NOOP}
+    />,
+  );
+}
 
+describe("WorkspaceRepoChips duplicate policy", () => {
   it("excludes repositories already selected by another quick-chat row", () => {
     renderWorkspaceChips(false);
 
@@ -444,5 +456,151 @@ describe("WorkspaceRepoChips", () => {
 
     expect(screen.getByRole("option", { name: /^frontend/ })).toBeTruthy();
     expect(screen.getByRole("option", { name: /^backend/ })).toBeTruthy();
+  });
+});
+
+describe("WorkspaceRepoChips workspace markers", () => {
+  it("marks another task row's workspace repository while keeping it selectable", () => {
+    const onRowRepositoryChange = vi.fn();
+    renderWorkspaceChips(true, workspaceRows, [], onRowRepositoryChange);
+
+    fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[1]);
+
+    const selectedElsewhere = screen.getByRole("option", { name: /^frontend/ });
+    expect(selectedElsewhere).toBeTruthy();
+    const marker = within(selectedElsewhere).getByTestId(ALREADY_ADDED_MARKER);
+    expect(marker.getAttribute("aria-label")).toBe("Already added");
+    expect(marker.classList).toContain("text-primary");
+    fireEvent.click(selectedElsewhere);
+    expect(onRowRepositoryChange).toHaveBeenCalledWith("r1", REPO_FRONT_ID);
+  });
+
+  it("does not mark the only selected workspace repository when its row is reopened", () => {
+    renderWorkspaceChips(true, [row({ key: "r0", repositoryId: REPO_FRONT_ID })]);
+
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("option", { name: /^frontend/ })).toBeNull();
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
+
+    expect(
+      within(screen.getByRole("option", { name: /^frontend/ })).queryByTestId(ALREADY_ADDED_MARKER),
+    ).toBeNull();
+  });
+
+  it("clears a workspace marker when the selecting sibling changes or is removed", () => {
+    const { rerender } = renderWorkspaceChips(true, [
+      row({ key: "r0", repositoryId: REPO_FRONT_ID }),
+      row({ key: "r1" }),
+    ]);
+
+    fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[1]);
+    expect(
+      within(screen.getByRole("option", { name: /^frontend/ })).getByTestId(ALREADY_ADDED_MARKER),
+    ).toBeTruthy();
+
+    rerender(
+      <TooltipProvider>
+        <WorkspaceRepoChips
+          rows={[row({ key: "r0", repositoryId: REPO_BACK_ID }), row({ key: "r1" })]}
+          repositories={workspaceRepositories}
+          workspaceId="ws-1"
+          canAddMore
+          onAdd={vi.fn()}
+          onRemove={vi.fn()}
+          onRowRepositoryChange={NOOP}
+          onRowBranchChange={NOOP}
+        />
+      </TooltipProvider>,
+    );
+    expect(
+      within(screen.getByRole("option", { name: /^frontend/ })).queryByTestId(ALREADY_ADDED_MARKER),
+    ).toBeNull();
+    expect(
+      within(screen.getByRole("option", { name: /^backend/ })).getByTestId(ALREADY_ADDED_MARKER),
+    ).toBeTruthy();
+
+    rerender(
+      <TooltipProvider>
+        <WorkspaceRepoChips
+          rows={[row({ key: "r1" })]}
+          repositories={workspaceRepositories}
+          workspaceId="ws-1"
+          canAddMore
+          onAdd={vi.fn()}
+          onRemove={vi.fn()}
+          onRowRepositoryChange={NOOP}
+          onRowBranchChange={NOOP}
+        />
+      </TooltipProvider>,
+    );
+    expect(
+      within(screen.getByRole("option", { name: /^backend/ })).queryByTestId(ALREADY_ADDED_MARKER),
+    ).toBeNull();
+  });
+});
+
+describe("WorkspaceRepoChips discovered markers", () => {
+  it("marks normalized discovered paths selected by another task row and clears on rerender", () => {
+    const discoveredRepositories = [
+      { path: DISCOVERED_REPO_PATH, name: "local-project" },
+    ] as unknown as DialogFormState["discoveredRepositories"];
+    const { rerender } = renderWorkspaceChips(
+      true,
+      [row({ key: "r0", localPath: `${DISCOVERED_REPO_PATH}/` }), row({ key: "r1" })],
+      discoveredRepositories,
+    );
+
+    fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[1]);
+    expect(
+      within(screen.getByRole("option", { name: /^local-project/ })).getByTestId(
+        ALREADY_ADDED_MARKER,
+      ),
+    ).toBeTruthy();
+
+    rerender(
+      <TooltipProvider>
+        <WorkspaceRepoChips
+          rows={[
+            row({ key: "r0", localPath: "/home/me/projects/another-project" }),
+            row({ key: "r1" }),
+          ]}
+          repositories={workspaceRepositories}
+          discoveredRepositories={discoveredRepositories}
+          workspaceId="ws-1"
+          canAddMore
+          onAdd={vi.fn()}
+          onRemove={vi.fn()}
+          onRowRepositoryChange={NOOP}
+          onRowBranchChange={NOOP}
+        />
+      </TooltipProvider>,
+    );
+    expect(
+      within(screen.getByRole("option", { name: /^local-project/ })).queryByTestId(
+        ALREADY_ADDED_MARKER,
+      ),
+    ).toBeNull();
+
+    rerender(
+      <TooltipProvider>
+        <WorkspaceRepoChips
+          rows={[row({ key: "r1" })]}
+          repositories={workspaceRepositories}
+          discoveredRepositories={discoveredRepositories}
+          workspaceId="ws-1"
+          canAddMore
+          onAdd={vi.fn()}
+          onRemove={vi.fn()}
+          onRowRepositoryChange={NOOP}
+          onRowBranchChange={NOOP}
+        />
+      </TooltipProvider>,
+    );
+    expect(
+      within(screen.getByRole("option", { name: /^local-project/ })).queryByTestId(
+        ALREADY_ADDED_MARKER,
+      ),
+    ).toBeNull();
   });
 });

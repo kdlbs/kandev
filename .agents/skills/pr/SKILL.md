@@ -1,16 +1,15 @@
 ---
 name: pr
-description: Create a PR from an already verified, committed, and pushed branch. Ready PRs return to the planner for delegated fixup.
+description: Create a PR from a committed, post-commit-verified, and pushed branch. Ready PRs return to the planner for delegated fixup.
 ---
 
 # PR
 
 ## Planner Entry
 
-The user-started primary session delegates
-verification, commit, push, and PR creation as separate bounded implementer
-assignments, then coordinates `/pr-fixup` unless draft mode was requested. It
-does not run repository-host commands directly.
+The planner may create a routine PR directly after commit, post-commit
+verification, and push. It delegates only substantial delivery work; ready PR monitoring remains
+with `pr-poller`/`pr-fixup` when long-running.
 
 An explicitly assigned PR worker creates the PR only after receiving the
 verified, committed, and pushed branch state. It does not spawn other workers.
@@ -27,7 +26,8 @@ verified, committed, and pushed branch state. It does not spawn other workers.
 
 ## Available skills
 
-- **`/commit`** — Planner-side prerequisite for verified, committed changes.
+- **`/commit`** — Creates the artifact and hook receipt before verification.
+- **`/verify`** — Mandatory post-commit gate before push and PR creation.
 - **`/pr-fixup`** — Wait for CI checks and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix any failures or valid comments, and push.
 
 ## Options
@@ -42,7 +42,7 @@ Do not create, update, or delete Kandev subtasks for this workflow unless the us
 explicitly requests task tracking.
 
 1. **Uncommitted changes:** If there are dirty or staged changes, stop and tell
-   the planner that verification and commit assignments are required first.
+   the planner that commit and post-commit verification are required first.
 
 2. **Branch:** If on `main` or `master`, stop and tell the planner that a
    bounded branch-preparation assignment is required. Otherwise use the current

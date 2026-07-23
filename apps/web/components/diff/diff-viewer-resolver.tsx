@@ -41,6 +41,12 @@ interface DiffViewerResolverProps {
   onToggleExpandUnchanged?: () => void;
   /** Multi-repo subpath for the file (e.g. "kandev"); empty for single-repo. */
   repo?: string;
+  taskId?: string | null;
+  repositoryId?: string | null;
+  status?: string | null;
+  previousPath?: string | null;
+  publishedBranch?: string | null;
+  externalBaseBranch?: string | null;
 }
 
 export const DiffViewerResolved = memo(function DiffViewerResolved(props: DiffViewerResolverProps) {
@@ -55,7 +61,6 @@ export const DiffViewerResolved = memo(function DiffViewerResolved(props: DiffVi
       expandUnchanged,
       onToggleExpandUnchanged,
       onPreviewMarkdown,
-      repo,
       ...rest
     } = props;
     /* eslint-enable @typescript-eslint/no-unused-vars */

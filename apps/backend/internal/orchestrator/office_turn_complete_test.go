@@ -40,7 +40,8 @@ func seedOfficeSession(t *testing.T, repo officeSeedRepo, taskID, sessionID, age
 		WorkflowStepID:         stepID,
 		Title:                  "Office task",
 		State:                  v1.TaskStateInProgress,
-		AssigneeAgentProfileID: "agent-1", // marks the task as office-style (per-(task, agent) session)
+		ProjectID:              "project-office",
+		AssigneeAgentProfileID: "agent-1", // selects the per-(task, agent) session
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}
@@ -69,6 +70,43 @@ func seedOfficeSession(t *testing.T, repo officeSeedRepo, taskID, sessionID, age
 		}); err != nil {
 			t.Fatalf("seed executors_running: %v", err)
 		}
+	}
+}
+
+func TestHandleOfficeTurnCompleteUsesCanonicalOfficeProjection(t *testing.T) {
+	tests := []struct {
+		name         string
+		isFromOffice bool
+		assignee     string
+		wantHandled  bool
+	}{
+		{name: "unassigned Office task", isFromOffice: true, wantHandled: true},
+		{name: "assigned Kanban task", assignee: "assigned-agent", wantHandled: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedOfficeSession(t, repo, "t1", "s1", "")
+			mgr := &mockAgentManager{}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+			svc.repo = ownershipOverrideRepo{
+				sessionExecutorStore: repo,
+				tasks: map[string]*models.Task{"t1": {
+					ID: "t1", IsFromOffice: tt.isFromOffice, AssigneeAgentProfileID: tt.assignee,
+				}},
+			}
+			session, err := repo.GetTaskSession(ctx, "s1")
+			if err != nil {
+				t.Fatalf("get session: %v", err)
+			}
+
+			handled := svc.handleOfficeTurnComplete(ctx, "t1", "s1", session, "")
+			if handled != tt.wantHandled {
+				t.Fatalf("handled = %v, want %v", handled, tt.wantHandled)
+			}
+		})
 	}
 }
 

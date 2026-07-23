@@ -26,11 +26,13 @@ import {
   type FileAttachment,
 } from "./file-attachment";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
-import type { ContextFile } from "@/lib/state/context-files-store";
 import type { DiffComment } from "@/lib/diff/types";
-import type { ChatSubmitResult, MessageAttachment } from "./chat-input-container";
+import type {
+  ChatSubmitPayload,
+  ChatSubmitResult,
+  MessageAttachment,
+} from "./chat-input-container";
 import type { TipTapInputHandle } from "./tiptap-input";
-import type { TaskMentionData } from "@/hooks/use-inline-mention";
 
 type UseChatInputStateProps = {
   sessionId: string | null;
@@ -41,13 +43,7 @@ type UseChatInputStateProps = {
   hasContextComments?: boolean;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss?: () => void;
-  onSubmit: (
-    message: string,
-    reviewComments?: DiffComment[],
-    attachments?: MessageAttachment[],
-    inlineMentions?: ContextFile[],
-    inlineTaskMentions?: TaskMentionData[],
-  ) => ChatSubmitResult;
+  onSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
 };
 
 function isPromiseLike(value: ChatSubmitResult): value is Promise<void | boolean> {
@@ -163,6 +159,14 @@ type SubmitDraftArgs = {
   clearArgs: Omit<ClearSubmittedInputArgs, "submittedText" | "submittedAttachments">;
 };
 
+function buildChatSubmitPayload(payload: Required<ChatSubmitPayload>): ChatSubmitPayload {
+  return Object.fromEntries(
+    Object.entries(payload).filter(
+      ([key, value]) => key === "message" || (Array.isArray(value) && value.length > 0),
+    ),
+  ) as ChatSubmitPayload;
+}
+
 function submitDraft(args: SubmitDraftArgs) {
   if (args.isSending) return;
   const trimmed = args.valueRef.current.trim();
@@ -175,12 +179,16 @@ function submitDraft(args: SubmitDraftArgs) {
   const messageAttachments = toMessageAttachments(currentAttachments);
   const inlineMentions = args.inputRef.current?.getMentions() ?? [];
   const inlineTaskMentions = args.inputRef.current?.getTaskMentions() ?? [];
+  const entityReferences = args.inputRef.current?.getEntityReferences() ?? [];
   const result = args.onSubmit(
-    trimmed,
-    allComments.length > 0 ? allComments : undefined,
-    messageAttachments.length > 0 ? messageAttachments : undefined,
-    inlineMentions.length > 0 ? inlineMentions : undefined,
-    inlineTaskMentions.length > 0 ? inlineTaskMentions : undefined,
+    buildChatSubmitPayload({
+      message: trimmed,
+      reviewComments: allComments,
+      attachments: messageAttachments,
+      inlineMentions,
+      inlineTaskMentions,
+      entityReferences,
+    }),
   );
   handleSubmitResult(result, () =>
     clearSubmittedInput({

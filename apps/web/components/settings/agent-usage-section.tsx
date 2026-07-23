@@ -18,7 +18,7 @@ function AgentUsageCard({ item }: { item: AgentSubscriptionUsage }) {
     <Card data-testid={`agent-usage-card-${item.agent_id}`}>
       <CardContent className="py-4 space-y-4">
         <div className="flex items-center gap-2">
-          <AgentLogo agentName={item.agent_id} className="shrink-0" />
+          <AgentLogo agentName={item.agent_id} className="shrink-0 !opacity-100 brightness-100" />
           <h4 className="font-medium">{item.display_name}</h4>
           {usage?.plan && (
             <Badge variant="secondary" className="capitalize">

@@ -64,6 +64,19 @@
         return jsx("span", { id: "hello-main-top-bar" }, "Hello " + slotProps.currentPage);
       }
 
+      function StatusSlot(props) {
+        var slotProps = props.slotProps || {};
+        var id = slotProps.placement === "left" ? "hello-status-left" : "hello-status-right";
+        return jsx(
+          "span",
+          { id: id },
+          "Hello status " +
+            String(slotProps.presentation || "unknown") +
+            " " +
+            String(slotProps.activeTaskId || "no-task"),
+        );
+      }
+
       registry.registerNavItem({
         id: "e2e-hello",
         label: "Hello E2E",
@@ -73,6 +86,8 @@
       registry.registerRoute("/plugins/e2e-hello", PluginPage);
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);
+      registry.registerComponent("app-status-bar-left", StatusSlot);
+      registry.registerComponent("app-status-bar-right", StatusSlot);
       registry.registerWsHandler("task.created", function () {
         incrementCount();
       });

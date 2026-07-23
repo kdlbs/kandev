@@ -12,9 +12,27 @@ import (
 
 // mockTaskCreator records CreateOfficeTask calls and returns a configurable error.
 type mockTaskCreator struct {
-	calls  []createTaskCall
-	taskID string
-	err    error
+	calls      []createTaskCall
+	agentCalls []createTaskCall
+	taskID     string
+	err        error
+}
+
+func (m *mockTaskCreator) CreateOfficeTaskAsAgent(
+	_ context.Context, workspaceID, projectID, assigneeAgentID, title, description string,
+) (string, error) {
+	m.agentCalls = append(m.agentCalls, createTaskCall{
+		WorkspaceID:     workspaceID,
+		ProjectID:       projectID,
+		AssigneeAgentID: assigneeAgentID,
+		Title:           title,
+		Description:     description,
+	})
+	id := m.taskID
+	if id == "" {
+		id = "new-task-id"
+	}
+	return id, m.err
 }
 
 type createTaskCall struct {
@@ -57,18 +75,27 @@ func TestCreateOfficeTaskAsAgent_WorkerCanCreate(t *testing.T) {
 		t.Fatalf("create caller: %v", err)
 	}
 
-	taskID, err := svc.CreateOfficeTaskAsAgent(ctx, caller.ID, "ws-1", "", "", "Build widget", "A description")
+	taskID, err := svc.CreateOfficeTaskAsAgent(
+		ctx, caller.ID, "ws-1", "project-1", "agent-assignee", "Build widget", "A description",
+	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent failed for worker: %v", err)
 	}
 	if taskID == "" {
 		t.Error("expected non-empty task ID")
 	}
-	if len(mock.calls) != 1 {
-		t.Fatalf("expected 1 CreateOfficeTask call, got %d", len(mock.calls))
+	if len(mock.agentCalls) != 1 {
+		t.Fatalf("expected 1 CreateOfficeTaskAsAgent call, got %d", len(mock.agentCalls))
 	}
-	if mock.calls[0].Title != "Build widget" {
-		t.Errorf("title = %q, want %q", mock.calls[0].Title, "Build widget")
+	if len(mock.calls) != 0 {
+		t.Fatalf("CreateOfficeTask was called %d times; agent creation must use the agent-specific path", len(mock.calls))
+	}
+	if mock.agentCalls[0].Title != "Build widget" {
+		t.Errorf("title = %q, want %q", mock.agentCalls[0].Title, "Build widget")
+	}
+	if mock.agentCalls[0].ProjectID != "project-1" || mock.agentCalls[0].AssigneeAgentID != "agent-assignee" {
+		t.Errorf("project/assignee = %q/%q, want project-1/agent-assignee",
+			mock.agentCalls[0].ProjectID, mock.agentCalls[0].AssigneeAgentID)
 	}
 }
 
@@ -93,8 +120,8 @@ func TestCreateOfficeTaskAsAgent_EmptyCallerSkipsCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected success with empty caller: %v", err)
 	}
-	if len(mock.calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(mock.calls))
+	if len(mock.agentCalls) != 1 {
+		t.Fatalf("expected 1 agent call, got %d", len(mock.agentCalls))
 	}
 }
 
@@ -121,7 +148,7 @@ func TestCreateOfficeTaskAsAgent_ForbiddenWhenPermissionMissing(t *testing.T) {
 	if !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("expected ErrForbidden, got: %v", err)
 	}
-	if len(mock.calls) != 0 {
-		t.Error("CreateOfficeTask should not be called when forbidden")
+	if len(mock.calls) != 0 || len(mock.agentCalls) != 0 {
+		t.Error("task creator should not be called when forbidden")
 	}
 }

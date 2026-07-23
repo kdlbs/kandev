@@ -7,8 +7,10 @@ import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { WorkflowSelectorRow } from "@/components/workflow-selector-row";
 import { AgentLogo } from "@/components/agent-logo";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
+import type { DialogPromptEnhance } from "@/components/task-create-dialog-types";
 import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
+import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 
@@ -361,7 +363,7 @@ export type DialogPromptSectionProps = {
   initialDescription: string;
   fs: DialogFormState;
   handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
-  enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
+  enhance?: DialogPromptEnhance;
   workspaceId?: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
   onLinearImport?: (issue: LinearIssue) => void;
@@ -432,6 +434,11 @@ export function DialogPromptSection({
         jiraImport={importBindings(importsEnabled, ws, onJiraImport)}
         linearImport={importBindings(importsEnabled, ws, onLinearImport)}
         onVoiceAutoSend={onVoiceAutoSend}
+      />
+      <PromptResultRecovery
+        pendingResult={enhance?.pendingResult ?? null}
+        onApply={enhance?.onApplyPending ?? (() => undefined)}
+        onCopy={enhance?.onCopyPending ?? (() => undefined)}
       />
       {extraFormSlot}
     </>

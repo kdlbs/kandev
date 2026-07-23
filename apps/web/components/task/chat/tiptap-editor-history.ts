@@ -5,7 +5,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
-import { navigateHistory, type HistoryState } from "./message-history";
+import { navigateHistory, type HistoryState, type MessageHistoryEntry } from "./message-history";
 import { getMarkdownText, textToEditorContent } from "./tiptap-helpers";
 import type { SlashCommand } from "./slash-command-types";
 
@@ -46,7 +46,7 @@ export type HistoryKeymapRefs = {
   disabledRef: React.RefObject<boolean | undefined>;
   isSuggestionMenuOpenRef: React.RefObject<boolean>;
   isReverseSearchOpenRef: React.RefObject<boolean>;
-  getHistoryRef: React.RefObject<() => readonly string[]>;
+  getHistoryRef: React.RefObject<() => readonly MessageHistoryEntry[]>;
   getSlashCommandsRef: React.RefObject<() => readonly SlashCommand[]>;
   onOpenReverseSearchRef: React.RefObject<(() => void) | undefined>;
   onChangeRef: React.RefObject<(value: string) => void>;
@@ -64,26 +64,49 @@ type Editor = ReturnType<typeof useEditor>;
 
 type HistoryRuntimeState = {
   index: number | null;
-  draft: string;
+  draft: import("@tiptap/core").JSONContent | null;
   isApplying: boolean;
 };
+
+export function historyEntryToEditorContent(
+  entry: MessageHistoryEntry,
+  slashCommands: readonly SlashCommand[],
+) {
+  return textToEditorContent(entry.content, slashCommands, entry.entityReferences);
+}
 
 function writeHistoryContent(
   editor: Editor,
   state: HistoryRuntimeState,
-  text: string,
+  entry: MessageHistoryEntry,
   slashCommands: readonly SlashCommand[],
   onChange: (value: string) => void,
 ): void {
   if (!editor) return;
   state.isApplying = true;
   try {
-    if (text === "") {
+    if (entry.content === "") {
       editor.chain().focus().clearContent().run();
     } else {
-      editor.chain().focus().setContent(textToEditorContent(text, slashCommands)).run();
+      editor.chain().focus().setContent(historyEntryToEditorContent(entry, slashCommands)).run();
       editor.commands.focus("end");
     }
+    onChange(getMarkdownText(editor));
+  } finally {
+    state.isApplying = false;
+  }
+}
+
+function writeDraftContent(
+  editor: Editor,
+  state: HistoryRuntimeState,
+  onChange: (value: string) => void,
+) {
+  if (!editor || !state.draft) return;
+  state.isApplying = true;
+  try {
+    editor.chain().focus().setContent(state.draft).run();
+    editor.commands.focus("end");
     onChange(getMarkdownText(editor));
   } finally {
     state.isApplying = false;
@@ -121,11 +144,20 @@ function runHistoryArrow(
   if (decision.kind === "defer") return false;
   if (decision.kind === "consume-noop") return true;
   if (state.index === null && decision.index !== null) {
-    state.draft = getMarkdownText(editor);
+    state.draft = editor.getJSON();
   }
-  const text = decision.index === null ? state.draft : history[decision.index];
-  const slashCommands = refs.getSlashCommandsRef.current?.() ?? [];
-  writeHistoryContent(editor, state, text, slashCommands, refs.onChangeRef.current);
+  if (decision.index === null) {
+    writeDraftContent(editor, state, refs.onChangeRef.current);
+  } else {
+    const slashCommands = refs.getSlashCommandsRef.current?.() ?? [];
+    writeHistoryContent(
+      editor,
+      state,
+      history[decision.index],
+      slashCommands,
+      refs.onChangeRef.current,
+    );
+  }
   state.index = decision.index;
   return true;
 }
@@ -148,7 +180,7 @@ function reverseSearchPlugin(state: HistoryRuntimeState, refs: HistoryKeymapRefs
     filterTransaction: (tr) => {
       if (tr.docChanged && !state.isApplying && state.index !== null) {
         state.index = null;
-        state.draft = "";
+        state.draft = null;
       }
       return true;
     },
@@ -179,7 +211,7 @@ function applyHistoryIndexImpl(
   if (!editor) return;
   const history = refs.getHistoryRef.current?.() ?? [];
   if (index < 0 || index >= history.length) return;
-  if (state.index === null) state.draft = getMarkdownText(editor);
+  if (state.index === null) state.draft = editor.getJSON();
   const slashCommands = refs.getSlashCommandsRef.current?.() ?? [];
   writeHistoryContent(editor, state, history[index], slashCommands, refs.onChangeRef.current);
   state.index = index;
@@ -187,7 +219,7 @@ function applyHistoryIndexImpl(
 
 export function useHistoryKeymap(refs: HistoryKeymapRefs): HistoryNavController {
   return useMemo(() => {
-    const state: HistoryRuntimeState = { index: null, draft: "", isApplying: false };
+    const state: HistoryRuntimeState = { index: null, draft: null, isApplying: false };
     const extension = buildHistoryExtension(state, refs);
     const applyHistoryIndex: HistoryNavController["applyHistoryIndex"] = (editor, index) =>
       applyHistoryIndexImpl(editor, state, index, refs);

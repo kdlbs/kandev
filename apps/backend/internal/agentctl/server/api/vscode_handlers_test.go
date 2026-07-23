@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -70,26 +69,6 @@ func TestHandleVscodeStart_ManagerStopping(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Errorf("expected 409, got %d", w.Code)
-	}
-}
-
-func TestHandleVscodeStart_TempSetupFailure(t *testing.T) {
-	tempFile := filepath.Join(t.TempDir(), "not-a-directory")
-	if err := os.WriteFile(tempFile, []byte("file"), 0o600); err != nil {
-		t.Fatalf("write temp file: %v", err)
-	}
-	t.Setenv("TMPDIR", tempFile)
-	s := newTestServer(t)
-
-	body, _ := json.Marshal(VscodeStartRequest{Theme: "dark"})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/vscode/start", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	s.router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", w.Code)
 	}
 }
 

@@ -4,8 +4,10 @@ import { useEffect, useRef, useCallback } from "react";
 import dynamic from "@/lib/routing/client-dynamic";
 import type { BeforeMount, OnMount } from "@monaco-editor/react";
 import { KANDEV_MONACO_DARK } from "@/lib/theme/editor-theme";
+import type { PromptReference } from "@/lib/prompts/expand-prompt-references";
 import {
   createPlaceholderCompletionProvider,
+  createPromptMentionCompletionProvider,
   type ScriptPlaceholder,
 } from "./script-editor-completions";
 
@@ -24,23 +26,37 @@ export type CompletionProviderFactory = (
   monaco: Monaco,
 ) => import("monaco-editor").languages.CompletionItemProvider;
 
-// Per-language singletons so a markdown editor and a shell editor can coexist
-// without their providers fighting over the same global slot.
-const disposablesByLanguage: Map<string, { dispose: () => void }> = new Map();
+// Per-language, per-slot singletons so a markdown editor and a shell editor
+// can coexist without their providers fighting over the same global slot.
+// "primary" holds the placeholder/custom completion provider; "mention"
+// holds the @prompt-name mention provider — both can be registered at once.
+type ProviderSlot = "primary" | "mention";
+
+const disposablesByKey: Map<string, { dispose: () => void }> = new Map();
 const instanceCountsByLanguage: Map<string, number> = new Map();
 
-function disposeFor(language: string) {
-  const existing = disposablesByLanguage.get(language);
+function slotKey(language: string, slot: ProviderSlot) {
+  return `${language}:${slot}`;
+}
+
+function disposeFor(language: string, slot: ProviderSlot) {
+  const key = slotKey(language, slot);
+  const existing = disposablesByKey.get(key);
   if (existing) {
     existing.dispose();
-    disposablesByLanguage.delete(language);
+    disposablesByKey.delete(key);
   }
 }
 
-function swapProvider(monaco: Monaco, language: string, factory: CompletionProviderFactory) {
-  disposeFor(language);
-  disposablesByLanguage.set(
-    language,
+function swapProvider(
+  monaco: Monaco,
+  language: string,
+  slot: ProviderSlot,
+  factory: CompletionProviderFactory,
+) {
+  disposeFor(language, slot);
+  disposablesByKey.set(
+    slotKey(language, slot),
     monaco.languages.registerCompletionItemProvider(language, factory(monaco)),
   );
 }
@@ -48,7 +64,8 @@ function swapProvider(monaco: Monaco, language: string, factory: CompletionProvi
 function unregisterProvider(language: string) {
   const next = (instanceCountsByLanguage.get(language) ?? 1) - 1;
   if (next <= 0) {
-    disposeFor(language);
+    disposeFor(language, "primary");
+    disposeFor(language, "mention");
     instanceCountsByLanguage.delete(language);
     return;
   }
@@ -77,6 +94,12 @@ type ScriptEditorProps = {
    * file-path autocomplete).
    */
   completionProvider?: CompletionProviderFactory;
+  /**
+   * Saved custom prompts to suggest as `@name` mentions. Registered
+   * alongside the placeholder/custom completion provider (independent
+   * trigger character, so both can be active at once).
+   */
+  mentionPrompts?: PromptReference[];
   readOnly?: boolean;
   lineNumbers?: "on" | "off";
 };
@@ -89,6 +112,7 @@ export function ScriptEditor({
   placeholders,
   executorType,
   completionProvider,
+  mentionPrompts,
   readOnly = false,
   lineNumbers = "on",
 }: ScriptEditorProps) {
@@ -107,14 +131,33 @@ export function ScriptEditor({
   const ensureProviderRegistered = useCallback(
     (monaco: Monaco) => {
       const factory = resolveFactory(completionProvider, placeholders, executorType);
-      if (!factory) return;
+      const mentionFactory = resolveMentionFactory(mentionPrompts);
+      if (!factory && !mentionFactory) {
+        // Nothing to register. If a previous render had registered providers
+        // for this instance, dispose them now so stale suggestions (e.g. a
+        // deleted prompt list) don't linger while the editor stays mounted.
+        if (mountedRef.current) {
+          disposeFor(language, "primary");
+          disposeFor(language, "mention");
+        }
+        return;
+      }
       if (!mountedRef.current) {
         mountedRef.current = true;
         instanceCountsByLanguage.set(language, (instanceCountsByLanguage.get(language) ?? 0) + 1);
       }
-      swapProvider(monaco, language, factory);
+      if (factory) {
+        swapProvider(monaco, language, "primary", factory);
+      } else {
+        disposeFor(language, "primary");
+      }
+      if (mentionFactory) {
+        swapProvider(monaco, language, "mention", mentionFactory);
+      } else {
+        disposeFor(language, "mention");
+      }
     },
-    [completionProvider, placeholders, executorType, language],
+    [completionProvider, placeholders, executorType, mentionPrompts, language],
   );
 
   useEffect(() => {
@@ -175,4 +218,11 @@ function resolveFactory(
     return (monaco) => createPlaceholderCompletionProvider(monaco, placeholders, executorType);
   }
   return null;
+}
+
+function resolveMentionFactory(
+  mentionPrompts: PromptReference[] | undefined,
+): CompletionProviderFactory | null {
+  if (!mentionPrompts || mentionPrompts.length === 0) return null;
+  return (monaco) => createPromptMentionCompletionProvider(monaco, mentionPrompts);
 }

@@ -16,7 +16,9 @@ import {
   IconEye,
 } from "@tabler/icons-react";
 import type { FileDiffMetadata } from "@pierre/diffs";
+import { ExternalVcsFileLink } from "@/components/editors/external-vcs-file-link";
 import type { ViewMode } from "@/hooks/use-global-view-mode";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
 
@@ -61,6 +63,13 @@ interface DiffHeaderToolbarOptions {
   onRevert?: (filePath: string) => void;
   /** Multi-repo subpath (repository_name) so Edit opens under the right repo. */
   repo?: string;
+  taskId?: string | null;
+  sessionId?: string | null;
+  repositoryId?: string | null;
+  status?: string | null;
+  previousPath?: string | null;
+  publishedBranch?: string | null;
+  baseBranch?: string | null;
   expandUnchanged?: boolean;
   onToggleExpandUnchanged?: () => void;
 }
@@ -69,6 +78,8 @@ type ToolbarButtonsProps = Omit<DiffHeaderToolbarOptions, "filePath" | "diff"> &
   resolvedPath: string;
   onCopyDiff: () => void;
   isMarkdownFile: boolean;
+  externalLink: Omit<React.ComponentProps<typeof ExternalVcsFileLink>, "filePath" | "size">;
+  externalLinkSize: "xs" | "touch";
 };
 
 function DiffHeaderToolbarButtons({
@@ -85,12 +96,16 @@ function DiffHeaderToolbarButtons({
   onPreviewMarkdown,
   repo,
   isMarkdownFile,
+  externalLink,
+  externalLinkSize,
 }: ToolbarButtonsProps) {
   return (
     <div className="flex items-center gap-1">
       <ToolbarBtn onClick={onCopyDiff} tooltip="Copy diff">
         <IconCopy className="h-3.5 w-3.5" />
       </ToolbarBtn>
+
+      <ExternalVcsFileLink {...externalLink} filePath={resolvedPath} size={externalLinkSize} />
 
       {onRevert && (
         <ToolbarBtn onClick={() => onRevert(resolvedPath)} tooltip="Revert changes">
@@ -169,7 +184,15 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
     repo,
     expandUnchanged,
     onToggleExpandUnchanged,
+    taskId,
+    sessionId,
+    repositoryId,
+    status,
+    previousPath,
+    publishedBranch,
+    baseBranch,
   } = opts;
+  const { isMobile } = useResponsiveBreakpoint();
 
   return useCallback(
     (fileDiff: FileDiffMetadata): ReactNode => {
@@ -189,6 +212,17 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
           repo={repo}
           expandUnchanged={expandUnchanged}
           onToggleExpandUnchanged={onToggleExpandUnchanged}
+          externalLink={{
+            taskId,
+            sessionId,
+            repositoryId,
+            repositoryName: repo,
+            status,
+            publishedBranch,
+            baseBranch,
+            previousPath: fileDiff.prevName ?? previousPath,
+          }}
+          externalLinkSize={isMobile ? "touch" : "xs"}
         />
       );
     },
@@ -205,6 +239,14 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
       repo,
       expandUnchanged,
       onToggleExpandUnchanged,
+      taskId,
+      sessionId,
+      repositoryId,
+      status,
+      previousPath,
+      publishedBranch,
+      baseBranch,
+      isMobile,
     ],
   );
 }

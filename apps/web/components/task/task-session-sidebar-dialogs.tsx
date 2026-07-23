@@ -7,6 +7,7 @@ import { TaskDetachTargetConfirmDialog } from "./task-detach-confirm-dialog";
 import { TaskExternalLinkDialog } from "./task-external-link-dialog";
 import { TaskGitHubIssueDialog } from "./task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "./task-github-pr-dialog";
+import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
 import type { Repository } from "@/lib/types/http";
 import type {
   SidebarExternalLinkTarget,
@@ -42,6 +43,8 @@ export type SidebarDialogsActions = {
   setLinkingPullRequestTask: (next: LinkTarget) => void;
   linkingIssueTask: LinkTarget;
   setLinkingIssueTask: (next: LinkTarget) => void;
+  linkingMergeRequestTask: LinkTarget;
+  setLinkingMergeRequestTask: (next: LinkTarget) => void;
   linkingExternalIssueTask: SidebarExternalLinkTarget | null;
   setLinkingExternalIssueTask: (next: SidebarExternalLinkTarget | null) => void;
 };
@@ -127,6 +130,8 @@ export function SidebarLinkDialogs({
     | "setLinkingPullRequestTask"
     | "linkingIssueTask"
     | "setLinkingIssueTask"
+    | "linkingMergeRequestTask"
+    | "setLinkingMergeRequestTask"
     | "linkingExternalIssueTask"
     | "setLinkingExternalIssueTask"
   >;
@@ -138,6 +143,8 @@ export function SidebarLinkDialogs({
     setLinkingPullRequestTask,
     linkingIssueTask,
     setLinkingIssueTask,
+    linkingMergeRequestTask,
+    setLinkingMergeRequestTask,
     linkingExternalIssueTask,
     setLinkingExternalIssueTask,
   } = actions;
@@ -160,6 +167,18 @@ export function SidebarLinkDialogs({
             if (!open) setLinkingIssueTask(null);
           }}
           task={linkingIssueTask}
+          repositories={repositories}
+        />
+      )}
+      {linkingMergeRequestTask && workspaceId && (
+        <TaskMRLinkDialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setLinkingMergeRequestTask(null);
+          }}
+          taskId={linkingMergeRequestTask.id}
+          workspaceId={workspaceId}
+          taskRepositories={linkingMergeRequestTask.repositories ?? []}
           repositories={repositories}
         />
       )}

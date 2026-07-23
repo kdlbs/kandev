@@ -9,10 +9,9 @@ Use this skill to turn lessons from real agent sessions into durable harness cha
 
 ## Planner Entry
 
-In a user-started primary session, inventory and
-plan the harness change, then delegate file edits and validation to a native
-`implementer` subagent. Do not use Kandev MCP task/session APIs to launch that
-worker. An explicitly assigned worker continues below and does not spawn agents.
+The planner may inventory, edit, and validate a small localized harness change
+directly. Delegate broad cross-platform migration or independent work when it
+has positive ROI. Do not use Kandev MCP task/session APIs for workers.
 
 ## Choose The Artifact
 

@@ -2,6 +2,7 @@
 
 import { cloneElement, isValidElement, useState } from "react";
 import {
+  IconBrandGitlab,
   IconBrandSentry,
   IconCopy,
   IconCircleDot,
@@ -51,6 +52,7 @@ type ContextMenuProps = {
   onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkIssue?: (taskId: string, taskTitle?: string) => void;
+  onLinkMergeRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkJiraTicket?: (taskId: string, taskTitle?: string) => void;
   onLinkLinearIssue?: (taskId: string, taskTitle?: string) => void;
   onLinkSentryIssue?: (taskId: string, taskTitle?: string) => void;
@@ -82,6 +84,7 @@ export function TaskItemWithContextMenu({
   onDetachTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkMergeRequest,
   onLinkJiraTicket,
   onLinkLinearIssue,
   onLinkSentryIssue,
@@ -123,6 +126,7 @@ export function TaskItemWithContextMenu({
           onDetachTask={onDetachTask}
           onLinkPullRequest={onLinkPullRequest}
           onLinkIssue={onLinkIssue}
+          onLinkMergeRequest={onLinkMergeRequest}
           onLinkJiraTicket={onLinkJiraTicket}
           onLinkLinearIssue={onLinkLinearIssue}
           onLinkSentryIssue={onLinkSentryIssue}
@@ -357,6 +361,7 @@ function selectTaskLinkActions(
     ContextMenuProps,
     | "onLinkPullRequest"
     | "onLinkIssue"
+    | "onLinkMergeRequest"
     | "onLinkJiraTicket"
     | "onLinkLinearIssue"
     | "onLinkSentryIssue"
@@ -365,6 +370,7 @@ function selectTaskLinkActions(
   return {
     onLinkPullRequest: createTaskLinkSelectAction(task, handlers.onLinkPullRequest, closeMenu),
     onLinkIssue: createTaskLinkSelectAction(task, handlers.onLinkIssue, closeMenu),
+    onLinkMergeRequest: createTaskLinkSelectAction(task, handlers.onLinkMergeRequest, closeMenu),
     onLinkJiraTicket: createTaskLinkSelectAction(task, handlers.onLinkJiraTicket, closeMenu),
     onLinkLinearIssue: createTaskLinkSelectAction(task, handlers.onLinkLinearIssue, closeMenu),
     onLinkSentryIssue: createTaskLinkSelectAction(task, handlers.onLinkSentryIssue, closeMenu),
@@ -504,6 +510,7 @@ function TaskLinkMenu({
   disabled,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkMergeRequest,
   onLinkJiraTicket,
   onLinkLinearIssue,
   onLinkSentryIssue,
@@ -511,6 +518,7 @@ function TaskLinkMenu({
   disabled?: boolean;
   onLinkPullRequest?: () => void;
   onLinkIssue?: () => void;
+  onLinkMergeRequest?: () => void;
   onLinkJiraTicket?: () => void;
   onLinkLinearIssue?: () => void;
   onLinkSentryIssue?: () => void;
@@ -518,6 +526,7 @@ function TaskLinkMenu({
   if (
     !onLinkPullRequest &&
     !onLinkIssue &&
+    !onLinkMergeRequest &&
     !onLinkJiraTicket &&
     !onLinkLinearIssue &&
     !onLinkSentryIssue
@@ -541,6 +550,16 @@ function TaskLinkMenu({
           <ContextMenuItem disabled={disabled} onSelect={onLinkIssue}>
             <IconCircleDot className="mr-2 h-4 w-4" />
             GitHub Issue
+          </ContextMenuItem>
+        )}
+        {onLinkMergeRequest && (
+          <ContextMenuItem
+            className="min-h-12! sm:min-h-7!"
+            disabled={disabled}
+            onSelect={onLinkMergeRequest}
+          >
+            <IconBrandGitlab className="mr-2 h-4 w-4" />
+            GitLab Merge Request
           </ContextMenuItem>
         )}
         {onLinkJiraTicket && (

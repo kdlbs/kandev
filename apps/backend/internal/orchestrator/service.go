@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -118,6 +119,17 @@ type WorkflowStepGetter interface {
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error)
+}
+
+// PromptReferenceExpander resolves "@name" saved-prompt references embedded in
+// an effective prompt and returns both the expanded prompt and the exact
+// server-generated block content. Implemented by promptservice.Service.
+type PromptReferenceExpander interface {
+	AppendReferenceExpansionsWithContext(
+		ctx context.Context,
+		prompt string,
+		log *zap.Logger,
+	) (expandedPrompt, trustedContext string)
 }
 
 // repoStore is the repository interface accepted by NewService.
@@ -249,6 +261,11 @@ type Service struct {
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
+
+	// Prompt reference expander for resolving "@name" saved-prompt
+	// references in the effective workflow-step prompt. Nil-safe: when
+	// unset, buildWorkflowPrompt leaves the prompt unchanged.
+	promptExpander PromptReferenceExpander
 
 	// Workflow engine for typed state-machine evaluation of step transitions
 	workflowEngine *engine.Engine
@@ -776,6 +793,15 @@ func (s *Service) WorkflowStepRequiresCompletionSignal(ctx context.Context, step
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
 	s.initWorkflowEngine()
+}
+
+// SetPromptReferenceExpander sets the collaborator used to resolve "@name"
+// saved-prompt references embedded in workflow-step prompts.
+//
+// If not set: buildWorkflowPrompt leaves any "@name" references in the
+// effective prompt unexpanded.
+func (s *Service) SetPromptReferenceExpander(e PromptReferenceExpander) {
+	s.promptExpander = e
 }
 
 // ClarificationCanceller detaches in-memory clarification waiters when an agent's
@@ -1512,7 +1538,7 @@ func canResumeRunning(running *models.ExecutorRunning) bool {
 	return models.IsAlwaysResumableRuntime(running.Runtime)
 }
 
-func isMissingMergedPRBranchError(err error) bool {
+func isMissingBranchError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -1527,6 +1553,8 @@ var (
 	remoteRefPattern      = regexp.MustCompile(`remote ref ([^\s]+)`)
 	pathspecBranchPattern = regexp.MustCompile(`pathspec '([^']+)'`)
 )
+
+const launchFailurePRLookupTimeout = time.Second
 
 func extractMissingBranchName(err error) string {
 	if err == nil {
@@ -1545,21 +1573,97 @@ func extractMissingBranchName(err error) string {
 	return ""
 }
 
-func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, sessionID string, launchErr error) {
-	if s.messageCreator == nil || !isMissingMergedPRBranchError(launchErr) {
+func (s *Service) matchingTaskPRState(ctx context.Context, taskID, repositoryID, branch string) string {
+	repositoryID = strings.TrimSpace(repositoryID)
+	if s.githubService == nil || repositoryID == "" || branch == "" {
+		return ""
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, launchFailurePRLookupTimeout)
+	defer cancel()
+	prsByTask, err := s.githubService.ListTaskPRs(lookupCtx, []string{taskID})
+	if err != nil {
+		s.logger.Debug("failed to load task PR state for missing branch guidance",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return ""
+	}
+	prs := prsByTask[taskID]
+	if state, found := taskPRState(prs, repositoryID, branch); found {
+		return state
+	}
+	state, found := taskPRState(prs, "", branch)
+	if !found || !s.hasOnlyTaskRepository(lookupCtx, taskID, repositoryID) {
+		return ""
+	}
+	return state
+}
+
+func taskPRState(prs []*github.TaskPR, repositoryID, branch string) (string, bool) {
+	matched := false
+	state := ""
+	for _, pr := range prs {
+		if pr == nil || strings.TrimSpace(pr.RepositoryID) != repositoryID || strings.TrimSpace(pr.HeadBranch) != branch {
+			continue
+		}
+		if matched {
+			return "", true
+		}
+		matched = true
+		state = strings.ToLower(strings.TrimSpace(pr.State))
+		if state != githubPRStateOpen && state != githubPRStateClosed && state != githubPRStateMerged {
+			return "", true
+		}
+	}
+	return state, matched
+}
+
+func (s *Service) hasOnlyTaskRepository(ctx context.Context, taskID, repositoryID string) bool {
+	store, ok := s.repo.(interface {
+		ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
+	})
+	if !ok {
+		return false
+	}
+	repositories, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		s.logger.Debug("failed to load task repositories for legacy PR guidance",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return false
+	}
+	return len(repositories) == 1 && repositories[0] != nil &&
+		strings.TrimSpace(repositories[0].RepositoryID) == repositoryID
+}
+
+func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, sessionID, repositoryID string, launchErr error) {
+	if s.messageCreator == nil || !isMissingBranchError(launchErr) {
 		return
 	}
 
 	branch := extractMissingBranchName(launchErr)
-	content := "This task references a PR branch that no longer exists on remote (likely merged and deleted)."
+	prState := s.matchingTaskPRState(ctx, taskID, repositoryID, branch)
+	if prState == githubPRStateOpen {
+		return
+	}
+	content := "Kandev couldn't fetch the requested branch from the configured repository. Verify the task's repository branch or PR link, then retry."
 	if branch != "" {
-		content = "The remote PR branch \"" + branch + "\" no longer exists (likely merged and deleted)."
+		content = "Kandev couldn't fetch branch \"" + branch + "\" from the configured repository. Verify the task's repository branch or PR link, then retry."
+	}
+	authoritativeMissingBranch := prState == githubPRStateClosed || prState == githubPRStateMerged
+	if authoritativeMissingBranch {
+		content = "This task references a PR branch that no longer exists on remote."
+		if branch != "" {
+			content = "The remote PR branch \"" + branch + "\" no longer exists."
+		}
 	}
 	metadata := map[string]interface{}{
 		"variant":        "warning",
-		"failure_kind":   "missing_pr_branch",
+		"failure_kind":   "branch_fetch_failed",
 		"missing_branch": branch,
-		"actions": []map[string]interface{}{
+	}
+	if authoritativeMissingBranch {
+		metadata["failure_kind"] = "missing_pr_branch"
+		metadata["actions"] = []map[string]interface{}{
 			{
 				actionMetaKeyType:    "archive_task",
 				actionMetaKeyLabel:   "Archive task",
@@ -1575,7 +1679,7 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 				actionMetaKeyIcon:    "trash",
 				actionMetaKeyTestID:  "missing-branch-delete-button",
 			},
-		},
+		}
 	}
 	s.suppressToast.Store(sessionID, true)
 	msgCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

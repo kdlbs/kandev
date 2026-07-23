@@ -10,9 +10,9 @@ import { useSessionResumption } from "@/hooks/domains/session/use-session-resump
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import { MessageSendError } from "@/lib/chat/message-send-error";
 import type { TaskSession } from "@/lib/types/http";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { sendMessageRequest } from "@/hooks/use-message-handler";
+import type { ChatSubmitPayload } from "./chat/chat-input-container";
 import { EnsureSessionErrorEmptyState } from "./ensure-session-error";
 import { PassthroughToolbar } from "./passthrough-toolbar";
 import { TaskChatPanel } from "./task-chat-panel";
@@ -151,19 +151,17 @@ function SessionAgentLogo({ profile }: { profile: AgentProfileOption | null | un
 
 export function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId: string }) {
   const handleSendMessage = useCallback(
-    async (content: string) => {
-      const client = getWebSocketClient();
-      if (!client) {
-        throw new MessageSendError(
-          "connection-unavailable",
-          "Connection unavailable. Reconnect and try again.",
-        );
-      }
-      await client.request(
-        "message.add",
-        { task_id: taskId, session_id: session.id, content },
-        10000,
-      );
+    async (payload: ChatSubmitPayload) => {
+      await sendMessageRequest({
+        taskId,
+        resolvedSessionId: session.id,
+        finalMessage: payload.message,
+        modelToSend: undefined,
+        planMode: false,
+        hasReviewComments: !!payload.reviewComments?.length,
+        attachments: payload.attachments,
+        entityReferences: payload.entityReferences,
+      });
     },
     [taskId, session.id],
   );

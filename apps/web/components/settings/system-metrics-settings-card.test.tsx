@@ -33,6 +33,7 @@ describe("SystemMetricsSettingsCard", () => {
     );
 
     const cpuMetric = await screen.findByRole("checkbox", { name: "CPU %" });
+    expect(screen.getByRole("checkbox", { name: "System load (1 min)" })).toBeTruthy();
     await waitFor(() => expect(cpuMetric.getAttribute("data-state")).toBe("checked"));
     fireEvent.click(cpuMetric);
 

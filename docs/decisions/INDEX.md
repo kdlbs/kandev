@@ -52,13 +52,18 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-14-typed-utility-chat-sessions | [Typed Utility Chats Share the Quick Chat Session Model](2026-07-14-typed-utility-chat-sessions.md) | accepted   | backend, frontend           | 2026-07-14 |
 | 2026-07-15-office-agent-execution-profile-routing | [Separate Office identity from routed execution profiles](2026-07-15-office-agent-execution-profile-routing.md) | proposed | backend, frontend | 2026-07-15 |
 | 0044 | [ACP agent compatibility dialects](0044-acp-agent-compatibility-dialects.md)                                                        | accepted   | backend, protocol           | 2026-07-16 |
-| 0045 | [Install-wide storage maintenance uses typed ownership providers and quarantine](0045-install-wide-storage-maintenance.md)          | accepted (amended 2026-07-19) | backend, frontend, infra | 2026-07-14 |
+| 0045 | [Install-wide storage maintenance uses typed ownership providers and quarantine](0045-install-wide-storage-maintenance.md)          | accepted (amended 2026-07-22) | backend, frontend, infra | 2026-07-14 |
 | 0046 | [Settings route save coordinator](0046-settings-route-save-coordinator.md)                                                          | accepted   | frontend                    | 2026-07-14 |
 | 0047 | [Plugins read conversation content via a capability-gated Host RPC](0047-plugin-host-conversation-reads.md)                          | accepted   | backend, protocol           | 2026-07-21 |
 | 0048 | [Plugins invoke a settings-selectable utility agent](0048-plugin-host-utility-agent-invoke.md)                                       | accepted   | backend, frontend, protocol | 2026-07-21 |
+| 2026-07-23-opencode-review-evidence-trust | [Trusted OpenCode Review Evidence](2026-07-23-opencode-review-evidence-trust.md) | accepted | workflow, infra | 2026-07-23 |
+| 2026-07-23-planner-direct-small-work | [Planner Direct Small Work](2026-07-23-planner-direct-small-work.md) | accepted | workflow | 2026-07-23 |
+| 2026-07-23-post-commit-hook-aware-verification | [Post-Commit Hook-Aware Verification](2026-07-23-post-commit-hook-aware-verification.md) | accepted | workflow | 2026-07-23 |
 | 2026-07-18-turn-configuration-snapshots | [Attribute runtime configuration to turns](2026-07-18-turn-configuration-snapshots.md) | accepted | backend, frontend | 2026-07-18 |
 | 2026-07-19-reject-mcp-actions-on-raw-websocket | [Reject MCP Actions on the Raw WebSocket](2026-07-19-reject-mcp-actions-on-raw-websocket.md) | accepted | backend, protocol | 2026-07-19 |
 | 2026-07-19-workspace-symlink-entries | [Treat Nested Workspace Symlinks as Entries](2026-07-19-workspace-symlink-entries.md) | accepted | backend, infra | 2026-07-19 |
 | 2026-07-20-explicit-local-repository-trust | [Explicit Local Repository Trust](2026-07-20-explicit-local-repository-trust.md) | accepted | backend, frontend | 2026-07-20 |
 | 2026-07-20-provider-neutral-remote-repositories | [Provider-neutral remote repositories](2026-07-20-provider-neutral-remote-repositories.md) | accepted | backend, frontend, protocol | 2026-07-20 |
 | 2026-07-20-repository-provider-origin-identity | [Persist Provider Origin In Repository Identity](2026-07-20-repository-provider-origin-identity.md) | accepted | backend, frontend | 2026-07-20 |
+| 2026-07-21-portable-status-bar-order | [Portable Status Bar Order](2026-07-21-portable-status-bar-order.md) | accepted | backend, frontend, protocol | 2026-07-21 |
+| 2026-07-21-work-item-reference-search | [Backend-normalized work-item references](2026-07-21-work-item-reference-search.md) | accepted | backend, frontend, protocol | 2026-07-21 |

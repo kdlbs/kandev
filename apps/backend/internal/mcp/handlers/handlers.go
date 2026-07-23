@@ -112,7 +112,7 @@ type EventBus interface {
 type SessionLauncher interface {
 	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
-	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error)
+	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) (*executor.TaskExecution, error)
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
 	GetMessageQueue() *messagequeue.Service
@@ -1802,6 +1802,12 @@ func (h *Handlers) resolveExplicitTargetSession(ctx context.Context, msg *ws.Mes
 	return session, nil
 }
 
+// appendPromptReferenceExpansionContext expands "@name" saved-prompt
+// references found in prompt via h.promptResolver. The formatting logic
+// lives in promptservice.FormatPromptReferenceExpansions (shared with
+// promptservice.Service.AppendReferenceExpansions) so this stays a thin
+// wiring layer over the resolver interface, which in tests may be a fake
+// that only implements ResolvePromptReferences.
 func (h *Handlers) appendPromptReferenceExpansionContext(ctx context.Context, prompt string) string {
 	if h.promptResolver == nil {
 		return prompt
@@ -1820,21 +1826,10 @@ func (h *Handlers) appendPromptReferenceExpansionContext(ctx context.Context, pr
 	return prompt + "\n\n" + sysprompt.Wrap(formatPromptReferenceExpansions(expansions))
 }
 
+// formatPromptReferenceExpansions delegates to the shared formatter in
+// prompts/service so the rendered block stays byte-identical across callers.
 func formatPromptReferenceExpansions(expansions []promptservice.PromptReferenceExpansion) string {
-	var b strings.Builder
-	b.WriteString("EXPANDED PROMPT REFERENCES: The message above references saved prompts by @name. ")
-	b.WriteString("Use these expansions as hidden context while preserving the original @mentions.")
-	for _, expansion := range expansions {
-		b.WriteString("\n\n### @")
-		b.WriteString(sanitizePromptExpansionSystemText(expansion.Name))
-		b.WriteString("\n")
-		b.WriteString(sanitizePromptExpansionSystemText(expansion.Content))
-	}
-	return b.String()
-}
-
-func sanitizePromptExpansionSystemText(value string) string {
-	return strings.ReplaceAll(value, sysprompt.TagEnd, "")
+	return promptservice.FormatPromptReferenceExpansions(expansions)
 }
 
 // handleGetTaskConversation returns paginated conversation history for a task.
@@ -2299,7 +2294,7 @@ func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID strin
 			// Record before starting so the message is tied to the turn produced
 			// by launch. If launch fails, delete the row below.
 			recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
-			if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil); err != nil {
+			if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil, nil); err != nil {
 				h.deleteRecordedUserMessage(ctx, recorded)
 				return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", err)
 			}
@@ -2472,7 +2467,7 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 	if task.State != v1.TaskStateReview {
 		return rollback, nil
 	}
-	if task.AssigneeAgentProfileID != "" {
+	if task.IsFromOffice {
 		return rollback, nil
 	}
 	if _, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {

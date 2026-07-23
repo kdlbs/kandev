@@ -17,6 +17,11 @@ test.describe("System Licenses page", () => {
     const fullCountText = (await count.innerText()).trim();
     expect(fullCountText.length).toBeGreaterThan(0);
 
+    await testPage.getByTestId("system-licenses-filter").fill("Orca status-bar reference");
+    await expect(testPage.getByTestId("system-license-row")).toContainText(
+      "Orca status-bar reference",
+    );
+
     // Filter to "react" — expect at least one row and a different count value.
     const filter = testPage.getByTestId("system-licenses-filter");
     await filter.fill("react");

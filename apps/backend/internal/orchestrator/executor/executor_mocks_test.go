@@ -608,6 +608,9 @@ func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error { ret
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListArchivedTasksWithActiveSessions(ctx context.Context) ([]string, error) {
+	return nil, nil
+}
 
 func (m *mockRepository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
 	return nil, nil
@@ -959,6 +962,9 @@ func (m *mockRepository) ListScriptsByRepositoryIDs(_ context.Context, _ []strin
 	return make(map[string][]*models.RepositoryScript), nil
 }
 func (m *mockRepository) GetRepositoryByProviderInfo(_ context.Context, _, _, _, _, _ string) (*models.Repository, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetRepositoryByLocalPath(_ context.Context, _, _ string) (*models.Repository, error) {
 	return nil, nil
 }
 

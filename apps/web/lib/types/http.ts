@@ -9,6 +9,7 @@ import type {
   WorkspaceId,
 } from "./ids";
 import type { OnEnterActionType, StepEvents } from "./workflow-actions";
+import type { EntityReference } from "./entity-reference";
 
 export type { ExecutorType } from "./executor";
 export type {
@@ -17,6 +18,7 @@ export type {
   SidebarViewDraftApi,
   SidebarTaskPrefsApi,
   TaskCreateLastUsedApi,
+  AppStatusBarOrderApi,
   MCPTaskAgentProfileDefault,
   UserSettings,
   UserSettingsResponse,
@@ -206,6 +208,8 @@ export type Repository = {
   provider_host?: string;
   provider_owner: string;
   provider_name: string;
+  /** Canonical credential-free clone URL for provider-backed repositories. */
+  remote_url?: string;
   default_branch: string;
   scripts?: RepositoryScript[];
   worktree_branch_prefix: string;
@@ -655,6 +659,10 @@ export type MessageType =
   | "script_execution"
   | "agent_plan";
 
+export type MessageMetadata = Record<string, unknown> & {
+  entity_references?: EntityReference[];
+};
+
 export type Message = {
   id: string;
   session_id: SessionId;
@@ -665,7 +673,7 @@ export type Message = {
   content: string;
   raw_content?: string;
   type: MessageType;
-  metadata?: Record<string, unknown>;
+  metadata?: MessageMetadata;
   requests_input?: boolean;
   created_at: string;
   /** Authoritative per-message change signal; advances on every content/metadata update. */

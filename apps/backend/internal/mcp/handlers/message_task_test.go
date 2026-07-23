@@ -104,7 +104,7 @@ func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prom
 	return &orchestrator.PromptResult{}, nil
 }
 
-func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, _, _ bool, _ []v1.MessageAttachment) (*executor.TaskExecution, error) {
+func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, _, _ bool, _ []v1.MessageAttachment, _ []v1.EntityReference) (*executor.TaskExecution, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startCreatedCalls = append(f.startCreatedCalls, startCreatedCall{
@@ -963,6 +963,40 @@ func TestHandleMessageTask_WaitingForInput_FiresTurnStart(t *testing.T) {
 	assert.Equal(t, sess.ID, orch.promptCalls[0].sessionID)
 }
 
+func TestHandleMessageTask_KanbanRunnerTransitionsReviewToInProgress(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	task.AssigneeAgentProfileID = "kanban-runner"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.onTurnStart = func(ctx context.Context, taskID, sessionID string) error {
+		assert.Equal(t, target.ID, taskID)
+		assert.Equal(t, sess.ID, sessionID)
+		updatedTask, err := svc.GetTask(ctx, taskID)
+		require.NoError(t, err)
+		assert.Equal(t, v1.TaskStateInProgress, updatedTask.State)
+		return nil
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "review follow-up", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateInProgress, updatedTask.State)
+	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
+}
+
 func TestHandleMessageTask_WaitingForInput_UsesSessionSelectedByTurnStart(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)
@@ -1607,7 +1641,7 @@ func TestHandleMessageTask_DispatchRollbackDoesNotOverwriteCoordinatorStop(t *te
 	assert.Equal(t, "queued after stop", queueStatus.Entries[1].Content)
 }
 
-func TestHandleMessageTask_OfficeReviewDoesNotTransitionTaskState(t *testing.T) {
+func TestHandleMessageTask_UnassignedOfficeReviewDoesNotTransitionTaskState(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
@@ -1616,7 +1650,7 @@ func TestHandleMessageTask_OfficeReviewDoesNotTransitionTaskState(t *testing.T) 
 	require.NoError(t, err)
 	task.State = v1.TaskStateReview
 	task.WorkflowStepID = "step-review"
-	task.AssigneeAgentProfileID = "agent-profile-1"
+	task.ProjectID = "office-project"
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
 	h, orch := newMessageTaskHandler(t, svc, repo)
@@ -1645,6 +1679,7 @@ func TestHandleMessageTask_OfficeDispatchErrorRestoresWorkflowStep(t *testing.T)
 	require.NoError(t, err)
 	task.State = v1.TaskStateReview
 	task.WorkflowStepID = "step-review"
+	task.ProjectID = "office-project"
 	task.AssigneeAgentProfileID = "agent-profile-1"
 	require.NoError(t, repo.UpdateTask(ctx, task))
 

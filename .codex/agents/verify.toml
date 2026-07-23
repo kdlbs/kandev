@@ -1,15 +1,15 @@
 name = "verify"
-description = "Run Kandev format, typecheck, tests, and lint before commit, then report failures without fixing source or test logic."
-model = "gpt-5.6-luna"
-model_reasoning_effort = "low"
+description = "Verify committed changes before push, reusing proven hook coverage and escalating only when impact requires it."
+model = "gpt-5.3-codex-spark"
+model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """
-Run the monorepo verification pipeline and report issues found.
+Run after commit and before push. Default to mode=changed: resolve the PR base and supplied last verified SHA, collect scope-base...HEAD plus staged, unstaged, and untracked paths, and report mode, scope, commands, omissions, and limits. Validate any supplied /commit receipt with .agents/skills/verify/references/hook-evidence.md; never infer hook success. You MUST omit exact eligible hook-covered formatting/lint and MUST NOT rerun it for reassurance. Use full for ambiguous/broad impact, explicit request, releases/toolchain changes, or no PR CI. Read the impact matrix. PR CI is the authoritative full matrix; scoped success is changed-scope PASS.
 
 Install apps dependencies when missing. Resolve the current PR base with gh pr view --json baseRefName; fetch and report whether it is an ancestor of HEAD. Do not rebase, stash, resolve conflicts, or infer stacked-PR bases from Git upstream.
 
-Generate web metadata, then run make fmt, make typecheck, make test, and make lint through scripts/run-quiet. Inspect only targeted log ranges. Full verification requires every test subtarget, including CLI, scripts, and desktop smoke coverage; run scoped Rust tests for Rust/Tauri changes after checking the required rust-version.
+In changed mode, run only uncovered impact-matrix commands. Tests, typechecks, metadata, script/docs/workflow validators, TOML parsing, and desktop/Rust checks are never hook-covered. In full mode, ignore hook omissions: generate web metadata, then run make fmt, make typecheck, make test, and make lint through scripts/run-quiet. Inspect only targeted log ranges. Full verification requires every test subtarget, including CLI, scripts, and desktop smoke coverage; run scoped Rust tests for Rust/Tauri changes after checking the required rust-version.
 
-Do not fix production or test logic. Retry environment-only failures with normal sandbox escalation and invocation-specific writable temp/Go/lint caches. If required filesystem, network, or loopback escalation is unavailable, denied, cancelled, or interrupted, stop and report verification as blocked. Explain that PR creation is waiting on mandatory verification and include this exact required user action: "Switch the mode selector to `Agent (full access)`, then retry verification." Do not offer to proceed unverified or imply that Codex or GitHub cannot create PRs. Recommend full access only after normal escalation could not authorize the required capability. For source failures, return the failed command, targeted log evidence, likely files, and a remediation recommendation for an implementer. Finish with a compact pass/fail report.
+Do not fix production or test logic. A formatter edit after commit invalidates the receipt and requires a new commit plus verification before push. Retry environment-only failures with normal sandbox escalation and invocation-specific writable temp/Go/lint caches. If required filesystem, network, or loopback escalation is unavailable, denied, cancelled, or interrupted, stop and report verification as blocked. Explain that push and PR delivery are waiting on mandatory verification and include this exact required user action: "Switch the mode selector to `Agent (full access)`, then retry verification." Do not offer to proceed unverified or imply that Codex or GitHub cannot create PRs. Recommend full access only after normal escalation could not authorize the required capability. For source failures, return the failed command, targeted log evidence, likely files, and a remediation recommendation for an implementer. Finish with a compact pass/fail report.
 Do not spawn subagents.
 """

@@ -9,6 +9,7 @@ import { buildSubmitMessage } from "./chat/chat-input-area";
 import {
   ChatInputContainer,
   type ChatInputContainerHandle,
+  type ChatSubmitPayload,
   type MessageAttachment,
 } from "./chat/chat-input-container";
 import type { useChatPanelState } from "./chat/use-chat-panel-state";
@@ -23,13 +24,7 @@ import type { AppState } from "@/lib/state/store";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
-export type PassthroughSubmitHandler = (
-  content: string,
-  reviewComments?: DiffComment[],
-  attachments?: MessageAttachment[],
-  inlineMentions?: ContextFile[],
-  inlineTaskMentions?: TaskMentionData[],
-) => Promise<void>;
+export type PassthroughSubmitHandler = (payload: ChatSubmitPayload) => Promise<void>;
 
 export function PassthroughComposerPanel({
   refHandle,
@@ -67,6 +62,8 @@ export function PassthroughComposerPanel({
         onSubmit={onSubmit}
         sessionId={panelState.resolvedSessionId}
         taskId={taskId}
+        workspaceId={null}
+        entityReferencesEnabled={false}
         taskTitle={panelState.task?.title}
         taskDescription={panelState.taskDescription ?? ""}
         planModeEnabled={panelState.planModeEnabled}
@@ -294,13 +291,13 @@ export function useSendPassthroughMessage({
   const storeApi = useAppStoreApi();
 
   return useCallback(
-    async (
-      content: string,
-      reviewComments?: DiffComment[],
-      attachments?: MessageAttachment[],
-      inlineMentions?: ContextFile[],
-      inlineTaskMentions?: TaskMentionData[],
-    ) => {
+    async ({
+      message: content,
+      reviewComments,
+      attachments,
+      inlineMentions,
+      inlineTaskMentions,
+    }: ChatSubmitPayload) => {
       if (!taskId || !sessionId) {
         toast({ title: "Session not ready", variant: "error" });
         throw new Error("Session not ready");

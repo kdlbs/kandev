@@ -5,6 +5,7 @@ import {
   assertNoDocumentHorizontalOverflow,
 } from "../../helpers/layout-assertions";
 import { GitLabPage } from "../../pages/gitlab-page";
+import { SessionPage } from "../../pages/session-page";
 
 test.describe("GitLab workspace parity", () => {
   test("keeps self-managed browse results isolated when switching workspaces", async ({
@@ -115,8 +116,22 @@ test.describe("GitLab workspace parity", () => {
     await panel.getByRole("button", { name: "Unlink merge request" }).click();
     await expect(testPage.getByTestId("mr-topbar-button")).toHaveCount(0);
 
-    await testPage.getByRole("button", { name: "Link GitLab merge request" }).click();
+    const topbar = testPage.getByTestId("task-topbar");
+    await expect(
+      topbar.getByRole("button", { name: /Link (?:MR|GitLab merge request)/i }),
+    ).toHaveCount(0);
+
+    const session = new SessionPage(testPage);
+    const activeTaskRow = session.sidebar.locator(
+      '[data-testid="sidebar-task-item"][aria-current="true"]',
+    );
+    await expect(activeTaskRow).toBeVisible();
+    await activeTaskRow.click({ button: "right" });
+    await testPage.getByRole("menuitem", { name: "Link", exact: true }).hover();
+    await testPage.getByRole("menuitem", { name: "GitLab Merge Request" }).click();
+
     const linkDialog = testPage.getByRole("dialog", { name: "Link GitLab merge request" });
+    await expect(linkDialog).toBeVisible();
     await linkDialog
       .getByLabel("Merge request URL")
       .fill(`${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/81`);

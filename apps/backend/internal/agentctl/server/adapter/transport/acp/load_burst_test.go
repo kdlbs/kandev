@@ -5,11 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+)
+
+const (
+	replayBurstProducerWatchdogTimeout = 20 * time.Second
+	burstProducerCleanupTimeout        = time.Second
+)
+
+var (
+	errReplayBurstProducerStalled            = errors.New("replay burst producer stalled")
+	errReplayBurstProducerBeforeWriteStalled = errors.New("replay burst producer stalled before writer entry")
 )
 
 // burstAgent is a minimal acp.Agent stub used by the load-replay regression
@@ -136,26 +147,202 @@ func (*burstClient) WaitForTerminalExit(context.Context, acp.WaitForTerminalExit
 	return acp.WaitForTerminalExitResponse{}, errors.New("not implemented")
 }
 
-// newBurstPair wires a real acp.ClientSideConnection / AgentSideConnection
-// pair over in-memory pipes. The client's SessionUpdate forwards to the
-// supplied handler. Cleanup is registered on the test.
-func newBurstPair(t *testing.T, onUpdate func(acp.SessionNotification)) (*acp.ClientSideConnection, *acp.AgentSideConnection) {
+type burstPair struct {
+	clientConn *acp.ClientSideConnection
+	agentConn  *acp.AgentSideConnection
+
+	c2aR *io.PipeReader
+	c2aW *io.PipeWriter
+	a2cR *io.PipeReader
+	a2cW *io.PipeWriter
+
+	agentToClientWriteEntered <-chan struct{}
+	closed                    chan struct{}
+	closeOnce                 sync.Once
+}
+
+func (p *burstPair) Close() {
+	p.closeOnce.Do(func() {
+		_ = p.c2aR.Close()
+		_ = p.c2aW.Close()
+		_ = p.a2cR.Close()
+		_ = p.a2cW.Close()
+		close(p.closed)
+	})
+}
+
+// writeEntrySignalWriter reports immediately before delegating to its writer.
+// When it wraps an unread io.PipeWriter, receiving the signal proves the
+// producer has entered the write that will block until the pipe is closed.
+type writeEntrySignalWriter struct {
+	writer  io.Writer
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (w *writeEntrySignalWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.entered) })
+	return w.writer.Write(p)
+}
+
+// newBurstPair wires an AgentSideConnection over in-memory pipes. When
+// onUpdate is supplied, it also creates a ClientSideConnection whose
+// SessionUpdate forwards to that handler. Cleanup is registered on the test.
+func newBurstPair(t *testing.T, onUpdate func(acp.SessionNotification)) *burstPair {
 	t.Helper()
 
 	c2aR, c2aW := io.Pipe()
 	a2cR, a2cW := io.Pipe()
+	a2cWriteEntered := make(chan struct{})
+	a2cWriteObserver := &writeEntrySignalWriter{writer: a2cW, entered: a2cWriteEntered}
 
-	clientConn := acp.NewClientSideConnection(&burstClient{onUpdate: onUpdate}, c2aW, a2cR)
-	agentConn := acp.NewAgentSideConnection(burstAgent{}, a2cW, c2aR)
+	pair := &burstPair{
+		agentConn:                 acp.NewAgentSideConnection(burstAgent{}, a2cWriteObserver, c2aR),
+		c2aR:                      c2aR,
+		c2aW:                      c2aW,
+		a2cR:                      a2cR,
+		a2cW:                      a2cW,
+		agentToClientWriteEntered: a2cWriteEntered,
+		closed:                    make(chan struct{}),
+	}
+	if onUpdate != nil {
+		pair.clientConn = acp.NewClientSideConnection(
+			&burstClient{onUpdate: onUpdate}, c2aW, a2cR,
+			acp.WithMaxQueuedNotifications(acpNotifQueueCapacity()),
+		)
+	}
+	t.Cleanup(pair.Close)
 
-	t.Cleanup(func() {
-		_ = c2aR.Close()
-		_ = c2aW.Close()
-		_ = a2cR.Close()
-		_ = a2cW.Close()
+	return pair
+}
+
+// newStalledBurstPair leaves the agent-to-client pipe unread so writes from
+// AgentSideConnection block until the pair is closed.
+func newStalledBurstPair(t *testing.T) *burstPair {
+	return newBurstPair(t, nil)
+}
+
+// runBurstProducer ensures a stalled synchronous io.Pipe write fails the
+// test promptly. acp-go-sdk's write path cannot observe context cancellation
+// after entering io.Pipe.Write, so the watchdog must close this pair's pipes.
+func runBurstProducer(pair *burstPair, timeout time.Duration, produce func() error) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- produce()
+	}()
+
+	entryTimer := time.NewTimer(timeout)
+	defer entryTimer.Stop()
+
+	// JSON encoding and SDK setup happen before the synchronous io.Pipe write.
+	// Bound that phase separately: it must not prevent the test from cleaning
+	// up a producer which never reaches the instrumented writer.
+	select {
+	case <-pair.agentToClientWriteEntered:
+	case err := <-done:
+		return err
+	case <-entryTimer.C:
+		return stalledBurstProducerError(pair, timeout, done, errReplayBurstProducerBeforeWriteStalled)
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		return stalledBurstProducerError(pair, timeout, done, errReplayBurstProducerStalled)
+	}
+}
+
+// stalledBurstProducerError owns the failure path for both producer phases.
+// It always reports the timeout that triggered cleanup, even if closing the
+// pipes lets the producer return nil.
+func stalledBurstProducerError(pair *burstPair, timeout time.Duration, done <-chan error, stallErr error) error {
+	pair.Close()
+
+	cleanupTimer := time.NewTimer(burstProducerCleanupTimeout)
+	defer cleanupTimer.Stop()
+	select {
+	case err := <-done:
+		return fmt.Errorf("%w after %s: %v", stallErr, timeout, err)
+	case <-cleanupTimer.C:
+		return fmt.Errorf("%w after %s: pipe cleanup did not release producer", stallErr, timeout)
+	}
+}
+
+func TestBurstProducerWatchdog_ClosesStalledPipes(t *testing.T) {
+	const watchdogTimeout = 100 * time.Millisecond
+
+	pair := newStalledBurstPair(t)
+	producerExited := make(chan struct{})
+	err := runBurstProducer(pair, watchdogTimeout, func() error {
+		defer close(producerExited)
+		return pair.agentConn.SessionUpdate(context.Background(), makeReplayNotification("stalled-session", 1))
 	})
 
-	return clientConn, agentConn
+	select {
+	case <-pair.agentToClientWriteEntered:
+	default:
+		t.Fatal("producer did not enter the agent-to-client pipe write")
+	}
+	select {
+	case <-producerExited:
+	default:
+		t.Fatal("watchdog returned before the stalled producer exited")
+	}
+	if !errors.Is(err, errReplayBurstProducerStalled) {
+		t.Fatalf("watchdog error = %v, want stalled producer error", err)
+	}
+}
+
+func TestBurstProducerWatchdog_ClosesPipesBeforeAgentToClientWrite(t *testing.T) {
+	const watchdogTimeout = 100 * time.Millisecond
+
+	pair := newStalledBurstPair(t)
+	producerBlocked := make(chan struct{})
+	producerExited := make(chan struct{})
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runBurstProducer(pair, watchdogTimeout, func() error {
+			close(producerBlocked)
+			<-pair.closed
+			close(producerExited)
+			return nil
+		})
+	}()
+
+	select {
+	case <-producerBlocked:
+	case <-time.After(watchdogTimeout):
+		t.Fatal("producer did not block before SessionUpdate")
+	}
+
+	select {
+	case err := <-runDone:
+		if !errors.Is(err, errReplayBurstProducerBeforeWriteStalled) {
+			t.Fatalf("watchdog error = %v, want pre-write stalled producer error", err)
+		}
+	case <-time.After(watchdogTimeout + burstProducerCleanupTimeout + time.Second):
+		t.Fatal("writer-entry watchdog did not close pipes and return")
+	}
+
+	select {
+	case <-producerExited:
+	default:
+		t.Fatal("writer-entry watchdog returned before the pre-write producer exited")
+	}
+	select {
+	case <-pair.closed:
+	default:
+		t.Fatal("writer-entry watchdog did not close the owned pipes")
+	}
+	select {
+	case <-pair.agentToClientWriteEntered:
+		t.Fatal("producer entered agent-to-client write before watchdog cleanup")
+	default:
+	}
 }
 
 func TestLoadSession_DrainsBackedUpReplayBeforeClearingSuppression(t *testing.T) {
@@ -279,7 +466,7 @@ func TestLoadReplayBurst_HandlesLargeReplay(t *testing.T) {
 	// just rely on Close to drain it.
 	t.Cleanup(func() { _ = a.Close() })
 
-	clientConn, agentConn := newBurstPair(t, a.enqueueACPUpdate)
+	pair := newBurstPair(t, a.enqueueACPUpdate)
 
 	const sessionID = "burst-session"
 
@@ -289,25 +476,32 @@ func TestLoadReplayBurst_HandlesLargeReplay(t *testing.T) {
 	// Push the burst of replay notifications. These would all be suppressed
 	// by the adapter (AgentMessageChunk + ToolCall + Plan are on the suppress
 	// list) — the point is whether the SDK's 1024-deep queue stays drained.
-	for i := 0; i < notificationBurstSize; i++ {
-		if err := agentConn.SessionUpdate(ctx, makeReplayNotification(sessionID, i)); err != nil {
-			t.Fatalf("SessionUpdate at i=%d failed: %v", i, err)
+	// A stalled SDK pipe write does not honor ctx; bound the producer phase and
+	// close only this pair's pipes if that happens.
+	if err := runBurstProducer(pair, replayBurstProducerWatchdogTimeout, func() error {
+		for i := 0; i < notificationBurstSize; i++ {
+			if err := pair.agentConn.SessionUpdate(ctx, makeReplayNotification(sessionID, i)); err != nil {
+				return fmt.Errorf("SessionUpdate at i=%d: %w", i, err)
+			}
 		}
-	}
 
-	// Sentinel: AvailableCommandsUpdate passes through during load, so it
-	// will land on updatesCh once the consumer drains the queue.
-	if err := agentConn.SessionUpdate(ctx, acp.SessionNotification{
-		SessionId: acp.SessionId(sessionID),
-		Update: acp.SessionUpdate{
-			AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
-				AvailableCommands: []acp.AvailableCommand{
-					{Name: sentinelCmd, Description: "burst sentinel"},
+		// Sentinel: AvailableCommandsUpdate passes through during load, so it
+		// will land on updatesCh once the consumer drains the queue.
+		if err := pair.agentConn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: acp.SessionId(sessionID),
+			Update: acp.SessionUpdate{
+				AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
+					AvailableCommands: []acp.AvailableCommand{
+						{Name: sentinelCmd, Description: "burst sentinel"},
+					},
 				},
 			},
-		},
+		}); err != nil {
+			return fmt.Errorf("sentinel SessionUpdate: %w", err)
+		}
+		return nil
 	}); err != nil {
-		t.Fatalf("sentinel SessionUpdate failed: %v", err)
+		t.Fatal(err)
 	}
 
 	// The sentinel-wait loop below is the authoritative overflow check: the
@@ -324,7 +518,7 @@ func TestLoadReplayBurst_HandlesLargeReplay(t *testing.T) {
 			if ev.Type == streams.EventTypeAvailableCommands {
 				got = &ev
 			}
-		case <-clientConn.Done():
+		case <-pair.clientConn.Done():
 			t.Fatal("client connection closed while waiting for sentinel — overflow")
 		case <-deadline:
 			t.Fatal("timeout waiting for sentinel AvailableCommands event after replay burst")

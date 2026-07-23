@@ -224,6 +224,14 @@ type Service struct {
 	cleanupWorkerWake   chan struct{}
 	cleanupRunsMu       sync.Mutex
 	cleanupRuns         map[*taskResourceCleanupRun]struct{}
+	// repoResolveMu serializes the check-then-create sections of
+	// FindOrCreateRepository and FindOrCreateRepositoryByLocalPath so two
+	// resolvers racing to register the same not-yet-known repository (by
+	// provider identity or by canonical local_path) converge on a single row
+	// instead of each inserting a duplicate. Covers concurrent requests
+	// within this backend process only — this backend is single-process per
+	// SQLite database, so that is the complete threat model today.
+	repoResolveMu sync.Mutex
 }
 
 // NewService creates a new task service

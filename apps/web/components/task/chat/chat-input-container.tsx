@@ -9,6 +9,8 @@ import { useAppStore } from "@/components/state-provider";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
+import type { TaskMentionData } from "@/hooks/use-inline-mention";
+import type { EntityReference } from "@/lib/types/entity-reference";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useChatInputContainer } from "./use-chat-input-container";
 import {
@@ -19,6 +21,8 @@ import {
 import type { ContextItem } from "@/lib/types/context";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
+import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
+import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -44,16 +48,21 @@ export type ChatInputContainerHandle = {
 
 export type ChatSubmitResult = void | boolean | Promise<void | boolean>;
 
+export type ChatSubmitPayload = {
+  message: string;
+  reviewComments?: DiffComment[];
+  attachments?: MessageAttachment[];
+  inlineMentions?: ContextFile[];
+  inlineTaskMentions?: TaskMentionData[];
+  entityReferences?: EntityReference[];
+};
+
 type ChatInputContainerProps = {
-  onSubmit: (
-    message: string,
-    reviewComments?: DiffComment[],
-    attachments?: MessageAttachment[],
-    inlineMentions?: ContextFile[],
-    inlineTaskMentions?: import("@/hooks/use-inline-mention").TaskMentionData[],
-  ) => ChatSubmitResult;
+  onSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId: string | null;
   taskId: string | null;
+  workspaceId?: string | null;
+  entityReferencesEnabled?: boolean;
   taskTitle?: string;
   taskDescription: string;
   planModeEnabled: boolean;
@@ -224,6 +233,7 @@ type NormalizedChatInputProps = ChatInputContainerProps & {
   contextFiles: ContextFile[];
   contextItems: ContextItem[];
   showRequestChangesTooltip: boolean;
+  entityReferencesEnabled: boolean;
 };
 
 function normalizeChatInputProps(p: ChatInputContainerProps): NormalizedChatInputProps {
@@ -236,6 +246,7 @@ function normalizeChatInputProps(p: ChatInputContainerProps): NormalizedChatInpu
     contextFiles: p.contextFiles ?? [],
     contextItems: p.contextItems ?? [],
     showRequestChangesTooltip: p.showRequestChangesTooltip ?? false,
+    entityReferencesEnabled: p.entityReferencesEnabled ?? false,
   };
 }
 
@@ -280,6 +291,8 @@ function buildEditorAreaProps(
     setIsInputFocused: s.setIsInputFocused,
     sessionId: p.sessionId,
     taskId: p.taskId,
+    workspaceId: p.workspaceId ?? null,
+    entityReferencesEnabled: p.entityReferencesEnabled,
     onAddContextFile: p.onAddContextFile,
     onToggleContextFile: p.onToggleContextFile,
     planContextEnabled: p.planContextEnabled,
@@ -319,6 +332,73 @@ function buildStoppedBannerProps(p: ChatInputContainerProps) {
   };
 }
 
+function applyEnhancedPromptToEditor(inputRef: ContainerState["inputRef"], value: string): boolean {
+  const input = inputRef.current;
+  if (!input) {
+    return false;
+  }
+
+  input.setValue(value);
+  return input.getValue() === value;
+}
+
+function useChatPromptEnhancement({
+  inputRef,
+  taskId,
+  sessionId,
+  taskTitle,
+  taskDescription,
+}: {
+  inputRef: ContainerState["inputRef"];
+  taskId: string | null;
+  sessionId: string | null;
+  taskTitle?: string;
+  taskDescription: string;
+}) {
+  const isUtilityConfigured = useIsUtilityConfigured();
+  const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
+    sessionId,
+    taskTitle,
+    taskDescription,
+  });
+  const getCurrentEditorValue = useCallback(() => inputRef.current?.getValue() ?? null, [inputRef]);
+  const applyEnhancedPrompt = useCallback(
+    (nextValue: string) => applyEnhancedPromptToEditor(inputRef, nextValue),
+    [inputRef],
+  );
+  const promptDelivery = usePromptResultDelivery({
+    scopeKey: `chat:${taskId ?? ""}:${sessionId ?? ""}`,
+    getCurrent: getCurrentEditorValue,
+    apply: applyEnhancedPrompt,
+  });
+  const handleEnhancePrompt = useCallback(() => {
+    const currentValue = getCurrentEditorValue();
+    if (currentValue === null) return;
+    if (!currentValue.trim()) return;
+    const generation = promptDelivery.captureScope();
+    void enhancePrompt(currentValue, (result) =>
+      promptDelivery.deliver(currentValue, result, generation),
+    );
+  }, [getCurrentEditorValue, enhancePrompt, promptDelivery]);
+
+  return { handleEnhancePrompt, isEnhancingPrompt, isUtilityConfigured, promptDelivery };
+}
+
+function insertVoiceTranscript(inputRef: ContainerState["inputRef"], text: string): void {
+  const editor = inputRef.current;
+  if (!editor) return;
+
+  const trimmed = text.trim();
+  if (!trimmed) return;
+
+  const cursor = editor.getSelectionStart();
+  const current = editor.getValue();
+  const charBefore = cursor > 0 ? current.charAt(cursor - 1) : "";
+  const needsLeadingSpace = charBefore !== "" && !/\s/.test(charBefore);
+  const insert = needsLeadingSpace ? ` ${trimmed}` : trimmed;
+  editor.insertText(insert, cursor, cursor);
+}
+
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
   function ChatInputContainer(props, ref) {
     const { sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isStarting, isSending } =
@@ -351,36 +431,17 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onSubmit: props.onSubmit,
     });
 
-    const isUtilityConfigured = useIsUtilityConfigured();
-    const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
+    const promptEnhancement = useChatPromptEnhancement({
+      inputRef: s.inputRef,
+      taskId,
       sessionId,
       taskTitle,
       taskDescription,
     });
 
-    const handleEnhancePrompt = useCallback(() => {
-      const currentValue = s.value?.trim();
-      if (!currentValue) return;
-      enhancePrompt(currentValue, (enhanced) => {
-        // Use setValue to directly update TipTap editor (handleChange only updates React state)
-        s.inputRef.current?.setValue(enhanced);
-      });
-    }, [s, enhancePrompt]);
-
     const handleVoiceTranscript = useCallback(
       (text: string) => {
-        const editor = s.inputRef.current;
-        if (!editor) return;
-        const trimmed = text.trim();
-        if (!trimmed) return;
-        const cursor = editor.getSelectionStart();
-        const current = editor.getValue();
-        // Prepend a space when inserting after existing non-whitespace content
-        // so transcripts flow naturally without running into the previous word.
-        const charBefore = cursor > 0 ? current.charAt(cursor - 1) : "";
-        const needsLeadingSpace = charBefore !== "" && !/\s/.test(charBefore);
-        const insert = needsLeadingSpace ? ` ${trimmed}` : trimmed;
-        editor.insertText(insert, cursor, cursor);
+        insertVoiceTranscript(s.inputRef, text);
       },
       [s.inputRef],
     );
@@ -422,10 +483,19 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
         addFiles={s.addFiles}
         contextAreaProps={buildContextAreaProps(s, p)}
+        promptResultRecovery={
+          promptEnhancement.promptDelivery.pendingResult ? (
+            <PromptResultRecovery
+              pendingResult={promptEnhancement.promptDelivery.pendingResult}
+              onApply={promptEnhancement.promptDelivery.applyPending}
+              onCopy={promptEnhancement.promptDelivery.copyPending}
+            />
+          ) : null
+        }
         editorAreaProps={buildEditorAreaProps(s, p, {
-          onEnhancePrompt: handleEnhancePrompt,
-          isEnhancingPrompt,
-          isUtilityConfigured,
+          onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
+          isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
+          isUtilityConfigured: promptEnhancement.isUtilityConfigured,
           onVoiceTranscript: handleVoiceTranscript,
           onVoiceAutoSend: handleVoiceAutoSend,
         })}
