@@ -9,6 +9,9 @@ import (
 
 func TestResolvePermissions_Defaults(t *testing.T) {
 	perms := shared.ResolvePermissions(shared.AgentRoleCEO, "")
+	if !shared.HasPermission(perms, "can_create_projects") {
+		t.Error("CEO should have can_create_projects by default")
+	}
 	if !shared.HasPermission(perms, shared.PermCanCreateAgents) {
 		t.Error("CEO should have can_create_agents by default")
 	}
@@ -17,6 +20,9 @@ func TestResolvePermissions_Defaults(t *testing.T) {
 	}
 
 	workerPerms := shared.ResolvePermissions(shared.AgentRoleWorker, "")
+	if shared.HasPermission(workerPerms, "can_create_projects") {
+		t.Error("Worker should not have can_create_projects by default")
+	}
 	if shared.HasPermission(workerPerms, shared.PermCanCreateAgents) {
 		t.Error("Worker should not have can_create_agents by default")
 	}
@@ -31,6 +37,14 @@ func TestResolvePermissions_Defaults(t *testing.T) {
 	specialistPerms := shared.ResolvePermissions(shared.AgentRoleSpecialist, "")
 	if shared.HasPermission(specialistPerms, shared.PermCanAssignTasks) {
 		t.Error("Specialist should not have can_assign_tasks by default")
+	}
+}
+
+func TestResolvePermissions_ProjectCreationOverride(t *testing.T) {
+	perms := shared.ResolvePermissions(shared.AgentRoleWorker, `{"can_create_projects": true}`)
+
+	if !shared.HasPermission(perms, "can_create_projects") {
+		t.Error("override should grant can_create_projects to worker")
 	}
 }
 
@@ -133,8 +147,8 @@ func TestNoEscalation_EmptyRequest(t *testing.T) {
 
 func TestAllPermissionKeys(t *testing.T) {
 	keys := shared.AllPermissionKeys()
-	if len(keys) != 6 {
-		t.Errorf("expected 6 permission keys, got %d", len(keys))
+	if len(keys) != 7 {
+		t.Errorf("expected 7 permission keys, got %d", len(keys))
 	}
 }
 

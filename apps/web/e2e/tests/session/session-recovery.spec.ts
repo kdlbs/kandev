@@ -103,12 +103,23 @@ test.describe("Session recovery", () => {
     // Click "Start fresh session"
     await session.recoveryFreshButton().click();
 
-    // Agent should recover and become idle
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    // Recovery briefly exposes the idle placeholder before the replacement
+    // agent starts. Observe the starting phase before treating the composer as
+    // ready so that transient idle state cannot satisfy the assertion.
+    const freshStarting = testPage.locator('[data-placeholder="Preparing workspace..."]');
+    await expect(freshStarting).toBeVisible({ timeout: 30_000 });
+    await expect(freshStarting).not.toBeVisible({ timeout: 30_000 });
+    await expect(testPage.getByTestId("chat-input-editor")).toHaveAttribute(
+      "contenteditable",
+      "true",
+      {
+        timeout: 30_000,
+      },
+    );
 
     // Verify agent works after recovery
     await session.sendMessage("/e2e:simple-message");
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });
 
   test("agent crash — resume session recovers", async ({ testPage, apiClient, seedData }) => {
@@ -128,12 +139,23 @@ test.describe("Session recovery", () => {
     // Click "Resume session"
     await session.recoveryResumeButton().click();
 
-    // Agent should recover and become idle
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    // Recovery briefly exposes the idle placeholder before the resumed agent
+    // starts. Observe the starting phase before treating the composer as ready
+    // so that transient idle state cannot satisfy the assertion.
+    const resumeStarting = testPage.locator('[data-placeholder="Preparing workspace..."]');
+    await expect(resumeStarting).toBeVisible({ timeout: 30_000 });
+    await expect(resumeStarting).not.toBeVisible({ timeout: 30_000 });
+    await expect(testPage.getByTestId("chat-input-editor")).toHaveAttribute(
+      "contenteditable",
+      "true",
+      {
+        timeout: 30_000,
+      },
+    );
 
     // Verify agent works after recovery
     await session.sendMessage("/e2e:simple-message");
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });
 
   test("agent crash — resume fails again, no stuck button remains", async ({

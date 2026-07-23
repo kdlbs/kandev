@@ -7,10 +7,9 @@ description: Implement changes using Test-Driven Development (Red-Green-Refactor
 
 ## Execution Context
 
-The user-started primary session delegates TDD
-work to an `implementer` or `test-engineer` worker and does not continue below.
-An explicitly assigned worker follows this procedure and does not spawn other
-workers.
+The planner may apply TDD directly for small scoped work; delegate substantial,
+cross-component, or independently test-heavy work. A worker follows this
+procedure for its one packet and does not spawn workers.
 
 Implement code changes using strict Red-Green-Refactor. Iron law: **no production code without a failing test first.**
 
@@ -19,7 +18,8 @@ Wrote code before a test? Delete it. Start over from a failing test.
 ## Available skills and subagents
 
 - **`/e2e`** — Follow this procedure when the assigned packet explicitly owns Playwright E2E coverage.
-- **`/verify`** — The planner launches this as a separate assignment after the worker's targeted checks pass.
+- **`/verify`** — After targeted checks pass, the planner commits through hooks
+  and launches this as a separate post-commit assignment before push.
 
 ## When to use
 
@@ -96,7 +96,8 @@ Return to step 1 for the next behavior or edge case. Continue until the feature 
 ### 5. Final verification
 
 Run the targeted tests named in the work packet and report their results. The
-planner launches a separate `verify` assignment for the monorepo pipeline.
+planner commits the accepted result, then launches a separate hook-aware
+`verify` assignment before push.
 
 ## Testing anti-patterns
 

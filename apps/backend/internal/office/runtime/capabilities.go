@@ -13,8 +13,11 @@ const WildcardTaskScope = "*"
 const (
 	CapabilityPostComment      = "post_comment"
 	CapabilityUpdateTaskStatus = "update_task_status"
+	CapabilityCreateTask       = "create_task"
 	CapabilityCreateSubtask    = "create_subtask"
 	CapabilityCreateAgent      = "create_agent"
+	CapabilityListProjects     = "list_projects"
+	CapabilityCreateProject    = "create_project"
 	CapabilityRequestApproval  = "request_approval"
 	CapabilityReadMemory       = "read_memory"
 	CapabilityWriteMemory      = "write_memory"
@@ -31,10 +34,16 @@ func (c Capabilities) Allows(key string) bool {
 		return c.CanPostComments
 	case CapabilityUpdateTaskStatus:
 		return c.CanUpdateTaskStatus
+	case CapabilityCreateTask:
+		return c.CanCreateTasks
 	case CapabilityCreateSubtask:
 		return c.CanCreateSubtasks
 	case CapabilityCreateAgent:
 		return c.CanCreateAgents
+	case CapabilityListProjects:
+		return c.CanListProjects
+	case CapabilityCreateProject:
+		return c.CanCreateProjects
 	case CapabilityRequestApproval:
 		return c.CanRequestApproval
 	case CapabilityReadMemory:
@@ -66,8 +75,11 @@ func (c Capabilities) AllowedKeys() []string {
 	keys := []string{
 		CapabilityPostComment,
 		CapabilityUpdateTaskStatus,
+		CapabilityCreateTask,
 		CapabilityCreateSubtask,
 		CapabilityCreateAgent,
+		CapabilityListProjects,
+		CapabilityCreateProject,
 		CapabilityRequestApproval,
 		CapabilityReadMemory,
 		CapabilityWriteMemory,
@@ -95,8 +107,11 @@ func FromAgent(agent *models.AgentInstance) Capabilities {
 	return Capabilities{
 		CanPostComments:     true,
 		CanUpdateTaskStatus: true,
+		CanCreateTasks:      shared.HasPermission(perms, shared.PermCanCreateTasks),
 		CanCreateSubtasks:   shared.HasPermission(perms, shared.PermCanCreateTasks),
 		CanCreateAgents:     shared.HasPermission(perms, shared.PermCanCreateAgents),
+		CanListProjects:     true,
+		CanCreateProjects:   shared.HasPermission(perms, shared.PermCanCreateProjects),
 		CanRequestApproval:  shared.HasPermission(perms, shared.PermCanApprove),
 		CanReadMemory:       true,
 		CanWriteMemory:      true,

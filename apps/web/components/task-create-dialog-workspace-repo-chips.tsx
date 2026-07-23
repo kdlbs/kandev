@@ -1,7 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { IconPlus, IconX, IconCode, IconGitBranch, IconFolderPlus } from "@tabler/icons-react";
+import {
+  IconPlus,
+  IconX,
+  IconCode,
+  IconGitBranch,
+  IconFolderPlus,
+  IconCheck,
+} from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useBranches, type BranchSource } from "@/hooks/domains/workspace/use-repository-branches";
@@ -90,9 +97,10 @@ export function WorkspaceRepoChips({
           workspaceId={workspaceId}
           repositories={repositories}
           discoveredRepositories={discoveredRepositories ?? []}
-          // Task creation allows the same repository on different branches;
-          // quick chat excludes a repository as soon as another row uses it.
+          // Task creation marks other rows' picks but keeps every option
+          // selectable; quick chat excludes a repository once another row uses it.
           excludedRepoIds={collectExcludedRepoIds(rows, row, allowDuplicateRepositories)}
+          selectedElsewhere={collectSelectedRepoIdentities(rows, row)}
           branchLocked={branchLocked}
           // For local-executor rows, seed row.branch with the workspace's
           // current branch via this prop. Non-local rows leave it undefined
@@ -151,8 +159,8 @@ export function WorkspaceRepoChips({
  * Returns the repo ids/paths that should be hidden from `currentRow` based on
  * the caller's repository-duplication mode.
  *
- * When duplicates are allowed, only an exact (repo, branch) pairing is
- * excluded, so task creation can target multiple branches from one repo.
+ * When duplicates are allowed, task creation keeps every repository available
+ * so a user can intentionally pick the same repository for another branch.
  * When duplicates are disabled, quick chat excludes the entire repository
  * after another row selects it, regardless of branch.
  *
@@ -165,14 +173,33 @@ function collectExcludedRepoIds(
   currentRow: TaskRepoRow,
   allowDuplicateRepositories: boolean,
 ): Set<string> {
+  if (allowDuplicateRepositories) return new Set();
+
   const ids = new Set<string>();
   for (const r of rows) {
     if (r.key === currentRow.key) continue;
-    if (allowDuplicateRepositories && (!r.branch || r.branch !== currentRow.branch)) continue;
     if (r.repositoryId) ids.add(r.repositoryId);
     if (r.localPath) ids.add(r.localPath);
   }
   return ids;
+}
+
+function collectSelectedRepoIdentities(rows: TaskRepoRow[], currentRow: TaskRepoRow): Set<string> {
+  const identities = new Set<string>();
+  for (const row of rows) {
+    if (row.key === currentRow.key) continue;
+    if (row.repositoryId) identities.add(repoIdIdentity(row.repositoryId));
+    if (row.localPath) identities.add(repoPathIdentity(row.localPath));
+  }
+  return identities;
+}
+
+function repoIdIdentity(id: string): string {
+  return `id:${id}`;
+}
+
+function repoPathIdentity(path: string): string {
+  return `path:${normalizeRepoPath(path)}`;
 }
 
 type RepoChipProps = {
@@ -183,6 +210,8 @@ type RepoChipProps = {
   discoveredRepositories: LocalRepository[];
   /** Repo IDs/paths to filter out of the dropdown (already in use elsewhere). */
   excludedRepoIds: Set<string>;
+  /** Repository identities selected in another row, rendered as a marker. */
+  selectedElsewhere: Set<string>;
   /**
    * Lock the branch pill regardless of branch availability. Used for the
    * local executor where the user's actual checkout dictates the branch
@@ -233,6 +262,7 @@ function useRepoChipData({
   repositories,
   discoveredRepositories,
   excludedRepoIds,
+  selectedElsewhere,
   onBranchChange,
   preferredDefaultBranch,
   preferredDefaultBranchLoading,
@@ -245,6 +275,7 @@ function useRepoChipData({
   | "repositories"
   | "discoveredRepositories"
   | "excludedRepoIds"
+  | "selectedElsewhere"
   | "onBranchChange"
   | "preferredDefaultBranch"
   | "preferredDefaultBranchLoading"
@@ -304,16 +335,22 @@ function useRepoChipData({
         keywords: [r.name, r.local_path, formatUserHomePath(r.local_path)].filter(
           (s): s is string => !!s,
         ),
-        renderLabel: () => renderWorkspaceRepoOption(r),
+        renderLabel: () =>
+          renderWorkspaceRepoOption(
+            r,
+            selectedElsewhere.has(repoIdIdentity(r.id)) ||
+              (!!r.local_path && selectedElsewhere.has(repoPathIdentity(r.local_path))),
+          ),
       })),
       ...filteredDiscovered.map((r) => ({
         value: r.path,
         label: leafSegment(r.path),
         keywords: [r.path, formatUserHomePath(r.path)],
-        renderLabel: () => renderDiscoveredRepoOption(r.path),
+        renderLabel: () =>
+          renderDiscoveredRepoOption(r.path, selectedElsewhere.has(repoPathIdentity(r.path))),
       })),
     ],
-    [filteredRepos, filteredDiscovered],
+    [filteredRepos, filteredDiscovered, selectedElsewhere],
   );
   const branchOptions: PillOption[] = useMemo(
     () => sortBranches(branches).map(branchToOption),
@@ -344,31 +381,13 @@ function buildCreateRepositoryAction(onSelect?: () => void): PillAction | undefi
   };
 }
 
-function RepoChipRemoveButton({ onRemove }: { onRemove: () => void }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label="Remove repository"
-          className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-muted/60 cursor-pointer"
-          data-testid="remove-repo-chip"
-        >
-          <IconX className="h-3 w-3" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>Remove repository</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function RepoChip({
   row,
   workspaceId,
   repositories,
   discoveredRepositories,
   excludedRepoIds,
+  selectedElsewhere,
   branchLocked,
   preferredDefaultBranch,
   preferredDefaultBranchLoading,
@@ -388,6 +407,7 @@ function RepoChip({
     repositories,
     discoveredRepositories,
     excludedRepoIds,
+    selectedElsewhere,
     onBranchChange,
     preferredDefaultBranch,
     preferredDefaultBranchLoading,
@@ -399,14 +419,13 @@ function RepoChip({
     repositories,
     discoveredRepositories,
   );
-  const branchValue = preferredDefaultBranchLoading ? "" : row.branch;
   const hasRepo = !!(row.repositoryId || row.localPath);
+  const branchValue = preferredDefaultBranchLoading ? "" : row.branch;
   const branchPlaceholder = computeBranchPlaceholder(
     hasRepo,
     branchesLoading || !!preferredDefaultBranchLoading,
     branchOptions.length,
   );
-
   return (
     <span
       className="inline-flex items-center rounded-md border border-input bg-input/20 dark:bg-input/30 pr-0.5"
@@ -459,23 +478,48 @@ function RepoChip({
   );
 }
 
+function RepoChipRemoveButton({ onRemove }: { onRemove: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Remove repository"
+          className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-muted/60 cursor-pointer"
+          data-testid="remove-repo-chip"
+        >
+          <IconX className="h-3 w-3" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>Remove repository</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function normalizeRepoPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/\/+$/g, "");
 }
 
-function renderWorkspaceRepoOption(repo: Repository) {
+function renderWorkspaceRepoOption(repo: Repository, alreadyAdded: boolean) {
   const display = repo.local_path ? formatUserHomePath(repo.local_path) : "";
   return (
-    <span className="flex min-w-0 flex-1 flex-col overflow-hidden" title={display || repo.name}>
-      <span className="truncate">{repo.name}</span>
-      {display ? (
-        <span className="truncate text-[11px] text-muted-foreground">{display}</span>
-      ) : null}
+    <span
+      className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden"
+      title={display || repo.name}
+    >
+      <span className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <span className="truncate">{repo.name}</span>
+        {display ? (
+          <span className="truncate text-[11px] text-muted-foreground">{display}</span>
+        ) : null}
+      </span>
+      {alreadyAdded ? <AlreadyAddedMarker /> : null}
     </span>
   );
 }
 
-function renderDiscoveredRepoOption(path: string) {
+function renderDiscoveredRepoOption(path: string, alreadyAdded: boolean) {
   const display = formatUserHomePath(path);
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden" title={display}>
@@ -486,6 +530,20 @@ function renderDiscoveredRepoOption(path: string) {
       <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
         on disk
       </Badge>
+      {alreadyAdded ? <AlreadyAddedMarker /> : null}
+    </span>
+  );
+}
+
+function AlreadyAddedMarker() {
+  return (
+    <span
+      role="img"
+      aria-label="Already added"
+      data-testid="already-added-repository-marker"
+      className="shrink-0 text-primary"
+    >
+      <IconCheck aria-hidden="true" className="h-4 w-4" />
     </span>
   );
 }

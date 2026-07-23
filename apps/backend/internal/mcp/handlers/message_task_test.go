@@ -104,7 +104,7 @@ func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prom
 	return &orchestrator.PromptResult{}, nil
 }
 
-func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, _, _ bool, _ []v1.MessageAttachment) (*executor.TaskExecution, error) {
+func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, _, _ bool, _ []v1.MessageAttachment, _ []v1.EntityReference) (*executor.TaskExecution, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startCreatedCalls = append(f.startCreatedCalls, startCreatedCall{
@@ -1641,7 +1641,7 @@ func TestHandleMessageTask_DispatchRollbackDoesNotOverwriteCoordinatorStop(t *te
 	assert.Equal(t, "queued after stop", queueStatus.Entries[1].Content)
 }
 
-func TestHandleMessageTask_OfficeReviewDoesNotTransitionTaskState(t *testing.T) {
+func TestHandleMessageTask_UnassignedOfficeReviewDoesNotTransitionTaskState(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
@@ -1651,7 +1651,6 @@ func TestHandleMessageTask_OfficeReviewDoesNotTransitionTaskState(t *testing.T) 
 	task.State = v1.TaskStateReview
 	task.WorkflowStepID = "step-review"
 	task.ProjectID = "office-project"
-	task.AssigneeAgentProfileID = "agent-profile-1"
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
 	h, orch := newMessageTaskHandler(t, svc, repo)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -362,6 +364,62 @@ func TestCompleteOnboarding_CreatesTask(t *testing.T) {
 	if len(mock.calls) != 1 {
 		t.Errorf("expected 1 task creation (the onboarding task), got %d", len(mock.calls))
 	}
+}
+
+func TestDefaultOnboardingBriefMutationsHaveCEOCapabilityCatalog(t *testing.T) {
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve onboarding test source path")
+	}
+	backendDir := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "../../.."))
+	appsDir := filepath.Dir(backendDir)
+
+	brief := readOnboardingContractFile(t,
+		filepath.Join(appsDir, "web/app/office/setup/setup-task-defaults.ts"))
+	officeContext := readOnboardingContractFile(t,
+		filepath.Join(backendDir, "config/prompts/office-context.md"))
+	projectSkill := readOnboardingContractFile(t,
+		filepath.Join(backendDir, "internal/office/configloader/skills/kandev-projects/SKILL.md"))
+	hiringSkill := readOnboardingContractFile(t,
+		filepath.Join(backendDir, "internal/office/configloader/skills/kandev-team-admin/references/hiring.md"))
+
+	contracts := []struct {
+		briefMutation string
+		catalog       string
+		capability    string
+	}{
+		{"create one project per repository", projectSkill, "kandev projects create"},
+		{"create the agent team", hiringSkill, "kandev agents create"},
+		{"responsibilities, permissions, and operating guidance", hiringSkill, "--role"},
+		{"draft a proposed plan", officeContext, "create_task_plan_kandev"},
+		{"questions for the human", officeContext, "ask_user_question_kandev"},
+	}
+	brief = strings.ToLower(brief)
+	for _, contract := range contracts {
+		t.Run(contract.briefMutation, func(t *testing.T) {
+			if !strings.Contains(brief, contract.briefMutation) {
+				t.Fatalf("default onboarding brief no longer contains %q; update this contract", contract.briefMutation)
+			}
+			if !strings.Contains(strings.ToLower(contract.catalog), strings.ToLower(contract.capability)) {
+				t.Fatalf("brief mutation %q has no advertised CEO capability %q",
+					contract.briefMutation, contract.capability)
+			}
+		})
+	}
+	for _, unsupported := range []string{"create a workspace", "create workspaces", "step_complete_kandev"} {
+		if strings.Contains(brief, unsupported) {
+			t.Errorf("default onboarding brief requests unsupported Office mutation %q", unsupported)
+		}
+	}
+}
+
+func readOnboardingContractFile(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read onboarding contract file %s: %v", path, err)
+	}
+	return string(content)
 }
 
 func TestCompleteOnboarding_NoTaskWhenTitleEmpty(t *testing.T) {

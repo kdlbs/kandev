@@ -43,37 +43,41 @@ Options considered:
 Blocked task: $KANDEV_TASK_ID" \
     2>/dev/null
 )
-HUMAN_TASK_ID=$(echo "$HUMAN_TASK" | jq -r '.id')
+HUMAN_TASK_ID=$(echo "$HUMAN_TASK" | jq -r '.task_id')
 ```
 
-### Step 2: Block your task on the human task
+### Step 2: Cross-reference from the blocked task
 
 ```bash
-# Link: your task is blocked by the human task
-$KANDEV_CLI kandev task update --id "$KANDEV_TASK_ID" \
-  --add-blocker "$HUMAN_TASK_ID"
+$KANDEV_CLI kandev tasks message --id "$KANDEV_TASK_ID" \
+  --prompt "Escalated to human task $HUMAN_TASK_ID. Waiting for decision on: <question>"
 ```
 
-### Step 3: Post a comment and set blocked status
+The Office CLI does not currently expose a secure operation for adding a blocker
+relationship. The human task description links back to the blocked task, and the
+comment above links the blocked task to the human task. Do not comment on the new
+human task: a run may only message tasks granted by its signed runtime scope.
+These references do not create a task dependency.
+
+### Step 3: Set blocked status
 
 ```bash
-$KANDEV_CLI kandev tasks message --prompt "Escalated to human: created task $HUMAN_TASK_ID. Waiting for decision on: <question>"
-
 $KANDEV_CLI kandev task update --status blocked
 ```
 
 ### Step 4: Exit
 
-Your session ends. The orchestrator will wake you with reason
-`task_blockers_resolved` when the human closes the decision task.
+Your session ends. Because this flow does not create a blocker relationship, the
+`task_blockers_resolved` wake reason will NOT occur for this manual cross-reference
+flow. The human or coordinator must post the decision on the blocked task or update
+it through the normal task workflow.
 
-## On wakeup after resolution
+## On human response
 
-When you wake with `KANDEV_WAKE_REASON=task_blockers_resolved`, parse
-`$KANDEV_WAKE_PAYLOAD_JSON` for the resolved blocker titles. If it is absent,
-read the JSON file at `$KANDEV_WAKE_PAYLOAD_PATH` instead. Then continue your
-work incorporating the human's decision (visible in the resolved task's comments
-or description).
+Resume from the normal task comment or task update event. Parse
+`$KANDEV_WAKE_PAYLOAD_JSON` first; if it is absent, read the JSON file at
+`$KANDEV_WAKE_PAYLOAD_PATH`. Confirm the decision is present on the blocked task,
+move it back to the appropriate active status, and continue the work.
 
 ## Rules
 

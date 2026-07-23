@@ -1,5 +1,5 @@
 ---
-description: Provide a frontier-model second opinion on unusually risky Kandev architecture and planning; the primary planner owns normal specs and plans.
+description: User-requested independent frontier second opinion; planner owns normal architecture, specs, and plans.
 mode: subagent
 temperature: 0.1
 permission:

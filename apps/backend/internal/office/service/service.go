@@ -164,6 +164,7 @@ type WorkspaceCreator interface {
 // interface to avoid a direct import of the task package.
 type TaskCreator interface {
 	CreateOfficeTask(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (taskID string, err error)
+	CreateOfficeTaskAsAgent(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (taskID string, err error)
 }
 
 // SubtaskCreator creates child tasks in the kanban system.
@@ -408,7 +409,7 @@ func (s *Service) CreateOfficeTaskAsAgent(
 	if s.taskCreator == nil {
 		return "", fmt.Errorf("task creator not configured")
 	}
-	return s.taskCreator.CreateOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description)
+	return s.taskCreator.CreateOfficeTaskAsAgent(ctx, workspaceID, projectID, assigneeAgentID, title, description)
 }
 
 // CreateOfficeSubtaskAsAgent checks can_create_tasks for the caller before
@@ -427,6 +428,16 @@ func (s *Service) CreateOfficeSubtaskAsAgent(
 		return "", fmt.Errorf("subtask creator not configured")
 	}
 	return creator.CreateOfficeSubtask(ctx, parentTaskID, assigneeAgentID, title, description)
+}
+
+// GetTaskWorkspaceID returns the workspace that owns a task for runtime scope validation.
+func (s *Service) GetTaskWorkspaceID(ctx context.Context, taskID string) (string, error) {
+	return s.repo.GetTaskWorkspaceID(ctx, taskID)
+}
+
+// GetTaskProjectID returns the project assigned to a task for runtime scope validation.
+func (s *Service) GetTaskProjectID(ctx context.Context, taskID string) (string, error) {
+	return s.repo.GetTaskProjectID(ctx, taskID)
 }
 
 func (s *Service) requireTaskCreatePermission(ctx context.Context, callerAgentID string) error {

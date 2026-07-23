@@ -447,7 +447,7 @@ type TaskStatusUpdateRequest struct {
 func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusUpdateRequest) error {
 	dbState := normaliseStatus(req.NewStatus)
 	if dbState == "" {
-		return fmt.Errorf("unknown status: %s", req.NewStatus)
+		return &InvalidTaskStatusError{Status: req.NewStatus}
 	}
 
 	preStatus := ""

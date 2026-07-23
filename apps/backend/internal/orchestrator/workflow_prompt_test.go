@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/sysprompt"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -22,12 +23,19 @@ type fakePromptReferenceExpander struct {
 	calls []string
 }
 
-func (f *fakePromptReferenceExpander) AppendReferenceExpansions(_ context.Context, prompt string, _ *zap.Logger) string {
+const fakeResolvedPromptReferenceContext = "EXPANDED PROMPT REFERENCES:\n- resolved saved-prompt content"
+
+func (f *fakePromptReferenceExpander) AppendReferenceExpansionsWithContext(
+	_ context.Context,
+	prompt string,
+	_ *zap.Logger,
+) (string, string) {
 	f.calls = append(f.calls, prompt)
 	if !strings.Contains(prompt, "@") {
-		return prompt
+		return prompt, ""
 	}
-	return prompt + "\n\n<kandev-system>EXPANDED:" + prompt + "</kandev-system>"
+	return prompt + "\n\n" + sysprompt.Wrap(fakeResolvedPromptReferenceContext),
+		fakeResolvedPromptReferenceContext
 }
 
 func TestBuildWorkflowPrompt_ReplacesTaskPromptPlaceholder(t *testing.T) {
@@ -89,7 +97,7 @@ func TestBuildWorkflowPrompt_ExpandsStepPromptReference(t *testing.T) {
 	if !strings.Contains(got, "Use @my-prompt for context.") {
 		t.Fatalf("expected original prompt text preserved, got %q", got)
 	}
-	if !strings.Contains(got, "<kandev-system>EXPANDED:Use @my-prompt for context.</kandev-system>") {
+	if !strings.Contains(got, sysprompt.Wrap(fakeResolvedPromptReferenceContext)) {
 		t.Fatalf("expected hidden expansion block appended, got %q", got)
 	}
 }
@@ -129,7 +137,7 @@ func TestBuildWorkflowPrompt_ExpandsBasePromptReference(t *testing.T) {
 	if !strings.Contains(got, want) {
 		t.Fatalf("expected base prompt reference preserved in joined prompt, got %q", got)
 	}
-	if !strings.Contains(got, "<kandev-system>EXPANDED:"+want+"</kandev-system>") {
+	if !strings.Contains(got, sysprompt.Wrap(fakeResolvedPromptReferenceContext)) {
 		t.Fatalf("expected base-prompt reference to be resolved by the expander, got %q", got)
 	}
 }
@@ -169,7 +177,7 @@ func TestApplyWorkflowAndPlanMode_KeepsWorkflowPromptVisibleWhenStepEnablesPlanM
 	}
 	svc := createTestService(repo, stepGetter, newMockTaskRepo())
 
-	got, planModeActive := svc.applyWorkflowAndPlanMode(
+	got, planModeActive, _ := svc.applyWorkflowAndPlanMode(
 		context.Background(),
 		"Migrate Atlantis datasource.",
 		"task-1",
@@ -205,7 +213,7 @@ func TestApplyWorkflowAndPlanMode_PassthroughSkipsReferenceExpansion(t *testing.
 	expander := &fakePromptReferenceExpander{}
 	svc.promptExpander = expander
 
-	got, _ := svc.applyWorkflowAndPlanMode(
+	got, _, _ := svc.applyWorkflowAndPlanMode(
 		context.Background(),
 		"Migrate Atlantis datasource.",
 		"task-1",

@@ -63,4 +63,4 @@ Report what was simplified:
 - What was removed/inlined/simplified
 - Lines removed (net)
 
-Do not spawn subagents. Report required full verification to the planner.
+Do not spawn subagents. Report required change-aware verification to the planner.
