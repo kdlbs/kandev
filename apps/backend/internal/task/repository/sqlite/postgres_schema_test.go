@@ -2,8 +2,15 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
+	"net/url"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
@@ -312,5 +319,113 @@ func TestPostgresTaskEnvironmentReposMultiBranchMigration(t *testing.T) {
 		) VALUES ('ter-dupe', 'env-1', 'repo-1', '', 'wt-dupe', $1, $1)
 	`, now); err == nil {
 		t.Fatal("expected duplicate env/repo/branch insert to fail")
+	}
+}
+
+// openIsolatedPostgresMultiConn is like testutil.OpenIsolatedPostgres but
+// supports a real multi-connection pool. OpenIsolatedPostgres scopes its
+// isolated schema via a session-level `SET search_path` issued on one
+// connection — fine for its single-connection pool, but a second pooled
+// connection never sees that SET and falls back to the default "public"
+// schema. Baking search_path into the DSN's libpq `options` param instead
+// makes every new connection resolve unqualified table names against the
+// isolated schema, so the pool can be sized for genuine concurrency tests.
+func openIsolatedPostgresMultiConn(t *testing.T, dsn string, maxConns int) *sqlx.DB {
+	t.Helper()
+	schema := "kandev_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+
+	setup, err := sqlx.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres (schema setup): %v", err)
+	}
+	if _, err := setup.Exec("CREATE SCHEMA " + schema); err != nil {
+		_ = setup.Close()
+		t.Fatalf("create postgres schema %s: %v", schema, err)
+	}
+	_ = setup.Close()
+
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	scopedDSN := dsn + sep + "options=" + url.QueryEscape("-c search_path="+schema)
+	db, err := sqlx.Open("pgx", scopedDSN)
+	if err != nil {
+		t.Fatalf("open postgres (scoped, %d conns): %v", maxConns, err)
+	}
+	db.SetMaxOpenConns(maxConns)
+	db.SetMaxIdleConns(maxConns)
+	t.Cleanup(func() {
+		if cleanup, cerr := sqlx.Open("pgx", dsn); cerr == nil {
+			_, _ = cleanup.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
+			_ = cleanup.Close()
+		}
+		_ = db.Close()
+	})
+	return db
+}
+
+// TestPostgresSetSessionPrimary_ConcurrentPromotionsLeaveExactlyOnePrimary
+// exercises the race Greptile flagged on PR #1860: SetSessionPrimary demotes
+// every other session for a task and promotes the target in one
+// transaction, plus a `SELECT ... FOR UPDATE` row lock on the owning task
+// so concurrent promotions on separate Postgres connections serialize
+// instead of interleaving their demote/promote pairs. Uses
+// openIsolatedPostgresMultiConn (not testutil.OpenIsolatedPostgres, which
+// caps the pool at one connection) because genuine cross-connection
+// concurrency is the whole point — a one-connection pool would trivially
+// serialize even the pre-fix code and prove nothing.
+func TestPostgresSetSessionPrimary_ConcurrentPromotionsLeaveExactlyOnePrimary(t *testing.T) {
+	const concurrency = 8
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), concurrency)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-primary-race", "ws-primary-race", "Task primary race", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	sessionIDs := make([]string, concurrency)
+	for i := range sessionIDs {
+		sessionIDs[i] = fmt.Sprintf("session-primary-race-%d", i)
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: sessionIDs[i], TaskID: "task-primary-race", State: models.TaskSessionStateRunning,
+		}); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", sessionIDs[i], err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, concurrency)
+	for i, sessionID := range sessionIDs {
+		wg.Add(1)
+		go func(i int, sessionID string) {
+			defer wg.Done()
+			errs[i] = repo.SetSessionPrimary(ctx, sessionID)
+		}(i, sessionID)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("SetSessionPrimary(%s) concurrent call failed: %v", sessionIDs[i], err)
+		}
+	}
+
+	var primaryCount int
+	if err := db.Get(&primaryCount, db.Rebind(
+		`SELECT COUNT(*) FROM task_sessions WHERE task_id = ? AND is_primary = 1`,
+	), "task-primary-race"); err != nil {
+		t.Fatalf("count primary sessions: %v", err)
+	}
+	if primaryCount != 1 {
+		t.Errorf("expected exactly 1 primary session after %d concurrent promotions, got %d — FOR UPDATE lock not serializing across connections", concurrency, primaryCount)
 	}
 }
