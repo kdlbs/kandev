@@ -311,6 +311,10 @@ function renderMessageHandler() {
   );
 }
 
+function submit(message: string) {
+  return { message };
+}
+
 describe("useMessageHandler input routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -322,7 +326,7 @@ describe("useMessageHandler input routing", () => {
     const { result } = renderMessageHandler();
 
     await act(async () => {
-      await result.current.handleSendMessage("follow up");
+      await result.current.handleSendMessage(submit("follow up"));
     });
 
     expect(getWebSocketClientMock().request).toHaveBeenCalledWith(
@@ -339,7 +343,7 @@ describe("useMessageHandler input routing", () => {
     selectedSession("RUNNING", "background");
 
     await act(async () => {
-      await result.current.handleSendMessage("fresh state");
+      await result.current.handleSendMessage(submit("fresh state"));
     });
 
     expect(getWebSocketClientMock().request).toHaveBeenCalled();
@@ -351,10 +355,17 @@ describe("useMessageHandler input routing", () => {
     const { result } = renderMessageHandler();
 
     await act(async () => {
-      await result.current.handleSendMessage("next");
+      await result.current.handleSendMessage(submit("next"));
     });
 
-    expect(queueMock).toHaveBeenCalledWith("task-1", "next", undefined, false, undefined);
+    expect(queueMock).toHaveBeenCalledWith({
+      taskId: "task-1",
+      content: "next",
+      model: undefined,
+      planMode: false,
+      attachments: undefined,
+      entityReferences: undefined,
+    });
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
   });
 
@@ -363,7 +374,7 @@ describe("useMessageHandler input routing", () => {
     const { result } = renderMessageHandler();
 
     await act(async () => {
-      await result.current.handleSendMessage("start");
+      await result.current.handleSendMessage(submit("start"));
     });
 
     expect(getWebSocketClientMock().request).toHaveBeenCalled();
@@ -375,7 +386,7 @@ describe("useMessageHandler input routing", () => {
     const { result } = renderMessageHandler();
 
     await act(async () => {
-      await result.current.handleSendMessage("after setup");
+      await result.current.handleSendMessage(submit("after setup"));
     });
 
     expect(queueMock).toHaveBeenCalled();
@@ -386,7 +397,7 @@ describe("useMessageHandler input routing", () => {
     selectedSession("COMPLETED");
     const { result } = renderMessageHandler();
 
-    await expect(result.current.handleSendMessage("too late")).rejects.toMatchObject({
+    await expect(result.current.handleSendMessage(submit("too late"))).rejects.toMatchObject({
       code: "session-unavailable",
     });
     expect(queueMock).not.toHaveBeenCalled();
