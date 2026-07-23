@@ -57,7 +57,9 @@ function pressKey(
   return event;
 }
 
-const TOGGLE_KEYBINDING = { id: "toggle", default: "mod+shift+k", description: "Toggle" };
+const TOGGLE_KEYBINDING = { id: "toggle", default: "mod+shift+e", description: "Toggle" };
+/** A free combo (not used by any core shortcut) shared by two plugins bound to the same "open" id. */
+const OPEN_COMBO = "mod+shift+o";
 
 function withToggleKeybinding(overrides: Partial<PluginRecord> = {}): PluginRecord {
   return makePlugin({ ui: { keybindings: [TOGGLE_KEYBINDING] }, ...overrides });
@@ -83,7 +85,7 @@ describe("usePluginShortcuts", () => {
     pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", handler);
 
     renderHook(() => usePluginShortcuts());
-    const event = pressKey("k", { ctrlKey: true, shiftKey: true });
+    const event = pressKey("e", { ctrlKey: true, shiftKey: true });
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(event.defaultPrevented).toBe(true);
@@ -108,7 +110,7 @@ describe("usePluginShortcuts", () => {
     renderHook(() => usePluginShortcuts());
     const input = document.createElement("input");
     document.body.appendChild(input);
-    pressKey("k", { ctrlKey: true, shiftKey: true }, input);
+    pressKey("e", { ctrlKey: true, shiftKey: true }, input);
     input.remove();
 
     expect(handler).not.toHaveBeenCalled();
@@ -118,22 +120,22 @@ describe("usePluginShortcuts", () => {
     mockItems = [withToggleKeybinding()];
 
     renderHook(() => usePluginShortcuts());
-    expect(() => pressKey("k", { ctrlKey: true, shiftKey: true })).not.toThrow();
+    expect(() => pressKey("e", { ctrlKey: true, shiftKey: true })).not.toThrow();
   });
 
   it("respects a user override combo instead of the manifest default", () => {
     mockItems = [withToggleKeybinding()];
     mockOverrides = {
-      [`plugin:${PLUGIN_ID}:toggle`]: { key: "j", modifiers: { ctrlOrCmd: true } },
+      [`plugin:${PLUGIN_ID}:toggle`]: { key: "u", modifiers: { ctrlOrCmd: true } },
     };
     const handler = vi.fn();
     pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", handler);
 
     renderHook(() => usePluginShortcuts());
-    pressKey("k", { ctrlKey: true, shiftKey: true }); // manifest default — no longer bound
+    pressKey("e", { ctrlKey: true, shiftKey: true }); // manifest default — no longer bound
     expect(handler).not.toHaveBeenCalled();
 
-    pressKey("j", { ctrlKey: true }); // user override — now bound
+    pressKey("u", { ctrlKey: true }); // user override — now bound
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
@@ -142,12 +144,12 @@ describe("usePluginShortcuts", () => {
       makePlugin({
         id: "plugin-a",
         display_name: "Plugin A",
-        ui: { keybindings: [{ id: "open", default: "mod+j", description: "Open" }] },
+        ui: { keybindings: [{ id: "open", default: OPEN_COMBO, description: "Open" }] },
       }),
       makePlugin({
         id: "plugin-b",
         display_name: "Plugin B",
-        ui: { keybindings: [{ id: "open", default: "mod+j", description: "Open" }] },
+        ui: { keybindings: [{ id: "open", default: OPEN_COMBO, description: "Open" }] },
       }),
     ];
     const callOrder: string[] = [];
@@ -155,7 +157,7 @@ describe("usePluginShortcuts", () => {
     pluginRegistry.forPlugin("plugin-b").registerKeybinding("open", () => callOrder.push("b"));
 
     renderHook(() => usePluginShortcuts());
-    pressKey("j", { ctrlKey: true });
+    pressKey("o", { ctrlKey: true, shiftKey: true });
 
     expect(callOrder).toEqual(["a", "b"]);
   });
@@ -167,7 +169,7 @@ describe("usePluginShortcuts", () => {
 
     const { unmount } = renderHook(() => usePluginShortcuts());
     unmount();
-    pressKey("k", { ctrlKey: true, shiftKey: true });
+    pressKey("e", { ctrlKey: true, shiftKey: true });
 
     expect(handler).not.toHaveBeenCalled();
   });
@@ -191,12 +193,12 @@ describe("usePluginShortcuts handler exceptions", () => {
       makePlugin({
         id: "plugin-a",
         display_name: "Plugin A",
-        ui: { keybindings: [{ id: "open", default: "mod+j", description: "Open" }] },
+        ui: { keybindings: [{ id: "open", default: OPEN_COMBO, description: "Open" }] },
       }),
       makePlugin({
         id: "plugin-b",
         display_name: "Plugin B",
-        ui: { keybindings: [{ id: "open", default: "mod+j", description: "Open" }] },
+        ui: { keybindings: [{ id: "open", default: OPEN_COMBO, description: "Open" }] },
       }),
     ];
     const secondHandler = vi.fn();
@@ -207,7 +209,7 @@ describe("usePluginShortcuts handler exceptions", () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     renderHook(() => usePluginShortcuts());
-    expect(() => pressKey("j", { ctrlKey: true })).not.toThrow();
+    expect(() => pressKey("o", { ctrlKey: true, shiftKey: true })).not.toThrow();
 
     expect(secondHandler).toHaveBeenCalledTimes(1);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -261,7 +263,7 @@ describe("core vs plugin shortcut precedence", () => {
       useAppShortcuts();
       usePluginShortcuts();
     });
-    pressKey("k", { ctrlKey: true, shiftKey: true });
+    pressKey("e", { ctrlKey: true, shiftKey: true });
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(mockToggleAppSidebar).not.toHaveBeenCalled();
@@ -278,7 +280,7 @@ describe("core vs plugin shortcut precedence", () => {
     pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", pluginHandler);
 
     const coreShortcut: KeyboardShortcut = {
-      key: "k",
+      key: "e",
       modifiers: { ctrlOrCmd: true, shift: true },
     };
     const coreCallback = vi.fn();
@@ -291,10 +293,96 @@ describe("core vs plugin shortcut precedence", () => {
       useKeyboardShortcut(coreShortcut, coreCallback);
     });
 
-    const event = pressKey("k", { ctrlKey: true, shiftKey: true });
+    const event = pressKey("e", { ctrlKey: true, shiftKey: true });
 
     expect(pluginHandler).toHaveBeenCalledTimes(1);
     expect(coreCallback).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(true);
+  });
+});
+
+describe("core shortcut combo shadowing (robust, non-registry-aware core shortcuts)", () => {
+  beforeEach(() => {
+    mockOverrides = {};
+    mockItems = [];
+    mockToggleAppSidebar.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  it("does not invoke or preventDefault a plugin bound to FIND_IN_PANEL's combo, leaving core panel-search to handle it", () => {
+    // Regression for Greptile P1 (PR #1895, comment 3638902528): FIND_IN_PANEL
+    // (Cmd/Ctrl+F) is handled by independent per-panel capture-phase
+    // listeners (`use-panel-search.ts`) that never call `preventDefault` up
+    // front and don't check it either. The old "bail on defaultPrevented"
+    // guard couldn't protect this combo at all — only skipping the plugin
+    // handler outright (by combo, not by event state) fixes it.
+    mockItems = [
+      makePlugin({
+        ui: { keybindings: [{ id: "find", default: "mod+f", description: "Find" }] },
+      }),
+    ];
+    const pluginHandler = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("find", pluginHandler);
+
+    renderHook(() => usePluginShortcuts());
+    const event = pressKey("f", { ctrlKey: true });
+
+    expect(pluginHandler).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("still fires a plugin bound to a genuinely free combo (no core shortcut uses it)", () => {
+    mockItems = [
+      makePlugin({
+        ui: { keybindings: [{ id: "open", default: "mod+shift+u", description: "Open" }] },
+      }),
+    ];
+    const pluginHandler = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("open", pluginHandler);
+
+    renderHook(() => usePluginShortcuts());
+    const event = pressKey("u", { ctrlKey: true, shiftKey: true });
+
+    expect(pluginHandler).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("shadows the plugin by a user's REMAPPED core combo, not the old default", () => {
+    // A user remaps TASK_SWITCHER (default Cmd/Ctrl+Space) to Cmd/Ctrl+U. A
+    // plugin bound to the OLD default (mod+space) should now fire freely,
+    // and a plugin bound to the NEW combo (mod+u) should be shadowed.
+    mockOverrides = { TASK_SWITCHER: { key: "u", modifiers: { ctrlOrCmd: true } } };
+    mockItems = [
+      makePlugin({
+        id: "plugin-old-combo",
+        display_name: "Old Combo Plugin",
+        ui: { keybindings: [{ id: "open", default: "mod+space", description: "Open" }] },
+      }),
+      makePlugin({
+        id: "plugin-new-combo",
+        display_name: "New Combo Plugin",
+        ui: { keybindings: [{ id: "open", default: "mod+u", description: "Open" }] },
+      }),
+    ];
+    const oldComboHandler = vi.fn();
+    const newComboHandler = vi.fn();
+    pluginRegistry.forPlugin("plugin-old-combo").registerKeybinding("open", oldComboHandler);
+    pluginRegistry.forPlugin("plugin-new-combo").registerKeybinding("open", newComboHandler);
+
+    renderHook(() => usePluginShortcuts());
+
+    pressKey(" ", { ctrlKey: true }); // old TASK_SWITCHER default — no longer core, plugin fires
+    expect(oldComboHandler).toHaveBeenCalledTimes(1);
+
+    const event = pressKey("u", { ctrlKey: true }); // new TASK_SWITCHER combo — shadows the plugin
+    expect(newComboHandler).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+
+    pluginRegistry.unregisterPlugin("plugin-old-combo");
+    pluginRegistry.unregisterPlugin("plugin-new-combo");
   });
 });

@@ -35,16 +35,17 @@ describe("useKeyboardShortcut", () => {
     const callback = vi.fn();
     renderHook(() => useKeyboardShortcut(SHORTCUT, callback));
 
-    window.addEventListener(
-      "keydown",
-      (event) => {
-        event.preventDefault();
-      },
-      { capture: true },
-    );
+    const preventDefaultListener = (event: KeyboardEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", preventDefaultListener, { capture: true });
 
-    pressKey("k", { ctrlKey: true, shiftKey: true });
+    try {
+      pressKey("k", { ctrlKey: true, shiftKey: true });
 
-    expect(callback).not.toHaveBeenCalled();
+      expect(callback).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", preventDefaultListener, { capture: true });
+    }
   });
 });
