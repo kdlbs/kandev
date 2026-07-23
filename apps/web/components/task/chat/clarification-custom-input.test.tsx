@@ -1,6 +1,8 @@
+import { createRef } from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, fireEvent } from "@testing-library/react";
 import { ClarificationCustomInput } from "./clarification-overlay-parts";
+import { routePanelMouseDown } from "./route-panel-mouse-down";
 
 // Mutable pointer state so individual tests can flip to a touch device without
 // touching matchMedia internals.
@@ -35,6 +37,51 @@ function makeProps(overrides: Partial<Parameters<typeof ClarificationCustomInput
 function pressEnter(el: HTMLElement, init: Partial<KeyboardEventInit> = {}): boolean {
   return fireEvent.keyDown(el, { key: "Enter", ...init });
 }
+
+function renderInPanel(overrides: Partial<Parameters<typeof ClarificationCustomInput>[0]> = {}) {
+  const panelRef = createRef<HTMLDivElement>();
+  return render(
+    <div
+      data-testid="panel"
+      tabIndex={-1}
+      ref={panelRef}
+      onMouseDown={(event) => routePanelMouseDown(event, panelRef)}
+    >
+      <ClarificationCustomInput {...makeProps(overrides)} />
+    </div>,
+  );
+}
+
+describe("ClarificationCustomInput row focus", () => {
+  it("focuses the textarea when the non-interactive row surface is pressed", () => {
+    const { getByTestId } = renderInPanel();
+
+    const notDefaulted = fireEvent.mouseDown(getByTestId("clarification-custom-input"));
+
+    expect(notDefaulted).toBe(false);
+    expect(document.activeElement).toBe(getByTestId(INPUT_TESTID));
+  });
+
+  it("does not focus the disabled textarea from the row surface", () => {
+    const { getByTestId } = renderInPanel({ isSubmitting: true });
+
+    fireEvent.mouseDown(getByTestId("clarification-custom-input"));
+
+    expect(document.activeElement).not.toBe(getByTestId(INPUT_TESTID));
+  });
+
+  it("does not route a touch Send press through the textarea", () => {
+    pointer.isFinePointer = false;
+    const onSubmit = vi.fn();
+    const { getByTestId } = renderInPanel({ draft: "answer", onSubmit });
+
+    fireEvent.mouseDown(getByTestId(TOUCH_SUBMIT_TESTID));
+    fireEvent.click(getByTestId(TOUCH_SUBMIT_TESTID));
+
+    expect(document.activeElement).not.toBe(getByTestId(INPUT_TESTID));
+    expect(onSubmit).toHaveBeenCalledOnce();
+  });
+});
 
 describe("ClarificationCustomInput multiline", () => {
   it("renders a textarea so answers can span multiple lines", () => {

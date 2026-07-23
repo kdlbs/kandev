@@ -98,6 +98,13 @@ type UseDiffOptionsArgs = {
   onRevert?: (filePath: string) => void;
   /** Multi-repo subpath (repository_name) so Edit opens under the right repo. */
   repo?: string;
+  taskId?: string | null;
+  sessionId?: string | null;
+  repositoryId?: string | null;
+  status?: string | null;
+  previousPath?: string | null;
+  publishedBranch?: string | null;
+  baseBranch?: string | null;
   /** Enable diff expansion (requires full deletionLines/additionLines in metadata) */
   enableExpansion?: boolean;
   /** Number of lines to expand per click (default: 20) */
@@ -157,6 +164,13 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onPreviewMarkdown,
     onRevert,
     repo,
+    taskId: args.taskId,
+    sessionId: args.sessionId,
+    repositoryId: args.repositoryId,
+    status: args.status,
+    previousPath: args.previousPath,
+    publishedBranch: args.publishedBranch,
+    baseBranch: args.baseBranch,
     expandUnchanged,
     onToggleExpandUnchanged,
   });

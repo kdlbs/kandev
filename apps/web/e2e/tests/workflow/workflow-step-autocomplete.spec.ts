@@ -39,6 +39,61 @@ test.describe("Workflow step prompt autocomplete", () => {
     await expect(suggestion).toContainText("task_prompt");
   });
 
+  test("shows and inserts a saved prompt mention when typing @ in step prompt editor", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    const promptName = "e2e-mention-prompt";
+    await apiClient.createPrompt(promptName, "Some reusable prompt content for e2e mentions.");
+
+    try {
+      const page = new WorkflowSettingsPage(testPage);
+      await page.goto(seedData.workspaceId);
+
+      const card = await page.findWorkflowCard("E2E Workflow");
+      await expect(card).toBeVisible();
+
+      // Click first step to open config panel
+      const stepNodes = card.locator(".group.relative");
+      await stepNodes.first().click();
+      await testPage.waitForTimeout(500);
+
+      // Wait for the ScriptEditor (Monaco) to mount inside the step config panel
+      const monacoEditor = card.locator(".monaco-editor");
+      await expect(monacoEditor).toBeVisible({ timeout: 10_000 });
+
+      // Click into the editor to focus it
+      await monacoEditor.click();
+      await testPage.waitForTimeout(300);
+
+      // Type @ to trigger the prompt-mention autocomplete
+      await testPage.keyboard.type("@");
+      await testPage.waitForTimeout(500);
+
+      // The Monaco suggest widget should appear with the seeded prompt
+      const suggestWidget = testPage.locator(".monaco-editor .suggest-widget");
+      await expect(suggestWidget).toBeVisible({ timeout: 5_000 });
+
+      const suggestion = suggestWidget.locator(".monaco-list-row").filter({
+        hasText: promptName,
+      });
+      await expect(suggestion.first()).toBeVisible();
+
+      // Accept the suggestion and verify the editor content now contains the mention.
+      await suggestion.first().click();
+      await testPage.waitForTimeout(300);
+
+      await expect(monacoEditor).toContainText(`@${promptName}`);
+    } finally {
+      const { prompts } = await apiClient.listPrompts();
+      const created = prompts.find((p) => p.name === promptName);
+      if (created) {
+        await apiClient.deletePrompt(created.id).catch(() => undefined);
+      }
+    }
+  });
+
   test("persists step agent profile selection after change", async ({
     testPage,
     seedData,

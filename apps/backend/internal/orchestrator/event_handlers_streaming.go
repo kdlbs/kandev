@@ -1089,7 +1089,7 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
-	} else if dbTask != nil && dbTask.AssigneeAgentProfileID != "" {
+	} else if dbTask.IsOfficeOwnedAndAssigned() {
 		s.logger.Debug("skipping REVIEW transition for office task",
 			zap.String("task_id", taskID))
 		return
@@ -1184,7 +1184,7 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sess
 		}
 		return
 	}
-	if dbTask.AssigneeAgentProfileID != "" {
+	if dbTask.IsOfficeOwnedAndAssigned() {
 		return
 	}
 	if taskArchived(dbTask) {
@@ -1327,7 +1327,7 @@ func (s *Service) reconcileTaskStateForRuntimeLocked(
 	if taskArchived(task) {
 		return nil
 	}
-	if state == v1.TaskStateInProgress && task != nil && task.AssigneeAgentProfileID != "" {
+	if state == v1.TaskStateInProgress && task.IsOfficeOwnedAndAssigned() {
 		return nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -1572,7 +1572,7 @@ func (s *Service) handleOfficeTurnComplete(
 		return false
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil || task.AssigneeAgentProfileID == "" {
+	if err != nil || !task.IsOfficeOwnedAndAssigned() {
 		return false
 	}
 

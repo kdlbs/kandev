@@ -17,6 +17,10 @@ import {
 import { formatDiffStats } from "@/lib/utils/file-diff";
 import { toRelativePath } from "@/lib/utils";
 import { FileActionsDropdown } from "@/components/editors/file-actions-dropdown";
+import {
+  ExternalVcsFileLink,
+  useExternalVcsFileStatus,
+} from "@/components/editors/external-vcs-file-link";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { LspStatusButton } from "@/components/editors/lsp-status-button";
 import type { LspStatus } from "@/lib/lsp/lsp-client-manager";
@@ -218,6 +222,7 @@ function MarkdownPreviewButton({ onTogglePreview }: { onTogglePreview: () => voi
 
 interface MonacoEditorToolbarProps {
   path: string;
+  repositoryName?: string;
   worktreePath?: string;
   isDirty: boolean;
   isSaving: boolean;
@@ -242,6 +247,7 @@ interface MonacoEditorToolbarProps {
 
 export function MonacoEditorToolbar({
   path,
+  repositoryName,
   worktreePath,
   isDirty,
   isSaving,
@@ -263,6 +269,7 @@ export function MonacoEditorToolbar({
   onDelete,
   onToggleMarkdownPreview,
 }: MonacoEditorToolbarProps) {
+  const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   return (
     <PanelHeaderBarSplit
       left={
@@ -294,6 +301,14 @@ export function MonacoEditorToolbar({
           <ReloadFromAgentButton
             hasRemoteUpdate={hasRemoteUpdate}
             onReloadFromAgent={onReloadFromAgent}
+          />
+          <ExternalVcsFileLink
+            filePath={path}
+            previousPath={fileStatus?.old_path}
+            status={fileStatus?.status}
+            sessionId={sessionId}
+            repositoryName={repositoryName}
+            size="sm"
           />
           <FileActionsDropdown filePath={path} sessionId={sessionId} size="sm" />
           <DeleteButton onDelete={onDelete} />

@@ -502,6 +502,7 @@ func TestSwitchModelFallback_PreservesRestrictedMCPMode(t *testing.T) {
 				ID:                     "task-office",
 				WorkspaceID:            "workspace-1",
 				Title:                  "Office task",
+				IsFromOffice:           true,
 				AssigneeAgentProfileID: "office-agent",
 			}
 			repo.sessions["session-office"] = &models.TaskSession{

@@ -35,17 +35,45 @@ func getPRFeedback(ctx context.Context, c Client, owner, repo string, number int
 	if err != nil {
 		return nil, err
 	}
-	reviews, err := c.ListPRReviews(ctx, owner, repo, number)
-	if err != nil {
-		return nil, err
+	fetchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type feedbackResult struct {
+		reviews  []PRReview
+		comments []PRComment
+		checks   []CheckRun
+		err      error
 	}
-	comments, err := c.ListPRComments(ctx, owner, repo, number, nil)
-	if err != nil {
-		return nil, err
-	}
-	checks, err := c.ListCheckRuns(ctx, owner, repo, pr.HeadSHA)
-	if err != nil {
-		return nil, err
+	results := make(chan feedbackResult, 3)
+	go func() {
+		value, callErr := c.ListPRReviews(fetchCtx, owner, repo, number)
+		results <- feedbackResult{reviews: value, err: callErr}
+	}()
+	go func() {
+		value, callErr := c.ListPRComments(fetchCtx, owner, repo, number, nil)
+		results <- feedbackResult{comments: value, err: callErr}
+	}()
+	go func() {
+		value, callErr := c.ListCheckRuns(fetchCtx, owner, repo, pr.HeadSHA)
+		results <- feedbackResult{checks: value, err: callErr}
+	}()
+
+	var reviews []PRReview
+	var comments []PRComment
+	var checks []CheckRun
+	for range 3 {
+		result := <-results
+		if result.err != nil {
+			return nil, result.err
+		}
+		if result.reviews != nil {
+			reviews = result.reviews
+		}
+		if result.comments != nil {
+			comments = result.comments
+		}
+		if result.checks != nil {
+			checks = result.checks
+		}
 	}
 	// Ensure non-nil slices so JSON serialization produces [] instead of null.
 	if reviews == nil {

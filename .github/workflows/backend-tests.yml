@@ -255,5 +255,8 @@ jobs:
 
       # Keep this targeted: the service package has broad subprocess coverage,
       # while this native test is the Windows path-semantics regression.
-      - name: Test explicit local repository paths
-        run: go test -race -v -run '^TestExplicitLocalRepositoryWindowsPathSemantics$' ./internal/task/service
+      - name: Test Windows path semantics
+        run: >-
+          go test -race -v
+          -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
+          ./internal/task/service

@@ -42,7 +42,8 @@ calm, paced, visible retry — separate from generic agent failures.
   Cancel (`session.recover` action `cancel_retry`), it falls through to the
   existing red Resume / Start-fresh banner (with friendly "stayed overloaded
   after several retries" copy instead of the raw 529). Gated to non-office tasks
-  (`isOfficeTask`, i.e. `AssigneeAgentProfileID`) so genuine office tasks keep
+  (`isOfficeTask`, i.e. authoritative Office ownership plus an assigned runner)
+  so genuine office tasks keep
   their structured error UI. The transient branch runs *before* run-mode
   automation finalization in `handleAgentFailed` — it's the only non-terminal
   failure path, so finalizing (which reaps the ephemeral worktree) must wait

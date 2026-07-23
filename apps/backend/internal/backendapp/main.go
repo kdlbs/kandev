@@ -470,7 +470,7 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
-		lifecycleMgr, agentRegistry, services.Workflow, repos.Secrets, repoCloner)
+		lifecycleMgr, agentRegistry, services.Workflow, repos.Secrets, repoCloner, services.Prompts)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
@@ -751,6 +751,7 @@ func startGatewayAndServe(
 	}
 
 	services.Task.StartAutoArchiveLoop(ctx)
+	services.Task.StartArchivedSessionReconciliationLoop(ctx)
 	services.Task.StartQuickChatExpirationLoop(ctx)
 
 	// ============================================

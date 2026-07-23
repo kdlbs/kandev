@@ -36,6 +36,11 @@ interface FileDiffViewerProps {
   onToggleExpandUnchanged?: () => void;
   /** Multi-repo subpath for the file (e.g. "kandev"); empty for single-repo. */
   repo?: string;
+  taskId?: string | null;
+  repositoryId?: string | null;
+  previousPath?: string | null;
+  publishedBranch?: string | null;
+  externalBaseBranch?: string | null;
 }
 
 /**
@@ -72,6 +77,11 @@ export const FileDiffViewer = memo(function FileDiffViewer({
   expandUnchanged,
   onToggleExpandUnchanged,
   repo,
+  taskId,
+  repositoryId,
+  previousPath,
+  publishedBranch,
+  externalBaseBranch,
 }: FileDiffViewerProps) {
   const data = useMemo(() => transformGitDiff(filePath, diff, status), [filePath, diff, status]);
 
@@ -99,6 +109,12 @@ export const FileDiffViewer = memo(function FileDiffViewer({
       expandUnchanged={expandUnchanged}
       onToggleExpandUnchanged={onToggleExpandUnchanged}
       repo={repo}
+      taskId={taskId}
+      repositoryId={repositoryId}
+      status={status}
+      previousPath={previousPath}
+      publishedBranch={publishedBranch}
+      externalBaseBranch={externalBaseBranch}
     />
   );
 });

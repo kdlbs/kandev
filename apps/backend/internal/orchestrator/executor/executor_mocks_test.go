@@ -608,6 +608,9 @@ func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error { ret
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListArchivedTasksWithActiveSessions(ctx context.Context) ([]string, error) {
+	return nil, nil
+}
 
 func (m *mockRepository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
 	return nil, nil

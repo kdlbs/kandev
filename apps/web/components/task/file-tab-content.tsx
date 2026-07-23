@@ -6,6 +6,12 @@ import { FileImageViewer } from "./file-image-viewer";
 import { FileBinaryViewer } from "./file-binary-viewer";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { getFileCategory } from "@/lib/utils/file-types";
+import { FileViewerExternalLink } from "./file-viewer-header";
+
+function resolveTabCategory(tab: OpenFileTab): "image" | "binary" | "text" {
+  if (!tab.isBinary) return "text";
+  return getFileCategory(tab.path) === "image" ? "image" : "binary";
+}
 
 export function FileTabContent({
   tab,
@@ -26,9 +32,16 @@ export function FileTabContent({
   onFileSave: (path: string) => void;
   onFileDelete: (path: string) => void;
 }) {
-  const extCategory = getFileCategory(tab.path);
-  let category: "image" | "binary" | "text" = "text";
-  if (tab.isBinary) category = extCategory === "image" ? "image" : "binary";
+  const category = resolveTabCategory(tab);
+  const externalLink = (
+    <FileViewerExternalLink
+      path={tab.path}
+      sessionId={activeSessionId}
+      taskId={taskId}
+      repositoryId={activeSession?.repository_id}
+      repositoryName={tab.repo}
+    />
+  );
 
   return (
     <TabsContent value={`file:${tab.path}`} className="flex-1 min-h-0">
@@ -37,12 +50,14 @@ export function FileTabContent({
           path={tab.path}
           content={tab.content}
           worktreePath={activeSession?.worktree_path ?? undefined}
+          headerActions={externalLink}
         />
       )}
       {category === "binary" && (
         <FileBinaryViewer
           path={tab.path}
           worktreePath={activeSession?.worktree_path ?? undefined}
+          headerActions={externalLink}
         />
       )}
       {category === "text" && (
@@ -56,6 +71,7 @@ export function FileTabContent({
           taskId={taskId}
           repositoryId={activeSession?.repository_id ?? undefined}
           worktreePath={activeSession?.worktree_path ?? undefined}
+          repo={tab.repo}
           enableComments={!!activeSessionId}
           onChange={(newContent) => onFileChange(tab.path, newContent)}
           onSave={() => onFileSave(tab.path)}
