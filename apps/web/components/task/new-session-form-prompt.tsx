@@ -3,13 +3,16 @@
 import type { RefObject } from "react";
 import { Textarea } from "@kandev/ui/textarea";
 import { IconLoader2 } from "@tabler/icons-react";
+import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
+import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 import { ContextZone } from "./chat/context-items/context-zone";
 import { AttachButton } from "./session-dialog-shared";
 import type { ContextItem } from "@/lib/types/context";
 
 type SessionPromptFieldProps = {
   promptRef: RefObject<HTMLTextAreaElement | null>;
+  promptValue: string;
   contextItems: ContextItem[];
   isBusy: boolean;
   isDragging: boolean;
@@ -18,12 +21,15 @@ type SessionPromptFieldProps = {
   hasProfiles: boolean;
   isUtilityConfigured: boolean;
   isEnhancingPrompt: boolean;
+  pendingResult: UtilityGenerationResult | null;
   fileInputRef: RefObject<HTMLInputElement | null>;
-  onPromptInput: () => void;
+  onPromptChange: (value: string) => void;
   onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   onSubmit: (e: React.FormEvent) => void;
   onAttachClick: () => void;
   onEnhancePrompt: () => void;
+  onApplyPending: () => void;
+  onCopyPending: () => Promise<void> | void;
   onDragOver: (e: React.DragEvent) => void;
   onDragLeave: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent) => void;
@@ -32,6 +38,7 @@ type SessionPromptFieldProps = {
 
 export function SessionPromptField({
   promptRef,
+  promptValue,
   contextItems,
   isBusy,
   isDragging,
@@ -40,12 +47,15 @@ export function SessionPromptField({
   hasProfiles,
   isUtilityConfigured,
   isEnhancingPrompt,
+  pendingResult,
   fileInputRef,
-  onPromptInput,
+  onPromptChange,
   onPaste,
   onSubmit,
   onAttachClick,
   onEnhancePrompt,
+  onApplyPending,
+  onCopyPending,
   onDragOver,
   onDragLeave,
   onDrop,
@@ -62,11 +72,12 @@ export function SessionPromptField({
         <ContextZone items={contextItems} />
         <Textarea
           ref={promptRef}
+          value={promptValue}
           placeholder="What should the agent work on?"
           className="min-w-0 max-w-full field-sizing-fixed wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
           autoFocus
           disabled={isBusy}
-          onInput={onPromptInput}
+          onChange={(event) => onPromptChange(event.target.value)}
           onPaste={onPaste}
           onKeyDown={(e) => {
             if (
@@ -98,6 +109,11 @@ export function SessionPromptField({
           tabIndex={-1}
         />
       </div>
+      <PromptResultRecovery
+        pendingResult={pendingResult}
+        onApply={onApplyPending}
+        onCopy={onCopyPending}
+      />
       {isDragging && (
         <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
           <span className="text-sm text-primary font-medium">Drop files here</span>

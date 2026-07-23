@@ -115,13 +115,24 @@ type CreateTaskOpts = {
   workflow_step_id?: string;
   agent_profile_id?: string;
   repository_ids?: string[];
-  repositories?: Array<{ repository_id: string; base_branch?: string; checkout_branch?: string }>;
+  repositories?: TaskRepositoryInput[];
   plan_mode?: boolean;
   metadata?: Record<string, unknown>;
   parent_id?: string;
   workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
   workspace_group_id?: string;
   attachments?: MessageAttachmentInput[];
+};
+
+type TaskRepositoryInput = {
+  repository_id?: string;
+  base_branch?: string;
+  checkout_branch?: string;
+  remote_url?: string;
+  provider?: string;
+  provider_repo_id?: string;
+  provider_owner?: string;
+  provider_name?: string;
 };
 
 function buildTaskMetadata(opts: CreateTaskOpts): Record<string, unknown> | undefined {
@@ -171,7 +182,7 @@ type OptionalAgentTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
   repository_ids?: string[];
-  repositories?: Array<{ repository_id: string; base_branch?: string; checkout_branch?: string }>;
+  repositories?: TaskRepositoryInput[];
   executor_id?: string;
   executor_profile_id?: string;
   metadata?: Record<string, unknown>;
@@ -336,11 +347,7 @@ export class ApiClient {
       /** Repository IDs to associate with the task (required for agent execution). */
       repository_ids?: string[];
       /** Full repository entries with optional checkout_branch / base_branch. */
-      repositories?: Array<{
-        repository_id: string;
-        base_branch?: string;
-        checkout_branch?: string;
-      }>;
+      repositories?: TaskRepositoryInput[];
       /** When true, task is placed at position 0 regardless of is_start_step. */
       plan_mode?: boolean;
       /** Extra metadata to store on the task. */
@@ -490,11 +497,7 @@ export class ApiClient {
       workflow_step_id?: string;
       repository_ids?: string[];
       /** Full repository entries with optional checkout_branch / base_branch. */
-      repositories?: Array<{
-        repository_id: string;
-        base_branch?: string;
-        checkout_branch?: string;
-      }>;
+      repositories?: TaskRepositoryInput[];
       executor_id?: string;
       executor_profile_id?: string;
       metadata?: Record<string, unknown>;
@@ -1476,6 +1479,7 @@ export class ApiClient {
       task_environment_id?: string;
       worktree_path?: string;
       worktree_branch?: string;
+      worktrees?: Array<{ repository_id?: string; worktree_path?: string }>;
       error_message?: string;
       metadata?: Record<string, unknown>;
     }>;

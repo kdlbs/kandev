@@ -8,7 +8,6 @@ import {
   IconClock,
   IconExternalLink,
   IconGitMerge,
-  IconLink,
   IconPlus,
   IconUnlink,
   IconX,
@@ -241,19 +240,7 @@ function MRTopbarControl({
       />
     );
   }
-  if (!gitlabAvailable) return null;
-  return (
-    <Button
-      size={compact ? "icon-sm" : "sm"}
-      variant="outline"
-      className={mrTriggerClass(compact, mobile)}
-      onClick={onLink}
-      aria-label="Link GitLab merge request"
-    >
-      <IconLink className="h-4 w-4 text-orange-500" />
-      {!compact && <span className="text-xs font-medium">Link MR</span>}
-    </Button>
-  );
+  return null;
 }
 
 export const MRTopbarButton = memo(function MRTopbarButton({

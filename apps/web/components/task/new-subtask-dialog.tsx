@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { RefObject } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -169,33 +170,70 @@ function useContextChangeHandler(opts: {
   setContextValue: (v: string) => void;
   setHasPrompt: (v: boolean) => void;
   promptRef: React.RefObject<HTMLTextAreaElement | null>;
+  promptValue: string;
+  setPromptValue: (value: string) => void;
   initialPrompt: string | null;
   summarize: (sessionId: string) => Promise<SummarizeSessionResult>;
   toast: SummaryToastFn;
 }) {
-  const { setContextValue, setHasPrompt, promptRef, initialPrompt, summarize, toast } = opts;
+  const {
+    setContextValue,
+    setHasPrompt,
+    promptRef,
+    promptValue,
+    setPromptValue,
+    initialPrompt,
+    summarize,
+    toast,
+  } = opts;
   return useCallback(
     async (value: string) => {
       if (!value) return;
       setContextValue(value);
-      const ta = promptRef.current;
-      if (!ta) return;
+      if (!promptRef.current) return;
       if (value === "copy_prompt" && initialPrompt) {
-        ta.value = initialPrompt;
+        setPromptValue(initialPrompt);
         setHasPrompt(true);
         return;
       }
       if (value === "blank") {
-        ta.value = "";
+        setPromptValue("");
         setHasPrompt(false);
         return;
       }
       if (value.startsWith("summarize:")) {
+        const controlledPromptRef: RefObject<HTMLTextAreaElement | null> = {
+          current: promptRef.current
+            ? ({
+                get value() {
+                  return promptValue;
+                },
+                set value(value: string) {
+                  setPromptValue(value);
+                },
+              } as HTMLTextAreaElement)
+            : null,
+        };
         const result = await summarize(value.slice("summarize:".length));
-        applySummarizeSessionResult({ result, promptRef, setContextValue, setHasPrompt, toast });
+        applySummarizeSessionResult({
+          result,
+          promptRef: controlledPromptRef,
+          setContextValue,
+          setHasPrompt,
+          toast,
+        });
       }
     },
-    [setContextValue, setHasPrompt, promptRef, initialPrompt, summarize, toast],
+    [
+      initialPrompt,
+      promptRef,
+      promptValue,
+      setContextValue,
+      setHasPrompt,
+      setPromptValue,
+      summarize,
+      toast,
+    ],
   );
 }
 
@@ -219,6 +257,7 @@ type SubtaskFormProps = {
   onClose: () => void;
 };
 
+// eslint-disable-next-line max-lines-per-function
 function NewSubtaskForm({
   parentTaskId,
   defaultTitle,
@@ -241,6 +280,7 @@ function NewSubtaskForm({
   const [isCreating, setIsCreating] = useState(false);
   const [title, setTitle] = useState(defaultTitle);
   const [hasPrompt, setHasPrompt] = useState(false);
+  const [promptValue, setPromptValue] = useState("");
   const [contextValue, setContextValue] = useState("blank");
   const [workspaceMode, setWorkspaceMode] = useState<SubtaskWorkspaceMode>(() =>
     defaultSubtaskWorkspaceMode(worktreeBranch),
@@ -258,16 +298,21 @@ function NewSubtaskForm({
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
   useExecutorDefault(allExecutorProfiles, fs.executorProfileId, fs.setExecutorProfileId);
   const promptZone = useSubtaskPromptZone({
+    parentTaskId,
     taskTitle: title,
     inputDisabled: isCreating || isSummarizing,
     contextValue,
     initialPrompt,
+    promptValue,
+    setPromptValue,
     setHasPrompt,
   });
   const handleContextChange = useContextChangeHandler({
     setContextValue,
     setHasPrompt,
     promptRef: promptZone.promptRef,
+    promptValue,
+    setPromptValue,
     initialPrompt,
     summarize,
     toast,
@@ -306,10 +351,16 @@ function NewSubtaskForm({
     sessionOptions: isUtilityConfigured ? sessionOptions : [],
     promptZoneProps: {
       ...promptZone,
+      promptValue,
       isCreating,
       isSummarizing,
       isUtilityConfigured,
-      setHasPrompt,
+      onPromptChange: (value: string) => {
+        setPromptValue(value);
+        setHasPrompt(value.trim().length > 0);
+      },
+      onApplyPending: promptZone.applyPending,
+      onCopyPending: promptZone.copyPending,
       onSubmitShortcut: handleSubmit,
     },
     isCreating,
@@ -371,7 +422,7 @@ export function NewSubtaskDialog({
           </DialogTitle>
         </DialogHeader>
         <NewSubtaskForm
-          key={`${open}`}
+          key={`${parentTaskId}-${open}`}
           parentTaskId={parentTaskId}
           defaultTitle={defaultTitle}
           defaultProfileId={currentSession?.agent_profile_id ?? ""}

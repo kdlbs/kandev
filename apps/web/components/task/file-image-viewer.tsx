@@ -1,25 +1,28 @@
 "use client";
 
-import { toRelativePath } from "@/lib/utils";
+import type { ReactNode } from "react";
 import { getImageMimeType } from "@/lib/utils/file-types";
+import { FileViewerHeader } from "./file-viewer-header";
 
 type FileImageViewerProps = {
   path: string;
   content: string; // base64-encoded
   worktreePath?: string;
+  headerActions?: ReactNode;
 };
 
-export function FileImageViewer({ path, content, worktreePath }: FileImageViewerProps) {
+export function FileImageViewer({
+  path,
+  content,
+  worktreePath,
+  headerActions,
+}: FileImageViewerProps) {
   const mime = getImageMimeType(path);
   const src = `data:${mime};base64,${content}`;
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center px-2 border-foreground/10 border-b">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
-          <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
-        </div>
-      </div>
+      <FileViewerHeader path={path} worktreePath={worktreePath} actions={headerActions} />
       <div className="flex-1 flex items-center justify-center overflow-auto p-6">
         <img
           src={src}

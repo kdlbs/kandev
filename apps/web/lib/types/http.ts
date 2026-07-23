@@ -208,6 +208,8 @@ export type Repository = {
   provider_host?: string;
   provider_owner: string;
   provider_name: string;
+  /** Canonical credential-free clone URL for provider-backed repositories. */
+  remote_url?: string;
   default_branch: string;
   scripts?: RepositoryScript[];
   worktree_branch_prefix: string;

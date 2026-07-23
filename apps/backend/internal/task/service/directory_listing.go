@@ -16,12 +16,13 @@ type DirectoryEntry struct {
 }
 
 // DirectoryListing is the result of ListDirectory: the absolute path that was
-// listed, the parent (empty when at the filesystem root), and the immediate
-// subdirectory children sorted alphabetically.
+// listed, whether it may be selected, the parent (empty when at the filesystem
+// root), and the immediate subdirectory children sorted alphabetically.
 type DirectoryListing struct {
-	Path    string
-	Parent  string
-	Entries []DirectoryEntry
+	Path      string
+	Parent    string
+	Entries   []DirectoryEntry
+	Choosable bool
 }
 
 // ListDirectory returns the immediate subdirectories of path. When path is
@@ -41,6 +42,10 @@ type DirectoryListing struct {
 //
 // Hidden (".") directories are excluded.
 func (s *Service) ListDirectory(ctx context.Context, path string) (DirectoryListing, error) {
+	if listing, handled, err := listVirtualDirectoryRoot(path); handled {
+		return listing, err
+	}
+
 	abs, err := resolveListingPath(path)
 	if err != nil {
 		return DirectoryListing{}, err
@@ -53,9 +58,10 @@ func (s *Service) ListDirectory(ctx context.Context, path string) (DirectoryList
 
 	_ = ctx
 	return DirectoryListing{
-		Path:    abs,
-		Parent:  parentPath(abs),
-		Entries: collectSubdirs(abs, entries),
+		Path:      abs,
+		Parent:    parentPath(abs),
+		Entries:   collectSubdirs(abs, entries),
+		Choosable: true,
 	}, nil
 }
 

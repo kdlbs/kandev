@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
@@ -80,6 +81,20 @@ func (m *MockEventBus) ClearEvents() {
 
 func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repository) {
 	t.Helper()
+	return createTestServiceWithSessionsRepo(t, func(repo *sqliterepo.Repository) repository.SessionRepository {
+		return repo
+	})
+}
+
+// createTestServiceWithSessionsRepo mirrors createTestService but lets a
+// caller substitute the Sessions repository (e.g. to wrap it with a test-only
+// hook) while reusing the same DB setup, migrations, and cleanup-worker
+// wiring for every other field.
+func createTestServiceWithSessionsRepo(
+	t *testing.T,
+	wrapSessions func(*sqliterepo.Repository) repository.SessionRepository,
+) (*Service, *MockEventBus, *sqliterepo.Repository) {
+	t.Helper()
 	tmpDir := t.TempDir()
 	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
 	if err != nil {
@@ -118,7 +133,7 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 		Workflows:        repo,
 		Messages:         repo,
 		Turns:            repo,
-		Sessions:         repo,
+		Sessions:         wrapSessions(repo),
 		GitSnapshots:     repo,
 		RepoEntities:     repo,
 		Executors:        repo,
@@ -1865,6 +1880,413 @@ func TestService_ArchiveTaskStopsExecutorRunningForTerminalSession(t *testing.T)
 	waitForCleanupDone(t, svc)
 	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-completed"); !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		t.Fatalf("executor row should be removed after successful stop, got %v", err)
+	}
+}
+
+// TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions is the
+// regression test for the stuck-spinner bug: archiving a task with an active
+// session cancels that session in the DB (verified elsewhere), but any client
+// cache kept fresh exclusively by session.state_changed — e.g. an Office task
+// list's "is running" indicator — never learns about it unless ArchiveTask
+// also publishes the event. Without the fix, the archived task's session
+// would sit at RUNNING in every client cache forever.
+func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-running", TaskID: "task-1", State: models.TaskSessionStateRunning,
+		AgentProfileID: "agent-1", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	if err := svc.ArchiveTask(ctx, "task-1"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	var found *bus.Event
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if !ok || data["session_id"] != "session-running" {
+			continue
+		}
+		found = evt
+	}
+	if found == nil {
+		t.Fatal("expected a session.state_changed event for session-running, got none")
+	}
+	data := found.Data.(map[string]interface{})
+	if got := data["old_state"]; got != string(models.TaskSessionStateRunning) {
+		t.Errorf("old_state = %v, want RUNNING", got)
+	}
+	if got := data["new_state"]; got != string(models.TaskSessionStateCancelled) {
+		t.Errorf("new_state = %v, want CANCELLED", got)
+	}
+	if got := data["task_id"]; got != "task-1" {
+		t.Errorf("task_id = %v, want task-1", got)
+	}
+	if got := data["agent_profile_id"]; got != "agent-1" {
+		t.Errorf("agent_profile_id = %v, want agent-1", got)
+	}
+	updatedAtStr, _ := data["updated_at"].(string)
+	if _, err := time.Parse(time.RFC3339Nano, updatedAtStr); err != nil {
+		t.Errorf("updated_at %q not parseable as RFC3339Nano: %v", updatedAtStr, err)
+	}
+
+	session, err := repo.GetTaskSession(ctx, "session-running")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateCancelled {
+		t.Errorf("session state = %q, want CANCELLED", session.State)
+	}
+}
+
+// TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot is a
+// defensive-coverage test: CancelActiveTaskSessionsByTaskID re-evaluates
+// active sessions atomically and returns full session rows directly, so a
+// returned session can have no matching entry in a caller-supplied snapshot
+// taken moments earlier. publishSessionsCancelled must build the event
+// entirely from that returned row — old_state is the only field allowed to
+// fall back to an empty best-effort hint when snapshot has nothing for the
+// session's ID; every other field, including agent_profile_id, must come
+// from the row cancelledSessions already carries, not be silently dropped
+// or fabricated.
+func TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	ctx := context.Background()
+
+	// The exact shape of the race: CancelActiveTaskSessionsByTaskID returned
+	// this session's row, but the caller's pre-cancel snapshot is empty.
+	cancelledSession := &models.TaskSession{
+		ID:             "session-not-in-snapshot",
+		TaskID:         "task-race",
+		State:          models.TaskSessionStateCancelled,
+		AgentProfileID: "agent-1",
+		UpdatedAt:      time.Now().UTC(),
+	}
+
+	svc.publishSessionsCancelled(ctx, "task-race", nil, []*models.TaskSession{cancelledSession}, "task archived")
+
+	var found *bus.Event
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if ok && data["session_id"] == "session-not-in-snapshot" {
+			found = evt
+		}
+	}
+	if found == nil {
+		t.Fatal("expected a session.state_changed event for the snapshot-missing session, got none")
+	}
+	data := found.Data.(map[string]interface{})
+	if got := data["new_state"]; got != string(models.TaskSessionStateCancelled) {
+		t.Errorf("new_state = %v, want CANCELLED", got)
+	}
+	if got := data["old_state"]; got != "" {
+		t.Errorf("old_state = %v, want empty (no snapshot hint available)", got)
+	}
+	if got := data["agent_profile_id"]; got != "agent-1" {
+		t.Errorf("agent_profile_id = %v, want agent-1 (must come from the returned row, not the snapshot)", got)
+	}
+}
+
+// cancelHookSessionRepository wraps the real session repository so a test
+// can deterministically simulate a client disconnecting the instant after
+// CancelActiveTaskSessionsByTaskID's DB write commits — the exact race
+// finalizeCancelledSessions guards against by publishing on a
+// context.WithoutCancel derivative. Test-only: production code has no
+// equivalent hook.
+type cancelHookSessionRepository struct {
+	*sqliterepo.Repository
+	afterCancelSessions func()
+}
+
+func (r *cancelHookSessionRepository) CancelActiveTaskSessionsByTaskID(
+	ctx context.Context, taskID, reason string,
+) ([]*models.TaskSession, error) {
+	cancelledSessions, err := r.Repository.CancelActiveTaskSessionsByTaskID(ctx, taskID, reason)
+	if r.afterCancelSessions != nil {
+		r.afterCancelSessions()
+	}
+	return cancelledSessions, err
+}
+
+// TestService_ArchiveTaskPublishesEventAfterClientDisconnect is the
+// regression test for the client-disconnect race: finalizeCancelledSessions
+// commits the session-cancellation DB write on the caller's ctx, then
+// publishes session.state_changed on a context.WithoutCancel derivative
+// specifically so that a client disconnecting (cancelling ctx) in the instant
+// right after that DB write still gets the event. A
+// cancelHookSessionRepository simulates that race deterministically by
+// cancelling ctx from inside CancelActiveTaskSessionsByTaskID, right after
+// the real DB write returns.
+func TestService_ArchiveTaskPublishesEventAfterClientDisconnect(t *testing.T) {
+	hook := &cancelHookSessionRepository{}
+	svc, eventBus, repo := createTestServiceWithSessionsRepo(t, func(repo *sqliterepo.Repository) repository.SessionRepository {
+		hook.Repository = repo
+		return hook
+	})
+
+	setupCtx := context.Background()
+	if err := repo.CreateWorkspace(setupCtx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(setupCtx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(setupCtx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(setupCtx, &models.TaskSession{
+		ID: "session-running", TaskID: "task-1", State: models.TaskSessionStateRunning,
+		AgentProfileID: "agent-1", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	hook.afterCancelSessions = cancel
+
+	if err := svc.ArchiveTask(ctx, "task-1"); err != nil {
+		t.Fatalf("ArchiveTask returned an error even though ctx was only cancelled after the sessions DB write committed: %v", err)
+	}
+
+	var found *bus.Event
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if ok && data["session_id"] == "session-running" {
+			found = evt
+		}
+	}
+	if found == nil {
+		t.Fatal("expected a session.state_changed event for session-running despite the post-commit ctx cancellation, got none")
+	}
+	data := found.Data.(map[string]interface{})
+	if got := data["session_id"]; got != "session-running" {
+		t.Errorf("session_id = %v, want session-running", got)
+	}
+	if got := data["new_state"]; got != string(models.TaskSessionStateCancelled) {
+		t.Errorf("new_state = %v, want CANCELLED", got)
+	}
+	updatedAtStr, _ := data["updated_at"].(string)
+	if _, err := time.Parse(time.RFC3339Nano, updatedAtStr); err != nil {
+		t.Errorf("updated_at %q not parseable as RFC3339Nano: %v", updatedAtStr, err)
+	}
+
+	session, err := repo.GetTaskSession(context.Background(), "session-running")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateCancelled {
+		t.Errorf("session state = %q, want CANCELLED", session.State)
+	}
+}
+
+// flakyCancelSessionRepository wraps the real session repository so a test
+// can deterministically simulate CancelActiveTaskSessionsByTaskID failing
+// with a transient error (e.g. the kind of writer-contention timeout the
+// repository's own internal 10s bound produces) on its first N-1 calls and
+// succeeding on the Nth. Test-only: production code has no equivalent hook.
+type flakyCancelSessionRepository struct {
+	*sqliterepo.Repository
+	mu           sync.Mutex
+	failuresLeft int
+	calls        int
+}
+
+func (r *flakyCancelSessionRepository) CancelActiveTaskSessionsByTaskID(
+	ctx context.Context, taskID, reason string,
+) ([]*models.TaskSession, error) {
+	r.mu.Lock()
+	r.calls++
+	if r.failuresLeft > 0 {
+		r.failuresLeft--
+		r.mu.Unlock()
+		return nil, errors.New("simulated transient sqlite writer contention timeout")
+	}
+	r.mu.Unlock()
+	return r.Repository.CancelActiveTaskSessionsByTaskID(ctx, taskID, reason)
+}
+
+func (r *flakyCancelSessionRepository) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+// TestService_ArchiveTaskRetriesTransientSessionCancellationFailure is the
+// regression test for the retry loop in finalizeCancelledSessions:
+// CancelActiveTaskSessionsByTaskID is bounded by its own internal timeout,
+// so a lone attempt failing (e.g. to writer contention) used to be swallowed
+// immediately, leaving the archived task's sessions stuck active with no
+// cancellation event ever published. Failing the first two calls and
+// succeeding on the third proves the retry loop keeps trying within its
+// bounded attempt budget and still delivers the session.state_changed event
+// once the underlying write finally succeeds.
+func TestService_ArchiveTaskRetriesTransientSessionCancellationFailure(t *testing.T) {
+	flaky := &flakyCancelSessionRepository{failuresLeft: 2}
+	svc, eventBus, repo := createTestServiceWithSessionsRepo(t, func(repo *sqliterepo.Repository) repository.SessionRepository {
+		flaky.Repository = repo
+		return flaky
+	})
+
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-flaky", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-flaky", TaskID: "task-flaky", State: models.TaskSessionStateRunning,
+		AgentProfileID: "agent-1", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	if err := svc.ArchiveTask(ctx, "task-flaky"); err != nil {
+		t.Fatalf("ArchiveTask returned an error even though the retry loop should have recovered: %v", err)
+	}
+
+	if got, want := flaky.callCount(), 3; got != want {
+		t.Fatalf("CancelActiveTaskSessionsByTaskID call count = %d, want %d (2 failures + 1 success)", got, want)
+	}
+
+	var found *bus.Event
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if ok && data["session_id"] == "session-flaky" {
+			found = evt
+		}
+	}
+	if found == nil {
+		t.Fatal("expected a session.state_changed event for session-flaky after the retry loop recovered, got none")
+	}
+	data := found.Data.(map[string]interface{})
+	if got := data["new_state"]; got != string(models.TaskSessionStateCancelled) {
+		t.Errorf("new_state = %v, want CANCELLED", got)
+	}
+
+	session, err := repo.GetTaskSession(context.Background(), "session-flaky")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateCancelled {
+		t.Errorf("session state = %q, want CANCELLED", session.State)
+	}
+}
+
+// TestService_ArchiveTaskPublishesEventsForAllCancelledSessions is the
+// regression test for the shared-deadline bug: publishSessionsCancelled used
+// to run its per-session Publish call under one deadline shared across the
+// whole cancelledSessions batch, so a slow synchronous subscriber for one
+// session could starve the event for every session queued after it.
+// Archiving a task with two active sessions and asserting both get their own
+// session.state_changed event proves the fix (each session now gets an
+// independent 10s timeout) without relying on a real timing race.
+func TestService_ArchiveTaskPublishesEventsForAllCancelledSessions(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-multi", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-running-a", TaskID: "task-multi", State: models.TaskSessionStateRunning,
+		AgentProfileID: "agent-1", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(session-running-a): %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-running-b", TaskID: "task-multi", State: models.TaskSessionStateWaitingForInput,
+		AgentProfileID: "agent-2",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(session-running-b): %v", err)
+	}
+
+	if err := svc.ArchiveTask(ctx, "task-multi"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	foundBySessionID := make(map[string]*bus.Event)
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		sessionID, _ := data["session_id"].(string)
+		if sessionID == "session-running-a" || sessionID == "session-running-b" {
+			foundBySessionID[sessionID] = evt
+		}
+	}
+	for _, sessionID := range []string{"session-running-a", "session-running-b"} {
+		evt, ok := foundBySessionID[sessionID]
+		if !ok {
+			t.Fatalf("expected a session.state_changed event for %s, got none (events: %#v)", sessionID, eventBus.GetPublishedEvents())
+		}
+		data := evt.Data.(map[string]interface{})
+		if got := data["new_state"]; got != string(models.TaskSessionStateCancelled) {
+			t.Errorf("%s: new_state = %v, want CANCELLED", sessionID, got)
+		}
+		if got := data["task_id"]; got != "task-multi" {
+			t.Errorf("%s: task_id = %v, want task-multi", sessionID, got)
+		}
+	}
+
+	for _, sessionID := range []string{"session-running-a", "session-running-b"} {
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("GetTaskSession(%s): %v", sessionID, err)
+		}
+		if session.State != models.TaskSessionStateCancelled {
+			t.Errorf("%s: session state = %q, want CANCELLED", sessionID, session.State)
+		}
 	}
 }
 

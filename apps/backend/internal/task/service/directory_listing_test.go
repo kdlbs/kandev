@@ -49,6 +49,22 @@ func TestListDirectory_ListsImmediateSubdirsOnly(t *testing.T) {
 	}
 }
 
+func TestDriveRootsFromMask(t *testing.T) {
+	got := driveRootsFromMask((1 << 2) | (1 << 4))
+	want := []DirectoryEntry{
+		{Name: `C:\`, Path: `C:\`},
+		{Name: `E:\`, Path: `E:\`},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("drive roots = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("drive root[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestListDirectory_DefaultsToHome(t *testing.T) {
 	svc := &Service{}
 	got, err := svc.ListDirectory(context.Background(), "")
@@ -147,5 +163,8 @@ func TestListDirectory_ParentEmptyAtFilesystemRoot(t *testing.T) {
 	}
 	if got.Parent != "" {
 		t.Errorf("expected empty parent at %q, got %q", target, got.Parent)
+	}
+	if !got.Choosable {
+		t.Errorf("filesystem root %q should be choosable", target)
 	}
 }

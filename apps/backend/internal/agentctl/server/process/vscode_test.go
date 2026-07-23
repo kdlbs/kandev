@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -214,6 +215,77 @@ func TestWriteThemeSettings_DarkTheme(t *testing.T) {
 	assert.Equal(t, float64(14), settings["editor.fontSize"])
 	assert.Equal(t, "Default Dark Modern", settings["workbench.colorTheme"])
 	assert.Equal(t, true, settings["editor.minimap.autohide"])
+}
+
+func TestVscodeManager_WriteSettings_MergesWorkspaceExcludes(t *testing.T) {
+	tests := []struct {
+		name             string
+		existing         map[string]any
+		preservedEntries map[string]string
+	}{
+		{
+			name: "adds missing exclude settings",
+			existing: map[string]any{
+				"editor.fontSize": 14,
+			},
+		},
+		{
+			name: "preserves existing exclude entries and overrides the marker",
+			existing: map[string]any{
+				"editor.fontSize": 14,
+				"files.exclude": map[string]any{
+					"**/*.tmp": true,
+					storageworkspaces.OwnershipMarkerFilename: false,
+				},
+				"search.exclude": map[string]any{
+					"**/vendor": true,
+					storageworkspaces.OwnershipMarkerFilename: false,
+				},
+			},
+			preservedEntries: map[string]string{
+				"files.exclude":  "**/*.tmp",
+				"search.exclude": "**/vendor",
+			},
+		},
+		{
+			name: "replaces non-object exclude settings",
+			existing: map[string]any{
+				"editor.fontSize": 14,
+				"files.exclude":   "invalid",
+				"search.exclude":  []any{"invalid"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			v := NewVscodeManager("code-server", "/workspace", "dark", nil, newTestLogger(t))
+			settingsPath := filepath.Join(v.userDataDir(), "User", "settings.json")
+			require.NoError(t, os.MkdirAll(filepath.Dir(settingsPath), 0o755))
+			data, err := json.Marshal(tt.existing)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(settingsPath, data, 0o644))
+
+			v.writeThemeSettings()
+
+			written, err := os.ReadFile(settingsPath)
+			require.NoError(t, err)
+			var settings map[string]any
+			require.NoError(t, json.Unmarshal(written, &settings))
+			assert.Equal(t, float64(14), settings["editor.fontSize"])
+
+			for _, key := range []string{"files.exclude", "search.exclude"} {
+				excludes, ok := settings[key].(map[string]any)
+				require.True(t, ok, "%s should be an object", key)
+				assert.Equal(t, true, excludes[storageworkspaces.OwnershipMarkerFilename])
+				assert.NotContains(t, excludes, "**/"+storageworkspaces.OwnershipMarkerFilename)
+				if pattern := tt.preservedEntries[key]; pattern != "" {
+					assert.Equal(t, true, excludes[pattern])
+				}
+			}
+		})
+	}
 }
 
 func TestVscodeManager_InitialState(t *testing.T) {

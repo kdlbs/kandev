@@ -221,6 +221,7 @@ describe("TaskSwitcher — detach menu", () => {
 
 describe("TaskSwitcher — external issue link menu", () => {
   it("offers configured external issue providers from the task context menu", async () => {
+    const onLinkMergeRequest = vi.fn();
     render(
       <Providers>
         <TaskSwitcher
@@ -233,11 +234,10 @@ describe("TaskSwitcher — external issue link menu", () => {
           onSelectTask={vi.fn()}
           onLinkPullRequest={vi.fn()}
           onLinkIssue={vi.fn()}
-          {...({
-            onLinkJiraTicket: vi.fn(),
-            onLinkLinearIssue: vi.fn(),
-            onLinkSentryIssue: vi.fn(),
-          } as Partial<Parameters<typeof TaskSwitcher>[0]>)}
+          onLinkMergeRequest={onLinkMergeRequest}
+          onLinkJiraTicket={vi.fn()}
+          onLinkLinearIssue={vi.fn()}
+          onLinkSentryIssue={vi.fn()}
         />
       </Providers>,
     );
@@ -251,21 +251,22 @@ describe("TaskSwitcher — external issue link menu", () => {
       expect(screen.getByText("Jira Ticket")).toBeTruthy();
       expect(screen.getByText("Linear Issue")).toBeTruthy();
       expect(screen.getByText("Sentry Issue")).toBeTruthy();
+      expect(screen.getByText("GitLab Merge Request")).toBeTruthy();
     });
   });
 
-  it("passes the visible task title to external issue link handlers", () => {
+  it("targets the selected task when linking a GitLab merge request", () => {
     const archivedTask: TaskSwitcherItem = {
       id: "archived-task",
       title: "Archived task title",
       isArchived: true,
     };
     const closeMenu = vi.fn();
-    const onLinkJiraTicket = vi.fn();
+    const onLinkMergeRequest = vi.fn();
 
-    createTaskLinkSelectAction(archivedTask, onLinkJiraTicket, closeMenu)?.();
+    createTaskLinkSelectAction(archivedTask, onLinkMergeRequest, closeMenu)?.();
 
-    expect(onLinkJiraTicket).toHaveBeenCalledWith(archivedTask.id, archivedTask.title);
+    expect(onLinkMergeRequest).toHaveBeenCalledWith(archivedTask.id, archivedTask.title);
     expect(closeMenu).toHaveBeenCalledOnce();
   });
 });

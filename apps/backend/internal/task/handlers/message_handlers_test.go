@@ -404,6 +404,7 @@ func TestWSAddMessage_CreatedOfficeSessionOmitsCoordinatorTaskControls(t *testin
 	content := runCreatedMessageContextTest(t, &models.Task{
 		ID:                     "t1",
 		State:                  v1.TaskStateInProgress,
+		IsFromOffice:           true,
 		AssigneeAgentProfileID: "office-agent",
 		UpdatedAt:              now,
 	}, &models.TaskSession{
@@ -415,6 +416,24 @@ func TestWSAddMessage_CreatedOfficeSessionOmitsCoordinatorTaskControls(t *testin
 	})
 	assert.NotContains(t, content, "stop_task_kandev",
 		"Office pre-wrap must not persist a task-mode-only tool")
+}
+
+func TestWSAddMessage_CreatedKanbanRunnerIncludesCoordinatorTaskControls(t *testing.T) {
+	now := time.Now().UTC()
+	content := runCreatedMessageContextTest(t, &models.Task{
+		ID:                     "t1",
+		State:                  v1.TaskStateInProgress,
+		AssigneeAgentProfileID: "kanban-runner",
+		UpdatedAt:              now,
+	}, &models.TaskSession{
+		ID:             "s1",
+		TaskID:         "t1",
+		State:          models.TaskSessionStateCreated,
+		AgentProfileID: "profile-1",
+		UpdatedAt:      now,
+	})
+	assert.Contains(t, content, "stop_task_kandev",
+		"Kanban sessions retain coordinator task controls even with a projected runner")
 }
 
 func TestWSAddMessage_CreatedConfigSessionOmitsCoordinatorTaskControls(t *testing.T) {
