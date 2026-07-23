@@ -444,7 +444,9 @@ func (e *Executor) updateSessionStarting(ctx context.Context, taskID string, ses
 	}
 	allowedTerminalRecovery := !promoteTask &&
 		session.State == models.TaskSessionStateStarting &&
-		current.State == models.TaskSessionStateFailed
+		(current.State == models.TaskSessionStateFailed ||
+			(current.State == models.TaskSessionStateCancelled &&
+				models.IsArchiveCancelReason(current.ErrorMessage)))
 	if isStopTerminalSessionState(current.State) && !allowedTerminalRecovery {
 		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
 	}

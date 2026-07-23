@@ -1254,7 +1254,7 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 	var cancelledSessions []*models.TaskSession
 	var cancelErr error
 	for attempt := 1; attempt <= maxCancelAttempts; attempt++ {
-		cancelledSessions, cancelErr = s.sessions.CancelActiveTaskSessionsByTaskID(ctx, taskID, "task archived")
+		cancelledSessions, cancelErr = s.sessions.CancelActiveTaskSessionsByTaskID(ctx, taskID, models.SessionArchiveCancelReason)
 		if cancelErr == nil {
 			break
 		}
@@ -1286,7 +1286,7 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 	// can no longer consume a shared batch-wide budget and starve the
 	// events for sessions later in the loop.
 	detachedCtx := context.WithoutCancel(ctx)
-	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, "task archived")
+	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, models.SessionArchiveCancelReason)
 }
 
 func (s *Service) registerTaskRuntimeStopOwners(stopTargets []taskStopTarget, force bool) {

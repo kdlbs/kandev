@@ -2553,6 +2553,62 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 	})
 }
 
+// updateSessionStarting's fallback path (no onSessionStarting callback wired)
+// must mirror Service.setSessionStarting: an archive-cancelled session (the
+// resume path treats CANCELLED as an expected, resumable terminal state) may
+// recover into STARTING like a Failed session, but an ordinary/explicit
+// cancellation must stay rejected.
+func TestUpdateSessionStarting_ArchiveCancelledSessionRecovers(t *testing.T) {
+	for _, reason := range []string{models.SessionArchiveCancelReason, models.SessionArchiveTreeCancelReason} {
+		t.Run(reason, func(t *testing.T) {
+			repo := newMockRepository()
+			executor := newTestExecutor(t, &mockAgentManager{}, repo)
+			repo.sessions["session-1"] = &models.TaskSession{
+				ID:           "session-1",
+				TaskID:       "task-1",
+				State:        models.TaskSessionStateCancelled,
+				ErrorMessage: reason,
+			}
+			next := &models.TaskSession{
+				ID:     "session-1",
+				TaskID: "task-1",
+				State:  models.TaskSessionStateStarting,
+			}
+
+			if err := executor.updateSessionStarting(context.Background(), "task-1", next, false); err != nil {
+				t.Fatalf("updateSessionStarting: %v", err)
+			}
+			if got := repo.sessions["session-1"].State; got != models.TaskSessionStateStarting {
+				t.Fatalf("session state = %q, want STARTING", got)
+			}
+		})
+	}
+}
+
+func TestUpdateSessionStarting_OrdinaryCancelledSessionStaysRejected(t *testing.T) {
+	repo := newMockRepository()
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.sessions["session-1"] = &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		State:  models.TaskSessionStateCancelled,
+	}
+	next := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		State:  models.TaskSessionStateStarting,
+	}
+
+	err := executor.updateSessionStarting(context.Background(), "task-1", next, false)
+	var superseded *SessionStateSupersededError
+	if !errors.As(err, &superseded) {
+		t.Fatalf("updateSessionStarting error = %v, want SessionStateSupersededError", err)
+	}
+	if got := repo.sessions["session-1"].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %q, want CANCELLED (unchanged)", got)
+	}
+}
+
 func TestPersistLaunchState_PrepareOnlyCannotOverwriteCoordinatorCancellation(t *testing.T) {
 	repo := newMockRepository()
 	executor := newTestExecutor(t, &mockAgentManager{}, repo)

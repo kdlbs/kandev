@@ -3435,6 +3435,63 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 	}
 }
 
+// TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully is the
+// end-to-end regression for "Can't resume this un-archived task": a session
+// cancelled by an archive (Service.ArchiveTask / cascade archive) must resume
+// like a Failed one once the task is unarchived. Before the fix, the launch
+// succeeded but the STARTING-transition guard rejected the CANCELLED session
+// as superseded, leaving the freshly-launched execution orphaned while the
+// session stayed stuck at CANCELLED and the task was marked FAILED.
+func TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+
+	startAgentProcessCalled := false
+	agentMgr := &sessionUpdatingAgentManager{
+		mockAgentManager: &mockAgentManager{
+			launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				return &executor.LaunchAgentResponse{
+					AgentExecutionID: "exec-new",
+					Status:           v1.AgentStatusStarting,
+				}, nil
+			},
+		},
+		repo:          repo,
+		sessionID:     "session1",
+		taskID:        "task1",
+		onStartCalled: &startAgentProcessCalled,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	// Session was cancelled by an archive; the task has since been unarchived
+	// (seedTaskAndSession's task is never archived), leaving exactly the state
+	// an unarchive-then-resume observes. No ExecutorRunning row exists — the
+	// archive cleanup already tore it down, which ResumeTaskSession's initial
+	// guard explicitly allows for terminal-state sessions.
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
+	session, _ := repo.GetTaskSession(ctx, "session1")
+	session.AgentProfileID = "profile-1"
+	session.ErrorMessage = models.SessionArchiveTreeCancelReason
+	_ = repo.UpdateTaskSession(ctx, session)
+
+	if _, err := svc.ResumeTaskSession(ctx, "task1", "session1"); err != nil {
+		t.Fatalf("ResumeTaskSession on archive-cancelled session returned: %v", err)
+	}
+
+	resumed, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if resumed.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %s, want WAITING_FOR_INPUT (agent started successfully)", resumed.State)
+	}
+	if got, ok := taskRepo.updatedStates["task1"]; ok && got == v1.TaskStateFailed {
+		t.Error("task must not be marked FAILED when resume of an archive-cancelled session succeeds")
+	}
+}
+
 // ctxAwareTaskRepo wraps mockTaskRepo and respects ctx cancellation. Used to
 // prove that ResumeTaskSession's failure-recording path is insulated from a
 // pre-cancelled caller ctx (the WS-disconnect scenario).
