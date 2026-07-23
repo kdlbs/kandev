@@ -1082,6 +1082,9 @@ func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	}
 }
 
+// sameStringSet reports whether got and want contain the same strings,
+// ignoring order and duplicates count-for-count — used to compare the set of
+// cancelled session IDs against an expected set regardless of return order.
 func sameStringSet(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
