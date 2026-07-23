@@ -435,7 +435,7 @@ func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath 
 			zap.String("output", string(output)),
 			zap.Error(err))
 
-		if err := m.forceRemoveDir(worktreePath); err != nil {
+		if err := m.forceRemoveDir(ctx, worktreePath); err != nil {
 			return err
 		}
 
@@ -486,20 +486,23 @@ func (m *Manager) tryRemoveEmptyTaskDir(worktreePath string) {
 // Native Windows cleanup intentionally stays within Go's portable filesystem
 // APIs. Unix hosts get a final non-shell rm fallback for persistent removal
 // failures caused by filesystems that reject os.RemoveAll while allowing rm.
-func (m *Manager) forceRemoveDir(dir string) error {
+func (m *Manager) forceRemoveDir(ctx context.Context, dir string) error {
 	const maxRetries = 3
 	const retryDelay = 200 * time.Millisecond
 	return m.removeDirWithRetriesAndFallback(
-		dir, maxRetries, retryDelay, os.RemoveAll, forceRemoveDirUnix, isUnixLikeOS(runtime.GOOS),
+		ctx, dir, maxRetries, retryDelay, os.RemoveAll, forceRemoveDirUnix, isUnixLikeOS(runtime.GOOS),
 	)
 }
 
 func (m *Manager) removeDirWithRetries(
-	dir string, maxRetries int, retryDelay time.Duration, removeAll func(string) error,
+	ctx context.Context, dir string, maxRetries int, retryDelay time.Duration, removeAll func(string) error,
 ) error {
 	var lastErr error
 
 	for i := range maxRetries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		lastErr = removeAll(dir)
 		if lastErr == nil {
 			return nil
@@ -509,32 +512,45 @@ func (m *Manager) removeDirWithRetries(
 				zap.String("path", dir),
 				zap.Int("attempt", i+1),
 				zap.Error(lastErr))
-			time.Sleep(retryDelay)
+			if err := waitForRetry(ctx, retryDelay); err != nil {
+				return err
+			}
 		}
 	}
 	return fmt.Errorf("remove directory %s after %d attempts: %w", dir, maxRetries, lastErr)
 }
 
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func (m *Manager) removeDirWithRetriesAndFallback(
-	dir string, maxRetries int, retryDelay time.Duration,
-	removeAll, fallback func(string) error,
+	ctx context.Context, dir string, maxRetries int, retryDelay time.Duration,
+	removeAll func(string) error, fallback func(context.Context, string) error,
 	useFallback bool,
 ) error {
-	err := m.removeDirWithRetries(dir, maxRetries, retryDelay, removeAll)
-	if err == nil || !useFallback {
+	err := m.removeDirWithRetries(ctx, dir, maxRetries, retryDelay, removeAll)
+	if err == nil || !useFallback || ctx.Err() != nil {
 		return err
 	}
-	if fallbackErr := fallback(dir); fallbackErr != nil {
+	if fallbackErr := fallback(ctx, dir); fallbackErr != nil {
 		return fmt.Errorf("remove directory %s with Unix fallback: %w", dir, errors.Join(err, fallbackErr))
 	}
 	return nil
 }
 
-func forceRemoveDirUnix(dir string) error {
+func forceRemoveDirUnix(ctx context.Context, dir string) error {
 	if strings.TrimSpace(dir) == "" {
 		return errors.New("refusing to remove an empty directory path")
 	}
-	cmd := exec.Command("rm", "-rf", "--", dir)
+	cmd := exec.CommandContext(ctx, "rm", "-rf", "--", dir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("rm -rf -- %q: %w: %s", dir, err, strings.TrimSpace(string(output)))
