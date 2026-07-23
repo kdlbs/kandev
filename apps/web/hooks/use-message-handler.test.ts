@@ -6,6 +6,7 @@ import {
 } from "./use-message-handler";
 import type { AppState } from "@/lib/state/store";
 import type { TaskMentionData } from "./use-inline-mention";
+import type { EntityReference } from "@/lib/types/entity-reference";
 
 const getWebSocketClientMock = vi.hoisted(() => vi.fn());
 
@@ -212,5 +213,42 @@ describe("sendMessageRequest", () => {
       code: "connection-unavailable",
       message: "Connection unavailable. Reconnect and try again.",
     });
+  });
+
+  it("sends structured references under the backend entity_references field", async () => {
+    const request = vi.fn().mockResolvedValue(undefined);
+    getWebSocketClientMock.mockReturnValue({ request });
+    const reference: EntityReference = {
+      version: 1,
+      ref: "mention:v1:github:issue:acme%2Frepo:42",
+      provider: "github",
+      kind: "issue",
+      id: "42",
+      key: "acme/repo#42",
+      title: "Fix composer references",
+      url: "https://github.com/acme/repo/issues/42",
+      scope: "acme/repo",
+    };
+    const payload = {
+      taskId: "task-1",
+      resolvedSessionId: "session-1",
+      finalMessage: "reference",
+      modelToSend: undefined,
+      planMode: false,
+      entityReferences: [reference],
+    } as Parameters<typeof sendMessageRequest>[0] & { entityReferences: EntityReference[] };
+
+    await sendMessageRequest(payload);
+
+    expect(request).toHaveBeenCalledWith(
+      "message.add",
+      {
+        task_id: "task-1",
+        session_id: "session-1",
+        content: "reference",
+        entity_references: [reference],
+      },
+      10000,
+    );
   });
 });

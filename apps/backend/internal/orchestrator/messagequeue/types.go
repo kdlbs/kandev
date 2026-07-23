@@ -20,9 +20,13 @@ const (
 	QueuedByWorkflow = "workflow"
 )
 
-// MetadataCoalesceKey identifies queued entries that should be replaced rather
-// than appended when a newer pending message supersedes an older one.
-const MetadataCoalesceKey = "coalesce_key"
+const (
+	// MetadataCoalesceKey identifies queued entries that should be replaced
+	// rather than appended when newer pending content supersedes older content.
+	MetadataCoalesceKey = "coalesce_key"
+	// MetadataEntityReferences stores normalized composer references.
+	MetadataEntityReferences = "entity_references"
+)
 
 // QueueFullErrorCode is the well-known WS / MCP error code surfaced when an
 // insert would exceed the per-session cap. Shared between the user-side WS

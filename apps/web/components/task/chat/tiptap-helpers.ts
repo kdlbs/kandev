@@ -1,4 +1,6 @@
 import type React from "react";
+import type { EntityReference } from "@/lib/types/entity-reference";
+import { isEntityReference } from "@/lib/entity-references/message-references";
 import { formatSlashCommandLabel, normalizeSlashCommandName } from "./tiptap-slash-command-utils";
 import type { SlashCommand } from "./slash-command-types";
 
@@ -19,6 +21,38 @@ export type EditorContentNode = {
   content?: EditorContentNode[];
 };
 
+export function isEntityReferenceTriggerAllowed(args: {
+  textBeforeTrigger: string;
+  parentType: string;
+  hasCodeMark: boolean;
+}): boolean {
+  if (args.parentType === "codeBlock" || args.hasCodeMark) return false;
+  return args.textBeforeTrigger === "" || /\s$/u.test(args.textBeforeTrigger);
+}
+
+function entityReferenceFromAttrs(attrs: Record<string, unknown> | undefined) {
+  if (!attrs) return null;
+  const candidate = attrs.key === null ? { ...attrs, key: undefined } : attrs;
+  return isEntityReference(candidate) ? candidate : null;
+}
+
+export function extractEntityReferences(doc: JSONNode): EntityReference[] {
+  const references: EntityReference[] = [];
+  const seen = new Set<string>();
+  const visit = (node: JSONNode) => {
+    if (node.type === "entityReference") {
+      const reference = entityReferenceFromAttrs(node.attrs);
+      if (reference && !seen.has(reference.ref)) {
+        seen.add(reference.ref);
+        references.push(reference);
+      }
+    }
+    node.content?.forEach(visit);
+  };
+  visit(doc);
+  return references;
+}
+
 // ── Serialization ───────────────────────────────────────────────────
 
 function serializeInline(nodes: JSONNode[]): string {
@@ -27,6 +61,9 @@ function serializeInline(nodes: JSONNode[]): string {
       if (n.type === "hardBreak") return "\n";
       if (n.type === "contextMention") {
         return n.attrs?.label ? `@${n.attrs.label}` : "";
+      }
+      if (n.type === "entityReference") {
+        return formatEntityReferenceMarkdown(n.attrs as Partial<EntityReference>);
       }
       if (n.type === "slashCommand") {
         return formatSlashCommandLabel(n.attrs);
@@ -38,6 +75,21 @@ function serializeInline(nodes: JSONNode[]): string {
       return text;
     })
     .join("");
+}
+
+function escapeMarkdownLabel(value: string): string {
+  return value.replace(/([\\[\]])/g, "\\$1");
+}
+
+function encodeMarkdownUrl(value: string): string {
+  return encodeURI(value).replace(/\(/g, "%28").replace(/\)/g, "%29");
+}
+
+export function formatEntityReferenceMarkdown(reference: Partial<EntityReference>): string {
+  const label = String(reference.key || reference.title || "");
+  const url = String(reference.url || "");
+  if (!label || !url) return "";
+  return `[#${escapeMarkdownLabel(label)}](${encodeMarkdownUrl(url)})`;
 }
 
 function serializeNode(node: JSONNode): string {
@@ -108,7 +160,7 @@ function slashCommandMap(commands: readonly SlashCommand[]): Map<string, SlashCo
   return map;
 }
 
-function textLineToNodes(line: string, commands: Map<string, SlashCommand>): EditorContentNode[] {
+function slashTextToNodes(line: string, commands: Map<string, SlashCommand>): EditorContentNode[] {
   const nodes: EditorContentNode[] = [];
   const tokenPattern = /\/\S+/g;
   let cursor = 0;
@@ -129,9 +181,44 @@ function textLineToNodes(line: string, commands: Map<string, SlashCommand>): Edi
   return nodes;
 }
 
+function entityReferenceTokens(references: readonly EntityReference[]) {
+  return references
+    .map((reference) => ({ reference, markdown: formatEntityReferenceMarkdown(reference) }))
+    .filter((token) => token.markdown.length > 0);
+}
+
+function textLineToNodes(
+  line: string,
+  commands: Map<string, SlashCommand>,
+  references: readonly EntityReference[],
+): EditorContentNode[] {
+  const tokens = entityReferenceTokens(references);
+  if (tokens.length === 0) return slashTextToNodes(line, commands);
+  const nodes: EditorContentNode[] = [];
+  let cursor = 0;
+  while (cursor < line.length) {
+    let match: { index: number; markdown: string; reference: EntityReference } | null = null;
+    for (const token of tokens) {
+      const index = line.indexOf(token.markdown, cursor);
+      if (index !== -1 && (!match || index < match.index)) match = { ...token, index };
+    }
+    if (!match) {
+      nodes.push(...slashTextToNodes(line.slice(cursor), commands));
+      break;
+    }
+    if (match.index > cursor) {
+      nodes.push(...slashTextToNodes(line.slice(cursor, match.index), commands));
+    }
+    nodes.push({ type: "entityReference", attrs: { ...match.reference } });
+    cursor = match.index + match.markdown.length;
+  }
+  return nodes;
+}
+
 export function textToEditorContent(
   text: string,
   slashCommands: readonly SlashCommand[] = [],
+  entityReferences: readonly EntityReference[] = [],
 ): EditorContentNode {
   const commands = slashCommandMap(slashCommands);
   const content: EditorContentNode[] = [];
@@ -142,7 +229,7 @@ export function textToEditorContent(
     if (inCodeFence || isFenceLine) {
       nodes = line ? [{ type: "text", text: line }] : [];
     } else {
-      nodes = textLineToNodes(line, commands);
+      nodes = textLineToNodes(line, commands, entityReferences);
     }
     content.push(nodes.length > 0 ? { type: "paragraph", content: nodes } : { type: "paragraph" });
     if (isFenceLine) inCodeFence = !inCodeFence;

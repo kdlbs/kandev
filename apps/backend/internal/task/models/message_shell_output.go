@@ -1,6 +1,9 @@
 package models
 
-import "github.com/kandev/kandev/internal/agentctl/types/streams"
+import (
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/entityrefs"
+)
 
 // ShellExecOutputSnapshot is the full bounded output stored on a shell message.
 type ShellExecOutputSnapshot struct {
@@ -13,15 +16,29 @@ type ShellExecOutputSnapshot struct {
 // ProjectMessageMetadata removes shell output bodies from client message payloads.
 // It copies the normalized shell path so repository-owned metadata is never mutated.
 func ProjectMessageMetadata(metadata map[string]any) map[string]any {
+	projected := metadata
+	copied := false
+	if rawReferences, exists := metadata["entity_references"]; exists {
+		projected = copyMetadata(metadata)
+		copied = true
+		references := entityrefs.NormalizePersisted(rawReferences)
+		if len(references) == 0 {
+			delete(projected, "entity_references")
+		} else {
+			projected["entity_references"] = references
+		}
+	}
 	output, ok := shellOutputFromMetadata(metadata)
 	if !ok {
-		return metadata
+		return projected
 	}
 	normalized, ok := projectNormalizedShell(metadata["normalized"], shellOutputSummary(output))
 	if !ok {
-		return metadata
+		return projected
 	}
-	projected := copyMetadata(metadata)
+	if !copied {
+		projected = copyMetadata(metadata)
+	}
 	projected["normalized"] = normalized
 	return projected
 }

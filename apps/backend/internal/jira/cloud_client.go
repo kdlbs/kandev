@@ -243,6 +243,7 @@ func (c *CloudClient) TestAuth(ctx context.Context) (*TestConnectionResult, erro
 
 // issueResponse mirrors the subset of the Atlassian issue payload we consume.
 type issueResponse struct {
+	ID     string `json:"id"`
 	Key    string `json:"key"`
 	Fields struct {
 		Summary     string      `json:"summary"`
@@ -547,6 +548,7 @@ func (c *CloudClient) searchTicketsServer(ctx context.Context, jql, pageToken st
 // Factored out so GetTicket and SearchTickets stay consistent.
 func issueToTicket(issue *issueResponse, siteURL string) JiraTicket {
 	return JiraTicket{
+		ID:             issue.ID,
 		Key:            issue.Key,
 		Summary:        issue.Fields.Summary,
 		StatusID:       issue.Fields.Status.ID,

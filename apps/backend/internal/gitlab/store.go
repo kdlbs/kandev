@@ -3,8 +3,10 @@ package gitlab
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +20,20 @@ import (
 type Store struct {
 	db *sqlx.DB
 	ro *sqlx.DB
+}
+
+// MentionProjectScope is one explicitly workspace-bound GitLab project.
+type MentionProjectScope struct {
+	ID   int64  `json:"id"`
+	Path string `json:"path"`
+}
+
+// MentionScope is the operational host/project boundary for mention search.
+// It is deliberately separate from the legacy install-wide GitLab auth state.
+type MentionScope struct {
+	WorkspaceID string                `json:"workspace_id"`
+	Host        string                `json:"host"`
+	Projects    []MentionProjectScope `json:"projects"`
 }
 
 // NewStore initialises the gitlab Store and creates its tables. db is the
@@ -183,6 +199,14 @@ const createTablesSQL = `
 		issue_presets TEXT NOT NULL DEFAULT '[]',
 		updated_at DATETIME NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS gitlab_mention_scopes (
+		workspace_id TEXT PRIMARY KEY,
+		host TEXT NOT NULL,
+		projects_json TEXT NOT NULL DEFAULT '[]',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
 `
 
 func (s *Store) createTables() error {
@@ -267,6 +291,53 @@ func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
 		columns[name] = struct{}{}
 	}
 	return columns, rows.Err()
+}
+
+// UpsertMentionScope explicitly binds one workspace to a GitLab host and
+// project allowlist. No global/default workspace fallback is used.
+func (s *Store) UpsertMentionScope(ctx context.Context, scope *MentionScope) error {
+	if scope == nil || strings.TrimSpace(scope.WorkspaceID) == "" {
+		return errors.New("gitlab mention scope: workspace ID required")
+	}
+	projects, err := json.Marshal(scope.Projects)
+	if err != nil {
+		return fmt.Errorf("marshal gitlab mention projects: %w", err)
+	}
+	now := time.Now().UTC()
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO gitlab_mention_scopes (workspace_id, host, projects_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id) DO UPDATE SET
+			host = excluded.host,
+			projects_json = excluded.projects_json,
+			updated_at = excluded.updated_at`,
+		scope.WorkspaceID, scope.Host, string(projects), now, now)
+	return err
+}
+
+// GetMentionScope returns only the exact workspace binding, or nil when none
+// exists. It never consults install-wide host/default settings.
+func (s *Store) GetMentionScope(ctx context.Context, workspaceID string) (*MentionScope, error) {
+	var row struct {
+		WorkspaceID string `db:"workspace_id"`
+		Host        string `db:"host"`
+		Projects    string `db:"projects_json"`
+	}
+	err := s.ro.GetContext(ctx, &row, `
+		SELECT workspace_id, host, projects_json
+		FROM gitlab_mention_scopes
+		WHERE workspace_id = ?`, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	scope := &MentionScope{WorkspaceID: row.WorkspaceID, Host: row.Host}
+	if err := json.Unmarshal([]byte(row.Projects), &scope.Projects); err != nil {
+		return nil, fmt.Errorf("decode gitlab mention projects: %w", err)
+	}
+	return scope, nil
 }
 
 // taskMRSelectCols is the projection used by every SELECT so dev DBs that

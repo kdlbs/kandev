@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type RefObject } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
-import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
+import {
+  type ChatInputContainerHandle,
+  type ChatSubmitPayload,
+  type ChatSubmitResult,
+} from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
@@ -119,7 +123,7 @@ function useSessionAgentIdentity(sessionId: string | null | undefined): {
 }
 
 type TaskChatPanelProps = {
-  onSend?: (message: string) => void;
+  onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId?: string | null;
   taskId?: string | null;
   onOpenFile?: (path: string) => void;

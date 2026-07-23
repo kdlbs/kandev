@@ -10,17 +10,17 @@ import {
   useMemo,
 } from "react";
 import { EditorContent } from "@tiptap/react";
-import { useShallow } from "zustand/react/shallow";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { EditorContextProvider } from "./editor-context";
+import { EntityReferenceMenu } from "./entity-reference-menu";
 import { MentionMenu } from "./mention-menu";
 import { MessageHistorySearch } from "./message-history-search";
 import { SlashCommandMenu } from "./slash-command-menu";
 import { buildTaskMentionItems } from "./task-mention-items";
-import { extractUserHistory } from "./message-history";
+import { createMessageHistorySelector, type MessageHistoryEntry } from "./message-history";
 import { useDrainOlderMessages } from "./use-drain-older-messages";
 import {
   createMentionSuggestion,
@@ -33,6 +33,7 @@ import { useTipTapEditor, type TipTapInputHandle } from "./use-tiptap-editor";
 import type { MentionItem } from "@/hooks/use-inline-mention";
 import type { SlashCommand } from "./slash-command-types";
 import type { ContextFile } from "@/lib/state/context-files-store";
+import { useEntityReferenceComposer } from "./use-entity-reference-composer";
 
 export type { TipTapInputHandle } from "./use-tiptap-editor";
 
@@ -52,6 +53,8 @@ type TipTapInputProps = {
   // TipTap-specific
   sessionId: string | null;
   taskId?: string | null;
+  workspaceId?: string | null;
+  entityReferencesEnabled?: boolean;
   onAddContextFile?: (file: ContextFile) => void;
   onToggleContextFile?: (file: ContextFile) => void;
   planContextEnabled?: boolean;
@@ -361,6 +364,8 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onBlur,
     sessionId,
     taskId,
+    workspaceId = null,
+    entityReferencesEnabled = false,
     onImagePaste,
   },
   ref,
@@ -374,9 +379,15 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     setMentionMenu: menu.setMentionMenu,
     setSlashMenu: menu.setSlashMenu,
   });
+  const entityReferences = useEntityReferenceComposer({
+    enabled: entityReferencesEnabled,
+    workspaceId,
+    sessionId,
+  });
   const isSuggestionMenuOpen =
     (menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0) ||
-    (menu.slashMenu.isOpen && menu.slashMenu.items.length > 0);
+    (menu.slashMenu.isOpen && menu.slashMenu.items.length > 0) ||
+    entityReferences.isOpen;
   const { history, getHistory } = useChatHistory(sessionId);
   const { editorWrapperRef, ...overlay } = useReverseSearchOverlay(sessionId);
   const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen);
@@ -396,6 +407,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onImagePaste,
     mentionSuggestion,
     slashSuggestion,
+    entityReferenceSuggestion: entityReferences.suggestion,
     slashCommands,
     isSuggestionMenuOpen,
     getHistory,
@@ -416,6 +428,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     <>
       <TipTapPopups
         menu={menu}
+        entityReferences={entityReferences}
         overlay={overlay}
         history={history}
         isDraining={isDraining}
@@ -435,14 +448,16 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
 
 type TipTapPopupsProps = {
   menu: ReturnType<typeof useMenuHandlers>;
+  entityReferences: ReturnType<typeof useEntityReferenceComposer>;
   overlay: Omit<ReturnType<typeof useReverseSearchOverlay>, "editorWrapperRef">;
-  history: readonly string[];
+  history: readonly MessageHistoryEntry[];
   isDraining: boolean;
   onReverseSearchSelect: (index: number) => void;
 };
 
 function TipTapPopups({
   menu,
+  entityReferences,
   overlay,
   history,
   isDraining,
@@ -460,6 +475,19 @@ function TipTapPopups({
         onSelect={menu.handleMentionSelect}
         onClose={menu.handleMentionClose}
         setSelectedIndex={menu.setMentionSelectedIndex}
+      />
+      <EntityReferenceMenu
+        isOpen={entityReferences.isOpen}
+        clientRect={entityReferences.clientRect}
+        groups={entityReferences.groups}
+        query={entityReferences.query}
+        selectedIndex={entityReferences.selectedIndex}
+        isSearching={entityReferences.isSearching}
+        error={entityReferences.error}
+        onRetry={entityReferences.retry}
+        onSelect={entityReferences.selectReference}
+        onClose={entityReferences.close}
+        setSelectedIndex={entityReferences.setSelectedIndex}
       />
       <SlashCommandMenu
         isOpen={menu.slashMenu.isOpen}
@@ -483,16 +511,11 @@ function TipTapPopups({
   );
 }
 
-function useMessageHistoryForSession(sessionId: string | null): string[] {
-  // Subscribe to the *derived* user history (not the raw messages array) via a
-  // shallow comparison: agent streaming tokens churn the messages array every
-  // frame but don't change the user's sent-message history, so the rich editor
-  // only re-renders when the history list itself changes.
-  return useAppStore(
-    useShallow((s) =>
-      extractUserHistory((sessionId ? s.messages.bySession[sessionId] : undefined) ?? []),
-    ),
-  );
+function useMessageHistoryForSession(sessionId: string | null): MessageHistoryEntry[] {
+  // The memoized selector keeps its snapshot stable while agent messages
+  // stream, but still reacts to user content or reference-metadata changes.
+  const selector = useMemo(() => createMessageHistorySelector(sessionId), [sessionId]);
+  return useAppStore(selector);
 }
 
 function useChatHistory(sessionId: string | null) {
