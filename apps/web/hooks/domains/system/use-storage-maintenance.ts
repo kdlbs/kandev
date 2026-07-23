@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -65,16 +66,28 @@ const MAX_TERMINAL_REFRESH_ATTEMPTS = 6;
 
 function useStorageActionRunner() {
   const { toast } = useToast();
-  const [pendingAction, setPendingAction] = useState<StoragePendingAction>("load");
+  const [loading, setLoading] = useState(true);
+  const [pendingActions, setPendingActions] = useState<
+    Array<{ id: number; action: Exclude<StoragePendingAction, "load" | null> }>
+  >([]);
+  const nextPendingActionId = useRef(0);
   const [error, setError] = useState<string | null>(null);
-  const finishLoading = useCallback(() => setPendingAction(null), []);
+  const finishLoading = useCallback(() => setLoading(false), []);
+  const pendingAction = useMemo<StoragePendingAction>(() => {
+    if (loading) return "load";
+    const policyAction = pendingActions.findLast(
+      ({ action }) => action === "save" || action === "adopt",
+    );
+    return policyAction?.action ?? pendingActions[0]?.action ?? null;
+  }, [loading, pendingActions]);
   const perform = useCallback(
     async (
       action: Exclude<StoragePendingAction, "load" | null>,
       work: () => Promise<void>,
       rethrow = false,
     ) => {
-      setPendingAction(action);
+      const pendingActionId = nextPendingActionId.current++;
+      setPendingActions((current) => [...current, { id: pendingActionId, action }]);
       setError(null);
       try {
         await work();
@@ -84,7 +97,7 @@ function useStorageActionRunner() {
         toast({ title: "Storage action failed", description: message, variant: "error" });
         if (rethrow) throw requestError;
       } finally {
-        setPendingAction(null);
+        setPendingActions((current) => current.filter(({ id }) => id !== pendingActionId));
       }
     },
     [toast],

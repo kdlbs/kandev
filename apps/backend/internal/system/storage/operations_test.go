@@ -167,6 +167,38 @@ func TestDeleteQuarantineRejectsBeforeRetentionWithoutStartingDelete(t *testing.
 	}
 }
 
+func TestAnalyzeForcesOverviewRefresh(t *testing.T) {
+	connection := newSQLite(t)
+	pool := db.NewPool(connection, connection)
+	rawSettings, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new settings store: %v", err)
+	}
+	overview := &recordingRefreshOverview{called: make(chan struct{})}
+	tracker := jobs.NewTracker(nil, newOperationsTestLogger(t))
+	operations := NewOperations(OperationsConfig{
+		Settings: NewSettingsStore(rawSettings), Store: newStorageStore(t, pool),
+		Jobs: tracker, Overview: overview,
+	})
+
+	jobID, err := operations.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	select {
+	case <-overview.called:
+	case <-time.After(time.Second):
+		t.Fatal("Analyze did not request an overview refresh")
+	}
+	if overview.refreshCalls != 1 {
+		t.Fatalf("Refresh calls = %d, want 1", overview.refreshCalls)
+	}
+	if overview.summaryCalls != 0 {
+		t.Fatalf("Summary calls = %d, want 0", overview.summaryCalls)
+	}
+	waitForJobState(t, tracker, jobID, jobs.StateSucceeded)
+}
+
 func waitForJobState(t *testing.T, tracker *jobs.Tracker, id string, state jobs.State) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
@@ -185,6 +217,32 @@ func waitForJobState(t *testing.T, tracker *jobs.Tracker, id string, state jobs.
 
 type recordingQuarantineController struct {
 	deleteCalls int
+}
+
+type recordingRefreshOverview struct {
+	called       chan struct{}
+	refreshCalls int
+	summaryCalls int
+}
+
+func (o *recordingRefreshOverview) Summary(context.Context) (Summary, error) {
+	o.summaryCalls++
+	close(o.called)
+	return Summary{}, nil
+}
+
+func (o *recordingRefreshOverview) Refresh(context.Context) (OverviewSnapshot, error) {
+	o.refreshCalls++
+	close(o.called)
+	return OverviewSnapshot{Summary: Summary{}}, nil
+}
+
+func (o *recordingRefreshOverview) Get(context.Context) (OverviewSnapshot, error) {
+	return OverviewSnapshot{}, nil
+}
+
+func (o *recordingRefreshOverview) Capabilities(context.Context, StorageMaintenanceSettings) Capabilities {
+	return Capabilities{}
 }
 
 type signallingCleanupProvider struct {

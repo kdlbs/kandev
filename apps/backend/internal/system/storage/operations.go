@@ -32,7 +32,7 @@ type OperationsConfig struct {
 	Jobs       *jobs.Tracker
 	Activity   *activity.Coordinator
 	Providers  []CleanupProvider
-	Overview   OverviewProvider
+	Overview   OverviewRefresher
 	GoCache    GoCacheAdopter
 	Quarantine QuarantineController
 }
@@ -75,9 +75,14 @@ func (o *Operations) Analyze(ctx context.Context) (string, error) {
 		if _, err := o.config.Store.TransitionRun(jobCtx, id, RunStateRunning, nil, ""); err != nil {
 			return nil, err
 		}
-		summary, analyzeErr := o.config.Overview.Summary(jobCtx)
-		return o.finishAnalysis(jobCtx, id, summary, analyzeErr)
+		snapshot, analyzeErr := o.config.Overview.Refresh(jobCtx)
+		return o.finishAnalysis(jobCtx, id, snapshot.Summary, analyzeErr)
 	}), nil
+}
+
+type OverviewRefresher interface {
+	OverviewReader
+	Refresh(context.Context) (OverviewSnapshot, error)
 }
 
 func (o *Operations) RunNow(ctx context.Context, resources []string) (string, error) {
