@@ -2,6 +2,77 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile sidebar task actions", () => {
+  test("switches to the selected task and its chat from the phone task drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const sourceTitle = "Mobile drawer source task";
+    const destinationTitle = "Mobile drawer destination task";
+    const destinationResponse = "destination drawer session response";
+    const taskOptions = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    };
+    const source = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      sourceTitle,
+      seedData.agentProfileId,
+      { ...taskOptions, description: 'e2e:message("source drawer session response")' },
+    );
+    const destination = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      destinationTitle,
+      seedData.agentProfileId,
+      { ...taskOptions, description: `e2e:message("${destinationResponse}")` },
+    );
+    if (!source.session_id || !destination.session_id) {
+      throw new Error("mobile drawer task setup did not create both sessions");
+    }
+    expect(source.session_id).not.toBe(destination.session_id);
+
+    // Wait for the destination's actual agent response before navigating, so
+    // the assertion below proves that the drawer selected its session rather
+    // than merely replacing the URL/title.
+    await expect
+      .poll(async () => {
+        const response = await apiClient.rawRequest(
+          "GET",
+          `/api/v1/task-sessions/${destination.session_id}/messages?limit=50`,
+        );
+        const body = (await response.json()) as { messages?: Array<{ content?: string }> };
+        return body.messages?.some((message) => message.content?.includes(destinationResponse));
+      })
+      .toBe(true);
+
+    await testPage.goto(`/t/${source.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.chat.getByText("source drawer session response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await testPage.getByTestId("mobile-session-menu").tap();
+    const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const destinationRow = drawer
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: destinationTitle });
+    await expect(destinationRow).toBeVisible();
+    await destinationRow.tap();
+
+    await expect(drawer).toBeHidden();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${destination.id}$`));
+    const mobileTopBar = testPage
+      .getByTestId("mobile-session-menu")
+      .locator("xpath=ancestor::header");
+    await expect(mobileTopBar.getByText(destinationTitle, { exact: true })).toBeVisible();
+    await expect(session.chat.getByText(destinationResponse).last()).toBeVisible({
+      timeout: 30_000,
+    });
+  });
+
   test("opens the phone task switcher as an inset bottom card", async ({
     testPage,
     apiClient,

@@ -27,6 +27,66 @@ import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/typ
 import type { AppState } from "@/lib/state/store";
 import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
 
+export const OPTIONAL_HYDRATION_TIMEOUT_MS = 5_000;
+
+type OptionalHydrationResult<T> = { status: "fulfilled"; value: T } | { status: "unavailable" };
+
+function beginOptionalHydration() {
+  let deadlineTimer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<void>((resolve) => {
+    deadlineTimer = setTimeout(resolve, OPTIONAL_HYDRATION_TIMEOUT_MS);
+  });
+
+  return {
+    load<T>(label: string, operation: () => Promise<T>): Promise<OptionalHydrationResult<T>> {
+      return new Promise((resolve) => {
+        let settled = false;
+        const settle = (value: OptionalHydrationResult<T>) => {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        };
+
+        void Promise.resolve()
+          .then(operation)
+          .then(
+            (value) => settle({ status: "fulfilled", value }),
+            (error) => {
+              if (settled) return;
+              console.warn(
+                `[session-page-state] optional ${label} failed; continuing without it`,
+                error,
+              );
+              settle({ status: "unavailable" });
+            },
+          );
+        void deadline.then(() => {
+          if (!settled) {
+            console.warn(
+              `[session-page-state] optional ${label} timed out after ${OPTIONAL_HYDRATION_TIMEOUT_MS}ms; continuing without it`,
+            );
+            settle({ status: "unavailable" });
+          }
+        });
+      });
+    },
+    complete() {
+      clearTimeout(deadlineTimer);
+    },
+  };
+}
+
+function optionalValue<T>(result: OptionalHydrationResult<T>): T | undefined {
+  return result.status === "fulfilled" ? result.value : undefined;
+}
+
+function optionalState<T>(
+  value: T | undefined,
+  build: (resolved: T) => Partial<AppState>,
+): Partial<AppState> {
+  return value === undefined ? {} : build(value);
+}
+
 function buildWorktreeState(allSessions: TaskSession[]) {
   const sessionsWithWorktrees = allSessions.filter((s) => s.worktree_id);
   return {
@@ -55,9 +115,9 @@ function buildWorktreeState(allSessions: TaskSession[]) {
 type BuildSessionPageStateParams = {
   task: Task;
   sessionId: string | null;
-  snapshot: Awaited<ReturnType<typeof fetchWorkflowSnapshot>>;
-  agents: Awaited<ReturnType<typeof listAgents>>;
-  repositories: Awaited<ReturnType<typeof listRepositories>>["repositories"];
+  snapshot?: Awaited<ReturnType<typeof fetchWorkflowSnapshot>>;
+  agents?: Awaited<ReturnType<typeof listAgents>>;
+  repositories?: Awaited<ReturnType<typeof listRepositories>>["repositories"];
   allSessions: TaskSession[];
   // Full session payload (with agent_profile_snapshot) for the active sessionId,
   // when available. The list endpoint returns lightweight summaries without the
@@ -65,73 +125,90 @@ type BuildSessionPageStateParams = {
   // default model on SSR — visible as a brief flash of the wrong model before
   // the WS-driven cached state arrives.
   activeSession: TaskSession | null;
-  workspaces: Awaited<ReturnType<typeof listWorkspaces>>["workspaces"];
-  workflows: Awaited<ReturnType<typeof listWorkflows>>["workflows"];
-  turns: Awaited<ReturnType<typeof listSessionTurns>>["turns"];
-  userSettingsResponse: UserSettingsResponse | null;
-  messagesResponse: ListMessagesResponse | null;
+  workspaces?: Awaited<ReturnType<typeof listWorkspaces>>["workspaces"];
+  workflows?: Awaited<ReturnType<typeof listWorkflows>>["workflows"];
+  turns?: Awaited<ReturnType<typeof listSessionTurns>>["turns"];
+  userSettingsResponse?: UserSettingsResponse | null;
+  messagesResponse?: ListMessagesResponse | null;
 };
 
 function buildSessionPageState(p: BuildSessionPageStateParams) {
   const { task, sessionId, snapshot, agents, allSessions, messagesResponse } = p;
   const messages = messagesResponse?.messages ? [...messagesResponse.messages].reverse() : [];
-  const taskState = taskToState(task, sessionId, {
-    items: messages,
-    hasMore: messagesResponse?.has_more ?? false,
-    oldestCursor: messages[0]?.id ?? null,
-  });
+  const taskState =
+    messagesResponse === undefined
+      ? taskToState(task, sessionId)
+      : taskToState(task, sessionId, {
+          items: messages,
+          hasMore: messagesResponse?.has_more ?? false,
+          oldestCursor: messages[0]?.id ?? null,
+        });
 
   return {
-    ...snapshotToState(snapshot),
+    ...optionalState(snapshot, snapshotToState),
     ...taskState,
     ...buildResourceState(p),
     ...buildSessionState(p),
     ...buildWorktreeState(allSessions),
     ...buildPrepareProgressState(allSessions),
-    settingsAgents: { items: agents.agents },
-    settingsData: { agentsLoaded: true, executorsLoaded: false },
-    userSettings: mapUserSettingsResponse(p.userSettingsResponse),
+    ...optionalState(agents, (value) => ({
+      settingsAgents: { items: value.agents },
+      settingsData: { agentsLoaded: true, executorsLoaded: false },
+    })),
+    ...optionalState(p.userSettingsResponse, (value) => ({
+      userSettings: mapUserSettingsResponse(value),
+    })),
   };
 }
 
 function buildResourceState(p: BuildSessionPageStateParams) {
   const { task, agents, repositories, workspaces, workflows } = p;
   const repositoryId = task.repositories?.[0]?.repository_id;
-  const repository = repositories.find((r) => r.id === repositoryId);
+  const repository = repositories?.find((r) => r.id === repositoryId);
   const scripts = repository?.scripts ?? [];
   return {
     workspaces: {
-      items: workspaces.map(mapWorkspaceItem),
+      ...(workspaces ? { items: workspaces.map(mapWorkspaceItem) } : {}),
       activeId: task.workspace_id,
-    },
+    } as Partial<AppState>["workspaces"],
     // Don't write activeId — null means "All Workflows"; task context lives in kanban.workflowId.
-    workflows: {
-      items: workflows.map((w) => ({
-        id: w.id as string,
-        workspaceId: w.workspace_id as string,
-        name: w.name,
-        hidden: w.hidden,
-        style: w.style,
-      })),
-    } as Partial<AppState>["workflows"],
-    repositories: {
-      itemsByWorkspaceId: { [task.workspace_id]: repositories },
-      loadingByWorkspaceId: { [task.workspace_id]: false },
-      loadedByWorkspaceId: { [task.workspace_id]: true },
-    },
-    repositoryScripts: repositoryId
+    ...optionalState(workflows, (value) => ({
+      workflows: {
+        items: value.map((w) => ({
+          id: w.id as string,
+          workspaceId: w.workspace_id as string,
+          name: w.name,
+          hidden: w.hidden,
+          style: w.style,
+        })),
+      } as Partial<AppState>["workflows"],
+    })),
+    ...optionalState(repositories, (value) => ({
+      repositories: {
+        itemsByWorkspaceId: { [task.workspace_id]: value },
+        loadingByWorkspaceId: { [task.workspace_id]: false },
+        loadedByWorkspaceId: { [task.workspace_id]: true },
+      },
+    })),
+    ...(repositories
       ? {
-          itemsByRepositoryId: { [repositoryId]: scripts },
-          loadingByRepositoryId: { [repositoryId]: false },
-          loadedByRepositoryId: { [repositoryId]: true },
+          repositoryScripts: repositoryId
+            ? {
+                itemsByRepositoryId: { [repositoryId]: scripts },
+                loadingByRepositoryId: { [repositoryId]: false },
+                loadedByRepositoryId: { [repositoryId]: true },
+              }
+            : { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
         }
-      : { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
-    agentProfiles: {
-      items: agents.agents.flatMap((agent) =>
-        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-      ),
-      version: 0,
-    },
+      : {}),
+    ...optionalState(agents, (value) => ({
+      agentProfiles: {
+        items: value.agents.flatMap((agent) =>
+          agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
+        ),
+        version: 0,
+      },
+    })),
   };
 }
 
@@ -151,14 +228,18 @@ function buildSessionState(p: BuildSessionPageStateParams) {
       loadingByTaskId: { [task.id]: false },
       loadedByTaskId: { [task.id]: true },
     },
-    turns: sessionId
+    ...(turns !== undefined
       ? {
-          bySession: { [sessionId]: turns },
-          activeBySession: {
-            [sessionId]: turns.filter((t) => !t.completed_at).pop()?.id ?? null,
-          },
+          turns: sessionId
+            ? {
+                bySession: { [sessionId]: turns },
+                activeBySession: {
+                  [sessionId]: turns.filter((t) => !t.completed_at).pop()?.id ?? null,
+                },
+              }
+            : { bySession: {}, activeBySession: {} },
         }
-      : { bySession: {}, activeBySession: {} },
+      : {}),
     environmentIdBySessionId: Object.fromEntries(
       allSessions.filter((s) => s.task_environment_id).map((s) => [s.id, s.task_environment_id!]),
     ),
@@ -194,7 +275,14 @@ export async function fetchSessionData(sessionId: string): Promise<FetchedSessio
     listTaskSessions(activeSession.task_id, { cache: "no-store" }),
   ]);
 
-  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, activeSession);
+  const optionalHydration = beginOptionalHydration();
+  return fetchSessionDataFromTask(
+    task,
+    sessionId,
+    allSessionsResponse,
+    Promise.resolve({ status: "fulfilled", value: { session: activeSession } }),
+    optionalHydration,
+  );
 }
 
 export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSessionData> {
@@ -214,22 +302,19 @@ export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSe
   // Refetch the active session via the single-session endpoint to get
   // agent_profile_snapshot, which the list endpoint strips. See
   // BuildSessionPageStateParams.activeSession for the SSR-flicker rationale.
-  // A failure here (auth, 5xx, timeout) degrades gracefully to the original
-  // initial-flash behaviour but should surface in server logs so silent
-  // 401/500s are debuggable.
+  // All remaining enrichment shares this deadline so no optional request can
+  // extend route loading beyond the configured bound.
+  const optionalHydration = beginOptionalHydration();
   const { fetchTaskSession } = await import("@/lib/api");
-  const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" }).catch((e) => {
-    console.warn(
-      "[session-page-state] failed to fetch active session snapshot; SSR will fall back to summary entry",
-      e,
-    );
-    return null;
-  });
+  const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
+    fetchTaskSession(sessionId, { cache: "no-store" }),
+  );
   return fetchSessionDataFromTask(
     task,
     sessionId,
     allSessionsResponse,
-    sessionResponse?.session ?? null,
+    activeSessionResponse,
+    optionalHydration,
   );
 }
 
@@ -237,6 +322,26 @@ async function fetchTaskDataOnly(
   task: Task,
   allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
 ): Promise<FetchedSessionData> {
+  const optionalHydration = beginOptionalHydration();
+  const results = await Promise.all([
+    // Only the task and its session list are essential to route recovery. These
+    // enrichment requests seed convenience state and must never strand the route.
+    optionalHydration.load("workflow snapshot", () =>
+      task.workflow_id
+        ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
+        : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
+    ),
+    optionalHydration.load("agents", () => listAgents({ cache: "no-store" })),
+    optionalHydration.load("repositories", () =>
+      listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
+    ),
+    optionalHydration.load("workspaces", () => listWorkspaces({ cache: "no-store" })),
+    optionalHydration.load("workflows", () =>
+      listWorkflows(task.workspace_id, { cache: "no-store", includeHidden: true }),
+    ),
+    optionalHydration.load("user settings", () => fetchUserSettings({ cache: "no-store" })),
+  ]);
+  optionalHydration.complete();
   const [
     snapshot,
     agents,
@@ -244,36 +349,27 @@ async function fetchTaskDataOnly(
     workspacesResponse,
     workflowsResponse,
     userSettingsResponse,
-  ] = await Promise.all([
-    task.workflow_id
-      ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
-      : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
-    listAgents({ cache: "no-store" }),
-    listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
-    listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-    listWorkflows(task.workspace_id, { cache: "no-store", includeHidden: true }).catch(() => ({
-      workflows: [],
-    })),
-    fetchUserSettings({ cache: "no-store" }).catch(() => null),
-  ]);
+  ] = results;
 
   const allSessions = allSessionsResponse.sessions ?? [];
-  const repositories = repositoriesResponse.repositories ?? [];
-  const workspaces = workspacesResponse.workspaces ?? [];
-  const workflows = workflowsResponse.workflows ?? [];
+  const snapshotValue = optionalValue(snapshot);
+  const agentsValue = optionalValue(agents);
+  const repositories = optionalValue(repositoriesResponse)?.repositories;
+  const workspaces = optionalValue(workspacesResponse)?.workspaces;
+  const workflows = optionalValue(workflowsResponse)?.workflows;
 
   const initialState = buildSessionPageState({
     task,
     sessionId: null,
-    snapshot,
-    agents,
+    snapshot: snapshotValue,
+    agents: agentsValue,
     repositories,
     allSessions,
     activeSession: null,
     workspaces,
     workflows,
     turns: [],
-    userSettingsResponse,
+    userSettingsResponse: optionalValue(userSettingsResponse),
     messagesResponse: null,
   });
 
@@ -340,7 +436,8 @@ async function fetchSessionDataFromTask(
   task: Task,
   sessionId: string,
   allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
-  activeSession: TaskSession | null,
+  activeSessionResponse: Promise<OptionalHydrationResult<{ session?: TaskSession | null }>>,
+  optionalHydration: ReturnType<typeof beginOptionalHydration>,
 ): Promise<FetchedSessionData> {
   // User shells are env-scoped — look up this session's task_environment_id
   // from the already-fetched session list. Sessions w/o env (legacy) skip
@@ -349,6 +446,34 @@ async function fetchSessionDataFromTask(
   const sessionEnvId =
     allSessionsResponse.sessions?.find((s) => s.id === sessionId)?.task_environment_id ?? "";
 
+  const results = await Promise.all([
+    // The required task and session list were fetched before this optional fan-out.
+    optionalHydration.load("workflow snapshot", () =>
+      task.workflow_id
+        ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
+        : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
+    ),
+    optionalHydration.load("agents", () => listAgents({ cache: "no-store" })),
+    optionalHydration.load("repositories", () =>
+      listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
+    ),
+    optionalHydration.load("workspaces", () => listWorkspaces({ cache: "no-store" })),
+    optionalHydration.load("workflows", () =>
+      listWorkflows(task.workspace_id, { cache: "no-store", includeHidden: true }),
+    ),
+    optionalHydration.load("session turns", () =>
+      listSessionTurns(sessionId, { cache: "no-store" }),
+    ),
+    optionalHydration.load("user settings", () => fetchUserSettings({ cache: "no-store" })),
+    optionalHydration.load("terminals", () =>
+      sessionEnvId ? fetchTerminals(task.id, sessionEnvId) : Promise.resolve([]),
+    ),
+    optionalHydration.load("messages", () =>
+      listTaskSessionMessages(sessionId, { limit: 50, sort: "desc" }, { cache: "no-store" }),
+    ),
+    activeSessionResponse,
+  ]);
+  optionalHydration.complete();
   const [
     snapshot,
     agents,
@@ -359,47 +484,35 @@ async function fetchSessionDataFromTask(
     userSettingsResponse,
     terminalsResponse,
     messagesResponse,
-  ] = await Promise.all([
-    task.workflow_id
-      ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
-      : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
-    listAgents({ cache: "no-store" }),
-    listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
-    listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-    listWorkflows(task.workspace_id, { cache: "no-store", includeHidden: true }).catch(() => ({
-      workflows: [],
-    })),
-    listSessionTurns(sessionId, { cache: "no-store" }).catch(() => ({ turns: [], total: 0 })),
-    fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    sessionEnvId ? fetchTerminals(task.id, sessionEnvId).catch(() => []) : Promise.resolve([]),
-    listTaskSessionMessages(sessionId, { limit: 50, sort: "desc" }, { cache: "no-store" }).catch(
-      () => null as ListMessagesResponse | null,
-    ),
-  ]);
+    activeSessionResult,
+  ] = results;
 
   const allSessions = allSessionsResponse.sessions ?? [];
-  const repositories = repositoriesResponse.repositories ?? [];
-  const workspaces = workspacesResponse.workspaces ?? [];
-  const workflows = workflowsResponse.workflows ?? [];
-  const turns = turnsResponse.turns ?? [];
+  const snapshotValue = optionalValue(snapshot);
+  const agentsValue = optionalValue(agents);
+  const repositories = optionalValue(repositoriesResponse)?.repositories;
+  const workspaces = optionalValue(workspacesResponse)?.workspaces;
+  const workflows = optionalValue(workflowsResponse)?.workflows;
+  const turns = optionalValue(turnsResponse)?.turns;
+  const terminals = optionalValue(terminalsResponse) ?? [];
+  const messages = optionalValue(messagesResponse);
+  const activeSession = optionalValue(activeSessionResult)?.session ?? null;
 
-  const initialTerminals: Terminal[] = terminalsResponse
-    .filter(shouldHydrateTerminal)
-    .map(hydrateTerminal);
+  const initialTerminals: Terminal[] = terminals.filter(shouldHydrateTerminal).map(hydrateTerminal);
 
   const initialState = buildSessionPageState({
     task,
     sessionId,
-    snapshot,
-    agents,
+    snapshot: snapshotValue,
+    agents: agentsValue,
     repositories,
     allSessions,
     activeSession,
     workspaces,
     workflows,
     turns,
-    userSettingsResponse,
-    messagesResponse,
+    userSettingsResponse: optionalValue(userSettingsResponse),
+    messagesResponse: messages,
   });
 
   return { task, sessionId, initialState, initialTerminals };
