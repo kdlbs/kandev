@@ -1192,7 +1192,12 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		s.logger.Info("reaped active sessions on archive",
 			zap.String("task_id", id),
 			zap.Int("count", len(cancelledIDs)))
-		s.publishSessionsCancelled(ctx, id, activeSessions, cancelledIDs, "task archived", cancelledAt)
+		// Detach from ctx via WithoutCancel: the DB write above already
+		// committed on a detached context, so a client disconnect here must
+		// not also suppress the event lookup below (GetTaskSession per
+		// cancelled session) — event-driven clients need session.state_changed
+		// regardless of whether the archiving caller is still connected.
+		s.publishSessionsCancelled(context.WithoutCancel(ctx), id, activeSessions, cancelledIDs, "task archived", cancelledAt)
 	}
 
 	// 4. Re-read task for updated archived_at field
