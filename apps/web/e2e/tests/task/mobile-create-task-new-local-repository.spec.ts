@@ -51,7 +51,9 @@ async function openCreationDrawer(page: Page): Promise<Locator> {
   expect(refreshBox).not.toBeNull();
   expect(actionBox).not.toBeNull();
   expect(searchControlBox!.width).toBeGreaterThan(refreshBox!.width + actionBox!.width);
-  expect(refreshBox!.x - (searchControlBox!.x + searchControlBox!.width)).toBeLessThanOrEqual(8);
+  const refreshGap = refreshBox!.x - (searchControlBox!.x + searchControlBox!.width);
+  expect(refreshGap).toBeGreaterThanOrEqual(0);
+  expect(refreshGap).toBeLessThanOrEqual(8);
   expect(refreshBox!.height).toBeGreaterThanOrEqual(44);
   expect(actionBox!.height).toBeGreaterThanOrEqual(44);
   await action.click();
