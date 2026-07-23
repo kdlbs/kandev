@@ -78,6 +78,7 @@ export const defaultUIState: UISliceState = {
     isTaskSwitcherOpen: false,
   },
   chatInput: { planModeBySessionId: {} },
+  reviewPRSelection: { selectedKeyByTaskId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], checks: [], healthy: true, loaded: false, loading: false },
   quickChat: { isOpen: false, sessions: [], activeSessionId: null },
@@ -408,6 +409,10 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   setPlanMode: (sessionId, enabled) =>
     set((draft) => {
       draft.chatInput.planModeBySessionId[sessionId] = enabled;
+    }),
+  setReviewPRSelection: (taskId, selectedKey) =>
+    set((draft) => {
+      draft.reviewPRSelection.selectedKeyByTaskId[taskId] = selectedKey;
     }),
   setActiveDocument: (sessionId, doc) =>
     set((draft) => {

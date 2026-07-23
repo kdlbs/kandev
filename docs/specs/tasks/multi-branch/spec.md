@@ -49,6 +49,9 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - `TaskRepository.checkout_branch` was already on the http type.
 - Worktrees are keyed by `worktree.id` in the Zustand store, so two worktrees with the same `repository_id` already coexist.
 - Repo chips in chat-message renderers now key on `(repository_id, checkout_branch)` so multi-branch tasks render distinct chips instead of collapsing.
+- Review surfaces expose one linked pull request at a time when a task has multiple PRs. A task-scoped selector defaults to the primary (oldest) PR, remembers an in-session override, and falls back to the primary PR when that override disappears.
+- Selecting a PR changes the remote PR diff contribution while preserving the existing source precedence: uncommitted worktree changes, then cumulative committed changes, then the selected PR. PR-only views and PR timeline rows resolve the exact PR rather than the task primary.
+- The selector is available on desktop, phone, and coarse-pointer tablet. Phone uses a touch-sized bottom-menu treatment inside the existing Review surface; switching keeps Review open and exposes selected-PR loading, empty, and retry states.
 - Full "+ Branch" UI affordance and grouped repo > branch tabs are deferred — agents drive multi-branch via the MCP tool today.
 
 ## Non-goals
@@ -56,6 +59,8 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - **Auto-stack PRs.** Multi-branch lets you open N PRs; it does not detect base/branch relationships and stack them. Users do that themselves.
 - **Cross-branch merge orchestration.** Each branch's PR lifecycle is independent.
 - **Branch deletion / cleanup automation.** A `RemoveBranchFromTask` symmetric service method is planned but not in v1.
+- **Aggregate multi-PR review.** Review does not merge sibling PR diffs into one file list because two PRs can carry different revisions of the same repository path.
+- **Independent per-PR review history.** Reviewed-file and pending-comment identity remain session/repository/path scoped. Switching PRs treats a different diff hash as a new visible revision; PR-qualified persistence is separate data-model work.
 
 ## Risks
 
@@ -72,6 +77,8 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - `TestAddBranchToTask_HappyPath` — second branch appended after the fact lands as a new row.
 - `TestAddBranchToTask_RejectsDuplicate` — re-adding the same `(repo, branch)` errors.
 - `TestLaunchPreparedSession_MultiBranch_ReusesWorktreeIDsByBranchSlug` — a follow-on session for the same task reuses each existing branch worktree instead of preparing a new task directory.
+- Web unit tests prove selected-PR default, override, task isolation, and removed-PR fallback behavior.
+- Desktop and mobile Playwright tests prove a two-PR task can switch Review from the primary PR to a sibling PR without stale files, overflow, or closing the surface.
 
 ## Open questions
 
