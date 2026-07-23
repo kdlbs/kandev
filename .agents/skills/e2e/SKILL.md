@@ -395,5 +395,5 @@ Follow `/tdd` when writing E2E tests:
 1. **RED** — Write the spec, run it, watch it fail (missing `data-testid`, feature not implemented, etc.)
 2. **GREEN** — Implement the feature/fix, add `data-testid` attributes, run the test until green
 3. **REFACTOR** — Extract page objects, clean up selectors, keep tests green
-4. Run the targeted E2E spec when done and report that full verification is
-   required as a separate planner assignment
+4. Run the targeted E2E spec when done and report that final change-aware
+   verification is required as a separate planner assignment

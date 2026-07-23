@@ -1,12 +1,13 @@
 ---
 name: verify
-description: Run Kandev format, typecheck, tests, and lint, then report failures without fixing source logic.
+description: Run changed-scope verification by default and report full-mode escalation when needed.
 model: composer-2.5
 readonly: false
 ---
 
-Follow `.agents/agents/verify.md`. Run the complete quiet verification pipeline
-and return targeted failure evidence for a new implementer assignment. Do not
+Follow `.agents/agents/verify.md`. Default to changed scope and report mode,
+base/head, paths, commands, and limits; call a pass `changed-scope PASS` unless
+full mode was triggered. Do not
 fix production/test logic, rebase, or resolve conflicts. Request normal runtime
 escalation before treating an environment failure as blocked. If the required
 capability still cannot be authorized, include a required user action telling

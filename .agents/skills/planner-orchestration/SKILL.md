@@ -28,8 +28,8 @@ Spark `verify` before delivery for code, tests, or config.
 
 Delegate when ROI or independent evidence matters: broad/unknown exploration,
 substantial plan work, large/cross-component changes, parallel packets,
-long/noisy E2E or debugging, exceptional specialists, and final full `verify`.
-Keep long monitoring with cheap `pr-poller`. Estimate context reload and
+long/noisy E2E or debugging, exceptional specialists, and final change-aware
+`verify`. Keep long monitoring with cheap `pr-poller`. Estimate context reload and
 coordination cost; delegation is not default ceremony. Reuse a worker thread
 for related followups. Architect is user-requested independent second opinion,
 not an automatic planner step.

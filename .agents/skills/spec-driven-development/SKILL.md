@@ -1,6 +1,6 @@
 ---
 name: spec-driven-development
-description: "Single planner entrypoint for Kandev spec-driven implementation. Use when developing a feature or behavior-changing fix through the full flow: clarify intent, create/update specs, create a plan, split independent verifiable tasks, delegate every execution step to workers, verify, and report progress."
+description: "Single planner entrypoint for Kandev spec-driven implementation. Use when developing a feature or behavior-changing fix through the full flow: clarify intent, create/update specs, plan substantial delegated implementation, verify, and report progress."
 ---
 
 # Spec-Driven Development
@@ -9,8 +9,8 @@ Use this as the default development workflow for non-trivial features and behavi
 
 ## Planner And Workers
 
-The user-started primary session owns planning,
-architecture, planning, integration judgment, delegation, and user
+The user-started primary session owns architecture, planning, integration
+judgment, delegation, and user
 communication. Large feature-plan implementation stays worker-driven; small
 scoped work may be direct under `/planner-orchestration`. Workers do not spawn.
 
@@ -248,7 +248,7 @@ At the end:
   current-head PR AI review; use local `code-review` only for the central
   exceptional routes.
 - Run `qa` and `security-auditor` only for their central exceptional routes.
-- Run mandatory final `verify` for full format, typecheck, tests, and lint.
+- Run mandatory final change-aware `verify`; use its explicit full-mode branch when triggered.
 - Use `/record` for ADR/spec updates if implementation discovered a durable decision or behavior change.
 
 When PR delivery is in scope, PR AI review may be deferred, but do not claim

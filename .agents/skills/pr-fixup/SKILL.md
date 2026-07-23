@@ -9,8 +9,8 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 
 ## Planner Entry
 
-The planner keeps long polling on cheap `pr-poller` and final full checks on
-Spark `verify`, but may directly triage/reply to threads and make a small
+The planner keeps long polling on cheap `pr-poller` and final change-aware
+checks on Spark `verify`, but may directly triage/reply to threads and make a small
 scope-preserving fixup with focused checks. Delegate broad remediation or noisy
 work when it has positive ROI.
 
@@ -24,7 +24,7 @@ If `pr-poller` recommends `GitHub access requires approval; planner must surface
 ## Available skills and subagents
 
 - **`pr-poller` worker** — Polls CI/review state and can use one selected reviewer's exact-head evidence without waiting for unrelated bots.
-- **`verify` worker** — Runs the full verification pipeline and returns a compact pass/fail report before delivery.
+- **`verify` worker** — Runs change-aware verification and returns a compact pass/fail report before delivery.
 - **`/e2e`** — Read for debugging guidance when E2E tests fail in CI. Covers test patterns, run commands, failure triage, and local reproduction.
 - **`/commit`** — Use for staging and committing fixes with Conventional Commits format.
 
@@ -430,8 +430,8 @@ launched, stop and report the blocked phase. Parse the returned report:
   rows may remain `pending`, `timeout`, or `unknown` after an explicit selected
   reviewer is exact-head, complete, terminal/qualified, and all arrived
   findings are clean; otherwise preserve the normal configured-reviewer provisional gate.
-- If only long-running checks remain in `ci_pending` after full local
-  verification is green, `ci_failed` is explicitly known empty, and
+- If only long-running checks remain in `ci_pending` after the required local
+  verification scope is green, `ci_failed` is explicitly known empty, and
   `unresolved_review_threads: 0`, stop at the bounded cap and report the exact
   pending checks. Continue immediately if a check fails or a new thread appears.
 - If new CI failures appeared from the latest commit → loop back to task 2 and reset task 2-5 to `in_progress` as needed.

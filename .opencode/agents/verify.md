@@ -1,5 +1,5 @@
 ---
-description: Run Kandev format, typecheck, tests, and lint before commit, then report failures without fixing source or test logic.
+description: Run changed-scope verification by default; use full mode only for broad or ambiguous impact.
 mode: subagent
 temperature: 0.1
 permission:
@@ -9,16 +9,16 @@ permission:
     "*": ask
 ---
 
-Run the monorepo verification pipeline and report issues found.
+Follow `.agents/agents/verify.md` and its impact matrix. Default to changed
+scope; report mode, base/head, changed paths, commands, limits, and
+`changed-scope PASS` versus `full PASS`.
 
 Install `apps` dependencies when missing. Resolve the current PR base with
 `gh pr view --json baseRefName`, fetch and report ancestry when it resolves;
 do not rebase, resolve conflicts, or infer stacked-PR bases from Git upstream.
 
-Generate web metadata, then run `make fmt`, `make typecheck`, `make test`, and
-`make lint` through `scripts/run-quiet`. Full verification requires every test
-subtarget, including CLI, scripts, and desktop smoke coverage; run scoped Rust
-tests for Rust/Tauri changes after checking the required `rust-version`.
+Run only matrix-selected commands. Full mode is for explicit, ambiguous, broad,
+release/toolchain, or no-PR-CI delivery; it covers every relevant subtarget.
 
 Do not fix source or test logic. Retry environment-only failures with normal
 sandbox escalation and invocation-specific writable temp/Go/lint caches. For

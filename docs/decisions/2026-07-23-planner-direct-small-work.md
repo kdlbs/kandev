@@ -19,6 +19,11 @@ parallel packets, long/noisy E2E or debugging, exceptional specialist review,
 and final Spark `verify`; long PR monitoring stays with cheap `pr-poller`.
 Architect is only a user-requested independent second opinion.
 
+Spark `verify` defaults to changed-scope suites selected from the diff; GitHub
+PR CI is the authoritative full matrix. Full local verification remains for
+explicit requests, releases/shared toolchain changes, ambiguous impact, broad
+cross-component work, or delivery without PR CI.
+
 ## Consequences
 
 Small work avoids avoidable context reload while retaining skills, TDD,
@@ -31,3 +36,5 @@ isolation. No product spec applies.
 - **Delegate everything:** rejected for routine context and coordination cost.
 - **Planner does everything:** rejected because independent evidence and long
   noisy work still benefit from specialization.
+- **Always run full local verification:** rejected for routine cost; retained
+  for broad/ambiguous or no-CI delivery.

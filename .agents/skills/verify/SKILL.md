@@ -1,20 +1,20 @@
 ---
 name: verify
-description: Run format, typecheck, test, and lint across the monorepo. Use after implementing changes.
+description: Run change-aware verification by default, escalating to full monorepo checks only when impact requires it.
 ---
 
 # Verify
 
-In the user-started primary session, delegate the
-full verification pipeline to the registered `verify` worker. Do not substitute
+In the user-started primary session, delegate verification to the registered
+Spark `verify` worker with `mode=changed` by default. Do not substitute
 a generic agent: it may lack the required GitHub network access or
 shared-worktree write permissions. If the worker cannot be launched or access
 the required resources, stop and report that verification is blocked.
 
 An explicitly assigned `verify` worker follows the worker procedure below,
 reports verification failures without fixing source or test logic, and does not
-spawn workers. The planner assigns failures to an `implementer`, then launches
-a fresh `verify` assignment.
+spawn workers. The planner handles a small remediation directly or delegates a
+larger one, then launches a fresh `verify` assignment.
 
 ## What to do
 
@@ -35,8 +35,16 @@ contains the full procedure in `.agents/agents/verify.md`.
 
 ## Worker Procedure
 
-The assigned `verify` worker runs the full pipeline from the repository root and
-reports the exact commands and results:
+Resolve the PR base, then collect `base...HEAD`, staged, unstaged, and
+untracked paths. Report mode, base/head, paths/categories, exact commands, and
+coverage limits. If base/diff is unavailable or impact is ambiguous, use
+`mode=full`; use full mode for explicit requests, releases, shared build or
+toolchain changes, and unusually broad work. PR CI is the authoritative full
+matrix. Read [impact-matrix.md](references/impact-matrix.md) before commands.
+A scoped pass is `changed-scope PASS`, never `full PASS`.
+
+In `mode=full`, run the pipeline below. In `mode=changed`, run only the matrix
+commands for impacted categories; do not run unrelated suites.
 
 ```bash
 # Fresh worktrees share .git/ but not apps/node_modules.
@@ -135,7 +143,7 @@ those require a bounded implementer assignment before verification continues.
 For source, test, type, or lint failures, stop after capturing targeted failure
 evidence. Report the command, quiet-log path and relevant lines, likely owned
 files, and a concise remediation recommendation. Do not edit logic or rerun the
-whole pipeline until the planner has assigned and integrated a fix.
+selected checks until the planner has integrated a fix.
 
 If `make fmt` changes files, review and report the formatter diff, then continue
 with the remaining commands. If a later command fails, capture targeted evidence

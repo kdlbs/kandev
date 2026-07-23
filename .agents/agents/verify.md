@@ -9,7 +9,10 @@ permissionMode: acceptEdits
 
 # Verify
 
-Run the full verification pipeline for the monorepo and report any failures.
+Run changed-scope verification by default and report mode, paths, commands, and
+coverage limits. Read
+`.agents/skills/verify/references/impact-matrix.md`; use full mode only for its
+explicit broad/ambiguous triggers. Scoped success is `changed-scope PASS`.
 Do not change production or test logic, resolve conflicts, rebase, or commit.
 
 `permissionMode: acceptEdits` is intentional so the Bash-driven `make fmt`
@@ -28,17 +31,28 @@ step can retain formatter changes. It does not authorize source or test fixes.
      `origin/$PR_BASE` is an ancestor of `HEAD`; do not rebase or resolve
      conflicts in this role.
 
-2. **Format and generate metadata:**
+2. **Collect paths and choose the mode:**
+   ```bash
+   git diff --name-only "origin/$PR_BASE"...HEAD
+   git diff --name-only
+   git diff --cached --name-only
+   git ls-files --others --exclude-standard
+   ```
+   Categorize the union with
+   `.agents/skills/verify/references/impact-matrix.md`. Use
+   `mode=changed` unless that matrix requires `mode=full`. If the base or diff
+   cannot be resolved, fail closed to full mode.
+
+3. **Run only the selected commands** through `scripts/run-quiet`.
+   - In changed mode, run the matrix commands for the impacted categories.
+     Generate web metadata only when web/shared TypeScript is impacted. Run
+     only the applicable formatter and review any formatter changes.
+   - In full mode, run:
    ```bash
    scripts/run-quiet format -- make fmt
    git status --short
    node apps/web/scripts/generate-release-notes.mjs
    node apps/web/scripts/generate-changelog.mjs
-   ```
-   Review formatter changes before continuing.
-
-3. **Run the complete pipeline** through `scripts/run-quiet`:
-   ```bash
    scripts/run-quiet typecheck -- make typecheck
    scripts/run-quiet test -- make test
    scripts/run-quiet lint -- make lint
@@ -69,11 +83,12 @@ step can retain formatter changes. It does not authorize source or test fixes.
      remediation.
 
 5. **Stop** after a reproducible source/test failure is captured. The planner
-   assigns remediation and then launches a fresh verification run.
+   handles a small remediation directly or delegates a larger one, then
+   launches a fresh verification run.
 
-6. **Done** only when base ancestry has been reported and format, metadata
-   generation, typecheck, the complete test target, lint, and any scoped Rust
-   tests all pass.
+6. **Done** only when base ancestry, mode, changed paths/categories, exact
+   commands, and coverage limits are reported and every selected check passes.
+   Report `changed-scope PASS` or `full PASS` accurately.
 
 Do not spawn subagents. Report pass/fail state, blockers, and any required user
 action to the planner.

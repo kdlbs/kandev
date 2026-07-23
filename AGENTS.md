@@ -75,7 +75,9 @@ Every code change must include tests for new or changed logic. Backend: `*_test.
 - **Plans:** Implementation plans are generated from specs via `/plan` and committed under `docs/plans/<slug>/plan.md`, with individual sibling task files named `docs/plans/<slug>/task-<NN>-<short-slug>.md`. Specs are the living requirements; plans and task files are implementation records for the current buildout.
 
 ### Plan Implementation
-- After implementing a plan, run `make fmt` first to format code, then run `make typecheck test lint` to verify the changes. Formatting must come first because formatters may split lines, which can trigger complexity linter warnings.
+- After implementing a substantial plan, delegate `verify` with `mode=full`.
+  It runs `make fmt` before `make typecheck test lint`; formatting comes first
+  because it may split lines and expose complexity-linter failures.
 
 ### Observability
 - In dev mode (`KANDEV_MOCK_AGENT=true` or `debug.pprofEnabled`), `/debug/vars` exposes the stdlib expvar handler. Office provider-routing metrics live under `routing_*` (route attempts, fallbacks, parked runs, provider degraded/recovered counters). The metrics are also still emitted as structured `routing.metric.*` zap logs for human debugging.
@@ -104,7 +106,7 @@ before delivery when code, tests, or config changed.
 Delegate only when it has positive ROI or independent evidence is essential:
 broad/unknown exploration, substantial plan tasks, large/cross-component work,
 parallel packets, long/noisy E2E or debugging, exceptional specialist review,
-and final full `verify`. Keep long PR monitoring on cheap `pr-poller`.
+and final change-aware `verify`. Keep long PR monitoring on cheap `pr-poller`.
 Delegation is not default ceremony: weigh context reload and coordination cost.
 Each delegated worker executes one bounded packet and does not spawn agents.
 Never use Kandev MCP task/session APIs as a delegation fallback. The architect

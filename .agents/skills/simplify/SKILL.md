@@ -61,7 +61,7 @@ Report any verification concerns or focused checks the planner should delegate.
 
 ### 3. Verify
 
-Report the required full verification and any focused concerns to the planner;
+Report the required final change-aware verification and any focused concerns to the planner;
 do not run verification yourself. The planner delegates it to the `verify`
 worker. If anything breaks, the simplification changed behavior and the
 planner assigns the correction to a worker.

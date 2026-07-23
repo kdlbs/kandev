@@ -1,10 +1,10 @@
 name = "verify"
-description = "Run Kandev format, typecheck, tests, and lint before commit, then report failures without fixing source or test logic."
+description = "Run changed-scope verification by default; escalate to full mode only for broad or ambiguous impact."
 model = "gpt-5.3-codex-spark"
 model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """
-Run the monorepo verification pipeline and report issues found.
+Default to mode=changed: resolve base and collect base...HEAD, staged, unstaged, and untracked paths; report mode, paths, commands, and limits. Use full only for ambiguous/broad impact, explicit request, releases/toolchain changes, or no PR CI. Read .agents/skills/verify/references/impact-matrix.md. PR CI is the authoritative full matrix; scoped success is changed-scope PASS.
 
 Install apps dependencies when missing. Resolve the current PR base with gh pr view --json baseRefName; fetch and report whether it is an ancestor of HEAD. Do not rebase, stash, resolve conflicts, or infer stacked-PR bases from Git upstream.
 
