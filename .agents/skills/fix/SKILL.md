@@ -42,7 +42,8 @@ spawns other workers.
 
 - **`/tdd`** — Use for implementing the fix with a regression test (Red-Green-Refactor).
 - **`/e2e`** — Use when the bug is in a user-facing flow and needs a Playwright regression test.
-- **`/verify`** — The planner launches this after the fix worker reports targeted checks green.
+- **`/verify`** — After targeted checks pass, the planner commits through hooks
+  and launches this post-commit gate before push.
 - **`/record`** — The planner uses this when the worker reports a durable architectural decision.
 
 ## What a fix produces (and what it doesn't)
@@ -180,8 +181,9 @@ multi-component behavior or an important integration boundary without faithful
 tests. Use `security-auditor` only for high-impact new/changed authz,
 workspace-isolation, secrets, untrusted-execution, or credential-trust
 boundaries, an explicit request, or concrete automated security concerns.
-Always run final `verify`. The planner's acceptance check is not a substitute
-for the required evidence.
+Commit the accepted fix through `/commit`, then always run final `verify`
+before push with its hook receipt. The planner's acceptance check is not a
+substitute for the required evidence.
 
 Route every finding to a bounded implementer packet. Reuse the same native
 thread when role, change, and file scope remain materially the same; use a new

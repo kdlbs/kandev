@@ -29,7 +29,7 @@ Never execute that worker's phase in the planner session.
 ## Core Flow
 
 ```text
-Intent -> Planner artifacts -> User approval -> Workers by wave -> Risk-routed evidence -> Verify -> Report
+Intent -> Planner artifacts -> User approval -> Workers by wave -> Risk-routed evidence -> Commit -> Verify -> Report
 ```
 
 Do not skip from intent to code unless the user explicitly asks to bypass the process.
@@ -248,7 +248,8 @@ At the end:
   current-head PR AI review; use local `code-review` only for the central
   exceptional routes.
 - Run `qa` and `security-auditor` only for their central exceptional routes.
-- Run mandatory final change-aware `verify`; use its explicit full-mode branch when triggered.
+- Commit through active hooks, then run mandatory final change-aware `verify`
+  before push; pass the hook receipt and use full mode when triggered.
 - Use `/record` for ADR/spec updates if implementation discovered a durable decision or behavior change.
 
 When PR delivery is in scope, PR AI review may be deferred, but do not claim

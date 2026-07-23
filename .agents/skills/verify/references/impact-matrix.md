@@ -4,6 +4,10 @@ Collect `base...HEAD`, staged, unstaged, and untracked paths. Deduplicate the
 union, then run every matching row. Prefer package/suite targets over
 individual test names so changed dependents remain covered.
 
+When the planner supplies a last verified SHA and a `/commit` hook receipt,
+read [hook-evidence.md](hook-evidence.md). Eligible hook evidence may remove
+only the duplicate formatting/lint portions below; run every uncovered command.
+
 | Paths | Changed-mode commands |
 | --- | --- |
 | `AGENTS.md`, `CLAUDE.md`, `.agents/**`, `.claude/**`, `.codex/**`, `.cursor/**`, `.opencode/**`, ADRs/plans/specs | `git diff --check` and targeted `.github/scripts/lint-harness-files.py` inputs; parse changed TOML |

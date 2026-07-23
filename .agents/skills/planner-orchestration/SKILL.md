@@ -24,7 +24,9 @@ localized files, no meaningful isolation/parallelism benefit, and quick bounded
 verification. This includes small code/test/harness/docs edits, focused checks,
 routine Git/GitHub steps, PR-thread triage/replies, and small PR fixups. Apply
 the relevant skill/TDD, preserve dirty-worktree safety, and use final delegated
-Spark `verify` before delivery for code, tests, or config.
+Spark `verify` after commit and before push for code, tests, or config. Supply
+the `/commit` hook receipt so changed-scope verification avoids only proven
+duplicate hook work.
 
 Delegate when ROI or independent evidence matters: broad/unknown exploration,
 substantial plan work, large/cross-component changes, parallel packets,
@@ -171,11 +173,13 @@ gate. Keep responsibilities separate:
 - The planner checks assignment scope, acceptance criteria, and evidence.
 - `code-review` or qualifying PR AI evidence performs semantic diff review.
 - `qa` challenges integrated behavior and edge cases when risk requires it.
-- `verify` mechanically runs the required format, typecheck, test, and lint
-  commands.
+- `verify` mechanically runs required uncovered format, typecheck, test, and
+  lint commands on the committed artifact; eligible hook evidence may replace
+  exact changed-file format/lint duplicates only.
 
-For every final remediation affecting code, tests, or config, final `verify`
-is mandatory. A small, scope-preserving PR remediation uses the reviewer
+For every final remediation affecting code, tests, or config, commit first,
+then final `verify` before push. A small, scope-preserving PR remediation uses
+the reviewer
 finding, focused tests, final Spark `verify`, and fresh qualifying exact-head
 automated review; it almost never relaunches QA, code-review, or
 security-auditor just because original tags remain. Relaunch one only if the

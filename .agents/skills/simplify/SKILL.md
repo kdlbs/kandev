@@ -17,8 +17,8 @@ The best code is code you don't have to write. The second best is code anyone ca
 
 ## Available skills and subagents
 
-- **`verify` worker** — The planner runs this after simplification to ensure all
-  tests, lints, and typechecks still pass.
+- **`verify` worker** — After simplification is accepted and committed through
+  hooks, the planner runs this post-commit gate before push.
 
 ## Steps
 

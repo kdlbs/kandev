@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Run Kandev format, typecheck, tests, and lint before commit, then return a compact pass/fail report without fixing source failures.
+description: Verify the committed Kandev artifact before push, reusing proven hook coverage and reporting a compact pass/fail result.
 tools: Bash, Read, Grep, Glob
 model: sonnet
 effort: low
@@ -11,8 +11,9 @@ permissionMode: acceptEdits
 
 Run changed-scope verification by default and report mode, paths, commands, and
 coverage limits. Read
-`.agents/skills/verify/references/impact-matrix.md`; use full mode only for its
-explicit broad/ambiguous triggers. Scoped success is `changed-scope PASS`.
+`.agents/skills/verify/references/impact-matrix.md` and, when supplied,
+`hook-evidence.md`; use full mode only for explicit broad/ambiguous triggers.
+Scoped success is `changed-scope PASS`.
 Do not change production or test logic, resolve conflicts, rebase, or commit.
 
 `permissionMode: acceptEdits` is intentional so the Bash-driven `make fmt`
@@ -31,9 +32,16 @@ step can retain formatter changes. It does not authorize source or test fixes.
      `origin/$PR_BASE` is an ancestor of `HEAD`; do not rebase or resolve
      conflicts in this role.
 
-2. **Collect paths and choose the mode:**
+2. **Resolve verification scope and hook evidence:**
+   - Prefer the supplied last verified SHA as scope base only when it is an
+     ancestor of `HEAD`; otherwise use `origin/$PR_BASE`.
+   - Validate any supplied `/commit` receipt against current `HEAD`, `HEAD^`,
+     the scope base, hook results, bypass state, and a clean worktree exactly as
+     required by
+     `.agents/skills/verify/references/hook-evidence.md`. Never infer a receipt.
+   - Collect the scope delta and any dirty paths:
    ```bash
-   git diff --name-only "origin/$PR_BASE"...HEAD
+   git diff --name-only "$SCOPE_BASE"...HEAD
    git diff --name-only
    git diff --cached --name-only
    git ls-files --others --exclude-standard
@@ -44,10 +52,11 @@ step can retain formatter changes. It does not authorize source or test fixes.
    cannot be resolved, fail closed to full mode.
 
 3. **Run only the selected commands** through `scripts/run-quiet`.
-   - In changed mode, run the matrix commands for the impacted categories.
+   - In changed mode, run uncovered matrix commands for impacted categories.
+     Report every omitted command and its exact covering hook.
      Generate web metadata only when web/shared TypeScript is impacted. Run
      only the applicable formatter and review any formatter changes.
-   - In full mode, run:
+   - In full mode, ignore hook omissions and run:
    ```bash
    scripts/run-quiet format -- make fmt
    git status --short
@@ -70,7 +79,7 @@ step can retain formatter changes. It does not authorize source or test fixes.
    - If Go tests fail because `httptest.NewServer` cannot bind loopback in a restricted sandbox, rerun the exact command with normal network/loopback escalation before diagnosing code.
    - If required filesystem, network, or loopback escalation is unavailable,
      denied, cancelled, or interrupted, stop. Report verification as blocked,
-     explain that mandatory verification is preventing commit and PR creation,
+     explain that mandatory verification is preventing push and PR delivery,
      and include a **Required user action** telling the user to enable the
      runtime's full access mode and retry verification. Do not offer to proceed
      unverified or imply that the agent or repository host cannot create PRs.
@@ -86,9 +95,11 @@ step can retain formatter changes. It does not authorize source or test fixes.
    handles a small remediation directly or delegates a larger one, then
    launches a fresh verification run.
 
-6. **Done** only when base ancestry, mode, changed paths/categories, exact
-   commands, and coverage limits are reported and every selected check passes.
-   Report `changed-scope PASS` or `full PASS` accurately.
+6. **Done** only when PR/scope bases, ancestry, mode, receipt eligibility,
+   omissions, changed paths/categories, exact commands, and coverage limits are
+   reported and every selected check passes. If formatting changed the
+   post-commit checkout, invalidate the pass until a new commit and verification
+   run. Report `changed-scope PASS` or `full PASS` accurately.
 
 Do not spawn subagents. Report pass/fail state, blockers, and any required user
 action to the planner.

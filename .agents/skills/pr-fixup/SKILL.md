@@ -45,7 +45,7 @@ requests task tracking:
 2. **Fix failing CI checks** — Read failing run logs (via `scripts/run-quiet gh-run -- gh run view ...`), fix issues, run E2E tests locally if needed
 3. **Triage review comments** — Classify each comment as valid, already addressed, nitpick, or wrong
 4. **Address each comment** — Fix or reply with reasoning, resolve threads
-5. **Verify, commit, push** — Delegate verification; deliver directly unless delegation has positive ROI
+5. **Commit, verify, push** — Commit with hooks, delegate hook-aware verification, then push
 6. **Re-check** — Delegate to `pr-poller` again; if new failures, loop back to task 2
 7. **Summary** — Report what was done
 
@@ -390,18 +390,21 @@ Informational threads (acknowledged, no code change) still need `scripts/pr-reso
 
 Mark task 4 as completed.
 
-### 5. Verify, commit, and push
+### 5. Commit, verify, and push
 
 Mark task 5 as in_progress.
 
-1. The planner launches the registered `verify` worker. It reports failures
-   without changing source/test logic.
-2. If verification fails, the planner creates a new bounded remediation packet,
-   then launches a fresh verification assignment. Do not deliver until green.
-3. After a green report, the planner normally commits and pushes the routine
-   fix directly using `/commit` and `/push`. Delegate delivery only when
-   isolation or coordination provides positive ROI, supplying the verification
-   result and exact intended paths. Workers do not invoke one another.
+1. The planner commits the focused fix through `/commit` and preserves its hook
+   receipt plus the previously verified/pushed head as verification scope base.
+2. The planner launches registered `verify` on that committed artifact with
+   the receipt. It reports failures without changing source/test logic and
+   avoids only eligible duplicate hook-covered checks.
+3. If verification fails or changes formatting, the planner handles a small
+   remediation directly or creates a bounded packet, then commits and launches
+   fresh verification. Do not push until green.
+4. After a green report, the planner normally pushes directly using `/push`.
+   Delegate delivery only when isolation or coordination provides positive ROI.
+   Workers do not invoke one another.
 
 Mark task 5 as completed after the delivery worker reports the pushed commit.
 

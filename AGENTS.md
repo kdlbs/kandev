@@ -75,9 +75,10 @@ Every code change must include tests for new or changed logic. Backend: `*_test.
 - **Plans:** Implementation plans are generated from specs via `/plan` and committed under `docs/plans/<slug>/plan.md`, with individual sibling task files named `docs/plans/<slug>/task-<NN>-<short-slug>.md`. Specs are the living requirements; plans and task files are implementation records for the current buildout.
 
 ### Plan Implementation
-- After implementing a substantial plan, delegate `verify` with `mode=full`.
-  It runs `make fmt` before `make typecheck test lint`; formatting comes first
-  because it may split lines and expose complexity-linter failures.
+- After implementing a substantial plan, commit through active hooks, then
+  delegate `verify` with `mode=full` before push. Full mode ignores hook
+  omissions and runs `make fmt` before `make typecheck test lint`; formatting
+  comes first because it may split lines and expose complexity-linter failures.
 
 ### Observability
 - In dev mode (`KANDEV_MOCK_AGENT=true` or `debug.pprofEnabled`), `/debug/vars` exposes the stdlib expvar handler. Office provider-routing metrics live under `routing_*` (route attempts, fallbacks, parked runs, provider degraded/recovered counters). The metrics are also still emitted as structured `routing.metric.*` zap logs for human debugging.
@@ -101,7 +102,9 @@ judgment, and user communication. It may directly perform small scoped work
 when one clear concern touches a few localized files, has no useful isolation or
 parallelism benefit, and has quick bounded verification. Follow the applicable
 skill, protect unrelated dirty changes, and obtain delegated Spark `verify`
-before delivery when code, tests, or config changed.
+after commit and before push when code, tests, or config changed. Pass the
+successful non-bypassed hook receipt so changed-scope verification skips only
+equivalent hook-covered checks; PR CI remains the authoritative full matrix.
 
 Delegate only when it has positive ROI or independent evidence is essential:
 broad/unknown exploration, substantial plan tasks, large/cross-component work,
