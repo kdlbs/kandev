@@ -30,7 +30,7 @@ import (
 // finalizeCancelledSessions again is always safe — its underlying
 // CancelActiveTaskSessionsByTaskID UPDATE only matches sessions still in an
 // active state, so a task that was already fully reconciled (by ArchiveTask
-// itself or by an earlier sweep pass) simply yields an empty cancelledIDs
+// itself or by an earlier sweep pass) simply yields an empty cancelledSessions
 // slice and is a no-op. As long as the process keeps running, a later pass
 // retries once the SQLite contention that exhausted the in-line retry has
 // cleared — unlike the fixed 3-attempt budget, this sweep never gives up.

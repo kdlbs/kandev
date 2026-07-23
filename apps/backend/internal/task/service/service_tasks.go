@@ -1240,11 +1240,10 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 	const maxCancelAttempts = 3
 	const cancelRetryBackoff = 250 * time.Millisecond
 
-	var cancelledIDs []string
-	var cancelledAt time.Time
+	var cancelledSessions []*models.TaskSession
 	var cancelErr error
 	for attempt := 1; attempt <= maxCancelAttempts; attempt++ {
-		cancelledIDs, cancelledAt, cancelErr = s.sessions.CancelActiveTaskSessionsByTaskID(ctx, taskID, "task archived")
+		cancelledSessions, cancelErr = s.sessions.CancelActiveTaskSessionsByTaskID(ctx, taskID, "task archived")
 		if cancelErr == nil {
 			break
 		}
@@ -1259,24 +1258,24 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 			zap.Error(cancelErr))
 		return
 	}
-	if len(cancelledIDs) == 0 {
+	if len(cancelledSessions) == 0 {
 		return
 	}
 	s.logger.Info("reaped active sessions on archive",
 		zap.String("task_id", taskID),
-		zap.Int("count", len(cancelledIDs)))
+		zap.Int("count", len(cancelledSessions)))
 	// Detach from ctx via WithoutCancel: the DB write above already
 	// committed on a detached context, so a client disconnect here must
-	// not also suppress the event lookup below (GetTaskSession per
-	// cancelled session) — event-driven clients need session.state_changed
-	// regardless of whether the archiving caller is still connected.
+	// not also suppress the event publish below — event-driven clients
+	// need session.state_changed regardless of whether the archiving
+	// caller is still connected.
 	// Deliberately left unbounded (no timeout) here: publishSessionsCancelled
-	// gives each session in cancelledIDs its own independent 10s deadline,
-	// so one slow lookup or synchronous subscriber can no longer consume a
-	// shared batch-wide budget and starve the events for sessions later in
-	// the loop.
+	// gives each session in cancelledSessions its own independent 10s
+	// deadline around its Publish call, so one slow synchronous subscriber
+	// can no longer consume a shared batch-wide budget and starve the
+	// events for sessions later in the loop.
 	detachedCtx := context.WithoutCancel(ctx)
-	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledIDs, "task archived", cancelledAt)
+	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, "task archived")
 }
 
 func (s *Service) registerTaskRuntimeStopOwners(stopTargets []taskStopTarget, force bool) {

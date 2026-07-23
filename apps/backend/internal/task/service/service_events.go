@@ -49,22 +49,29 @@ const (
 )
 
 // publishSessionsCancelled publishes a session.state_changed event for each
-// session ID in cancelledIDs. The event's old_state is a best-effort hint
-// from snapshot (the pre-cancellation session list a caller already had in
-// hand) — used only for logging/diagnostics — but every other field,
-// including new_state, is read back from the DB via GetTaskSession so an ID
-// CancelActiveTaskSessionsByTaskID returns that wasn't in snapshot (it
-// re-evaluates active sessions itself, atomically, so its result can outrun
-// a caller-supplied list taken moments earlier) still gets
-// a correct, non-fabricated event instead of being silently dropped.
+// session in cancelledSessions — the full rows CancelActiveTaskSessionsByTaskID's
+// UPDATE ... RETURNING already produced. The event's old_state is a
+// best-effort hint from snapshot (the pre-cancellation session list a
+// caller already had in hand) — used only for logging/diagnostics — while
+// every other field, including new_state, comes directly from the returned
+// row.
+//
+// This used to re-read each session via GetTaskSession after the UPDATE
+// committed, which raced: if that lookup failed or timed out after commit,
+// the CANCELLED transition was permanent but its event was silently lost
+// (see the now-closed "Cancelled events escape reconciliation" review
+// thread, PR #1891 comment 3638052588). Building the payload straight from
+// cancelledSessions closes that gap structurally — there is no longer a
+// separate post-commit read to race, so a session in cancelledSessions can
+// no longer "vanish" between the write and the publish.
 //
 // ctx is expected to be detached-but-unbounded (callers typically pass a
 // context.WithoutCancel derivative with no deadline of its own): each
-// session in cancelledIDs gets its own independent 10-second timeout inside
-// the loop below, rather than the whole batch sharing one deadline. That
-// way a single slow GetTaskSession lookup or synchronous event subscriber
-// can only ever starve its own session's publish, not the events for every
-// session that comes after it in cancelledIDs.
+// session in cancelledSessions gets its own independent 10-second timeout
+// around the Publish call below, rather than the whole batch sharing one
+// deadline. That way a single slow synchronous event subscriber can only
+// ever starve its own session's publish, not the events for every session
+// that comes after it in cancelledSessions.
 //
 // CancelActiveTaskSessionsByTaskID is a repository-level DB write with no
 // event of its own; without this, any client cache kept fresh exclusively by
@@ -74,9 +81,8 @@ func (s *Service) publishSessionsCancelled(
 	ctx context.Context,
 	taskID string,
 	snapshot []*models.TaskSession,
-	cancelledIDs []string,
+	cancelledSessions []*models.TaskSession,
 	reason string,
-	cancelledAt time.Time,
 ) {
 	if s.eventBus == nil {
 		return
@@ -87,26 +93,18 @@ func (s *Service) publishSessionsCancelled(
 			oldStateByID[sess.ID] = sess.State
 		}
 	}
-	updatedAt := cancelledAt.Format(time.RFC3339Nano)
-	for _, sessionID := range cancelledIDs {
+	for _, sess := range cancelledSessions {
 		sessCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		sess, err := s.sessions.GetTaskSession(sessCtx, sessionID)
-		if err != nil || sess == nil {
-			s.logger.Warn("cancelled session vanished before state_changed publish",
-				zap.String(sessionEventFieldTaskID, taskID), zap.String(sessionEventFieldSessionID, sessionID), zap.Error(err))
-			cancel()
-			continue
-		}
 		data := map[string]interface{}{
 			sessionEventFieldTaskID:    taskID,
-			sessionEventFieldSessionID: sessionID,
-			"old_state":                string(oldStateByID[sessionID]),
+			sessionEventFieldSessionID: sess.ID,
+			"old_state":                string(oldStateByID[sess.ID]),
 			"new_state":                string(sess.State),
 			"error_message":            reason,
 			"agent_profile_id":         sess.AgentProfileID,
 			"agent_profile_snapshot":   sess.AgentProfileSnapshot,
 			"is_passthrough":           sess.IsPassthrough,
-			sessionEventFieldUpdatedAt: updatedAt,
+			sessionEventFieldUpdatedAt: sess.UpdatedAt.Format(time.RFC3339Nano),
 			sessionEventFieldName:      sess.Name,
 		}
 		if sess.ReviewStatus != models.ReviewStatusNone {
@@ -121,7 +119,7 @@ func (s *Service) publishSessionsCancelled(
 		event := bus.NewEvent(events.TaskSessionStateChanged, "task-service", data)
 		if err := s.eventBus.Publish(sessCtx, events.TaskSessionStateChanged, event); err != nil {
 			s.logger.Error("failed to publish session cancellation event",
-				zap.String(sessionEventFieldTaskID, taskID), zap.String(sessionEventFieldSessionID, sessionID), zap.Error(err))
+				zap.String(sessionEventFieldTaskID, taskID), zap.String(sessionEventFieldSessionID, sess.ID), zap.Error(err))
 		}
 		cancel()
 	}

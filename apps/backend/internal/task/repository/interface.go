@@ -190,7 +190,7 @@ type SessionRepository interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
-	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]string, time.Time, error)
+	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error)
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 	GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error)
 	HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error)

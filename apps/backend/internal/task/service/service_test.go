@@ -1960,37 +1960,29 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 
 // TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot is a
 // defensive-coverage test: CancelActiveTaskSessionsByTaskID re-evaluates
-// active sessions atomically, so it can return an ID that wasn't in a
-// caller-supplied snapshot taken moments earlier. publishSessionsCancelled
-// must not silently drop that ID — it must re-read the session from the DB
-// and still publish a correct event.
+// active sessions atomically and returns full session rows directly, so a
+// returned session can have no matching entry in a caller-supplied snapshot
+// taken moments earlier. publishSessionsCancelled must build the event
+// entirely from that returned row — old_state is the only field allowed to
+// fall back to an empty best-effort hint when snapshot has nothing for the
+// session's ID; every other field, including agent_profile_id, must come
+// from the row cancelledSessions already carries, not be silently dropped
+// or fabricated.
 func TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot(t *testing.T) {
-	svc, eventBus, repo := createTestService(t)
+	svc, eventBus, _ := createTestService(t)
 	ctx := context.Background()
 
-	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
-		t.Fatalf("CreateWorkflow: %v", err)
-	}
-	if err := repo.CreateTask(ctx, &models.Task{
-		ID: "task-race", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
-		Title: "Test", Priority: "medium",
-	}); err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	// Session already CANCELLED in the DB (as if CancelActiveTaskSessionsByTaskID
-	// just ran), but the caller's pre-cancel snapshot is empty — the exact
-	// shape of the race.
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "session-not-in-snapshot", TaskID: "task-race",
-		State: models.TaskSessionStateCancelled, AgentProfileID: "agent-1",
-	}); err != nil {
-		t.Fatalf("CreateTaskSession: %v", err)
+	// The exact shape of the race: CancelActiveTaskSessionsByTaskID returned
+	// this session's row, but the caller's pre-cancel snapshot is empty.
+	cancelledSession := &models.TaskSession{
+		ID:             "session-not-in-snapshot",
+		TaskID:         "task-race",
+		State:          models.TaskSessionStateCancelled,
+		AgentProfileID: "agent-1",
+		UpdatedAt:      time.Now().UTC(),
 	}
 
-	svc.publishSessionsCancelled(ctx, "task-race", nil, []string{"session-not-in-snapshot"}, "task archived", time.Now().UTC())
+	svc.publishSessionsCancelled(ctx, "task-race", nil, []*models.TaskSession{cancelledSession}, "task archived")
 
 	var found *bus.Event
 	for _, evt := range eventBus.GetPublishedEvents() {
@@ -2013,7 +2005,7 @@ func TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot(t *te
 		t.Errorf("old_state = %v, want empty (no snapshot hint available)", got)
 	}
 	if got := data["agent_profile_id"]; got != "agent-1" {
-		t.Errorf("agent_profile_id = %v, want agent-1 (must come from the DB re-read, not the snapshot)", got)
+		t.Errorf("agent_profile_id = %v, want agent-1 (must come from the returned row, not the snapshot)", got)
 	}
 }
 
@@ -2030,12 +2022,12 @@ type cancelHookSessionRepository struct {
 
 func (r *cancelHookSessionRepository) CancelActiveTaskSessionsByTaskID(
 	ctx context.Context, taskID, reason string,
-) ([]string, time.Time, error) {
-	cancelledIDs, cancelledAt, err := r.Repository.CancelActiveTaskSessionsByTaskID(ctx, taskID, reason)
+) ([]*models.TaskSession, error) {
+	cancelledSessions, err := r.Repository.CancelActiveTaskSessionsByTaskID(ctx, taskID, reason)
 	if r.afterCancelSessions != nil {
 		r.afterCancelSessions()
 	}
-	return cancelledIDs, cancelledAt, err
+	return cancelledSessions, err
 }
 
 // TestService_ArchiveTaskPublishesEventAfterClientDisconnect is the
@@ -2129,13 +2121,13 @@ type flakyCancelSessionRepository struct {
 
 func (r *flakyCancelSessionRepository) CancelActiveTaskSessionsByTaskID(
 	ctx context.Context, taskID, reason string,
-) ([]string, time.Time, error) {
+) ([]*models.TaskSession, error) {
 	r.mu.Lock()
 	r.calls++
 	if r.failuresLeft > 0 {
 		r.failuresLeft--
 		r.mu.Unlock()
-		return nil, time.Time{}, errors.New("simulated transient sqlite writer contention timeout")
+		return nil, errors.New("simulated transient sqlite writer contention timeout")
 	}
 	r.mu.Unlock()
 	return r.Repository.CancelActiveTaskSessionsByTaskID(ctx, taskID, reason)
@@ -2220,9 +2212,9 @@ func TestService_ArchiveTaskRetriesTransientSessionCancellationFailure(t *testin
 
 // TestService_ArchiveTaskPublishesEventsForAllCancelledSessions is the
 // regression test for the shared-deadline bug: publishSessionsCancelled used
-// to run its per-session GetTaskSession-then-publish work under one deadline
-// shared across the whole cancelledIDs batch, so a slow lookup or subscriber
-// for one session could starve the event for every session queued after it.
+// to run its per-session Publish call under one deadline shared across the
+// whole cancelledSessions batch, so a slow synchronous subscriber for one
+// session could starve the event for every session queued after it.
 // Archiving a task with two active sessions and asserting both get their own
 // session.state_changed event proves the fix (each session now gets an
 // independent 10s timeout) without relying on a real timing race.

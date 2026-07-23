@@ -1111,16 +1111,26 @@ func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	seedRepoLink(t, repo, "ws-r", "repo-other", "task-other", "sess-o1", "RUNNING")
 
 	reapedAfter := time.Now().UTC()
-	ids, cancelledAt, err := repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
+	sessions, err := repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	wantIDs := []string{"sess-r1", "sess-r2", "sess-r3", "sess-r4"}
-	if got := append([]string(nil), ids...); !sameStringSet(got, wantIDs) {
-		t.Errorf("cancelled ids = %v, want %v", got, wantIDs)
+	var gotIDs []string
+	for _, sess := range sessions {
+		gotIDs = append(gotIDs, sess.ID)
+		if sess.TaskID != "task-r" {
+			t.Errorf("session %s TaskID = %q, want task-r", sess.ID, sess.TaskID)
+		}
+		if sess.State != models.TaskSessionStateCancelled {
+			t.Errorf("session %s State = %q, want CANCELLED", sess.ID, sess.State)
+		}
+		if sess.UpdatedAt.Before(reapedAfter) {
+			t.Errorf("session %s UpdatedAt = %s, want >= %s", sess.ID, sess.UpdatedAt, reapedAfter)
+		}
 	}
-	if cancelledAt.Before(reapedAfter) {
-		t.Errorf("cancelledAt = %s, want >= %s", cancelledAt, reapedAfter)
+	if !sameStringSet(gotIDs, wantIDs) {
+		t.Errorf("cancelled ids = %v, want %v", gotIDs, wantIDs)
 	}
 	for _, sessionID := range wantIDs {
 		assertReapedSession(t, repo, sessionID, reapedAfter)
@@ -1143,12 +1153,12 @@ func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	}
 
 	// Idempotent: a second call changes nothing.
-	ids, _, err = repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
+	sessions, err = repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
 	if err != nil {
 		t.Fatalf("unexpected error on second call: %v", err)
 	}
-	if len(ids) != 0 {
-		t.Errorf("expected 0 sessions on idempotent re-run, got %v", ids)
+	if len(sessions) != 0 {
+		t.Errorf("expected 0 sessions on idempotent re-run, got %v", sessions)
 	}
 }
 
