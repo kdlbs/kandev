@@ -137,6 +137,8 @@ func TestValidateCommandPrefix(t *testing.T) {
 		{name: "unterminated quote rejected", prefix: `greywall "unterminated`, wantErr: true},
 		{name: "trailing backslash rejected", prefix: `greywall foo\`, wantErr: true},
 		{name: "only-empty-quotes rejected", prefix: `""`, wantErr: true},
+		{name: "leading flag rejected", prefix: `--foo greywall`, wantErr: true},
+		{name: "leading dash rejected", prefix: `-x sandbox`, wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -284,5 +286,43 @@ func TestCreateAgentProfiles_PersistsEnvVars(t *testing.T) {
 	}
 	if len(profiles) != 1 || len(profiles[0].EnvVars) != 1 || profiles[0].EnvVars[0].Key != "FOO" {
 		t.Fatalf("created env vars: %+v", profiles)
+	}
+}
+
+// TestCreateAgentProfiles_PersistsCommandPrefix confirms a valid prefix on a
+// nested-create profile is trimmed and stored.
+func TestCreateAgentProfiles_PersistsCommandPrefix(t *testing.T) {
+	ctrl := newTestController(nil)
+	st := newFakeStore()
+	ctrl.repo = st
+
+	profiles, err := ctrl.createAgentProfiles(context.Background(), "agent-1", "Test Agent", []CreateAgentProfileRequest{{
+		Name:          "Sandboxed",
+		Model:         "model-1",
+		CommandPrefix: "  greywall --  ",
+	}}, &testAgent{id: "test-agent", name: "test-agent"})
+	if err != nil {
+		t.Fatalf("createAgentProfiles: %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].CommandPrefix != "greywall --" {
+		t.Fatalf("created command prefix: %+v", profiles)
+	}
+}
+
+// TestCreateAgentProfiles_RejectsBadCommandPrefix confirms a malformed prefix on
+// a nested-create profile returns ErrInvalidCommandPrefix (mapped to HTTP 400)
+// rather than a generic error, and that the validate-first pass surfaces it.
+func TestCreateAgentProfiles_RejectsBadCommandPrefix(t *testing.T) {
+	ctrl := newTestController(nil)
+	st := newFakeStore()
+	ctrl.repo = st
+
+	_, err := ctrl.createAgentProfiles(context.Background(), "agent-1", "Test Agent", []CreateAgentProfileRequest{{
+		Name:          "Bad",
+		Model:         "model-1",
+		CommandPrefix: `greywall "unterminated`,
+	}}, &testAgent{id: "test-agent", name: "test-agent"})
+	if !errors.Is(err, ErrInvalidCommandPrefix) {
+		t.Fatalf("expected ErrInvalidCommandPrefix, got %v", err)
 	}
 }

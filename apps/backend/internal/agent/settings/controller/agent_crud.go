@@ -112,6 +112,14 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	// Validate every profile request BEFORE inserting the agent row so an
+	// invalid profile (e.g. a malformed command_prefix) returns a 400 without
+	// leaving an orphaned agent behind.
+	for i := range req.Profiles {
+		if err := validateCreateProfileRequest(req.Profiles[i]); err != nil {
+			return nil, err
+		}
+	}
 	agent := &models.Agent{
 		Name:          matched.Name,
 		WorkspaceID:   req.WorkspaceID,
@@ -172,18 +180,25 @@ func (c *Controller) findMatchedAvailability(name string, results []discovery.Av
 	return nil, fmt.Errorf("unknown agent: %s", name)
 }
 
+// validateCreateProfileRequest runs all save-time validation for a nested
+// agent-create profile. Kept separate so CreateAgent can validate every profile
+// before inserting the agent row (avoiding an orphaned agent on a bad profile).
+func validateCreateProfileRequest(p CreateAgentProfileRequest) error {
+	if p.CLIFlags != nil {
+		if err := validateCLIFlagDTOs(p.CLIFlags); err != nil {
+			return err
+		}
+	}
+	if err := validateProfileEnvVarDTOs(p.EnvVars); err != nil {
+		return err
+	}
+	return validateCommandPrefix(p.CommandPrefix)
+}
+
 func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayName string, profileReqs []CreateAgentProfileRequest, agentConfig agents.Agent) ([]*models.AgentProfile, error) {
 	profiles := make([]*models.AgentProfile, 0, len(profileReqs))
 	for _, profileReq := range profileReqs {
-		if profileReq.CLIFlags != nil {
-			if err := validateCLIFlagDTOs(profileReq.CLIFlags); err != nil {
-				return nil, err
-			}
-		}
-		if err := validateProfileEnvVarDTOs(profileReq.EnvVars); err != nil {
-			return nil, err
-		}
-		if err := validateCommandPrefix(profileReq.CommandPrefix); err != nil {
+		if err := validateCreateProfileRequest(profileReq); err != nil {
 			return nil, err
 		}
 		cliFlags := cliFlagsFromDTO(profileReq.CLIFlags)

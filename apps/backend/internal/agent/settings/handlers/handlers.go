@@ -223,6 +223,10 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		Profiles:    profiles,
 	})
 	if err != nil {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to create agent", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

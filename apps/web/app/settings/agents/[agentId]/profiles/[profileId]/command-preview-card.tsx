@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { IconCopy, IconCheck, IconTerminal2 } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
@@ -145,6 +145,11 @@ export function CommandPreviewCard({
   const [preview, setPreview] = useState<CommandPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Guards against out-of-order responses: a slow request for an older
+  // settings snapshot can resolve after a newer request has already been
+  // fired (or resolved). Each effect run stamps a unique sequence number;
+  // a response is only applied if it's still the most recent request.
+  const latestRequestId = useRef(0);
 
   const settingsKey = useMemo(
     () => JSON.stringify({ model, permissionSettings, cliPassthrough, cliFlags, commandPrefix }),
@@ -152,6 +157,7 @@ export function CommandPreviewCard({
   );
 
   useEffect(() => {
+    const requestId = ++latestRequestId.current;
     setLoading(true);
     setError(null);
 
@@ -164,13 +170,15 @@ export function CommandPreviewCard({
           cli_flags: cliFlags,
           command_prefix: commandPrefix,
         });
+        if (requestId !== latestRequestId.current) return;
         setPreview(response);
         setError(null);
       } catch (err) {
+        if (requestId !== latestRequestId.current) return;
         setError(err instanceof Error ? err.message : "Failed to load command preview");
         setPreview(null);
       } finally {
-        setLoading(false);
+        if (requestId === latestRequestId.current) setLoading(false);
       }
     }, 300);
 

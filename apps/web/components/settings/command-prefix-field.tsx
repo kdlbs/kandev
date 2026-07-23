@@ -33,7 +33,8 @@ export function CommandPrefixField({
       <p className="text-xs text-muted-foreground">
         Tokens prepended to the agent launch command, so it runs under a sandbox launcher (e.g.{" "}
         <code>greywall --</code>). The value is shell-tokenised. Leave empty to run the agent
-        directly.
+        directly. Applies to ACP sessions only — it has no effect when the profile uses TUI
+        passthrough.
       </p>
     </div>
   );

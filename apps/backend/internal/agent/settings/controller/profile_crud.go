@@ -244,6 +244,13 @@ func validateCommandPrefix(prefix string) error {
 	if len(tokens) == 0 || tokens[0] == "" {
 		return fmt.Errorf("%w: must start with a launcher command", ErrInvalidCommandPrefix)
 	}
+	// The first token is the launcher executable. A leading '-' means the user
+	// typed a flag first (e.g. "--foo greywall"), which would run the flag as
+	// the program — almost certainly a mistake, and a confusing failure mode
+	// for a sandbox boundary.
+	if strings.HasPrefix(tokens[0], "-") {
+		return fmt.Errorf("%w: first token %q must be a launcher command, not a flag", ErrInvalidCommandPrefix, tokens[0])
+	}
 	return nil
 }
 

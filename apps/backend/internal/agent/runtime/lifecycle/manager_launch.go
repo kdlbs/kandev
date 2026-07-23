@@ -213,33 +213,39 @@ type agentCommands struct {
 // resolveProfileLaunchTokens resolves the user-configured cli_flags argv tokens
 // and the launcher command_prefix tokens for a profile. Both must be applied on
 // every command build — the initial launch AND fresh restarts (context reset) —
-// or a sandboxed profile would silently relaunch without its wrapper. Malformed
-// values are logged and dropped rather than aborting the launch, mirroring the
-// tolerance the settings layer already applies at save time.
-func (m *Manager) resolveProfileLaunchTokens(profileInfo *AgentProfileInfo) (cliFlagTokens, commandPrefixTokens []string) {
+// or a sandboxed profile would silently relaunch without its wrapper.
+//
+// cli_flags are best-effort: a malformed entry is logged and dropped so a typo
+// doesn't block the task. command_prefix is a sandbox boundary, so it fails
+// CLOSED: a profile that configured a prefix which cannot be resolved returns an
+// error and aborts the launch rather than running the agent unwrapped.
+func (m *Manager) resolveProfileLaunchTokens(profileInfo *AgentProfileInfo) (cliFlagTokens, commandPrefixTokens []string, err error) {
 	if profileInfo == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	if tokens, err := cliflags.Resolve(profileInfo.CLIFlags); err != nil {
+	if tokens, resolveErr := cliflags.Resolve(profileInfo.CLIFlags); resolveErr != nil {
 		m.logger.Warn("failed to resolve cli_flags for profile, launching without user-configured flags",
 			zap.String("profile_id", profileInfo.ProfileID),
-			zap.Error(err))
+			zap.Error(resolveErr))
 	} else {
 		cliFlagTokens = tokens
 	}
-	if tokens, err := cliflags.Tokenise(profileInfo.CommandPrefix); err != nil {
-		m.logger.Warn("failed to tokenise command_prefix for profile, launching without launcher prefix",
-			zap.String("profile_id", profileInfo.ProfileID),
-			zap.Error(err))
-	} else {
+	if strings.TrimSpace(profileInfo.CommandPrefix) != "" {
+		tokens, tokErr := cliflags.Tokenise(profileInfo.CommandPrefix)
+		if tokErr != nil || len(tokens) == 0 {
+			return nil, nil, fmt.Errorf("resolve command_prefix for profile %s: %w",
+				profileInfo.ProfileID, tokErr)
+		}
 		commandPrefixTokens = tokens
 	}
-	return cliFlagTokens, commandPrefixTokens
+	return cliFlagTokens, commandPrefixTokens, nil
 }
 
 // buildAgentCommand builds the agent command strings for the execution.
 // Returns both the initial command and the continue command (for one-shot agents like Amp).
-func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent, preferNative bool) agentCommands {
+// Returns an error when a configured command_prefix cannot be resolved, so a
+// sandboxed profile fails closed instead of launching unwrapped.
+func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent, preferNative bool) (agentCommands, error) {
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)
@@ -250,7 +256,10 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
 	}
-	cliFlagTokens, commandPrefixTokens := m.resolveProfileLaunchTokens(profileInfo)
+	cliFlagTokens, commandPrefixTokens, err := m.resolveProfileLaunchTokens(profileInfo)
+	if err != nil {
+		return agentCommands{}, err
+	}
 	// Allow model override from request (for dynamic model switching)
 	if req.ModelOverride != "" {
 		model = req.ModelOverride
@@ -275,7 +284,7 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 	return agentCommands{
 		initial:   m.commandBuilder.BuildCommandString(agentConfig, cmdOpts),
 		continue_: m.commandBuilder.BuildContinueCommandString(agentConfig, cmdOpts),
-	}
+	}, nil
 }
 
 // launchResolveWorkspacePath resolves the effective workspace path for non-worktree executors.
@@ -910,7 +919,10 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 		}
 		preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execution.Metadata)
-		cmds := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
+		cmds, err := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
+		if err != nil {
+			return nil, err
+		}
 		execution.AgentCommand = cmds.initial
 		execution.ContinueCommand = cmds.continue_
 		if req.ACPSessionID != "" && execution.ACPSessionID == "" {
@@ -1036,7 +1048,21 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// Build the in-memory AgentExecution from the runtime instance. Extracted
 	// to keep launchInternal under the cyclomatic-complexity budget.
-	execution := m.buildExecutionFromInstance(req, execReq, execInstance, rt, profileInfo, agentConfig, prepResult)
+	execution, err := m.buildExecutionFromInstance(req, execReq, execInstance, rt, profileInfo, agentConfig, prepResult)
+	if err != nil {
+		// Command resolution failed (e.g. a configured command_prefix could not
+		// be tokenised). The execution isn't built yet, so stop the runtime
+		// instance directly to avoid leaking it, then fail closed.
+		if rt != nil && execInstance != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if stopErr := rt.StopInstance(cleanupCtx, execInstance, false); stopErr != nil {
+				m.logger.Warn("failed to stop runtime instance after command resolution error",
+					zap.Error(stopErr))
+			}
+			cancel()
+		}
+		return nil, err
+	}
 	if profileInfo != nil && len(profileInfo.EnvVars) > 0 {
 		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, profileInfo.EnvVars))
 	}
@@ -1071,7 +1097,7 @@ func (m *Manager) buildExecutionFromInstance(
 	profileInfo *AgentProfileInfo,
 	agentConfig agents.Agent,
 	prepResult *EnvPrepareResult,
-) *AgentExecution {
+) (*AgentExecution, error) {
 	execution := execInstance.ToAgentExecution(execReq)
 	execution.RuntimeName = rt.Name()
 	if req.ACPSessionID != "" {
@@ -1086,10 +1112,13 @@ func (m *Manager) buildExecutionFromInstance(
 	// promoteWorkspaceExecution's call site rather than re-deriving from the
 	// requested ExecutorType.
 	preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execReq.Metadata)
-	cmds := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
+	cmds, err := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
+	if err != nil {
+		return nil, err
+	}
 	execution.AgentCommand = cmds.initial
 	execution.ContinueCommand = cmds.continue_
-	return execution
+	return execution, nil
 }
 
 // registerAndPublishExecution does the post-spawn lockstep dance: track in the

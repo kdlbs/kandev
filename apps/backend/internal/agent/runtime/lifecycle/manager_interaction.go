@@ -657,8 +657,13 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		// Continue — the process may already be stopped
 	}
 
-	// 3. Rebuild agent command without resume flags and reset execution state
-	freshCmd, freshContinueCmd := m.buildFreshAgentCommand(ctx, execution, agentConfig)
+	// 3. Rebuild agent command without resume flags and reset execution state.
+	// Fail closed: if the launcher prefix can't be resolved, abort the restart
+	// rather than relaunch a sandboxed agent unwrapped.
+	freshCmd, freshContinueCmd, err := m.buildFreshAgentCommand(ctx, execution, agentConfig)
+	if err != nil {
+		return fmt.Errorf("failed to rebuild agent command for restart: %w", err)
+	}
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		exec.ACPSessionID = ""
 		exec.Status = v1.AgentStatusStarting
@@ -1492,13 +1497,21 @@ func (m *Manager) stopPassthroughProcess(ctx context.Context, executionID string
 // buildFreshAgentCommand rebuilds the agent command without resume flags by going through
 // the standard BuildCommandString pipeline with an empty SessionID. This works for all
 // agent types because each agent's BuildCommand respects SessionID="" to skip resume flags.
-func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent) (initial, continueCmd string) {
+//
+// It fails closed: if the profile cannot be resolved, or a configured
+// command_prefix cannot be tokenised, it returns an error so a context reset
+// never relaunches a sandboxed agent without its wrapper.
+func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent) (initial, continueCmd string, err error) {
 	var profileInfo *AgentProfileInfo
 	if execution.AgentProfileID != "" && m.profileResolver != nil {
-		pi, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
-		if err == nil {
-			profileInfo = pi
+		pi, resolveErr := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+		if resolveErr != nil {
+			// A profile was expected but could not be resolved. We cannot tell
+			// whether it carried a sandbox prefix, so refuse to relaunch rather
+			// than risk running unwrapped.
+			return "", "", fmt.Errorf("resolve profile %s for restart: %w", execution.AgentProfileID, resolveErr)
 		}
+		profileInfo = pi
 	}
 
 	model := ""
@@ -1518,7 +1531,10 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 	// Preserve the profile's cli_flags and command_prefix across restarts. A
 	// context reset that dropped the launcher prefix would relaunch a
 	// sandboxed agent unwrapped — the exact protection the prefix exists for.
-	cliFlagTokens, commandPrefixTokens := m.resolveProfileLaunchTokens(profileInfo)
+	cliFlagTokens, commandPrefixTokens, err := m.resolveProfileLaunchTokens(profileInfo)
+	if err != nil {
+		return "", "", err
+	}
 
 	opts := agents.CommandOptions{
 		Model:               model,
@@ -1533,5 +1549,5 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 		Runtime: execution.RuntimeName,
 	}
 	return m.commandBuilder.BuildCommandString(agentConfig, opts),
-		m.commandBuilder.BuildContinueCommandString(agentConfig, opts)
+		m.commandBuilder.BuildContinueCommandString(agentConfig, opts), nil
 }

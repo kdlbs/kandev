@@ -616,11 +616,13 @@ export function ProfileFormFields({
         />
       </div>
 
-      <CommandPrefixField
-        profile={profile}
-        baselineProfile={baselineProfile}
-        onChange={onChange}
-      />
+      {!profile.cli_passthrough && (
+        <CommandPrefixField
+          profile={profile}
+          baselineProfile={baselineProfile}
+          onChange={onChange}
+        />
+      )}
     </div>
   );
 }
