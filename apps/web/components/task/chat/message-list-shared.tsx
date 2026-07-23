@@ -43,6 +43,13 @@ export function getItemKey(item: RenderItem): string {
   return item.message.id;
 }
 
+export function getEffectiveActiveTurnId(
+  activeTurnId: string | null,
+  isWorking: boolean,
+): string | null {
+  return isWorking ? activeTurnId : null;
+}
+
 /** Only the latest ordinary agent row in the active turn can be the streaming reply. */
 export function getStreamingAgentMessageId(messages: Message[]): string | null {
   let latestUserIndex = -1;

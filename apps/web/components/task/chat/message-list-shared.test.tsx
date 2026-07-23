@@ -69,6 +69,7 @@ import {
   MessageItem,
   MessageListStatus,
   getConversationLoadingState,
+  getEffectiveActiveTurnId,
   getStreamingAgentMessageId,
 } from "./message-list-shared";
 
@@ -76,6 +77,16 @@ const item: RenderItem = { type: "message", message: { id: "m1" } as Message };
 const noop = () => {};
 const perm = new Map<string, Message>();
 const kids = new Map<string, Message[]>();
+
+describe("getEffectiveActiveTurnId", () => {
+  it("preserves the active turn while the session is working", () => {
+    expect(getEffectiveActiveTurnId("turn-active", true)).toBe("turn-active");
+  });
+
+  it("ignores a stale active turn after the session settles", () => {
+    expect(getEffectiveActiveTurnId("turn-stale", false)).toBeNull();
+  });
+});
 
 function row(onOpenFile: (p: string) => void) {
   return (

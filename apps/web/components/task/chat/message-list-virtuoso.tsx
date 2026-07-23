@@ -15,6 +15,7 @@ import {
   MessageItem,
   getItemKey,
   getConversationLoadingState,
+  getEffectiveActiveTurnId,
   getLastTurnGroupId,
   getStreamingAgentMessageId,
 } from "./message-list-shared";
@@ -462,6 +463,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
   });
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
   const { activeTurnId } = useSessionTurn(sessionId);
+  const effectiveActiveTurnId = getEffectiveActiveTurnId(activeTurnId, isWorking);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
 
   // Track which render branch fires and how itemCount/messageCount transition.
@@ -518,7 +520,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
         <VirtuosoBody
           {...props}
           scrollParent={scrollParent}
-          activeTurnId={activeTurnId}
+          activeTurnId={effectiveActiveTurnId}
           lastTurnGroupId={lastTurnGroupId}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}
