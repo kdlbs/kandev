@@ -108,6 +108,9 @@ func (s *Service) recordTaskActivity(taskID string, activity v1.ForegroundActivi
 		return
 	}
 	s.taskActivityMu.Lock()
+	if s.lastTaskActivity == nil {
+		s.lastTaskActivity = make(map[string]v1.ForegroundActivity)
+	}
 	s.lastTaskActivity[taskID] = activity
 	s.taskActivityMu.Unlock()
 }

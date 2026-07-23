@@ -57,7 +57,10 @@ function selectTaskPendingFlags(
   if (taskSessions?.length) {
     const live = loadedTaskPendingFlags(messagesBySession, taskSessions);
     return live.hasUnloadedMessages
-      ? live.flags | actionFlag(fallback?.taskPendingAction)
+      ? live.flags |
+          actionFlag(fallback?.taskPendingAction) |
+          (fallbackFlag(fallback, "permission") ? 2 : 0) |
+          (fallbackFlag(fallback, "clarification") ? 1 : 0)
       : live.flags;
   }
   const taskSnapshot = actionFlag(fallback?.taskPendingAction);

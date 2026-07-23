@@ -53,6 +53,16 @@ func foregroundActivityField(t *testing.T, data map[string]interface{}) interfac
 	return value
 }
 
+func TestRecordTaskActivity_ZeroValueServiceInitializesDedupCache(t *testing.T) {
+	var svc Service
+
+	svc.recordTaskActivity("task-1", v1.ForegroundActivityBackground)
+
+	if got := svc.lastTaskActivity["task-1"]; got != v1.ForegroundActivityBackground {
+		t.Fatalf("recorded activity = %q, want %q", got, v1.ForegroundActivityBackground)
+	}
+}
+
 // TestTaskUpdated_StampsForegroundActivityAggregate covers the task.updated
 // payload: it carries the MOST-ACTIVE-WINS aggregate, and emits explicit nil when
 // no session is running so a stale background reading is cleared.

@@ -131,6 +131,22 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(httpDTO(invalid)).taskPendingAction).toBeUndefined();
     expect(toKanbanTask(wsPayload(invalid)).taskPendingAction).toBeUndefined();
   });
+});
+
+describe("toKanbanTask — state normalization", () => {
+  it("preserves explicit null pending and activity fields so snapshot updates clear stale values", () => {
+    const mapped = toKanbanTask(
+      wsPayload({
+        primary_session_pending_action: null,
+        task_pending_action: null,
+        foreground_activity: null,
+      }),
+    );
+
+    expect(mapped.primarySessionPendingAction).toBeNull();
+    expect(mapped.taskPendingAction).toBeNull();
+    expect(mapped.foregroundActivity).toBeNull();
+  });
 
   it("missing repository on either shape: repositoryId is undefined", () => {
     const http = httpDTO({ repositories: undefined });

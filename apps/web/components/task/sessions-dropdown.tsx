@@ -22,7 +22,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
-import type { TaskSession, TaskSessionState } from "@/lib/types/http";
+import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
@@ -60,10 +60,15 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
 // (§spec:waiting-for-input-parity): a pending permission / clarification prompt
 // names itself even when the coarse status is still "running" mid-turn. Stale
 // pending data cannot replace a starting or terminal lifecycle label.
-export function sessionStatusTooltip(state: TaskSessionState, pending: PendingInput): string {
+export function sessionStatusTooltip(
+  state: TaskSessionState,
+  pending: PendingInput,
+  foregroundActivity?: ForegroundActivity | null,
+): string {
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
   if (canRequestInput && pending.permission) return "Permission requested";
   if (canRequestInput && pending.clarification) return "Waiting for input";
+  if (foregroundActivity === "background") return "Background running";
   return STATUS_LABELS[mapSessionStatus(state)];
 }
 
@@ -456,7 +461,7 @@ function SessionRow({
             </div>
           </TooltipTrigger>
           <TooltipContent side="left">
-            {sessionStatusTooltip(session.state, pending)}
+            {sessionStatusTooltip(session.state, pending, session.foreground_activity)}
           </TooltipContent>
         </Tooltip>
       </div>

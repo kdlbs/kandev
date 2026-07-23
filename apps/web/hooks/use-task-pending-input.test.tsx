@@ -81,6 +81,20 @@ describe("useTaskPendingInput", () => {
     expect(result.current).toEqual({ clarification: false, permission: true });
   });
 
+  it("uses the legacy primary-session snapshot while task session messages are unloaded", () => {
+    const { result } = renderHook(
+      () =>
+        useTaskPendingInput(PRIMARY_SESSION_ID, {
+          taskId: "task-1",
+          primarySessionState: "WAITING_FOR_INPUT",
+          primarySessionPendingAction: "permission",
+        }),
+      { wrapper: wrapper({}, [session(PRIMARY_SESSION_ID, "WAITING_FOR_INPUT")]) },
+    );
+
+    expect(result.current).toEqual({ clarification: false, permission: true });
+  });
+
   it("prefers loaded (empty) messages over a stale snapshot", () => {
     const { result } = renderHook(
       () =>

@@ -59,7 +59,7 @@ describe("task.updated task-wide pending action", () => {
   it("clears both snapshots when the payload carries explicit null", () => {
     const store = pendingStore("clarification");
     registerTasksHandlers(store)["task.updated"]!(taskUpdatedMessage(null));
-    expect(taskPendingActions(store)).toEqual({ main: undefined, multi: undefined });
+    expect(taskPendingActions(store)).toEqual({ main: null, multi: null });
   });
 
   it("preserves both snapshots when the payload omits the field", () => {

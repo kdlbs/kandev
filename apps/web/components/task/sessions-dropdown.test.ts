@@ -14,6 +14,16 @@ describe("sessionStatusTooltip", () => {
     ).toBe("Waiting for input");
   });
 
+  it("labels background-idle sessions as running when no input is pending", () => {
+    expect(
+      sessionStatusTooltip(
+        "WAITING_FOR_INPUT",
+        { permission: false, clarification: false },
+        "background",
+      ),
+    ).toBe("Background running");
+  });
+
   it.each([
     ["STARTING", "Running"],
     ["COMPLETED", "Complete"],
