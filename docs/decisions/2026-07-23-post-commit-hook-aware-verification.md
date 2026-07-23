@@ -18,8 +18,9 @@ returns a hook receipt containing the commit SHA, active-hook status, absence
 of bypass flags or environment variables, successful commit result, and
 post-commit worktree state.
 
-In changed-scope mode with authoritative PR CI, `verify` may omit only checks
-whose changed paths and behavior are exactly covered by that receipt. It first
+In changed-scope mode with authoritative PR CI, `verify` must omit checks whose
+changed paths and behavior are exactly covered by that receipt, and may omit no
+others. It first
 confirms that the receipt matches current `HEAD`, the verification delta, and a
 clean worktree. Tests, typechecks, generated-metadata checks, script/docs/
 workflow validators, TOML parsing, and other uncovered checks still run.

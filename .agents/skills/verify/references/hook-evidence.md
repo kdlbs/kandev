@@ -3,6 +3,8 @@
 Use a commit hook receipt only to remove exact duplicate work from
 `mode=changed`. The planner supplies the receipt from `/commit` plus the last
 successfully verified SHA. Do not infer hook success from commit history.
+When the receipt is eligible, every covered check below must be omitted; do not
+rerun it for reassurance.
 
 ## Eligibility
 
@@ -25,8 +27,9 @@ Full mode and delivery without PR CI never use hook omissions.
 
 ## Covered Checks
 
-Omit a row only when the named hook reported `passed` for at least one matching
-path in the receipt range.
+Omit a covered check when the named hook reported `passed` for at least one
+matching path in the receipt range. `verify` must not execute that duplicate
+command after declaring the receipt eligible.
 
 | Successful hook | Changed-scope work it replaces |
 | --- | --- |

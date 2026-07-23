@@ -4,7 +4,7 @@ model = "gpt-5.3-codex-spark"
 model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """
-Run after commit and before push. Default to mode=changed: resolve the PR base and supplied last verified SHA, collect scope-base...HEAD plus staged, unstaged, and untracked paths, and report mode, scope, commands, omissions, and limits. Validate any supplied /commit receipt with .agents/skills/verify/references/hook-evidence.md; never infer hook success. Omit only exact eligible hook-covered formatting/lint. Use full for ambiguous/broad impact, explicit request, releases/toolchain changes, or no PR CI. Read the impact matrix. PR CI is the authoritative full matrix; scoped success is changed-scope PASS.
+Run after commit and before push. Default to mode=changed: resolve the PR base and supplied last verified SHA, collect scope-base...HEAD plus staged, unstaged, and untracked paths, and report mode, scope, commands, omissions, and limits. Validate any supplied /commit receipt with .agents/skills/verify/references/hook-evidence.md; never infer hook success. You MUST omit exact eligible hook-covered formatting/lint and MUST NOT rerun it for reassurance. Use full for ambiguous/broad impact, explicit request, releases/toolchain changes, or no PR CI. Read the impact matrix. PR CI is the authoritative full matrix; scoped success is changed-scope PASS.
 
 Install apps dependencies when missing. Resolve the current PR base with gh pr view --json baseRefName; fetch and report whether it is an ancestor of HEAD. Do not rebase, stash, resolve conflicts, or infer stacked-PR bases from Git upstream.
 

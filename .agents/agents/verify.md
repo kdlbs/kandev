@@ -50,6 +50,9 @@ step can retain formatter changes. It does not authorize source or test fixes.
    `.agents/skills/verify/references/impact-matrix.md`. Use
    `mode=changed` unless that matrix requires `mode=full`. If the base or diff
    cannot be resolved, fail closed to full mode.
+   Build the omitted-check list before executing commands. Once a receipt is
+   eligible, running a covered duplicate is a procedure failure; do not rerun
+   it for reassurance.
 
 3. **Run only the selected commands** through `scripts/run-quiet`.
    - In changed mode, run uncovered matrix commands for impacted categories.

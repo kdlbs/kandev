@@ -13,7 +13,8 @@ Follow `.agents/agents/verify.md`, its impact matrix, and hook-evidence
 reference. Run after commit and before push. Default to changed scope; validate
 any supplied receipt, run only uncovered commands, and report PR/scope bases,
 receipt eligibility, omissions, changed paths, commands, limits, and
-`changed-scope PASS` versus `full PASS`. Never infer hook success.
+`changed-scope PASS` versus `full PASS`. Never infer hook success, and never
+rerun an eligible hook-covered command for reassurance.
 
 Install `apps` dependencies when missing. Resolve the current PR base with
 `gh pr view --json baseRefName`, fetch and report ancestry when it resolves;

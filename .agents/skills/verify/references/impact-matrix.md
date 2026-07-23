@@ -5,8 +5,9 @@ union, then run every matching row. Prefer package/suite targets over
 individual test names so changed dependents remain covered.
 
 When the planner supplies a last verified SHA and a `/commit` hook receipt,
-read [hook-evidence.md](hook-evidence.md). Eligible hook evidence may remove
-only the duplicate formatting/lint portions below; run every uncovered command.
+read [hook-evidence.md](hook-evidence.md). Eligible hook evidence removes the
+duplicate formatting/lint portions below; do not rerun them, and run every
+uncovered command.
 
 | Paths | Changed-mode commands |
 | --- | --- |
