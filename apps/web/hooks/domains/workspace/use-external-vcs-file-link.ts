@@ -23,7 +23,6 @@ export type UseExternalVcsFileLinkInput = {
   repositoryId?: string | null;
   repositoryName?: string | null;
   publishedBranch?: string | null;
-  publishedPullRequestNumber?: number | null;
   baseBranch?: string | null;
 };
 
@@ -229,6 +228,9 @@ function resolvePublishedBranch(
   activeBranch: string | null,
   snapshot: LinkSnapshot,
 ): string | null {
+  // TaskPR supplies a branch and PR number, but not the head repository or a
+  // fork discriminator. Preserve the published branch until that provenance is
+  // available instead of guessing a base-repository pull ref.
   if (input.publishedBranch) return input.publishedBranch;
   const branches = Array.from(new Set(publishedBranches(repository, snapshot)));
   if (activeBranch && branches.includes(activeBranch)) return activeBranch;
@@ -237,27 +239,6 @@ function resolvePublishedBranch(
   ).length;
   if (repositoryLinkCount > 1) return null;
   return branches.length === 1 ? branches[0] : null;
-}
-
-function resolvePublishedRevision(
-  input: UseExternalVcsFileLinkInput,
-  repository: Repository,
-  activeBranch: string | null,
-  snapshot: LinkSnapshot,
-): { branch: string; githubPullRequestNumber?: number } | null {
-  const branch = resolvePublishedBranch(input, repository, activeBranch, snapshot);
-  if (!branch) return null;
-  if (input.publishedBranch) {
-    return { branch, githubPullRequestNumber: input.publishedPullRequestNumber ?? undefined };
-  }
-  if (repository.provider !== "github") return { branch };
-  const matchingPRs = snapshot.githubPRs.filter(
-    (pr) => githubPRMatches(pr, repository) && pr.head_branch === branch,
-  );
-  return {
-    branch,
-    githubPullRequestNumber: matchingPRs.length === 1 ? matchingPRs[0].pr_number : undefined,
-  };
 }
 
 function resolveLink(
@@ -269,14 +250,13 @@ function resolveLink(
   const activeBranch = resolveActiveBranch(input, repository, snapshot);
   const taskRepository = resolveTaskRepositoryLink(repository, activeBranch, snapshot);
   if (!taskRepository) return null;
-  const publishedRevision = resolvePublishedRevision(input, repository, activeBranch, snapshot);
+  const publishedBranch = resolvePublishedBranch(input, repository, activeBranch, snapshot);
   return resolveExternalVcsFileURL({
     repository,
     path: input.filePath,
     previousPath: input.previousPath,
     status: input.status,
-    publishedBranch: publishedRevision?.branch,
-    publishedPullRequestNumber: publishedRevision?.githubPullRequestNumber,
+    publishedBranch,
     baseBranch: input.baseBranch || taskRepository.base_branch,
   });
 }

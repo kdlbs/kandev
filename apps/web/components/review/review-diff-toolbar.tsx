@@ -37,7 +37,6 @@ export type FileDiffToolbarProps = {
   repositoryId?: string | null;
   source: string;
   publishedBranch?: string | null;
-  publishedPullRequestNumber?: number | null;
   baseBranch?: string | null;
   wordWrap: boolean;
   expandUnchanged: boolean;
@@ -95,7 +94,6 @@ export function FileDiffToolbar(props: FileDiffToolbarProps) {
     repositoryId,
     source,
     publishedBranch,
-    publishedPullRequestNumber,
     baseBranch,
     wordWrap,
     expandUnchanged,
@@ -129,7 +127,6 @@ export function FileDiffToolbar(props: FileDiffToolbarProps) {
         repositoryId={repositoryId}
         repositoryName={repo}
         publishedBranch={publishedBranch}
-        publishedPullRequestNumber={publishedPullRequestNumber}
         baseBranch={baseBranch}
         size={isMobile ? "touch" : "xs"}
       />

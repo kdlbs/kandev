@@ -113,7 +113,6 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                   fallbackBaseBranch,
                   taskId: activeTaskId,
                   publishedPRBranch: activeTaskPR?.head_branch,
-                  publishedPRNumber: activeTaskPR?.pr_number,
                   publishedPRRepositoryId: activeTaskPR?.repository_id,
                 }}
               />

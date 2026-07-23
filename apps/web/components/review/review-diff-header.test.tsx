@@ -71,7 +71,6 @@ describe("ReviewDiffHeader external context", () => {
         baseBranchByRepo={{ frontend: "develop" }}
         taskId="task-1"
         publishedPRBranch="feature/unknown-repository"
-        publishedPRNumber={42}
         onCheckboxChange={vi.fn()}
         onDiscard={vi.fn()}
         onToggleCollapse={vi.fn()}
@@ -85,7 +84,7 @@ describe("ReviewDiffHeader external context", () => {
     expect(props).not.toHaveProperty("publishedPullRequestNumber");
   });
 
-  it("forwards the GitHub PR number with its published branch", () => {
+  it("forwards the published branch without guessing a fork PR ref", () => {
     render(
       <ReviewDiffHeader
         file={{ ...file, repository_id: "repo-1" }}
@@ -98,7 +97,6 @@ describe("ReviewDiffHeader external context", () => {
         baseBranchByRepo={{ frontend: "main" }}
         taskId="task-1"
         publishedPRBranch="contributor:feature/share"
-        publishedPRNumber={42}
         publishedPRRepositoryId="repo-1"
         onCheckboxChange={vi.fn()}
         onDiscard={vi.fn()}
@@ -111,7 +109,7 @@ describe("ReviewDiffHeader external context", () => {
     const props = JSON.parse(screen.getByTestId("review-toolbar-props").dataset.props ?? "{}");
     expect(props).toMatchObject({
       publishedBranch: "contributor:feature/share",
-      publishedPullRequestNumber: 42,
     });
+    expect(props).not.toHaveProperty("publishedPullRequestNumber");
   });
 });

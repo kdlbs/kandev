@@ -123,15 +123,14 @@ describe("resolveExternalVcsFileURL provider routes", () => {
 });
 
 describe("resolveExternalVcsFileURL review revisions", () => {
-  it("uses a GitHub pull-head ref when Review supplies its published PR number", () => {
+  it("keeps the published GitHub branch", () => {
     expect(
       resolve({
-        publishedBranch: "contributor:feature/share",
-        publishedPullRequestNumber: 42,
+        publishedBranch: "feature/share",
       }),
     ).toMatchObject({
-      revision: "refs/pull/42/head",
-      url: "https://github.com/acme/web/blob/refs%2Fpull%2F42%2Fhead/src/app.ts",
+      revision: "feature/share",
+      url: "https://github.com/acme/web/blob/feature%2Fshare/src/app.ts",
     });
   });
 });

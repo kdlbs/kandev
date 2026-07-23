@@ -14,7 +14,6 @@ export type ExternalVcsFileURLInput = {
   previousPath?: string | null;
   status?: string | null;
   publishedBranch?: string | null;
-  publishedPullRequestNumber?: number | null;
   baseBranch?: string | null;
 };
 
@@ -25,7 +24,7 @@ export type ExternalVcsFileURL = {
   revision: string;
 };
 
-type ResolvedTarget = { path: string; revision: string; usesPublishedRevision: boolean };
+type ResolvedTarget = { path: string; revision: string };
 type SSHCloneIdentity = { hostname: string; parts: string[] };
 
 function cleanValue(value: string | null | undefined): string {
@@ -58,23 +57,17 @@ function selectTarget(input: ExternalVcsFileURLInput): ResolvedTarget | null {
   const status = cleanValue(input.status).toLowerCase();
 
   if (status === "deleted") {
-    return baseBranch
-      ? { path: currentPath, revision: baseBranch, usesPublishedRevision: false }
-      : null;
+    return baseBranch ? { path: currentPath, revision: baseBranch } : null;
   }
   if (status === "renamed") {
     if (publishedBranch) {
-      return { path: currentPath, revision: publishedBranch, usesPublishedRevision: true };
+      return { path: currentPath, revision: publishedBranch };
     }
-    return baseBranch && previousPath
-      ? { path: previousPath, revision: baseBranch, usesPublishedRevision: false }
-      : null;
+    return baseBranch && previousPath ? { path: previousPath, revision: baseBranch } : null;
   }
   if ((status === "added" || status === "untracked") && !publishedBranch) return null;
   const revision = publishedBranch || baseBranch;
-  return revision
-    ? { path: currentPath, revision, usesPublishedRevision: Boolean(publishedBranch) }
-    : null;
+  return revision ? { path: currentPath, revision } : null;
 }
 
 function parseHTTPSRemote(rawRemoteURL: string | undefined): URL | null {
@@ -341,23 +334,6 @@ function buildFileURL(
   return `${remote.origin}/${repositoryPath}/${route}/${encodeURIComponent(target.revision)}/${filePath}`;
 }
 
-function githubPullHeadRevision(
-  provider: ExternalVcsProvider,
-  target: ResolvedTarget,
-  pullRequestNumber: number | null | undefined,
-): string {
-  if (
-    provider !== "github" ||
-    !target.usesPublishedRevision ||
-    !Number.isSafeInteger(pullRequestNumber) ||
-    !pullRequestNumber ||
-    pullRequestNumber < 1
-  ) {
-    return target.revision;
-  }
-  return `refs/pull/${pullRequestNumber}/head`;
-}
-
 export function resolveExternalVcsFileURL(
   input: ExternalVcsFileURLInput,
 ): ExternalVcsFileURL | null {
@@ -373,14 +349,10 @@ export function resolveExternalVcsFileURL(
   ) {
     return null;
   }
-  const resolvedTarget = {
-    ...target,
-    revision: githubPullHeadRevision(provider, target, input.publishedPullRequestNumber),
-  };
   return {
     provider,
-    url: buildFileURL(provider, input.repository, remote, resolvedTarget),
-    path: resolvedTarget.path,
-    revision: resolvedTarget.revision,
+    url: buildFileURL(provider, input.repository, remote, target),
+    path: target.path,
+    revision: target.revision,
   };
 }
