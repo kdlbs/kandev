@@ -13,6 +13,36 @@ const OVERLAY_SCROLLBAR_SELECTOR =
  * via a capturing scroll listener and restores them after every reattach.
  */
 test.describe("sidebar scrolling", () => {
+  test("keeps the empty list transparent and uses the full sidebar width", async ({ testPage }) => {
+    await testPage.goto("/");
+
+    const tasksToggle = testPage.getByRole("button", { name: "Tasks", exact: true });
+    if ((await tasksToggle.getAttribute("aria-expanded")) !== "true") {
+      await tasksToggle.click();
+    }
+
+    const appSidebar = testPage.getByTestId("app-sidebar");
+    const taskSidebar = testPage.getByTestId("task-sidebar");
+    const scrollRoot = taskSidebar.locator("[data-slot='scroll-area']");
+    await expect(taskSidebar.getByText("No tasks yet.")).toBeVisible();
+
+    await expect
+      .poll(() => scrollRoot.evaluate((element) => getComputedStyle(element).backgroundColor))
+      .toBe("rgba(0, 0, 0, 0)");
+
+    const [navigationBox, taskSidebarBox] = await Promise.all([
+      appSidebar.locator("nav").boundingBox(),
+      taskSidebar.boundingBox(),
+    ]);
+    expect(navigationBox).not.toBeNull();
+    expect(taskSidebarBox).not.toBeNull();
+    expect(taskSidebarBox!.x).toBeCloseTo(navigationBox!.x, 0);
+    expect(taskSidebarBox!.x + taskSidebarBox!.width).toBeCloseTo(
+      navigationBox!.x + navigationBox!.width,
+      0,
+    );
+  });
+
   test("fades overflowing tasks and reveals the scrollbar on hover", async ({
     testPage,
     apiClient,

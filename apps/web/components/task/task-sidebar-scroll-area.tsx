@@ -40,7 +40,7 @@ export function TaskSidebarScrollArea({ children }: { children: ReactNode }) {
   return (
     <ScrollArea
       type="auto"
-      className="task-sidebar-scroll-root min-h-0 flex-1 bg-card text-card-foreground"
+      className="task-sidebar-scroll-root min-h-0 flex-1"
       viewportProps={{
         ref: scrollRef,
         className: "task-sidebar-scroll",
