@@ -240,9 +240,8 @@ it("recovers from manual retry after all automatic root retries preserve saved e
 
 it("deduplicates concurrent load requests for one generation", async () => {
   const root = deferred<{ root: typeof ROOT & { children: (typeof CODEX)[] } }>();
-  requestFileTreeMock
-    .mockImplementationOnce(() => root.promise)
-    .mockImplementation(mockHydratedTree);
+  mockHydratedTree();
+  requestFileTreeMock.mockImplementationOnce(() => root.promise);
   const { result } = renderHook(() => useFileBrowserTree(SESSION, ENVIRONMENT));
 
   const duplicate = result.current.loadTree();

@@ -1,5 +1,5 @@
-import { renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const requestFileTreeMock = vi.fn();
 const getWebSocketClientMock = vi.fn(() => ({ on: vi.fn(() => () => {}) }));
@@ -46,6 +46,8 @@ describe("useFileBrowserTree persisted expansion", () => {
     });
   });
 
+  afterEach(() => vi.useRealTimers());
+
   it("hydrates every persisted expanded ancestor before marking the tree loaded", async () => {
     const { result } = renderHook(() => useFileBrowserTree(SESSION, ENVIRONMENT));
 
@@ -79,18 +81,35 @@ describe("useFileBrowserTree persisted expansion", () => {
     expect(result.current.expandedPaths).toEqual(new Set(EXPANDED_PATHS));
   });
 
-  it("removes failed restored folders and their descendants from expansion", async () => {
+  it("retries a transient restored-folder failure without pruning persisted expansion", async () => {
+    vi.useFakeTimers();
+    let codexAttempts = 0;
     requestFileTreeMock.mockImplementation((_client: unknown, _sessionId: string, path: string) => {
       if (path === ROOT_PATH) return Promise.resolve({ root: { ...ROOT, children: [CODEX] } });
-      if (path === CODEX_PATH) return Promise.reject(new Error("folder removed"));
+      if (path === CODEX_PATH && codexAttempts++ === 0) {
+        return Promise.reject(new Error("folder unavailable"));
+      }
+      if (path === CODEX_PATH) return Promise.resolve({ root: { ...CODEX, children: [AGENTS] } });
+      if (path === AGENTS_PATH) return Promise.resolve({ root: { ...AGENTS, children: [CONFIG] } });
       throw new Error(`Unexpected path: ${path}`);
     });
 
     const { result } = renderHook(() => useFileBrowserTree(SESSION, ENVIRONMENT));
-    await waitFor(() => expect(result.current.loadState).toBe("loaded"));
+    await act(async () => Promise.resolve());
 
-    expect(result.current.expandedPaths).toEqual(new Set());
-    expect(sessionStorage.getItem(STORAGE_KEY)).toBe("[]");
+    expect(result.current.loadState).toBe("waiting");
+    expect(result.current.expandedPaths).toEqual(new Set(EXPANDED_PATHS));
+    expect(sessionStorage.getItem(STORAGE_KEY)).toBe(JSON.stringify(EXPANDED_PATHS));
+
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+
+    expect(result.current.loadState).toBe("loaded");
+    expect(result.current.expandedPaths).toEqual(new Set(EXPANDED_PATHS));
+    expect(result.current.visibleRows.map((row) => row.path)).toEqual([
+      CODEX_PATH,
+      AGENTS_PATH,
+      CONFIG_PATH,
+    ]);
   });
 
   it("prunes an expanded folder and descendants when its restore response is null", async () => {

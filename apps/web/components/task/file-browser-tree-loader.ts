@@ -106,12 +106,6 @@ async function restoreTree({
     owner,
     paths,
     isCurrentLoad,
-    onFolderFailure: (path, error) =>
-      logLoad("restore-folder-failed", {
-        sessionId: owner.sessionId,
-        path,
-        error: error instanceof Error ? error.message : "Unknown error",
-      }),
   });
   return completeRestoredTree(hydrated, isCurrentLoad, (failedPaths) =>
     setExpandedPaths((previous) => removeFailedExpansions(Array.from(previous), failedPaths)),

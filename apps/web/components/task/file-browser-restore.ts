@@ -42,13 +42,11 @@ export async function fetchRestoredTree({
   owner,
   paths,
   isCurrentLoad,
-  onFolderFailure,
 }: {
   client: NonNullable<ReturnType<typeof getWebSocketClient>>;
   owner: TreeLoadOwner;
   paths: string[];
   isCurrentLoad: () => boolean;
-  onFolderFailure: (path: string, error: unknown) => void;
 }): Promise<RestoredTree | null> {
   const rootResponse = await requestFileTree(client, owner.sessionId, "", 1);
   if (!isCurrentLoad()) return null;
@@ -60,15 +58,10 @@ export async function fetchRestoredTree({
       failedPaths.push(path);
       continue;
     }
-    try {
-      const response = await requestFileTree(client, owner.sessionId, path, 1);
-      if (!isCurrentLoad()) return null;
-      if (response.root) tree = mergeLoadedFolder(tree, response.root);
-      else failedPaths.push(path);
-    } catch (error) {
-      failedPaths.push(path);
-      onFolderFailure(path, error);
-    }
+    const response = await requestFileTree(client, owner.sessionId, path, 1);
+    if (!isCurrentLoad()) return null;
+    if (response.root) tree = mergeLoadedFolder(tree, response.root);
+    else failedPaths.push(path);
   }
   return { root: rootResponse.root ?? null, tree, failedPaths };
 }
