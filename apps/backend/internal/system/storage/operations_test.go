@@ -57,6 +57,32 @@ func TestRunNowIgnoresQuietPeriodWithoutActiveTaskWork(t *testing.T) {
 	}
 }
 
+func TestRunNowInvalidatesOverviewAfterSuccess(t *testing.T) {
+	connection := newSQLite(t)
+	pool := db.NewPool(connection, connection)
+	rawSettings, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new settings store: %v", err)
+	}
+	overview := &recordingRefreshOverview{}
+	tracker := jobs.NewTracker(nil, newOperationsTestLogger(t))
+	operations := NewOperations(OperationsConfig{
+		Settings: NewSettingsStore(rawSettings), Store: newStorageStore(t, pool),
+		Jobs: tracker, Activity: activity.NewCoordinator(activity.Options{}),
+		Providers: []CleanupProvider{&signallingCleanupProvider{called: make(chan struct{})}},
+		Overview:  overview,
+	})
+
+	jobID, err := operations.RunNow(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunNow: %v", err)
+	}
+	waitForJobState(t, tracker, jobID, jobs.StateSucceeded)
+	if overview.invalidateCalls != 1 {
+		t.Fatalf("overview invalidations = %d, want 1", overview.invalidateCalls)
+	}
+}
+
 func TestRunNowRejectsCurrentTaskActivity(t *testing.T) {
 	connection := newSQLite(t)
 	pool := db.NewPool(connection, connection)
@@ -167,6 +193,67 @@ func TestDeleteQuarantineRejectsBeforeRetentionWithoutStartingDelete(t *testing.
 	}
 }
 
+func TestAdoptGoCacheInvalidatesOverview(t *testing.T) {
+	connection := newSQLite(t)
+	pool := db.NewPool(connection, connection)
+	rawSettings, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new settings store: %v", err)
+	}
+	overview := &recordingRefreshOverview{}
+	operations := NewOperations(OperationsConfig{
+		Settings: NewSettingsStore(rawSettings),
+		Overview: overview,
+		GoCache:  recordingGoCacheAdopter{},
+	})
+
+	if _, _, err := operations.AdoptGoCache(context.Background(), t.TempDir(), "ADOPT"); err != nil {
+		t.Fatalf("AdoptGoCache: %v", err)
+	}
+	if overview.invalidateCalls != 1 {
+		t.Fatalf("overview invalidations = %d, want 1", overview.invalidateCalls)
+	}
+}
+
+func TestRestoreQuarantineInvalidatesOverview(t *testing.T) {
+	overview := &recordingRefreshOverview{}
+	operations := NewOperations(OperationsConfig{
+		Overview: overview, Quarantine: &recordingQuarantineController{},
+	})
+
+	if _, err := operations.RestoreQuarantine(context.Background(), "entry"); err != nil {
+		t.Fatalf("RestoreQuarantine: %v", err)
+	}
+	if overview.invalidateCalls != 1 {
+		t.Fatalf("overview invalidations = %d, want 1", overview.invalidateCalls)
+	}
+}
+
+func TestDeleteQuarantineInvalidatesOverviewAfterSuccess(t *testing.T) {
+	connection := newSQLite(t)
+	store := newStorageStore(t, db.NewPool(connection, connection))
+	entry := testQuarantineEntry("expired-entry")
+	entry.DeleteAfter = time.Now().UTC().Add(-time.Hour)
+	if err := store.CreateQuarantineEntry(context.Background(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	overview := &recordingRefreshOverview{}
+	tracker := jobs.NewTracker(nil, newOperationsTestLogger(t))
+	operations := NewOperations(OperationsConfig{
+		Store: store, Jobs: tracker, Overview: overview,
+		Quarantine: &recordingQuarantineController{},
+	})
+
+	jobID, err := operations.DeleteQuarantine(context.Background(), entry.ID, "DELETE")
+	if err != nil {
+		t.Fatalf("DeleteQuarantine: %v", err)
+	}
+	waitForJobState(t, tracker, jobID, jobs.StateSucceeded)
+	if overview.invalidateCalls != 1 {
+		t.Fatalf("overview invalidations = %d, want 1", overview.invalidateCalls)
+	}
+}
+
 func TestAnalyzeForcesOverviewRefresh(t *testing.T) {
 	connection := newSQLite(t)
 	pool := db.NewPool(connection, connection)
@@ -219,10 +306,17 @@ type recordingQuarantineController struct {
 	deleteCalls int
 }
 
+type recordingGoCacheAdopter struct{}
+
+func (recordingGoCacheAdopter) ValidateAdoption(context.Context, string, string) error {
+	return nil
+}
+
 type recordingRefreshOverview struct {
-	called       chan struct{}
-	refreshCalls int
-	summaryCalls int
+	called          chan struct{}
+	refreshCalls    int
+	summaryCalls    int
+	invalidateCalls int
 }
 
 func (o *recordingRefreshOverview) Summary(context.Context) (Summary, error) {
@@ -243,6 +337,10 @@ func (o *recordingRefreshOverview) Get(context.Context) (OverviewSnapshot, error
 
 func (o *recordingRefreshOverview) Capabilities(context.Context, StorageMaintenanceSettings) Capabilities {
 	return Capabilities{}
+}
+
+func (o *recordingRefreshOverview) Invalidate() {
+	o.invalidateCalls++
 }
 
 type signallingCleanupProvider struct {

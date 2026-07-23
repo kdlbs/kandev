@@ -72,7 +72,7 @@ func provideStorageComposition(
 	cachedOverview := storagepkg.NewOverviewCache(overview)
 	providers := storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider)
 	runner := storagepkg.NewRunner(storagepkg.RunnerConfig{
-		Activity: coordinator, Store: store, Providers: providers,
+		Activity: coordinator, Store: store, Providers: providers, Overview: cachedOverview,
 	})
 	scheduler := storagepkg.NewScheduler(settings, runner, storagepkg.SchedulerOptions{})
 	runtime := storagepkg.NewRuntime(storagepkg.RuntimeConfig{

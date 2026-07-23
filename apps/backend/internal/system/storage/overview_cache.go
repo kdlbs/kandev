@@ -14,21 +14,27 @@ type OverviewSnapshot struct {
 	AnalyzedAt time.Time
 }
 
+type OverviewInvalidator interface {
+	Invalidate()
+}
+
 // OverviewCache keeps one process-local successful overview snapshot.
 type OverviewCache struct {
 	provider OverviewProvider
 	ttl      time.Duration
 	now      func() time.Time
 
-	mu       sync.Mutex
-	snapshot *OverviewSnapshot
-	flight   *overviewFlight
+	mu         sync.Mutex
+	snapshot   *OverviewSnapshot
+	flight     *overviewFlight
+	generation uint64
 }
 
 type overviewFlight struct {
-	done     chan struct{}
-	snapshot OverviewSnapshot
-	err      error
+	done       chan struct{}
+	snapshot   OverviewSnapshot
+	err        error
+	generation uint64
 }
 
 func NewOverviewCache(provider OverviewProvider) *OverviewCache {
@@ -71,8 +77,16 @@ func (c *OverviewCache) Capabilities(ctx context.Context, settings StorageMainte
 	return c.provider.Capabilities(ctx, settings)
 }
 
+func (c *OverviewCache) Invalidate() {
+	c.mu.Lock()
+	c.generation++
+	c.snapshot = nil
+	c.flight = nil
+	c.mu.Unlock()
+}
+
 func (c *OverviewCache) startRefreshLocked() *overviewFlight {
-	flight := &overviewFlight{done: make(chan struct{})}
+	flight := &overviewFlight{done: make(chan struct{}), generation: c.generation}
 	c.flight = flight
 	return flight
 }
@@ -82,8 +96,10 @@ func (c *OverviewCache) refresh(ctx context.Context, flight *overviewFlight) {
 	c.mu.Lock()
 	if err == nil {
 		snapshot := OverviewSnapshot{Summary: summary, AnalyzedAt: c.now().UTC()}
-		c.snapshot = &snapshot
 		flight.snapshot = snapshot
+		if flight.generation == c.generation {
+			c.snapshot = &snapshot
+		}
 	}
 	flight.err = err
 	if c.flight == flight {

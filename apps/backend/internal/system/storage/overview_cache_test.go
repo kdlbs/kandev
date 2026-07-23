@@ -142,6 +142,33 @@ func TestOverviewCacheCoalescesConcurrentMisses(t *testing.T) {
 	}
 }
 
+func TestOverviewCacheInvalidationDuringRefreshDiscardsStaleSnapshot(t *testing.T) {
+	provider := &firstCallBlockingOverview{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	cache := NewOverviewCache(provider)
+	firstResult := make(chan overviewResult, 1)
+	go func() {
+		snapshot, err := cache.Get(context.Background())
+		firstResult <- overviewResult{snapshot: snapshot, err: err}
+	}()
+	<-provider.started
+
+	cache.Invalidate()
+	close(provider.release)
+	if result := <-firstResult; result.err != nil {
+		t.Fatalf("first Get: %v", result.err)
+	}
+	second, err := cache.Get(context.Background())
+	if err != nil {
+		t.Fatalf("Get after invalidation: %v", err)
+	}
+	if second.Summary.Workspaces != 2 {
+		t.Fatalf("summary workspaces = %d, want refreshed value 2", second.Summary.Workspaces)
+	}
+}
+
 func TestOverviewCacheGetInitiatorCancellationDoesNotCancelSharedFlight(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		provider := &cancellableOverview{started: make(chan struct{}), release: make(chan struct{})}
@@ -238,6 +265,32 @@ type cancellableOverview struct {
 	calls   int
 	started chan struct{}
 	release chan struct{}
+}
+
+type firstCallBlockingOverview struct {
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	release chan struct{}
+}
+
+func (o *firstCallBlockingOverview) Summary(context.Context) (Summary, error) {
+	o.mu.Lock()
+	o.calls++
+	call := o.calls
+	o.mu.Unlock()
+	if call == 1 {
+		close(o.started)
+		<-o.release
+	}
+	return Summary{Workspaces: call}, nil
+}
+
+func (*firstCallBlockingOverview) Capabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
+	return Capabilities{}
 }
 
 func (o *cancellableOverview) Summary(ctx context.Context) (Summary, error) {
