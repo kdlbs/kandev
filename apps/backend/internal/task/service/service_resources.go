@@ -81,10 +81,13 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 	var kanbanWorkflow *models.Workflow
 	if req.BootstrapKanbanWorkflow {
 		if s.workspaceBootstrapper == nil {
-			return nil, errors.New("workspace bootstrapper is not configured")
+			err := errors.New("workspace bootstrapper is not configured")
+			s.logger.Error("failed to create workspace with Kanban bootstrap", zap.Error(err))
+			return nil, err
 		}
 		workflow, err := s.workspaceBootstrapper.CreateWorkspaceWithKanban(ctx, workspace)
 		if err != nil {
+			s.logger.Error("failed to create workspace with Kanban bootstrap", zap.Error(err))
 			return nil, err
 		}
 		kanbanWorkflow = workflow
