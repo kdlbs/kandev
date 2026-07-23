@@ -72,6 +72,17 @@ func TestResolveRescanPath(t *testing.T) {
 	}
 }
 
+func TestResolveRescanPath_RejectsUnrelatedDirectoryWithGitChild(t *testing.T) {
+	current := filepath.Join(t.TempDir(), "workspace", "repo")
+	unrelated := t.TempDir()
+	initGitRepoAt(t, filepath.Join(unrelated, "unrelated-repository"))
+
+	got, ok := resolveRescanPath(unrelated, current)
+	if ok || got != "" {
+		t.Fatalf("resolveRescanPath accepted unrelated git directory: (%q, %v)", got, ok)
+	}
+}
+
 // join wraps filepath.Join so callers can express paths with separate
 // segments without thinking about platform separators.
 func join(root string, segs ...string) string {
