@@ -246,9 +246,9 @@ After restart, verify `/health`, **System > About**, **System > Status**, the da
 
 ## Resource metrics
 
-Configure sampling at **Settings > General > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or load average remains selected.
+Configure sampling at **Settings > General > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or 1-minute system load remains selected. System load is the average number of tasks running or waiting for CPU during the last minute; compare it with the host's CPU core count.
 
-Collection starts only while at least one connected client shows metrics in a kanban or task topbar. Enabling execution metrics adds active Docker, SSH, and Sprites `agentctl` sources; execution disk sampling uses `/`. A provider hook also exists for remote Docker, but creating that runtime currently returns a not-implemented error. Missing platform APIs, container permissions, an invalid disk path, a disconnected executor, macOS/Windows temperature support, or Windows load-average support produce unavailable samples rather than quotas.
+Collection starts only while at least one connected client displays metrics in the global status bar. Phone clients subscribe only while their Status drawer is open. The built-in status surface renders the Kandev host source only. Enabling execution metrics also adds active Docker, SSH, and Sprites `agentctl` sources to the metrics stream for separately owned consumers such as plugins; execution disk sampling uses `/`. A provider hook also exists for remote Docker, but creating that runtime currently returns a not-implemented error. Missing platform APIs, container permissions, an invalid disk path, a disconnected executor, macOS/Windows temperature support, or Windows load-average support produce unavailable samples rather than quotas.
 
 These metrics are lightweight UI observability. Set alerts, retention, CPU/memory limits, and disk quotas in the host, container platform, or external monitoring stack.
 
@@ -257,9 +257,15 @@ These metrics are lightweight UI observability. Set alerts, retention, CPU/memor
 **Settings > System > Feature Toggles** currently exposes:
 
 - **Office mode** — experimental, medium risk, and off in the production profile by default.
+- **App status bar** — stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins.
 - **Debug mode** — high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
 
-Both require restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
+Each requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
+
+Status-bar layout is a separate per-user preference. Hold Cmd on macOS or Ctrl
+elsewhere while mouse-dragging an item to move it across the desktop/tablet bar.
+The backend preserves the layout across reloads and restarts; the phone Status
+drawer mirrors it as the saved left sequence followed by the saved right sequence.
 
 ## Troubleshooting
 

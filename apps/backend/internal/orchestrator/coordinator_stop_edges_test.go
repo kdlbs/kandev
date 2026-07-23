@@ -60,6 +60,7 @@ func TestStopTaskForCoordinator_ReviewGuardsPreserveTaskState(t *testing.T) {
 							return task, err
 						}
 						copyTask := *task
+						copyTask.IsFromOffice = true
 						copyTask.AssigneeAgentProfileID = "office-agent"
 						return &copyTask, nil
 					},

@@ -8,16 +8,30 @@ import (
 	"github.com/kandev/kandev/internal/profiles"
 )
 
+const (
+	featureOfficeKey        = "features.office"
+	featurePluginsKey       = "features.plugins"
+	featureAppStatusBarKey  = "features.appStatusBar"
+	debugDevModeKey         = "debug.devMode"
+	envFeaturesOffice       = "KANDEV_FEATURES_OFFICE"
+	envFeaturesPlugins      = "KANDEV_FEATURES_PLUGINS"
+	envFeaturesAppStatusBar = "KANDEV_FEATURES_APP_STATUS_BAR"
+	envDebugDevMode         = "KANDEV_DEBUG_DEV_MODE"
+	envDebugPprofEnabled    = "KANDEV_DEBUG_PPROF_ENABLED"
+	envDebugAgentMessages   = "KANDEV_DEBUG_AGENT_MESSAGES"
+)
+
 func OptionsFromConfig(cfg *config.Config) Options {
 	return Options{
 		DefaultValues: ValuesFromConfig(cfg),
 		RuntimeValues: ValuesFromConfig(cfg),
 		EnvValues: map[string]bool{
-			"KANDEV_FEATURES_OFFICE":      isTruthy(os.Getenv("KANDEV_FEATURES_OFFICE")),
-			"KANDEV_FEATURES_PLUGINS":     isTruthy(os.Getenv("KANDEV_FEATURES_PLUGINS")),
-			"KANDEV_DEBUG_DEV_MODE":       isTruthy(os.Getenv("KANDEV_DEBUG_DEV_MODE")),
-			"KANDEV_DEBUG_PPROF_ENABLED":  isTruthy(os.Getenv("KANDEV_DEBUG_PPROF_ENABLED")),
-			"KANDEV_DEBUG_AGENT_MESSAGES": isTruthy(os.Getenv("KANDEV_DEBUG_AGENT_MESSAGES")),
+			envFeaturesOffice:       isTruthy(os.Getenv(envFeaturesOffice)),
+			envFeaturesPlugins:      isTruthy(os.Getenv(envFeaturesPlugins)),
+			envFeaturesAppStatusBar: isTruthy(os.Getenv(envFeaturesAppStatusBar)),
+			envDebugDevMode:         isTruthy(os.Getenv(envDebugDevMode)),
+			envDebugPprofEnabled:    isTruthy(os.Getenv(envDebugPprofEnabled)),
+			envDebugAgentMessages:   isTruthy(os.Getenv(envDebugAgentMessages)),
 		},
 		IsExplicitEnv: func(name string) bool {
 			_, ok := os.LookupEnv(name)
@@ -29,28 +43,31 @@ func OptionsFromConfig(cfg *config.Config) Options {
 func ValuesFromConfig(cfg *config.Config) map[string]bool {
 	debugEnabled := cfg.Debug.DevMode || cfg.Debug.PprofEnabled
 	return map[string]bool{
-		"features.office":  cfg.Features.Office,
-		"features.plugins": cfg.Features.Plugins,
-		"debug.devMode":    debugEnabled,
+		featureOfficeKey:       cfg.Features.Office,
+		featurePluginsKey:      cfg.Features.Plugins,
+		featureAppStatusBarKey: cfg.Features.AppStatusBar,
+		debugDevModeKey:        debugEnabled,
 	}
 }
 
 func ApplyStatesToConfig(cfg *config.Config, states []RuntimeFlagState) {
 	for _, state := range states {
 		switch state.Key {
-		case "features.office":
+		case featureOfficeKey:
 			cfg.Features.Office = state.EffectiveValue
-		case "features.plugins":
+		case featurePluginsKey:
 			cfg.Features.Plugins = state.EffectiveValue
-		case "debug.devMode":
+		case featureAppStatusBarKey:
+			cfg.Features.AppStatusBar = state.EffectiveValue
+		case debugDevModeKey:
 			cfg.Debug.DevMode = state.EffectiveValue
 			cfg.Debug.PprofEnabled = state.EffectiveValue
 			if state.EffectiveValue {
-				setIfNotExplicit("KANDEV_DEBUG_AGENT_MESSAGES", "true")
-				setIfNotExplicit("KANDEV_DEBUG_PPROF_ENABLED", "true")
+				setIfNotExplicit(envDebugAgentMessages, "true")
+				setIfNotExplicit(envDebugPprofEnabled, "true")
 			} else {
-				unsetIfNotExplicit("KANDEV_DEBUG_AGENT_MESSAGES")
-				unsetIfNotExplicit("KANDEV_DEBUG_PPROF_ENABLED")
+				unsetIfNotExplicit(envDebugAgentMessages)
+				unsetIfNotExplicit(envDebugPprofEnabled)
 			}
 		}
 	}

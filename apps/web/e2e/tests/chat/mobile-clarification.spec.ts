@@ -28,7 +28,10 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
     const input = session.clarificationInput();
-    await input.click();
+    // Tap the apparent row surface, outside the textarea itself. The whole row
+    // is the mobile touch target and should transfer focus into the textarea.
+    await session.clarificationCustomInput().tap({ position: { x: 4, y: 4 } });
+    await expect(input).toBeFocused();
     await input.pressSequentially("first line");
     // On touch, Enter inserts a newline rather than submitting.
     await input.press("Enter");

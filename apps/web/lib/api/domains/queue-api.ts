@@ -1,4 +1,5 @@
 import type { QueueStatus, QueuedMessage } from "@/lib/state/slices/session/types";
+import type { EntityReference } from "@/lib/types/entity-reference";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
@@ -75,6 +76,7 @@ export type QueueMessageParams = {
     name?: string;
     delivery_mode?: "prompt" | "path";
   }>;
+  entity_references?: EntityReference[];
   user_id?: string;
 };
 
@@ -153,6 +155,7 @@ export async function updateQueuedMessage(params: {
     name?: string;
     delivery_mode?: "prompt" | "path";
   }>;
+  entity_references: EntityReference[];
   user_id?: string;
 }): Promise<{ entry_id: string }> {
   const client = getWebSocketClient();
@@ -160,7 +163,10 @@ export async function updateQueuedMessage(params: {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   try {
-    return await client.request<{ entry_id: string }>("message.queue.update", params);
+    return await client.request<{ entry_id: string }>("message.queue.update", {
+      ...params,
+      entity_references: params.entity_references ?? [],
+    });
   } catch (err) {
     rethrowQueueError(err);
   }

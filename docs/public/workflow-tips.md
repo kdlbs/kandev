@@ -79,7 +79,7 @@ Workflow-level settings include the name and default agent profile. A step can o
 | Control | Behavior |
 |---------|----------|
 | Name and color | Board label and presentation. Color is stored as a CSS utility class. |
-| Prompt | Step-specific agent prompt. `{{task_prompt}}` inserts the task description. |
+| Prompt | Step-specific agent prompt. `{{task_prompt}}` inserts the task description. Type `@` to reference a saved prompt by name. |
 | Start step | Preferred initial step. The editor keeps at most one. If none is set, task creation falls back to the first step by position. |
 | Auto-start agent | Adds `auto_start_agent` to `on_enter`. It still needs a valid agent and executor configuration. |
 | Plan mode | Adds `enable_plan_mode` on entry. Add the matching disable behavior on completion or exit when later steps should edit files. |
@@ -116,6 +116,16 @@ Keep one transition action per event. A “next” action on the last step or �
 4. Enable the explicit completion signal for agents that can call `step_complete_kandev`; otherwise the step can wait indefinitely.
 5. Add WIP limits before pull rules, then test a full target and a vacated slot.
 6. Export the workflow before a large edit. Workflow deletion is permanent; when it contains tasks, the UI asks you to migrate them or archive them.
+
+## Saved prompt references in step prompts
+
+A step's Prompt field accepts `@name` references to [saved prompts](developer-tools.md#saved-prompts) (**Settings > Prompts**), the same way task chat does. Type `@` and select a prompt, or type the name directly.
+
+- The reference is resolved when the step prompt runs, not when it is saved. Editing the saved prompt's content later automatically changes what every step referencing it sends next time — there is nothing to update on the step itself.
+- The `@name` mention stays visible in the prompt/chat. Kandev attaches the referenced prompt's content as hidden context for the agent; it is not shown as part of the visible conversation.
+- `{{task_prompt}}` is only interpolated in the step prompt field itself. If a referenced saved prompt's content contains `{{task_prompt}}`, it is **not** expanded — it is sent to the agent as literal text.
+
+The same `@name` syntax and resolution apply to a GitHub Review Watch's prompt field. See [Integrations](integrations.md#configure-and-use-the-workspace).
 
 ## Repository instructions and multiple repositories
 

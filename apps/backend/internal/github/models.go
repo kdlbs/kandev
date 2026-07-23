@@ -12,6 +12,8 @@ const TaskCIAutoFixMaxRounds = 10
 
 // PR represents a GitHub Pull Request.
 type PR struct {
+	ID                 int64               `json:"id"`
+	NodeID             string              `json:"node_id"`
 	Number             int                 `json:"number"`
 	Title              string              `json:"title"`
 	URL                string              `json:"url"`
@@ -549,6 +551,8 @@ type DailyCount struct {
 
 // Issue represents a GitHub Issue (not a PR).
 type Issue struct {
+	ID          int64      `json:"id"`
+	NodeID      string     `json:"node_id"`
 	Number      int        `json:"number"`
 	Title       string     `json:"title"`
 	Body        string     `json:"body"`

@@ -25,10 +25,6 @@ vi.mock("@/components/page-topbar", () => ({
   ),
 }));
 
-vi.mock("@/components/system-metrics/topbar-metrics", () => ({
-  TopbarMetrics: () => <div data-testid="topbar-metrics" />,
-}));
-
 vi.mock("./mobile-menu-sheet", () => ({
   MobileMenuSheet: () => null,
 }));

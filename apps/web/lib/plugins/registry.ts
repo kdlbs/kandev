@@ -37,7 +37,17 @@ export interface PluginRouteRegistration extends RouteRegistration {
 }
 
 interface SlotRegistration {
+  registrationId: string;
+  orderingId: string;
   slot: string;
+  Component: SlotComponent;
+}
+
+/** Slot component plus its stable registry identity and owning plugin. */
+export interface PluginSlotRegistration {
+  registrationId: string;
+  orderingId: string;
+  pluginId: string;
   Component: SlotComponent;
 }
 
@@ -56,6 +66,7 @@ class PluginRegistryStore {
   private navItems: Owned<NavItem>[] = [];
   private slotComponents: Owned<SlotRegistration>[] = [];
   private wsHandlers: Owned<WsHandlerRegistration>[] = [];
+  private nextSlotRegistrationId = 0;
   /** Display names from the boot payload, used for derived page-chrome titles. */
   private pluginNames = new Map<string, string>();
   private listeners = new Set<() => void>();
@@ -91,7 +102,18 @@ class PluginRegistryStore {
   }
 
   registerComponent(pluginId: string, slot: string, Component: SlotComponent): void {
-    this.slotComponents.push({ pluginId, value: { slot, Component } });
+    const ordinal = this.slotComponents.filter(
+      (entry) => entry.pluginId === pluginId && entry.value.slot === slot,
+    ).length;
+    this.slotComponents.push({
+      pluginId,
+      value: {
+        registrationId: `slot-registration-${this.nextSlotRegistrationId++}`,
+        orderingId: pluginSlotOrderingId(pluginId, slot, ordinal),
+        slot,
+        Component,
+      },
+    });
     this.notify();
   }
 
@@ -130,9 +152,19 @@ class PluginRegistryStore {
   }
 
   getSlotComponents(slot: string): SlotComponent[] {
+    return this.getSlotRegistrations(slot).map((registration) => registration.Component);
+  }
+
+  /** Stable, plugin-owned slot registrations for host render boundaries. */
+  getSlotRegistrations(slot: string): PluginSlotRegistration[] {
     return this.slotComponents
       .filter((entry) => entry.value.slot === slot)
-      .map((entry) => entry.value.Component);
+      .map((entry) => ({
+        registrationId: entry.value.registrationId,
+        orderingId: entry.value.orderingId,
+        pluginId: entry.pluginId,
+        Component: entry.value.Component,
+      }));
   }
 
   /**
@@ -181,6 +213,10 @@ class PluginRegistryStore {
     this.version += 1;
     this.listeners.forEach((listener) => listener());
   }
+}
+
+function pluginSlotOrderingId(pluginId: string, slot: string, ordinal: number): string {
+  return `plugin:${encodeURIComponent(pluginId)}:${encodeURIComponent(slot)}:${ordinal}`;
 }
 
 export const pluginRegistry = new PluginRegistryStore();

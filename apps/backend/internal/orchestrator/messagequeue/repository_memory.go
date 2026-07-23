@@ -179,7 +179,11 @@ func (r *memoryRepository) TakeByID(_ context.Context, sessionID, entryID string
 	return nil, nil
 }
 
-func (r *memoryRepository) UpdateContent(_ context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
+func (r *memoryRepository) UpdateContent(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
+	return r.UpdateContentAndMetadata(ctx, sessionID, entryID, content, attachments, nil, queuedBy)
+}
+
+func (r *memoryRepository) UpdateContentAndMetadata(_ context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	list, ok := r.entries[sessionID]
@@ -195,6 +199,7 @@ func (r *memoryRepository) UpdateContent(_ context.Context, sessionID, entryID, 
 		}
 		m.Content = content
 		m.Attachments = attachments
+		m.Metadata = applyMetadataUpdates(m.Metadata, metadataUpdates)
 		return nil
 	}
 	return ErrEntryNotFound

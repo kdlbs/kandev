@@ -11,7 +11,7 @@ import {
 
 export default function StatsLoading() {
   return (
-    <div className="h-screen w-full flex flex-col bg-background">
+    <div className="flex h-full min-h-0 w-full flex-col bg-background">
       <header className="flex items-center gap-3 p-4 pb-3 shrink-0">
         <Skeleton className="h-8 w-16" />
         <div className="flex items-center gap-2">

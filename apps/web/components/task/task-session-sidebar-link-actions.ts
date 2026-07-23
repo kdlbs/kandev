@@ -31,6 +31,9 @@ export function useSidebarLinkActions(store: StoreApi) {
     null,
   );
   const [linkingIssueTask, setLinkingIssueTask] = useState<SidebarLinkTarget | null>(null);
+  const [linkingMergeRequestTask, setLinkingMergeRequestTask] = useState<SidebarLinkTarget | null>(
+    null,
+  );
   const [linkingExternalIssueTask, setLinkingExternalIssueTask] =
     useState<SidebarExternalLinkTarget | null>(null);
 
@@ -60,6 +63,13 @@ export function useSidebarLinkActions(store: StoreApi) {
   const handleLinkIssueTask = useCallback(
     (taskId: string, fallbackTitle?: string) => {
       setLinkingIssueTask(getLinkTarget(taskId, fallbackTitle));
+    },
+    [getLinkTarget],
+  );
+
+  const handleLinkMergeRequestTask = useCallback(
+    (taskId: string, fallbackTitle?: string) => {
+      setLinkingMergeRequestTask(getLinkTarget(taskId, fallbackTitle));
     },
     [getLinkTarget],
   );
@@ -96,6 +106,9 @@ export function useSidebarLinkActions(store: StoreApi) {
     linkingIssueTask,
     setLinkingIssueTask,
     handleLinkIssueTask,
+    linkingMergeRequestTask,
+    setLinkingMergeRequestTask,
+    handleLinkMergeRequestTask,
     linkingExternalIssueTask,
     setLinkingExternalIssueTask,
     handleLinkJiraTicketTask,

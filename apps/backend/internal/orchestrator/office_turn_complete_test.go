@@ -40,7 +40,8 @@ func seedOfficeSession(t *testing.T, repo officeSeedRepo, taskID, sessionID, age
 		WorkflowStepID:         stepID,
 		Title:                  "Office task",
 		State:                  v1.TaskStateInProgress,
-		AssigneeAgentProfileID: "agent-1", // marks the task as office-style (per-(task, agent) session)
+		ProjectID:              "project-office",
+		AssigneeAgentProfileID: "agent-1",
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}

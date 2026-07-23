@@ -14,6 +14,7 @@ import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 import type { Repository } from "@/lib/types/http";
 import type { Layout } from "react-resizable-panels";
 import type { OpenFileTab } from "@/lib/types/backend";
+import { TaskReviewDialogMount } from "../dockview-review-dialog";
 
 const DEFAULT_TABLET_LAYOUT: Record<string, number> = {
   left: 60,
@@ -104,6 +105,7 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
 }: SessionTabletLayoutProps) {
   // Use shared layout state hook
   const {
+    activeTaskId,
     effectiveSessionId,
     sessionKey,
     selectedDiff,
@@ -188,6 +190,7 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
         workspaceId={workspaceId}
         workflowId={workflowId}
       />
+      <TaskReviewDialogMount taskId={activeTaskId} sessionId={effectiveSessionId} />
     </div>
   );
 });

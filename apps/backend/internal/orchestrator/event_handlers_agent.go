@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -499,6 +500,8 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			DeliveryMode: att.DeliveryMode,
 		}
 	}
+	references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
+	promptContent := AppendEntityReferenceContext(queuedMsg.Content, references)
 
 	// Create user message for the queued message (so it appears in chat history).
 	// Skip when the queued metadata is tagged user_message_recorded — that means
@@ -517,12 +520,13 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 
 		meta := NewUserMessageMeta().
 			WithPlanMode(queuedMsg.PlanMode).
-			WithAttachments(attachments)
+			WithAttachments(attachments).
+			WithEntityReferences(references)
 		// Merge any extra metadata captured at queue time (e.g. sender_task_id
 		// from message_task_kandev) so the resulting Message row carries the
 		// full context.
-		metaMap := mergeMetadata(meta.ToMap(), queuedMsg.Metadata)
-		err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, metaMap)
+		metaMap := mergeMetadata(meta.ToMap(), metadataWithoutEntityReferences(queuedMsg.Metadata))
+		err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap)
 		if err != nil {
 			s.logger.Error("failed to create user message for queued message",
 				zap.String("session_id", queuedMsg.SessionID),
@@ -548,7 +552,7 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	// comment for the guarded claim-then-mark-RUNNING step this enables,
 	// and for why a bare, unguarded check-then-clear would not be enough.
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
-		queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
+		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		queuedMsg.ID)
 	if errors.Is(err, errQueuedDispatchSuperseded) {
 		// A newer dispatch for this same session (e.g. a second parent
@@ -591,6 +595,19 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			zap.String("queue_id", queuedMsg.ID),
 			zap.String("content_preview", queuedMsg.Content[:min(50, len(queuedMsg.Content))]))
 	}
+}
+
+func metadataWithoutEntityReferences(metadata map[string]interface{}) map[string]interface{} {
+	if len(metadata) == 0 {
+		return nil
+	}
+	copy := make(map[string]interface{}, len(metadata))
+	for key, value := range metadata {
+		if key != messagequeue.MetadataEntityReferences {
+			copy[key] = value
+		}
+	}
+	return copy
 }
 
 // handleAgentCompleted handles agent completion events

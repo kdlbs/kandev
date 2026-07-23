@@ -368,6 +368,61 @@ func TestUpdateMessage(t *testing.T) {
 	})
 }
 
+func TestMemoryRepository_UpdateContentAndMetadataPreservesUnrelatedKeys(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	msg := &QueuedMessage{
+		SessionID: "s",
+		TaskID:    "t",
+		Content:   "original",
+		QueuedBy:  "user-1",
+		Metadata: map[string]interface{}{
+			"entity_references": []interface{}{"old"},
+			"origin":            "inter-task",
+		},
+	}
+	require.NoError(t, repo.Insert(ctx, msg, 0))
+
+	require.NoError(t, repo.UpdateContentAndMetadata(
+		ctx, "s", msg.ID, "edited", nil,
+		map[string]interface{}{"entity_references": []interface{}{"new"}},
+		"user-1",
+	))
+
+	entries, err := repo.ListBySession(ctx, "s")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "edited", entries[0].Content)
+	assert.Equal(t, "inter-task", entries[0].Metadata["origin"])
+	assert.Equal(t, []interface{}{"new"}, entries[0].Metadata["entity_references"])
+}
+
+func TestUpdateMessageWithMetadataClearsEntityReferences(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+	msg, err := svc.QueueMessageWithMetadata(
+		ctx, "s", "t", "original", "", "user-1", false, nil,
+		map[string]interface{}{
+			"entity_references": []interface{}{"old"},
+			"origin":            "inter-task",
+		},
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, svc.UpdateMessageWithMetadata(
+		ctx, "s", msg.ID, "edited", nil,
+		map[string]interface{}{"entity_references": nil},
+		"user-1",
+	))
+
+	entries := svc.GetStatus(ctx, "s").Entries
+	require.Len(t, entries, 1)
+	assert.Equal(t, "edited", entries[0].Content)
+	assert.Equal(t, "inter-task", entries[0].Metadata["origin"])
+	_, exists := entries[0].Metadata["entity_references"]
+	assert.False(t, exists, "empty replacement must remove stale references")
+}
+
 func TestRemoveEntry(t *testing.T) {
 	t.Run("removes the targeted entry", func(t *testing.T) {
 		svc := setupService(t)

@@ -207,9 +207,11 @@ export function computeStagedStats(stagedFiles: FileInfo[]) {
 export function mapPRFilesToChangedFiles(
   files: PRDiffFile[],
   repositoryName?: string,
+  prKey?: string,
 ): PRChangedFile[] {
   return files.map((file) => ({
     path: file.filename,
+    prKey,
     status: normalizeFileChangeStatus(file.status),
     plus: file.additions,
     minus: file.deletions,

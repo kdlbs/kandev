@@ -2,16 +2,19 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Task topbar inline rename", () => {
-  test("renames the task by double-clicking the title and pressing Enter", async ({
+  test("hints at editing before renaming the task by double-clicking the title", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     test.setTimeout(90_000);
 
+    const originalTitle =
+      "Topbar rename original with a deliberately long title that is truncated in the task header";
+
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      "Topbar rename original",
+      originalTitle,
       seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
@@ -26,7 +29,15 @@ test.describe("Task topbar inline rename", () => {
     await session.waitForLoad();
 
     const title = testPage.locator('[data-testid="task-topbar"] [aria-current="page"]');
-    await expect(title).toHaveText("Topbar rename original", { timeout: 10_000 });
+    await expect(title).toHaveText(originalTitle, { timeout: 10_000 });
+
+    await title.hover();
+    const tooltip = testPage
+      .locator('[data-slot="tooltip-content"][data-state]')
+      .filter({ hasText: originalTitle });
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toContainText(originalTitle);
+    await expect(tooltip).toContainText("Double-click to edit (or press Enter)");
 
     await title.dblclick();
     const input = testPage.getByTestId("task-title-rename-input");

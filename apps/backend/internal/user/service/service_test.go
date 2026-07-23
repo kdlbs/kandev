@@ -140,6 +140,36 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettingsAppStatusBarOrder(t *testing.T) {
+	saved := models.AppStatusBarOrder{
+		LeftItemIDs:  []string{"builtin:connection"},
+		RightItemIDs: []string{"builtin:metrics"},
+	}
+	t.Run("omission preserves saved order", func(t *testing.T) {
+		settings := &models.UserSettings{AppStatusBarOrder: saved}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if fmt.Sprint(settings.AppStatusBarOrder) != fmt.Sprint(saved) {
+			t.Fatalf("AppStatusBarOrder = %#v, want %#v", settings.AppStatusBarOrder, saved)
+		}
+	})
+
+	t.Run("explicit value replaces saved order", func(t *testing.T) {
+		next := models.AppStatusBarOrder{
+			LeftItemIDs:  []string{"builtin:metrics"},
+			RightItemIDs: []string{"builtin:connection"},
+		}
+		settings := &models.UserSettings{AppStatusBarOrder: saved}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{AppStatusBarOrder: &next}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if fmt.Sprint(settings.AppStatusBarOrder) != fmt.Sprint(next) {
+			t.Fatalf("AppStatusBarOrder = %#v, want %#v", settings.AppStatusBarOrder, next)
+		}
+	})
+}
+
 func TestApplyBasicSettingsMCPTaskAgentProfileDefault(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
 		settings := &models.UserSettings{MCPTaskAgentProfileDefault: models.MCPTaskAgentProfileDefaultWorkspaceDefault}
@@ -853,6 +883,28 @@ func TestPublishUserSettingsEventIncludesNormalizedMCPTaskAgentProfileDefault(t 
 	}
 	if got := eventData["mcp_task_agent_profile_default"]; got != models.MCPTaskAgentProfileDefaultCurrentTask {
 		t.Fatalf("mcp_task_agent_profile_default = %#v, want current_task", got)
+	}
+}
+
+func TestPublishUserSettingsEventIncludesAppStatusBarOrder(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(&recordingUserRepository{}, eventBus, log)
+	want := models.AppStatusBarOrder{
+		LeftItemIDs:  []string{"left"},
+		RightItemIDs: []string{"right"},
+	}
+	svc.publishUserSettingsEvent(context.Background(), &models.UserSettings{AppStatusBarOrder: want})
+
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data map, got %T", eventBus.publishedEvents[0].Data)
+	}
+	if got, ok := eventData["app_status_bar_order"].(models.AppStatusBarOrder); !ok || fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("app_status_bar_order = %#v, want %#v", eventData["app_status_bar_order"], want)
 	}
 }
 

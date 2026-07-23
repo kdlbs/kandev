@@ -134,6 +134,7 @@ export function KanbanHeaderMobile({
         title={title}
         backLabel=""
         leading={<MobileBrandLink workspaceId={workspaceId} />}
+        showStatusTrigger={false}
         className="h-10 px-3 py-1"
         variant="root"
         leftActions={

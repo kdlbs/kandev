@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -35,23 +36,40 @@ type OrchestratorService interface {
 
 // MessageHandlers handles WebSocket requests for messages
 type MessageHandlers struct {
-	service      *service.Service
-	orchestrator OrchestratorService
-	logger       *logger.Logger
+	service            *service.Service
+	orchestrator       OrchestratorService
+	logger             *logger.Logger
+	referenceValidator entityrefs.SubmissionValidator
 }
 
 // NewMessageHandlers creates a new MessageHandlers instance
-func NewMessageHandlers(svc *service.Service, orchestrator OrchestratorService, log *logger.Logger) *MessageHandlers {
-	return &MessageHandlers{
+func NewMessageHandlers(
+	svc *service.Service,
+	orchestrator OrchestratorService,
+	log *logger.Logger,
+	validators ...entityrefs.SubmissionValidator,
+) *MessageHandlers {
+	handlers := &MessageHandlers{
 		service:      svc,
 		orchestrator: orchestrator,
 		logger:       log.WithFields(zap.String("component", "task-message-handlers")),
 	}
+	if len(validators) > 0 {
+		handlers.referenceValidator = validators[0]
+	}
+	return handlers
 }
 
 // RegisterMessageRoutes registers message HTTP + WebSocket handlers
-func RegisterMessageRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorService, log *logger.Logger) {
-	handlers := NewMessageHandlers(svc, orchestrator, log)
+func RegisterMessageRoutes(
+	router *gin.Engine,
+	dispatcher *ws.Dispatcher,
+	svc *service.Service,
+	orchestrator OrchestratorService,
+	log *logger.Logger,
+	validators ...entityrefs.SubmissionValidator,
+) {
+	handlers := NewMessageHandlers(svc, orchestrator, log, validators...)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -213,6 +231,7 @@ type wsAddMessageRequest struct {
 	HasReviewComments bool                   `json:"has_review_comments,omitempty"`
 	Attachments       []v1.MessageAttachment `json:"attachments,omitempty"`
 	ContextFiles      []v1.ContextFileMeta   `json:"context_files,omitempty"`
+	EntityReferences  []v1.EntityReference   `json:"entity_references,omitempty"`
 }
 
 func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -230,6 +249,21 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	sessionResp, wsErr := h.checkSessionStateForMessage(ctx, msg, req.TaskSessionID)
 	if wsErr != nil {
 		return wsErr, nil
+	}
+	if len(req.EntityReferences) > 0 {
+		if sessionResp.Session.IsPassthrough || h.referenceValidator == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid entity references", nil)
+		}
+		references, err := h.referenceValidator.ValidateForSubmission(
+			ctx,
+			req.TaskSessionID,
+			req.TaskID,
+			req.EntityReferences,
+		)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid entity references", nil)
+		}
+		req.EntityReferences = references
 	}
 
 	// Transition task from REVIEW → IN_PROGRESS if needed
@@ -273,7 +307,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		WithPlanMode(req.PlanMode).
 		WithReviewComments(req.HasReviewComments).
 		WithAttachments(req.Attachments).
-		WithContextFiles(req.ContextFiles)
+		WithContextFiles(req.ContextFiles).
+		WithEntityReferences(req.EntityReferences)
 
 	// First message on a CREATED session is the kanban "type in chat to start
 	// the agent" path. Wrap with the Kandev MCP system block before persisting
@@ -290,7 +325,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
-	storedContent := req.Content
+	storedContent := orchestrator.AppendEntityReferenceContext(req.Content, req.EntityReferences)
 	if isCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
 		task, err := h.service.GetTask(ctx, req.TaskID)
 		if err != nil {
@@ -299,12 +334,12 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
 		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
-		storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, req.Content, sysprompt.KandevContextOptions{
+		storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
 			RequiresCompletionSignal:       requiresSignal,
-			IncludeCoordinatorTaskControls: task.AssigneeAgentProfileID == "" && !configMode,
+			IncludeCoordinatorTaskControls: !task.IsOfficeOwnedAndAssigned() && !configMode,
 		})
-		req.Content = storedContent
 	}
+	req.Content = storedContent
 
 	message, err := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,

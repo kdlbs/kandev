@@ -26,15 +26,40 @@ function withStatus(plugin: PluginRecord, status: PluginStatus): PluginRecord {
   return { ...plugin, status };
 }
 
-/** Loads a plugin's UI bundle into the running app, if it declares one. */
+/**
+ * Loads a plugin's UI bundle into the running app, if it declares one.
+ * Unloads any previous registrations first — a first-time load is a safe
+ * no-op through `unloadPlugin` since nothing is registered yet.
+ *
+ * `evictCache` controls whether the cached bundle registration is dropped
+ * before reloading:
+ * - Install/update (`afterInstall`) passes `evictCache: true`: the backend
+ *   install endpoint is also how an update is applied, so without eviction an
+ *   update would leave the prior version's nav/route/slot registrations in
+ *   place alongside the new ones (e.g. a duplicated top-bar widget), and
+ *   `loadPlugins` would skip re-importing the bundle and re-run the old
+ *   version's `initialize()` against the new registry entry.
+ * - Plain enable (`handleEnable`) passes `evictCache: false`: the disable path
+ *   intentionally keeps the cached registration (see `unloadPlugin`'s doc) so
+ *   a same-tab disable→enable cycle can reuse it without depending on the
+ *   browser re-executing the bundle's module-eval side effect — the
+ *   `bundleUrl` is unchanged, so a forced re-import would silently return the
+ *   already-evaluated module without calling `registerKandevPlugin` again.
+ */
 async function loadIfActive(
   record: PluginRecord,
   storeApi: StoreApi<AppState>,
   theme: "light" | "dark",
+  evictCache: boolean,
 ) {
   if (record.status !== "active") return;
   const active = toActivePlugin(record);
   if (!active) return;
+  if (evictCache) {
+    unloadPlugin(record.id, { evictCache: true });
+  } else {
+    unloadPlugin(record.id);
+  }
   await loadPlugins([active], (pluginId) => buildHostApi(pluginId, storeApi, theme));
 }
 
@@ -55,7 +80,7 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
       await enablePlugin(plugin.id);
       const updated = withStatus(plugin, "active");
       upsertPlugin(updated);
-      await loadIfActive(updated, storeApi, resolvedTheme);
+      await loadIfActive(updated, storeApi, resolvedTheme, false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : `Failed to enable ${plugin.display_name}`);
     } finally {
@@ -134,7 +159,7 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   // "installed" toast, so it takes priority over the success toast.
   const afterInstall = async ({ plugin, warning }: InstallResult) => {
     upsertPlugin(plugin);
-    await loadIfActive(plugin, storeApi, resolvedTheme);
+    await loadIfActive(plugin, storeApi, resolvedTheme, true);
     if (warning) {
       toast.warning(warning);
     } else {

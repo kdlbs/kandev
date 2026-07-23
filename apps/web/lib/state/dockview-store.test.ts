@@ -3,6 +3,7 @@ import type { DockviewApi } from "dockview-react";
 import {
   useDockviewStore,
   resolvePresetPinnedWidths,
+  resolveCustomLayoutPinnedWidths,
   collectPinnedWidthUpdates,
 } from "./dockview-store";
 import { getGlobalSidebarWidth, setGlobalSidebarWidth } from "@/lib/local-storage";
@@ -201,6 +202,136 @@ describe("resolvePresetPinnedWidths", () => {
       expect(getGlobalSidebarWidth()).toBe(520);
       expect(getPinnedTarget("sidebar")).toBe(520);
     });
+  });
+});
+
+describe("applyCustomLayout", () => {
+  beforeEach(() => {
+    useDockviewStore.setState({
+      api: null,
+      currentLayoutEnvId: null,
+      isRestoringLayout: false,
+      pinnedWidths: new Map(),
+      preMaximizeLayout: null,
+      rightPanelsVisible: true,
+    });
+  });
+
+  it("uses the selected layout's saved right width instead of the live task width", () => {
+    const fromJSON = vi.fn();
+    const api = {
+      width: 1020,
+      height: 730,
+      fromJSON,
+      getPanel: () => undefined,
+      groups: [],
+      panels: [],
+      hasMaximizedGroup: () => false,
+      layout: vi.fn(),
+    } as unknown as DockviewApi;
+    useDockviewStore.setState({
+      api,
+      pinnedWidths: new Map([["right", 450]]),
+    });
+
+    useDockviewStore.getState().applyCustomLayout({
+      id: "layout-override-default",
+      name: "Default",
+      isDefault: false,
+      createdAt: "2026-07-22T00:00:00.000Z",
+      layout: {
+        columns: [
+          {
+            id: "center",
+            groups: [
+              {
+                id: "group-center",
+                panels: [{ id: "chat", component: "chat", title: "Chat" }],
+                activePanel: "chat",
+              },
+            ],
+          },
+          {
+            id: "right",
+            pinned: true,
+            width: 350,
+            groups: [
+              {
+                id: "group-right-top",
+                panels: [{ id: "files", component: "files", title: "Files" }],
+                activePanel: "files",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const serialized = fromJSON.mock.calls[0]?.[0] as {
+      grid: { root: { data: Array<{ size: number }> } };
+    };
+    expect(serialized.grid.root.data[1].size).toBe(350);
+    expect(useDockviewStore.getState().pinnedWidths.get("right")).toBe(350);
+  });
+});
+
+describe("resolveCustomLayoutPinnedWidths", () => {
+  it("preserves complete saved column proportions across workbench sizes", () => {
+    const widths = resolveCustomLayoutPinnedWidths(
+      [
+        { id: "center", width: 1400, groups: [] },
+        { id: "right", pinned: true, width: 600, groups: [] },
+      ],
+      1000,
+    );
+
+    expect(widths.get("right")).toBe(300);
+  });
+
+  it("uses the resolved sidebar share when capping right regardless of column order", () => {
+    const widths = resolveCustomLayoutPinnedWidths(
+      [
+        { id: "right", pinned: true, width: 1000, groups: [] },
+        { id: "center", width: 300, groups: [] },
+        { id: "sidebar", pinned: true, width: 700, groups: [] },
+      ],
+      1000,
+    );
+
+    expect(widths.get("sidebar")).toBe(350);
+    expect(widths.get("right")).toBe(180);
+  });
+
+  it("clamps saved pinned geometry to the current workbench cap", () => {
+    const widths = resolveCustomLayoutPinnedWidths(
+      [{ id: "right", pinned: true, width: 900, groups: [] }],
+      1020,
+    );
+
+    expect(widths.get("right")).toBe(540);
+  });
+
+  it("uses layout defaults when saved pinned geometry is missing", () => {
+    const widths = resolveCustomLayoutPinnedWidths(
+      [{ id: "right", pinned: true, groups: [] }],
+      1020,
+    );
+
+    expect(widths.has("right")).toBe(false);
+  });
+
+  it("keeps valid pinned pixels but omits invalid geometry in an incomplete profile", () => {
+    const widths = resolveCustomLayoutPinnedWidths(
+      [
+        { id: "center", width: 1000, groups: [] },
+        { id: "right", pinned: true, width: 350, groups: [] },
+        { id: "sidebar", pinned: true, width: 0, groups: [] },
+      ],
+      1020,
+    );
+
+    expect(widths.get("right")).toBe(350);
+    expect(widths.has("sidebar")).toBe(false);
   });
 });
 

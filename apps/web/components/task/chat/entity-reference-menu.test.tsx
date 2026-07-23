@@ -1,0 +1,181 @@
+import type { ComponentType } from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { EntityReference, EntityReferenceSearchGroup } from "@/lib/types/entity-reference";
+import * as entityReferenceMenus from "./entity-reference-menu";
+
+afterEach(cleanup);
+
+const unavailableSearchGroups: EntityReferenceSearchGroup[] = [
+  {
+    source: "gitlab_issues",
+    provider: "gitlab",
+    kind: "issue",
+    display_name: "GitLab",
+    kind_label: "Issue",
+    status: "unsupported_scope",
+    results: [],
+  },
+  {
+    source: "linear_issues",
+    provider: "linear",
+    kind: "issue",
+    display_name: "Linear",
+    kind_label: "Issue",
+    status: "not_configured",
+    results: [],
+  },
+  {
+    source: "github_issues",
+    provider: "github",
+    kind: "issue",
+    display_name: "GitHub",
+    kind_label: "Issue",
+    status: "timeout",
+    results: [],
+  },
+];
+
+const kandevTaskGroup: EntityReferenceSearchGroup = {
+  source: "kandev_tasks",
+  provider: "kandev",
+  kind: "task",
+  display_name: "Kandev tasks",
+  kind_label: "Task",
+  status: "ok",
+  results: [
+    {
+      version: 1,
+      ref: "mention:v1:kandev:task:workspace-1:task-1",
+      provider: "kandev",
+      kind: "task",
+      id: "task-1",
+      key: "",
+      title: "Existing task",
+      url: "/t/task-1",
+      scope: "workspace-1",
+    },
+  ],
+};
+
+const githubIssueGroup: EntityReferenceSearchGroup = {
+  source: "github_issues",
+  provider: "github",
+  kind: "issue",
+  display_name: "GitHub",
+  kind_label: "Issue",
+  status: "ok",
+  results: [
+    {
+      version: 1,
+      ref: "mention:v1:github:issue:octo%2Frepo:7",
+      provider: "github",
+      kind: "issue",
+      id: "7",
+      key: "#7",
+      title: "External issue",
+      url: "https://github.com/octo/repo/issues/7",
+      scope: "octo/repo",
+    },
+  ],
+};
+
+describe("EntityReferenceMenu", () => {
+  it("provides a menu distinct from @ context mentions", () => {
+    expect(typeof (entityReferenceMenus as Record<string, unknown>).EntityReferenceMenu).toBe(
+      "function",
+    );
+  });
+
+  it("renders descriptor-driven groups with a generic fallback and 44px touch rows", () => {
+    const reference: EntityReference = {
+      version: 1,
+      ref: "mention:v1:plugin:acme:incident:scope:incident-9",
+      provider: "plugin:acme:tracker",
+      kind: "incident",
+      id: "incident-9",
+      key: "INC-9",
+      title: "Authentication outage",
+      url: "https://tracker.example.test/incidents/9",
+      scope: "tracker.example.test/team-a",
+    };
+    const groups: EntityReferenceSearchGroup[] = [
+      {
+        source: "plugin:acme:incidents",
+        provider: reference.provider,
+        kind: reference.kind,
+        display_name: "Acme tracker",
+        kind_label: "Incident",
+        status: "ok",
+        results: [reference],
+      },
+    ];
+    const onSelect = vi.fn();
+    const Menu = entityReferenceMenus.EntityReferenceMenu as unknown as ComponentType<{
+      isOpen: boolean;
+      clientRect: () => DOMRect;
+      groups: EntityReferenceSearchGroup[];
+      query: string;
+      selectedIndex: number;
+      isSearching: boolean;
+      error: null;
+      onRetry: () => void;
+      onSelect: (reference: EntityReference) => void;
+      onClose: () => void;
+      setSelectedIndex: (index: number) => void;
+    }>;
+
+    render(
+      <Menu
+        isOpen
+        clientRect={() => new DOMRect(16, 240, 1, 20)}
+        groups={groups}
+        query="auth"
+        selectedIndex={0}
+        isSearching={false}
+        error={null}
+        onRetry={vi.fn()}
+        onSelect={onSelect}
+        onClose={vi.fn()}
+        setSelectedIndex={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Acme tracker")).toBeTruthy();
+    expect(screen.getByTestId("entity-reference-menu")).toBeTruthy();
+    expect(screen.getByText("Incident")).toBeTruthy();
+    expect(screen.getByTestId("entity-reference-generic-icon")).toBeTruthy();
+    const row = screen.getByRole("option", { name: /#INC-9.*Authentication outage/ });
+    expect(row.className).toContain("min-h-11");
+    fireEvent.click(row);
+    expect(onSelect).toHaveBeenCalledWith(reference);
+  });
+
+  it("omits sources that are not searchable in the active workspace", () => {
+    const visibleEntityReferenceGroups = (entityReferenceMenus as Record<string, unknown>)
+      .visibleEntityReferenceGroups;
+    expect(visibleEntityReferenceGroups).toBeTypeOf("function");
+    if (typeof visibleEntityReferenceGroups !== "function") return;
+
+    expect(
+      (visibleEntityReferenceGroups as (value: EntityReferenceSearchGroup[]) => unknown)(
+        unavailableSearchGroups,
+      ),
+    ).toEqual([unavailableSearchGroups[2]]);
+  });
+
+  it("keeps Kandev tasks out of # work item search", () => {
+    expect(entityReferenceMenus.visibleEntityReferenceGroups([kandevTaskGroup])).toEqual([]);
+
+    const selectableEntityReferences = (entityReferenceMenus as Record<string, unknown>)
+      .selectableEntityReferences;
+    expect(selectableEntityReferences).toBeTypeOf("function");
+    if (typeof selectableEntityReferences !== "function") return;
+    expect(
+      (selectableEntityReferences as (value: EntityReferenceSearchGroup[]) => unknown)([
+        kandevTaskGroup,
+        githubIssueGroup,
+      ]),
+    ).toEqual(githubIssueGroup.results);
+  });
+});

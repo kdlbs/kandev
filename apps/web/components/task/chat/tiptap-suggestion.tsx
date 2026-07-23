@@ -46,7 +46,6 @@ export type MentionSuggestionCallbacks = {
 };
 
 export const MentionSuggestionPluginKey = new PluginKey("mentionSuggestion");
-
 /**
  * Creates a mention suggestion config for TipTap.
  * `setMenuState` drives the React rendering of MentionMenu.
@@ -73,9 +72,7 @@ export function createMentionSuggestion(
     pluginKey: MentionSuggestionPluginKey,
     allowSpaces: false,
 
-    items: async ({ query }) => {
-      return callbacks.getItems(query);
-    },
+    items: ({ query }) => callbacks.getItems(query),
 
     command: ({ editor, range, props: mentionAttrs }) => {
       editor

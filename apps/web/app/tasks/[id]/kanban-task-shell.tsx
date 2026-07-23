@@ -73,7 +73,7 @@ export function KanbanTaskShell({
   );
 
   const simpleSlot = (
-    <div className="flex h-screen w-full flex-col overflow-y-auto bg-background p-6">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-background p-6">
       {showOfficeLink && <CrossLinkRow taskId={taskId} target="office" />}
       <div className="mt-4 max-w-3xl">
         <TaskHeader

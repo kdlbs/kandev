@@ -80,6 +80,7 @@ export function buildStateOverrides(m: DefaultState) {
     mobileKanban: m.mobileKanban,
     mobileSession: m.mobileSession,
     chatInput: m.chatInput,
+    reviewPRSelection: m.reviewPRSelection,
     documentPanel: m.documentPanel,
     systemHealth: m.systemHealth,
     quickChat: m.quickChat,

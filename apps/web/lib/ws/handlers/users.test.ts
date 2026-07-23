@@ -25,6 +25,29 @@ function userSettingsMessage(
 }
 
 describe("user settings websocket handler", () => {
+  it("replaces portable status order when present and preserves it when omitted", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        app_status_bar_order: {
+          left_item_ids: ["builtin:metrics"],
+          right_item_ids: ["builtin:connection"],
+        },
+      }),
+    );
+    expect(store.getState().userSettings.appStatusBarOrder).toEqual({
+      leftItemIds: ["builtin:metrics"],
+      rightItemIds: ["builtin:connection"],
+    });
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.appStatusBarOrder).toEqual({
+      leftItemIds: ["builtin:metrics"],
+      rightItemIds: ["builtin:connection"],
+    });
+  });
+
   it("applies valid MCP task profile preferences and normalizes unknown values", () => {
     const store = makeStore();
 
@@ -54,7 +77,9 @@ describe("user settings websocket handler", () => {
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
     expect(store.getState().userSettings.confirmTaskArchive).toBe(true);
   });
+});
 
+describe("user settings websocket sidebar sync", () => {
   it("preserves local collapsed groups when syncing sidebar views", () => {
     const store = makeStore();
     store.setState((state) => ({

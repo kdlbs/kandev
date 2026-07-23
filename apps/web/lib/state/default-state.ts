@@ -99,6 +99,7 @@ export const defaultState = {
   mobileKanban: defaultUIState.mobileKanban,
   mobileSession: defaultUIState.mobileSession,
   chatInput: defaultUIState.chatInput,
+  reviewPRSelection: defaultUIState.reviewPRSelection,
   documentPanel: defaultUIState.documentPanel,
   systemHealth: defaultUIState.systemHealth,
   quickChat: defaultUIState.quickChat,
@@ -198,13 +199,28 @@ function mergeSidebarTaskPrefsState(
   };
 }
 
+function mergeReviewPRSelectionState(
+  initialState: Partial<DefaultState>,
+): DefaultState["reviewPRSelection"] {
+  return {
+    ...defaultState.reviewPRSelection,
+    ...initialState.reviewPRSelection,
+    selectedKeyByTaskId: {
+      ...defaultState.reviewPRSelection.selectedKeyByTaskId,
+      ...initialState.reviewPRSelection?.selectedKeyByTaskId,
+    },
+  };
+}
+
+function mergeSessionFailureNotification(initialState: Partial<DefaultState>) {
+  return initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification;
+}
+
 export function mergeInitialState(initialState?: Partial<DefaultState>): DefaultState {
   if (!initialState) return defaultState;
-
   return {
     ...defaultState,
     ...initialState,
-    // Ensure nested objects are properly merged
     kanban: { ...defaultState.kanban, ...initialState.kanban },
     kanbanMulti: { ...defaultState.kanbanMulti, ...initialState.kanbanMulti },
     workflows: { ...defaultState.workflows, ...initialState.workflows },
@@ -288,11 +304,11 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     mobileKanban: { ...defaultState.mobileKanban, ...initialState.mobileKanban },
     mobileSession: { ...defaultState.mobileSession, ...initialState.mobileSession },
     chatInput: { ...defaultState.chatInput, ...initialState.chatInput },
+    reviewPRSelection: mergeReviewPRSelectionState(initialState),
     documentPanel: { ...defaultState.documentPanel, ...initialState.documentPanel },
     systemHealth: { ...defaultState.systemHealth, ...initialState.systemHealth },
     quickChat: mergeQuickChatState(initialState),
-    sessionFailureNotification:
-      initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
+    sessionFailureNotification: mergeSessionFailureNotification(initialState),
     bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },
     sidebarViews: mergeSidebarViewState(initialState),
     sidebarTaskPrefs: mergeSidebarTaskPrefsState(initialState),

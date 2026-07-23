@@ -23,6 +23,12 @@ Invoke the `verify` worker in a single call. Wait for it to complete and surface
 - If verify passes cleanly: report success.
 - If verify fails: create a bounded remediation assignment from its report and
   do not proceed with downstream actions that depend on green verification.
+- If verify reports that required sandbox capabilities could not be authorized,
+  stop before commit, push, or PR creation and surface its required user action.
+  On Codex, tell the user exactly: "Switch the mode selector to
+  `Agent (full access)`, then retry verification." Explain that PR creation is
+  waiting on mandatory verification; do not imply that Codex or GitHub cannot
+  create PRs, ask whether to proceed unverified, or launch downstream workers.
 
 Do not run verification commands in the planner session. The worker's prompt
 contains the full procedure in `.agents/agents/verify.md`.
@@ -104,6 +110,17 @@ If Go tests fail from `httptest.NewServer` with an error such as
 as a sandbox limitation. Rerun the exact command with the runtime's normal
 network or loopback escalation. Diagnose test code only if the escalated rerun
 still fails.
+
+If that escalation is unavailable, denied, cancelled, or interrupted, stop and
+return a blocked verification report with a **Required user action** section.
+State that mandatory verification must pass before commit and PR creation can
+continue. On Codex, the action must say exactly: "Switch the mode selector to
+`Agent (full access)`, then retry verification." On other runtimes, tell the
+user to enable the runtime's full filesystem, network, or loopback access as
+needed, then retry verification. Do not offer to proceed with an unverified PR
+or describe the blocker as an inability of Codex or the repository host to
+create one. Recommend full access only after normal escalation could not
+authorize the required capability in the current mode.
 
 For desktop Rust changes, compare `rustc --version` with the `rust-version` in
 `apps/desktop/src-tauri/Cargo.toml` before running the Rust suite. Activate an

@@ -28,6 +28,7 @@ import (
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
@@ -59,6 +60,7 @@ func provideOrchestrator(
 	workflowSvc *workflowservice.Service,
 	secretStore secrets.SecretStore,
 	repoCloner *repoclone.Cloner,
+	promptSvc *promptservice.Service,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
 		return nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
@@ -120,6 +122,12 @@ func provideOrchestrator(
 	// Wire workflow step getter for prompt building
 	if workflowSvc != nil {
 		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
+	}
+
+	// Wire "@name" saved-prompt reference expansion into workflow-step prompt
+	// building.
+	if promptSvc != nil {
+		orchestratorSvc.SetPromptReferenceExpander(promptSvc)
 	}
 
 	// Wire review task creator for auto-creating tasks from review watch PRs

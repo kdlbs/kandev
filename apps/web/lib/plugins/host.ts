@@ -175,12 +175,19 @@ function removeStyles(pluginId: string): void {
 
 /**
  * Disables a plugin: calls `destroy?.()`, bulk-revokes its registry
- * registrations, and removes its injected stylesheets. Deliberately keeps
- * the `registeredPlugins` entry — see module doc — so a later re-enable in
- * the same tab can re-run `initialize` without depending on the browser
- * re-executing the bundle's module-eval side effect.
+ * registrations, and removes its injected stylesheets. By default this
+ * keeps the `registeredPlugins` entry — see module doc — so a later
+ * re-enable in the same tab can re-run `initialize` without depending on the
+ * browser re-executing the bundle's module-eval side effect.
+ *
+ * Pass `evictCache: true` for the install/update path specifically: an
+ * updated package can ship new bundle code under the same `bundleUrl`, so
+ * the cached registration (and, with it, the stale `initialize`/`destroy`
+ * closures from the previous version) must be dropped so the next
+ * `loadPlugin` re-imports it. This is opt-in — unconditional eviction here
+ * would break the plain disable/re-enable cycle's cached-registration reuse.
  */
-export function unloadPlugin(id: string): void {
+export function unloadPlugin(id: string, options?: { evictCache?: boolean }): void {
   const plugin = registeredPlugins.get(id);
   try {
     plugin?.destroy?.();
@@ -189,5 +196,8 @@ export function unloadPlugin(id: string): void {
   } finally {
     pluginRegistry.unregisterPlugin(id);
     removeStyles(id);
+    if (options?.evictCache) {
+      registeredPlugins.delete(id);
+    }
   }
 }

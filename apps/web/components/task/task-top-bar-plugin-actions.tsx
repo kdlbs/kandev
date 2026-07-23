@@ -9,8 +9,8 @@ import type { TaskSession } from "@/lib/types/http";
 /**
  * Props forwarded to every plugin component registered for the `chat-top-bar`
  * slot (`registry.registerComponent("chat-top-bar", Component)`). This is the
- * session top bar's right-hand cluster, beside the CPU/DB metrics and the
- * document / editors / debug controls — the place for at-a-glance status a
+ * session top bar's right-hand cluster, beside the document / editors / debug
+ * controls — the place for at-a-glance status a
  * plugin wants to surface for the current task.
  *
  * A task can hold several sessions; the top bar is bound to one at a time
@@ -37,7 +37,7 @@ const EMPTY_SESSIONS: TaskSession[] = [];
 
 /**
  * Plugin extension point in the session top bar, rendered alongside the
- * first-party controls (CPU/DB metrics, document/editor menus, debug toggle).
+ * first-party controls (document/editor menus and debug toggle).
  * Renders every plugin component registered for the `chat-top-bar` slot (each
  * isolated behind its own error boundary via `PluginSlot`) and forwards the
  * current task, workspace, and all of its session ids as `slotProps`.

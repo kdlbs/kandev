@@ -31,6 +31,13 @@ export function parseSystemMetricsDisplay(value: UserSettingsData["system_metric
   return { showInTopbar: value?.show_in_topbar ?? false };
 }
 
+export function parseAppStatusBarOrder(value: UserSettingsData["app_status_bar_order"]) {
+  return {
+    leftItemIds: value?.left_item_ids ?? [],
+    rightItemIds: value?.right_item_ids ?? [],
+  };
+}
+
 /**
  * Maps the backend's snake_case VoiceMode payload into the camelCase shape
  * the store and UI use. Missing or partial payloads fall back to the defaults
@@ -139,6 +146,7 @@ export function buildCoreFields(s: UserSettingsData) {
     githubSavedPresets: s.github_saved_presets,
     githubDefaultQueryPresets: s.github_default_query_presets,
     gitlabSavedPresets: s.gitlab_saved_presets,
+    appStatusBarOrder: parseAppStatusBarOrder(s.app_status_bar_order),
     ...buildTerminalFields(s),
     ...buildSystemMetricsDisplayFields(s),
     ...buildVoiceModeFields(s),
@@ -195,6 +203,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       terminalFontFamily: null,
       terminalFontSize: null,
       changesPanelLayout: "tree" as const,
+      appStatusBarOrder: parseAppStatusBarOrder(undefined),
       ...buildSystemMetricsDisplayFields(undefined),
       voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
       ...buildLspFields(undefined),

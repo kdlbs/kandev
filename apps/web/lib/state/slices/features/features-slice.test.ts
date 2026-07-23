@@ -22,15 +22,18 @@ describe("features slice", () => {
     }
     expect(store.getState().features.office).toBe(false);
     expect(store.getState().features.plugins).toBe(false);
+    expect(defaultFeaturesState.features).toHaveProperty("appStatusBar", false);
   });
 
   it("setFeatures replaces the whole flag map", () => {
     const store = makeStore();
-    store.getState().setFeatures({ office: true, plugins: true });
+    store.getState().setFeatures({ office: true, plugins: true, appStatusBar: true });
     expect(store.getState().features.office).toBe(true);
     expect(store.getState().features.plugins).toBe(true);
-    store.getState().setFeatures({ office: false, plugins: false });
+    expect(store.getState().features.appStatusBar).toBe(true);
+    store.getState().setFeatures({ office: false, plugins: false, appStatusBar: false });
     expect(store.getState().features.office).toBe(false);
     expect(store.getState().features.plugins).toBe(false);
+    expect(store.getState().features.appStatusBar).toBe(false);
   });
 });

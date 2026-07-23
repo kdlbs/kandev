@@ -408,11 +408,11 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
   );
 
   if (!s.isMounted) {
-    return <div className="h-dvh w-full bg-background" />;
+    return <div className="h-full min-h-0 w-full bg-background" />;
   }
 
   return (
-    <div className="h-dvh w-full flex flex-col" data-testid="kanban-board">
+    <div className="flex h-full min-h-0 w-full flex-col" data-testid="kanban-board">
       <HomepageCommands onCreateTask={s.handleCreate} />
       <KanbanHeader
         workspaceId={s.workspaceState.activeId ?? undefined}

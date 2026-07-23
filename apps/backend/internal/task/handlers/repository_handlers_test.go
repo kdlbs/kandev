@@ -91,6 +91,31 @@ func TestHTTPListRepositoryBranchesUsesRepositoryIdentity(t *testing.T) {
 	}
 }
 
+func TestHTTPListDirectoryIncludesChoosableContract(t *testing.T) {
+	router, _ := newRepositoryHTTPTestRouter(t)
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/fs/list-dir?path="+url.QueryEscape(t.TempDir()),
+		nil,
+	)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	var body struct {
+		Choosable *bool `json:"choosable"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Choosable == nil || !*body.Choosable {
+		t.Fatalf("choosable = %v, want true; body = %s", body.Choosable, response.Body.String())
+	}
+}
+
 func TestHTTPListBranchesRejectsRepositoryFromAnotherWorkspace(t *testing.T) {
 	router, repo, svc := newRepositoryHTTPTestRouterWithService(t)
 	for _, workspaceID := range []string{"ws-a", "ws-b"} {

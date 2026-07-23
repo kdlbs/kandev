@@ -477,25 +477,34 @@ function useDescriptionInput(
   attachments: FileAttachment[],
 ) {
   const [description, setDescription] = useState(initialDescription);
+  const descriptionRef = useRef(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Caret offset to restore after a non-typed value mutation (e.g. voice
   // transcript splice). Consumed inside useLayoutEffect so the cursor lands
   // before the next paint and the user sees no jump.
   const pendingCursorRef = useRef<number | null>(null);
 
+  const setDescriptionValue = useCallback(
+    (newValue: string) => {
+      const hadContent = descriptionRef.current.trim().length > 0;
+      const hasContent = newValue.trim().length > 0;
+      descriptionRef.current = newValue;
+      setDescription(newValue);
+      if (hadContent !== hasContent) onDescriptionChange(hasContent);
+    },
+    [onDescriptionChange],
+  );
+
   useEffect(() => {
     const ref = descriptionValueRef as React.MutableRefObject<TaskFormInputsHandle | null>;
     if (ref) {
       ref.current = {
-        getValue: () => description,
-        setValue: (v: string) => {
-          setDescription(v);
-          onDescriptionChange(v.trim().length > 0);
-        },
+        getValue: () => descriptionRef.current,
+        setValue: setDescriptionValue,
         getAttachments: () => attachments,
       };
     }
-  }, [description, attachments, descriptionValueRef, onDescriptionChange]);
+  }, [attachments, descriptionValueRef, setDescriptionValue]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -521,16 +530,6 @@ function useDescriptionInput(
     textarea.focus();
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   }, [autoFocus]);
-
-  const setDescriptionValue = useCallback(
-    (newValue: string) => {
-      const hadContent = description.trim().length > 0;
-      const hasContent = newValue.trim().length > 0;
-      setDescription(newValue);
-      if (hadContent !== hasContent) onDescriptionChange(hasContent);
-    },
-    [description, onDescriptionChange],
-  );
 
   const insertAtCursor = useCallback(
     (text: string) => {
