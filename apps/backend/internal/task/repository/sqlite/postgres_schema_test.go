@@ -343,6 +343,15 @@ func openIsolatedPostgresMultiConn(t *testing.T, dsn string, maxConns int) *sqlx
 		t.Fatalf("create postgres schema %s: %v", schema, err)
 	}
 	_ = setup.Close()
+	// Register schema-drop cleanup immediately: any t.Fatalf between here and
+	// the end of this function (e.g. sqlx.Open below failing) must still not
+	// leak the schema on the Postgres test instance.
+	t.Cleanup(func() {
+		if cleanup, cerr := sqlx.Open("pgx", dsn); cerr == nil {
+			_, _ = cleanup.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
+			_ = cleanup.Close()
+		}
+	})
 
 	sep := "?"
 	if strings.Contains(dsn, "?") {
@@ -355,13 +364,7 @@ func openIsolatedPostgresMultiConn(t *testing.T, dsn string, maxConns int) *sqlx
 	}
 	db.SetMaxOpenConns(maxConns)
 	db.SetMaxIdleConns(maxConns)
-	t.Cleanup(func() {
-		if cleanup, cerr := sqlx.Open("pgx", dsn); cerr == nil {
-			_, _ = cleanup.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
-			_ = cleanup.Close()
-		}
-		_ = db.Close()
-	})
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
