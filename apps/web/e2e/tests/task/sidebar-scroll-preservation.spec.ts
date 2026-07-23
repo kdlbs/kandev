@@ -1,6 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
+const OVERLAY_SCROLLBAR_SELECTOR =
+  "[data-slot='scroll-area-scrollbar'][data-orientation='vertical']";
+
 /**
  * Regression: when clicking another task in the sidebar, the sidebar's
  * scroll position would jump back to the top. Dockview rebuilds panel slots
@@ -58,9 +61,7 @@ test.describe("sidebar scrolling", () => {
     expect(overlayGeometry.rowRightGap).toBeLessThanOrEqual(1);
 
     await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "true");
-    const overlayScrollbar = session.sidebar.locator(
-      "[data-slot='scroll-area-scrollbar'][data-orientation='vertical']",
-    );
+    const overlayScrollbar = session.sidebar.locator(OVERLAY_SCROLLBAR_SELECTOR);
     await expect(overlayScrollbar).toBeAttached();
     const restingStyles = await scrollContainer.evaluate((element) => {
       const styles = getComputedStyle(element);
@@ -85,6 +86,26 @@ test.describe("sidebar scrolling", () => {
       element.scrollTop = element.scrollHeight;
     });
     await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "false");
+  });
+
+  test("does not mount an overlay scrollbar when the task list fits", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Short Task List", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const scrollContainer = testPage.getByTestId("task-sidebar-scroll");
+    await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "false");
+    await expect(session.sidebar.locator(OVERLAY_SCROLLBAR_SELECTOR)).toHaveCount(0);
   });
 
   test("clicking another task does not reset the sidebar scroll position", async ({
