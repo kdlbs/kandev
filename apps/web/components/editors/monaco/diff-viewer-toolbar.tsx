@@ -13,6 +13,8 @@ import {
 } from "@tabler/icons-react";
 import type { FileDiffData } from "@/lib/diff/types";
 import type { ViewMode } from "@/hooks/use-global-view-mode";
+import { ExternalVcsFileLink } from "@/components/editors/external-vcs-file-link";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 interface DiffViewerToolbarProps {
   data: FileDiffData;
@@ -25,6 +27,14 @@ interface DiffViewerToolbarProps {
   onCopyDiff: () => void;
   onOpenFile?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
+  sessionId?: string;
+  taskId?: string | null;
+  repositoryId?: string | null;
+  repositoryName?: string;
+  status?: string | null;
+  previousPath?: string | null;
+  publishedBranch?: string | null;
+  baseBranch?: string | null;
 }
 
 const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
@@ -113,9 +123,30 @@ function DiffViewerActions({
   onCopyDiff,
   onOpenFile,
   onRevert,
+  sessionId,
+  taskId,
+  repositoryId,
+  repositoryName,
+  status,
+  previousPath,
+  publishedBranch,
+  baseBranch,
 }: DiffViewerActionsProps) {
+  const { isMobile } = useResponsiveBreakpoint();
   return (
     <div className="flex items-center gap-1">
+      <ExternalVcsFileLink
+        filePath={filePath}
+        previousPath={previousPath}
+        status={status}
+        taskId={taskId}
+        sessionId={sessionId}
+        repositoryId={repositoryId}
+        repositoryName={repositoryName}
+        publishedBranch={publishedBranch}
+        baseBranch={baseBranch}
+        size={isMobile ? "touch" : "xs"}
+      />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="ghost" size="sm" className={iconBtn} onClick={onCopyDiff}>
@@ -177,6 +208,14 @@ export function DiffViewerToolbar({
   onCopyDiff,
   onOpenFile,
   onRevert,
+  sessionId,
+  taskId,
+  repositoryId,
+  repositoryName,
+  status,
+  previousPath,
+  publishedBranch,
+  baseBranch,
 }: DiffViewerToolbarProps) {
   return (
     <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50 bg-card/50 rounded-t-md text-xs text-muted-foreground">
@@ -192,6 +231,14 @@ export function DiffViewerToolbar({
         onCopyDiff={onCopyDiff}
         onOpenFile={onOpenFile}
         onRevert={onRevert}
+        sessionId={sessionId}
+        taskId={taskId}
+        repositoryId={repositoryId}
+        repositoryName={repositoryName}
+        status={status}
+        previousPath={previousPath}
+        publishedBranch={publishedBranch}
+        baseBranch={baseBranch}
       />
     </div>
   );

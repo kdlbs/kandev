@@ -48,14 +48,30 @@ func TestPrepareSupervisorEnvWritesExpectedPaths(t *testing.T) {
 }
 
 func TestListenControlSocketUsesOwnerOnlyMode(t *testing.T) {
+	const unixSocketTempRoot = "/tmp"
+
 	if runtime.GOOS == "windows" {
 		t.Skip("unix sockets are not supported on windows")
 	}
-	dir, err := os.MkdirTemp("", "kandev-sock-*")
+	shortRoot, err := os.MkdirTemp(unixSocketTempRoot, "kandev-inherited-tmp-*")
 	if err != nil {
+		t.Fatalf("create temporary directory under /tmp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(shortRoot) })
+	longTMPDIR := filepath.Join(shortRoot, "this-inherited-tmpdir-is-deliberately-long-to-exceed-the-unix-socket-path-limit")
+	if err := os.Mkdir(longTMPDIR, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("TMPDIR", longTMPDIR)
+
+	dir, err := os.MkdirTemp(unixSocketTempRoot, "kandev-sock-*")
+	if err != nil {
+		t.Fatalf("create socket directory under /tmp: %v", err)
+	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if filepath.Dir(dir) != unixSocketTempRoot {
+		t.Fatalf("socket directory = %q, want it directly under %s", dir, unixSocketTempRoot)
+	}
 	socket := filepath.Join(dir, "control.sock")
 	ln, err := listenControlSocket(socket)
 	if err != nil {

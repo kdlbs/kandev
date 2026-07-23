@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { IconFolder, IconBox, IconChevronRight } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -59,7 +59,7 @@ export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps
         )}
       </PopoverTrigger>
       <PopoverContent
-        className="w-[440px] gap-0 p-0 overflow-hidden"
+        className="w-[440px] max-w-[calc(100vw-2rem)] gap-0 p-0 overflow-hidden"
         align="start"
         sideOffset={4}
         data-testid="folder-picker-popover"
@@ -71,7 +71,7 @@ export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps
           onNavigate={(p) => void load(p)}
         />
         <Footer
-          choosable={!!listing?.path}
+          choosable={listing?.choosable === true}
           onUseScratch={() => {
             onChange("");
             setOpen(false);
@@ -89,8 +89,10 @@ export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps
 
 function leafName(path: string): string {
   if (!path) return "";
-  const trimmed = path.replace(/\/+$/, "");
-  const idx = trimmed.lastIndexOf("/");
+  if (path === "/") return "/";
+  const trimmed = path.replace(/[\\/]+$/, "");
+  if (/^[A-Za-z]:$/.test(trimmed)) return `${trimmed}\\`;
+  const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   return idx === -1 ? trimmed : trimmed.slice(idx + 1) || "/";
 }
 
@@ -98,16 +100,22 @@ export function useDirectoryListing(open: boolean, value: string) {
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
 
   const load = useCallback(async (path: string) => {
+    const generation = ++requestGeneration.current;
     setLoading(true);
     setError(null);
+    setListing(null);
     try {
-      setListing(await listDirectory(path));
+      const nextListing = await listDirectory(path);
+      if (generation !== requestGeneration.current) return;
+      setListing(nextListing);
     } catch (err) {
+      if (generation !== requestGeneration.current) return;
       setError(err instanceof Error ? err.message : "Failed to load directory");
     } finally {
-      setLoading(false);
+      if (generation === requestGeneration.current) setLoading(false);
     }
   }, []);
 
@@ -117,12 +125,17 @@ export function useDirectoryListing(open: boolean, value: string) {
     // closed without committing, and reopened would still see the stale
     // last-browsed directory instead of their picked folder (or the root).
     if (!open) {
+      requestGeneration.current++;
       setListing(null);
+      setLoading(false);
+      setError(null);
       return;
     }
-    if (listing) return;
     void load(value || "");
-  }, [open, listing, load, value]);
+    return () => {
+      requestGeneration.current++;
+    };
+  }, [open, load, value]);
 
   return { listing, loading, error, load };
 }
@@ -130,14 +143,40 @@ export function useDirectoryListing(open: boolean, value: string) {
 /** Splits an absolute path into clickable breadcrumb segments. */
 function pathSegments(path: string): Array<{ name: string; path: string }> {
   if (!path) return [];
-  const parts = path.split("/").filter(Boolean);
   const segs: Array<{ name: string; path: string }> = [{ name: "/", path: "/" }];
-  let acc = "";
+
+  const driveMatch = /^([A-Za-z]:)[\\/]*(.*)$/.exec(path);
+  if (driveMatch) {
+    const driveRoot = `${driveMatch[1]}\\`;
+    segs.push({ name: driveRoot, path: driveRoot });
+    appendPathSegments(segs, driveRoot, driveMatch[2], "\\");
+    return segs;
+  }
+
+  const uncMatch = /^\\\\([^\\/]+)[\\/]([^\\/]+)[\\/]*(.*)$/.exec(path);
+  if (uncMatch) {
+    const shareRoot = `\\\\${uncMatch[1]}\\${uncMatch[2]}\\`;
+    segs.push({ name: shareRoot, path: shareRoot });
+    appendPathSegments(segs, shareRoot, uncMatch[3], "\\");
+    return segs;
+  }
+
+  appendPathSegments(segs, "", path, "/");
+  return segs;
+}
+
+function appendPathSegments(
+  segs: Array<{ name: string; path: string }>,
+  root: string,
+  path: string,
+  separator: "/" | "\\",
+) {
+  const parts = path.split(/[\\/]+/).filter(Boolean);
+  let acc = root.replace(/[\\/]+$/, "");
   for (const part of parts) {
-    acc += `/${part}`;
+    acc += `${separator}${part}`;
     segs.push({ name: part, path: acc });
   }
-  return segs;
 }
 
 function Breadcrumb({

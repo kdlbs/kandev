@@ -587,8 +587,9 @@ type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSes
 type AgentStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) (handled bool)
 
 // LaunchFailedFunc is called when session launch fails before the agent starts.
-// Useful for creating user-facing status messages tied to launch errors.
-type LaunchFailedFunc func(ctx context.Context, taskID, sessionID string, err error)
+// repositoryID identifies the repository whose launch failed. Useful for
+// creating repository-scoped user-facing status messages tied to launch errors.
+type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID string, err error)
 
 // PrimarySessionSetFunc is called when the first session for a task is marked
 // primary. This lets the orchestrator publish a task.updated event so the

@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/readselector"
 	"github.com/kandev/kandev/internal/common/subproc"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"go.uber.org/zap"
 )
 
@@ -34,6 +35,10 @@ const (
 const maxFileSize = 10 * 1024 * 1024 // 10MB
 
 var errPathTraversal = errors.New("path traversal detected")
+
+func isRootOwnershipMarkerPath(path string) bool {
+	return filepath.Clean(filepath.FromSlash(path)) == storageworkspaces.OwnershipMarkerFilename
+}
 
 // updateFiles updates the file listing
 func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
@@ -70,7 +75,7 @@ func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpda
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || isRootOwnershipMarkerPath(line) {
 			continue
 		}
 		update.Files = append(update.Files, types.FileEntry{
@@ -131,12 +136,15 @@ func (wt *WorkspaceTracker) buildFileTreeNode(safePath, relPath string, info os.
 	for _, entry := range entries {
 		// Skip specific directories that should be ignored
 		name := entry.Name()
+		childRelPath := filepath.Join(relPath, name)
+		if isRootOwnershipMarkerPath(childRelPath) {
+			continue
+		}
 		if name == ".git" || name == "node_modules" || name == ".next" || name == "dist" || name == "build" {
 			continue
 		}
 
 		childFullPath := filepath.Join(safePath, name)
-		childRelPath := filepath.Join(relPath, name)
 
 		isSymlink := entry.Type()&os.ModeSymlink != 0
 		var childInfo os.FileInfo
@@ -844,6 +852,9 @@ func (wt *WorkspaceTracker) SearchFiles(query string, limit int) []string {
 
 	for _, file := range files {
 		path := file.Path
+		if isRootOwnershipMarkerPath(path) {
+			continue
+		}
 		lowerPath := strings.ToLower(path)
 		name := filepath.Base(lowerPath)
 

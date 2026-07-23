@@ -3,6 +3,16 @@ import { renderHook, render, screen, fireEvent, cleanup } from "@testing-library
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { ReactElement } from "react";
 
+vi.mock("@/components/editors/external-vcs-file-link", () => ({
+  ExternalVcsFileLink: (props: Record<string, unknown>) => (
+    <span data-testid="external-vcs-file-link-props" data-props={JSON.stringify(props)} />
+  ),
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isMobile: false }),
+}));
+
 import { useDiffHeaderToolbar } from "./diff-header-toolbar";
 
 const FILE = "src/foo.ts";
@@ -31,6 +41,10 @@ function renderToolbar(node: ReactElement) {
 function headerProp(name: string | undefined) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (name === undefined ? {} : { name }) as any;
+}
+
+function externalLinkProps() {
+  return JSON.parse(screen.getByTestId("external-vcs-file-link-props").dataset.props ?? "{}");
 }
 
 const baseOpts = {
@@ -123,5 +137,38 @@ describe("useDiffHeaderToolbar", () => {
     const mdNode = result.current(headerProp("README.md"));
     renderToolbar(mdNode as ReactElement);
     expect(screen.getByLabelText("Preview markdown")).toBeTruthy();
+  });
+
+  it("forwards file, repository, revision, and rename context to the external action", () => {
+    const { result } = renderHook(() =>
+      useDiffHeaderToolbar({
+        ...baseOpts,
+        sessionId: "session-1",
+        taskId: "task-1",
+        repositoryId: "repo-1",
+        repo: "frontend",
+        status: "renamed",
+        publishedBranch: "feature/external-links",
+        baseBranch: "main",
+      }),
+    );
+    const node = result.current({
+      ...headerProp("src/new-name.ts"),
+      prevName: "src/old-name.ts",
+    });
+    renderToolbar(node as ReactElement);
+
+    expect(externalLinkProps()).toEqual({
+      filePath: "src/new-name.ts",
+      previousPath: "src/old-name.ts",
+      status: "renamed",
+      taskId: "task-1",
+      sessionId: "session-1",
+      repositoryId: "repo-1",
+      repositoryName: "frontend",
+      publishedBranch: "feature/external-links",
+      baseBranch: "main",
+      size: "xs",
+    });
   });
 });

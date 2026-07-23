@@ -116,13 +116,19 @@ export function TaskMRLinkDialog({
   taskRepositories: TaskRepositoryLink[];
   repositories: Repository[];
 }) {
+  const options = useRepositoryOptions(repositories, taskRepositories);
+  const defaultRepositoryID = options[0]?.id ?? NO_REPOSITORY;
   const [mrURL, setMRURL] = useState("");
-  const [repositoryID, setRepositoryID] = useState(NO_REPOSITORY);
+  const [repositoryID, setRepositoryID] = useState(defaultRepositoryID);
   const [submitting, setSubmitting] = useState(false);
   const setTaskMR = useAppStore((state) => state.setTaskMR);
   const { toast } = useToast();
-  const options = useRepositoryOptions(repositories, taskRepositories);
-  const defaultRepositoryID = options[0]?.id ?? NO_REPOSITORY;
+
+  useEffect(() => {
+    if (repositoryID === NO_REPOSITORY && defaultRepositoryID !== NO_REPOSITORY) {
+      setRepositoryID(defaultRepositoryID);
+    }
+  }, [defaultRepositoryID, repositoryID]);
 
   useEffect(() => {
     if (open) return;

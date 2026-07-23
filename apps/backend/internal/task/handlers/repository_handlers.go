@@ -161,9 +161,10 @@ func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 		entries = append(entries, gin.H{"name": e.Name, "path": e.Path})
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"path":    result.Path,
-		"parent":  result.Parent,
-		"entries": entries,
+		"path":      result.Path,
+		"parent":    result.Parent,
+		"entries":   entries,
+		"choosable": result.Choosable,
 	})
 }
 

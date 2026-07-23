@@ -62,6 +62,7 @@ type TaskSwitcherProps = {
   onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
   onLinkIssue?: TaskLinkHandler;
+  onLinkMergeRequest?: TaskLinkHandler;
   onLinkJiraTicket?: TaskLinkHandler;
   onLinkLinearIssue?: TaskLinkHandler;
   onLinkSentryIssue?: TaskLinkHandler;
@@ -146,6 +147,7 @@ type TaskRowProps = {
   onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
   onLinkIssue?: TaskLinkHandler;
+  onLinkMergeRequest?: TaskLinkHandler;
   onLinkJiraTicket?: TaskLinkHandler;
   onLinkLinearIssue?: TaskLinkHandler;
   onLinkSentryIssue?: TaskLinkHandler;
@@ -169,6 +171,7 @@ function taskLinkHandlerProps(props: Pick<TaskRowProps, keyof TaskLinkHandlerPro
   return {
     onLinkPullRequest: props.onLinkPullRequest,
     onLinkIssue: props.onLinkIssue,
+    onLinkMergeRequest: props.onLinkMergeRequest,
     onLinkJiraTicket: props.onLinkJiraTicket,
     onLinkLinearIssue: props.onLinkLinearIssue,
     onLinkSentryIssue: props.onLinkSentryIssue,
@@ -178,6 +181,7 @@ function taskLinkHandlerProps(props: Pick<TaskRowProps, keyof TaskLinkHandlerPro
 type TaskLinkHandlerProps = {
   onLinkPullRequest?: TaskLinkHandler;
   onLinkIssue?: TaskLinkHandler;
+  onLinkMergeRequest?: TaskLinkHandler;
   onLinkJiraTicket?: TaskLinkHandler;
   onLinkLinearIssue?: TaskLinkHandler;
   onLinkSentryIssue?: TaskLinkHandler;
@@ -404,6 +408,7 @@ type GroupSectionProps = {
   onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
   onLinkIssue?: TaskLinkHandler;
+  onLinkMergeRequest?: TaskLinkHandler;
   onLinkJiraTicket?: TaskLinkHandler;
   onLinkLinearIssue?: TaskLinkHandler;
   onLinkSentryIssue?: TaskLinkHandler;
@@ -444,6 +449,7 @@ function GroupSection({
   onDetachTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkMergeRequest,
   onLinkJiraTicket,
   onLinkLinearIssue,
   onLinkSentryIssue,
@@ -482,6 +488,7 @@ function GroupSection({
       onDetachTask,
       onLinkPullRequest,
       onLinkIssue,
+      onLinkMergeRequest,
       onLinkJiraTicket,
       onLinkLinearIssue,
       onLinkSentryIssue,
@@ -538,6 +545,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onDetachTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkMergeRequest,
   onLinkJiraTicket,
   onLinkLinearIssue,
   onLinkSentryIssue,
@@ -594,6 +602,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onDetachTask={onDetachTask}
           onLinkPullRequest={onLinkPullRequest}
           onLinkIssue={onLinkIssue}
+          onLinkMergeRequest={onLinkMergeRequest}
           onLinkJiraTicket={onLinkJiraTicket}
           onLinkLinearIssue={onLinkLinearIssue}
           onLinkSentryIssue={onLinkSentryIssue}

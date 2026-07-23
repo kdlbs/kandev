@@ -162,6 +162,66 @@ func performInitializeLocalRepositoryRequest(
 	return response
 }
 
+func TestHTTPCreateRepositoryIgnoresRemoteURL(t *testing.T) {
+	router, repo := newRepositoryHTTPTestRouter(t)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/workspaces/ws-1/repositories",
+		strings.NewReader(`{"name":"owner/repo","source_type":"provider","remote_url":"https://github.com/owner/repo.git"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+	repositories, err := repo.ListRepositories(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(repositories) != 1 {
+		t.Fatalf("repositories = %d, want 1", len(repositories))
+	}
+	if repositories[0].RemoteURL != "" {
+		t.Errorf("RemoteURL = %q, want empty; generic repository creation must not accept clone URLs", repositories[0].RemoteURL)
+	}
+}
+
+func TestHTTPUpdateRepositoryIgnoresRemoteURL(t *testing.T) {
+	router, repo := newRepositoryHTTPTestRouter(t)
+	if err := repo.CreateRepository(context.Background(), &models.Repository{
+		ID:          "provider-repo",
+		WorkspaceID: "ws-1",
+		Name:        "owner/repo",
+		SourceType:  "provider",
+		RemoteURL:   "https://github.com/owner/old.git",
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	request := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/repositories/provider-repo",
+		strings.NewReader(`{"remote_url":"https://github.com/owner/repo.git"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	repository, err := repo.GetRepository(context.Background(), "provider-repo")
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if repository.RemoteURL != "https://github.com/owner/old.git" {
+		t.Errorf("RemoteURL = %q, want original value %q", repository.RemoteURL, "https://github.com/owner/old.git")
+	}
+}
+
 type repositoryHandlerRemoteLister struct {
 	calls int
 }
@@ -199,6 +259,31 @@ func TestHTTPListRepositoryBranchesUsesRepositoryIdentity(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `"name":"main"`) {
 		t.Fatalf("response missing remote main branch: %s", response.Body.String())
+	}
+}
+
+func TestHTTPListDirectoryIncludesChoosableContract(t *testing.T) {
+	router, _ := newRepositoryHTTPTestRouter(t)
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/fs/list-dir?path="+url.QueryEscape(t.TempDir()),
+		nil,
+	)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	var body struct {
+		Choosable *bool `json:"choosable"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Choosable == nil || !*body.Choosable {
+		t.Fatalf("choosable = %v, want true; body = %s", body.Choosable, response.Body.String())
 	}
 }
 

@@ -32,12 +32,21 @@ import {
 } from "@/lib/markdown/source-line-ranges";
 import { commentsBeginInRange, commentsOverlapRange } from "@/lib/markdown/preview-comments";
 import type { DiffComment } from "@/lib/state/slices/comments";
+import {
+  ExternalVcsFileLink,
+  useExternalVcsFileStatus,
+} from "@/components/editors/external-vcs-file-link";
 
 interface MarkdownPreviewToolbarProps {
   path: string;
   worktreePath?: string;
   commentCount: number;
   commentsEnabled: boolean;
+  taskId?: string | null;
+  sessionId?: string;
+  repositoryId?: string | null;
+  repositoryName?: string;
+  showExternalVcsLink: boolean;
   onTogglePreview: () => void;
 }
 
@@ -46,8 +55,14 @@ function MarkdownPreviewToolbar({
   worktreePath,
   commentCount,
   commentsEnabled,
+  taskId,
+  sessionId,
+  repositoryId,
+  repositoryName,
+  showExternalVcsLink,
   onTogglePreview,
 }: MarkdownPreviewToolbarProps) {
+  const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   return (
     <PanelHeaderBarSplit
       left={
@@ -58,6 +73,18 @@ function MarkdownPreviewToolbar({
       }
       right={
         <div className="flex items-center gap-1">
+          {showExternalVcsLink && (
+            <ExternalVcsFileLink
+              filePath={path}
+              previousPath={fileStatus?.old_path}
+              status={fileStatus?.status}
+              taskId={taskId}
+              sessionId={sessionId}
+              repositoryId={repositoryName ? undefined : repositoryId}
+              repositoryName={repositoryName}
+              size="sm"
+            />
+          )}
           {commentsEnabled && commentCount > 0 && (
             <div className="flex items-center gap-1 px-2 py-1 text-xs text-primary">
               <IconMessagePlus className="h-3.5 w-3.5" />
@@ -93,7 +120,9 @@ interface MarkdownPreviewContentProps {
   sessionId?: string;
   taskId?: string | null;
   repositoryId?: string | null;
+  repositoryName?: string;
   enableComments?: boolean;
+  showExternalVcsLink?: boolean;
   onTogglePreview: () => void;
 }
 
@@ -304,7 +333,9 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   sessionId,
   taskId,
   repositoryId,
+  repositoryName,
   enableComments = false,
+  showExternalVcsLink = true,
   onTogglePreview,
 }: MarkdownPreviewContentProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -352,6 +383,11 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
         worktreePath={worktreePath}
         commentCount={commentState.comments.length}
         commentsEnabled={commentsEnabled}
+        taskId={taskId}
+        sessionId={sessionId}
+        repositoryId={repositoryId}
+        repositoryName={repositoryName}
+        showExternalVcsLink={showExternalVcsLink}
         onTogglePreview={onTogglePreview}
       />
       <div ref={scrollRef} className="flex-1 overflow-auto p-6">
