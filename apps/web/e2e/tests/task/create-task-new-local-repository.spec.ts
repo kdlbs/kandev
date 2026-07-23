@@ -44,6 +44,13 @@ async function openRepositoryCreation(page: Page): Promise<void> {
   await expect(search).toBeVisible();
   await expect(refresh).toBeVisible();
   await expect(action).toBeVisible();
+  await expect(refresh).toBeEnabled();
+  await refresh.hover();
+  const refreshTooltip = page
+    .locator('[data-slot="tooltip-content"][data-state]')
+    .getByText("Refresh repositories", { exact: true })
+    .filter({ visible: true });
+  await expect(refreshTooltip).toBeVisible();
   const [searchBox, refreshBox, actionBox] = await Promise.all([
     search.boundingBox(),
     refresh.boundingBox(),

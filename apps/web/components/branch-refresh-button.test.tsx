@@ -30,13 +30,10 @@ describe("BranchRefreshButton", () => {
     expect(button.className).toContain("w-12");
   });
 
-  it("uses the repository-specific fallback tooltip and refreshes on click", () => {
+  it("refreshes on click", () => {
     const onRefresh = renderRefreshButton();
     const button = screen.getByTestId("repo-refresh-button");
 
-    fireEvent.mouseEnter(button);
-
-    expect(screen.getByRole("tooltip").textContent).toBe("Refresh repositories");
     fireEvent.click(button);
     expect(onRefresh).toHaveBeenCalledOnce();
   });
