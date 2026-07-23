@@ -81,6 +81,20 @@ func (m *MockEventBus) ClearEvents() {
 
 func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repository) {
 	t.Helper()
+	return createTestServiceWithSessionsRepo(t, func(repo *sqliterepo.Repository) repository.SessionRepository {
+		return repo
+	})
+}
+
+// createTestServiceWithSessionsRepo mirrors createTestService but lets a
+// caller substitute the Sessions repository (e.g. to wrap it with a test-only
+// hook) while reusing the same DB setup, migrations, and cleanup-worker
+// wiring for every other field.
+func createTestServiceWithSessionsRepo(
+	t *testing.T,
+	wrapSessions func(*sqliterepo.Repository) repository.SessionRepository,
+) (*Service, *MockEventBus, *sqliterepo.Repository) {
+	t.Helper()
 	tmpDir := t.TempDir()
 	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
 	if err != nil {
@@ -119,7 +133,7 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 		Workflows:        repo,
 		Messages:         repo,
 		Turns:            repo,
-		Sessions:         repo,
+		Sessions:         wrapSessions(repo),
 		GitSnapshots:     repo,
 		RepoEntities:     repo,
 		Executors:        repo,
@@ -2000,6 +2014,184 @@ func TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot(t *te
 	}
 	if got := data["agent_profile_id"]; got != "agent-1" {
 		t.Errorf("agent_profile_id = %v, want agent-1 (must come from the DB re-read, not the snapshot)", got)
+	}
+}
+
+// cancelHookSessionRepository wraps the real session repository so a test
+// can deterministically simulate a client disconnecting the instant after
+// CancelActiveTaskSessionsByTaskID's DB write commits — the exact race
+// finalizeCancelledSessions guards against by publishing on a
+// context.WithoutCancel derivative. Test-only: production code has no
+// equivalent hook.
+type cancelHookSessionRepository struct {
+	*sqliterepo.Repository
+	afterCancelSessions func()
+}
+
+func (r *cancelHookSessionRepository) CancelActiveTaskSessionsByTaskID(
+	ctx context.Context, taskID, reason string,
+) ([]string, time.Time, error) {
+	cancelledIDs, cancelledAt, err := r.Repository.CancelActiveTaskSessionsByTaskID(ctx, taskID, reason)
+	if r.afterCancelSessions != nil {
+		r.afterCancelSessions()
+	}
+	return cancelledIDs, cancelledAt, err
+}
+
+// TestService_ArchiveTaskPublishesEventAfterClientDisconnect is the
+// regression test for the client-disconnect race: finalizeCancelledSessions
+// commits the session-cancellation DB write on the caller's ctx, then
+// publishes session.state_changed on a context.WithoutCancel derivative
+// specifically so that a client disconnecting (cancelling ctx) in the instant
+// right after that DB write still gets the event. A
+// cancelHookSessionRepository simulates that race deterministically by
+// cancelling ctx from inside CancelActiveTaskSessionsByTaskID, right after
+// the real DB write returns.
+func TestService_ArchiveTaskPublishesEventAfterClientDisconnect(t *testing.T) {
+	hook := &cancelHookSessionRepository{}
+	svc, eventBus, repo := createTestServiceWithSessionsRepo(t, func(repo *sqliterepo.Repository) repository.SessionRepository {
+		hook.Repository = repo
+		return hook
+	})
+
+	setupCtx := context.Background()
+	if err := repo.CreateWorkspace(setupCtx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(setupCtx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(setupCtx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(setupCtx, &models.TaskSession{
+		ID: "session-running", TaskID: "task-1", State: models.TaskSessionStateRunning,
+		AgentProfileID: "agent-1", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	hook.afterCancelSessions = cancel
+
+	if err := svc.ArchiveTask(ctx, "task-1"); err != nil {
+		t.Fatalf("ArchiveTask returned an error even though ctx was only cancelled after the sessions DB write committed: %v", err)
+	}
+
+	var found *bus.Event
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if ok && data["session_id"] == "session-running" {
+			found = evt
+		}
+	}
+	if found == nil {
+		t.Fatal("expected a session.state_changed event for session-running despite the post-commit ctx cancellation, got none")
+	}
+	data := found.Data.(map[string]interface{})
+	if got := data["session_id"]; got != "session-running" {
+		t.Errorf("session_id = %v, want session-running", got)
+	}
+	if got := data["new_state"]; got != string(models.TaskSessionStateCancelled) {
+		t.Errorf("new_state = %v, want CANCELLED", got)
+	}
+	updatedAtStr, _ := data["updated_at"].(string)
+	if _, err := time.Parse(time.RFC3339Nano, updatedAtStr); err != nil {
+		t.Errorf("updated_at %q not parseable as RFC3339Nano: %v", updatedAtStr, err)
+	}
+
+	session, err := repo.GetTaskSession(context.Background(), "session-running")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateCancelled {
+		t.Errorf("session state = %q, want CANCELLED", session.State)
+	}
+}
+
+// TestService_ArchiveTaskPublishesEventsForAllCancelledSessions is the
+// regression test for the shared-deadline bug: publishSessionsCancelled used
+// to run its per-session GetTaskSession-then-publish work under one deadline
+// shared across the whole cancelledIDs batch, so a slow lookup or subscriber
+// for one session could starve the event for every session queued after it.
+// Archiving a task with two active sessions and asserting both get their own
+// session.state_changed event proves the fix (each session now gets an
+// independent 10s timeout) without relying on a real timing race.
+func TestService_ArchiveTaskPublishesEventsForAllCancelledSessions(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-multi", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-running-a", TaskID: "task-multi", State: models.TaskSessionStateRunning,
+		AgentProfileID: "agent-1", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(session-running-a): %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-running-b", TaskID: "task-multi", State: models.TaskSessionStateWaitingForInput,
+		AgentProfileID: "agent-2",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(session-running-b): %v", err)
+	}
+
+	if err := svc.ArchiveTask(ctx, "task-multi"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	foundBySessionID := make(map[string]*bus.Event)
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		sessionID, _ := data["session_id"].(string)
+		if sessionID == "session-running-a" || sessionID == "session-running-b" {
+			foundBySessionID[sessionID] = evt
+		}
+	}
+	for _, sessionID := range []string{"session-running-a", "session-running-b"} {
+		evt, ok := foundBySessionID[sessionID]
+		if !ok {
+			t.Fatalf("expected a session.state_changed event for %s, got none (events: %#v)", sessionID, eventBus.GetPublishedEvents())
+		}
+		data := evt.Data.(map[string]interface{})
+		if got := data["new_state"]; got != string(models.TaskSessionStateCancelled) {
+			t.Errorf("%s: new_state = %v, want CANCELLED", sessionID, got)
+		}
+		if got := data["task_id"]; got != "task-multi" {
+			t.Errorf("%s: task_id = %v, want task-multi", sessionID, got)
+		}
+	}
+
+	for _, sessionID := range []string{"session-running-a", "session-running-b"} {
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("GetTaskSession(%s): %v", sessionID, err)
+		}
+		if session.State != models.TaskSessionStateCancelled {
+			t.Errorf("%s: session state = %q, want CANCELLED", sessionID, session.State)
+		}
 	}
 }
 

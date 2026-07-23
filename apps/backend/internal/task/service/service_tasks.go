@@ -1176,51 +1176,34 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	// that raced in after the snapshot and must clean itself up.
 	s.registerTaskRuntimeStopOwners(stopTargets, true)
 
-	// 3b. Finalize active sessions in the DB. The async cleanup below tears down
-	// the agent processes; this records the terminal session state, which
-	// process teardown does not persist on its own. Publish a
-	// session.state_changed event per session actually cancelled — the DB
-	// write alone is invisible to any client cache (e.g. an Office task
-	// list's "is running" indicator) that's kept fresh exclusively by that
-	// event, and would otherwise show a live spinner forever after archive.
-	cancelledIDs, cancelledAt, cancelErr := s.sessions.CancelActiveTaskSessionsByTaskID(ctx, id, "task archived")
-	if cancelErr != nil {
-		s.logger.Warn("failed to reap active sessions on archive",
-			zap.String("task_id", id),
-			zap.Error(cancelErr))
-	} else if len(cancelledIDs) > 0 {
-		s.logger.Info("reaped active sessions on archive",
-			zap.String("task_id", id),
-			zap.Int("count", len(cancelledIDs)))
-		// Detach from ctx via WithoutCancel: the DB write above already
-		// committed on a detached context, so a client disconnect here must
-		// not also suppress the event lookup below (GetTaskSession per
-		// cancelled session) — event-driven clients need session.state_changed
-		// regardless of whether the archiving caller is still connected.
-		// Deliberately left unbounded (no timeout) here: publishSessionsCancelled
-		// gives each session in cancelledIDs its own independent 10s deadline,
-		// so one slow lookup or synchronous subscriber can no longer consume a
-		// shared batch-wide budget and starve the events for sessions later in
-		// the loop.
-		detachedCtx := context.WithoutCancel(ctx)
-		s.publishSessionsCancelled(detachedCtx, id, activeSessions, cancelledIDs, "task archived", cancelledAt)
-	}
+	// archived_at has committed above: the rest of this function only
+	// reports on that already-durable state (cancelling sessions, re-reading
+	// the task, publishing task.updated) or kicks off cleanup that already
+	// runs detached from ctx. A client disconnecting right after the write
+	// above must not stop any of that from finishing and reaching
+	// event-driven clients that don't share the archiving caller's
+	// connection.
+	finalizeCtx := context.WithoutCancel(ctx)
+
+	// 3b. Finalize active sessions in the DB and publish their cancellation
+	// events. See finalizeCancelledSessions for the detailed rationale.
+	s.finalizeCancelledSessions(finalizeCtx, id, activeSessions)
 
 	// 4. Re-read task for updated archived_at field
-	task, err = s.tasks.GetTask(ctx, id)
+	task, err = s.tasks.GetTask(finalizeCtx, id)
 	if err != nil {
 		return err
 	}
 
 	// 5. Publish task.updated event so frontend removes from board
-	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	s.publishTaskEvent(finalizeCtx, events.TaskUpdated, task, nil)
 	s.logger.Info("task archived",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
 
 	// 6. Background: Stop agents and cleanup worktrees
 	if cleanupJob != nil {
-		if err := s.StartPreparedTaskResourceCleanup(ctx, cleanupJob.OperationID); err != nil {
+		if err := s.StartPreparedTaskResourceCleanup(finalizeCtx, cleanupJob.OperationID); err != nil {
 			s.logger.Warn("start committed archive resource cleanup",
 				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
 		}
@@ -1230,6 +1213,44 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+// finalizeCancelledSessions finalizes an archived task's active sessions in
+// the DB and publishes a session.state_changed event for each one actually
+// cancelled. The async cleanup that follows tears down the agent processes;
+// this records the terminal session state, which process teardown does not
+// persist on its own. The DB write alone is invisible to any client cache
+// (e.g. an Office task list's "is running" indicator) that's kept fresh
+// exclusively by that event, and would otherwise show a live spinner
+// forever after archive. A cancellation failure is logged and swallowed —
+// ArchiveTask has already committed archived_at, so this is best-effort
+// cleanup, not a reason to fail the archive.
+func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, activeSessions []*models.TaskSession) {
+	cancelledIDs, cancelledAt, cancelErr := s.sessions.CancelActiveTaskSessionsByTaskID(ctx, taskID, "task archived")
+	if cancelErr != nil {
+		s.logger.Warn("failed to reap active sessions on archive",
+			zap.String("task_id", taskID),
+			zap.Error(cancelErr))
+		return
+	}
+	if len(cancelledIDs) == 0 {
+		return
+	}
+	s.logger.Info("reaped active sessions on archive",
+		zap.String("task_id", taskID),
+		zap.Int("count", len(cancelledIDs)))
+	// Detach from ctx via WithoutCancel: the DB write above already
+	// committed on a detached context, so a client disconnect here must
+	// not also suppress the event lookup below (GetTaskSession per
+	// cancelled session) — event-driven clients need session.state_changed
+	// regardless of whether the archiving caller is still connected.
+	// Deliberately left unbounded (no timeout) here: publishSessionsCancelled
+	// gives each session in cancelledIDs its own independent 10s deadline,
+	// so one slow lookup or synchronous subscriber can no longer consume a
+	// shared batch-wide budget and starve the events for sessions later in
+	// the loop.
+	detachedCtx := context.WithoutCancel(ctx)
+	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledIDs, "task archived", cancelledAt)
 }
 
 func (s *Service) registerTaskRuntimeStopOwners(stopTargets []taskStopTarget, force bool) {
