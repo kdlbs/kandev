@@ -10,6 +10,7 @@ import type { EditorOption } from "@/lib/types/http";
 import { type ComboboxOption } from "@/components/combobox";
 import {
   parseChangesPanelLayout,
+  parseAppStatusBarOrder,
   parseSystemMetricsDisplay,
   parseTerminalLinkBehavior,
   taskCreateLastUsedHasValue,
@@ -315,6 +316,7 @@ function buildUserSettingsFromResponse(
     terminalFontSize: s.terminal_font_size || null,
     changesPanelLayout: parseChangesPanelLayout(s.changes_panel_layout),
     systemMetricsDisplay: parseSystemMetricsDisplay(s.system_metrics_display),
+    appStatusBarOrder: parseAppStatusBarOrder(s.app_status_bar_order),
     voiceMode: parseVoiceMode(s.voice_mode),
     ...mapEditorSettingsFields(s),
   };

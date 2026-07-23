@@ -64,6 +64,7 @@ type UserSettings struct {
 	TerminalFontSize            int                               `json:"terminal_font_size"`
 	ChangesPanelLayout          string                            `json:"changes_panel_layout"` // "flat" | "tree"
 	SystemMetricsDisplay        SystemMetricsDisplaySettings      `json:"system_metrics_display"`
+	AppStatusBarOrder           AppStatusBarOrder                 `json:"app_status_bar_order"`
 	VoiceMode                   VoiceModeSettings                 `json:"voice_mode"`
 	CreatedAt                   time.Time                         `json:"created_at"`
 	UpdatedAt                   time.Time                         `json:"updated_at"`
@@ -71,6 +72,11 @@ type UserSettings struct {
 
 type SystemMetricsDisplaySettings struct {
 	ShowInTopbar bool `json:"show_in_topbar"`
+}
+
+type AppStatusBarOrder struct {
+	LeftItemIDs  []string `json:"left_item_ids"`
+	RightItemIDs []string `json:"right_item_ids"`
 }
 
 // VoiceModeSettings is the per-user configuration surface for the chat

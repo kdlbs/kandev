@@ -18,6 +18,7 @@ export type {
   SidebarViewDraftApi,
   SidebarTaskPrefsApi,
   TaskCreateLastUsedApi,
+  AppStatusBarOrderApi,
   MCPTaskAgentProfileDefault,
   UserSettings,
   UserSettingsResponse,

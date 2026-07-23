@@ -40,6 +40,19 @@ func TestDefinitionsIncludePluginsExperimentalMetadata(t *testing.T) {
 	}
 }
 
+func TestDefinitionsIncludeAppStatusBarMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.appStatusBar")
+	if !ok {
+		t.Fatal("features.appStatusBar definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_APP_STATUS_BAR" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_APP_STATUS_BAR", def.EnvVar)
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+}
+
 func TestDefinitionsExposeSingleUserFacingDebugToggle(t *testing.T) {
 	def, ok := DefinitionByKey("debug.devMode")
 	if !ok {

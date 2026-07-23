@@ -1,7 +1,7 @@
 "use client";
 
 import { usePluginRegistry } from "@/lib/plugins/registry";
-import type { SlotComponent } from "@/lib/plugins/types";
+import type { PluginSlotRegistration } from "@/lib/plugins/registry";
 import { PluginErrorBoundary } from "./plugin-error-boundary";
 
 export type PluginSlotProps = {
@@ -26,22 +26,39 @@ export type PluginSlotProps = {
  */
 export function PluginSlot({ name, slotProps, ownerPluginId }: PluginSlotProps) {
   const registry = usePluginRegistry();
-  const components = ownerPluginId
-    ? registry.getSlotComponentsForPlugin(name, ownerPluginId)
-    : registry.getSlotComponents(name);
+  const registrations = registry
+    .getSlotRegistrations(name)
+    .filter((registration) => !ownerPluginId || registration.pluginId === ownerPluginId);
 
-  if (components.length === 0) return null;
-
-  // Key by owner too, so navigating A -> B resets the boundary instead of reusing A's error (hiding B).
-  const keyBase = ownerPluginId ? `${name}-${ownerPluginId}` : name;
+  if (registrations.length === 0) return null;
 
   return (
     <>
-      {components.map((SlotComponentImpl: SlotComponent, index) => (
-        <PluginErrorBoundary key={`${keyBase}-${index}`} context={`slot "${name}" component`}>
-          <SlotComponentImpl slotProps={slotProps} />
-        </PluginErrorBoundary>
+      {registrations.map((registration) => (
+        <PluginSlotRegistrationView
+          key={registration.registrationId}
+          registration={registration}
+          name={name}
+          slotProps={slotProps}
+        />
       ))}
     </>
+  );
+}
+
+export function PluginSlotRegistrationView({
+  registration,
+  name,
+  slotProps,
+}: {
+  registration: PluginSlotRegistration;
+  name: string;
+  slotProps?: unknown;
+}) {
+  const { pluginId, Component } = registration;
+  return (
+    <PluginErrorBoundary context={`plugin "${pluginId}" slot "${name}" component`}>
+      <Component slotProps={slotProps} />
+    </PluginErrorBoundary>
   );
 }

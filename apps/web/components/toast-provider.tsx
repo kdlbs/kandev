@@ -133,7 +133,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 function ToastList({ toasts }: { toasts: Toast[] }) {
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 flex w-[360px] flex-col-reverse gap-2"
+      className="fixed bottom-[calc(1rem+var(--app-status-bar-height))] right-4 z-50 flex w-[360px] flex-col-reverse gap-2"
       data-testid="toast-container"
       aria-live="polite"
       aria-relevant="additions text"

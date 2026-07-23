@@ -46,7 +46,7 @@ function WalkthroughLauncher({
   stepCount,
 }: WalkthroughLauncherProps) {
   return (
-    <div className="group fixed bottom-6 right-6 z-[41]">
+    <div className="group fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-[41]">
       <button
         type="button"
         data-testid="walkthrough-launcher"

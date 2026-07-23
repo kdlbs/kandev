@@ -49,6 +49,9 @@ export class SessionPage {
   }
 
   // Chat status bar locators
+  appStatusBar() {
+    return this.page.getByTestId("app-status-bar");
+  }
   chatStatusBar() {
     return this.page.getByTestId("chat-status-bar");
   }
