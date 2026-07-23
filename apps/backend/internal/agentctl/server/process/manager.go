@@ -114,6 +114,11 @@ type Manager struct {
 	// swap it when transitioning single→multi mode.
 	repoTrackers   []*WorkspaceTracker
 	repoTrackersMu sync.RWMutex
+	// workspaceSourceRoots is the canonical durable-source allowlist used both
+	// by workspace operations and repository-child discovery. It is guarded by
+	// repoTrackersMu so a rebind snapshots its proposed policy before creating
+	// replacement trackers.
+	workspaceSourceRoots []string
 	// rescanMu serializes RescanRepositories calls so two concurrent
 	// rescans can't both observe an empty tracker set and double-bootstrap
 	// (or both append duplicate trackers for the same new child). The
@@ -266,10 +271,11 @@ func (m *Manager) BeginStop() {
 func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	cfg.WorkDir = resolveExistingWorkDir(cfg.WorkDir, log.WithFields(zap.String("component", "process-manager")))
 	m := &Manager{
-		cfg:                cfg,
-		logger:             log.WithFields(zap.String("component", "process-manager")),
-		updatesCh:          make(chan adapter.AgentEvent, 100),
-		pendingPermissions: make(map[string]*PendingPermission),
+		cfg:                  cfg,
+		logger:               log.WithFields(zap.String("component", "process-manager")),
+		updatesCh:            make(chan adapter.AgentEvent, 100),
+		pendingPermissions:   make(map[string]*PendingPermission),
+		workspaceSourceRoots: canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
 	}
 	// Multi-repo task roots hold one git worktree per repository as siblings.
 	// In that case build a per-repo tracker for each child so each emits its
@@ -277,7 +283,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	// can show all repos. The root tracker covers the single-repo case via
 	// preferGitRepoChildIfRootIsBare; we skip its fallback when we've already
 	// detected a multi-repo root to avoid double-tracking the first repo.
-	repoChildren := scanRepositorySubdirs(cfg.WorkDir)
+	repoChildren := scanRepositorySubdirs(cfg.WorkDir, m.workspaceSourceRoots)
 	if len(repoChildren) >= 2 {
 		// Multi-repo: root tracker bound to the bare task root (no fallback,
 		// no events), plus one tracker per repo subdir.
@@ -335,14 +341,27 @@ func (m *Manager) setBaseBranches(branches map[string]string) {
 // allowlist used by workspace file operations. Roots are set on every active
 // tracker because rebind/rescan can swap the root tracker live.
 func (m *Manager) SetWorkspaceSourceRoots(roots []string) {
+	canonical := canonicalWorkspaceSourceRoots(roots)
+	m.rescanMu.Lock()
+	defer m.rescanMu.Unlock()
 	m.repoTrackersMu.RLock()
 	trackers := append([]*WorkspaceTracker{m.workspaceTracker}, m.repoTrackers...)
 	m.repoTrackersMu.RUnlock()
+	m.repoTrackersMu.Lock()
+	m.workspaceSourceRoots = canonical
+	m.cfg.WorkspaceSourceRoots = append([]string(nil), canonical...)
+	m.repoTrackersMu.Unlock()
 	for _, tracker := range trackers {
 		if tracker != nil {
-			tracker.SetAllowedSourceRoots(roots)
+			tracker.SetAllowedSourceRoots(canonical)
 		}
 	}
+}
+
+func (m *Manager) currentWorkspaceSourceRoots() []string {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	return append([]string(nil), m.workspaceSourceRoots...)
 }
 
 // lookupBaseBranch reads the task's recorded base branch for a given
@@ -382,7 +401,7 @@ type repositorySubdir struct {
 // that are themselves git repositories or worktrees. Returns an empty slice
 // when workDir doesn't exist, isn't readable, or contains zero git children.
 // Used to detect multi-repo task roots at Manager construction.
-func scanRepositorySubdirs(workDir string) []repositorySubdir {
+func scanRepositorySubdirs(workDir string, allowedSourceRoots []string) []repositorySubdir {
 	if workDir == "" {
 		return nil
 	}
@@ -396,19 +415,63 @@ func scanRepositorySubdirs(workDir string) []repositorySubdir {
 			continue
 		}
 		candidate := filepath.Join(workDir, entry.Name())
+		linkInfo, err := os.Lstat(candidate)
+		if err != nil {
+			continue
+		}
+		repositoryPath := candidate
+		if linkInfo.Mode()&os.ModeSymlink != 0 {
+			resolved, err := filepath.EvalSymlinks(candidate)
+			if err != nil || !pathWithinSourceRoots(resolved, allowedSourceRoots) {
+				continue
+			}
+			repositoryPath = resolved
+		}
 		// Directory links are how a Local task exposes durable folder and
 		// repository attachments. DirEntry.IsDir is false for a Unix symlink;
-		// Stat follows the owned link and rejects files/broken links.
-		info, err := os.Stat(candidate)
+		// Stat follows only a link already proven under a registered source root.
+		// codeql[go/path-injection] Candidate is a child of workDir; links pass containment above.
+		info, err := os.Stat(repositoryPath)
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		if resolveGitIndexPath(candidate) == "" {
+		if resolveGitIndexPath(repositoryPath) == "" {
 			continue
 		}
-		out = append(out, repositorySubdir{name: entry.Name(), path: candidate})
+		out = append(out, repositorySubdir{name: entry.Name(), path: repositoryPath})
 	}
 	return out
+}
+
+func canonicalWorkspaceSourceRoots(roots []string) []string {
+	canonical := make([]string, 0, len(roots))
+	seen := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		resolved, err := filepath.EvalSymlinks(filepath.Clean(root))
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(resolved)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if _, ok := seen[resolved]; ok {
+			continue
+		}
+		seen[resolved] = struct{}{}
+		canonical = append(canonical, resolved)
+	}
+	return canonical
+}
+
+func pathWithinSourceRoots(path string, roots []string) bool {
+	for _, root := range roots {
+		rel, err := filepath.Rel(root, path)
+		if err == nil && !pathEscapesRoot(rel) {
+			return true
+		}
+	}
+	return false
 }
 
 // Status returns the current process status

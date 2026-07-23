@@ -503,6 +503,33 @@ func TestAttachWorkspaceSourcesAllowsFolderForLocalPCAlias(t *testing.T) {
 	}
 }
 
+func TestAttachWorkspaceSourcesRejectsFolderForRemoteExecutorBeforeResolvingPath(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.workspaceFolders = repo
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-remote-folder", Name: "Remote Folder"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-remote-folder", WorkspaceID: "ws-remote-folder", Name: "WF"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-remote-folder", WorkspaceID: "ws-remote-folder", Name: "app", DefaultBranch: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{WorkspaceID: "ws-remote-folder", WorkflowID: "wf-remote-folder", WorkflowStepID: "step", Title: "Task", Repositories: []TaskRepositoryInput{{RepositoryID: "repo-remote-folder", BaseBranch: "main"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "env-remote-folder", TaskID: task.ID, ExecutorType: "remote_docker"}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{{Kind: WorkspaceSourceFolder, LocalPath: filepath.Join(t.TempDir(), "not-present"), DisplayName: "docs"}}})
+	if !errors.Is(err, ErrUnsupportedWorkspaceSource) {
+		t.Fatalf("error = %v, want unsupported workspace source", err)
+	}
+}
+
 func TestAttachWorkspaceSources_PersistsPrelaunchSourcesWithExplicitDeferredResult(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	svc.workspaceFolders = repo

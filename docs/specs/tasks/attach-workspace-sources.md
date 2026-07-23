@@ -33,6 +33,8 @@ manually moving files into the task workspace.
   request surfaces; folder sources remain file-only.
 - Duplicate repository/branch pairs, duplicate canonical folder paths, cross-workspace repository
   IDs, invalid remote URLs, and inaccessible local paths are rejected before the task changes.
+- A source file rename may stay within its canonical workspace/source root; a cross-root move or
+  rename is rejected before either source is mutated.
 - A multi-source submission is atomic from the user's perspective: either every source is attached
   and materialized in the current task environment, or none of the new attachments remain.
 - Repository attachment works for every executor that can run the task. Arbitrary folders are
@@ -50,7 +52,8 @@ manually moving files into the task workspace.
   materialization path. The existing `add_branch_to_task_kandev` tool remains as a compatibility
   wrapper for one repository/branch source.
 
-Decision: [ADR-2026-07-22-runtime-mutable-task-workspace-sources](../../decisions/2026-07-22-runtime-mutable-task-workspace-sources.md).
+Decisions: [ADR-2026-07-22-runtime-mutable-task-workspace-sources](../../decisions/2026-07-22-runtime-mutable-task-workspace-sources.md)
+and [ADR-2026-07-23-workspace-source-root-move-boundary](../../decisions/2026-07-23-workspace-source-root-move-boundary.md).
 
 ## Data model
 
@@ -130,6 +133,7 @@ persisted in source URLs or copied into agent-visible metadata.
 | A container/remote repository clone fails | Newly created remote entries are removed best-effort, durable attachments are rolled back, and the response identifies the failed source. |
 | A container/remote task submits a folder source | The request returns `422` without persistence or filesystem changes. |
 | Agentctl cannot rescan the new root | The attachment fails rather than reporting success with a stale Files tree. |
+| A requested file move or rename crosses canonical source roots | The request is rejected before either source is mutated. |
 | A persisted local folder later disappears | The current live environment keeps its existing materialization; a new/reset environment surfaces the missing source and does not silently omit it. |
 | The client disconnects during materialization | Rollback runs on a detached bounded context and the eventual task event reflects durable state. |
 

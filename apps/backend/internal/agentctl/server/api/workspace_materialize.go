@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net/http"
@@ -118,6 +119,10 @@ func (s *Server) handleWorkspaceRemoveMaterializedRepository(c *gin.Context) {
 
 var errMaterializeCollision = errors.New("materialize destination collision")
 
+var beforeMaterializeQuarantineRename = func() {}
+
+var afterMaterializeQuarantineOpen = func(string) {}
+
 func materializeDestination(workDir, destination string) (string, error) {
 	if destination == "" || filepath.IsAbs(destination) || filepath.Base(destination) != destination || destination == "." || destination == ".." {
 		return "", errors.New("unsafe destination")
@@ -195,12 +200,14 @@ func materializeRepository(ctx context.Context, locator, destination, baseBranch
 	if reused, err := matchingCheckout(ctx, destination, locator, baseBranch, checkoutBranch); err != nil || reused {
 		return reused, err
 	}
+	// codeql[go/path-injection] destination is a direct child of the canonical workspace root; Lstat rejects links before use.
 	if _, err := os.Lstat(destination); err == nil {
 		return false, errMaterializeCollision
 	} else if !os.IsNotExist(err) {
 		return false, fmt.Errorf("inspect destination: %w", err)
 	}
 	parent := filepath.Dir(destination)
+	// codeql[go/path-injection] parent is the canonical workspace root containing the direct-child destination.
 	tmp, err := os.MkdirTemp(parent, ".kandev-clone-")
 	if err != nil {
 		return false, err
@@ -213,6 +220,7 @@ func materializeRepository(ctx context.Context, locator, destination, baseBranch
 	if err := checkoutMaterializedBranch(ctx, checkout, baseBranch, checkoutBranch); err != nil {
 		return false, err
 	}
+	// codeql[go/path-injection] checkout is newly created beneath the trusted workspace root; destination is its direct child.
 	if err := os.Rename(checkout, destination); err != nil {
 		if os.IsExist(err) {
 			return false, errMaterializeCollision
@@ -248,10 +256,24 @@ func hasGitRef(ctx context.Context, directory, ref string) bool {
 }
 
 func matchingCheckout(ctx context.Context, destination, locator, baseBranch, checkoutBranch string) (bool, error) {
-	if _, err := os.Stat(filepath.Join(destination, ".git")); err != nil {
+	// codeql[go/path-injection] destination is a direct child of the canonical workspace root and must be a real directory before Git probes.
+	destinationInfo, err := os.Lstat(destination)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil || destinationInfo.Mode()&os.ModeSymlink != 0 || !destinationInfo.IsDir() {
+		return false, errMaterializeCollision
+	}
+	gitPath := filepath.Join(destination, ".git")
+	// codeql[go/path-injection] .git is the exact child of a real, non-symlink destination and is Lstat-checked before Git probes.
+	gitInfo, err := os.Lstat(gitPath)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
+		return false, errMaterializeCollision
+	}
+	if gitInfo.Mode()&os.ModeSymlink != 0 || !gitInfo.IsDir() {
 		return false, errMaterializeCollision
 	}
 	origin, err := materializeGitOutput(ctx, "-C", destination, "remote", "get-url", "origin")
@@ -282,42 +304,165 @@ func matchingCheckout(ctx context.Context, destination, locator, baseBranch, che
 }
 
 func removeMaterializedRepository(ctx context.Context, workDir, destination, locator string) (bool, error) {
-	info, err := os.Lstat(destination)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return false, errMaterializeCollision
-	}
-	gitDir, err := os.Stat(filepath.Join(destination, ".git"))
-	if err != nil || !gitDir.IsDir() {
-		return false, errMaterializeCollision
-	}
-	origin, err := materializeGitOutput(ctx, "-C", destination, "remote", "get-url", "origin")
-	if err != nil || strings.TrimSpace(origin) != locator {
-		return false, errMaterializeCollision
-	}
-	trash, err := os.MkdirTemp(workDir, ".kandev-remove-")
+	canonicalWorkDir, err := filepath.EvalSymlinks(workDir)
 	if err != nil {
 		return false, err
 	}
-	if err := os.Remove(trash); err != nil {
+	if filepath.Dir(destination) != canonicalWorkDir {
+		return false, errMaterializeCollision
+	}
+	root, err := os.OpenRoot(canonicalWorkDir)
+	if err != nil {
 		return false, err
 	}
-	if err := os.Rename(destination, trash); err != nil {
+	defer func() { _ = root.Close() }()
+	quarantine, err := materializeQuarantine(root)
+	if err != nil {
+		return false, err
+	}
+	destinationName := filepath.Base(destination)
+	beforeMaterializeQuarantineRename()
+	// codeql[go/path-injection] Root binds both direct-child names to the canonical workspace; quarantine captures the exact object before validation.
+	if err := root.Rename(destinationName, quarantine); err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
 		return false, err
 	}
-	if err := os.RemoveAll(trash); err != nil {
+	// codeql[go/path-injection] Root Lstat rejects a link or non-directory before opening the quarantined name.
+	quarantineInfo, err := root.Lstat(quarantine)
+	if err != nil || quarantineInfo.Mode()&os.ModeSymlink != 0 || !quarantineInfo.IsDir() {
+		return false, restoreMaterializedQuarantine(root, quarantineInfo, quarantine, destinationName)
+	}
+	// codeql[go/path-injection] Root opens the exact object atomically moved into its private canonical-workdir quarantine.
+	quarantineRoot, err := root.OpenRoot(quarantine)
+	if err != nil {
+		return false, restoreMaterializedQuarantine(root, nil, quarantine, destinationName)
+	}
+	defer func() { _ = quarantineRoot.Close() }()
+	capturedInfo, err := quarantineRoot.Lstat(".")
+	if err != nil || capturedInfo.Mode()&os.ModeSymlink != 0 || !capturedInfo.IsDir() {
+		return false, restoreMaterializedQuarantine(root, capturedInfo, quarantine, destinationName)
+	}
+	afterMaterializeQuarantineOpen(quarantine)
+	// codeql[go/path-injection] The opened quarantine root keeps .git bound to the captured directory, independent of later pathname replacement.
+	gitDir, err := quarantineRoot.Lstat(".git")
+	if err != nil || gitDir.Mode()&os.ModeSymlink != 0 || !gitDir.IsDir() {
+		return false, restoreMaterializedQuarantine(root, capturedInfo, quarantine, destinationName)
+	}
+	origin, err := materializeQuarantineOrigin(quarantineRoot)
+	if err != nil || strings.TrimSpace(origin) != locator {
+		return false, restoreMaterializedQuarantine(root, capturedInfo, quarantine, destinationName)
+	}
+	// codeql[go/path-injection] The captured quarantine root recursively removes only its own entries after origin verification.
+	if err := clearMaterializedQuarantine(quarantineRoot); err != nil {
+		return false, err
+	}
+	if matches, err := quarantineMatchesCaptured(root, quarantine, capturedInfo); err != nil || !matches {
+		return false, errMaterializeCollision
+	}
+	// codeql[go/path-injection] Root non-recursively removes the quarantined parent entry only after it still matches the captured object.
+	if err := root.Remove(quarantine); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
+func materializeQuarantine(root *os.Root) (string, error) {
+	for range 10 {
+		entropy := make([]byte, 16)
+		if _, err := rand.Read(entropy); err != nil {
+			return "", err
+		}
+		name := fmt.Sprintf(".kandev-remove-%x", entropy)
+		if err := root.Mkdir(name, 0o700); err == nil {
+			if err := root.Remove(name); err != nil {
+				return "", err
+			}
+			return name, nil
+		} else if !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
+	}
+	return "", errors.New("allocate removal quarantine")
+}
+
+func restoreMaterializedQuarantine(root *os.Root, captured os.FileInfo, quarantine, destination string) error {
+	if captured == nil {
+		return errMaterializeCollision
+	}
+	if matches, err := quarantineMatchesCaptured(root, quarantine, captured); err != nil || !matches {
+		return errMaterializeCollision
+	}
+	if _, err := root.Lstat(destination); err == nil {
+		return errMaterializeCollision
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	// codeql[go/path-injection] Root restores the exact quarantined object only when its direct-child destination remains absent.
+	if err := root.Rename(quarantine, destination); err != nil {
+		return err
+	}
+	return errMaterializeCollision
+}
+
+func quarantineMatchesCaptured(root *os.Root, quarantine string, captured os.FileInfo) (bool, error) {
+	info, err := root.Lstat(quarantine)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(info, captured), nil
+}
+
+func materializeQuarantineOrigin(root *os.Root) (string, error) {
+	config, err := root.ReadFile(filepath.Join(".git", "config"))
+	if err != nil {
+		return "", err
+	}
+	return parseMaterializeOriginURL(string(config)), nil
+}
+
+func parseMaterializeOriginURL(config string) string {
+	inOrigin := false
+	for line := range strings.SplitSeq(config, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			fields := strings.Fields(strings.TrimSpace(line[1 : len(line)-1]))
+			inOrigin = len(fields) == 2 && strings.EqualFold(fields[0], "remote") && fields[1] == `"origin"`
+			continue
+		}
+		if !inOrigin || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "url") {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func clearMaterializedQuarantine(root *os.Root) error {
+	directory, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = directory.Close() }()
+	entries, err := directory.ReadDir(-1)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := root.RemoveAll(entry.Name()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func materializeGitOutput(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- validated locator/ref; no shell.
+	// codeql[go/command-injection] git is fixed; HTTP locators and refs are validated before checkout and matching probes.
+	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- git is fixed and arguments are validated; no shell.
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() != nil {

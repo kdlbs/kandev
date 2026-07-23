@@ -511,6 +511,7 @@ func canonicalFolder(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// codeql[go/path-injection] Explicit local-folder selection resolves to a canonical directory for the trusted local-user model; remote executors are rejected before this path is reached.
 	info, err := os.Stat(p)
 	if err != nil {
 		return "", err

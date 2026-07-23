@@ -90,6 +90,38 @@ func TestHandleRescanWorkspace_FailedRescanRetainsExistingSourceRoots(t *testing
 	}
 }
 
+func TestHandleRescanWorkspace_TracksRepositoryLinkWithProposedSourceRoots(t *testing.T) {
+	workspace := t.TempDir()
+	source := t.TempDir()
+	initWorkspaceGitRepo(t, workspace)
+	initWorkspaceGitRepo(t, source)
+	if err := os.Symlink(source, filepath.Join(workspace, "linked-repository")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: workspace}
+	procMgr := process.NewManager(cfg, log)
+	defer func() { _ = procMgr.Stop(context.Background()) }()
+	s := NewServer(cfg, procMgr, nil, nil, log)
+
+	body, err := json.Marshal(RescanWorkspaceRequest{WorkspaceSourceRoots: []string{source}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/rescan", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+	if got := procMgr.RepoSubpaths(); len(got) != 1 || got[0] != "linked-repository" {
+		t.Fatalf("RepoSubpaths = %v, want [linked-repository]", got)
+	}
+}
+
 // A rollback must prune trackers for checkouts that have already been removed
 // from disk. The ordinary empty-workdir rescan deliberately only appends, so
 // rollback uses its own exact reconciliation endpoint.

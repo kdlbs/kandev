@@ -38,6 +38,13 @@ import (
 //
 // Idempotent: a rescan with no on-disk changes is a no-op.
 func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) error {
+	return m.RescanRepositoriesWithSourceRoots(ctx, newWorkDir, nil)
+}
+
+// RescanRepositoriesWithSourceRoots discovers repository children and updates
+// their tracker graph using proposed source roots as one serialized operation.
+// A nil roots slice retains the existing policy for compatibility callers.
+func (m *Manager) RescanRepositoriesWithSourceRoots(ctx context.Context, newWorkDir string, roots []string) error {
 	release, err := m.admitStart()
 	if err != nil {
 		m.logger.Debug("workspace rescan rejected during teardown")
@@ -51,45 +58,32 @@ func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) err
 	m.rescanMu.Lock()
 	defer m.rescanMu.Unlock()
 
-	// Resolve the candidate workDir and prove it's a readable directory
-	// BEFORE committing cfg.WorkDir. If newWorkDir is bogus, leaving the
-	// manager pointing at the existing root keeps path-based handlers
-	// (vscode, git, files) consistent with the trackers that never moved.
+	candidate, scopeChanged, err := m.rescanCandidateWorkDir(newWorkDir)
+	if err != nil {
+		return err
+	}
+
+	proposedRoots := roots != nil
+	if roots == nil {
+		roots = m.currentWorkspaceSourceRoots()
+	} else {
+		roots = canonicalWorkspaceSourceRoots(roots)
+	}
+
+	// Snapshot existing trackers while rescanMu serializes the graph mutation.
+	// cfg.WorkDir and roots are committed only with the resulting graph below.
 	m.repoTrackersMu.RLock()
-	candidate := m.cfg.WorkDir
+	workDir := candidate
+	existingTrackers := len(m.repoTrackers)
+	trackers := append([]*WorkspaceTracker{m.workspaceTracker}, m.repoTrackers...)
 	m.repoTrackersMu.RUnlock()
-	scopeChanged := false
-	if newWorkDir != "" && newWorkDir != candidate {
-		resolved, ok := resolveRescanPath(newWorkDir, candidate)
-		if !ok {
-			m.logger.Warn("workspace rescan: ignoring invalid work_dir",
-				zap.String("work_dir", newWorkDir),
-				zap.String("current_work_dir", candidate))
-			return fmt.Errorf("invalid workspace work_dir: %s", newWorkDir)
-		}
-		// resolved is derived from currentWorkDir (trusted manager config),
-		// not from newWorkDir, so os.Stat here doesn't see HTTP-supplied
-		// input. CodeQL's path-injection trace ends at resolveRescanPath.
-		if info, err := os.Stat(resolved); err == nil && info.IsDir() {
-			candidate = resolved
-			scopeChanged = true
-		} else {
-			m.logger.Warn("workspace rescan: ignoring invalid work_dir",
-				zap.String("work_dir", newWorkDir), zap.Error(err))
-			return fmt.Errorf("workspace work_dir is inaccessible: %s", newWorkDir)
+	for _, tracker := range trackers {
+		if tracker != nil {
+			tracker.SetAllowedSourceRoots(roots)
 		}
 	}
 
-	// Read existingTrackers under the same write-lock that commits the new
-	// cfg.WorkDir so two concurrent rescans don't both observe 0 trackers
-	// and double-bootstrap the multi-repo set.
-	m.repoTrackersMu.Lock()
-	m.cfg.WorkDir = candidate
-	workDir := m.cfg.WorkDir
-	existingTrackers := len(m.repoTrackers)
-	m.repoTrackersMu.Unlock()
-
-	children := scanRepositorySubdirs(workDir)
+	children := scanRepositorySubdirs(workDir, roots)
 	subs := m.snapshotSubscribers()
 
 	m.logger.Info("workspace rescan started",
@@ -99,6 +93,7 @@ func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) err
 		zap.Int("subscribers", len(subs)))
 
 	if candidate == "" {
+		m.commitRescanWorkspaceState(workDir, roots)
 		return nil
 	}
 	// A promoted root must always replace the old single-repo file tracker,
@@ -107,15 +102,56 @@ func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) err
 		// Nothing to do: a non-multi-repo workspace stays on its single
 		// tracker. The legacy preferGitRepoChildIfRootIsBare fallback
 		// covers single-repo construct-time setup.
+		m.commitRescanWorkspaceState(workDir, roots)
 		return nil
 	}
 
 	if existingTrackers == 0 && scopeChanged {
-		m.transitionToMultiRepoMode(ctx, workDir, children, subs)
+		m.transitionToMultiRepoMode(ctx, workDir, children, roots, subs)
 		return nil
 	}
-	m.appendNewRepoTrackers(ctx, children, subs)
+	if proposedRoots {
+		m.reconcileRepoTrackers(ctx, workDir, children, roots, subs)
+		return nil
+	}
+	m.appendNewRepoTrackers(ctx, workDir, children, roots, subs)
 	return nil
+}
+
+// rescanCandidateWorkDir resolves and validates a proposed tracking root
+// without committing it, so a failed rescan retains the active graph.
+func (m *Manager) rescanCandidateWorkDir(newWorkDir string) (string, bool, error) {
+	m.repoTrackersMu.RLock()
+	candidate := m.cfg.WorkDir
+	m.repoTrackersMu.RUnlock()
+	if newWorkDir == "" || newWorkDir == candidate {
+		return candidate, false, nil
+	}
+	resolved, ok := resolveRescanPath(newWorkDir, candidate)
+	if !ok {
+		m.logger.Warn("workspace rescan: ignoring invalid work_dir",
+			zap.String("work_dir", newWorkDir),
+			zap.String("current_work_dir", candidate))
+		return "", false, fmt.Errorf("invalid workspace work_dir: %s", newWorkDir)
+	}
+	// resolved is derived from currentWorkDir (trusted manager config),
+	// not from newWorkDir, so os.Stat here doesn't see HTTP-supplied input.
+	// CodeQL's path-injection trace ends at resolveRescanPath.
+	if info, err := os.Stat(resolved); err == nil && info.IsDir() {
+		return resolved, true, nil
+	} else {
+		m.logger.Warn("workspace rescan: ignoring invalid work_dir",
+			zap.String("work_dir", newWorkDir), zap.Error(err))
+		return "", false, fmt.Errorf("workspace work_dir is inaccessible: %s", newWorkDir)
+	}
+}
+
+func (m *Manager) commitRescanWorkspaceState(workDir string, roots []string) {
+	m.repoTrackersMu.Lock()
+	m.cfg.WorkDir = workDir
+	m.workspaceSourceRoots = append([]string(nil), roots...)
+	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
+	m.repoTrackersMu.Unlock()
 }
 
 // ReconcileRepositories makes the current-root repository tracker set exact.
@@ -143,9 +179,10 @@ func (m *Manager) ReconcileRepositories(ctx context.Context) error {
 		return fmt.Errorf("workspace work_dir is inaccessible: %s", workDir)
 	}
 
-	children := scanRepositorySubdirs(workDir)
+	roots := m.currentWorkspaceSourceRoots()
+	children := scanRepositorySubdirs(workDir, roots)
 	subs := m.snapshotSubscribers()
-	m.reconcileRepoTrackers(ctx, children, subs)
+	m.reconcileRepoTrackers(ctx, workDir, children, roots, subs)
 	return nil
 }
 
@@ -155,10 +192,18 @@ func (m *Manager) ReconcileRepositories(ctx context.Context) error {
 // git events scoped to a workspace the agent no longer executes in. Calling it
 // again with the previous root is the rollback operation used by lifecycle.
 func (m *Manager) RebindWorkspace(ctx context.Context, workDir string) error {
+	return m.RebindWorkspaceWithSourceRoots(ctx, workDir, nil)
+}
+
+// RebindWorkspaceWithSourceRoots replaces the complete workspace tracker graph
+// and installs proposed source roots before discovering linked repositories.
+// A nil roots slice retains the current policy for compatibility callers.
+func (m *Manager) RebindWorkspaceWithSourceRoots(ctx context.Context, workDir string, roots []string) error {
 	if workDir == "" || !filepath.IsAbs(workDir) {
 		return fmt.Errorf("workspace work_dir must be an absolute path")
 	}
 	resolved := filepath.Clean(workDir)
+	// codeql[go/path-injection] Rebind accepts an authenticated absolute workspace root and rejects inaccessible directories.
 	info, err := os.Stat(resolved)
 	if err != nil || !info.IsDir() {
 		return fmt.Errorf("workspace work_dir is inaccessible: %s", workDir)
@@ -171,10 +216,16 @@ func (m *Manager) RebindWorkspace(ctx context.Context, workDir string) error {
 	m.rescanMu.Lock()
 	defer m.rescanMu.Unlock()
 
+	if roots == nil {
+		roots = m.currentWorkspaceSourceRoots()
+	} else {
+		roots = canonicalWorkspaceSourceRoots(roots)
+	}
 	subs := m.snapshotSubscribers()
-	children := scanRepositorySubdirs(resolved)
+	children := scanRepositorySubdirs(resolved, roots)
 	bare := NewWorkspaceTrackerForRepo(resolved, "", m.logger)
 	bare.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), ""))
+	bare.SetAllowedSourceRoots(roots)
 	bare.Start(ctx)
 	for _, sub := range subs {
 		bare.AttachWorkspaceStreamSubscriber(sub)
@@ -183,6 +234,7 @@ func (m *Manager) RebindWorkspace(ctx context.Context, workDir string) error {
 	for _, child := range children {
 		tracker := NewWorkspaceTrackerForRepo(child.path, child.name, m.logger)
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
+		tracker.SetAllowedSourceRoots(roots)
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
@@ -192,7 +244,8 @@ func (m *Manager) RebindWorkspace(ctx context.Context, workDir string) error {
 
 	m.repoTrackersMu.Lock()
 	oldBare, oldRepos := m.workspaceTracker, m.repoTrackers
-	m.cfg.WorkDir, m.workspaceTracker, m.repoTrackers = resolved, bare, repos
+	m.cfg.WorkDir, m.workspaceTracker, m.repoTrackers, m.workspaceSourceRoots = resolved, bare, repos, append([]string(nil), roots...)
+	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
 	m.repoTrackersMu.Unlock()
 	if oldBare != nil {
 		for _, sub := range subs {
@@ -213,13 +266,14 @@ func (m *Manager) RebindWorkspace(ctx context.Context, workDir string) error {
 // bare task-root tracker and stands up per-repo trackers for every detected
 // child. Used when the agent launched as single-repo and a sibling worktree
 // was added afterwards.
-func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string, children []repositorySubdir, subs []types.WorkspaceStreamSubscriber) {
+func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string, children []repositorySubdir, roots []string, subs []types.WorkspaceStreamSubscriber) {
 	m.logger.Info("transitioning workspace to multi-repo mode",
 		zap.String("work_dir", workDir),
 		zap.Int("children", len(children)))
 
 	bareRoot := NewWorkspaceTrackerForRepo(workDir, "", m.logger)
 	bareRoot.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), ""))
+	bareRoot.SetAllowedSourceRoots(roots)
 	bareRoot.Start(ctx)
 	for _, sub := range subs {
 		bareRoot.AttachWorkspaceStreamSubscriber(sub)
@@ -229,6 +283,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 	for _, child := range children {
 		tracker := NewWorkspaceTrackerForRepo(child.path, child.name, m.logger)
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
+		tracker.SetAllowedSourceRoots(roots)
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
@@ -240,6 +295,9 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 	old := m.workspaceTracker
 	m.workspaceTracker = bareRoot
 	m.repoTrackers = append(m.repoTrackers, newRepoTrackers...)
+	m.cfg.WorkDir = workDir
+	m.workspaceSourceRoots = append([]string(nil), roots...)
+	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
 	m.repoTrackersMu.Unlock()
 
 	if old != nil {
@@ -253,7 +311,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 // appendNewRepoTrackers adds trackers for child subdirs that don't already
 // have one. Existing trackers (matched by RepositoryName) are left running
 // so their cached git state and subscriber wiring stay intact.
-func (m *Manager) appendNewRepoTrackers(ctx context.Context, children []repositorySubdir, subs []types.WorkspaceStreamSubscriber) {
+func (m *Manager) appendNewRepoTrackers(ctx context.Context, workDir string, children []repositorySubdir, roots []string, subs []types.WorkspaceStreamSubscriber) {
 	m.repoTrackersMu.RLock()
 	existing := make(map[string]bool, len(m.repoTrackers))
 	for _, t := range m.repoTrackers {
@@ -271,14 +329,12 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, children []reposito
 			zap.String("path", child.path))
 		tracker := NewWorkspaceTrackerForRepo(child.path, child.name, m.logger)
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
+		tracker.SetAllowedSourceRoots(roots)
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
 		}
 		newTrackers = append(newTrackers, tracker)
-	}
-	if len(newTrackers) == 0 {
-		return
 	}
 	// Re-check membership inside the write-lock as a defense-in-depth
 	// guard. rescanMu already serializes RescanRepositories callers, but
@@ -298,6 +354,9 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, children []reposito
 		}
 		m.repoTrackers = append(m.repoTrackers, t)
 	}
+	m.cfg.WorkDir = workDir
+	m.workspaceSourceRoots = append([]string(nil), roots...)
+	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
 	m.repoTrackersMu.Unlock()
 	// Stop + detach any dropped trackers outside the lock so we don't block
 	// readers on potentially-slow Stop() teardown.
@@ -309,18 +368,19 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, children []reposito
 	}
 }
 
-func (m *Manager) reconcileRepoTrackers(ctx context.Context, children []repositorySubdir, subs []types.WorkspaceStreamSubscriber) {
-	wanted := make(map[string]struct{}, len(children))
+func (m *Manager) reconcileRepoTrackers(ctx context.Context, workDir string, children []repositorySubdir, roots []string, subs []types.WorkspaceStreamSubscriber) {
+	wanted := make(map[repositoryTrackerKey]struct{}, len(children))
 	for _, child := range children {
-		wanted[child.name] = struct{}{}
+		wanted[repositoryTrackerIdentity(child.name, child.path)] = struct{}{}
 	}
 	m.repoTrackersMu.Lock()
 	retained := make([]*WorkspaceTracker, 0, len(m.repoTrackers))
 	removed := make([]*WorkspaceTracker, 0)
 	for _, tracker := range m.repoTrackers {
-		if _, ok := wanted[tracker.RepositoryName()]; ok {
+		identity := repositoryTrackerIdentity(tracker.RepositoryName(), tracker.workDir)
+		if _, ok := wanted[identity]; ok {
 			retained = append(retained, tracker)
-			delete(wanted, tracker.RepositoryName())
+			delete(wanted, identity)
 			continue
 		}
 		removed = append(removed, tracker)
@@ -328,11 +388,12 @@ func (m *Manager) reconcileRepoTrackers(ctx context.Context, children []reposito
 	m.repoTrackersMu.Unlock()
 	newTrackers := make([]*WorkspaceTracker, 0, len(wanted))
 	for _, child := range children {
-		if _, needed := wanted[child.name]; !needed {
+		if _, needed := wanted[repositoryTrackerIdentity(child.name, child.path)]; !needed {
 			continue
 		}
 		tracker := NewWorkspaceTrackerForRepo(child.path, child.name, m.logger)
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
+		tracker.SetAllowedSourceRoots(roots)
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
@@ -342,6 +403,9 @@ func (m *Manager) reconcileRepoTrackers(ctx context.Context, children []reposito
 	m.repoTrackersMu.Lock()
 	retained = append(retained, newTrackers...)
 	m.repoTrackers = retained
+	m.cfg.WorkDir = workDir
+	m.workspaceSourceRoots = append([]string(nil), roots...)
+	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
 	m.repoTrackersMu.Unlock()
 
 	for _, tracker := range removed {
@@ -350,6 +414,15 @@ func (m *Manager) reconcileRepoTrackers(ctx context.Context, children []reposito
 		}
 		tracker.Stop()
 	}
+}
+
+type repositoryTrackerKey struct {
+	name string
+	path string
+}
+
+func repositoryTrackerIdentity(name, path string) repositoryTrackerKey {
+	return repositoryTrackerKey{name: name, path: filepath.Clean(path)}
 }
 
 // resolveRescanPath maps an externally-supplied workspace path to a known-good
@@ -393,7 +466,7 @@ func resolveRescanPath(newPath, currentWorkDir string) (string, bool) {
 	// repo subdirs. scanRepositorySubdirs reads the directory and validates
 	// each child has a working .git entry, so a hostile or empty path returns
 	// nil and the rescan stays a no-op below.
-	if children := scanRepositorySubdirs(clean); len(children) >= 1 {
+	if children := scanRepositorySubdirs(clean, nil); len(children) >= 1 {
 		return clean, true
 	}
 	return "", false
