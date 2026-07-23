@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -1345,11 +1346,12 @@ func workflowOriginFromStep(step *wfmodels.WorkflowStep) workflowMessageOrigin {
 	}
 }
 
-func workflowMessageMetadata(planMode bool, origin workflowMessageOrigin) map[string]interface{} {
+func workflowMessageMetadata(planMode bool, origin workflowMessageOrigin, references []v1.EntityReference) map[string]interface{} {
 	meta := NewUserMessageMeta().
 		WithPlanMode(planMode).
 		WithAutoStart(true).
 		WithWorkflowStep(origin.StepID, origin.StepName, origin.StepColor).
+		WithEntityReferences(references).
 		ToMap()
 	if meta == nil {
 		meta = make(map[string]interface{})
@@ -1373,8 +1375,9 @@ func (s *Service) autoStartStepPrompt(
 	// content first, hand-off after — and forward attachments verbatim.
 	// Track the original message so terminal failure paths can restore it
 	// instead of dropping the user's prompt or attachments on the floor.
-	takenMsg, mergedPrompt, attachments := s.takeAndMergeHandoffMessage(ctx, sessionID, prompt)
+	takenMsg, mergedPrompt, attachments, references := s.takeAndMergeHandoffMessage(ctx, sessionID, prompt)
 	prompt = mergedPrompt
+	agentPrompt := AppendEntityReferenceContext(prompt, references)
 
 	// requeueTaken puts the original queued message back so a manual retry can
 	// pick it up. Skip when shouldQueueIfBusy successfully re-queued the
@@ -1390,7 +1393,7 @@ func (s *Service) autoStartStepPrompt(
 		// userMessageRecorded=false: recordAutoStartMessage has not run yet —
 		// the drain side (executeQueuedMessage) is responsible for inserting
 		// the chat-history row.
-		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin, false)
+		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin, false, references)
 		if err != nil {
 			requeueTaken()
 			return err
@@ -1408,8 +1411,8 @@ func (s *Service) autoStartStepPrompt(
 	// pre-wrapped runtime context from current server state.
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim.
-	recordedPrompt := prompt
-	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (prompt != "" || len(attachments) > 0) {
+	recordedPrompt := agentPrompt
+	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (agentPrompt != "" || len(attachments) > 0) {
 		isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 		if err != nil {
 			requeueTaken()
@@ -1417,16 +1420,17 @@ func (s *Service) autoStartStepPrompt(
 		}
 		configMode, _ := session.Metadata["config_mode"].(bool)
 		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
+		referenceContext := EntityReferenceContext(references)
 		if isOfficeTask {
-			recordedPrompt = sysprompt.InjectOfficeContext(taskID, sessionID, prompt)
+			recordedPrompt = sysprompt.InjectOfficeContext(taskID, sessionID, agentPrompt, referenceContext)
 		} else {
-			recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
+			recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, agentPrompt, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,
 				IncludeCoordinatorTaskControls: !configMode,
-			})
+			}, referenceContext)
 		}
 	}
-	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin)
+	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
@@ -1437,7 +1441,10 @@ func (s *Service) autoStartStepPrompt(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, recordedPrompt, true, planMode, true, attachments)
+		_, err := s.StartCreatedSession(
+			ctx, taskID, sessionID, session.AgentProfileID,
+			recordedPrompt, true, planMode, true, attachments, references,
+		)
 		if err != nil {
 			requeueTaken()
 		}
@@ -1446,7 +1453,7 @@ func (s *Service) autoStartStepPrompt(
 
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		_, err := s.PromptTask(ctx, taskID, sessionID, prompt, "", planMode, attachments, false)
+		_, err := s.PromptTask(ctx, taskID, sessionID, agentPrompt, "", planMode, attachments, false)
 		if err == nil {
 			return nil
 		}
@@ -1462,7 +1469,9 @@ func (s *Service) autoStartStepPrompt(
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName))
-			return s.fallbackFreshLaunchOnMissingExecution(ctx, taskID, sessionID, prompt, planMode, takenMsg, attachments)
+			return s.fallbackFreshLaunchOnMissingExecution(
+				ctx, taskID, sessionID, agentPrompt, planMode, takenMsg, attachments, references,
+			)
 		}
 
 		// "already has an agent running" means the execution store still tracks
@@ -1472,7 +1481,7 @@ func (s *Service) autoStartStepPrompt(
 		// chat row was successfully inserted above; a failed write passes false,
 		// letting the drain re-attempt insertion.
 		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -1487,7 +1496,7 @@ func (s *Service) autoStartStepPrompt(
 		if shouldQueueIfBusy {
 			// Pass userMsgRecorded so the drain skips CreateUserMessage only when
 			// the chat row was successfully inserted above by recordAutoStartMessage.
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -1523,6 +1532,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	planMode bool,
 	takenMsg *messagequeue.QueuedMessage,
 	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
 ) error {
 	requeue := func() {
 		if takenMsg != nil {
@@ -1544,7 +1554,10 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return err
 	}
 
-	if _, err := s.StartCreatedSession(ctx, taskID, sessionID, fresh.AgentProfileID, prompt, true, planMode, true, attachments); err != nil {
+	if _, err := s.StartCreatedSession(
+		ctx, taskID, sessionID, fresh.AgentProfileID,
+		prompt, true, planMode, true, attachments, references,
+	); err != nil {
 		s.logger.Error("auto-start fallback: fresh launch failed",
 			zap.String("session_id", sessionID), zap.Error(err))
 		requeue()
@@ -1600,15 +1613,15 @@ func (s *Service) resetSessionForFreshFallback(
 // (set by handleMoveTask via move_task_kandev or by drainQueuedMessageForPromptableSession)
 // and merges its content + attachments into the auto-start prompt. Returns the
 // original queued message (so terminal failure paths can re-queue it via
-// requeueMessage), the merged prompt, and the converted attachments. Empty
-// messages with neither content nor attachments are left in the queue.
-func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, basePrompt string) (*messagequeue.QueuedMessage, string, []v1.MessageAttachment) {
+// requeueMessage), merged prompt, converted attachments, and structurally
+// normalized references.
+func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, basePrompt string) (*messagequeue.QueuedMessage, string, []v1.MessageAttachment, []v1.EntityReference) {
 	if s.messageQueue == nil {
-		return nil, basePrompt, nil
+		return nil, basePrompt, nil, nil
 	}
 	msg, ok := s.messageQueue.TakeQueued(ctx, sessionID)
 	if !ok || msg == nil || (msg.Content == "" && len(msg.Attachments) == 0) {
-		return nil, basePrompt, nil
+		return nil, basePrompt, nil, nil
 	}
 	prompt := basePrompt
 	if msg.Content != "" {
@@ -1628,7 +1641,8 @@ func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, bas
 		}
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	return msg, prompt, attachments
+	references := entityrefs.NormalizePersisted(msg.Metadata[messagequeue.MetadataEntityReferences])
+	return msg, prompt, attachments, references
 }
 
 // recordAutoStartMessage creates a user message for a workflow auto-start prompt
@@ -1644,6 +1658,7 @@ func (s *Service) recordAutoStartMessage(
 	taskID, sessionID, prompt string,
 	planMode bool,
 	origin workflowMessageOrigin,
+	references []v1.EntityReference,
 ) bool {
 	if s.messageCreator == nil || prompt == "" {
 		return false
@@ -1660,7 +1675,7 @@ func (s *Service) recordAutoStartMessage(
 	// re-creating the exact pileup the cleanup_policy work fixes.
 	// workflow_auto_start is the original tag this function set; preserved
 	// for any consumer reading it directly.
-	metaMap := workflowMessageMetadata(planMode, origin)
+	metaMap := workflowMessageMetadata(planMode, origin, references)
 	if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, turnID, metaMap); err != nil {
 		s.logger.Error("failed to create auto-start user message",
 			zap.String("task_id", taskID),
@@ -1684,11 +1699,12 @@ func (s *Service) queueAutoStartPromptIfRunning(
 	attachments []v1.MessageAttachment,
 	origin workflowMessageOrigin,
 	userMessageRecorded bool,
+	references []v1.EntityReference,
 ) (bool, error) {
 	if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
 		return false, nil
 	}
-	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode, attachments, origin, userMessageRecorded); err != nil {
+	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode, attachments, origin, userMessageRecorded, references); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1719,7 +1735,9 @@ func toQueuedAttachments(attachments []v1.MessageAttachment) []messagequeue.Mess
 // transiently and the queue drained on boot_ready. Passing false (failed write
 // or pre-record queue path) lets the drain side record the message instead.
 // Callers that queue BEFORE recordAutoStartMessage runs (e.g.
-// queueAutoStartPromptIfRunning's early-busy path) must pass false.
+// queueAutoStartPromptIfRunning's early-busy path) must pass false. Prompt
+// content stays raw here; references remain metadata until drain-time context
+// is built, preventing duplicate system blocks across retries.
 func (s *Service) queueAutoStartPrompt(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
@@ -1727,11 +1745,12 @@ func (s *Service) queueAutoStartPrompt(
 	attachments []v1.MessageAttachment,
 	origin workflowMessageOrigin,
 	userMessageRecorded bool,
+	references []v1.EntityReference,
 ) error {
 	if s.messageQueue == nil {
 		return fmt.Errorf("message queue is not configured")
 	}
-	meta := workflowMessageMetadata(planMode, origin)
+	meta := workflowMessageMetadata(planMode, origin, references)
 	if userMessageRecorded {
 		meta[metaKeyUserMessageRecorded] = true
 	}

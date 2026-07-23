@@ -284,9 +284,17 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 // autoStart marks the launch as having been triggered by an automated path
 // (only consumed when skipMessageRecord is false — callers that store their
 // own message control its metadata directly).
+// references contains validated entity references whose exact server-generated
+// context block may survive first-turn canonicalization.
 //
-//nolint:cyclop,funlen // existing complexity inherited from main's session-lifecycle handling; signature touched here only to thread autoStart
-func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
+//nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
+func (s *Service) StartCreatedSession(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+) (*executor.TaskExecution, error) {
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -439,13 +447,14 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
 	if (effectivePrompt != "" || len(attachments) > 0) && !session.IsPassthrough {
+		referenceContext := EntityReferenceContext(references)
 		if isOfficeTask {
-			effectivePrompt = sysprompt.InjectOfficeContext(taskID, sessionID, effectivePrompt)
+			effectivePrompt = sysprompt.InjectOfficeContext(taskID, sessionID, effectivePrompt, referenceContext)
 		} else {
 			effectivePrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 				IncludeCoordinatorTaskControls: !configMode,
-			})
+			}, referenceContext)
 		}
 	}
 
@@ -2584,7 +2593,9 @@ func (s *Service) handlePromptDispatchFailure(ctx context.Context, taskID, sessi
 		s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
-		if freshErr := s.fallbackFreshLaunchOnMissingExecution(ctx, taskID, sessionID, prompt, planMode, nil, attachments); freshErr == nil {
+		if freshErr := s.fallbackFreshLaunchOnMissingExecution(
+			ctx, taskID, sessionID, prompt, planMode, nil, attachments, nil,
+		); freshErr == nil {
 			return &PromptResult{}, nil
 		} else {
 			promptErr = freshErr

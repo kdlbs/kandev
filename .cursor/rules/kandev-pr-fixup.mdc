@@ -11,6 +11,11 @@ session, delegate polling, remediation, verification, and delivery as separate
 bounded assignments. The commands below are worker procedures, not a fallback
 for the primary planner.
 
+If `pr-poller` reports that GitHub access requires approval, surface that gate
+to the user and stop. Do not relaunch polling after approval is denied,
+cancelled, or interrupted; use the shared skill's bounded retry behavior only
+for actual fetch failures after access was approved.
+
 The helper scripts are at `<worktree>/scripts/...`, not under the skill directory. Prefer:
 
 - `scripts/pr-state --summary <PR>` for state.

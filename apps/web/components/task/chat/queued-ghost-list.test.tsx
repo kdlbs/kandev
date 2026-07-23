@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import type { EntityReference } from "@/lib/types/entity-reference";
+import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
 
 const useQueueMock = vi.fn();
 
@@ -46,6 +48,20 @@ function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
     queued_at: "2026-05-18T00:00:00Z",
     queued_by: "user-1",
     ...overrides,
+  };
+}
+
+function taskReference(): EntityReference {
+  return {
+    version: 1,
+    ref: "mention:v1:kandev:task:workspace-1:task-1",
+    provider: "kandev",
+    kind: "task",
+    id: "task-1",
+    key: "KAN-1",
+    title: "Fix authentication",
+    url: "/t/task-1",
+    scope: "workspace-1",
   };
 }
 
@@ -272,5 +288,30 @@ describe("QueueAffordance — workflow entries", () => {
     expect(screen.getByTestId("workflow-message-badge").textContent).toContain("Review");
     expect(screen.queryByTitle("Edit queued message")).toBeNull();
     expect(screen.queryByTitle("Remove queued message")).toBeNull();
+  });
+});
+
+describe("QueueAffordance entity-reference edits", () => {
+  it("forwards an explicit empty replacement through the queue edit callback", async () => {
+    const reference = taskReference();
+    const state = queueState([
+      entry({
+        content: entityReferenceMarkdown(reference),
+        metadata: { entity_references: [reference] },
+      }),
+    ]);
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    fireEvent.click(screen.getByTitle("Edit queued message"));
+    fireEvent.change(screen.getByTestId("queue-edit-textarea"), {
+      target: { value: "reference removed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(state.editEntry).toHaveBeenCalledWith("q-1", "reference removed", undefined, []),
+    );
   });
 });

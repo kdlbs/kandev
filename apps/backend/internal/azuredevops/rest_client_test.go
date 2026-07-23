@@ -121,6 +121,8 @@ func TestRESTClientPullRequestReads(t *testing.T) {
 		switch r.URL.Path {
 		case "/acme/project-1/_apis/git/repositories/repo-1/pullrequests":
 			_, _ = w.Write([]byte(`{"count":1,"value":[{"pullRequestId":42,"title":"Ship it","status":"active","isDraft":true,"sourceRefName":"refs/heads/feature","targetRefName":"refs/heads/main","url":"https://api/pr/42","createdBy":{"id":"u1","displayName":"Ada"},"repository":{"id":"repo-1","name":"widgets","webUrl":"https://dev.azure.com/acme/Platform/_git/widgets","project":{"id":"project-1","name":"Platform"}}}]}`))
+		case "/acme/project-1/_apis/git/pullrequests":
+			_, _ = w.Write([]byte(`{"count":1,"value":[{"pullRequestId":42,"title":"Ship it","status":"active","repository":{"id":"repo-1","name":"widgets","webUrl":"https://dev.azure.com/acme/Platform/_git/widgets","project":{"id":"project-1","name":"Platform"}}}]}`))
 		case "/acme/project-1/_apis/git/repositories/repo-1/pullrequests/42":
 			_, _ = w.Write([]byte(`{"pullRequestId":42,"title":"Ship it","status":"active","sourceRefName":"refs/heads/feature","targetRefName":"refs/heads/main","createdBy":{"id":"u1","displayName":"Ada"},"repository":{"id":"repo-1","name":"widgets","webUrl":"https://dev.azure.com/acme/Platform/_git/widgets","project":{"id":"project-1","name":"Platform"}}}`))
 		case "/acme/project-1/_apis/git/repositories/repo-1/pullrequests/42/reviewers":
@@ -141,6 +143,10 @@ func TestRESTClientPullRequestReads(t *testing.T) {
 	prs, err := client.ListPullRequests(context.Background(), PullRequestFilter{ProjectID: "project-1", RepositoryID: "repo-1", Status: "active", ReviewerID: "me"})
 	if err != nil || len(prs.Items) != 1 || prs.Items[0].SourceBranch != "feature" || prs.Items[0].WebURL == "" {
 		t.Fatalf("ListPullRequests = %+v, %v", prs, err)
+	}
+	projectPRs, err := client.ListPullRequests(context.Background(), PullRequestFilter{ProjectID: "project-1", Status: "active", Top: 10})
+	if err != nil || len(projectPRs.Items) != 1 || projectPRs.Items[0].RepositoryID != "repo-1" {
+		t.Fatalf("project ListPullRequests = %+v, %v", projectPRs, err)
 	}
 	pr, err := client.GetPullRequest(context.Background(), "project-1", "repo-1", 42)
 	if err != nil || pr.ID != 42 {

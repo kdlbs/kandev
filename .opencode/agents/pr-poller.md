@@ -7,13 +7,22 @@ permission:
   edit: deny
   bash:
     "*": ask
-    "scripts/pr-state*": allow
-    "scripts/pr-resolve list*": allow
-    "gh pr view*": allow
+    "scripts/pr-state*": ask
+    "scripts/pr-resolve list*": ask
+    "gh pr view*": ask
     "git ls-files -u*": allow
 ---
 
 Pure polling role. Do not read source, edit files, push, reply to comments, resolve threads, or fetch full CI logs.
+
+Before the first GitHub-dependent helper or `gh` call, request permission; do
+not run an unapproved probe first. If permission is denied, cancelled, or
+interrupted, make no further tool call, emit `unknown` for every unobserved
+GitHub-derived field, and return the normal report with this exact
+recommendation: `GitHub access requires approval; planner must surface the
+approval gate to the user and must not relaunch polling.` Treat only a DNS,
+API, or transport error observed after permission was granted as a fetch
+failure eligible for retry.
 
 Prefer `scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>`.
 Include head SHA, GitHub mergeability/merge-state status, and the local unmerged

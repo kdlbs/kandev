@@ -14,13 +14,11 @@ import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useMessageHandler, buildTaskMentionsContext } from "@/hooks/use-message-handler";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
-import { type ContextFile } from "@/lib/state/context-files-store";
-import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import {
   ChatInputContainer,
+  type ChatSubmitPayload,
   type ChatSubmitResult,
   type ChatInputContainerHandle,
-  type MessageAttachment,
 } from "@/components/task/chat/chat-input-container";
 import { QueueAffordance } from "@/components/task/chat/queued-ghost-list";
 import {
@@ -38,6 +36,7 @@ import type { DiffComment } from "@/lib/diff/types";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { useChatPanelState } from "./use-chat-panel-state";
 import { cn } from "@/lib/utils";
+import { resolveComposerWorkspaceId } from "./composer-workspace";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -163,7 +162,7 @@ function usePanelMessageHandler(panelState: ReturnType<typeof useChatPanelState>
 
 export function useSubmitHandler(
   panelState: ReturnType<typeof useChatPanelState>,
-  onSend?: (message: string) => void,
+  onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult,
 ) {
   const [isSending, setIsSending] = useState(false);
   const storeApi = useAppStoreApi();
@@ -185,42 +184,30 @@ export function useSubmitHandler(
   const { handleSendMessage } = usePanelMessageHandler(panelState);
 
   const handleSubmit = useCallback(
-    async (
-      message: string,
-      reviewComments?: DiffComment[],
-      attachments?: MessageAttachment[],
-      inlineMentions?: ContextFile[],
-      inlineTaskMentions?: TaskMentionData[],
-    ) => {
+    async (payload: ChatSubmitPayload) => {
       if (isSending) return;
       setIsSending(true);
       try {
         const finalMessage = buildSubmitMessage({
-          message,
-          reviewComments,
+          message: payload.message,
+          reviewComments: payload.reviewComments,
           pendingPRFeedback,
           planComments,
           walkthroughComments,
           messageComments,
         });
-        const hasReviewComments = !!(reviewComments && reviewComments.length > 0);
+        const outbound = { ...payload, message: finalMessage };
         if (onSend) {
           // Expand task mentions because onSend bypasses useMessageHandler.buildFinalMessage.
-          const taskCtx = inlineTaskMentions?.length
-            ? buildTaskMentionsContext(inlineTaskMentions, storeApi.getState())
+          const taskCtx = payload.inlineTaskMentions?.length
+            ? buildTaskMentionsContext(payload.inlineTaskMentions, storeApi.getState())
             : "";
-          await onSend(finalMessage + taskCtx);
+          await onSend({ ...outbound, message: finalMessage + taskCtx });
         } else {
-          await handleSendMessage(
-            finalMessage,
-            attachments,
-            hasReviewComments,
-            inlineMentions,
-            inlineTaskMentions,
-          );
+          await handleSendMessage(outbound);
         }
-        if (reviewComments && reviewComments.length > 0)
-          markCommentsSent(reviewComments.map((c) => c.id));
+        if (payload.reviewComments && payload.reviewComments.length > 0)
+          markCommentsSent(payload.reviewComments.map((c) => c.id));
         if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
         if (pendingPRFeedback.length > 0) handleClearPRFeedback();
         if (walkthroughComments.length > 0) handleClearWalkthroughComments();
@@ -380,13 +367,7 @@ type ChatInputAreaProps = {
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>;
   clarificationKey: number;
   onClarificationResolved: () => void;
-  handleSubmit: (
-    message: string,
-    reviewComments?: DiffComment[],
-    attachments?: MessageAttachment[],
-    inlineMentions?: ContextFile[],
-    inlineTaskMentions?: TaskMentionData[],
-  ) => ChatSubmitResult;
+  handleSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
   handleCancelTurn: () => Promise<void>;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss?: () => void;
@@ -406,6 +387,20 @@ function useExecutorUnavailable(taskId: string | null, sessionId: string | null)
     unavailable: availability.unavailable,
     reason: availability.status?.label,
   };
+}
+
+function useComposerWorkspaceId(sessionId: string | null, taskId: string | null) {
+  return useAppStore((state) =>
+    resolveComposerWorkspaceId({
+      sessionId,
+      taskId,
+      quickChatSessions: state.quickChat.sessions,
+      activeWorkflowId: state.kanban.workflowId,
+      activeTasks: state.kanban.tasks,
+      snapshots: Object.values(state.kanbanMulti.snapshots),
+      workflows: state.workflows.items,
+    }),
+  );
 }
 
 function useChatInputDerived(
@@ -452,8 +447,8 @@ export function ChatInputArea({
   placeholderOverride,
   surfaceClassName,
 }: ChatInputAreaProps) {
-  const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled, todoItems } =
-    panelState;
+  const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled } = panelState;
+  const composerWorkspaceId = useComposerWorkspaceId(resolvedSessionId, taskId);
   const sessionState = panelState.session?.state ?? null;
   const canDrainQueue = sessionState === "WAITING_FOR_INPUT" || sessionState === "IDLE";
   const { planActions, executor, placeholder } = useChatInputDerived(
@@ -472,7 +467,7 @@ export function ChatInputArea({
         canDrain={canDrainQueue}
         renderStatusBar={(queueChip) => (
           <ChatStatusBar
-            todoItems={todoItems}
+            todoItems={panelState.todoItems}
             taskId={taskId}
             sessionId={resolvedSessionId}
             sessionState={sessionState}
@@ -490,6 +485,8 @@ export function ChatInputArea({
           onSubmit={handleSubmit}
           sessionId={resolvedSessionId}
           taskId={taskId}
+          workspaceId={composerWorkspaceId}
+          entityReferencesEnabled
           taskTitle={panelState.task?.title}
           taskDescription={panelState.taskDescription ?? ""}
           planModeEnabled={planModeEnabled}

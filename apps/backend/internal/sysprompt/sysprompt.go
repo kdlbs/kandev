@@ -90,11 +90,12 @@ func FormatOfficeContext(taskID, sessionID string) string {
 }
 
 // InjectOfficeContext ensures a first-turn prompt has the restricted Office context.
-func InjectOfficeContext(taskID, sessionID, prompt string) string {
+// trustedContents must contain only exact server-generated system block contents.
+func InjectOfficeContext(taskID, sessionID, prompt string, trustedContents ...string) string {
 	return canonicalizeKandevContext(
 		FormatOfficeContext(taskID, sessionID),
 		prompt,
-		trustedContextContents(sessionID),
+		trustedContextContents(sessionID, trustedContents...),
 	)
 }
 
@@ -208,16 +209,27 @@ func InjectKandevContext(taskID, sessionID, prompt string, requiresCompletionSig
 }
 
 // InjectKandevContextWithOptions prepends capability-aware Kandev context.
-func InjectKandevContextWithOptions(taskID, sessionID, prompt string, options KandevContextOptions) string {
+// trustedContents must contain only exact server-generated system block contents.
+func InjectKandevContextWithOptions(
+	taskID, sessionID, prompt string,
+	options KandevContextOptions,
+	trustedContents ...string,
+) string {
 	return canonicalizeKandevContext(
 		FormatKandevContextWithOptions(taskID, sessionID, options),
 		prompt,
-		trustedContextContents(sessionID),
+		trustedContextContents(sessionID, trustedContents...),
 	)
 }
 
-func trustedContextContents(sessionID string) []string {
-	return []string{FormatConfigContext(sessionID), PlanMode(), DefaultPlanPrefix()}
+func trustedContextContents(sessionID string, additional ...string) []string {
+	contents := []string{FormatConfigContext(sessionID), PlanMode(), DefaultPlanPrefix()}
+	for _, content := range additional {
+		if content != "" {
+			contents = append(contents, content)
+		}
+	}
+	return contents
 }
 
 func canonicalizeKandevContext(content, prompt string, trustedContents []string) string {

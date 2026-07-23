@@ -321,6 +321,7 @@ func TestIsNewerCheck(t *testing.T) {
 func TestConvertSearchItemToPR(t *testing.T) {
 	now := time.Now()
 	pr := convertSearchItemToPR(
+		101, "PR_kwDOA",
 		42, "Fix bug", "https://github.com/owner/repo/pull/42", "open",
 		"alice", "https://api.github.com/repos/myorg/myrepo", "", false,
 		now, now,
@@ -328,6 +329,9 @@ func TestConvertSearchItemToPR(t *testing.T) {
 
 	if pr.Number != 42 {
 		t.Errorf("expected number 42, got %d", pr.Number)
+	}
+	if pr.ID != 101 || pr.NodeID != "PR_kwDOA" {
+		t.Errorf("identity = (%d, %q), want (101, PR_kwDOA)", pr.ID, pr.NodeID)
 	}
 	if pr.Title != "Fix bug" {
 		t.Errorf("expected title 'Fix bug', got %s", pr.Title)
@@ -350,6 +354,7 @@ func TestConvertSearchItemToPRMerged(t *testing.T) {
 	now := time.Now()
 	mergedAt := "2025-01-02T03:04:05Z"
 	pr := convertSearchItemToPR(
+		102, "PR_kwDOB",
 		7, "Land feature", "https://github.com/owner/repo/pull/7", "closed",
 		"bob", "https://api.github.com/repos/myorg/myrepo", mergedAt, false,
 		now, now,

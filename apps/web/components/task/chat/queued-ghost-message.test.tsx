@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueuedGhostMessage } from "./queued-ghost-message";
+import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
+import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
+import type { EntityReference } from "@/lib/types/entity-reference";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
 afterEach(() => {
@@ -33,6 +37,43 @@ function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
     queued_by: "user-1",
     ...overrides,
   };
+}
+
+function taskReference(overrides: Partial<EntityReference> = {}): EntityReference {
+  return {
+    version: 1,
+    ref: "mention:v1:kandev:task:workspace-1:task-1",
+    provider: "kandev",
+    kind: "task",
+    id: "task-1",
+    key: "KAN-1",
+    title: "Fix authentication",
+    url: "/t/task-1",
+    scope: "workspace-1",
+    ...overrides,
+  };
+}
+
+function issueReference(): EntityReference {
+  return {
+    version: 1,
+    ref: "mention:v1:jira:issue:https%3A%2F%2Fjira.example:10001",
+    provider: "jira",
+    kind: "issue",
+    id: "10001",
+    key: "ENG-1",
+    title: "Fix login flow",
+    url: "https://jira.example/browse/ENG-1",
+    scope: "https://jira.example",
+  };
+}
+
+function renderWithProviders(node: React.ReactNode) {
+  return render(
+    <StateProvider>
+      <ToastProvider>{node}</ToastProvider>
+    </StateProvider>,
+  );
 }
 
 describe("QueuedGhostMessage workflow badge", () => {
@@ -153,5 +194,77 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
       <QueuedGhostMessage entry={entry()} canEdit onSave={async () => {}} onRemove={() => {}} />,
     );
     expect(container.querySelector("img")).toBeNull();
+  });
+});
+
+describe("QueuedGhostMessage entity references", () => {
+  it("renders an exact queued Markdown link as an accessible chip", () => {
+    const reference = taskReference();
+
+    renderWithProviders(
+      <QueuedGhostMessage
+        entry={entry({
+          content: entityReferenceMarkdown(reference),
+          metadata: { entity_references: [reference] },
+        })}
+        canEdit
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    const chip = screen.getByTestId("entity-reference-chip");
+    expect(chip.getAttribute("href")).toBe("/t/task-1");
+    expect(chip.getAttribute("target")).toBe("_self");
+  });
+
+  it("recomputes surviving references in edited document order", async () => {
+    const task = taskReference();
+    const issue = issueReference();
+    const edited = `${entityReferenceMarkdown(issue)} then ${entityReferenceMarkdown(task)}`;
+    const onSave = vi.fn(async () => {});
+
+    renderWithProviders(
+      <QueuedGhostMessage
+        entry={entry({
+          content: `${entityReferenceMarkdown(task)} then ${entityReferenceMarkdown(issue)}`,
+          metadata: { entity_references: [task, issue] },
+        })}
+        canEdit
+        onSave={onSave}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle("Edit queued message"));
+    fireEvent.change(screen.getByTestId("queue-edit-textarea"), { target: { value: edited } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(edited, [issue, task]));
+  });
+
+  it("sends an explicit empty reference replacement after all links are removed", async () => {
+    const reference = taskReference();
+    const onSave = vi.fn(async () => {});
+
+    renderWithProviders(
+      <QueuedGhostMessage
+        entry={entry({
+          content: entityReferenceMarkdown(reference),
+          metadata: { entity_references: [reference] },
+        })}
+        canEdit
+        onSave={onSave}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle("Edit queued message"));
+    fireEvent.change(screen.getByTestId("queue-edit-textarea"), {
+      target: { value: "reference removed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("reference removed", []));
   });
 });

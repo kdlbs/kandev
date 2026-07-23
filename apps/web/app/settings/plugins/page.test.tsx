@@ -217,7 +217,12 @@ describe("PluginsSettingsPage", () => {
     );
     await vi.waitFor(() =>
       expect(loadPluginsSpy).toHaveBeenCalledWith(
-        [expect.objectContaining({ id: PLUGIN_ID, bundleUrl: `/api/plugins/${PLUGIN_ID}/bundle` })],
+        [
+          expect.objectContaining({
+            id: PLUGIN_ID,
+            bundleUrl: `/api/plugins/${PLUGIN_ID}/bundle?v=1.0.0`,
+          }),
+        ],
         expect.any(Function),
       ),
     );
@@ -266,7 +271,7 @@ describe("PluginsSettingsPage install dialog", () => {
         [
           expect.objectContaining({
             id: NEW_PLUGIN_ID,
-            bundleUrl: `/api/plugins/${NEW_PLUGIN_ID}/bundle`,
+            bundleUrl: `/api/plugins/${NEW_PLUGIN_ID}/bundle?v=1.0.0`,
           }),
         ],
         expect.any(Function),

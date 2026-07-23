@@ -54,7 +54,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await textarea.pressSequentially("@");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await expect(testPage.getByRole("button", { name: /qa-alpha/ })).toBeVisible();
+    await expect(testPage.getByRole("option", { name: /qa-alpha/ })).toBeVisible();
   });
 
   test("Escape closes the menu without inserting the prompt", async ({ testPage, apiClient }) => {
@@ -98,8 +98,8 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
     // Both should be visible.
-    await expect(testPage.getByRole("button", { name: /qa-arr-1/ })).toBeVisible();
-    await expect(testPage.getByRole("button", { name: /qa-arr-2/ })).toBeVisible();
+    await expect(testPage.getByRole("option", { name: /qa-arr-1/ })).toBeVisible();
+    await expect(testPage.getByRole("option", { name: /qa-arr-2/ })).toBeVisible();
 
     await textarea.press("ArrowDown");
     await textarea.press("Enter");
@@ -128,7 +128,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await textarea.pressSequentially("@qa-mo");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await testPage.getByRole("button", { name: /qa-mouse/ }).click();
+    await testPage.getByRole("option", { name: /qa-mouse/ }).click();
 
     await expect(textarea).toHaveValue("MOUSE_CONTENT");
     await expect(testPage.getByText(MENU_TITLE)).not.toBeVisible();

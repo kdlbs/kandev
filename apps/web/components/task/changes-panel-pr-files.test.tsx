@@ -17,6 +17,7 @@ describe("PRFilesGroupedList", () => {
             minus: 0,
             oldPath: undefined,
             repository_name: "backend",
+            prKey: "acme/backend/42",
           },
         ]}
         onOpenDiff={onOpenDiff}
@@ -27,6 +28,7 @@ describe("PRFilesGroupedList", () => {
     expect(onOpenDiff).toHaveBeenCalledWith("README.md", {
       source: "pr",
       repositoryName: "backend",
+      prKey: "acme/backend/42",
     });
   });
 

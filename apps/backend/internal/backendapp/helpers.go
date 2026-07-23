@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -38,6 +39,7 @@ import (
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
@@ -713,11 +715,25 @@ func bootActivePlugins(p routeParams) []webapp.ActivePluginPayload {
 		out = append(out, webapp.ActivePluginPayload{
 			ID:        rec.ID,
 			Name:      rec.DisplayName,
-			BundleURL: "/api/plugins/" + rec.ID + "/bundle",
+			BundleURL: pluginBundleURL(rec),
 			StyleURLs: pluginStyleURLs(rec),
 		})
 	}
 	return out
+}
+
+// pluginBundleURL builds the browser-facing bundle URL, mirrored on the
+// frontend by lib/plugins/active-plugin.ts's toActivePlugin. The `?v=`
+// query param keys the URL on the installed version so an updated plugin
+// resolves to a *different* module specifier: without it,
+// unloadPlugin(id, {evictCache: true}) (apps/web/lib/plugins/host.ts) drops
+// the cached bundle registration on update, but a same-tab re-import() of
+// the identical URL returns the browser's already-evaluated ES module
+// without re-running its top-level registerKandevPlugin() call — leaving
+// the plugin active but unregistered. An unchanged version keeps the same
+// URL across boots, so normal (non-update) loads stay cache-friendly.
+func pluginBundleURL(rec pluginstore.Record) string {
+	return "/api/plugins/" + rec.ID + "/bundle?v=" + url.QueryEscape(rec.Version)
 }
 
 // pluginStyleURLs maps a plugin's root-relative ui.styles paths to
@@ -840,6 +856,9 @@ func resolveRepositoryIDForSessionSubpath(ctx context.Context, taskRepo *sqliter
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
 func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	if p.services != nil {
+		registerMentionRoutes(p.router, p.services.Mentions)
+	}
 	taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	if p.services != nil && p.services.User != nil {
@@ -865,9 +884,13 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.agentList, p.log)
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	var referenceValidators []entityrefs.SubmissionValidator
+	if p.services != nil && p.services.Mentions != nil && p.services.Mentions.Submission != nil {
+		referenceValidators = append(referenceValidators, p.services.Mentions.Submission)
+	}
 	taskhandlers.RegisterMessageRoutes(
 		p.router, p.gateway.Dispatcher, p.taskSvc,
-		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log,
+		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
 	taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
 	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.log)

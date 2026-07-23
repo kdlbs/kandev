@@ -104,7 +104,7 @@ func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prom
 	return &orchestrator.PromptResult{}, nil
 }
 
-func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, _, _ bool, _ []v1.MessageAttachment) (*executor.TaskExecution, error) {
+func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, _, _ bool, _ []v1.MessageAttachment, _ []v1.EntityReference) (*executor.TaskExecution, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startCreatedCalls = append(f.startCreatedCalls, startCreatedCall{
