@@ -1130,6 +1130,8 @@ func (c *GHClient) parsePRList(data string, owner, repo string) ([]*PR, error) {
 
 // ghSearchItem is a PR item from the GitHub search API.
 type ghSearchItem struct {
+	ID        int64     `json:"id"`
+	NodeID    string    `json:"node_id"`
 	Number    int       `json:"number"`
 	Title     string    `json:"title"`
 	HTMLURL   string    `json:"html_url"`
@@ -1155,6 +1157,7 @@ func (c *GHClient) parseSearchResults(data string) ([]*PR, error) {
 	prs := make([]*PR, len(items))
 	for i, item := range items {
 		prs[i] = convertSearchItemToPR(
+			item.ID, item.NodeID,
 			item.Number, item.Title, item.HTMLURL, item.State,
 			item.User.Login, item.RepositoryURL, item.PullRequest.MergedAt,
 			item.Draft, item.CreatedAt, item.UpdatedAt,

@@ -63,8 +63,17 @@ const kandevContextMarker = "KANDEV MCP TOOLS"
 // block — a user message body that happens to mention "KANDEV MCP TOOLS"
 // would not falsely signal that the wrap is already applied.
 func HasKandevContext(text string) bool {
+	return HasSystemMarker(text, kandevContextMarker)
+}
+
+// HasSystemMarker reports whether marker appears within a
+// <kandev-system>...</kandev-system> block in text. Unlike a plain
+// strings.Contains(text, marker), this will not false-positive on
+// caller-controlled text that happens to mention marker outside any system
+// block — the same scoping HasKandevContext relies on.
+func HasSystemMarker(text, marker string) bool {
 	for _, block := range systemTagRegex.FindAllString(text, -1) {
-		if strings.Contains(block, kandevContextMarker) {
+		if strings.Contains(block, marker) {
 			return true
 		}
 	}

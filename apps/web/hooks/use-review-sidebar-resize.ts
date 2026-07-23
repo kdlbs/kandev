@@ -53,6 +53,7 @@ function restoreBodyStyles() {
 export function useReviewSidebarResize(
   containerRef?: React.RefObject<HTMLElement | null>,
   open = true,
+  sourceKey?: string,
 ) {
   const [width, setWidth] = useState<number>(readStoredWidth);
   const isDragging = useRef(false);
@@ -65,7 +66,8 @@ export function useReviewSidebarResize(
   // because the container element only exists once Radix mounts the
   // DialogContent portal — on the closed → open transition, `containerRef`
   // (a stable ref *object*) doesn't change identity, so the effect needs
-  // `open` to re-fire and pick up the now-populated `current`.
+  // `open` to re-fire and pick up the now-populated `current`. `sourceKey`
+  // likewise reattaches the observer when React replaces a keyed container.
   useEffect(() => {
     if (!open) return;
     const el = containerRef?.current;
@@ -79,7 +81,7 @@ export function useReviewSidebarResize(
     const ro = new ResizeObserver(reclamp);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [containerRef, open]);
+  }, [containerRef, open, sourceKey]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {

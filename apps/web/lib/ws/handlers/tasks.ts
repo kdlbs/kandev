@@ -343,14 +343,19 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
   //  - the user is currently viewing this task,
   //  - the user was sitting on the previous primary,
   //  - they do NOT have a non-terminal pinned session for this task, and
-  //  - the primary actually changed.
+  //  - a real previous primary actually changed.
   // This makes workflow profile switches transparent for unpinned users
-  // without yanking users off a live session they deliberately selected.
+  // without yanking users off a live session they deliberately selected. A
+  // pinned user whose session is being retired is followed via the session
+  // state-transition handoff (maybeAdoptSessionOnTransition) once that session
+  // actually reaches a terminal state — not from here, where we cannot yet tell
+  // a retirement from a manual "Set as Primary" that leaves the old session live.
   const afterState = store.getState();
   logTaskMerge("task.updated", beforeState, afterState, message.payload);
   const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
   if (
     newPrimary &&
+    previousPrimary &&
     newPrimary !== previousPrimary &&
     afterState.tasks.activeTaskId === taskId &&
     afterState.tasks.activeSessionId === previousPrimary &&

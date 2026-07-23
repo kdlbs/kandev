@@ -8,16 +8,12 @@ import {
 } from "@/hooks/domains/session/use-session-git-status";
 import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
 import { useFileEditors } from "@/hooks/use-file-editors";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useReviewPRSelection } from "@/hooks/domains/github/use-review-pr-selection";
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
+import { usePRReviewRepositoryIdentity } from "@/hooks/domains/github/use-pr-review-repository-identity";
 import { useTaskRepositories } from "@/hooks/domains/kanban/use-task-repositories";
-import { useRepository } from "@/hooks/domains/workspace/use-repository";
 import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
-import {
-  getCumulativeReviewRepositoryNames,
-  isReviewMultiRepo,
-  resolvePRReviewRepositoryName,
-} from "@/components/review/types";
+import { getCumulativeReviewRepositoryNames, isReviewMultiRepo } from "@/components/review/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
@@ -111,16 +107,22 @@ export function useReviewDialog(effectiveSessionId: string | null) {
     cumulativeRepositoryNames,
   );
   const { openFile: reviewOpenFile } = useFileEditors();
-  const reviewTaskPR = useActiveTaskPR();
-  const reviewPRRepository = useRepository(reviewTaskPR?.repository_id ?? null);
-  const reviewPRRepositoryName = resolvePRReviewRepositoryName(
+  const {
+    prs: reviewPRs,
+    selectedPR: reviewTaskPR,
+    selectedKey: reviewSelectedPRKey,
+    selectPR: reviewSelectPR,
+  } = useReviewPRSelection(activeTaskId);
+  const reviewPRRepositoryName = usePRReviewRepositoryIdentity(
+    activeTaskId,
+    effectiveSessionId,
     reviewTaskPR,
-    reviewPRRepository?.name,
   );
-  const { files: reviewPRDiffFiles } = usePRDiff(
+  const reviewPRDiff = usePRDiff(
     reviewTaskPR?.owner ?? null,
     reviewTaskPR?.repo ?? null,
     reviewTaskPR?.pr_number ?? null,
+    reviewTaskPR?.last_synced_at ?? null,
   );
 
   const handleReviewSendComments = useCallback(
@@ -155,7 +157,14 @@ export function useReviewDialog(effectiveSessionId: string | null) {
     baseBranch,
     reviewGitStatusFiles: reviewGitStatus.files,
     reviewCumulativeDiff,
-    reviewPRDiffFiles,
+    reviewPRs,
+    reviewSelectedPR: reviewTaskPR,
+    reviewSelectedPRKey,
+    reviewSelectPR,
+    reviewPRDiffFiles: reviewPRDiff.files,
+    reviewPRDiffLoading: reviewPRDiff.loading,
+    reviewPRDiffError: reviewPRDiff.error,
+    reviewRefreshPRDiff: reviewPRDiff.refresh,
     reviewPRRepoName: reviewGitStatus.isMultiRepo ? reviewPRRepositoryName : undefined,
     reviewUseRepositoryKeys: reviewGitStatus.isMultiRepo,
     reviewOpenFile,

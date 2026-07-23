@@ -22,8 +22,10 @@ Mobile users need the same task controls as desktop without relying on long pres
 - Search and live workflow/task updates choose a deterministic visible fallback if the focused workflow disappears.
 - Pipeline is not offered or rendered on mobile. A saved desktop Pipeline preference falls back to Kanban on mobile without overwriting that preference.
 - Tapping a mobile Home task opens that task directly. Task actions remain available from the card's explicit context menu; the intermediate task action sheet is absent.
+- Opening a task route shows visible, accessible loading feedback while required task data loads. Optional route enrichment is bounded and may recover client-side; it cannot leave the task route blank indefinitely or mark unavailable data as authoritatively empty.
 - Editing a task from a mobile context menu exposes its title even after work has started. The existing lock on a started task's prompt remains unchanged.
 - The mobile Home menu and Dockview task switcher open as inset, card-style bottom surfaces with internal vertical scrolling and safe-area spacing, rather than edge-to-edge side sheets.
+- Switching tasks from the mobile task switcher keeps the workbench usable while destination details hydrate. Transient placeholder data must not crash mobile chrome, and a remembered panel that is unavailable for the destination falls back to Chat.
 - The active-session control at the top of mobile Dockview shows the active agent's icon beside its session label.
 - Desktop and tablet Kanban, context menus, drag/drop, and workflow filtering retain their existing behavior.
 
@@ -39,8 +41,11 @@ Mobile users need the same task controls as desktop without relying on long pres
 - **GIVEN** the focused workflow no longer matches search/filter results, **WHEN** the visible workflow set updates, **THEN** mobile Kanban focuses the first visible workflow without leaving an empty stacked board.
 - **GIVEN** Pipeline is saved as the user's desktop view, **WHEN** Home opens on mobile, **THEN** Kanban renders, Pipeline is absent from the mobile view choices, and the saved preference remains Pipeline.
 - **GIVEN** a task card on mobile Home, **WHEN** the user taps the card body, **THEN** the task route opens immediately and no task action sheet appears.
+- **GIVEN** a mobile task route whose optional hydration is delayed or fails, **WHEN** the user opens the task, **THEN** visible loading feedback appears and the core task remains recoverable without an indefinite blank screen.
 - **GIVEN** a started task on mobile Home, **WHEN** the user chooses Edit from its context menu, **THEN** the title can be changed while the prompt remains locked.
 - **GIVEN** the mobile Home menu or Dockview task switcher is opened, **WHEN** its content exceeds the viewport, **THEN** an inset bottom card remains within the safe area and scrolls internally.
+- **GIVEN** two tasks with active sessions, **WHEN** the user selects the other task from the mobile task switcher, **THEN** the destination URL, title, and chat render without a blank screen or mobile-chrome crash.
+- **GIVEN** Review is remembered for a mobile session but its selected merge request is no longer available, **WHEN** the session becomes active, **THEN** Chat is rendered and selected instead of an empty center pane.
 - **GIVEN** a mobile Dockview task with an active session, **WHEN** its chat panel is visible, **THEN** the active-session control shows the session agent's icon and label.
 - **GIVEN** a desktop viewport, **WHEN** the same task menus and Kanban open, **THEN** their existing desktop interaction and layout remain unchanged.
 

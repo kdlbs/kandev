@@ -9,6 +9,8 @@ import { useAppStore } from "@/components/state-provider";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
+import type { TaskMentionData } from "@/hooks/use-inline-mention";
+import type { EntityReference } from "@/lib/types/entity-reference";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useChatInputContainer } from "./use-chat-input-container";
 import {
@@ -44,16 +46,21 @@ export type ChatInputContainerHandle = {
 
 export type ChatSubmitResult = void | boolean | Promise<void | boolean>;
 
+export type ChatSubmitPayload = {
+  message: string;
+  reviewComments?: DiffComment[];
+  attachments?: MessageAttachment[];
+  inlineMentions?: ContextFile[];
+  inlineTaskMentions?: TaskMentionData[];
+  entityReferences?: EntityReference[];
+};
+
 type ChatInputContainerProps = {
-  onSubmit: (
-    message: string,
-    reviewComments?: DiffComment[],
-    attachments?: MessageAttachment[],
-    inlineMentions?: ContextFile[],
-    inlineTaskMentions?: import("@/hooks/use-inline-mention").TaskMentionData[],
-  ) => ChatSubmitResult;
+  onSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId: string | null;
   taskId: string | null;
+  workspaceId?: string | null;
+  entityReferencesEnabled?: boolean;
   taskTitle?: string;
   taskDescription: string;
   planModeEnabled: boolean;
@@ -224,6 +231,7 @@ type NormalizedChatInputProps = ChatInputContainerProps & {
   contextFiles: ContextFile[];
   contextItems: ContextItem[];
   showRequestChangesTooltip: boolean;
+  entityReferencesEnabled: boolean;
 };
 
 function normalizeChatInputProps(p: ChatInputContainerProps): NormalizedChatInputProps {
@@ -236,6 +244,7 @@ function normalizeChatInputProps(p: ChatInputContainerProps): NormalizedChatInpu
     contextFiles: p.contextFiles ?? [],
     contextItems: p.contextItems ?? [],
     showRequestChangesTooltip: p.showRequestChangesTooltip ?? false,
+    entityReferencesEnabled: p.entityReferencesEnabled ?? false,
   };
 }
 
@@ -280,6 +289,8 @@ function buildEditorAreaProps(
     setIsInputFocused: s.setIsInputFocused,
     sessionId: p.sessionId,
     taskId: p.taskId,
+    workspaceId: p.workspaceId ?? null,
+    entityReferencesEnabled: p.entityReferencesEnabled,
     onAddContextFile: p.onAddContextFile,
     onToggleContextFile: p.onToggleContextFile,
     planContextEnabled: p.planContextEnabled,

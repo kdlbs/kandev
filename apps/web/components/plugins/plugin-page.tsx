@@ -65,7 +65,7 @@ export function PluginPageFrame({ registration, children }: PluginPageFrameProps
   const Icon = lookupPluginIcon(chrome.icon);
   const Actions = chrome.Actions;
   return (
-    <div className="flex h-screen w-full flex-col bg-background">
+    <div className="flex h-full min-h-0 w-full flex-col bg-background">
       <PageTopbar
         title={chrome.title}
         subtitle={chrome.subtitle}

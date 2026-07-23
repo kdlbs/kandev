@@ -48,10 +48,8 @@ import {
 } from "./dockview-desktop-layout-hooks";
 import { renderPanel } from "./dockview-panel-content";
 import { PreviewController } from "./preview-controller";
-import { WalkthroughOverlay } from "@/components/review/walkthrough-overlay";
 import { BottomTerminalPanel } from "./bottom-terminal-panel";
-import { DockviewReviewDialog } from "./dockview-review-dialog";
-import { useReviewDialog } from "./use-review-dialog";
+import { TaskReviewDialogMount } from "./dockview-review-dialog";
 
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
@@ -369,8 +367,6 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const envIdRef = useRef<string | null>(effectiveEnvId);
   const hasDevScript = Boolean(repository?.dev_script?.trim());
 
-  const review = useReviewDialog(effectiveSessionId);
-
   const userDefaultLayout = useSyncUserDefaultLayout();
   useLspFileOpener();
   useEditorKeybinds();
@@ -436,12 +432,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       />
       <BottomTerminalPanel />
       <PanelPortalHost renderPanel={renderPanel} />
-      <DockviewReviewDialog sessionId={effectiveSessionId} review={review} />
-      <WalkthroughOverlay
-        taskId={activeTaskId}
-        sessionId={effectiveSessionId}
-        onSelectFile={review.reviewOpenFile}
-      />
+      <TaskReviewDialogMount taskId={activeTaskId} sessionId={effectiveSessionId} />
     </div>
   );
 });

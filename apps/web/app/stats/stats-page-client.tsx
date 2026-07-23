@@ -67,7 +67,7 @@ interface StatsPageClientProps {
 
 function StatsEmptyState({ message }: { message: string }) {
   return (
-    <div className="h-screen w-full flex flex-col bg-background">
+    <div className="flex h-full min-h-0 w-full flex-col bg-background">
       <PageTopbar title="Statistics" icon={<IconChartBar className="h-4 w-4" />} />
       <div className="flex-1 flex items-center justify-center">
         <p className="text-muted-foreground">{message}</p>
@@ -409,7 +409,7 @@ export function StatsPageClient({ workspaceId, activeRange, initialError }: Stat
 
   if (initialError)
     return (
-      <div className="h-screen w-full flex flex-col bg-background">
+      <div className="flex h-full min-h-0 w-full flex-col bg-background">
         <PageTopbar title="Statistics" icon={<IconChartBar className="h-4 w-4" />} />
         <div className="flex-1 flex items-center justify-center">
           <p className="text-destructive">Error loading stats: {initialError}</p>
@@ -419,7 +419,7 @@ export function StatsPageClient({ workspaceId, activeRange, initialError }: Stat
   if (!workspaceId) return <StatsEmptyState message="Select a workspace to view statistics." />;
 
   return (
-    <div className="h-screen w-full flex flex-col bg-background">
+    <div className="flex h-full min-h-0 w-full flex-col bg-background">
       <StatsHeader
         global={globalReady}
         range={range}

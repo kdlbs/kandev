@@ -315,7 +315,7 @@ export interface RestartResponse {
   message: string;
 }
 
-export type LicenseEcosystem = "npm" | "go";
+export type LicenseEcosystem = "npm" | "go" | "source";
 
 export interface LicenseEntry {
   name: string;

@@ -1,4 +1,5 @@
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
+import { AppStatusSurfaceProvider } from "@/components/app-status-bar/app-status-surface-provider";
 import { CommandPanel } from "@/components/command-panel";
 import { ConfigChatProvider } from "@/components/config-chat/config-chat-provider";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
@@ -40,10 +41,12 @@ export function AppShell({ children }: AppShellProps) {
               <RecentTaskSwitcher />
               <ConfigChatProvider>
                 <QuickChatProvider>
-                  <div className="flex h-screen min-h-0 w-full overflow-hidden">
-                    <AppSidebar />
-                    <main className="flex-1 min-w-0 min-h-0 flex flex-col">{children}</main>
-                  </div>
+                  <AppStatusSurfaceProvider>
+                    <div className="flex min-h-0 flex-1 overflow-hidden">
+                      <AppSidebar />
+                      <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+                    </div>
+                  </AppStatusSurfaceProvider>
                 </QuickChatProvider>
               </ConfigChatProvider>
             </CommandRegistryProvider>

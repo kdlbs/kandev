@@ -11,14 +11,19 @@ import type { PRChangedFile } from "./changes-panel-timeline";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
-import { useActiveTaskPRsWithFiles } from "@/hooks/domains/github/use-active-task-pr-files";
+import { useReviewPRSelection } from "@/hooks/domains/github/use-review-pr-selection";
+import {
+  prFetchKey,
+  useActiveTaskPRsWithFiles,
+} from "@/hooks/domains/github/use-active-task-pr-files";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
+import { usePRReviewRepositoryIdentity } from "@/hooks/domains/github/use-pr-review-repository-identity";
 import {
   getCumulativeReviewRepositoryNames,
   isReviewMultiRepo,
   resolvePRReviewRepositoryName,
 } from "@/components/review/types";
+import { prTaskKey } from "@/components/github/pr-utils";
 import {
   type ChangedFile,
   computePRGroupStamp,
@@ -33,6 +38,7 @@ import {
   type ReviewProgressPRSource,
 } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
+import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 
 function useChangesPanelStoreData() {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -154,8 +160,88 @@ function usePerRepoCallbacks(
   );
 }
 
-function useChangesPanelPRData(repositoryNames: string[]) {
+type ChangesPanelPRBuildInput = {
+  prs: TaskPR[];
+  filesByPRKey: Record<string, PRDiffFile[]>;
+  repoNameById: Record<string, string>;
+  taskHasMultipleRepos: boolean;
+  selectedPRId: string | undefined;
+  selectedPRRepositoryName: string | undefined;
+  useRepositoryKeys: boolean;
+};
+
+function countPRsByRepository(prs: TaskPR[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const pr of prs) {
+    const repositoryId = pr.repository_id ?? "";
+    counts.set(repositoryId, (counts.get(repositoryId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function repositoryNameForPR(pr: TaskPR, repoNameById: Record<string, string>): string {
+  if (!pr.repository_id) return "";
+  return repoNameById[pr.repository_id] ?? "";
+}
+
+function progressRepositoryName(
+  pr: TaskPR,
+  selectedPRId: string | undefined,
+  selectedPRRepositoryName: string | undefined,
+  workspaceRepositoryName: string,
+): string {
+  if (pr.id === selectedPRId && selectedPRRepositoryName) return selectedPRRepositoryName;
+  return resolvePRReviewRepositoryName(pr, workspaceRepositoryName || undefined) ?? pr.repo;
+}
+
+function buildChangesPanelPRData({
+  prs,
+  filesByPRKey,
+  repoNameById,
+  taskHasMultipleRepos,
+  selectedPRId,
+  selectedPRRepositoryName,
+  useRepositoryKeys,
+}: ChangesPanelPRBuildInput): { prFiles: PRChangedFile[]; prDiffFiles: PRDiffFile[] } {
+  const merged: PRChangedFile[] = [];
+  const progressSources = new Map<string, ReviewProgressPRSource>();
+  const prCounts = countPRsByRepository(prs);
+  const anyRepoMultiPR = Array.from(prCounts.values()).some((count) => count > 1);
+  const needsStamp = prs.length > 1;
+
+  for (const pr of prs) {
+    const files = filesByPRKey[prFetchKey(pr)] ?? [];
+    const repositoryName = repositoryNameForPR(pr, repoNameById);
+    const stamp = computePRGroupStamp({
+      needsStamp,
+      taskHasMultipleRepos,
+      anyRepoMultiPR,
+      repoName: repositoryName || `${pr.owner}/${pr.repo}`,
+      branch: pr.head_branch ?? "",
+      prNumber: pr.pr_number,
+    });
+    merged.push(...mapPRFilesToChangedFiles(files, stamp, prTaskKey(pr)));
+    progressSources.set(pr.id, {
+      repositoryName: progressRepositoryName(
+        pr,
+        selectedPRId,
+        selectedPRRepositoryName,
+        repositoryName,
+      ),
+      files,
+    });
+  }
+
+  return {
+    prFiles: merged,
+    prDiffFiles: selectPRFilesForReviewProgress(progressSources, selectedPRId, useRepositoryKeys),
+  };
+}
+
+function useChangesPanelPRData(repositoryNames: string[], sessionId: string | null) {
   const { prs, filesByPRKey } = useActiveTaskPRsWithFiles();
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const { selectedPR: taskPR } = useReviewPRSelection(activeTaskId);
   const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const repoNameById = useMemo(() => buildRepoNameById(reposByWorkspace), [reposByWorkspace]);
   const taskRepositoryCount = useAppStore((s) => {
@@ -166,7 +252,7 @@ function useChangesPanelPRData(repositoryNames: string[]) {
   });
   const taskHasMultipleRepos = taskRepositoryCount > 1;
   const useRepositoryKeys = isReviewMultiRepo(taskRepositoryCount, repositoryNames);
-  const taskPR = useActiveTaskPR();
+  const selectedPRRepositoryName = usePRReviewRepositoryIdentity(activeTaskId, sessionId, taskPR);
   const refreshKey = taskPR?.last_synced_at ?? null;
   const { commits: prCommitsList } = usePRCommits(
     taskPR?.owner ?? null,
@@ -174,52 +260,27 @@ function useChangesPanelPRData(repositoryNames: string[]) {
     taskPR?.pr_number ?? null,
     refreshKey,
   );
-  const { prFiles, prDiffFiles } = useMemo(() => {
-    const merged: PRChangedFile[] = [];
-    const progressSources = new Map<string, ReviewProgressPRSource>();
-    // Multi-branch tasks open multiple PRs on the same repo — files must
-    // split by PR so the agent's two branches don't get conflated under one
-    // "kandev" header. We stamp each row with a label unique per PR.
-    //
-    //  - 1 PR total            → no stamp (single section header is enough)
-    //  - Multi-repo, 1 PR/repo → stamp = repo name (legacy behavior)
-    //  - Multi-PR per repo     → stamp = "<repo> · <head_branch>" so the
-    //                            group label still names the repo but
-    //                            disambiguates the branch the PR is on
-    //  - Single repo + N PRs   → stamp = head_branch (repo is redundant)
-    const prCountByRepoID = new Map<string, number>();
-    for (const pr of prs) {
-      const key = pr.repository_id ?? "";
-      prCountByRepoID.set(key, (prCountByRepoID.get(key) ?? 0) + 1);
-    }
-    const anyRepoMultiPR = Array.from(prCountByRepoID.values()).some((n) => n > 1);
-    const needsStamp = prs.length > 1;
-    for (const pr of prs) {
-      const key = `${pr.owner}/${pr.repo}/${pr.pr_number}/${pr.last_synced_at ?? ""}`;
-      const files = filesByPRKey[key] ?? [];
-      const repoName = pr.repository_id ? (repoNameById[pr.repository_id] ?? "") : "";
-      const branch = pr.head_branch ?? "";
-      const stamp = computePRGroupStamp({
-        needsStamp,
+  const { prFiles, prDiffFiles } = useMemo(
+    () =>
+      buildChangesPanelPRData({
+        prs,
+        filesByPRKey,
+        repoNameById,
         taskHasMultipleRepos,
-        anyRepoMultiPR,
-        repoName: repoName || `${pr.owner}/${pr.repo}`,
-        branch,
-        prNumber: pr.pr_number,
-      });
-      merged.push(...mapPRFilesToChangedFiles(files, stamp));
-      progressSources.set(pr.id, {
-        repositoryName: resolvePRReviewRepositoryName(pr, repoName || undefined) ?? pr.repo,
-        files,
-      });
-    }
-    const progressFiles = selectPRFilesForReviewProgress(
-      progressSources,
+        selectedPRId: taskPR?.id,
+        selectedPRRepositoryName,
+        useRepositoryKeys,
+      }),
+    [
+      prs,
+      filesByPRKey,
+      repoNameById,
+      taskHasMultipleRepos,
       taskPR?.id,
+      selectedPRRepositoryName,
       useRepositoryKeys,
-    );
-    return { prFiles: merged, prDiffFiles: progressFiles };
-  }, [prs, filesByPRKey, repoNameById, taskHasMultipleRepos, taskPR?.id, useRepositoryKeys]);
+    ],
+  );
   const hasPRFiles = prFiles.length > 0;
   const hasPRCommits = prCommitsList.length > 0;
   return {
@@ -246,7 +307,7 @@ export function useChangesPanelData() {
     () => [...git.repoNames, ...getCumulativeReviewRepositoryNames(git.cumulativeDiff?.files)],
     [git.repoNames, git.cumulativeDiff],
   );
-  const prData = useChangesPanelPRData(reviewRepositoryNames);
+  const prData = useChangesPanelPRData(reviewRepositoryNames, activeSessionId);
   const vcsDialogs = useVcsDialogs();
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);

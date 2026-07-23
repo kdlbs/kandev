@@ -120,6 +120,7 @@ function PRFileRow({
   return (
     <li
       data-changes-file={file.path}
+      data-pr-key={file.prKey}
       data-active={isActive ? "true" : "false"}
       className={cn(
         "group flex items-center justify-between gap-2 text-sm rounded-md px-2 py-1.5 -mx-1 cursor-pointer md:px-1 md:py-0.5",
@@ -129,6 +130,7 @@ function PRFileRow({
         onOpenDiff(file.path, {
           source: "pr",
           repositoryName: file.repository_name || undefined,
+          prKey: file.prKey,
         })
       }
     >

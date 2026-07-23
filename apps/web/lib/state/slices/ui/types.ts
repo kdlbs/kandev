@@ -53,6 +53,10 @@ export type ChatInputState = {
   planModeBySessionId: Record<string, boolean>;
 };
 
+export type ReviewPRSelectionState = {
+  selectedKeyByTaskId: Record<string, string>;
+};
+
 export type ActiveDocument =
   | { type: "plan"; taskId: string }
   | { type: "file"; path: string; name: string };
@@ -143,6 +147,7 @@ export type UISliceState = {
   mobileKanban: MobileKanbanState;
   mobileSession: MobileSessionState;
   chatInput: ChatInputState;
+  reviewPRSelection: ReviewPRSelectionState;
   documentPanel: DocumentPanelState;
   systemHealth: SystemHealthState;
   quickChat: QuickChatState;
@@ -190,6 +195,7 @@ export type UISliceActions = {
   setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setReviewPRSelection: (taskId: string, selectedKey: string) => void;
   setActiveDocument: (sessionId: string, doc: ActiveDocument | null) => void;
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;

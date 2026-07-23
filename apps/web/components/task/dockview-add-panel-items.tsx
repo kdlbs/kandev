@@ -9,8 +9,7 @@ import {
   IconGitPullRequest,
 } from "@tabler/icons-react";
 import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
-import { prPanelLabel, prIdentitySlug } from "@/components/github/pr-utils";
-import { prTaskKey } from "@/components/github/pr-detail-panel";
+import { prPanelLabel, prIdentitySlug, prTaskKey } from "@/components/github/pr-utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";

@@ -19,8 +19,8 @@ import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
-import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
+import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { isDebugUI } from "@/lib/config";
 
 type TaskTopBarProps = {

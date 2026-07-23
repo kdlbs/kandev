@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -228,6 +229,40 @@ func TestSQLiteRepositorySystemMetricsDisplayRoundTrip(t *testing.T) {
 	}
 	if !got.SystemMetricsDisplay.ShowInTopbar {
 		t.Fatal("expected system metrics display preference to round-trip")
+	}
+}
+
+func TestSQLiteRepositoryAppStatusBarOrderDefaultAndRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	if settings.AppStatusBarOrder.LeftItemIDs == nil || settings.AppStatusBarOrder.RightItemIDs == nil {
+		t.Fatalf("default AppStatusBarOrder = %#v, want non-nil empty arrays", settings.AppStatusBarOrder)
+	}
+	settings.AppStatusBarOrder = models.AppStatusBarOrder{
+		LeftItemIDs:  []string{"builtin:connection", "plugin:left"},
+		RightItemIDs: []string{"builtin:metrics", "plugin:right"},
+	}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if !reflect.DeepEqual(got.AppStatusBarOrder, settings.AppStatusBarOrder) {
+		t.Fatalf("AppStatusBarOrder = %#v, want %#v", got.AppStatusBarOrder, settings.AppStatusBarOrder)
 	}
 }
 

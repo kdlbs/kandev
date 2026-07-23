@@ -17,7 +17,7 @@ import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
-import { prPanelLabel } from "@/components/github/pr-utils";
+import { prPanelLabel, prTaskKey } from "@/components/github/pr-utils";
 import { usePRFeedback } from "@/hooks/domains/github/use-pr-feedback";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useCommentsStore, isPRFeedbackComment } from "@/lib/state/slices/comments";
@@ -76,11 +76,6 @@ export function PRDetailPanelComponent({ panelId, params }: PRDetailPanelProps) 
       <PRDetailContent taskPR={pr} sessionId={sessionId} />
     </div>
   );
-}
-
-/** Stable per-PR key used by addPRPanel and the multi-PR topbar buttons. */
-export function prTaskKey(pr: TaskPR): string {
-  return `${pr.owner}/${pr.repo}/${pr.pr_number}`;
 }
 
 // --- Add PR feedback as chat context ---

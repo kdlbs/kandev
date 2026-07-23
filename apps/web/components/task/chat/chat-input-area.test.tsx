@@ -114,7 +114,7 @@ describe("useSubmitHandler", () => {
     const { result } = renderHook(() => useSubmitHandler(panelState()));
 
     await act(async () => {
-      await result.current.handleSubmit("hello");
+      await result.current.handleSubmit({ message: "hello" });
     });
 
     expect(toastMock).toHaveBeenCalledWith({
@@ -135,7 +135,7 @@ describe("useSubmitHandler", () => {
     const { result } = renderHook(() => useSubmitHandler(panelState()));
 
     await act(async () => {
-      await result.current.handleSubmit("hello");
+      await result.current.handleSubmit({ message: "hello" });
     });
 
     expect(toastMock).toHaveBeenCalledWith({
@@ -159,7 +159,7 @@ describe("useSubmitHandler", () => {
     );
 
     await act(async () => {
-      await result.current.handleSubmit("hello");
+      await result.current.handleSubmit({ message: "hello" });
     });
 
     expect(markCommentsSent).not.toHaveBeenCalled();
@@ -182,10 +182,10 @@ describe("useSubmitHandler", () => {
     );
 
     await act(async () => {
-      await result.current.handleSubmit("hello");
+      await result.current.handleSubmit({ message: "hello" });
     });
 
-    const [sentMessage] = handleSendMessageMock.mock.calls[0] as [string];
+    const [{ message: sentMessage }] = handleSendMessageMock.mock.calls[0] as [{ message: string }];
     expect(sentMessage.match(/### Agent Message Comments/g)).toHaveLength(1);
     expect(sentMessage).toContain("> settled answer");
     expect(sentMessage).toContain("> Please expand this.");

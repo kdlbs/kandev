@@ -9,6 +9,7 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { WorkflowStep } from "@/lib/types/http";
 import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
+import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useDebouncedCallback } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
 import {
@@ -490,6 +491,7 @@ function StepPromptSection({
   debouncedUpdatePrompt,
   readOnly,
 }: StepPromptSectionProps) {
+  const { prompts } = useCustomPrompts();
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
@@ -535,12 +537,16 @@ function StepPromptSection({
           lineNumbers="off"
           readOnly={readOnly}
           placeholders={STEP_PROMPT_PLACEHOLDERS}
+          mentionPrompts={prompts}
         />
       </div>
       <p className="text-[11px] text-muted-foreground/60">
-        Type {"{{"} to see available placeholders. Use{" "}
-        <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{task_prompt}}"}</code> to
-        include the original task description.
+        Type {"{{"} for placeholders (
+        <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{task_prompt}}"}</code>{" "}
+        inserts the task description) or {"@"} to reference a saved prompt by name — its content is
+        attached as hidden context, and editing the saved prompt updates every step that references
+        it. Note: {"{{task_prompt}}"} only expands in the step prompt itself, not inside a
+        referenced saved prompt.
       </p>
     </div>
   );

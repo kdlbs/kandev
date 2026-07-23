@@ -182,3 +182,56 @@ describe("useReviewSidebarResize", () => {
     expect(result.current.width).toBe(600 - REVIEW_SIDEBAR_LIMITS.minDiffPaneWidth);
   });
 });
+
+describe("useReviewSidebarResize observer lifecycle", () => {
+  it("reattaches the resize observer when the review source replaces the container", () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const observed: Element[] = [];
+    let disconnectCount = 0;
+
+    class MockResizeObserver implements ResizeObserver {
+      observe(target: Element) {
+        observed.push(target);
+      }
+
+      unobserve() {}
+
+      disconnect() {
+        disconnectCount += 1;
+      }
+    }
+
+    Object.defineProperty(globalThis, "ResizeObserver", {
+      configurable: true,
+      writable: true,
+      value: MockResizeObserver,
+    });
+
+    try {
+      const firstElement = document.createElement("div");
+      const secondElement = document.createElement("div");
+      const ref = { current: firstElement } as React.MutableRefObject<HTMLDivElement | null>;
+      const { rerender, unmount } = renderHook(
+        ({ sourceKey }) => useReviewSidebarResize(ref, true, sourceKey),
+        { initialProps: { sourceKey: "session-a:pr-1" } },
+      );
+
+      expect(observed).toEqual([firstElement]);
+
+      ref.current = secondElement;
+      rerender({ sourceKey: "session-b:pr-1" });
+
+      expect(disconnectCount).toBe(1);
+      expect(observed).toEqual([firstElement, secondElement]);
+
+      unmount();
+      expect(disconnectCount).toBe(2);
+    } finally {
+      Object.defineProperty(globalThis, "ResizeObserver", {
+        configurable: true,
+        writable: true,
+        value: originalResizeObserver,
+      });
+    }
+  });
+});

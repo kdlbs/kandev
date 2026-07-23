@@ -13,3 +13,8 @@ export function prPanelLabel(prNumber: number): string {
 export function prIdentitySlug(pr: TaskPR): string {
   return `${pr.owner}-${pr.repo}-${pr.pr_number}`;
 }
+
+/** Stable per-PR key used by task-scoped state and dockview panels. */
+export function prTaskKey(pr: TaskPR): string {
+  return `${pr.owner}/${pr.repo}/${pr.pr_number}`;
+}

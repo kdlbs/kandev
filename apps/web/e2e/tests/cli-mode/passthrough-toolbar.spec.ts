@@ -274,7 +274,7 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await expect(testPage.getByText("Mention tasks, files, prompts")).toBeVisible({
       timeout: 5_000,
     });
-    await testPage.getByRole("button", { name: new RegExp(promptName) }).click();
+    await testPage.getByRole("option", { name: new RegExp(promptName) }).click();
     await expect(editor).toContainText(promptName);
 
     const contextFileName = path.basename(contextFile);
@@ -282,7 +282,7 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await expect(testPage.getByText("Mention tasks, files, prompts")).toBeVisible({
       timeout: 10_000,
     });
-    await testPage.getByRole("button", { name: new RegExp(contextFileName) }).click();
+    await testPage.getByRole("option", { name: new RegExp(contextFileName) }).click();
     await expect(editor).toContainText(contextFileName);
 
     await testPage.getByTestId("submit-message-button").click();
@@ -340,7 +340,7 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await expect(testPage.getByText("Mention tasks, files, prompts")).toBeVisible({
       timeout: 5_000,
     });
-    await testPage.getByRole("button", { name: /^Plan Include the plan as context$/ }).click();
+    await testPage.getByRole("option", { name: /^Plan Include the plan as context$/ }).click();
     await expect(editor).toContainText("Plan");
 
     await testPage.getByTestId("submit-message-button").click();

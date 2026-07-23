@@ -137,14 +137,15 @@ interface PluginRegistry {
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
 
   // Named slot injection. Host renders all components registered for a slot via
-  // <PluginSlot name="..." props={...}/>. Initial slots: "task-sidebar",
+  // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
   // "settings-nav", "main-nav-footer", "chat-input-actions", "chat-top-bar",
-  // "main-top-bar", "plugin-settings".
+  // "main-top-bar", "app-status-bar-left", "app-status-bar-right", and
+  // "plugin-settings".
   // "chat-input-actions" renders icon buttons in the chat composer toolbar
   // (beside the model picker, mic, and send) and forwards
   // `{ taskId, taskTitle, activeSessionId, sessionIds }` as `slotProps`.
-  // "chat-top-bar" renders status in the session top bar (beside the CPU/DB
-  // metrics and the document/editor/debug controls) and forwards
+  // "chat-top-bar" renders status in the session top bar (beside the
+  // document/editor/debug controls) and forwards
   // `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }`. Both
   // carry the active session plus every kandev session id on the task.
   // "main-top-bar" renders status/actions in the default app top bar on the
@@ -185,6 +186,46 @@ interface PluginRegistry {
   registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
 }
 ```
+
+### App-status-bar slots
+
+`app-status-bar-left` and `app-status-bar-right` are live named component slots.
+Each registration is one opaque status item; the slot chooses its default side,
+not a permanent side after user customization. Components receive
+`slotProps` with this exact shape:
+
+```ts
+interface AppStatusBarSlotProps {
+  placement: "left" | "right";
+  presentation: "bar" | "mobile-drawer";
+  density: "full" | "compact";
+  pathname: string;
+  activeWorkspaceId: string | null;
+  activeTaskId: string | null;
+  activeSessionId: string | null;
+}
+```
+
+`placement` matches registration slot. `presentation` identifies the mounted host;
+the host mounts only one presentation at once. `density` is `full` on desktop and
+phone drawer, `compact` on tablet. `pathname` and active IDs are current-context
+hints, not entity payloads; read complete records from `host.store`.
+
+Before customization, registration order is render order within each default side.
+Users can Cmd-drag on macOS or Ctrl-drag elsewhere with a mouse to move any item
+across the whole desktop/tablet bar. Kandev stores that order in backend user
+settings; disabled contributions keep their place and return there when enabled.
+Phone renders the saved left sequence followed by the saved right sequence, without
+dragging. There is no cross-plugin priority API, keyboard-arrow ordering, or touch
+ordering. Enable, disable, and uninstall update slots without reload. Each component
+is isolated by an owner-aware error boundary, so plugins must tolerate remounting and
+render a compact bar control or touch-usable drawer row for the supplied presentation.
+The host neither inspects nor separately reorders children inside a registration, and
+does not add a nested interactive wrapper.
+
+A full-bleed plugin route (`topbar: false`) opts out of host chrome. It may mount
+the host-provided Status drawer trigger when its own chrome should expose status;
+otherwise status access is intentionally its responsibility.
 
 ## Registry internals (host side)
 

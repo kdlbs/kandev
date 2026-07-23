@@ -422,7 +422,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload task after on_turn_start: %w", err)
 	}
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID, planMode, task.IsEphemeral)
+	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID, planMode, task.IsEphemeral, session.IsPassthrough)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -683,7 +683,20 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		s.tagSessionAsWorkflowSwitched(ctx, sessionID)
 	}
 
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode, task.IsEphemeral)
+	// Passthrough sessions skip both the workflow-prompt "@name" expansion below
+	// and the Kandev MCP wrap further down: the prompt is typed straight into
+	// the agent CLI's TTY and the user sees it verbatim — they don't want a
+	// wall of MCP-tool boilerplate or a hidden expansion block prepended to
+	// "hello". Use the session snapshot, not a live profile lookup, so a
+	// mid-run profile edit cannot change wrap behavior. Looked up once here and
+	// reused below so we don't hit GetTaskSession twice for the same fact.
+	// If the lookup fails, resolveIsPassthroughForLaunch fails safe by
+	// treating the session as passthrough: skipping the wrap/expansion is
+	// strictly less harmful than leaking hidden <kandev-system> content into
+	// a real passthrough session's PTY.
+	isPassthrough := s.resolveIsPassthroughForLaunch(ctx, sessionID)
+
+	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode, task.IsEphemeral, isPassthrough)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -702,14 +715,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// recordAutoStartMessage) wrap before recording the user message so the DB
 	// row carries the block; the HasKandevContext guard makes this orchestrator
 	// pass a no-op in those cases instead of double-wrapping.
-	// Passthrough sessions skip the wrap: the prompt is typed straight into the
-	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
-	// MCP-tool boilerplate prepended to "hello". Use the session snapshot, not a
-	// live profile lookup, so a mid-run profile edit cannot change wrap behavior.
-	skipKandevMCPWrap := false
-	if launchSession, sessErr := s.repo.GetTaskSession(ctx, sessionID); sessErr == nil {
-		skipKandevMCPWrap = launchSession.IsPassthrough
-	}
+	skipKandevMCPWrap := isPassthrough
 	// `task` here is *v1.Task from the scheduler, which does NOT carry the
 	// orchestrator's WorkflowStepID — go through the task-ID variant so the
 	// repo lookup pulls the canonical step. Using the workflowStepID parameter
@@ -792,6 +798,23 @@ func (s *Service) prepareSessionForStart(
 	}
 	s.propagateInheritedEnvironment(ctx, task, sessionID)
 	return sessionID, nil
+}
+
+// resolveIsPassthroughForLaunch reloads the session snapshot to decide
+// whether this launch is a passthrough session (skip the Kandev MCP wrap and
+// the "@name" prompt-reference expansion). If the reload fails, this fails
+// safe by treating the session as passthrough: skipping the wrap/expansion is
+// strictly less harmful than leaking hidden <kandev-system> content into a
+// real passthrough session's PTY.
+func (s *Service) resolveIsPassthroughForLaunch(ctx context.Context, sessionID string) bool {
+	launchSession, sessErr := s.repo.GetTaskSession(ctx, sessionID)
+	if sessErr != nil {
+		s.logger.Warn("failed to reload session for passthrough check; defaulting to passthrough (skip hidden-content injection) as the safer failure mode",
+			zap.String("session_id", sessionID),
+			zap.Error(sessErr))
+		return true
+	}
+	return launchSession.IsPassthrough
 }
 
 // createStartSession picks the right session-creation path for the task:
@@ -934,7 +957,7 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
 // Returns the effective prompt and whether plan mode is active (from either the step or the caller).
 // For ephemeral tasks (quick chat), workflow step processing is skipped since they have no workflow.
-func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, taskID string, sessionID string, workflowStepID string, planMode bool, isEphemeral bool) (string, bool) {
+func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, taskID string, sessionID string, workflowStepID string, planMode bool, isEphemeral bool, isPassthrough bool) (string, bool) {
 	effectivePrompt := prompt
 
 	stepHasPlanMode := false
@@ -947,7 +970,7 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 				zap.Error(err))
 		} else {
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-			effectivePrompt = s.buildWorkflowPrompt(effectivePrompt, step, taskID, sessionID)
+			effectivePrompt = s.buildWorkflowPrompt(ctx, effectivePrompt, step, taskID, sessionID, isPassthrough)
 		}
 	}
 
@@ -1009,7 +1032,7 @@ func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, p
 // Otherwise, step.Prompt fully replaces the base prompt.
 // If the step has enable_plan_mode in on_enter events, plan mode prefix is also prepended.
 // Only true internal instructions are wrapped in <kandev-system> tags so they can be stripped from the visible chat.
-func (s *Service) buildWorkflowPrompt(basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string) string {
+func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string, isPassthrough bool) string {
 	_ = sessionID
 	var parts []string
 
@@ -1029,7 +1052,25 @@ func (s *Service) buildWorkflowPrompt(basePrompt string, step *wfmodels.Workflow
 		parts = append(parts, basePrompt)
 	}
 
-	return strings.Join(parts, "\n\n")
+	joined := strings.Join(parts, "\n\n")
+	return s.expandPromptReferences(ctx, joined, isPassthrough)
+}
+
+// expandPromptReferences resolves "@name" saved-prompt references in prompt
+// via the configured PromptReferenceExpander. When no expander is set, prompt
+// is returned unchanged. Passthrough sessions skip expansion entirely: the
+// prompt is written raw to a PTY with no <kandev-system> stripping step, so
+// the expansion's hidden wrapper block would be typed into the terminal
+// verbatim instead of staying hidden.
+func (s *Service) expandPromptReferences(ctx context.Context, prompt string, isPassthrough bool) string {
+	if s.promptExpander == nil || isPassthrough {
+		return prompt
+	}
+	var zapLogger *zap.Logger
+	if s.logger != nil {
+		zapLogger = s.logger.Zap()
+	}
+	return s.promptExpander.AppendReferenceExpansions(ctx, prompt, zapLogger)
 }
 
 // ResumeTaskSession restarts a specific task session using its stored worktree.
@@ -1278,7 +1319,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 
 	s.advanceTaskWorkflowStep(ctx, dbTask, workflowStepID, session)
 
-	effectivePrompt := s.buildWorkflowPrompt(dbTask.Description, step, taskID, sessionID)
+	effectivePrompt := s.buildWorkflowPrompt(ctx, dbTask.Description, step, taskID, sessionID, session.IsPassthrough)
 
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		return err

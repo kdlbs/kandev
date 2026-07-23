@@ -183,6 +183,27 @@ func TestHasKandevContext_DetectsInjectedWrap(t *testing.T) {
 	assert.False(t, HasKandevContext(userMentions))
 }
 
+// --- HasSystemMarker tests ---
+
+func TestHasSystemMarker(t *testing.T) {
+	const marker = "SOME MARKER"
+
+	// Marker present inside a <kandev-system> block -> true.
+	insideBlock := Wrap("prefix "+marker+" suffix") + "\n\nuser text"
+	assert.True(t, HasSystemMarker(insideBlock, marker))
+
+	// Marker present only outside any system block (plain text) -> false.
+	outsideOnly := "some visible text that mentions " + marker + " directly"
+	assert.False(t, HasSystemMarker(outsideOnly, marker))
+
+	// Marker present in both places -> true.
+	both := Wrap("system block with "+marker) + "\n\nuser text mentioning " + marker + " too"
+	assert.True(t, HasSystemMarker(both, marker))
+
+	// No system block at all -> false.
+	assert.False(t, HasSystemMarker("plain text with no tags", marker))
+}
+
 // --- StripSystemContent tests ---
 
 func TestStripSystemContent_NoTags(t *testing.T) {

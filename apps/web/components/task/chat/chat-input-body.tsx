@@ -28,6 +28,8 @@ export type ChatInputEditorAreaProps = {
   setIsInputFocused: (focused: boolean) => void;
   sessionId: string | null;
   taskId: string | null;
+  workspaceId?: string | null;
+  entityReferencesEnabled?: boolean;
   onAddContextFile?: (file: ContextFile) => void;
   onToggleContextFile?: (file: ContextFile) => void;
   planContextEnabled: boolean;
@@ -160,6 +162,8 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
           onBlur={() => setIsInputFocused(false)}
           sessionId={sessionId}
           taskId={taskId}
+          workspaceId={p.workspaceId ?? null}
+          entityReferencesEnabled={p.entityReferencesEnabled ?? false}
           onAddContextFile={onAddContextFile}
           onToggleContextFile={onToggleContextFile}
           planContextEnabled={planContextEnabled}
