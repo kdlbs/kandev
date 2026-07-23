@@ -9,13 +9,13 @@ import type { Message, TaskSessionState } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import {
   type MessageListProps,
   MessageListStatus,
   MessageItem,
   getItemKey,
   getConversationLoadingState,
-  getSessionRunningState,
   getLastTurnGroupId,
   getStreamingAgentMessageId,
 } from "./message-list-shared";
@@ -29,7 +29,7 @@ const debugFirstIndex = createDebugLogger("chat:virtuoso:firstIndex");
 
 type VirtuosoBodyProps = MessageListProps & {
   scrollParent: HTMLDivElement;
-  isRunning: boolean;
+  activeTurnId: string | null;
   lastTurnGroupId: string | null;
   hasMore: boolean;
   isLoadingMore: boolean;
@@ -106,7 +106,7 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
     childrenByParentToolCallId,
     taskId,
   } = props;
-  const { worktreePath, onOpenFile, lastTurnGroupId, isRunning } = props;
+  const { worktreePath, onOpenFile, lastTurnGroupId, activeTurnId } = props;
   const { hasMore, isLoadingMore, loadMore } = props;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const itemCount = items.length;
@@ -163,7 +163,7 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
             worktreePath={worktreePath}
             onOpenFile={onOpenFile}
             isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
-            isTurnActive={isRunning}
+            activeTurnId={activeTurnId}
             streamingMessageId={streamingMessageId}
             onScrollToMessage={handleScrollToMessage}
           />
@@ -180,7 +180,7 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
       worktreePath,
       onOpenFile,
       lastTurnGroupId,
-      isRunning,
+      activeTurnId,
       streamingMessageId,
       handleScrollToMessage,
     ],
@@ -210,10 +210,10 @@ function VirtuosoBody(props: VirtuosoBodyProps) {
       firstItemIndex,
       initialTopMostItemIndex: itemCount - 1,
       hasMore: props.hasMore,
-      isRunning: props.isRunning,
+      activeTurnId: props.activeTurnId,
       lastTurnGroupId: props.lastTurnGroupId ?? "-",
     });
-  }, [itemCount, firstItemIndex, props.hasMore, props.isRunning, props.lastTurnGroupId]);
+  }, [itemCount, firstItemIndex, props.hasMore, props.activeTurnId, props.lastTurnGroupId]);
 
   return (
     <Virtuoso
@@ -462,7 +462,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
     sessionState,
   });
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
-  const isRunning = getSessionRunningState(sessionState);
+  const { activeTurnId } = useSessionTurn(sessionId);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
 
   // Track which render branch fires and how itemCount/messageCount transition.
@@ -517,7 +517,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
         <VirtuosoBody
           {...props}
           scrollParent={scrollParent}
-          isRunning={isRunning}
+          activeTurnId={activeTurnId}
           lastTurnGroupId={lastTurnGroupId}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}

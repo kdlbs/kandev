@@ -7,13 +7,13 @@ import type { Message } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import {
   type MessageListProps,
   MessageListStatus,
   MessageItem,
   getItemKey,
   getConversationLoadingState,
-  getSessionRunningState,
   getLastTurnGroupId,
   getStreamingAgentMessageId,
 } from "./message-list-shared";
@@ -195,7 +195,7 @@ export const NativeMessageList = memo(function NativeMessageList({
     sessionState,
   });
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
-  const isRunning = getSessionRunningState(sessionState);
+  const { activeTurnId } = useSessionTurn(sessionId);
   const streamingMessageId = getStreamingAgentMessageId(messages);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
   const handleScrollToMessage = useScrollToMessage();
@@ -248,7 +248,7 @@ export const NativeMessageList = memo(function NativeMessageList({
               worktreePath={worktreePath}
               onOpenFile={onOpenFile}
               isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
-              isTurnActive={isRunning}
+              activeTurnId={activeTurnId}
               streamingMessageId={streamingMessageId}
               onScrollToMessage={handleScrollToMessage}
             />

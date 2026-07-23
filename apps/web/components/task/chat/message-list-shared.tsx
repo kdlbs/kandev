@@ -43,10 +43,6 @@ export function getItemKey(item: RenderItem): string {
   return item.message.id;
 }
 
-export function getSessionRunningState(sessionState: string | null | undefined) {
-  return sessionState === "CREATED" || sessionState === "STARTING" || sessionState === "RUNNING";
-}
-
 /** Only the latest ordinary agent row in the active turn can be the streaming reply. */
 export function getStreamingAgentMessageId(messages: Message[]): string | null {
   let latestUserIndex = -1;
@@ -240,7 +236,7 @@ export const MessageItem = memo(function MessageItem({
   worktreePath,
   onOpenFile,
   isLastGroup,
-  isTurnActive,
+  activeTurnId,
   streamingMessageId,
   onScrollToMessage,
 }: {
@@ -252,7 +248,7 @@ export const MessageItem = memo(function MessageItem({
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
   isLastGroup: boolean;
-  isTurnActive: boolean;
+  activeTurnId?: string | null;
   streamingMessageId?: string | null;
   onScrollToMessage: (id: string) => void;
 }) {
@@ -263,6 +259,7 @@ export const MessageItem = memo(function MessageItem({
     return <LastAgentErrorNotice sessionId={item.sessionId} error={item.error} />;
   }
   if (item.type === "turn_group") {
+    const isContainingTurnActive = Boolean(activeTurnId && item.turnId === activeTurnId);
     return (
       <TurnGroupMessage
         group={item}
@@ -273,17 +270,13 @@ export const MessageItem = memo(function MessageItem({
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}
         isLastGroup={isLastGroup}
-        isTurnActive={
-          isTurnActive &&
-          (streamingMessageId
-            ? item.messages.some((message) => message.id === streamingMessageId)
-            : false)
-        }
+        isTurnActive={isContainingTurnActive}
         streamingMessageId={streamingMessageId}
         onScrollToMessage={onScrollToMessage}
       />
     );
   }
+  const isContainingTurnActive = Boolean(activeTurnId && item.message.turn_id === activeTurnId);
   return (
     <MessageRenderer
       comment={item.message}
@@ -293,7 +286,8 @@ export const MessageItem = memo(function MessageItem({
       childrenByParentToolCallId={childrenByParentToolCallId}
       worktreePath={worktreePath}
       sessionId={sessionId ?? undefined}
-      isTurnActive={isTurnActive && item.message.id === streamingMessageId}
+      isTurnActive={isContainingTurnActive && item.message.id === streamingMessageId}
+      isContainingTurnActive={isContainingTurnActive}
       onOpenFile={onOpenFile}
       onScrollToMessage={onScrollToMessage}
     />

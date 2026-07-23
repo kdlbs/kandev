@@ -81,6 +81,7 @@ export function useSessionTurn(sessionId: string | null) {
   return {
     lastCompletedTurn,
     lastTurnDuration,
+    activeTurnId,
     isActive,
     sessionModel,
   };

@@ -98,6 +98,7 @@ export function AgentTurnPanel({
               isTaskDescription={idx === 0 && msg.author_type === "user"}
               taskId={taskId}
               sessionId={sessionId}
+              isContainingTurnActive={Boolean(isLive)}
             />
           ))}
         </div>
