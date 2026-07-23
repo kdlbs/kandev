@@ -364,7 +364,7 @@ export type UserSettingsUpdatedPayload = {
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminal_link_behavior?: string;
   changes_panel_layout?: "flat" | "tree";
-  system_metrics_display?: { show_in_topbar?: boolean };
+  system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_order?: AppStatusBarOrderApi;
   voice_mode?: import("@/lib/types/http-voice").VoiceModeSettings;
   updated_at?: string;

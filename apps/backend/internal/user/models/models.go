@@ -72,6 +72,7 @@ type UserSettings struct {
 
 type SystemMetricsDisplaySettings struct {
 	ShowInTopbar bool `json:"show_in_topbar"`
+	Simplified   bool `json:"simplified"`
 }
 
 type AppStatusBarOrder struct {

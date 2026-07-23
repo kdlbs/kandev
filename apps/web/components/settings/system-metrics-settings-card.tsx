@@ -30,10 +30,16 @@ export function SystemMetricsSettingsCard({
   showInTopbar,
   isShowInTopbarDirty,
   onShowInTopbarChange,
+  simplified,
+  isSimplifiedDirty,
+  onSimplifiedChange,
 }: {
   showInTopbar: boolean;
   isShowInTopbarDirty?: boolean;
   onShowInTopbarChange: (checked: boolean) => void;
+  simplified: boolean;
+  isSimplifiedDirty?: boolean;
+  onSimplifiedChange: (checked: boolean) => void;
 }) {
   const [settings, setSettings] = useState<SystemMetricsGlobalSettings>(DEFAULT_METRICS_SETTINGS);
   const [savedSettings, setSavedSettings] =
@@ -82,7 +88,7 @@ export function SystemMetricsSettingsCard({
   };
 
   return (
-    <SettingsCard isDirty={isDirty || Boolean(isShowInTopbarDirty)}>
+    <SettingsCard isDirty={isDirty || Boolean(isShowInTopbarDirty) || Boolean(isSimplifiedDirty)}>
       <CardHeader>
         <CardTitle className="text-base">Resource Metrics</CardTitle>
       </CardHeader>
@@ -95,6 +101,11 @@ export function SystemMetricsSettingsCard({
           checked={showInTopbar}
           isDirty={Boolean(isShowInTopbarDirty)}
           onCheckedChange={onShowInTopbarChange}
+        />
+        <SimplifiedMetricsToggle
+          checked={simplified}
+          isDirty={Boolean(isSimplifiedDirty)}
+          onCheckedChange={onSimplifiedChange}
         />
         <MetricsSamplerControls
           settings={settings}
@@ -112,6 +123,33 @@ export function SystemMetricsSettingsCard({
         />
       </CardContent>
     </SettingsCard>
+  );
+}
+
+function SimplifiedMetricsToggle({
+  checked,
+  isDirty,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  isDirty: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="space-y-1">
+        <Label htmlFor="simplified-system-metrics">Simplified metrics</Label>
+        <p className="text-xs text-muted-foreground">
+          Removes the Host marker and progress bars while retaining metric icons and values.
+        </p>
+      </div>
+      <Switch
+        id="simplified-system-metrics"
+        checked={checked}
+        data-settings-dirty={isDirty}
+        onCheckedChange={onCheckedChange}
+      />
+    </div>
   );
 }
 

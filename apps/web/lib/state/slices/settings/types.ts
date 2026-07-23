@@ -177,7 +177,7 @@ export type UserSettingsState = {
   terminalFontFamily: string | null;
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
-  systemMetricsDisplay: { showInTopbar: boolean };
+  systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarOrder: AppStatusBarOrderState;
   voiceMode: VoiceModeState;
   loaded: boolean;

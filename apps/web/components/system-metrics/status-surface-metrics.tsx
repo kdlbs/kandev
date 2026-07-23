@@ -29,6 +29,7 @@ export function StatusSurfaceMetrics({
 }: StatusSurfaceMetricsProps) {
   // Wire/storage name stays stable for existing user settings and API payloads.
   const enabled = useAppStore((state) => state.userSettings.systemMetricsDisplay.showInTopbar);
+  const simplified = useAppStore((state) => state.userSettings.systemMetricsDisplay.simplified);
   const snapshot = useAppStore((state) => state.system.metrics);
   const { isMobile } = useResponsiveBreakpoint();
   const shouldSubscribe = enabled && (!isMobile || drawerOpen);
@@ -44,7 +45,11 @@ export function StatusSurfaceMetrics({
         {!host ? (
           <EmptyMetrics drawer />
         ) : (
-          <DrawerSourceMetrics source={host} updatedAt={snapshot?.timestamp} />
+          <DrawerSourceMetrics
+            source={host}
+            updatedAt={snapshot?.timestamp}
+            simplified={simplified}
+          />
         )}
       </section>
     );
@@ -64,6 +69,7 @@ export function StatusSurfaceMetrics({
           updatedAt={snapshot?.timestamp}
           showSourceLabel={density === "full"}
           metricLimit={density === "compact" ? 2 : 4}
+          simplified={simplified}
         />
       )}
     </div>
@@ -90,16 +96,25 @@ function BarSourceMetrics({
   updatedAt,
   showSourceLabel,
   metricLimit,
+  simplified,
 }: {
   source: SystemMetricsSource;
   updatedAt?: string;
   showSourceLabel: boolean;
   metricLimit: number;
+  simplified: boolean;
 }) {
   return (
     <div className="flex h-full max-w-[360px] items-center gap-3 overflow-hidden text-[11px]">
-      <SourceBadge source={source} updatedAt={updatedAt} showLabel={showSourceLabel} />
-      <MetricValues source={source} updatedAt={updatedAt} limit={metricLimit} />
+      {!simplified ? (
+        <SourceBadge source={source} updatedAt={updatedAt} showLabel={showSourceLabel} />
+      ) : null}
+      <MetricValues
+        source={source}
+        updatedAt={updatedAt}
+        limit={metricLimit}
+        simplified={simplified}
+      />
     </div>
   );
 }
@@ -107,15 +122,17 @@ function BarSourceMetrics({
 function DrawerSourceMetrics({
   source,
   updatedAt,
+  simplified,
 }: {
   source: SystemMetricsSource;
   updatedAt?: string;
+  simplified: boolean;
 }) {
   return (
     <div className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-muted/60">
-      <SourceBadge source={source} updatedAt={updatedAt} showLabel />
+      {!simplified ? <SourceBadge source={source} updatedAt={updatedAt} showLabel /> : null}
       <div className="flex min-w-0 flex-1 items-center justify-end gap-3 overflow-hidden">
-        <MetricValues source={source} updatedAt={updatedAt} limit={4} />
+        <MetricValues source={source} updatedAt={updatedAt} limit={4} simplified={simplified} />
       </div>
     </div>
   );
@@ -153,17 +170,25 @@ function MetricValues({
   source,
   updatedAt,
   limit,
+  simplified,
 }: {
   source: SystemMetricsSource;
   updatedAt?: string;
   limit: number;
+  simplified: boolean;
 }) {
   const metrics = source.metrics.slice(0, limit);
   if (metrics.length === 0) return <span className="text-muted-foreground">-</span>;
   return (
     <span className="flex min-w-0 items-center gap-3 overflow-hidden">
       {metrics.map((metric) => (
-        <MetricValue key={metric.id} metric={metric} source={source} updatedAt={updatedAt} />
+        <MetricValue
+          key={metric.id}
+          metric={metric}
+          source={source}
+          updatedAt={updatedAt}
+          simplified={simplified}
+        />
       ))}
     </span>
   );
@@ -173,10 +198,12 @@ function MetricValue({
   metric,
   source,
   updatedAt,
+  simplified,
 }: {
   metric: SystemMetricSample;
   source: SystemMetricsSource;
   updatedAt?: string;
+  simplified: boolean;
 }) {
   const help =
     metric.id === "io_load"
@@ -190,7 +217,7 @@ function MetricValue({
           aria-label={`${metricLabel(metric.id)} ${formatMetric(metric)}`}
         >
           {metricIcon(metric.id)}
-          <MetricMeter metric={metric} />
+          {!simplified ? <MetricMeter metric={metric} /> : null}
           <span className="font-medium tracking-[-0.015em] [font-family:var(--font-geist-mono)]">
             {formatMetric(metric)}
           </span>
@@ -241,6 +268,7 @@ function MetricMeter({ metric }: { metric: SystemMetricSample }) {
   const width = `${Math.max(0, Math.min(100, metric.value))}%`;
   return (
     <span
+      data-testid="system-metric-meter"
       className="h-1 w-7 overflow-hidden rounded-full bg-muted-foreground/20"
       aria-hidden="true"
     >
