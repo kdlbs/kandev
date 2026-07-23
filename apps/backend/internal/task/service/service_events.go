@@ -58,6 +58,14 @@ const (
 // a caller-supplied list taken moments earlier) still gets
 // a correct, non-fabricated event instead of being silently dropped.
 //
+// ctx is expected to be detached-but-unbounded (callers typically pass a
+// context.WithoutCancel derivative with no deadline of its own): each
+// session in cancelledIDs gets its own independent 10-second timeout inside
+// the loop below, rather than the whole batch sharing one deadline. That
+// way a single slow GetTaskSession lookup or synchronous event subscriber
+// can only ever starve its own session's publish, not the events for every
+// session that comes after it in cancelledIDs.
+//
 // CancelActiveTaskSessionsByTaskID is a repository-level DB write with no
 // event of its own; without this, any client cache kept fresh exclusively by
 // session.state_changed (e.g. an Office task list's "is running" indicator)
@@ -81,10 +89,12 @@ func (s *Service) publishSessionsCancelled(
 	}
 	updatedAt := cancelledAt.Format(time.RFC3339Nano)
 	for _, sessionID := range cancelledIDs {
-		sess, err := s.sessions.GetTaskSession(ctx, sessionID)
+		sessCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		sess, err := s.sessions.GetTaskSession(sessCtx, sessionID)
 		if err != nil || sess == nil {
 			s.logger.Warn("cancelled session vanished before state_changed publish",
 				zap.String(sessionEventFieldTaskID, taskID), zap.String(sessionEventFieldSessionID, sessionID), zap.Error(err))
+			cancel()
 			continue
 		}
 		data := map[string]interface{}{
@@ -109,10 +119,11 @@ func (s *Service) publishSessionsCancelled(
 			data["task_environment_id"] = sess.TaskEnvironmentID
 		}
 		event := bus.NewEvent(events.TaskSessionStateChanged, "task-service", data)
-		if err := s.eventBus.Publish(ctx, events.TaskSessionStateChanged, event); err != nil {
+		if err := s.eventBus.Publish(sessCtx, events.TaskSessionStateChanged, event); err != nil {
 			s.logger.Error("failed to publish session cancellation event",
 				zap.String(sessionEventFieldTaskID, taskID), zap.String(sessionEventFieldSessionID, sessionID), zap.Error(err))
 		}
+		cancel()
 	}
 }
 
