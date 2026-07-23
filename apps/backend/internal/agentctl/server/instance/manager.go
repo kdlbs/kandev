@@ -366,7 +366,7 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 	}
 
 	stopErr := errors.Join(httpStopErr, processStopErr)
-	if httpStopErr != nil || (processStopErr != nil && !canReleaseInstanceResources(processStopErr)) {
+	if httpStopErr != nil || processStopErr != nil {
 		return stopErr
 	}
 
@@ -388,15 +388,6 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 		zap.Int("port", inst.Port))
 
 	return stopErr
-}
-
-type instanceResourceReleaseError interface {
-	CanReleaseInstanceResources() bool
-}
-
-func canReleaseInstanceResources(err error) bool {
-	var classified instanceResourceReleaseError
-	return errors.As(err, &classified) && classified.CanReleaseInstanceResources()
 }
 
 type instanceHTTPServer interface {

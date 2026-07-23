@@ -1,14 +1,19 @@
 ---
 id: "04-agent-temp-teardown"
 title: "Agent temp teardown"
-status: done
+status: superseded
 wave: 1
 depends_on: []
 plan: "plan.md"
 spec: "../../specs/system-page/storage-maintenance.md"
+superseded_by: "../storage-maintenance/task-10-inherit-service-temp.md"
 ---
 
 # Task 04: Agent temp teardown
+
+> Superseded on 2026-07-22 by the inherited service-temp boundary in ADR 0045 and Storage
+> Maintenance Task 10. This file records the earlier implementation packet; the per-instance
+> directory and cleanup behavior below is no longer active.
 
 ## Acceptance
 

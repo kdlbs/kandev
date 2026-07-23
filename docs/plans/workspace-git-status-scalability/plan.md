@@ -10,6 +10,10 @@ status: done
 
 First keep reusable verification caches shared and all verification storage outside Git worktrees, ignore legacy worktree-local cache paths, and reclaim each owned agent temp root during permanent instance teardown. Then make diff enrichment linear and context-aware while preserving complete changed-path metadata and all existing limits. Next coalesce overlapping live observations through the workspace tracker using Kandev's established detached, bounded singleflight pattern. Finish with HTTP-boundary concurrency and multi-repository regression coverage.
 
+The agent-temp teardown portion is a historical implementation record. ADR 0045 was amended on
+2026-07-22, and Storage Maintenance Task 10 superseded it by removing per-instance temp injection
+and cleanup. Host-local agents now inherit the Kandev service temporary environment.
+
 The incident that motivated this work involved 13,869 untracked Go cache files. Diff enrichment repeatedly recomputed total diff bytes by scanning the complete file map inside per-file loops, producing quadratic work. Six concurrent fresh multi-repository requests then repeated that computation and held agentctl near full CPU for roughly three minutes.
 
 ## Backend
@@ -105,7 +109,8 @@ Wave 0:
 Wave 1 (parallel):
 
 - [x] [task-01-linear-diff-enrichment](task-01-linear-diff-enrichment.md) - done
-- [x] [task-04-agent-temp-teardown](task-04-agent-temp-teardown.md) - done
+- [x] [task-04-agent-temp-teardown](task-04-agent-temp-teardown.md) - superseded by Storage
+  Maintenance Task 10
 
 Wave 2 (depends on Wave 1):
 
