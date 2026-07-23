@@ -256,6 +256,21 @@ func hasGitRef(ctx context.Context, directory, ref string) bool {
 }
 
 func matchingCheckout(ctx context.Context, destination, locator, baseBranch, checkoutBranch string) (bool, error) {
+	exists, err := materializedCheckoutExists(destination)
+	if err != nil || !exists {
+		return false, err
+	}
+	branch := checkoutBranch
+	if branch == "" {
+		branch = baseBranch
+	}
+	if err := matchingCheckoutIdentity(ctx, destination, locator, branch); err != nil {
+		return false, err
+	}
+	return matchingCheckoutCommit(ctx, destination, baseBranch, branch)
+}
+
+func materializedCheckoutExists(destination string) (bool, error) {
 	// codeql[go/path-injection] destination is a direct child of the canonical workspace root and must be a real directory before Git probes.
 	destinationInfo, err := os.Lstat(destination)
 	if os.IsNotExist(err) {
@@ -276,18 +291,22 @@ func matchingCheckout(ctx context.Context, destination, locator, baseBranch, che
 	if gitInfo.Mode()&os.ModeSymlink != 0 || !gitInfo.IsDir() {
 		return false, errMaterializeCollision
 	}
+	return true, nil
+}
+
+func matchingCheckoutIdentity(ctx context.Context, destination, locator, branch string) error {
 	origin, err := materializeGitOutput(ctx, "-C", destination, "remote", "get-url", "origin")
 	if err != nil || strings.TrimSpace(origin) != locator {
-		return false, errMaterializeCollision
-	}
-	branch := checkoutBranch
-	if branch == "" {
-		branch = baseBranch
+		return errMaterializeCollision
 	}
 	currentBranch, err := materializeGitOutput(ctx, "-C", destination, "branch", "--show-current")
 	if err != nil || strings.TrimSpace(currentBranch) != branch {
-		return false, errMaterializeCollision
+		return errMaterializeCollision
 	}
+	return nil
+}
+
+func matchingCheckoutCommit(ctx context.Context, destination, baseBranch, branch string) (bool, error) {
 	requestedRef := "origin/" + branch
 	if !hasGitRef(ctx, destination, "refs/remotes/"+requestedRef) {
 		requestedRef = "origin/" + baseBranch
@@ -304,68 +323,109 @@ func matchingCheckout(ctx context.Context, destination, locator, baseBranch, che
 }
 
 func removeMaterializedRepository(ctx context.Context, workDir, destination, locator string) (bool, error) {
-	canonicalWorkDir, err := filepath.EvalSymlinks(workDir)
-	if err != nil {
-		return false, err
-	}
-	if filepath.Dir(destination) != canonicalWorkDir {
-		return false, errMaterializeCollision
-	}
-	root, err := os.OpenRoot(canonicalWorkDir)
+	root, destinationName, err := openMaterializeRemovalRoot(workDir, destination)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = root.Close() }()
-	quarantine, err := materializeQuarantine(root)
+	quarantine, err := moveToMaterializeQuarantine(root, destinationName)
 	if err != nil {
 		return false, err
 	}
-	destinationName := filepath.Base(destination)
-	beforeMaterializeQuarantineRename()
-	// codeql[go/path-injection] Root binds both direct-child names to the canonical workspace; quarantine captures the exact object before validation.
-	if err := root.Rename(destinationName, quarantine); err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
+	if quarantine == "" {
+		return false, nil
+	}
+	quarantineRoot, capturedInfo, err := openMaterializedQuarantine(root, quarantine, destinationName)
+	if err != nil {
 		return false, err
 	}
+	defer func() { _ = quarantineRoot.Close() }()
+	afterMaterializeQuarantineOpen(quarantine)
+	if err := validateMaterializedQuarantine(quarantineRoot, locator); err != nil {
+		return false, restoreMaterializedQuarantine(root, capturedInfo, quarantine, destinationName)
+	}
+	if err := removeCapturedMaterializedQuarantine(root, quarantineRoot, capturedInfo, quarantine); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func openMaterializeRemovalRoot(workDir, destination string) (*os.Root, string, error) {
+	canonicalWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return nil, "", err
+	}
+	if filepath.Dir(destination) != canonicalWorkDir {
+		return nil, "", errMaterializeCollision
+	}
+	root, err := os.OpenRoot(canonicalWorkDir)
+	if err != nil {
+		return nil, "", err
+	}
+	return root, filepath.Base(destination), nil
+}
+
+func moveToMaterializeQuarantine(root *os.Root, destination string) (string, error) {
+	quarantine, err := materializeQuarantine(root)
+	if err != nil {
+		return "", err
+	}
+	beforeMaterializeQuarantineRename()
+	// codeql[go/path-injection] Root binds both direct-child names to the canonical workspace; quarantine captures the exact object before validation.
+	if err := root.Rename(destination, quarantine); err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return quarantine, nil
+}
+
+func openMaterializedQuarantine(root *os.Root, quarantine, destination string) (*os.Root, os.FileInfo, error) {
 	// codeql[go/path-injection] Root Lstat rejects a link or non-directory before opening the quarantined name.
 	quarantineInfo, err := root.Lstat(quarantine)
 	if err != nil || quarantineInfo.Mode()&os.ModeSymlink != 0 || !quarantineInfo.IsDir() {
-		return false, restoreMaterializedQuarantine(root, quarantineInfo, quarantine, destinationName)
+		return nil, nil, restoreMaterializedQuarantine(root, quarantineInfo, quarantine, destination)
 	}
 	// codeql[go/path-injection] Root opens the exact object atomically moved into its private canonical-workdir quarantine.
 	quarantineRoot, err := root.OpenRoot(quarantine)
 	if err != nil {
-		return false, restoreMaterializedQuarantine(root, nil, quarantine, destinationName)
+		return nil, nil, restoreMaterializedQuarantine(root, nil, quarantine, destination)
 	}
-	defer func() { _ = quarantineRoot.Close() }()
 	capturedInfo, err := quarantineRoot.Lstat(".")
 	if err != nil || capturedInfo.Mode()&os.ModeSymlink != 0 || !capturedInfo.IsDir() {
-		return false, restoreMaterializedQuarantine(root, capturedInfo, quarantine, destinationName)
+		_ = quarantineRoot.Close()
+		return nil, nil, restoreMaterializedQuarantine(root, capturedInfo, quarantine, destination)
 	}
-	afterMaterializeQuarantineOpen(quarantine)
+	return quarantineRoot, capturedInfo, nil
+}
+
+func validateMaterializedQuarantine(quarantineRoot *os.Root, locator string) error {
 	// codeql[go/path-injection] The opened quarantine root keeps .git bound to the captured directory, independent of later pathname replacement.
 	gitDir, err := quarantineRoot.Lstat(".git")
 	if err != nil || gitDir.Mode()&os.ModeSymlink != 0 || !gitDir.IsDir() {
-		return false, restoreMaterializedQuarantine(root, capturedInfo, quarantine, destinationName)
+		return errMaterializeCollision
 	}
 	origin, err := materializeQuarantineOrigin(quarantineRoot)
 	if err != nil || strings.TrimSpace(origin) != locator {
-		return false, restoreMaterializedQuarantine(root, capturedInfo, quarantine, destinationName)
+		return errMaterializeCollision
 	}
+	return nil
+}
+
+func removeCapturedMaterializedQuarantine(root, quarantineRoot *os.Root, capturedInfo os.FileInfo, quarantine string) error {
 	// codeql[go/path-injection] The captured quarantine root recursively removes only its own entries after origin verification.
 	if err := clearMaterializedQuarantine(quarantineRoot); err != nil {
-		return false, err
+		return err
 	}
 	if matches, err := quarantineMatchesCaptured(root, quarantine, capturedInfo); err != nil || !matches {
-		return false, errMaterializeCollision
+		return errMaterializeCollision
 	}
 	// codeql[go/path-injection] Root non-recursively removes the quarantined parent entry only after it still matches the captured object.
 	if err := root.Remove(quarantine); err != nil {
-		return false, err
+		return err
 	}
-	return true, nil
+	return nil
 }
 
 func materializeQuarantine(root *os.Root) (string, error) {
