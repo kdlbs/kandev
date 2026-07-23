@@ -131,6 +131,38 @@ it("replaces a completed session tree with the successor's root and restored exp
   ]);
 });
 
+it("hydrates folders expanded after restore when a same-key session is replaced", async () => {
+  requestFileTreeMock.mockImplementation((_client: unknown, _sessionId: string, path: string) => {
+    if (path === ROOT_PATH)
+      return Promise.resolve({
+        root: { ...ROOT, children: [CODEX, { ...CODEX, name: ".new", path: ".new" }] },
+      });
+    if (path === CODEX_PATH) return Promise.resolve({ root: { ...CODEX, children: [AGENTS] } });
+    if (path === AGENTS_PATH) return Promise.resolve({ root: { ...AGENTS, children: [CONFIG] } });
+    if (path === ".new")
+      return Promise.resolve({
+        root: { ...CODEX, name: ".new", path: ".new", children: [NEW_CONFIG] },
+      });
+    throw new Error(`Unexpected path: ${path}`);
+  });
+  const { result, rerender } = renderHook(
+    ({ sessionId }) => useFileBrowserTree(sessionId, ENVIRONMENT),
+    { initialProps: { sessionId: SESSION } },
+  );
+
+  await waitFor(() => expect(result.current.loadState).toBe("loaded"));
+  act(() => result.current.setExpandedPaths((paths) => new Set(paths).add(".new")));
+  rerender({ sessionId: SUCCESSOR_SESSION });
+
+  await waitFor(() => expect(result.current.loadState).toBe("loaded"));
+
+  expect(requestFileTreeMock.mock.calls.map((call) => [call[1], call[2]])).toContainEqual([
+    SUCCESSOR_SESSION,
+    ".new",
+  ]);
+  expect(result.current.visibleRows.map((row) => row.path)).toContain(NEW_CONFIG.path);
+});
+
 it("invalidates an in-flight request when the reset key changes", async () => {
   const firstRoot = deferred<{ root: typeof ROOT & { children: (typeof CODEX)[] } }>();
   requestFileTreeMock.mockImplementationOnce(() => firstRoot.promise);

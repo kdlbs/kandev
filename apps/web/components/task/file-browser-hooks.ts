@@ -238,6 +238,7 @@ type TreeLoadEffectsContext = {
   retryAttemptRef: React.MutableRefObject<number>;
   hasInitializedExpandedRef: React.MutableRefObject<string | null>;
   restoreExpandedPathsRef: React.MutableRefObject<string[]>;
+  expandedPathsRef: React.MutableRefObject<ReadonlySet<string>>;
   clearRetryTimer: () => void;
   loadTree: (options?: {
     resetRetry?: boolean;
@@ -262,6 +263,7 @@ function useTreeLoadEffects(ctx: TreeLoadEffectsContext) {
     retryAttemptRef,
     hasInitializedExpandedRef,
     restoreExpandedPathsRef,
+    expandedPathsRef,
     clearRetryTimer,
     loadTree,
     setTree,
@@ -287,7 +289,10 @@ function useTreeLoadEffects(ctx: TreeLoadEffectsContext) {
       restoreExpandedPathsRef.current = savedPaths;
       setExpandedPaths(savedPaths.length > 0 ? new Set(savedPaths) : new Set());
     }
-    const savedPaths = restoreExpandedPathsRef.current;
+    const savedPaths = resetKeyChanged
+      ? restoreExpandedPathsRef.current
+      : Array.from(expandedPathsRef.current);
+    restoreExpandedPathsRef.current = savedPaths;
     logLoad("init-effect", {
       sessionId,
       effectiveResetKey,
@@ -420,6 +425,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     retryAttemptRef,
     hasInitializedExpandedRef,
     restoreExpandedPathsRef,
+    expandedPathsRef,
     clearRetryTimer,
     loadTree,
     setTree,
