@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -319,6 +321,23 @@ type promptErrorAdapter struct {
 	prompted  chan<- uint64
 }
 
+type mcpCaptureAdapter struct {
+	promptErrorAdapter
+	newSessionServers  []types.McpServer
+	loadSessionServers []types.McpServer
+}
+
+func (a *mcpCaptureAdapter) NewSession(_ context.Context, servers []types.McpServer) (string, error) {
+	a.newSessionServers = append([]types.McpServer(nil), servers...)
+	return "new-session", nil
+}
+
+func (a *mcpCaptureAdapter) LoadSession(_ context.Context, sessionID string, servers []types.McpServer) error {
+	a.sessionID = sessionID
+	a.loadSessionServers = append([]types.McpServer(nil), servers...)
+	return nil
+}
+
 func (a *promptErrorAdapter) PrepareEnvironment() (map[string]string, error) {
 	return nil, nil
 }
@@ -383,6 +402,122 @@ func (a *promptErrorAdapter) Close() error {
 
 func (a *promptErrorAdapter) RequiresProcessKill() bool {
 	return false
+}
+
+func assertLocalKandevMCPServers(t *testing.T, got []types.McpServer) {
+	t.Helper()
+	if len(got) < 2 {
+		t.Fatalf("MCP servers = %+v, want local HTTP and SSE entries", got)
+	}
+	if got[0].Name != kandevMcpServerName || got[0].Type != mcpTransportHTTP || got[0].URL != "http://localhost:0/mcp" {
+		t.Errorf("first MCP server = %+v, want local kandev HTTP server", got[0])
+	}
+	if got[1].Name != kandevMcpServerName || got[1].Type != mcpTransportSSE || got[1].URL != "http://localhost:0/sse" {
+		t.Errorf("second MCP server = %+v, want local kandev SSE fallback", got[1])
+	}
+}
+
+func TestHandleWSNewSession_InjectsLocalKandevMCPServers(t *testing.T) {
+	s := newTestServerWithMCP(t)
+	capture := &mcpCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-new", "agent.session.new", NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp := s.handleWSNewSession(context.Background(), msg)
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want %q", resp.Type, ws.MessageTypeResponse)
+	}
+	assertLocalKandevMCPServers(t, capture.newSessionServers)
+}
+
+func TestHandleWSLoadSession_InjectsLocalKandevMCPServers(t *testing.T) {
+	s := newTestServerWithMCP(t)
+	capture := &mcpCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-load", "agent.session.load", LoadSessionRequest{SessionID: "existing-session"})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp := s.handleWSLoadSession(context.Background(), msg)
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want %q", resp.Type, ws.MessageTypeResponse)
+	}
+	assertLocalKandevMCPServers(t, capture.loadSessionServers)
+}
+
+func TestMCPToolCatalogRemainsAvailableAfterAgentSessionLoad(t *testing.T) {
+	log := newTestLogger()
+	dispatcher := ws.NewDispatcher()
+	dispatcher.RegisterFunc(ws.ActionMCPStepComplete, func(_ context.Context, msg *ws.Message) (*ws.Message, error) {
+		return ws.NewResponse(msg.ID, msg.Action, map[string]any{"accepted": true})
+	})
+	backend := mcpserver.NewDispatcherBackendClient(dispatcher, log)
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: t.TempDir()}
+	procMgr := process.NewManager(cfg, log)
+	mcpServer := mcpserver.New(backend, "session-1", "task-1", cfg.Port, log, "", false, mcpserver.ModeTask)
+	s := NewServer(cfg, procMgr, mcpServer, nil, log)
+	capture := &mcpCaptureAdapter{}
+	procMgr.SetAdapterForTest(capture)
+
+	assertStepCompleteAvailableAndCallable(t, s)
+
+	msg, err := ws.NewRequest("req-load", "agent.session.load", LoadSessionRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if resp := s.handleWSLoadSession(context.Background(), msg); resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("load response type = %q, want %q", resp.Type, ws.MessageTypeResponse)
+	}
+
+	// A second MCP client session proves the server catalog still serves the
+	// task-only completion tool after the agent session load path runs.
+	assertStepCompleteAvailableAndCallable(t, s)
+}
+
+func assertStepCompleteAvailableAndCallable(t *testing.T, s *Server) {
+	t.Helper()
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}`
+	init := postMCPRequest(t, s, initBody, "")
+	if init.code != http.StatusOK || init.sessionID == "" {
+		t.Fatalf("initialize status = %d, session = %q, body = %s", init.code, init.sessionID, init.body)
+	}
+
+	listed := postMCPRequest(t, s, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`, init.sessionID)
+	if listed.code != http.StatusOK || !strings.Contains(listed.body, `"name":"step_complete_kandev"`) {
+		t.Fatalf("tools/list status = %d, body = %s", listed.code, listed.body)
+	}
+
+	called := postMCPRequest(t, s, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"step_complete_kandev","arguments":{"summary":"done"}}}`, init.sessionID)
+	if called.code != http.StatusOK || !strings.Contains(called.body, `accepted`) || strings.Contains(called.body, `"isError":true`) {
+		t.Fatalf("tools/call status = %d, body = %s", called.code, called.body)
+	}
+}
+
+type mcpHTTPResponse struct {
+	code      int
+	body      string
+	sessionID string
+}
+
+func postMCPRequest(t *testing.T, s *Server, body, sessionID string) mcpHTTPResponse {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	if sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", sessionID)
+	}
+	s.router.ServeHTTP(recorder, req)
+	return mcpHTTPResponse{
+		code:      recorder.Code,
+		body:      recorder.Body.String(),
+		sessionID: recorder.Header().Get("Mcp-Session-Id"),
+	}
 }
 
 func TestHandleWSStderr_Empty(t *testing.T) {

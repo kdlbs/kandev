@@ -1,20 +1,22 @@
 ---
 name: verify
-description: Run format, typecheck, test, and lint across the monorepo. Use after implementing changes.
+description: Verify the committed artifact before push, reusing proven pre-commit hook coverage and escalating to full checks when impact requires it.
 ---
 
 # Verify
 
-In the user-started primary session, delegate the
-full verification pipeline to the registered `verify` worker. Do not substitute
+In the user-started primary session, delegate verification to the registered
+Spark `verify` worker after commit and before push, with `mode=changed` by
+default. Supply the `/commit` hook receipt and last successfully verified SHA
+when available. Do not substitute
 a generic agent: it may lack the required GitHub network access or
 shared-worktree write permissions. If the worker cannot be launched or access
 the required resources, stop and report that verification is blocked.
 
 An explicitly assigned `verify` worker follows the worker procedure below,
 reports verification failures without fixing source or test logic, and does not
-spawn workers. The planner assigns failures to an `implementer`, then launches
-a fresh `verify` assignment.
+spawn workers. The planner handles a small remediation directly or delegates a
+larger one, then launches a fresh `verify` assignment.
 
 ## What to do
 
@@ -24,10 +26,10 @@ Invoke the `verify` worker in a single call. Wait for it to complete and surface
 - If verify fails: create a bounded remediation assignment from its report and
   do not proceed with downstream actions that depend on green verification.
 - If verify reports that required sandbox capabilities could not be authorized,
-  stop before commit, push, or PR creation and surface its required user action.
+  stop before push or PR delivery and surface its required user action.
   On Codex, tell the user exactly: "Switch the mode selector to
-  `Agent (full access)`, then retry verification." Explain that PR creation is
-  waiting on mandatory verification; do not imply that Codex or GitHub cannot
+  `Agent (full access)`, then retry verification." Explain that push and PR
+  delivery are waiting on mandatory verification; do not imply that Codex or GitHub cannot
   create PRs, ask whether to proceed unverified, or launch downstream workers.
 
 Do not run verification commands in the planner session. The worker's prompt
@@ -35,8 +37,21 @@ contains the full procedure in `.agents/agents/verify.md`.
 
 ## Worker Procedure
 
-The assigned `verify` worker runs the full pipeline from the repository root and
-reports the exact commands and results:
+Resolve the PR base and verification scope base, then collect
+`scope-base...HEAD`, staged, unstaged, and untracked paths. The supplied last
+verified SHA may be the scope base only when it is an ancestor of `HEAD`;
+otherwise use the PR base. Report PR base/head, scope base, paths/categories,
+hook-receipt eligibility and omissions, exact commands, and coverage limits.
+If base/diff is unavailable or impact is ambiguous, use `mode=full`; use full
+mode for explicit requests, releases, shared build or toolchain changes, and
+unusually broad work. PR CI is the authoritative full matrix. Read
+[impact-matrix.md](references/impact-matrix.md) and, when a receipt is
+supplied, [hook-evidence.md](references/hook-evidence.md) before commands. A
+scoped pass is `changed-scope PASS`, never `full PASS`.
+
+In `mode=full`, run the pipeline below and ignore hook omissions. In
+`mode=changed`, run only uncovered matrix commands for impacted categories; do
+not run unrelated suites or repeat eligible hook-covered formatting/lint.
 
 ```bash
 # Fresh worktrees share .git/ but not apps/node_modules.
@@ -113,7 +128,7 @@ still fails.
 
 If that escalation is unavailable, denied, cancelled, or interrupted, stop and
 return a blocked verification report with a **Required user action** section.
-State that mandatory verification must pass before commit and PR creation can
+State that mandatory verification must pass before push and PR delivery can
 continue. On Codex, the action must say exactly: "Switch the mode selector to
 `Agent (full access)`, then retry verification." On other runtimes, tell the
 user to enable the runtime's full filesystem, network, or loopback access as
@@ -135,11 +150,13 @@ those require a bounded implementer assignment before verification continues.
 For source, test, type, or lint failures, stop after capturing targeted failure
 evidence. Report the command, quiet-log path and relevant lines, likely owned
 files, and a concise remediation recommendation. Do not edit logic or rerun the
-whole pipeline until the planner has assigned and integrated a fix.
+selected checks until the planner has integrated a fix.
 
-If `make fmt` changes files, review and report the formatter diff, then continue
-with the remaining commands. If a later command fails, capture targeted evidence
-and stop for planner-assigned remediation.
+If formatting changes files after commit, review and report the formatter diff,
+invalidate the hook receipt and verified-commit state, then continue only to
+collect useful evidence. The planner must commit the formatter result and
+launch fresh verification before push. If a later command fails, capture
+targeted evidence and stop for planner-assigned remediation.
 
 `make test` includes backend, web, CLI, and `test-scripts`; do not silently skip
 `test-scripts` or its desktop smoke coverage while reporting full verification

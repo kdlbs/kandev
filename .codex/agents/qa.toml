@@ -1,5 +1,5 @@
 name = "qa"
-description = "Verify integrated Kandev work after implementation by tracing wiring, testing happy paths, breaking edge cases, and checking coverage/readiness."
+description = "Independently verify Kandev changes with integration, public-contract, persistence, concurrency, recovery, cross-component, or missing faithful behavior evidence."
 model = "gpt-5.6-terra"
 model_reasoning_effort = "medium"
 sandbox_mode = "read-only"

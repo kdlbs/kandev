@@ -217,16 +217,17 @@ export function validateCreateInputs(inputs: {
 }
 
 /**
- * Detects two remote-repo rows that resolve to the same GitHub `owner/repo`.
+ * Detects two remote-repo rows that resolve to the same GitHub repository and
+ * selected branch.
  *
  * Both plain repo URLs and PR URLs are parsed via `parseGitHubAnyUrl`, so two
- * different PRs of the same repo (`/pull/1116` and `/pull/1117`) or the same
- * PR URL pasted twice are caught — they all collapse to the same backend
- * repository, which would otherwise surface as an opaque UUID-laden error.
+ * identical branch are caught. Same-repository rows on distinct branches are
+ * valid multi-branch task inputs and must reach the backend.
  *
  * Rows with an empty URL, or a URL that can't be parsed to `owner/repo`
- * (garbage), are skipped — only parseable rows participate in the comparison,
- * which is case-insensitive on `owner/repo`.
+ * (garbage), are skipped — only parseable rows participate in the comparison.
+ * Repository identity is case-insensitive on `owner/repo`; branch identity is
+ * case-sensitive because Git branch names are case-sensitive.
  *
  * Returns the human-readable label (`owner/repo`, preserving the first row's
  * casing) of the first duplicate found, or `null` when every parseable row is
@@ -238,7 +239,7 @@ export function findDuplicateRemoteRepo(remoteRepos: TaskRemoteRepoRow[]): strin
     const parsed = parseGitHubAnyUrl(row.url ?? "");
     if (!parsed) continue;
     const label = `${parsed.owner}/${parsed.repo}`;
-    const key = label.toLowerCase();
+    const key = `${label.toLowerCase()}\u0000${row.branch}`;
     const existing = seen.get(key);
     if (existing) return existing;
     seen.set(key, label);

@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { DialogFormState, TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 import {
   RemoteRepoChip,
+  selectedRemoteRepositoryIdentity,
   type RemoteRepoChipProps,
 } from "@/components/task-create-dialog-remote-repo-chip";
 import { useRemoteRepositories } from "@/hooks/domains/integrations/use-remote-repositories";
@@ -66,19 +67,26 @@ export function RemoteRepoChipsRow({
   const rows = fs.remoteRepos;
   return (
     <div className="flex min-h-9 flex-wrap items-center gap-2" data-testid="remote-repo-chips-row">
-      {rows.map((row) => (
-        <RemoteRepoChip
-          key={row.key}
-          row={row}
-          branches={fs.branchesByUrl.branches(row.url)}
-          branchesLoading={fs.branchesByUrl.loading(row.url)}
-          prInfo={fs.prInfoByUrl.info(row.url)}
-          accessibleRepos={accessibleRepos}
-          onURLChange={makeURLChange(onUpdateRow, row.key)}
-          onBranchChange={(branch) => onUpdateRow(row.key, { branch })}
-          onRemove={() => onRemoveRow(row.key)}
-        />
-      ))}
+      {rows.map((row) => {
+        const selectedRepositoryIdentities = rows
+          .filter((otherRow) => otherRow.key !== row.key)
+          .map(selectedRemoteRepositoryIdentity)
+          .filter((identity): identity is string => Boolean(identity));
+        return (
+          <RemoteRepoChip
+            key={row.key}
+            row={row}
+            branches={fs.branchesByUrl.branches(row.url)}
+            branchesLoading={fs.branchesByUrl.loading(row.url)}
+            prInfo={fs.prInfoByUrl.info(row.url)}
+            accessibleRepos={accessibleRepos}
+            selectedRepositoryIdentities={selectedRepositoryIdentities}
+            onURLChange={makeURLChange(onUpdateRow, row.key)}
+            onBranchChange={(branch) => onUpdateRow(row.key, { branch })}
+            onRemove={() => onRemoveRow(row.key)}
+          />
+        );
+      })}
       <AddRowButton onAddRow={onAddRow} />
     </div>
   );

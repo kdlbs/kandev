@@ -54,69 +54,40 @@ func tasksList(args []string) int {
 	})
 }
 
-// tasksMove transitions a task to a different workflow step.
-// `--prompt` queues a handoff message that the receiving step will
-// see as the first user comment.
+// tasksMove fails closed because Office runs do not have a signed runtime
+// capability for arbitrary workflow-step moves.
 func tasksMove(args []string) int {
 	fs := flag.NewFlagSet("tasks move", flag.ContinueOnError)
-	id := fs.String("id", "", "Task ID (required; defaults to $KANDEV_TASK_ID)")
-	step := fs.String("step", "", "Destination workflow step ID (required)")
-	prompt := fs.String("prompt", "", "Optional handoff prompt queued for the destination step")
+	_ = fs.String("id", "", "Task ID (defaults to $KANDEV_TASK_ID)")
+	_ = fs.String("step", "", "Destination workflow step ID")
+	_ = fs.String("prompt", "", "Optional handoff prompt")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1
 	}
-	client, err := newKandevClient()
-	if err != nil {
-		cliError("%v", err)
-		return 1
-	}
-	taskID := resolveTaskID(*id, client.taskID)
-	if taskID == "" || *step == "" {
-		cliError("--id (or KANDEV_TASK_ID) and --step are required")
-		return 1
-	}
-	payload := map[string]any{"workflow_step_id": *step}
-	if *prompt != "" {
-		payload["prompt"] = *prompt
-	}
-	body, status, err := client.do(http.MethodPost,
-		fmt.Sprintf("/api/v1/tasks/%s/move", taskID), payload)
-	return handleResponse(body, status, err)
+	cliError("tasks move is unavailable to Office agents; use `kandev task update --status <status>` for signed status changes, or ask a human or admin to move the task between workflow steps")
+	return 1
 }
 
-// tasksArchive archives a task. Idempotent: archiving an already-
-// archived task is a 200/204 no-op.
+// tasksArchive fails closed because Office runs do not have a signed runtime
+// capability for archival.
 func tasksArchive(args []string) int {
 	fs := flag.NewFlagSet("tasks archive", flag.ContinueOnError)
-	id := fs.String("id", "", "Task ID (required; defaults to $KANDEV_TASK_ID)")
+	_ = fs.String("id", "", "Task ID (defaults to $KANDEV_TASK_ID)")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1
 	}
-	client, err := newKandevClient()
-	if err != nil {
-		cliError("%v", err)
-		return 1
-	}
-	taskID := resolveTaskID(*id, client.taskID)
-	if taskID == "" {
-		cliError("--id (or KANDEV_TASK_ID) required")
-		return 1
-	}
-	body, status, err := client.do(http.MethodPost,
-		fmt.Sprintf("/api/v1/tasks/%s/archive", taskID), nil)
-	return handleResponse(body, status, err)
+	cliError("tasks archive is unavailable to Office agents; ask a human or admin to archive the task")
+	return 1
 }
 
-// tasksMessage posts a comment to a task as the current agent.
-// Different from `comment add` (which writes as the user) — this
-// shape lets the CEO drop a coordinator note on a worker's task
-// without spawning a new subtask.
+// tasksMessage posts a comment through the signed Office runtime surface.
+// The runtime validates task scope and derives attribution from the run token.
 func tasksMessage(args []string) int {
 	fs := flag.NewFlagSet("tasks message", flag.ContinueOnError)
 	id := fs.String("id", "", "Task ID (required; defaults to $KANDEV_TASK_ID)")
-	prompt := fs.String("prompt", "", "Message body (required)")
+	prompt := fs.String("prompt", "", "Message body (required; use \"-\" for stdin)")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1
@@ -127,16 +98,21 @@ func tasksMessage(args []string) int {
 		return 1
 	}
 	taskID := resolveTaskID(*id, client.taskID)
-	if taskID == "" || *prompt == "" {
+	message, err := resolveBody(*prompt)
+	if err != nil {
+		cliError("read prompt: %v", err)
+		return 1
+	}
+	if taskID == "" || message == "" {
 		cliError("--id (or KANDEV_TASK_ID) and --prompt are required")
 		return 1
 	}
-	payload := map[string]any{
-		"body":        *prompt,
-		"author_type": "agent",
+	payload := map[string]string{
+		"task_id": taskID,
+		"body":    message,
 	}
 	body, status, err := client.do(http.MethodPost,
-		fmt.Sprintf("/api/v1/office/tasks/%s/comments", taskID), payload)
+		"/api/v1/office/runtime/comments", payload)
 	return handleResponse(body, status, err)
 }
 

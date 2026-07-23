@@ -4,8 +4,8 @@ import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 import type { PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 
 /** Minimal TaskRemoteRepoRow builder for the dedup tests. */
-function remoteRow(key: string, url: string): TaskRemoteRepoRow {
-  return { key, url, branch: "", source: "paste" };
+function remoteRow(key: string, url: string, branch = ""): TaskRemoteRepoRow {
+  return { key, url, branch, source: "paste" };
 }
 
 /** Builds a `prInfoByUrl` stub for `buildRepositoriesPayload`. The submit
@@ -571,6 +571,15 @@ describe("findDuplicateRemoteRepo", () => {
         remoteRow("r1", "https://github.com/kdlbs/kandev/pull/1117"),
       ]),
     ).toBe(REPO_LABEL);
+  });
+
+  it("allows the same repo on distinct selected branches", () => {
+    expect(
+      findDuplicateRemoteRepo([
+        remoteRow("r0", REPO_URL, "main"),
+        remoteRow("r1", REPO_URL, "feature/remote-duplicate"),
+      ]),
+    ).toBeNull();
   });
 
   it("flags a PR URL and a plain repo URL of the same repo", () => {
