@@ -49,7 +49,7 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - `TaskRepository.checkout_branch` was already on the http type.
 - Worktrees are keyed by `worktree.id` in the Zustand store, so two worktrees with the same `repository_id` already coexist.
 - Repo chips in chat-message renderers now key on `(repository_id, checkout_branch)` so multi-branch tasks render distinct chips instead of collapsing.
-- In the task-creation dialog, every workspace, discovered-on-disk, and remote provider repository picker marks an option as `Already added` when another repository row already selects that repository. The current row does not mark its own selection.
+- In the task-creation dialog, every workspace, discovered-on-disk, and remote provider repository picker shows an accent-colored check (with an accessible `Already added` label) when another repository row already selects that repository. The current row does not mark its own selection.
 - Marked options remain selectable so users can intentionally create a multi-branch task from one repository. Removing or changing the other row removes the marker immediately.
 - Review surfaces expose one linked pull request at a time when a task has multiple PRs. A task-scoped selector defaults to the primary (oldest) PR, remembers an in-session override, and falls back to the primary PR when that override disappears.
 - Selecting a PR changes the remote PR diff contribution while preserving the existing source precedence: uncommitted worktree changes, then cumulative committed changes, then the selected PR. PR-only views and PR timeline rows resolve the exact PR rather than the task primary.
@@ -58,8 +58,8 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 
 ### Task-creation scenarios
 
-- **GIVEN** a task-creation repository row selects a workspace or discovered-on-disk repository, **WHEN** the user opens another repository selector, **THEN** that repository remains selectable and is visibly marked `Already added`.
-- **GIVEN** a task-creation Remote row selects a provider-backed repository, **WHEN** the user opens another Remote repository selector, **THEN** the same provider repository remains selectable and is visibly marked `Already added`.
+- **GIVEN** a task-creation repository row selects a workspace or discovered-on-disk repository, **WHEN** the user opens another repository selector, **THEN** that repository remains selectable and is visibly marked by a compact accent-colored check whose accessible label is `Already added`.
+- **GIVEN** a task-creation Remote row selects a provider-backed repository, **WHEN** the user opens another Remote repository selector, **THEN** the same provider repository remains selectable and is visibly marked by the same compact accent-colored check.
 - **GIVEN** a repository is marked because another row selects it, **WHEN** the user changes or removes that other row, **THEN** the marker disappears from the open or next-opened selector.
 - **GIVEN** a row already selects a repository and no other row selects it, **WHEN** the user reopens that row's selector, **THEN** its current repository is not marked as a duplicate.
 
@@ -86,7 +86,7 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - `TestAddBranchToTask_HappyPath` — second branch appended after the fact lands as a new row.
 - `TestAddBranchToTask_RejectsDuplicate` — re-adding the same `(repo, branch)` errors.
 - `TestLaunchPreparedSession_MultiBranch_ReusesWorktreeIDsByBranchSlug` — a follow-on session for the same task reuses each existing branch worktree instead of preparing a new task directory.
-- Task-creation component and mobile E2E coverage prove the `Already added` marker for workspace/on-disk and Remote provider selectors while preserving option selection.
+- Task-creation component and mobile E2E coverage prove the accessible, compact selected-repository marker for workspace/on-disk and Remote provider selectors while preserving option selection.
 - Web unit tests prove selected-PR default, override, task isolation, and removed-PR fallback behavior.
 - Desktop and mobile Playwright tests prove a two-PR task can switch Review from the primary PR to a sibling PR without stale files, overflow, or closing the surface.
 

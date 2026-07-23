@@ -18,20 +18,20 @@ No backend, API, persistence, or validation changes. Existing multi-branch task 
 
 ### Workspace and discovered repositories
 
-- `apps/web/components/task-create-dialog-workspace-repo-chips.tsx`: derive the repository IDs and normalized local paths selected by rows other than the current row; keep those options available in task creation and render an `Already added` marker beside each matching option. Preserve quick chat's current hide-selected behavior through its explicit duplicate policy.
+- `apps/web/components/task-create-dialog-workspace-repo-chips.tsx`: derive the repository IDs and normalized local paths selected by rows other than the current row; keep those options available in task creation and render a compact accent-colored check with an accessible `Already added` label beside each matching option. Preserve quick chat's current hide-selected behavior through its explicit duplicate policy.
 - `apps/web/components/task-create-dialog-repo-chips.tsx`: remove the stale comment that describes task creation as never filtering only because branch pairs differ, and document the marked-but-selectable behavior.
-- Reuse the existing `Pill` option rendering and `Badge` primitive. This changes option content only; the existing popover, responsive behavior, scroll owner, and touch targets remain intact.
+- Reuse the existing `Pill` option rendering. This changes option content only; the existing popover, responsive behavior, scroll owner, and touch targets remain intact.
 
 ### Remote provider repositories
 
 - `apps/web/components/task-create-dialog-remote-repo-chips.tsx`: compute per-row repository identities selected by other Remote rows using provider/id metadata with normalized URL fallback, and pass them to each chip.
-- `apps/web/components/task-create-dialog-remote-repo-chip.tsx`: mark matching provider options `Already added` while leaving them selectable. The current row's own repository is not marked unless another row also selects it.
+- `apps/web/components/task-create-dialog-remote-repo-chip.tsx`: mark matching provider options with the same compact accent-colored check while leaving them selectable. The current row's own repository is not marked unless another row also selects it.
 
 ### Mobile design contract
 
 - Desktop outcome and mobile entry point: the existing task-creation dialog and its repository pill triggers continue to expose the same choices; the marker appears inside the same option row at both viewport sizes.
 - Nearest shipped exemplar: the existing workspace `Pill` and Remote repository popover option rows remain the interaction and geometry baseline.
-- Presentation and hierarchy: no new surface or navigation is introduced. The selector popover remains the single scroll owner, with the repository name primary and `Already added` secondary.
+- Presentation and hierarchy: no new surface or navigation is introduced. The selector popover remains the single scroll owner, with the repository name primary and a compact check as the secondary duplicate signal.
 - Shared behavior: identity derivation and marker state are viewport-independent. Existing mobile option rows retain their 44px touch target and viewport containment.
 
 ## Tests
@@ -42,8 +42,8 @@ No backend, API, persistence, or validation changes. Existing multi-branch task 
 
 ## E2E Tests
 
-- **Scenario:** a selected workspace repository is marked in the next selector on a phone viewport and remains selectable. **File:** `apps/web/e2e/tests/task/mobile-create-task-repository-selection.spec.ts`. **What to verify:** open the mobile create-task dialog, select a seeded repository, add a row, open the next picker, and assert the matching option contains `Already added` and can still be chosen.
-- **Scenario:** a selected provider-backed Remote repository is marked in the next selector on a phone viewport. **File:** `apps/web/e2e/tests/task/mobile-create-task-remote-repo.spec.ts`. **What to verify:** select a mocked provider repository, add a Remote row, reopen the picker, assert the matching option contains `Already added`, remains inside the viewport, and remains selectable.
+- **Scenario:** a selected workspace repository is marked in the next selector on a phone viewport and remains selectable. **File:** `apps/web/e2e/tests/task/mobile-create-task-repository-selection.spec.ts`. **What to verify:** open the mobile create-task dialog, select a seeded repository, add a row, open the next picker, and assert the matching option exposes the accessible `Already added` check and can still be chosen.
+- **Scenario:** a selected provider-backed Remote repository is marked in the next selector on a phone viewport. **File:** `apps/web/e2e/tests/task/mobile-create-task-remote-repo.spec.ts`. **What to verify:** select a mocked provider repository, add a Remote row, reopen the picker, assert the matching option exposes the accessible check, remains inside the viewport, and remains selectable.
 
 ## Implementation Waves
 
@@ -78,6 +78,10 @@ Wave 7:
 - QA integration and mobile behavior — QA worker, balanced model
 - Code review — code-review worker, frontier model
 - Full format/typecheck/test/lint verification — verify worker, cheap model
+
+Wave 8:
+
+- [x] [task-09-compact-selected-marker](task-09-compact-selected-marker.md) — done
 
 ## Verification
 

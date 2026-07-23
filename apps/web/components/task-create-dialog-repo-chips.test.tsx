@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import type { Branch, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -37,6 +37,7 @@ afterEach(cleanup);
 const REPO_FRONT_ID = "repo-front";
 const REPO_BACK_ID = "repo-back";
 const REPO_CHIP_TRIGGER = "repo-chip-trigger";
+const ALREADY_ADDED_MARKER = "already-added-repository-marker";
 const DISCOVERED_REPO_PATH = "/home/me/projects/local-project";
 
 function makeRepo(id: string, name: string): Repository {
@@ -465,8 +466,11 @@ describe("WorkspaceRepoChips workspace markers", () => {
 
     fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[1]);
 
-    const selectedElsewhere = screen.getByRole("option", { name: /frontend.*Already added/i });
+    const selectedElsewhere = screen.getByRole("option", { name: /^frontend/ });
     expect(selectedElsewhere).toBeTruthy();
+    const marker = within(selectedElsewhere).getByTestId(ALREADY_ADDED_MARKER);
+    expect(marker.getAttribute("aria-label")).toBe("Already added");
+    expect(marker.classList).toContain("text-primary");
     fireEvent.click(selectedElsewhere);
     expect(onRowRepositoryChange).toHaveBeenCalledWith("r1", REPO_FRONT_ID);
   });
@@ -479,9 +483,9 @@ describe("WorkspaceRepoChips workspace markers", () => {
     expect(screen.queryByRole("option", { name: /^frontend/ })).toBeNull();
     fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
 
-    expect(screen.getByRole("option", { name: /^frontend/ }).textContent).not.toMatch(
-      /Already added/i,
-    );
+    expect(
+      within(screen.getByRole("option", { name: /^frontend/ })).queryByTestId(ALREADY_ADDED_MARKER),
+    ).toBeNull();
   });
 
   it("clears a workspace marker when the selecting sibling changes or is removed", () => {
@@ -491,7 +495,9 @@ describe("WorkspaceRepoChips workspace markers", () => {
     ]);
 
     fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[1]);
-    expect(screen.getByRole("option", { name: /frontend.*Already added/i })).toBeTruthy();
+    expect(
+      within(screen.getByRole("option", { name: /^frontend/ })).getByTestId(ALREADY_ADDED_MARKER),
+    ).toBeTruthy();
 
     rerender(
       <TooltipProvider>
@@ -507,8 +513,12 @@ describe("WorkspaceRepoChips workspace markers", () => {
         />
       </TooltipProvider>,
     );
-    expect(screen.queryByRole("option", { name: /frontend.*Already added/i })).toBeNull();
-    expect(screen.getByRole("option", { name: /backend.*Already added/i })).toBeTruthy();
+    expect(
+      within(screen.getByRole("option", { name: /^frontend/ })).queryByTestId(ALREADY_ADDED_MARKER),
+    ).toBeNull();
+    expect(
+      within(screen.getByRole("option", { name: /^backend/ })).getByTestId(ALREADY_ADDED_MARKER),
+    ).toBeTruthy();
 
     rerender(
       <TooltipProvider>
@@ -524,7 +534,9 @@ describe("WorkspaceRepoChips workspace markers", () => {
         />
       </TooltipProvider>,
     );
-    expect(screen.queryByRole("option", { name: /backend.*Already added/i })).toBeNull();
+    expect(
+      within(screen.getByRole("option", { name: /^backend/ })).queryByTestId(ALREADY_ADDED_MARKER),
+    ).toBeNull();
   });
 });
 
@@ -540,7 +552,11 @@ describe("WorkspaceRepoChips discovered markers", () => {
     );
 
     fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[1]);
-    expect(screen.getByRole("option", { name: /local-project.*Already added/i })).toBeTruthy();
+    expect(
+      within(screen.getByRole("option", { name: /^local-project/ })).getByTestId(
+        ALREADY_ADDED_MARKER,
+      ),
+    ).toBeTruthy();
 
     rerender(
       <TooltipProvider>
@@ -560,7 +576,11 @@ describe("WorkspaceRepoChips discovered markers", () => {
         />
       </TooltipProvider>,
     );
-    expect(screen.queryByRole("option", { name: /local-project.*Already added/i })).toBeNull();
+    expect(
+      within(screen.getByRole("option", { name: /^local-project/ })).queryByTestId(
+        ALREADY_ADDED_MARKER,
+      ),
+    ).toBeNull();
 
     rerender(
       <TooltipProvider>
@@ -577,6 +597,10 @@ describe("WorkspaceRepoChips discovered markers", () => {
         />
       </TooltipProvider>,
     );
-    expect(screen.queryByRole("option", { name: /local-project.*Already added/i })).toBeNull();
+    expect(
+      within(screen.getByRole("option", { name: /^local-project/ })).queryByTestId(
+        ALREADY_ADDED_MARKER,
+      ),
+    ).toBeNull();
   });
 });

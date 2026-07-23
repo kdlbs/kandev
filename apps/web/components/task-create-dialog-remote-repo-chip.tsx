@@ -5,6 +5,7 @@ import Link from "@/components/routing/app-link";
 import {
   IconBrandGithub,
   IconBrandGitlab,
+  IconCheck,
   IconGitBranch,
   IconLink,
   IconX,
@@ -490,11 +491,7 @@ function RepoOption({
         <span className="truncate">{repo.fullName}</span>
       </span>
       <span className="flex shrink-0 items-center gap-1">
-        {alreadyAdded ? (
-          <Badge variant="outline" className="text-[10px] text-muted-foreground">
-            Already added
-          </Badge>
-        ) : null}
+        {alreadyAdded ? <AlreadyAddedMarker /> : null}
         {repo.private ? (
           <Badge variant="outline" className="text-[10px] text-muted-foreground">
             private
@@ -502,6 +499,19 @@ function RepoOption({
         ) : null}
       </span>
     </button>
+  );
+}
+
+function AlreadyAddedMarker() {
+  return (
+    <span
+      role="img"
+      aria-label="Already added"
+      data-testid="already-added-repository-marker"
+      className="text-primary"
+    >
+      <IconCheck aria-hidden="true" className="h-4 w-4" />
+    </span>
   );
 }
 

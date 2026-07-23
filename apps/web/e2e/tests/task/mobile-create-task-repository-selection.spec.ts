@@ -19,10 +19,9 @@ test.describe("Create task workspace repository picker on mobile", () => {
     await expect(repositoryChips).toHaveCount(2);
     await repositoryChips.nth(1).click();
 
-    const selectedElsewhere = testPage.getByRole("option", {
-      name: /E2E Repo.*Already added/i,
-    });
+    const selectedElsewhere = testPage.getByRole("option", { name: /^E2E Repo/ });
     await expect(selectedElsewhere).toBeVisible();
+    await expect(selectedElsewhere.getByTestId("already-added-repository-marker")).toBeVisible();
     await selectedElsewhere.click();
     await expect(repositoryChips.nth(1)).toContainText("E2E Repo");
   });

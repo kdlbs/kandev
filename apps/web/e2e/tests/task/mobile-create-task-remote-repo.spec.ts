@@ -143,7 +143,7 @@ test.describe("Create task Remote repo picker on mobile", () => {
     const duplicateOption = testPage
       .getByTestId("remote-repo-option")
       .filter({ hasText: "mock-user/duplicate" });
-    await expect(duplicateOption).toContainText("Already added");
+    await expect(duplicateOption.getByTestId("already-added-repository-marker")).toBeVisible();
 
     const [optionBox, viewport] = await Promise.all([
       duplicateOption.boundingBox(),

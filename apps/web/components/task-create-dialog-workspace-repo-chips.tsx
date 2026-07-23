@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { IconPlus, IconX, IconCode, IconGitBranch } from "@tabler/icons-react";
+import { IconPlus, IconX, IconCode, IconGitBranch, IconCheck } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useBranches, type BranchSource } from "@/hooks/domains/workspace/use-repository-branches";
@@ -473,7 +473,7 @@ function renderWorkspaceRepoOption(repo: Repository, alreadyAdded: boolean) {
           <span className="truncate text-[11px] text-muted-foreground">{display}</span>
         ) : null}
       </span>
-      {alreadyAdded ? <AlreadyAddedBadge /> : null}
+      {alreadyAdded ? <AlreadyAddedMarker /> : null}
     </span>
   );
 }
@@ -489,16 +489,21 @@ function renderDiscoveredRepoOption(path: string, alreadyAdded: boolean) {
       <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
         on disk
       </Badge>
-      {alreadyAdded ? <AlreadyAddedBadge /> : null}
+      {alreadyAdded ? <AlreadyAddedMarker /> : null}
     </span>
   );
 }
 
-function AlreadyAddedBadge() {
+function AlreadyAddedMarker() {
   return (
-    <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
-      Already added
-    </Badge>
+    <span
+      role="img"
+      aria-label="Already added"
+      data-testid="already-added-repository-marker"
+      className="shrink-0 text-primary"
+    >
+      <IconCheck aria-hidden="true" className="h-4 w-4" />
+    </span>
   );
 }
 

@@ -52,6 +52,7 @@ import { RemoteRepoChip } from "./task-create-dialog-remote-repo-chip";
 
 const TRIGGER_TID = "remote-repo-chip-trigger";
 const INPUT_TID = "remote-repo-input";
+const ALREADY_ADDED_MARKER = "already-added-repository-marker";
 const FULL_NAME = "acme/site";
 const URL_ACME_SITE = "https://github.com/acme/site";
 function githubSite(overrides: Partial<AccessibleRepo> = {}): AccessibleRepo {
@@ -173,7 +174,10 @@ describe("RemoteRepoChip — already added marker", () => {
       />,
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    expect(screen.getByText("Already added")).toBeTruthy();
+    const marker = screen.getByTestId(ALREADY_ADDED_MARKER);
+    expect(marker.getAttribute("aria-label")).toBe("Already added");
+    expect(marker.classList).toContain("text-primary");
+    expect(screen.queryByText("Already added")).toBeNull();
     fireEvent.click(screen.getByText(FULL_NAME).closest("button") as HTMLButtonElement);
     expect(onURLChange).toHaveBeenCalledOnce();
   });
@@ -202,7 +206,7 @@ describe("RemoteRepoChip — already added marker", () => {
       />,
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    expect(screen.queryByText("Already added")).toBeNull();
+    expect(screen.queryByTestId(ALREADY_ADDED_MARKER)).toBeNull();
   });
   it("marks an option from a normalized pasted URL identity", () => {
     renderInProvider(
@@ -220,7 +224,7 @@ describe("RemoteRepoChip — already added marker", () => {
       />,
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    expect(screen.getByText("Already added")).toBeTruthy();
+    expect(screen.getByTestId(ALREADY_ADDED_MARKER)).toBeTruthy();
   });
 });
 describe("RemoteRepoChip — unified search", () => {
