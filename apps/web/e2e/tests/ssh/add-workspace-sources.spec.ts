@@ -69,7 +69,7 @@ test.describe("SSH executor — attach workspace sources", () => {
       const rows = await apiClient.listSSHSessions(seedData.sshExecutorId);
       const row = rows.find((candidate) => candidate.task_id === task.id);
       expect(row?.remote_task_dir).toBeTruthy();
-      const sibling = `${row!.remote_task_dir}/ssh-second-source-main/remote-source.txt`;
+      const sibling = `${row!.remote_task_dir}/fixture-ssh-second-source-main/remote-source.txt`;
       expect(remotePathExists(seedData.sshTarget, sibling)).toBe(true);
       expect(readRemoteFile(seedData.sshTarget, sibling)).toBe("ssh-second-source fixture\n");
       const agentctlLog = readRemoteFile(
@@ -80,7 +80,9 @@ test.describe("SSH executor — attach workspace sources", () => {
 
       await session.clickTab("Files");
       await expect(
-        session.files.getByTestId("file-tree-node").filter({ hasText: "ssh-second-source-main" }),
+        session.files
+          .getByTestId("file-tree-node")
+          .filter({ hasText: "fixture-ssh-second-source-main" }),
       ).toBeVisible({ timeout: 30_000 });
 
       await backend.restart();
@@ -102,7 +104,9 @@ test.describe("SSH executor — attach workspace sources", () => {
       await session.waitForLoad();
       await session.clickTab("Files");
       await expect(
-        session.files.getByTestId("file-tree-node").filter({ hasText: "ssh-second-source-main" }),
+        session.files
+          .getByTestId("file-tree-node")
+          .filter({ hasText: "fixture-ssh-second-source-main" }),
       ).toBeVisible({ timeout: 30_000 });
     } finally {
       await fixture.close();

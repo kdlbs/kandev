@@ -76,13 +76,13 @@ test.describe("Docker executor — attach workspace sources", () => {
       expect(
         containerFile(
           before!.container_id!,
-          "/workspace/docker-second-source-main/remote-source.txt",
+          "/workspace/fixture-docker-second-source-main/remote-source.txt",
         ),
       ).toBe("docker-second-source fixture\n");
       await expect(
         session.files
           .getByTestId("file-tree-node")
-          .filter({ hasText: "docker-second-source-main" }),
+          .filter({ hasText: "fixture-docker-second-source-main" }),
       ).toBeVisible({ timeout: 30_000 });
 
       const forgedFolder = await apiClient.rawRequest(
@@ -126,7 +126,7 @@ test.describe("Docker executor — attach workspace sources", () => {
       expect(
         containerFile(
           after!.container_id!,
-          "/workspace/docker-second-source-main/remote-source.txt",
+          "/workspace/fixture-docker-second-source-main/remote-source.txt",
         ),
       ).toBe("docker-second-source fixture\n");
       await testPage.reload();
@@ -135,7 +135,7 @@ test.describe("Docker executor — attach workspace sources", () => {
       await expect(
         session.files
           .getByTestId("file-tree-node")
-          .filter({ hasText: "docker-second-source-main" }),
+          .filter({ hasText: "fixture-docker-second-source-main" }),
       ).toBeVisible({ timeout: 30_000 });
     } finally {
       await fixture.close();
