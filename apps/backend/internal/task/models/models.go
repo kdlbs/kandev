@@ -473,6 +473,13 @@ type Task struct {
 	IsFromOffice bool `json:"is_from_office,omitempty"`
 }
 
+// IsOfficeOwnedAndAssigned reports whether runtime behavior belongs to an
+// Office-owned task with a designated runner. Kanban tasks may also project a
+// runner from their workflow step, but retain normal per-session semantics.
+func (t *Task) IsOfficeOwnedAndAssigned() bool {
+	return t != nil && t.IsFromOffice && t.AssigneeAgentProfileID != ""
+}
+
 // ChildCompletionRow is the compact active-child projection used to decide
 // whether a parent task's on_children_completed trigger is ready to fire.
 type ChildCompletionRow struct {

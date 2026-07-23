@@ -358,6 +358,26 @@ func TestTaskIsFromOfficeField(t *testing.T) {
 	}
 }
 
+func TestTaskIsOfficeOwnedAndAssigned(t *testing.T) {
+	tests := []struct {
+		name string
+		task *Task
+		want bool
+	}{
+		{name: "nil task", task: nil, want: false},
+		{name: "kanban runner", task: &Task{AssigneeAgentProfileID: "runner"}, want: false},
+		{name: "unassigned office task", task: &Task{IsFromOffice: true}, want: false},
+		{name: "assigned office task", task: &Task{IsFromOffice: true, AssigneeAgentProfileID: "runner"}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.task.IsOfficeOwnedAndAssigned(); got != tt.want {
+				t.Errorf("IsOfficeOwnedAndAssigned() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestExecutorTypeRuntime pins the ExecutorType → agentruntime.Runtime
 // mapping table. Every executor variant the codebase ships must
 // declare its runtime explicitly here — a missing case falls through

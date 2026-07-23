@@ -336,7 +336,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
 		storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
 			RequiresCompletionSignal:       requiresSignal,
-			IncludeCoordinatorTaskControls: task.AssigneeAgentProfileID == "" && !configMode,
+			IncludeCoordinatorTaskControls: !task.IsOfficeOwnedAndAssigned() && !configMode,
 		})
 	}
 	req.Content = storedContent

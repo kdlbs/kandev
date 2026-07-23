@@ -2472,7 +2472,7 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 	if task.State != v1.TaskStateReview {
 		return rollback, nil
 	}
-	if task.AssigneeAgentProfileID != "" {
+	if task.IsOfficeOwnedAndAssigned() {
 		return rollback, nil
 	}
 	if _, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {

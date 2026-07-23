@@ -758,8 +758,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	return execution, nil
 }
 
-// isOfficeTask returns true when the task has an assignee agent profile, which
-// identifies it as an office-managed task (as opposed to a kanban / quick-chat task).
+// isOfficeTask returns true only for an office-owned task with an assignee.
 func (s *Service) isOfficeTask(ctx context.Context, taskID string) bool {
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	return err == nil && isOfficeTask
@@ -770,7 +769,7 @@ func (s *Service) lookupOfficeTask(ctx context.Context, taskID string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	return dbTask != nil && dbTask.AssigneeAgentProfileID != "", nil
+	return dbTask.IsOfficeOwnedAndAssigned(), nil
 }
 
 // prepareSessionForStart creates the session for a launch and propagates any
@@ -795,15 +794,15 @@ func (s *Service) prepareSessionForStart(
 }
 
 // createStartSession picks the right session-creation path for the task:
-// office tasks with an assignee use the per-(task, agent) EnsureSessionForAgent
-// (so runs reuse one row across turns); kanban / quick-chat fall through to
-// the per-launch PrepareSession used since day one.
+// office-owned tasks with an assignee use the per-(task, agent)
+// EnsureSessionForAgent (so runs reuse one row across turns); kanban /
+// quick-chat tasks fall through to the per-launch PrepareSession used since day one.
 func (s *Service) createStartSession(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
-	if err == nil && dbTask != nil && dbTask.AssigneeAgentProfileID != "" {
+	if err == nil && dbTask.IsOfficeOwnedAndAssigned() {
 		session, ensureErr := s.executor.EnsureSessionForAgent(
 			ctx, task, dbTask.AssigneeAgentProfileID, agentProfileID, executorID, executorProfileID,
 		)
