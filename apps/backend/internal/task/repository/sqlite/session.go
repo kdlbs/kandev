@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
@@ -760,72 +759,28 @@ func completedAtForTaskSessionState(status models.TaskSessionState, now time.Tim
 // execution, making it the authoritative way to finalize a task's sessions
 // independent of agent-process teardown.
 //
-// The snapshot-then-update runs in one transaction so the returned ID set is
-// exactly what changed state: a session that raced to a terminal state
-// between the snapshot and the update is excluded rather than misreported as
-// cancelled. Callers use the returned IDs to publish a matching
-// session.state_changed event per session — without this, clients that cache
-// session state independently of the task (e.g. an Office task list's "is
-// running" indicator) never learn the session left its active state and
-// spin forever after the owning task is archived.
+// The UPDATE and the ID selection happen in a single atomic statement via
+// RETURNING, so the returned ID set is exactly what this call changed — a
+// session created or transitioned to active state concurrently, after this
+// statement starts, is simply outside its snapshot; the task_id + state
+// predicate is evaluated once per row as it commits, so no session matching
+// it at commit time is missed by a separate pre-update snapshot. Callers use
+// the returned IDs to publish a matching session.state_changed event per
+// session — without this, clients that cache session state independently of
+// the task (e.g. an Office task list's "is running" indicator) never learn
+// the session left its active state and spin forever after the owning task
+// is archived.
 func (r *Repository) CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]string, time.Time, error) {
 	now := time.Now().UTC()
 	writeCtx := context.WithoutCancel(ctx)
-	tx, err := r.db.BeginTxx(writeCtx, nil)
-	if err != nil {
-		return nil, now, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
 	var ids []string
-	if err := tx.SelectContext(writeCtx, &ids, r.db.Rebind(`
-		SELECT id FROM task_sessions
-		WHERE task_id = ?
-			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
-	`), taskID); err != nil {
-		return nil, now, err
-	}
-	if len(ids) == 0 {
-		return nil, now, tx.Commit()
-	}
-
-	query, args, err := sqlx.In(`
+	if err := r.db.SelectContext(writeCtx, &ids, r.db.Rebind(`
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
-		WHERE id IN (?)
+		WHERE task_id = ?
 			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
-	`, string(models.TaskSessionStateCancelled), reason, now, now, ids)
-	if err != nil {
-		return nil, now, err
-	}
-	result, err := tx.ExecContext(writeCtx, r.db.Rebind(query), args...)
-	if err != nil {
-		return nil, now, err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return nil, now, err
-	}
-	if changed != int64(len(ids)) {
-		// A session raced to a terminal state between the snapshot and the
-		// update (only reachable with >1 writer connection); re-derive the
-		// exact set this call actually cancelled instead of trusting the
-		// stale snapshot. candidateIDs preserves the original list as the
-		// IN(...) filter — ids is what we overwrite with the real answer.
-		candidateIDs := ids
-		selQuery, selArgs, inErr := sqlx.In(`
-			SELECT id FROM task_sessions
-			WHERE id IN (?) AND state = ? AND updated_at = ?
-		`, candidateIDs, string(models.TaskSessionStateCancelled), now)
-		if inErr != nil {
-			return nil, now, inErr
-		}
-		ids = nil
-		if err := tx.SelectContext(writeCtx, &ids, r.db.Rebind(selQuery), selArgs...); err != nil {
-			return nil, now, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
+		RETURNING id
+	`), string(models.TaskSessionStateCancelled), reason, now, now, taskID); err != nil {
 		return nil, now, err
 	}
 	return ids, now, nil

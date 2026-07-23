@@ -1944,12 +1944,12 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 	}
 }
 
-// TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot is the
-// regression test for a race in the fix above: CancelActiveTaskSessionsByTaskID
-// re-snapshots active sessions itself, inside its own transaction, so it can
-// return an ID that wasn't in a caller-supplied snapshot taken moments
-// earlier. publishSessionsCancelled must not silently drop that ID — it must
-// re-read the session from the DB and still publish a correct event.
+// TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot is a
+// defensive-coverage test: CancelActiveTaskSessionsByTaskID re-evaluates
+// active sessions atomically, so it can return an ID that wasn't in a
+// caller-supplied snapshot taken moments earlier. publishSessionsCancelled
+// must not silently drop that ID — it must re-read the session from the DB
+// and still publish a correct event.
 func TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

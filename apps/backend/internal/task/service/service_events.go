@@ -54,8 +54,8 @@ const (
 // hand) — used only for logging/diagnostics — but every other field,
 // including new_state, is read back from the DB via GetTaskSession so an ID
 // CancelActiveTaskSessionsByTaskID returns that wasn't in snapshot (it
-// re-snapshots active sessions itself, inside its own transaction, so its
-// result can outrun a caller-supplied list taken moments earlier) still gets
+// re-evaluates active sessions itself, atomically, so its result can outrun
+// a caller-supplied list taken moments earlier) still gets
 // a correct, non-fabricated event instead of being silently dropped.
 //
 // CancelActiveTaskSessionsByTaskID is a repository-level DB write with no
