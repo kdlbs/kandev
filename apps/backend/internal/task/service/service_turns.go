@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // Turn operations
@@ -625,7 +626,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		applyTaskEnvironmentToWorkspaceInfo(info, taskEnv)
 		info.TaskDirName = taskEnv.TaskDirName
 	}
-	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, info); err != nil {
+	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, session.Worktrees, info); err != nil {
 		return nil, err
 	}
 
@@ -679,7 +680,17 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	return info, nil
 }
 
-func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID string, info *lifecycle.WorkspaceInfo) error {
+type workspaceWorktreeKey struct {
+	repositoryID string
+	branchSlug   string
+}
+
+type workspaceRepositoryProjection struct {
+	taskRepository *models.TaskRepository
+	repository     *models.Repository
+}
+
+func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID string, sessionWorktrees []*models.TaskSessionWorktree, info *lifecycle.WorkspaceInfo) error {
 	if taskID == "" || s.taskRepos == nil || s.repoEntities == nil {
 		return nil
 	}
@@ -688,29 +699,88 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 	} else if task != nil {
 		info.WorkspaceID = task.WorkspaceID
 	}
+	worktreesByIdentity := make(map[workspaceWorktreeKey]*models.TaskSessionWorktree, len(sessionWorktrees))
+	for _, worktree := range sessionWorktrees {
+		if worktree != nil && worktree.RepositoryID != "" {
+			worktreesByIdentity[workspaceWorktreeKey{repositoryID: worktree.RepositoryID, branchSlug: worktree.BranchSlug}] = worktree
+		}
+	}
+	projections, err := s.workspaceRepositoryProjections(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
+	for index, projection := range projections {
+		taskRepository, repository := projection.taskRepository, projection.repository
+		spec := lifecycle.WorkspaceRepositorySpec{
+			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: repository.Name,
+			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
+			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
+			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+		}
+		if worktree := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchPlans[index].IdentitySlug}]; worktree != nil {
+			spec.WorktreeID = worktree.WorktreeID
+			spec.BranchSlug = worktree.BranchSlug
+			spec.BranchIdentitySlug = worktree.BranchSlug
+		}
+		info.WorkspaceRepositories = append(info.WorkspaceRepositories, spec)
+	}
+	return nil
+}
+
+func (s *Service) workspaceRepositoryProjections(ctx context.Context, taskID string) ([]workspaceRepositoryProjection, error) {
 	taskRepositories, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
 	if err != nil {
-		return fmt.Errorf("list task repositories: %w", err)
+		return nil, fmt.Errorf("list task repositories: %w", err)
 	}
+	projections := make([]workspaceRepositoryProjection, 0, len(taskRepositories))
 	for _, taskRepository := range taskRepositories {
 		if taskRepository == nil {
 			continue
 		}
 		repository, err := s.repoEntities.GetRepository(ctx, taskRepository.RepositoryID)
 		if err != nil {
-			return fmt.Errorf("get workspace repository: %w", err)
+			return nil, fmt.Errorf("get workspace repository: %w", err)
 		}
 		if repository == nil {
-			return fmt.Errorf("workspace repository %q not found", taskRepository.RepositoryID)
+			return nil, fmt.Errorf("workspace repository %q not found", taskRepository.RepositoryID)
 		}
-		info.WorkspaceRepositories = append(info.WorkspaceRepositories, lifecycle.WorkspaceRepositorySpec{
-			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: repository.Name,
-			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
-			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+		projections = append(projections, workspaceRepositoryProjection{taskRepository: taskRepository, repository: repository})
+	}
+	return projections, nil
+}
+
+func workspaceBranchIdentityInputs(projections []workspaceRepositoryProjection) []worktree.BranchIdentityInput {
+	inputs := make([]worktree.BranchIdentityInput, 0, len(projections))
+	for _, projection := range projections {
+		taskRepository, repository := projection.taskRepository, projection.repository
+		inputs = append(inputs, worktree.BranchIdentityInput{
+			RepositoryID: taskRepository.RepositoryID, BaseBranch: taskRepository.BaseBranch, CheckoutBranch: taskRepository.CheckoutBranch,
+			DefaultBranch: repository.DefaultBranch, PRNumber: taskRepositoryPRNumber(taskRepository.Metadata), Position: taskRepository.Position,
 		})
 	}
-	return nil
+	return inputs
+}
+
+func taskRepositoryPRNumber(metadata map[string]interface{}) int {
+	if metadata == nil {
+		return 0
+	}
+	switch number := metadata["pr_number"].(type) {
+	case float64:
+		if number > 0 {
+			return int(number)
+		}
+	case int:
+		if number > 0 {
+			return number
+		}
+	case int64:
+		if number > 0 {
+			return int(number)
+		}
+	}
+	return 0
 }
 
 // PersistSessionRuntimeModel records the session's selected ACP model.
