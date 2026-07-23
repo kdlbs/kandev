@@ -18,6 +18,12 @@ The implementation preserves PR #1687's unarchive contract: archived filesystem 
 reclaimed, historical worktree rows and branch metadata remain, and pending archive cleanup is
 cancelled when a task becomes active again.
 
+The 2026-07-22 follow-up removes per-instance temporary-directory injection. Host-local agents
+inherit the Kandev service's `TMPDIR`, `TMP`, and `TEMP` unchanged so temp-derived Node/Playwright
+caches can be reused. The superseded marker, snapshot, Storage-provider, UI, and E2E work is removed;
+managed Go-cache defaults and injection remain unchanged. A separate test-harness task addresses
+the observed accumulation of `kandev-e2e-*` roots.
+
 ---
 
 ## Backend
@@ -288,3 +294,19 @@ Wave 4:
 Wave 5:
 
 - [x] [Task 09 — E2E, QA, and final verification](task-09-e2e-qa-verification.md)
+
+Wave 6:
+
+- [x] [Task 10 — Inherit the service temp environment](task-10-inherit-service-temp.md)
+
+Wave 7:
+
+- [x] [Task 11 — Contain E2E temporary roots](task-11-e2e-temp-cleanup.md)
+
+Wave 8:
+
+- [x] [Task 12 — Update inherited-temp operations docs](task-12-inherited-temp-docs.md)
+
+Wave 9:
+
+- [x] [Task 13 — Review and verify inherited temp behavior](task-13-inherited-temp-verification.md)

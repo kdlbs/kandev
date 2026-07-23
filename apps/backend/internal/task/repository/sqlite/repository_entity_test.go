@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -118,6 +119,43 @@ func TestGetRepositoryByProviderInfoSeparatesGitLabHosts(t *testing.T) {
 	)
 	if err != nil || got == nil || got.ID != "repo-private" {
 		t.Fatalf("host-aware lookup = %+v, err = %v; want repo-private", got, err)
+	}
+}
+
+// TestGetRepositoryByProviderInfoReturnsEarliestCreatedDuplicate guards the
+// Greptile-flagged race window: when two rows already share the same
+// provider identity (left over from a resolver race that predates
+// Service.repoResolveMu), GetRepositoryByProviderInfo must resolve to the
+// same row ListRepositories' dedupeRepositoriesByIdentity keeps as the
+// canonical winner (earliest created_at, ties broken by the smaller id) —
+// not an arbitrary one of the two — otherwise a caller can attach a task to,
+// or backfill fields onto, the duplicate ListRepositories hides.
+func TestGetRepositoryByProviderInfoReturnsEarliestCreatedDuplicate(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-provider-dup")
+	for _, item := range []*models.Repository{
+		{ID: "repo-dup-later", WorkspaceID: "ws-provider-dup", Name: "later", SourceType: "provider", Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+		{ID: "repo-dup-earlier", WorkspaceID: "ws-provider-dup", Name: "earlier", SourceType: "provider", Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+	} {
+		if err := repo.CreateRepository(ctx, item); err != nil {
+			t.Fatalf("create repository %s: %v", item.ID, err)
+		}
+	}
+	// CreateRepository always stamps created_at = time.Now(), so backdate the
+	// intended winner directly to make ordering deterministic regardless of
+	// wall-clock resolution.
+	earlier := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE repositories SET created_at = ? WHERE id = ?`), earlier, "repo-dup-earlier"); err != nil {
+		t.Fatalf("backdate repo-dup-earlier: %v", err)
+	}
+
+	got, err := repo.GetRepositoryByProviderInfo(ctx, "ws-provider-dup", "github", "https://github.com", "kdlbs", "kandev")
+	if err != nil {
+		t.Fatalf("GetRepositoryByProviderInfo: %v", err)
+	}
+	if got == nil || got.ID != "repo-dup-earlier" {
+		t.Fatalf("GetRepositoryByProviderInfo = %+v, want repo-dup-earlier (the row ListRepositories keeps as canonical)", got)
 	}
 }
 

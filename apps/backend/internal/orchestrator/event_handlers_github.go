@@ -22,6 +22,9 @@ import (
 const (
 	issueWatchIDKey             = "issue_watch_id"
 	issueNumberKey              = "issue_number"
+	githubPRStateOpen           = "open"
+	githubPRStateClosed         = "closed"
+	githubPRStateMerged         = "merged"
 	ciAutomationDetachedTimeout = 2 * time.Minute
 )
 

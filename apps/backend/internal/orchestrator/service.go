@@ -1610,7 +1610,7 @@ func taskPRState(prs []*github.TaskPR, repositoryID, branch string) (string, boo
 		}
 		matched = true
 		state = strings.ToLower(strings.TrimSpace(pr.State))
-		if state != "open" && state != "closed" && state != "merged" {
+		if state != githubPRStateOpen && state != githubPRStateClosed && state != githubPRStateMerged {
 			return "", true
 		}
 	}
@@ -1642,14 +1642,14 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 
 	branch := extractMissingBranchName(launchErr)
 	prState := s.matchingTaskPRState(ctx, taskID, repositoryID, branch)
-	if prState == "open" {
+	if prState == githubPRStateOpen {
 		return
 	}
 	content := "Kandev couldn't fetch the requested branch from the configured repository. Verify the task's repository branch or PR link, then retry."
 	if branch != "" {
 		content = "Kandev couldn't fetch branch \"" + branch + "\" from the configured repository. Verify the task's repository branch or PR link, then retry."
 	}
-	authoritativeMissingBranch := prState == "closed" || prState == "merged"
+	authoritativeMissingBranch := prState == githubPRStateClosed || prState == githubPRStateMerged
 	if authoritativeMissingBranch {
 		content = "This task references a PR branch that no longer exists on remote."
 		if branch != "" {

@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -232,21 +231,28 @@ func TestBuildAdapterConfig_StripEnvRemovesDeclaredVars(t *testing.T) {
 	}
 }
 
-func TestStartOneShotRestoresTempEnvAfterStrip(t *testing.T) {
+func TestStartOneShotPreservesConfiguredTempEnvironment(t *testing.T) {
 	log := newTestLogger(t)
 	workDir := t.TempDir()
+	serviceTemp := setServiceTempTestEnv(t)
+	agentEnv := []string{
+		"PATH=/usr/bin",
+		"TMPDIR=/configured/tmpdir",
+		"TMP=/configured/tmp",
+		"TEMP=/configured/temp",
+	}
 
 	m := &Manager{
 		cfg: &config.InstanceConfig{
 			SessionID: "session-1",
 			WorkDir:   workDir,
-			AgentEnv:  []string{"PATH=/usr/bin"},
+			AgentEnv:  agentEnv,
 		},
 		logger:  log,
 		adapter: newOneShotStubAdapter(),
 		adapterCfg: &adapter.Config{
 			OneShotConfig: &adapter.OneShotConfig{
-				Env:     []string{"PATH=/usr/bin"},
+				Env:     agentEnv,
 				WorkDir: workDir,
 			},
 		},
@@ -262,10 +268,15 @@ func TestStartOneShotRestoresTempEnvAfterStrip(t *testing.T) {
 		m.workspaceTracker.Stop()
 	})
 
-	wantDir := filepath.Join(os.TempDir(), agentTempDirRoot, agentTempDirName("session-1", "", 0))
-	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
-		if got := lookupEnvValue(m.adapterCfg.OneShotConfig.Env, key); got != wantDir {
-			t.Fatalf("OneShotConfig.Env %s = %q, want %q", key, got, wantDir)
+	want := map[string]string{
+		"TMPDIR": "/configured/tmpdir",
+		"TMP":    "/configured/tmp",
+		"TEMP":   "/configured/temp",
+	}
+	for key, value := range want {
+		if got := lookupEnvValue(m.adapterCfg.OneShotConfig.Env, key); got != value {
+			t.Fatalf("OneShotConfig.Env %s = %q, want configured service value %q", key, got, value)
 		}
 	}
+	assertNoAgentTempRoot(t, serviceTemp)
 }

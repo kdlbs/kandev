@@ -446,14 +446,14 @@ func (s *Service) recordCIAutomationError(ctx context.Context, pr *github.TaskPR
 }
 
 func ciAutomationCanAutoFixFromFeedback(pr *github.TaskPR) bool {
-	return pr != nil && pr.State != "closed" && pr.State != "merged"
+	return pr != nil && pr.State != githubPRStateClosed && pr.State != githubPRStateMerged
 }
 
 func ciAutomationCanAutoFixFromFeedbackPR(feedback *github.PRFeedback) bool {
 	if feedback == nil || feedback.PR == nil {
 		return true
 	}
-	return feedback.PR.State != "closed" && feedback.PR.State != "merged"
+	return feedback.PR.State != githubPRStateClosed && feedback.PR.State != githubPRStateMerged
 }
 
 func ciAutomationChecksSettledForAutoFix(pr *github.TaskPR, feedback *github.PRFeedback) bool {
@@ -517,7 +517,7 @@ func ciAutomationShouldIncludeFeedbackComment(pr *github.TaskPR, comment github.
 }
 
 func ciAutomationReadyToMerge(pr *github.TaskPR) bool {
-	if pr == nil || pr.State != "open" {
+	if pr == nil || pr.State != githubPRStateOpen {
 		return false
 	}
 	if pr.ChecksState != ciAutomationCheckSuccess || pr.MergeableState != "clean" {

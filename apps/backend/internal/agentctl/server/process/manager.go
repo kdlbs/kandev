@@ -4,7 +4,6 @@ package process
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -69,8 +68,6 @@ type PermissionNotification struct {
 
 // defaultStderrBufferSize is the number of recent stderr lines to keep for error context
 const defaultStderrBufferSize = 50
-
-const agentTempDirRoot = "kandev-agent"
 
 const processKillRequiredExitGrace = 250 * time.Millisecond
 
@@ -182,15 +179,6 @@ type Manager struct {
 
 	// Final command string (full command with all adapter args)
 	finalCommand string
-
-	// agentTempRoot and agentTempDir record the exact temporary directory
-	// created for this manager. The retained Root keeps cleanup anchored to the
-	// directory opened at creation even if its pathname is later replaced.
-	agentTempRoot       string
-	agentTempDir        string
-	agentTempChild      string
-	agentTempRootHandle *os.Root
-	agentTempMu         sync.Mutex
 
 	// Synchronization
 	mu               sync.RWMutex
@@ -602,10 +590,6 @@ func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*P
 	if m.processRunner == nil {
 		return nil, fmt.Errorf("process runner not available")
 	}
-	if err := m.ensureAgentTempEnv(); err != nil {
-		return nil, err
-	}
-	req.Env = m.ownedProcessEnv(req.Env)
 	return m.processRunner.Start(ctx, req)
 }
 
@@ -819,11 +803,6 @@ func (m *Manager) Start(ctx context.Context) error {
 		return fmt.Errorf("no agent command configured")
 	}
 
-	if err := m.ensureAgentTempEnv(); err != nil {
-		m.status.Store(StatusError)
-		return err
-	}
-
 	// Build adapter config and create protocol adapter
 	if err := m.buildAdapterConfig(); err != nil {
 		m.status.Store(StatusError)
@@ -908,11 +887,6 @@ func (m *Manager) Start(ctx context.Context) error {
 // startOneShot initialises a one-shot adapter without spawning a long-lived subprocess.
 // The adapter manages its own per-prompt subprocess lifecycle internally.
 func (m *Manager) startOneShot() error {
-	// One-shot adapters bypass buildFinalCommand, so restore temp env vars
-	// after StripEnv before their per-prompt subprocesses inherit Env.
-	if err := m.ensureAgentTempEnv(); err != nil {
-		return err
-	}
 	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
@@ -1014,10 +988,6 @@ func (m *Manager) buildAdapterConfig() error {
 // buildFinalCommand assembles the full command args and creates the exec.Cmd.
 // The process group is set so child processes can be killed together.
 func (m *Manager) buildFinalCommand() error {
-	if err := m.ensureAgentTempEnv(); err != nil {
-		return err
-	}
-
 	extraArgs := m.adapter.PrepareCommandArgs()
 
 	cmdArgs := make([]string, 0, len(m.cfg.AgentArgs)-1+len(extraArgs))
@@ -1111,167 +1081,6 @@ func formatEnvEntrySizes(entries []envEntrySize) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 
-func (m *Manager) ensureAgentTempEnv() error {
-	m.agentTempMu.Lock()
-	defer m.agentTempMu.Unlock()
-
-	root := filepath.Join(os.TempDir(), agentTempDirRoot)
-	child := agentTempDirName(m.cfg.SessionID, m.cfg.InstanceID, m.cfg.Port)
-	dir := filepath.Join(root, child)
-	if m.agentTempRootHandle != nil {
-		if m.agentTempRoot == root && m.agentTempDir == dir && m.agentTempChild == child {
-			for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
-				m.cfg.AgentEnv = upsertEnvValue(m.cfg.AgentEnv, key, dir)
-			}
-			return nil
-		}
-		return fmt.Errorf("agent temp ownership already initialized for %q", m.agentTempDir)
-	}
-	rootHandle, err := openOwnedTempRoot(root)
-	if err != nil {
-		return err
-	}
-	if err := ensureOwnedTempChild(rootHandle, child); err != nil {
-		_ = rootHandle.Close()
-		return fmt.Errorf("failed to create agent temp dir: %w", err)
-	}
-	m.agentTempRoot = root
-	m.agentTempDir = dir
-	m.agentTempChild = child
-	m.agentTempRootHandle = rootHandle
-	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
-		m.cfg.AgentEnv = upsertEnvValue(m.cfg.AgentEnv, key, dir)
-	}
-	return nil
-}
-
-func (m *Manager) ownedProcessEnv(env map[string]string) map[string]string {
-	m.agentTempMu.Lock()
-	defer m.agentTempMu.Unlock()
-
-	managed := make(map[string]string, len(env)+3)
-	for key, value := range env {
-		managed[key] = value
-	}
-	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
-		managed[key] = m.agentTempDir
-	}
-	return managed
-}
-
-func openOwnedTempRoot(path string) (*os.Root, error) {
-	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
-		return nil, fmt.Errorf("failed to create agent temp root %q: %w", path, err)
-	}
-	pathInfo, err := os.Lstat(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to inspect agent temp root %q: %w", path, err)
-	}
-	if pathInfo.Mode()&os.ModeSymlink != 0 || !pathInfo.IsDir() {
-		return nil, fmt.Errorf("unsafe agent temp root %q: expected a directory, not a symlink", path)
-	}
-	root, err := os.OpenRoot(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open agent temp root %q: %w", path, err)
-	}
-	openedInfo, err := root.Stat(".")
-	if err != nil || !os.SameFile(pathInfo, openedInfo) {
-		_ = root.Close()
-		return nil, fmt.Errorf("unsafe agent temp root %q: path changed while opening", path)
-	}
-	if err := root.Chmod(".", 0o700); err != nil {
-		_ = root.Close()
-		return nil, fmt.Errorf("failed to secure agent temp root %q: %w", path, err)
-	}
-	return root, nil
-}
-
-func ensureOwnedTempChild(root *os.Root, name string) error {
-	if err := root.Mkdir(name, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
-		return err
-	}
-	info, err := root.Lstat(name)
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("unsafe agent temp child %q: expected a directory, not a symlink", name)
-	}
-	return root.Chmod(name, 0o700)
-}
-
-func (m *Manager) cleanupAgentTempDir() error {
-	m.agentTempMu.Lock()
-	defer m.agentTempMu.Unlock()
-
-	root := filepath.Clean(m.agentTempRoot)
-	target := filepath.Clean(m.agentTempDir)
-	if m.agentTempRoot == "" && m.agentTempDir == "" {
-		return nil
-	}
-	if m.agentTempRoot == "" || m.agentTempDir == "" || target == root {
-		return fmt.Errorf("refusing to clean invalid agent temp dir %q under root %q", m.agentTempDir, m.agentTempRoot)
-	}
-	rel, err := filepath.Rel(root, target)
-	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("refusing to clean agent temp dir outside root: target %q root %q", m.agentTempDir, m.agentTempRoot)
-	}
-	if rel != m.agentTempChild || strings.ContainsRune(rel, filepath.Separator) || m.agentTempRootHandle == nil {
-		return fmt.Errorf("refusing to clean unowned agent temp dir %q under root %q", m.agentTempDir, m.agentTempRoot)
-	}
-	if err := m.agentTempRootHandle.RemoveAll(rel); err != nil {
-		return fmt.Errorf("failed to remove agent temp dir %q: %w", target, err)
-	}
-	closeErr := m.agentTempRootHandle.Close()
-	m.agentTempRoot = ""
-	m.agentTempDir = ""
-	m.agentTempChild = ""
-	m.agentTempRootHandle = nil
-	if closeErr != nil {
-		return fmt.Errorf("failed to close agent temp root %q: %w", root, closeErr)
-	}
-	return nil
-}
-
-func agentTempDirName(sessionID, instanceID string, port int) string {
-	name := strings.TrimSpace(sessionID)
-	if name == "" {
-		name = strings.TrimSpace(instanceID)
-	}
-	if name == "" && port > 0 {
-		name = fmt.Sprintf("port-%d", port)
-	}
-	if name == "" {
-		name = "default"
-	}
-
-	var b strings.Builder
-	for _, r := range name {
-		if isAgentTempDirRune(r) {
-			b.WriteRune(r)
-		} else {
-			b.WriteByte('_')
-		}
-	}
-	cleaned := strings.Trim(b.String(), "._-")
-	if cleaned == "" {
-		cleaned = "default"
-	}
-	if len(cleaned) > 40 {
-		cleaned = cleaned[:40]
-	}
-	identity := fmt.Sprintf("%d:%s|%d:%s|%d", len(sessionID), sessionID, len(instanceID), instanceID, port)
-	digest := sha256.Sum256([]byte(identity))
-	return fmt.Sprintf("%s-%x", cleaned, digest[:12])
-}
-
-func isAgentTempDirRune(r rune) bool {
-	return r >= 'a' && r <= 'z' ||
-		r >= 'A' && r <= 'Z' ||
-		r >= '0' && r <= '9' ||
-		r == '.' || r == '_' || r == '-'
-}
-
 func upsertEnvValue(env []string, key, value string) []string {
 	prefix := key + "="
 	next := make([]string, 0, len(env)+1)
@@ -1322,7 +1131,6 @@ func (m *Manager) startAgentShell() {
 	}
 	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
 	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
-	shellCfg.Env = m.ownedProcessEnv(nil)
 	shellSession, err := shell.NewSession(shellCfg, m.logger)
 	if err != nil {
 		m.logger.Warn("failed to create shell session", zap.Error(err))
@@ -1489,20 +1297,20 @@ func (m *Manager) GetSessionID() string {
 
 // Stop stops the agent process
 func (m *Manager) Stop(ctx context.Context) error {
-	return m.stop(ctx, false)
+	return m.stop(ctx)
 }
 
-// StopForTeardown permanently closes process admission, drains prior owners,
-// and removes the manager's temp directory after every owned process is reaped.
+// StopForTeardown permanently closes process admission and drains prior owners
+// before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
 	m.CloseAdmission()
 	if err := m.WaitForAdmission(ctx); err != nil {
 		return fmt.Errorf("wait for process admission to drain: %w", err)
 	}
-	return m.stop(ctx, true)
+	return m.stop(ctx)
 }
 
-func (m *Manager) stop(ctx context.Context, terminalStop bool) error {
+func (m *Manager) stop(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1529,9 +1337,6 @@ func (m *Manager) stop(ctx context.Context, terminalStop bool) error {
 				}
 				m.mainReapPending.Store(false)
 			}
-			if terminalStop {
-				return classifyTempCleanupError(m.cleanupAgentTempDir())
-			}
 			return nil
 		}
 		return nil
@@ -1557,27 +1362,7 @@ func (m *Manager) stop(ctx context.Context, terminalStop bool) error {
 		return stopErr
 	}
 	m.mainReapPending.Store(false)
-	if terminalStop {
-		return classifyTempCleanupError(m.cleanupAgentTempDir())
-	}
 	return nil
-}
-
-type tempCleanupError struct {
-	err error
-}
-
-func (e tempCleanupError) Error() string { return e.err.Error() }
-func (e tempCleanupError) Unwrap() error { return e.err }
-func (e tempCleanupError) CanReleaseInstanceResources() bool {
-	return true
-}
-
-func classifyTempCleanupError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return tempCleanupError{err: err}
 }
 
 func (m *Manager) agentPID() int {
@@ -2338,13 +2123,8 @@ func (m *Manager) StartShell() error {
 	if !m.cfg.ShellEnabled {
 		return nil
 	}
-	if err := m.ensureAgentTempEnv(); err != nil {
-		return err
-	}
-
 	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
 	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
-	shellCfg.Env = m.ownedProcessEnv(nil)
 	shellSession, err := shell.NewSession(shellCfg, m.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create shell session: %w", err)
@@ -2355,17 +2135,13 @@ func (m *Manager) StartShell() error {
 	return nil
 }
 
-// StartTerminalShell creates a managed per-terminal shell with the instance temp environment.
+// StartTerminalShell creates a managed per-terminal shell.
 func (m *Manager) StartTerminalShell(terminalID string, cfg shell.Config) (*shell.Session, error) {
 	release, err := m.admitStart()
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	if err := m.ensureAgentTempEnv(); err != nil {
-		return nil, err
-	}
-	cfg.Env = m.ownedProcessEnv(cfg.Env)
 	return m.shellMgr.Start(terminalID, cfg)
 }
 
@@ -2378,9 +2154,6 @@ func (m *Manager) StartVscode(_ context.Context, theme string) error {
 		return err
 	}
 	defer release()
-	if err := m.ensureAgentTempEnv(); err != nil {
-		return err
-	}
 	return m.startVscode(theme)
 }
 
@@ -2405,7 +2178,6 @@ func (m *Manager) startVscode(theme string) error {
 
 	strategy := codeServerInstallStrategy(m.logger)
 	m.vscode = NewVscodeManager(command, m.cfg.WorkDir, theme, strategy, m.logger)
-	m.vscode.setEnv(m.ownedProcessEnv(nil))
 	m.vscode.Start()
 	return nil
 }
