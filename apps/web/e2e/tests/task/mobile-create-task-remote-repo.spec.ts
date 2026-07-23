@@ -122,4 +122,42 @@ test.describe("Create task Remote repo picker on mobile", () => {
     );
     expect(hasHorizontalOverflow).toBe(false);
   });
+
+  test("marks an already selected provider repository without disabling its touch selection", async ({
+    apiClient,
+    testPage,
+  }) => {
+    await apiClient.mockGitHubAddRepos("mock-user", [
+      { full_name: "mock-user/duplicate", owner: "mock-user", name: "duplicate", private: false },
+    ]);
+
+    await openRemotePicker(testPage);
+    const firstOption = testPage
+      .getByTestId("remote-repo-option")
+      .filter({ hasText: "mock-user/duplicate" });
+    await expect(firstOption).toBeVisible({ timeout: 10_000 });
+    await firstOption.tap();
+
+    await testPage.getByTestId("remote-add-row").tap();
+    await testPage.getByTestId("remote-repo-chip-trigger").nth(1).tap();
+    const duplicateOption = testPage
+      .getByTestId("remote-repo-option")
+      .filter({ hasText: "mock-user/duplicate" });
+    await expect(duplicateOption.getByTestId("already-added-repository-marker")).toBeVisible();
+
+    const [optionBox, viewport] = await Promise.all([
+      duplicateOption.boundingBox(),
+      testPage.viewportSize(),
+    ]);
+    expect(optionBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(optionBox!.x).toBeGreaterThanOrEqual(0);
+    expect(optionBox!.x + optionBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(optionBox!.y + optionBox!.height).toBeLessThanOrEqual(viewport!.height);
+
+    await duplicateOption.tap();
+    await expect(testPage.getByTestId("remote-repo-chip-trigger").nth(1)).toContainText(
+      "mock-user/duplicate",
+    );
+  });
 });
