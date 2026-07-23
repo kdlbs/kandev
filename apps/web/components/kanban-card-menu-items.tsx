@@ -4,6 +4,7 @@ import { useMemo, type ReactNode } from "react";
 import {
   IconArchive,
   IconArrowRight,
+  IconBrandGitlab,
   IconBrandSentry,
   IconCircleDot,
   IconGitPullRequest,
@@ -89,6 +90,7 @@ type BuildKanbanCardMenuEntriesArgs = {
   onDetach?: () => void;
   onLinkPullRequest?: () => void;
   onLinkIssue?: () => void;
+  onLinkMergeRequest?: () => void;
   onLinkJiraTicket?: () => void;
   onLinkLinearIssue?: () => void;
   onLinkSentryIssue?: () => void;
@@ -227,10 +229,30 @@ function buildSendToWorkflowSubmenu({
   };
 }
 
+function buildGitLabMergeRequestLinkEntry({
+  disabled,
+  onLinkMergeRequest,
+}: {
+  disabled?: boolean;
+  onLinkMergeRequest?: () => void;
+}): KanbanCardMenuEntry | null {
+  if (!onLinkMergeRequest) return null;
+  return {
+    kind: "item",
+    key: "link-gitlab-merge-request",
+    testId: "task-context-link-gitlab-merge-request",
+    icon: <IconBrandGitlab className="mr-2 h-4 w-4" />,
+    label: "GitLab Merge Request",
+    disabled,
+    onSelect: onLinkMergeRequest,
+  };
+}
+
 function buildLinkSubmenu({
   disabled,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkMergeRequest,
   onLinkJiraTicket,
   onLinkLinearIssue,
   onLinkSentryIssue,
@@ -238,6 +260,7 @@ function buildLinkSubmenu({
   disabled?: boolean;
   onLinkPullRequest?: () => void;
   onLinkIssue?: () => void;
+  onLinkMergeRequest?: () => void;
   onLinkJiraTicket?: () => void;
   onLinkLinearIssue?: () => void;
   onLinkSentryIssue?: () => void;
@@ -245,6 +268,7 @@ function buildLinkSubmenu({
   if (
     !onLinkPullRequest &&
     !onLinkIssue &&
+    !onLinkMergeRequest &&
     !onLinkJiraTicket &&
     !onLinkLinearIssue &&
     !onLinkSentryIssue
@@ -274,6 +298,8 @@ function buildLinkSubmenu({
       onSelect: onLinkIssue,
     });
   }
+  const gitLabEntry = buildGitLabMergeRequestLinkEntry({ disabled, onLinkMergeRequest });
+  if (gitLabEntry) children.push(gitLabEntry);
   if (onLinkJiraTicket) {
     children.push({
       kind: "item",
@@ -335,6 +361,7 @@ export function buildKanbanCardMenuEntries({
   onDetach,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkMergeRequest,
   onLinkJiraTicket,
   onLinkLinearIssue,
   onLinkSentryIssue,
@@ -376,6 +403,7 @@ export function buildKanbanCardMenuEntries({
     disabled: isProcessing,
     onLinkPullRequest,
     onLinkIssue,
+    onLinkMergeRequest,
     onLinkJiraTicket,
     onLinkLinearIssue,
     onLinkSentryIssue,

@@ -9,6 +9,7 @@ export type DirectoryListing = {
   path: string;
   parent: string;
   entries: DirectoryEntry[];
+  choosable: boolean;
 };
 
 /**

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
 )
@@ -479,6 +480,15 @@ func (v *VscodeManager) writeThemeSettings() {
 	}
 	for k, v := range managed {
 		settings[k] = v
+	}
+	markerPattern := storageworkspaces.OwnershipMarkerFilename
+	for _, key := range []string{"files.exclude", "search.exclude"} {
+		excludes, ok := settings[key].(map[string]any)
+		if !ok {
+			excludes = map[string]any{}
+			settings[key] = excludes
+		}
+		excludes[markerPattern] = true
 	}
 
 	data, err := json.MarshalIndent(settings, "", "  ")

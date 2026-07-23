@@ -110,7 +110,12 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
                 {taskTitle ?? "Task details"}
               </BreadcrumbPage>
             </TooltipTrigger>
-            <TooltipContent>{taskTitle ?? "Task details"}</TooltipContent>
+            <TooltipContent className="max-w-sm whitespace-normal break-words">
+              <span className="block">{taskTitle ?? "Task details"}</span>
+              {canRename && (
+                <span className="mt-1 block">Double-click to edit (or press Enter)</span>
+              )}
+            </TooltipContent>
           </Tooltip>
         </BreadcrumbItem>
       </BreadcrumbList>
