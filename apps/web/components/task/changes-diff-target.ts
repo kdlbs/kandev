@@ -3,6 +3,7 @@ export type DiffSource = "uncommitted" | "committed" | "pr";
 export type OpenDiffOptions = {
   source?: DiffSource;
   repositoryName?: string;
+  prKey?: string;
 };
 
 export type DiffSheetMode =
@@ -12,5 +13,6 @@ export type DiffSheetMode =
       path: string;
       sourceFilter?: "all" | DiffSource;
       repositoryName?: string;
+      prKey?: string;
     }
   | { kind: "commit"; sha: string; repo?: string };

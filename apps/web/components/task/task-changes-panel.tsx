@@ -6,7 +6,6 @@ import { TruncatedFilesBanner, useSelectedFileKey } from "./changes-panel-banner
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { useReviewSources, type ReviewSource } from "@/hooks/domains/session/use-review-sources";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
@@ -14,12 +13,20 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateUserSettings } from "@/lib/api";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { ReviewDiffList } from "@/components/review/review-diff-list";
+import { ReviewPRDiffBoundary } from "@/components/review/review-dialog-pr-state";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
 import type { ReviewFile } from "@/components/review/types";
 import { hashDiff, reviewFileKey, splitReviewFileKey } from "@/components/review/types";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import { ChangesTopBar } from "./changes-top-bar";
+import {
+  resolveSelectedFileRepositoryName,
+  shouldBlockChangesForPR,
+  shouldDeferReviewStateForPR,
+  useAutoCloseWhenEmpty,
+  useVisibleDiffState,
+} from "./task-changes-panel-state";
 import type { SelectedDiff } from "./task-layout";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
 
@@ -27,6 +34,7 @@ type TaskChangesPanelProps = {
   mode?: "all" | "file";
   filePath?: string;
   fileRepositoryName?: string;
+  prKey?: string;
   selectedDiff: SelectedDiff | null;
   onClearSelected: () => void;
   onBecameEmpty?: () => void;
@@ -40,16 +48,6 @@ type TaskChangesPanelProps = {
   /** Force word-wrap on diffs. Defaults to the app diff preference. */
   wordWrap?: boolean;
 };
-
-// Returns true only after gitStatus loads and the file's uncommitted diff is gone.
-export function shouldCloseFileDiffPanel(
-  gitStatus: { files?: Record<string, { diff?: string }> } | undefined,
-  filePath: string,
-): boolean {
-  if (!gitStatus) return false;
-  const entry = gitStatus.files?.[filePath];
-  return !entry?.diff;
-}
 
 function scrollToFileAndClear(
   path: string,
@@ -77,11 +75,25 @@ function scrollToFileAndClear(
   }
 }
 
-function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () => void) {
+function useChangesView(
+  selectedDiff: SelectedDiff | null,
+  onClearSelected: () => void,
+  sourceFilter: "all" | ReviewSource,
+  explicitPRKey?: string,
+) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const { allFiles, cumulativeLoading, prDiffLoading, gitStatus, rawPRFiles, truncatedFilesCount } =
-    useReviewSources(activeSessionId);
-  const pr = useActiveTaskPR();
+  const reviewSources = useReviewSources(activeSessionId, explicitPRKey);
+  const {
+    allFiles,
+    cumulativeLoading,
+    prDiffLoading,
+    prDiffError,
+    refreshPRDiff,
+    gitStatus,
+    rawPRFiles,
+    truncatedFilesCount,
+    selectedPR: pr,
+  } = reviewSources;
   const { reviews } = useSessionFileReviews(activeSessionId);
   const byId = useCommentsStore((s) => s.byId);
   const commentSessionIds = useCommentsStore((s) =>
@@ -94,7 +106,7 @@ function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () =
     // When a PR exists but its diff files are still loading, the file list
     // temporarily uses cumulative diff content which has a different hash.
     // Skip review computation until PR diffs arrive to avoid a 1/1 -> 0/1 flash.
-    if (pr && prDiffLoading) {
+    if (shouldDeferReviewStateForPR(Boolean(pr), prDiffLoading, sourceFilter)) {
       return { reviewedFiles: reviewed, staleFiles: stale };
     }
     for (const file of allFiles) {
@@ -109,7 +121,7 @@ function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () =
       }
     }
     return { reviewedFiles: reviewed, staleFiles: stale };
-  }, [allFiles, reviews, pr, prDiffLoading]);
+  }, [allFiles, reviews, pr, prDiffLoading, sourceFilter]);
 
   const totalCommentCount = useMemo(() => {
     if (!commentSessionIds || commentSessionIds.length === 0) return 0;
@@ -152,8 +164,13 @@ function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () =
     fileRefs,
     cumulativeLoading,
     prDiffLoading,
+    prDiffError,
+    refreshPRDiff,
     gitStatus,
     truncatedFilesCount,
+    prs: reviewSources.prs,
+    selectedPR: reviewSources.selectedPR,
+    selectPR: reviewSources.selectPR,
   };
 }
 
@@ -176,6 +193,29 @@ function useWalkthroughRequest(activeSessionId: string | null | undefined, allFi
     sessionId: activeSessionId,
     ready: allFiles.length > 0,
   });
+}
+
+function useChangesPRPresentation(opts: {
+  sourceFilter: "all" | ReviewSource;
+  prKey: string | undefined;
+  mode: "all" | "file";
+  filePath: string | undefined;
+  fileRepositoryName: string | undefined;
+  visibleFiles: ReviewFile[];
+}) {
+  const visibleSelectedFile = opts.visibleFiles.find((file) => file.path === opts.filePath);
+  const selectedFileKey = useSelectedFileKey(
+    opts.mode,
+    opts.filePath,
+    resolveSelectedFileRepositoryName(
+      opts.sourceFilter,
+      opts.prKey,
+      opts.fileRepositoryName,
+      visibleSelectedFile?.repository_name,
+    ),
+  );
+  const blockChangesForPR = shouldBlockChangesForPR(opts.sourceFilter, opts.visibleFiles);
+  return { selectedFileKey, blockChangesForPR };
 }
 
 function useChangesActions(
@@ -286,167 +326,11 @@ function useChangesActions(
   };
 }
 
-function shouldCloseFileDiffPanelAggregate(
-  prevFileSeenRef: React.MutableRefObject<boolean>,
-  gitStatus: { files?: Record<string, { diff?: string }> } | undefined,
-  filePath: string,
-  onBecameEmpty: (() => void) | undefined,
-): boolean {
-  const shouldClose = shouldCloseFileDiffPanel(gitStatus, filePath);
-  if (prevFileSeenRef.current && shouldClose) {
-    onBecameEmpty?.();
-    return true;
-  }
-  if (!shouldClose) prevFileSeenRef.current = true;
-  return false;
-}
-
-function useAutoCloseWhenEmpty(opts: {
-  mode: "all" | "file";
-  filePath: string | undefined;
-  sourceFilter: "all" | ReviewSource;
-  gitStatus: { files?: Record<string, { diff?: string }> } | undefined;
-  visibleCount: number;
-  onBecameEmpty: (() => void) | undefined;
-}) {
-  const { mode, filePath, sourceFilter, gitStatus, visibleCount, onBecameEmpty } = opts;
-  const prevVisibleCountRef = useRef<number | null>(null);
-  const prevFileSeenRef = useRef<boolean>(false);
-  const prevSourceFilterRef = useRef<typeof sourceFilter | null>(null);
-
-  useEffect(() => {
-    if (!onBecameEmpty) return;
-    if (mode === "file" && filePath) {
-      if (sourceFilter === "all") {
-        shouldCloseFileDiffPanelAggregate(prevFileSeenRef, gitStatus, filePath, onBecameEmpty);
-        return;
-      }
-      // File-mode with explicit source (uncommitted/committed/pr): close when
-      // that source-specific view becomes empty for the opened file.
-      // Reset tracking when the filtered source changes so a tab switch
-      // doesn't fire onBecameEmpty just because the new tab starts empty.
-      if (prevSourceFilterRef.current !== sourceFilter) {
-        prevSourceFilterRef.current = sourceFilter;
-        prevVisibleCountRef.current = null;
-      }
-      const prevCount = prevVisibleCountRef.current;
-      prevVisibleCountRef.current = visibleCount;
-      if (prevCount !== null && prevCount > 0 && visibleCount === 0) {
-        onBecameEmpty();
-      }
-      return;
-    }
-
-    // In list mode, a filtered tab going empty is not a "panel is empty"
-    // signal — other sources may still have content.
-    if (sourceFilter !== "all") return;
-
-    const prevCount = prevVisibleCountRef.current;
-    if (prevCount !== null && prevCount > 0 && visibleCount === 0) {
-      onBecameEmpty();
-    }
-    prevVisibleCountRef.current = visibleCount;
-  }, [mode, filePath, sourceFilter, gitStatus, onBecameEmpty, visibleCount]);
-}
-
-type FilterVisibleFilesOpts = {
-  mode: "all" | "file";
-  filePath: string | undefined;
-  fileRepositoryName: string | undefined;
-  sourceFilter: "all" | ReviewSource;
-  rawPRFiles?: ReviewFile[];
-};
-
-function filterVisibleFiles(allFiles: ReviewFile[], opts: FilterVisibleFilesOpts): ReviewFile[] {
-  const { mode, filePath, fileRepositoryName, sourceFilter, rawPRFiles } = opts;
-  // In file mode with an explicit PR source, bypass the deduplicated allFiles and
-  // read from rawPRFiles. This is necessary because allFiles deduplicates with
-  // priority uncommitted > committed > PR: a file that also has local changes
-  // will not appear with source "pr" in allFiles, causing "No changes" in PR rows.
-  if (mode === "file" && filePath && sourceFilter === "pr" && rawPRFiles && rawPRFiles.length > 0) {
-    let prFiles = rawPRFiles.filter((f) => f.path === filePath && f.source === "pr");
-    if (fileRepositoryName !== undefined) {
-      prFiles = prFiles.filter((f) => (f.repository_name ?? "") === fileRepositoryName);
-    }
-    if (prFiles.length > 0) return prFiles;
-  }
-  let files = allFiles;
-  if (mode === "file" && filePath) {
-    files = files.filter((file) => file.path === filePath);
-    if (fileRepositoryName !== undefined) {
-      files = files.filter((file) => (file.repository_name ?? "") === fileRepositoryName);
-    }
-  }
-  if (sourceFilter !== "all") {
-    files = files.filter((file) => file.source === sourceFilter);
-  }
-  return files;
-}
-
-function useVisibleDiffState(opts: {
-  allFiles: ReviewFile[];
-  rawPRFiles: ReviewFile[];
-  mode: "all" | "file";
-  filePath: string | undefined;
-  fileRepositoryName: string | undefined;
-  sourceFilter: "all" | ReviewSource;
-  fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
-  reviewedFiles: Set<string>;
-  staleFiles: Set<string>;
-}) {
-  const {
-    allFiles,
-    rawPRFiles,
-    mode,
-    filePath,
-    fileRepositoryName,
-    sourceFilter,
-    fileRefs,
-    reviewedFiles,
-    staleFiles,
-  } = opts;
-  const visibleFiles = useMemo(
-    () =>
-      filterVisibleFiles(allFiles, {
-        mode,
-        filePath,
-        fileRepositoryName,
-        sourceFilter,
-        rawPRFiles,
-      }),
-    [allFiles, rawPRFiles, mode, filePath, fileRepositoryName, sourceFilter],
-  );
-  const visibleFileRefs = useMemo(() => {
-    if (mode !== "file" || !filePath) return fileRefs;
-    const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
-    for (const [key, ref] of fileRefs.entries()) {
-      const split = splitReviewFileKey(key);
-      if (split.path !== filePath) continue;
-      if (fileRepositoryName !== undefined && (split.repositoryName || "") !== fileRepositoryName) {
-        continue;
-      }
-      refs.set(key, ref);
-    }
-    return refs;
-  }, [mode, filePath, fileRepositoryName, fileRefs]);
-  const reviewedCount = useMemo(
-    () =>
-      visibleFiles.reduce((count, file) => {
-        const key = reviewFileKey(file);
-        if (!staleFiles.has(key) && reviewedFiles.has(key)) return count + 1;
-        return count;
-      }, 0),
-    [visibleFiles, reviewedFiles, staleFiles],
-  );
-  const totalCount = visibleFiles.length;
-  const progressPercent = totalCount > 0 ? (reviewedCount / totalCount) * 100 : 0;
-  return { visibleFiles, visibleFileRefs, reviewedCount, totalCount, progressPercent };
-}
-
 const TaskChangesPanel = memo(function TaskChangesPanel({
   mode = "all",
   filePath,
   fileRepositoryName,
+  prKey,
   selectedDiff,
   onClearSelected,
   onBecameEmpty,
@@ -458,50 +342,38 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const { openFile: panelOpenFile, openFileInMarkdownPreview } = usePanelActions();
   const handleOpenFile = onOpenFileProp ?? panelOpenFile;
 
-  const {
-    activeSessionId,
-    allFiles,
-    rawPRFiles,
-    reviewedFiles,
-    staleFiles,
-    totalCommentCount,
-    fileRefs,
-    cumulativeLoading,
-    prDiffLoading,
-    gitStatus,
-    truncatedFilesCount,
-  } = useChangesView(selectedDiff, onClearSelected);
-  const {
-    splitView,
-    wordWrap,
-    setWordWrap,
-    autoMarkOnScroll,
-    handleToggleSplitView,
-    handleToggleReviewed,
-    handleDiscard,
-    handleToggleAutoMark,
-    handleFixComments,
-  } = useChangesActions(activeSessionId, allFiles, wordWrapProp);
-  const handleRequestWalkthrough = useWalkthroughRequest(activeSessionId, allFiles);
-  const { visibleFiles, visibleFileRefs, reviewedCount, totalCount, progressPercent } =
-    useVisibleDiffState({
-      allFiles,
-      rawPRFiles,
-      mode,
-      filePath,
-      fileRepositoryName,
-      sourceFilter,
-      fileRefs,
-      reviewedFiles,
-      staleFiles,
-    });
-  const selectedFileKey = useSelectedFileKey(mode, filePath, fileRepositoryName);
+  const view = useChangesView(selectedDiff, onClearSelected, sourceFilter, prKey);
+  const usesPRDiff = sourceFilter === "all" || sourceFilter === "pr";
+  const relevantPRLoading = usesPRDiff && view.prDiffLoading;
+  const actions = useChangesActions(view.activeSessionId, view.allFiles, wordWrapProp);
+  const handleRequestWalkthrough = useWalkthroughRequest(view.activeSessionId, view.allFiles);
+  const visible = useVisibleDiffState({
+    allFiles: view.allFiles,
+    rawPRFiles: view.rawPRFiles,
+    mode,
+    filePath,
+    fileRepositoryName,
+    sourceFilter,
+    prKey,
+    fileRefs: view.fileRefs,
+    reviewedFiles: view.reviewedFiles,
+    staleFiles: view.staleFiles,
+  });
+  const { selectedFileKey, blockChangesForPR } = useChangesPRPresentation({
+    sourceFilter,
+    prKey,
+    mode,
+    filePath,
+    fileRepositoryName,
+    visibleFiles: visible.visibleFiles,
+  });
   useAutoCloseWhenEmpty({
     mode,
     filePath,
     sourceFilter,
-    gitStatus,
-    visibleCount: visibleFiles.length,
+    gitStatus: view.gitStatus,
+    visibleCount: visible.visibleFiles.length,
+    prDiffLoading: relevantPRLoading,
     onBecameEmpty,
   });
 
@@ -510,37 +382,48 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   return (
     <PanelRoot>
       <ChangesTopBar
-        autoMarkOnScroll={autoMarkOnScroll}
-        splitView={splitView}
-        wordWrap={wordWrap}
-        totalCommentCount={totalCommentCount}
-        reviewedCount={reviewedCount}
-        totalCount={totalCount}
-        progressPercent={progressPercent}
-        setWordWrap={setWordWrap}
-        handleToggleSplitView={handleToggleSplitView}
-        handleToggleAutoMark={handleToggleAutoMark}
-        handleFixComments={handleFixComments}
+        autoMarkOnScroll={actions.autoMarkOnScroll}
+        splitView={actions.splitView}
+        wordWrap={actions.wordWrap}
+        totalCommentCount={view.totalCommentCount}
+        reviewedCount={visible.reviewedCount}
+        totalCount={visible.totalCount}
+        progressPercent={visible.progressPercent}
+        setWordWrap={actions.setWordWrap}
+        handleToggleSplitView={actions.handleToggleSplitView}
+        handleToggleAutoMark={actions.handleToggleAutoMark}
+        handleFixComments={actions.handleFixComments}
         handleRequestWalkthrough={handleRequestWalkthrough}
-        requestWalkthroughDisabled={allFiles.length === 0}
+        requestWalkthroughDisabled={view.allFiles.length === 0}
+        prs={mode === "all" ? view.prs : []}
+        selectedPR={mode === "all" ? view.selectedPR : null}
+        prDiffLoading={view.prDiffLoading}
+        onSelectPR={view.selectPR}
       />
       <PanelBody padding={false} scroll={false} className="overflow-hidden">
-        <TruncatedFilesBanner count={truncatedFilesCount} />
-        <ChangesPanelContent
-          isLoading={cumulativeLoading || prDiffLoading}
-          files={visibleFiles}
-          activeSessionId={activeSessionId}
-          reviewedFiles={reviewedFiles}
-          staleFiles={staleFiles}
-          autoMarkOnScroll={autoMarkOnScroll}
-          wordWrap={wordWrap}
-          selectedFile={selectedFileKey}
-          onToggleReviewed={handleToggleReviewed}
-          onDiscard={handleDiscard}
-          onOpenFile={handleOpenFile}
-          onPreviewMarkdown={openFileInMarkdownPreview}
-          fileRefs={visibleFileRefs}
-        />
+        <TruncatedFilesBanner count={view.truncatedFilesCount} />
+        <ReviewPRDiffBoundary
+          selectedPR={usesPRDiff && blockChangesForPR ? view.selectedPR : null}
+          loading={blockChangesForPR && relevantPRLoading}
+          error={blockChangesForPR ? view.prDiffError : null}
+          onRetry={view.refreshPRDiff}
+        >
+          <ChangesPanelContent
+            isLoading={view.cumulativeLoading || relevantPRLoading}
+            files={visible.visibleFiles}
+            activeSessionId={view.activeSessionId}
+            reviewedFiles={view.reviewedFiles}
+            staleFiles={view.staleFiles}
+            autoMarkOnScroll={actions.autoMarkOnScroll}
+            wordWrap={actions.wordWrap}
+            selectedFile={selectedFileKey}
+            onToggleReviewed={actions.handleToggleReviewed}
+            onDiscard={actions.handleDiscard}
+            onOpenFile={handleOpenFile}
+            onPreviewMarkdown={openFileInMarkdownPreview}
+            fileRefs={visible.visibleFileRefs}
+          />
+        </ReviewPRDiffBoundary>
       </PanelBody>
     </PanelRoot>
   );
@@ -608,4 +491,4 @@ function ChangesPanelContent({
   );
 }
 
-export { TaskChangesPanel, filterVisibleFiles, scrollToFileAndClear };
+export { TaskChangesPanel, scrollToFileAndClear };
