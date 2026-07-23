@@ -154,6 +154,9 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		BranchSlug:         req.BranchSlug,
 		BranchIdentitySlug: req.BranchIdentitySlug,
 	}
+	for _, f := range req.WorkspaceFolders {
+		launchReq.WorkspaceFolders = append(launchReq.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
+	}
 
 	if req.RouteOverride != nil {
 		launchReq.RouteOverride = &lifecycle.RouteOverride{

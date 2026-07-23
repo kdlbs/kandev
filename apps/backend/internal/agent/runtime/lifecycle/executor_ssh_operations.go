@@ -463,17 +463,29 @@ func startRemoteAgentctl(
 	ctx context.Context,
 	client *ssh.Client,
 	shell, agentctlBin, workspacePath, sessionDir string,
+	env map[string]string,
 	log *logger.Logger,
 ) (port int, pid int, err error) {
 	port = pickRemoteAgentctlPort()
+	envScript, err := buildSSHEnvInitScript(env)
+	if err != nil {
+		return 0, 0, fmt.Errorf("ssh: launch agentctl: %w", err)
+	}
 
 	// Wrap the agentctl exec in a login shell so the spawned process
 	// inherits the user's $PATH (nvm/asdf/brew etc.). Without this, even
 	// if `npx` is installed via nvm, agentctl's child processes won't
 	// find it because the SSH-exec channel runs a non-interactive non-
 	// login shell and `nohup` inherits whatever that shell's PATH was.
+	// The launch environment is supplied on stdin, never embedded in the
+	// command string. That keeps transient Git credentials out of argv and
+	// remote process listings while letting the long-lived agentctl inherit
+	// exactly the same resolved credentials as clone/setup commands.
 	innerScript := fmt.Sprintf(
-		`set -e
+		`set -ae
+. /dev/stdin
+set +a
+set -e
 mkdir -p %[1]s
 : > %[1]s/agentctl.log
 AGENTCTL_PORT=%[4]d nohup %[2]s --workdir %[3]s \
@@ -488,7 +500,7 @@ echo "$AGENTCTL_PID"
 		shellQuote(workspacePath),
 		port,
 	)
-	out, stderr, err := runSSHCommand(ctx, client, WrapLoginShell(shell, innerScript))
+	out, stderr, err := runSSHCommandStdin(ctx, client, WrapLoginShell(shell, innerScript), strings.NewReader(envScript))
 	if err != nil {
 		return 0, 0, fmt.Errorf("ssh: launch agentctl: %w (stderr: %s)", err, strings.TrimSpace(stderr))
 	}
@@ -544,6 +556,7 @@ func createRemoteAgentInstance(
 	controlPort int,
 	workspacePath string,
 	req *ExecutorCreateRequest,
+	authToken string,
 	log *logger.Logger,
 ) (int, error) {
 	body, err := json.Marshal(agentctl.CreateInstanceRequest{
@@ -587,6 +600,7 @@ func createRemoteAgentInstance(
 		return 0, fmt.Errorf("ssh: build create-instance request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	setSSHControlAuthorization(httpReq, authToken)
 
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
@@ -614,6 +628,50 @@ func createRemoteAgentInstance(
 		zap.Int("instance_port", resp.Port),
 		zap.String("instance_id", resp.ID))
 	return resp.Port, nil
+}
+
+func setSSHControlAuthorization(req *http.Request, token string) {
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
+func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort int, nonce string) (string, error) {
+	body, err := json.Marshal(map[string]string{"nonce": nonce})
+	if err != nil {
+		return "", err
+	}
+	httpClient := remoteControlHTTPClient(client, controlPort)
+	defer httpClient.CloseIdleConnections()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/auth/handshake", controlPort), bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("ssh: agentctl handshake: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ssh: agentctl handshake returned %d", resp.StatusCode)
+	}
+	var result struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || result.Token == "" {
+		return "", errors.New("ssh: agentctl handshake returned no token")
+	}
+	return result.Token, nil
+}
+
+func remoteControlHTTPClient(client *ssh.Client, controlPort int) *http.Client {
+	return &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return client.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(controlPort)))
+		},
+		DisableKeepAlives: true,
+	}}
 }
 
 // sshRemoteAgentCredentialEnvKeys are the agent-authentication environment

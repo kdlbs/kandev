@@ -482,79 +482,76 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
   });
 }
 
+function handleQueueStatusChanged(
+  store: StoreApi<AppState>,
+  message: Parameters<NonNullable<WsHandlers["message.queue.status_changed"]>>[0],
+) {
+  const payload = message.payload;
+  if (!payload?.session_id) {
+    console.warn("[Queue] Missing session_id in queue status change event");
+    return;
+  }
+  const entries = (payload.entries as QueuedMessage[] | null | undefined) ?? [];
+  const count = typeof payload.count === "number" ? payload.count : entries.length;
+  const max = typeof payload.max === "number" ? payload.max : 0;
+  store.getState().setQueueEntries(payload.session_id, entries, { count, max });
+}
+
+function handleSessionStateChanged(
+  store: StoreApi<AppState>,
+  message: Parameters<NonNullable<WsHandlers["session.state_changed"]>>[0],
+): void {
+  const payload = message.payload;
+  if (!payload?.task_id || !payload.session_id) return;
+  const taskId = toTaskId(payload.task_id);
+  const sessionId = toSessionId(payload.session_id);
+  const newState = payload.new_state as TaskSessionState | undefined;
+  const sessionUpdate = buildSessionUpdate(payload);
+  const existingSession = store.getState().taskSessions.items[sessionId];
+
+  if (isStaleSessionStateEvent(existingSession, payload.updated_at)) {
+    debug("state_changed ignored stale snapshot", {
+      sessionId,
+      task_id: taskId,
+      existingUpdatedAt: existingSession?.updated_at,
+      payloadUpdatedAt: payload.updated_at,
+      newState: newState ?? "-",
+    });
+    return;
+  }
+
+  debug("state_changed", {
+    sessionId,
+    task_id: taskId,
+    oldState: existingSession?.state ?? "-",
+    newState: newState ?? "-",
+  });
+  upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
+  syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
+  extractContextWindow(store, sessionId, payload);
+  maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
+  maybeAdoptSessionOnTransition(
+    store,
+    taskId,
+    sessionId,
+    newState,
+    !!existingSession,
+    existingSession?.state,
+  );
+  maybeNotifySessionFailure(store, {
+    taskId,
+    sessionId,
+    newState,
+    payload,
+    previousState: existingSession?.state,
+  });
+  maybeFanOutOfficeRefetch(store, newState, existingSession?.state);
+}
+
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    "message.queue.status_changed": (message) => {
-      const payload = message.payload;
-      if (!payload?.session_id) {
-        console.warn("[Queue] Missing session_id in queue status change event");
-        return;
-      }
-      const sessionId = payload.session_id;
-      const entries = (payload.entries as QueuedMessage[] | null | undefined) ?? [];
-      const count = typeof payload.count === "number" ? payload.count : entries.length;
-      const max = typeof payload.max === "number" ? payload.max : 0;
-      store.getState().setQueueEntries(sessionId, entries, { count, max });
-    },
-    "session.state_changed": (message) => {
-      const payload = message.payload;
-      if (!payload?.task_id) return;
-      const { task_id: rawTaskId, session_id: rawSessionId } = payload;
-      const newState = payload.new_state as TaskSessionState | undefined;
-
-      if (!rawSessionId) return;
-      const taskId = toTaskId(rawTaskId);
-      const sessionId = toSessionId(rawSessionId);
-
-      const sessionUpdate = buildSessionUpdate(payload);
-      const existingSession = store.getState().taskSessions.items[sessionId];
-
-      if (isStaleSessionStateEvent(existingSession, payload.updated_at)) {
-        debug("state_changed ignored stale snapshot", {
-          sessionId,
-          task_id: taskId,
-          existingUpdatedAt: existingSession?.updated_at,
-          payloadUpdatedAt: payload.updated_at,
-          newState: newState ?? "-",
-        });
-        return;
-      }
-
-      debug("state_changed", {
-        sessionId,
-        // Logged before upsertTaskSessionList below, so on the first event for a
-        // session the store has no row yet and the auto-resolver can't map it —
-        // exactly the oldState="-" anchor line. taskId is already in scope, so
-        // pass it directly (rendered as task_id=, matching the auto-annotation).
-        task_id: taskId,
-        oldState: existingSession?.state ?? "-",
-        newState: newState ?? "-",
-      });
-
-      upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
-      syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
-      extractContextWindow(store, sessionId, payload);
-      maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
-
-      maybeAdoptSessionOnTransition(
-        store,
-        taskId,
-        sessionId,
-        newState,
-        !!existingSession,
-        existingSession?.state,
-      );
-
-      maybeNotifySessionFailure(store, {
-        taskId,
-        sessionId,
-        newState,
-        payload,
-        previousState: existingSession?.state,
-      });
-
-      maybeFanOutOfficeRefetch(store, newState, existingSession?.state);
-    },
+    "message.queue.status_changed": (message) => handleQueueStatusChanged(store, message),
+    "session.state_changed": (message) => handleSessionStateChanged(store, message),
     "session.agentctl_starting": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) return;
@@ -585,6 +582,19 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         errorMessage: payload.error_message,
         updatedAt: message.timestamp,
       });
+    },
+    "session.workspace_sources.updated": (message) => {
+      const {
+        session_id: sessionId,
+        workspace_path: workspacePath,
+        adopted_session_ids: adoptedSessionIds,
+      } = message.payload;
+      const existing = store.getState().taskSessions.items[sessionId];
+      if (existing) store.getState().setTaskSession({ ...existing, worktree_path: workspacePath });
+      store.getState().reconcileWorkspaceSourcesAdopted(adoptedSessionIds ?? [sessionId]);
+      store.getState().bumpWorkspaceFilesRefresh(sessionId);
+      store.getState().clearLegacyGitStatusEntry(sessionId);
+      store.getState().bumpSessionCommitsRefetch(sessionId);
     },
   };
 }

@@ -215,14 +215,15 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
 	// 15 kanban (incl. delete + archive task + stop_task + spawn_session) +
-	// 1 add_branch_to_task + 1 update_repository_base_branch +
+	// 1 add_branch_to_task + 1 add_workspace_sources + 1 update_repository_base_branch +
 	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
 	// 1 related-tasks = 27.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
 	assert.Contains(t, tools, "spawn_session_kandev", "spawn_session must be registered in task mode")
-	assert.Equal(t, 27, len(tools))
+	assert.Contains(t, tools, "add_workspace_sources_kandev")
+	assert.Equal(t, 28, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {

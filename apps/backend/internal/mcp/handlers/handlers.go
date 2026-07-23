@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
@@ -41,6 +42,21 @@ type ClarificationService interface {
 	CreateRequest(req *clarification.Request) (string, bool)
 	WaitForResponse(ctx context.Context, pendingID string) (*clarification.Response, error)
 	CancelRequest(pendingID string) bool
+}
+
+type workspaceSourceJSON struct {
+	Kind           string `json:"kind"`
+	RepositoryID   string `json:"repository_id"`
+	LocalPath      string `json:"local_path"`
+	GitHubURL      string `json:"github_url"`
+	RemoteURL      string `json:"remote_url"`
+	Provider       string `json:"provider"`
+	ProviderRepoID string `json:"provider_repo_id"`
+	ProviderOwner  string `json:"provider_owner"`
+	ProviderName   string `json:"provider_name"`
+	BaseBranch     string `json:"base_branch"`
+	CheckoutBranch string `json:"checkout_branch"`
+	DisplayName    string `json:"display_name"`
 }
 
 // SessionCanceller detaches in-memory clarification waiters while keeping DB
@@ -281,6 +297,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
+	d.RegisterFunc(ws.ActionMCPAddWorkspaceSources, h.handleAddWorkspaceSources)
 	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
@@ -1324,6 +1341,84 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 		keyCheckoutBranch: taskRepo.CheckoutBranch,
 		keyPosition:       taskRepo.Position,
 	})
+}
+
+// handleAddWorkspaceSources forwards the documented discriminated source
+// union to the shared attachment service. It deliberately rejects fields from
+// the other variant so callers cannot get a silently ambiguous attachment.
+func (h *Handlers) handleAddWorkspaceSources(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID  string            `json:"task_id"`
+		Sources []json.RawMessage `json:"sources"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" || len(req.Sources) == 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and at least one source are required", nil)
+	}
+	sources, err := parseWorkspaceSources(req.Sources)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	result, err := h.taskSvc.AttachWorkspaceSources(ctx, service.AttachWorkspaceSourcesRequest{TaskID: req.TaskID, Sources: sources})
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, classifyWorkspaceSourceError(err), "Failed to attach workspace sources: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"task_id": result.Task.ID, "repositories": result.Task.Repositories, "workspace_folders": result.Task.WorkspaceFolders, "workspace_path": result.WorkspacePath, "session_ids": result.SessionIDs,
+	})
+}
+
+func parseWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInput, error) {
+	sources := make([]service.WorkspaceSourceInput, 0, len(raw))
+	for _, item := range raw {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(item, &fields); err != nil {
+			return nil, fmt.Errorf("source must be an object")
+		}
+		var kind string
+		if err := json.Unmarshal(fields["kind"], &kind); err != nil {
+			return nil, fmt.Errorf("source kind is required")
+		}
+		allowed := map[string]bool{"kind": true, "local_path": true}
+		switch kind {
+		case string(service.WorkspaceSourceRepository):
+			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
+				allowed[key] = true
+			}
+		case string(service.WorkspaceSourceFolder):
+			allowed["display_name"] = true
+		default:
+			return nil, fmt.Errorf("unsupported workspace source kind %q", kind)
+		}
+		for key := range fields {
+			if !allowed[key] {
+				return nil, fmt.Errorf("field %q is not allowed for %s source", key, kind)
+			}
+		}
+		var source workspaceSourceJSON
+		if err := json.Unmarshal(item, &source); err != nil {
+			return nil, err
+		}
+		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
+	}
+	return sources, nil
+}
+
+func classifyWorkspaceSourceError(err error) string {
+	switch {
+	case errors.Is(err, service.ErrInvalidWorkspaceSource):
+		return ws.ErrorCodeValidation
+	case errors.Is(err, taskrepo.ErrTaskNotFound), errors.Is(err, taskrepository.ErrRepositoryNotFound), errors.Is(err, service.ErrTaskRepositoryNotFound):
+		return ws.ErrorCodeNotFound
+	case errors.Is(err, service.ErrWorkspaceSourceConflict), errors.Is(err, service.ErrWorkspaceSourceActive):
+		return ws.ErrorCodeConflict
+	case errors.Is(err, service.ErrUnsupportedWorkspaceSource), errors.Is(err, service.ErrWorkspaceSourceMaterialize):
+		return ws.ErrorCodeValidation
+	default:
+		return ws.ErrorCodeInternalError
+	}
 }
 
 // handleUpdateRepositoryBaseBranch updates the base_branch on a single

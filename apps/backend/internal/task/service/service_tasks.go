@@ -1,3 +1,4 @@
+//revive:disable:file-length-limit // Legacy task operations remain cohesive; workspace-source additions live in focused files.
 package service
 
 import (
@@ -200,6 +201,9 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	}
 	if req.IsEphemeral && req.WorkflowID != "" {
 		return fmt.Errorf("workflow_id must be empty for ephemeral tasks")
+	}
+	if err := validateTaskRepositoryBranches(req.Repositories); err != nil {
+		return err
 	}
 	return nil
 }
@@ -721,6 +725,9 @@ func (s *Service) resolveRepoInputRemote(
 		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, provider, owner, name)
 	}
 	providerHost := remoteProviderHost(provider, canonicalURL)
+	if provider == providerGitLab && providerHost != "https://gitlab.com" {
+		return "", "", false, fmt.Errorf("untrusted GitLab origin %q", providerHost)
+	}
 	repo, repoCreated, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
 		WorkspaceID:    workspaceID,
 		Provider:       provider,
@@ -994,6 +1001,7 @@ func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) 
 	} else {
 		task.Repositories = repos
 	}
+	s.hydrateTaskWorkspaceFolders(ctx, task)
 
 	return task, nil
 }
@@ -2391,6 +2399,7 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 	if err := s.loadTaskRepositoriesBatch(ctx, tasks); err != nil {
 		s.logger.Error("failed to batch-load task repositories", zap.Error(err))
 	}
+	s.hydrateTaskWorkspaceFoldersBatch(ctx, tasks)
 
 	return tasks, nil
 }
@@ -2423,6 +2432,7 @@ func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflo
 	if err := s.loadTaskRepositoriesBatch(ctx, tasks); err != nil {
 		s.logger.Error("failed to batch-load task repositories", zap.Error(err))
 	}
+	s.hydrateTaskWorkspaceFoldersBatch(ctx, tasks)
 
 	return tasks, total, nil
 }

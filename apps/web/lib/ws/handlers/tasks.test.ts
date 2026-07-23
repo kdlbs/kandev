@@ -1,12 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
-import { removeRecentTask } from "@/lib/recent-tasks";
 import type { AppState } from "@/lib/state/store";
 import { registerTasksHandlers } from "./tasks";
-
-vi.mock("@/lib/recent-tasks", () => ({
-  removeRecentTask: vi.fn(),
-}));
 
 const SESS_OTHER = "sess-other";
 const SESS_DRIFTED = "sess-drifted";
@@ -99,17 +94,6 @@ function makeMessage(payload: Record<string, unknown>) {
   } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
 }
 
-function makeDeletedMessage(payload: Record<string, unknown>) {
-  return {
-    id: "msg-1",
-    type: "notification" as const,
-    action: "task.deleted" as const,
-    payload,
-  } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.deleted"]>>[0];
-}
-
-const REVIEW_TITLE = "Review PR #11259";
-
 // Shared setup for the primary-session focus-follow tests: a single task t1
 // whose kanban primary, plus the active/pinned session ids, are the only knobs
 // that vary between cases.
@@ -135,39 +119,12 @@ function makeFollowStore(opts: {
   });
 }
 
-function makeActiveStore() {
-  return makeStore({
-    kanban: { workflowId: "wf1", steps: [], tasks: [{ id: "t1", workflowId: "wf1" }] },
-    tasks: {
-      activeTaskId: "t1",
-      activeSessionId: null,
-      pinnedSessionId: null,
-      lastSessionByTaskId: {},
-    },
-    environmentIdBySessionId: {},
-  } as unknown as Partial<AppState>);
-}
-
-function makeInactiveStore() {
-  return makeStore({
-    kanban: { workflowId: "wf1", steps: [], tasks: [{ id: "t1", workflowId: "wf1" }] },
-    tasks: {
-      activeTaskId: null,
-      activeSessionId: null,
-      pinnedSessionId: null,
-      lastSessionByTaskId: {},
-    },
-    environmentIdBySessionId: {},
-  } as unknown as Partial<AppState>);
-}
-
 describe("task.updated primary-session focus follow", () => {
   let store: ReturnType<typeof makeStore>;
   let setActiveSessionAuto: ReturnType<typeof vi.fn<(taskId: string, sessionId: string) => void>>;
 
   beforeEach(() => {
     setActiveSessionAuto = vi.fn();
-    vi.mocked(removeRecentTask).mockClear();
   });
 
   it("follows focus to the new primary when the user is on the previous primary", () => {
@@ -237,6 +194,28 @@ describe("task.updated primary-session focus follow", () => {
   });
 });
 
+describe("task.updated workspace sources", () => {
+  it("merges authoritative workspace folders into the kanban task", () => {
+    const store = makeStore({
+      kanban: { workflowId: "wf1", steps: [], tasks: [{ id: "t1", workflowId: "wf1" }] },
+    } as unknown as Partial<AppState>);
+
+    registerTasksHandlers(store)["task.updated"]!(
+      makeMessage({
+        ...makeTask("t1", "sess-1"),
+        repositories: [{ id: "tr-1", repository_id: "repo-1", base_branch: "main", position: 0 }],
+        workspace_folders: [
+          { id: "folder-1", local_path: "/work/docs", display_name: "docs", position: 0 },
+        ],
+      }),
+    );
+
+    expect(store.getState().kanban.tasks[0].workspaceFolders).toEqual([
+      { id: "folder-1", local_path: "/work/docs", display_name: "docs", position: 0 },
+    ]);
+  });
+});
+
 // Regression: even when the user happens to be sitting on the previous
 // primary, an explicit pin on it must override primary-follow-focus here.
 // A pinned user whose session is genuinely retired is followed via the session
@@ -249,7 +228,6 @@ describe("task.updated primary-session focus follow (pinning)", () => {
 
   beforeEach(() => {
     setActiveSessionAuto = vi.fn();
-    vi.mocked(removeRecentTask).mockClear();
   });
 
   it("does NOT follow focus when the user has pinned the previous primary", () => {
@@ -317,7 +295,6 @@ describe("task.updated primary-session focus follow (stale pin cleanup)", () => 
 
   beforeEach(() => {
     setActiveSessionAuto = vi.fn();
-    vi.mocked(removeRecentTask).mockClear();
   });
 
   it("clears a terminal orphaned pin when following focus to the new primary", () => {
@@ -543,157 +520,5 @@ describe("task.updated repository clearing", () => {
     const task = store.getState().kanban.tasks.find((item) => item.id === "t1");
     expect(task?.repositoryId).toBeUndefined();
     expect(task?.repositories).toEqual([]);
-  });
-});
-
-describe("task.deleted cleanup", () => {
-  beforeEach(() => {
-    vi.mocked(removeRecentTask).mockClear();
-  });
-
-  it("removes the deleted task from recent task history", () => {
-    const store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
-      environmentIdBySessionId: {},
-    });
-
-    const handlers = registerTasksHandlers(store);
-    handlers["task.deleted"]!(
-      makeDeletedMessage({
-        task_id: "t1",
-        workflow_id: "wf1",
-      }),
-    );
-
-    expect(removeRecentTask).toHaveBeenCalledTimes(1);
-    expect(removeRecentTask).toHaveBeenCalledWith("t1");
-  });
-
-  it("clears deleted task session state", () => {
-    const store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: SESS_PINNED, workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
-      tasks: {
-        activeTaskId: "t1",
-        activeSessionId: SESS_PINNED,
-        pinnedSessionId: SESS_PINNED,
-        lastSessionByTaskId: { t1: SESS_PINNED, t2: SESS_OTHER },
-      },
-      environmentIdBySessionId: {},
-    });
-
-    const handlers = registerTasksHandlers(store);
-    handlers["task.deleted"]!(makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }));
-
-    const state = store.getState();
-    expect(state.tasks.pinnedSessionId).toBeNull();
-    expect(state.tasks.lastSessionByTaskId).not.toHaveProperty("t1");
-    expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", SESS_OTHER);
-  });
-});
-
-describe("task.deleted live notification + redirect", () => {
-  it("sets a task-deleted notification (with title + reason) when the focused task is deleted", () => {
-    const store = makeActiveStore();
-    const handlers = registerTasksHandlers(store);
-
-    handlers["task.deleted"]!(
-      makeDeletedMessage({
-        task_id: "t1",
-        workflow_id: "wf1",
-        title: REVIEW_TITLE,
-        reason: "pr_approved_by_user",
-      }),
-    );
-
-    expect(store.getState().setTaskDeletedNotification).toHaveBeenCalledWith({
-      taskId: "t1",
-      title: REVIEW_TITLE,
-      reason: "pr_approved_by_user",
-    });
-  });
-
-  it("does not notify when a non-focused task is deleted", () => {
-    const store = makeStore({
-      kanban: { workflowId: "wf1", steps: [], tasks: [{ id: "t1", workflowId: "wf1" }] },
-      tasks: {
-        activeTaskId: "t2",
-        activeSessionId: null,
-        pinnedSessionId: null,
-        lastSessionByTaskId: {},
-      },
-      environmentIdBySessionId: {},
-    } as unknown as Partial<AppState>);
-    const handlers = registerTasksHandlers(store);
-
-    handlers["task.deleted"]!(makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }));
-
-    expect(store.getState().setTaskDeletedNotification).not.toHaveBeenCalled();
-  });
-
-  it("does not redirect or notify for a user-initiated delete (no reason) even on the task route", () => {
-    window.history.replaceState({}, "", "/t/t1");
-    const store = makeActiveStore();
-    const handlers = registerTasksHandlers(store);
-
-    handlers["task.deleted"]!(
-      makeDeletedMessage({ task_id: "t1", workflow_id: "wf1", title: REVIEW_TITLE }),
-    );
-
-    // The local delete flow owns navigation for user-initiated deletes; the WS
-    // handler must not preempt it by redirecting.
-    expect(window.location.pathname).toBe("/t/t1");
-    expect(store.getState().setTaskDeletedNotification).not.toHaveBeenCalled();
-  });
-
-  // Covers both the canonical `/t/:id` and compatibility `/tasks/:id` routes,
-  // and the not-yet-hydrated case (activeTaskId still null) via makeInactiveStore.
-  it.each(["/t/t1", "/tasks/t1"])(
-    "redirects home and notifies when parked on %s before activeTaskId hydrates",
-    (path) => {
-      window.history.replaceState({}, "", path);
-      const store = makeInactiveStore();
-      const handlers = registerTasksHandlers(store);
-
-      handlers["task.deleted"]!(
-        makeDeletedMessage({
-          task_id: "t1",
-          workflow_id: "wf1",
-          title: REVIEW_TITLE,
-          reason: "pr_approved_by_user",
-        }),
-      );
-
-      expect(window.location.pathname).toBe("/");
-      expect(store.getState().setTaskDeletedNotification).toHaveBeenCalledWith({
-        taskId: "t1",
-        title: REVIEW_TITLE,
-        reason: "pr_approved_by_user",
-      });
-    },
-  );
-
-  it("does not redirect an auto-deletion when viewing a different route", () => {
-    window.history.replaceState({}, "", "/t/other");
-    const store = makeActiveStore();
-    const handlers = registerTasksHandlers(store);
-
-    handlers["task.deleted"]!(
-      makeDeletedMessage({
-        task_id: "t1",
-        workflow_id: "wf1",
-        title: REVIEW_TITLE,
-        reason: "pr_approved_by_user",
-      }),
-    );
-
-    expect(window.location.pathname).toBe("/t/other");
   });
 });

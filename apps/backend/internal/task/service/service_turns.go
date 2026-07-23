@@ -32,6 +32,8 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
+	unlock := s.lockWorkspaceSources(session.TaskID)
+	defer unlock()
 
 	turn := &models.Turn{
 		ID:            uuid.New().String(),
@@ -582,6 +584,19 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		RuntimeConfigOptions:    runtimeConfig.ConfigOptions,
 		RuntimeConfigOptionsSet: runtimeConfigOptionsSet,
 	}
+	// Durable folder attachments are replayed by lifecycle for both fresh
+	// launch and workspace-only session recovery.
+	if s.workspaceFolders != nil {
+		folders, err := s.workspaceFolders.ListTaskWorkspaceFolders(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("list task workspace folders: %w", err)
+		}
+		for _, folder := range folders {
+			if folder != nil {
+				info.WorkspaceFolders = append(info.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: folder.DisplayName, LocalPath: folder.LocalPath})
+			}
+		}
+	}
 
 	var taskEnv *models.TaskEnvironment
 	if session.TaskEnvironmentID != "" {
@@ -608,6 +623,10 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 	if taskEnv != nil {
 		applyTaskEnvironmentToWorkspaceInfo(info, taskEnv)
+		info.TaskDirName = taskEnv.TaskDirName
+	}
+	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, info); err != nil {
+		return nil, err
 	}
 
 	// Populate executor info for correct runtime selection and remote reconnection
@@ -658,6 +677,40 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 
 	return info, nil
+}
+
+func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID string, info *lifecycle.WorkspaceInfo) error {
+	if taskID == "" || s.taskRepos == nil || s.repoEntities == nil {
+		return nil
+	}
+	if task, err := s.tasks.GetTask(ctx, taskID); err != nil {
+		return fmt.Errorf("get workspace task: %w", err)
+	} else if task != nil {
+		info.WorkspaceID = task.WorkspaceID
+	}
+	taskRepositories, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("list task repositories: %w", err)
+	}
+	for _, taskRepository := range taskRepositories {
+		if taskRepository == nil {
+			continue
+		}
+		repository, err := s.repoEntities.GetRepository(ctx, taskRepository.RepositoryID)
+		if err != nil {
+			return fmt.Errorf("get workspace repository: %w", err)
+		}
+		if repository == nil {
+			return fmt.Errorf("workspace repository %q not found", taskRepository.RepositoryID)
+		}
+		info.WorkspaceRepositories = append(info.WorkspaceRepositories, lifecycle.WorkspaceRepositorySpec{
+			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: repository.Name,
+			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
+			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
+			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+		})
+	}
+	return nil
 }
 
 // PersistSessionRuntimeModel records the session's selected ACP model.

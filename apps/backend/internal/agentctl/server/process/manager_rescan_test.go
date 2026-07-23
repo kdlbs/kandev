@@ -33,7 +33,9 @@ func TestRescanRepositories_TransitionsSingleToMultiRepo(t *testing.T) {
 		t.Fatalf("expected 0 repoTrackers in single-repo mode, got %d", len(m.repoTrackers))
 	}
 
-	m.RescanRepositories(context.Background(), taskRoot)
+	if err := m.RescanRepositories(context.Background(), taskRoot); err != nil {
+		t.Fatal(err)
+	}
 
 	if len(m.repoTrackers) != 2 {
 		t.Fatalf("expected 2 repoTrackers after transition, got %d", len(m.repoTrackers))
@@ -75,7 +77,9 @@ func TestRescanRepositories_AppendsNewRepoTrackerInMultiRepoMode(t *testing.T) {
 	repoC := filepath.Join(taskRoot, "gamma")
 	initGitRepoAt(t, repoC)
 
-	m.RescanRepositories(context.Background(), taskRoot)
+	if err := m.RescanRepositories(context.Background(), taskRoot); err != nil {
+		t.Fatal(err)
+	}
 
 	if len(m.repoTrackers) != 3 {
 		t.Fatalf("expected 3 repoTrackers after append, got %d", len(m.repoTrackers))
@@ -90,6 +94,97 @@ func TestRescanRepositories_AppendsNewRepoTrackerInMultiRepoMode(t *testing.T) {
 		}
 	}
 	m.stopWorkspaceTrackers()
+}
+
+// A live remote materialization does not change the workspace root: it asks
+// agentctl to rescan the root it already tracks after adding a sibling. The
+// rescan must append only the new tracker, leaving existing tracker instances
+// intact so their Changes subscriptions and cached state survive.
+func TestRescanRepositories_EmptyWorkDirAppendsNewTrackerAtCurrentRoot(t *testing.T) {
+	taskRoot := t.TempDir()
+	initGitRepoAt(t, taskRoot)
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, log)
+	defer m.stopWorkspaceTrackers()
+	if len(m.repoTrackers) != 0 {
+		t.Fatalf("initial repo trackers = %d, want 0", len(m.repoTrackers))
+	}
+	existing := m.workspaceTracker
+	sub := m.SubscribeWorkspaceStream()
+	defer m.UnsubscribeWorkspaceStream(sub)
+	drainChannel(sub)
+
+	repo := filepath.Join(taskRoot, "beta")
+	initGitRepoAt(t, repo)
+	if err := m.RescanRepositories(context.Background(), ""); err != nil {
+		t.Fatalf("rescan current root: %v", err)
+	}
+
+	if len(m.repoTrackers) != 1 {
+		t.Fatalf("repo trackers after current-root rescan = %d, want 1", len(m.repoTrackers))
+	}
+	if m.workspaceTracker != existing {
+		t.Fatal("current-root rescan replaced an existing tracker")
+	}
+	if m.repoTrackers[0].RepositoryName() != "beta" {
+		t.Fatalf("new tracker = %q, want beta", m.repoTrackers[0].RepositoryName())
+	}
+	m.repoTrackers[0].workspaceSubMu.RLock()
+	_, visibleInChanges := m.repoTrackers[0].workspaceStreamSubscribers[sub]
+	m.repoTrackers[0].workspaceSubMu.RUnlock()
+	if !visibleInChanges {
+		t.Fatal("new child tracker did not inherit the Changes stream subscriber")
+	}
+}
+
+func TestReconcileRepositories_PrunesRemovedTrackerAndPreservesSubscription(t *testing.T) {
+	taskRoot := t.TempDir()
+	original := filepath.Join(taskRoot, "original")
+	rolledBack := filepath.Join(taskRoot, "rolled-back")
+	initGitRepoAt(t, original)
+	initGitRepoAt(t, rolledBack)
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, log)
+	defer m.stopWorkspaceTrackers()
+	if len(m.repoTrackers) != 2 {
+		t.Fatalf("initial repo trackers = %d, want 2", len(m.repoTrackers))
+	}
+	originalTracker := m.repoTrackers[0]
+	rolledBackTracker := m.repoTrackers[0]
+	if originalTracker.RepositoryName() != "original" {
+		originalTracker = m.repoTrackers[1]
+	}
+	if rolledBackTracker.RepositoryName() != "rolled-back" {
+		rolledBackTracker = m.repoTrackers[1]
+	}
+	sub := m.SubscribeWorkspaceStream()
+	defer m.UnsubscribeWorkspaceStream(sub)
+	if err := os.RemoveAll(rolledBack); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ReconcileRepositories(context.Background()); err != nil {
+		t.Fatalf("reconcile repositories: %v", err)
+	}
+	if got := m.RepoSubpaths(); len(got) != 1 || got[0] != "original" {
+		t.Fatalf("RepoSubpaths = %v, want [original]", got)
+	}
+	if m.repoTrackers[0] != originalTracker {
+		t.Fatal("reconcile replaced the retained tracker")
+	}
+	m.repoTrackers[0].workspaceSubMu.RLock()
+	_, subscribed := m.repoTrackers[0].workspaceStreamSubscribers[sub]
+	m.repoTrackers[0].workspaceSubMu.RUnlock()
+	if !subscribed {
+		t.Fatal("reconcile dropped the retained Changes subscription")
+	}
+	rolledBackTracker.workspaceSubMu.RLock()
+	_, staleSubscribed := rolledBackTracker.workspaceStreamSubscribers[sub]
+	rolledBackTracker.workspaceSubMu.RUnlock()
+	if staleSubscribed {
+		t.Fatal("removed tracker can still replay Changes to the subscription")
+	}
 }
 
 // TestRescanRepositories_FileTreeReturnsTaskRootContentsAfterTransition
@@ -133,7 +228,9 @@ func TestRescanRepositories_FileTreeReturnsTaskRootContentsAfterTransition(t *te
 		t.Errorf("pre-rescan tree should not contain sibling marker yet: %v", preNames)
 	}
 
-	m.RescanRepositories(context.Background(), taskRoot)
+	if err := m.RescanRepositories(context.Background(), taskRoot); err != nil {
+		t.Fatal(err)
+	}
 
 	postTree, err := m.workspaceTracker.GetFileTree("", 1)
 	if err != nil {
@@ -145,6 +242,146 @@ func TestRescanRepositories_FileTreeReturnsTaskRootContentsAfterTransition(t *te
 	}
 	if postNames["primary-marker.txt"] {
 		t.Errorf("post-rescan tree should not include primary's inner files at root: %v", postNames)
+	}
+}
+
+func TestRescanRepositories_PromotedRootTracksPlainFolderWithOneRepository(t *testing.T) {
+	taskRoot := t.TempDir()
+	primary := filepath.Join(taskRoot, "repo")
+	folder := filepath.Join(taskRoot, "notes")
+	initGitRepoAt(t, primary)
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := NewManager(&config.InstanceConfig{WorkDir: primary}, log)
+	defer m.stopWorkspaceTrackers()
+	if err := m.RescanRepositories(context.Background(), taskRoot); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := m.workspaceTracker.GetFileTree("", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := fileTreeChildNames(tree)
+	if !names["notes"] || !names["repo"] {
+		t.Fatalf("promoted root file scope = %v", names)
+	}
+	if len(m.repoTrackers) != 1 || m.repoTrackers[0].RepositoryName() != "repo" {
+		t.Fatalf("repo trackers = %+v", m.repoTrackers)
+	}
+}
+
+// Source-root policy is installed after a successful API rescan. It must
+// therefore be applied to the bare root tracker that replaces the original
+// primary tracker as well as every newly-created child tracker.
+func TestRescanRepositories_SourceRootsApplyToPromotedTrackers(t *testing.T) {
+	taskRoot := t.TempDir()
+	primary := filepath.Join(taskRoot, "primary")
+	sibling := filepath.Join(taskRoot, "sibling")
+	source := t.TempDir()
+	initGitRepoAt(t, primary)
+	initGitRepoAt(t, sibling)
+	for _, dir := range []string{taskRoot, primary, sibling} {
+		if err := os.Symlink(source, filepath.Join(dir, "linked")); err != nil {
+			t.Skip("symlinks not supported")
+		}
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := NewManager(&config.InstanceConfig{WorkDir: primary}, log)
+	defer m.stopWorkspaceTrackers()
+	if err := m.RescanRepositories(context.Background(), taskRoot); err != nil {
+		t.Fatal(err)
+	}
+	m.SetWorkspaceSourceRoots([]string{source})
+
+	assertLinkedSourceFileOperations(t, m.workspaceTracker, "linked/root.txt")
+	for _, tracker := range m.repoTrackers {
+		assertLinkedSourceFileOperations(t, tracker, "linked/"+tracker.RepositoryName()+".txt")
+	}
+}
+
+// Empty-path rescans append a new tracker without replacing the root tracker.
+// Applying policy after that reconciliation must cover both tracker kinds.
+func TestRescanRepositories_SourceRootsApplyToCurrentRootAppends(t *testing.T) {
+	taskRoot := t.TempDir()
+	source := t.TempDir()
+	initGitRepoAt(t, taskRoot)
+	if err := os.Symlink(source, filepath.Join(taskRoot, "linked")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, log)
+	defer m.stopWorkspaceTrackers()
+	child := filepath.Join(taskRoot, "child")
+	initGitRepoAt(t, child)
+	if err := os.Symlink(source, filepath.Join(child, "linked")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+	if err := m.RescanRepositories(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	m.SetWorkspaceSourceRoots([]string{source})
+
+	assertLinkedSourceFileOperations(t, m.workspaceTracker, "linked/root.txt")
+	if len(m.repoTrackers) != 1 {
+		t.Fatalf("repo trackers = %d, want 1", len(m.repoTrackers))
+	}
+	assertLinkedSourceFileOperations(t, m.repoTrackers[0], "linked/child.txt")
+}
+
+func assertLinkedSourceFileOperations(t *testing.T, tracker *WorkspaceTracker, path string) {
+	t.Helper()
+	if err := tracker.CreateFile(path); err != nil {
+		t.Fatalf("create %q through linked source: %v", path, err)
+	}
+	if _, _, err := tracker.ApplyFileDiff(context.Background(), path, "", "not a diff", stringPtr("updated")); err != nil {
+		t.Fatalf("write %q through linked source: %v", path, err)
+	}
+	content, _, _, _, err := tracker.GetFileContent(path)
+	if err != nil || content != "updated" {
+		t.Fatalf("read %q through linked source = %q, %v", path, content, err)
+	}
+	renamed := path + ".renamed"
+	if err := tracker.RenameFile(path, renamed); err != nil {
+		t.Fatalf("rename %q through linked source: %v", path, err)
+	}
+	if err := tracker.DeleteFile(renamed); err != nil {
+		t.Fatalf("delete %q through linked source: %v", renamed, err)
+	}
+}
+
+// Rebinding is intentionally stronger than a rescan: a live host execution
+// changes its process CWD, so no tracker rooted at the previous workspace may
+// survive the switch (or a later rollback).
+func TestRebindWorkspace_ReplacesTrackersAndSupportsReverseRollback(t *testing.T) {
+	oldRoot := t.TempDir()
+	newRoot := t.TempDir()
+	initGitRepoAt(t, oldRoot)
+	newRepo := filepath.Join(newRoot, "repo")
+	initGitRepoAt(t, newRepo)
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := NewManager(&config.InstanceConfig{WorkDir: oldRoot}, log)
+	defer m.stopWorkspaceTrackers()
+
+	if err := m.RebindWorkspace(context.Background(), newRoot); err != nil {
+		t.Fatalf("rebind new root: %v", err)
+	}
+	if m.cfg.WorkDir != newRoot || m.workspaceTracker.workDir != newRoot {
+		t.Fatalf("new binding = workdir %q tracker %q, want %q", m.cfg.WorkDir, m.workspaceTracker.workDir, newRoot)
+	}
+	if len(m.repoTrackers) != 1 || m.repoTrackers[0].workDir != newRepo {
+		t.Fatalf("new repo trackers were not replaced: %+v", m.repoTrackers)
+	}
+
+	if err := m.RebindWorkspace(context.Background(), oldRoot); err != nil {
+		t.Fatalf("reverse rebind: %v", err)
+	}
+	if m.cfg.WorkDir != oldRoot || m.workspaceTracker.workDir != oldRoot || len(m.repoTrackers) != 0 {
+		t.Fatalf("rollback binding = workdir %q tracker %q repos %d", m.cfg.WorkDir, m.workspaceTracker.workDir, len(m.repoTrackers))
 	}
 }
 
@@ -187,7 +424,9 @@ func TestRescanRepositories_PropagatesSubscriberToNewTrackers(t *testing.T) {
 	// into our post-rescan assertions.
 	drainChannel(sub)
 
-	m.RescanRepositories(context.Background(), taskRoot)
+	if err := m.RescanRepositories(context.Background(), taskRoot); err != nil {
+		t.Fatal(err)
+	}
 
 	// After transition, every active tracker must hold the subscriber:
 	// bare root + 2 per-repo trackers = 3 attach references. The exported

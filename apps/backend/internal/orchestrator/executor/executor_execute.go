@@ -1156,6 +1156,15 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 			req.Repositories[i].WorktreeBranchTicket = req.WorktreeBranchTicket
 		}
 	}
+	if folders, folderErr := e.repo.ListTaskWorkspaceFolders(ctx, task.ID); folderErr != nil {
+		return nil, execConfig, folderErr
+	} else {
+		for _, f := range folders {
+			if f != nil {
+				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{Name: f.DisplayName, LocalPath: f.LocalPath})
+			}
+		}
+	}
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.
 	if isConfigModeSession(session) {

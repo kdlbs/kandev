@@ -53,6 +53,11 @@ type Config struct {
 	// Empty means authentication is disabled (e.g. dev/test without nonce).
 	AuthToken string
 
+	// ListenHostOverride forces HTTP listeners to a specific host. It is used by
+	// SSH launches, whose controller and instance traffic stays inside explicit
+	// loopback SSH forwards even though bootstrap authentication is enabled.
+	ListenHostOverride string
+
 	// BootstrapNonce is a one-time-use nonce for the handshake protocol.
 	// When set (via AGENTCTL_BOOTSTRAP_NONCE), agentctl generates its own AuthToken.
 	// at startup and exposes POST /auth/handshake for the backend to retrieve it.
@@ -235,6 +240,10 @@ type InstanceConfig struct {
 	// WorkspaceTracker's baseBranch. Empty falls back to the hardcoded
 	// origin/main → master priority list inside workspace_git_status.go.
 	BaseBranches map[string]string
+
+	// WorkspaceSourceRoots are canonical durable source roots permitted for
+	// linked workspace file operations.
+	WorkspaceSourceRoots []string
 }
 
 // Load loads the configuration from environment variables.
@@ -259,6 +268,7 @@ func Load() *Config {
 		LogFormat:          getEnv("AGENTCTL_LOG_FORMAT", "json"),
 		McpLogFile:         getEnv("KANDEV_MCP_LOG_FILE", ""),
 		VscodeCommand:      getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
+		ListenHostOverride: getEnv("AGENTCTL_LISTEN_HOST", ""),
 		IdleTimeout:        getEnvDuration("KANDEV_ACP_IDLE_TIMEOUT", time.Hour),
 		IdleReaperInterval: getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute),
 	}
@@ -285,6 +295,9 @@ func Load() *Config {
 //
 // An empty return means "all interfaces" (the historical ":port" form).
 func (c *Config) ListenHost() string {
+	if c.ListenHostOverride != "" {
+		return c.ListenHostOverride
+	}
 	if c.AuthToken == "" {
 		return "127.0.0.1"
 	}
@@ -414,6 +427,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
 	}
+	if overrides.WorkspaceSourceRoots != nil {
+		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
+	}
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -454,6 +470,7 @@ type InstanceOverrides struct {
 	RequiresProcessKill    bool
 	StripEnv               []string
 	BaseBranches           map[string]string
+	WorkspaceSourceRoots   []string
 }
 
 // ParseCommand splits a command string into arguments

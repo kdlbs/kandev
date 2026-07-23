@@ -376,8 +376,9 @@ func (s *Server) registerTools() {
 		// Task-mode only: requires a live session to attach the new
 		// (repository, branch) to. External mode has no such context.
 		s.registerAddBranchToTaskTool()
+		s.registerAddWorkspaceSourcesTool()
 		s.registerUpdateRepositoryBaseBranchTool()
-		count += 2
+		count += 3
 		// Task-mode only: ADR 0015 explicit step-completion signal. The
 		// tool targets the current (task, session, step) the MCP server
 		// was bound to, so it has no meaningful semantics outside a task
@@ -641,12 +642,12 @@ Use this when the task should open more than one PR — same repo with different
 
 IMPORTANT:
 - Only works on tasks running the WORKTREE executor. Tasks on docker / sprites / local-pc / SSH / remote_docker reject this tool because sibling worktrees are a git-worktree-specific layout — other executors bind one workspace path per task and the new branch would silently never appear on disk.
-- task_id defaults to your CURRENT task when omitted — pass it explicitly only to target a different task.
+- task_id defaults to your CURRENT task when omitted and must match that task when provided.
 - Repository selection (matches create_task_kandev): pass exactly one of repository_id / repository_url / local_path. For single-repo tasks all three are optional — the service auto-resolves to the task's only repository. Multi-repo tasks must identify the target repo explicitly.
 - checkout_branch is the branch the new worktree will check out. Leave empty to create a fresh feature branch from base_branch.
 - base_branch is optional; defaults to the repository's default_branch.
 - The (task_id, repository_id, base_branch, checkout_branch) tuple must be unique on the task — re-adding the same combination is an error, not a no-op.`),
-			mcp.WithString("task_id", mcp.Description("The task to attach the branch to. Defaults to the current task when omitted.")),
+			mcp.WithString("task_id", mcp.Description("The current task. Defaults to the current task when omitted.")),
 			mcp.WithString("repository_id", mcp.Description("Repository UUID. Optional for single-repo tasks (auto-resolved). Required for multi-repo tasks unless repository_url or local_path is supplied.")),
 			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). Alternative to repository_id when you don't have the UUID handy. The repository is found-or-created in the task's workspace.")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Alternative to repository_id for the local worktree flow. The repository is found-or-created in the task's workspace.")),
@@ -657,6 +658,56 @@ IMPORTANT:
 	)
 }
 
+// registerAddWorkspaceSourcesTool attaches a mixed repository/folder batch to
+// the current task. Runtime adoption remains a backend concern; this tool only
+// forwards the documented union unchanged to the shared mutation boundary.
+func (s *Server) registerAddWorkspaceSourcesTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("add_workspace_sources_kandev",
+			mcp.WithDescription("Attach repository and folder workspace sources to an idle task. task_id defaults to the current task."),
+			mcp.WithString(mcpKeyTaskID, mcp.Description("Task to update. Defaults to the current task.")),
+			mcp.WithArray("sources", mcp.Required(), mcp.MinItems(1),
+				mcp.Description("Ordered source objects. Each has kind repository or folder and the documented fields for that kind."),
+				mcp.Items(map[string]any{"type": "object"}),
+			),
+		),
+		s.wrapHandler("add_workspace_sources_kandev", s.addWorkspaceSourcesHandler()),
+	)
+}
+
+func (s *Server) addWorkspaceSourcesHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID := req.GetString(mcpKeyTaskID, "")
+		if taskID == "" {
+			taskID = s.taskID
+		}
+		if taskID == "" {
+			return mcp.NewToolResultError("task_id is required (no current task context to default to)"), nil
+		}
+		// A task-mode MCP server is bound to one live task. Never let an agent
+		// use this mutation tool as a cross-task capability: the backend tunnel
+		// has no authenticated user principal to authorize arbitrary task IDs.
+		if s.taskID == "" || taskID != s.taskID {
+			return mcp.NewToolResultError("task_id is not available in this session"), nil
+		}
+		arguments, ok := req.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("sources is required"), nil
+		}
+		sources, ok := arguments["sources"]
+		if !ok {
+			return mcp.NewToolResultError("sources is required"), nil
+		}
+		payload := map[string]interface{}{mcpKeyTaskID: taskID, "sources": sources}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAddWorkspaceSources, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID := req.GetString(mcpKeyTaskID, "")
@@ -665,6 +716,12 @@ func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
 		}
 		if taskID == "" {
 			return mcp.NewToolResultError("task_id is required (no current task context to default to)"), nil
+		}
+		// A task-mode MCP server is bound to one live task. Never let an agent
+		// use this mutation tool as a cross-task capability: the backend tunnel
+		// has no authenticated user principal to authorize arbitrary task IDs.
+		if s.taskID == "" || taskID != s.taskID {
+			return mcp.NewToolResultError("task_id is not available in this session"), nil
 		}
 		// Mutual-exclusion gate at the MCP tier so the error names the
 		// agent-facing alias (repository_url) instead of the WS wire field

@@ -303,6 +303,7 @@ type ExecutorCreateRequest struct {
 	AgentProfileID         string
 	OfficeAgentProfileID   string
 	WorkspacePath          string
+	WorkspaceSourceRoots   []string
 	Protocol               string
 	Env                    map[string]string
 	AutoApprovePermissions bool
@@ -397,6 +398,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		ContainerID:          ri.ContainerID,
 		ContainerIP:          ri.ContainerIP,
 		WorkspacePath:        workspacePath,
+		WorkspaceSourceRoots: append([]string(nil), req.WorkspaceSourceRoots...),
 		RuntimeName:          ri.RuntimeName,
 		Status:               v1.AgentStatusRunning,
 		StartedAt:            time.Now(),

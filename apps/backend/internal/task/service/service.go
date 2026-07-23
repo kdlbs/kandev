@@ -146,6 +146,14 @@ var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrInvalidRepositorySettings = errors.New("invalid repository settings")
 	ErrInvalidExecutorConfig     = errors.New("invalid executor config")
+	// Workspace-source sentinels are the service boundary consumed by the HTTP
+	// and MCP adapters. Keep categories stable rather than making callers parse
+	// a validation or runtime error string.
+	ErrInvalidWorkspaceSource     = errors.New("invalid workspace source")
+	ErrWorkspaceSourceConflict    = errors.New("workspace source conflict")
+	ErrWorkspaceSourceActive      = errors.New("workspace source task is active")
+	ErrUnsupportedWorkspaceSource = errors.New("unsupported workspace source")
+	ErrWorkspaceSourceMaterialize = errors.New("workspace source materialization failed")
 )
 
 func validateExecutorConfig(config map[string]string) error {
@@ -168,62 +176,69 @@ func validateExecutorConfig(config map[string]string) error {
 
 // Repos holds the repository sub-interfaces used by the task service.
 type Repos struct {
-	Workspaces       repository.WorkspaceRepository
-	Tasks            repository.TaskRepository
-	TaskRepos        repository.TaskRepoRepository
-	Workflows        repository.WorkflowRepository
-	Messages         repository.MessageRepository
-	Turns            repository.TurnRepository
-	Sessions         repository.SessionRepository
-	GitSnapshots     repository.GitSnapshotRepository
-	RepoEntities     repository.RepositoryEntityRepository
-	Executors        repository.ExecutorRepository
-	Environments     repository.EnvironmentRepository
-	TaskEnvironments repository.TaskEnvironmentRepository
-	Reviews          repository.ReviewRepository
-	ResourceCleanups repository.TaskResourceCleanupRepository
+	Workspaces        repository.WorkspaceRepository
+	Tasks             repository.TaskRepository
+	TaskRepos         repository.TaskRepoRepository
+	WorkspaceFolders  repository.TaskWorkspaceFolderRepository
+	Workflows         repository.WorkflowRepository
+	Messages          repository.MessageRepository
+	Turns             repository.TurnRepository
+	Sessions          repository.SessionRepository
+	GitSnapshots      repository.GitSnapshotRepository
+	RepoEntities      repository.RepositoryEntityRepository
+	RepositoryCleanup repository.RepositoryCleanupRepository
+	Executors         repository.ExecutorRepository
+	Environments      repository.EnvironmentRepository
+	TaskEnvironments  repository.TaskEnvironmentRepository
+	Reviews           repository.ReviewRepository
+	ResourceCleanups  repository.TaskResourceCleanupRepository
 }
 
 // Service provides task business logic
 type Service struct {
-	workspaces            repository.WorkspaceRepository
-	tasks                 repository.TaskRepository
-	taskRepos             repository.TaskRepoRepository
-	workflows             repository.WorkflowRepository
-	messages              repository.MessageRepository
-	turns                 repository.TurnRepository
-	sessions              repository.SessionRepository
-	gitSnapshots          repository.GitSnapshotRepository
-	repoEntities          repository.RepositoryEntityRepository
-	executors             repository.ExecutorRepository
-	environments          repository.EnvironmentRepository
-	taskEnvironments      repository.TaskEnvironmentRepository
-	reviews               repository.ReviewRepository
-	resourceCleanups      repository.TaskResourceCleanupRepository
-	eventBus              bus.EventBus
-	logger                *logger.Logger
-	discoveryConfig       RepositoryDiscoveryConfig
-	worktreeCleanup       WorktreeCleanup
-	executionStopper      TaskExecutionStopper
-	cleanupActivity       TaskResourceCleanupActivityGate
-	branchMaterializer    BranchMaterializer
-	providerProber        ProviderDefaultBranchProber
-	gitArchiveCapture     GitArchiveCapture
-	workflowStepCreator   WorkflowStepCreator
-	workspaceBootstrapper WorkspaceBootstrapper
-	workflowStepGetter    WorkflowStepGetter
-	startStepResolver     StartStepResolver
-	prTaskResolver        PRTaskResolver
-	quickChatDir          string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
-	branchFetcher         *branchFetcher
-	envDestroyer          EnvironmentDestroyer
-	sessionRunningChecker SessionRunningChecker
-	remoteBranchLister    RemoteBranchLister
-	repoCloneLocation     RepoCloneLocation
-	blockers              BlockerRepository
-	comments              CommentRepository
-	baseBranchPusher      AgentBaseBranchPusher
-	runtimeOverridesMu    sync.Mutex
+	workspaces                  repository.WorkspaceRepository
+	tasks                       repository.TaskRepository
+	taskRepos                   repository.TaskRepoRepository
+	workspaceFolders            repository.TaskWorkspaceFolderRepository
+	workflows                   repository.WorkflowRepository
+	messages                    repository.MessageRepository
+	turns                       repository.TurnRepository
+	sessions                    repository.SessionRepository
+	gitSnapshots                repository.GitSnapshotRepository
+	repoEntities                repository.RepositoryEntityRepository
+	repositoryCleanup           repository.RepositoryCleanupRepository
+	executors                   repository.ExecutorRepository
+	environments                repository.EnvironmentRepository
+	taskEnvironments            repository.TaskEnvironmentRepository
+	reviews                     repository.ReviewRepository
+	resourceCleanups            repository.TaskResourceCleanupRepository
+	eventBus                    bus.EventBus
+	logger                      *logger.Logger
+	discoveryConfig             RepositoryDiscoveryConfig
+	worktreeCleanup             WorktreeCleanup
+	executionStopper            TaskExecutionStopper
+	cleanupActivity             TaskResourceCleanupActivityGate
+	branchMaterializer          BranchMaterializer
+	workspaceSourceMaterializer WorkspaceSourceMaterializer
+	workspaceSourceLocksMu      sync.Mutex
+	workspaceSourceLocks        map[string]*sync.Mutex
+	providerProber              ProviderDefaultBranchProber
+	gitArchiveCapture           GitArchiveCapture
+	workflowStepCreator         WorkflowStepCreator
+	workspaceBootstrapper       WorkspaceBootstrapper
+	workflowStepGetter          WorkflowStepGetter
+	startStepResolver           StartStepResolver
+	prTaskResolver              PRTaskResolver
+	quickChatDir                string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
+	branchFetcher               *branchFetcher
+	envDestroyer                EnvironmentDestroyer
+	sessionRunningChecker       SessionRunningChecker
+	remoteBranchLister          RemoteBranchLister
+	repoCloneLocation           RepoCloneLocation
+	blockers                    BlockerRepository
+	comments                    CommentRepository
+	baseBranchPusher            AgentBaseBranchPusher
+	runtimeOverridesMu          sync.Mutex
 	// cleanupDoneForTest lets unit tests wait for async cleanup; nil in production.
 	cleanupDoneForTest  chan struct{}
 	cleanupWorkerMu     sync.Mutex
@@ -245,24 +260,26 @@ type Service struct {
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
-		workspaces:       repos.Workspaces,
-		tasks:            repos.Tasks,
-		taskRepos:        repos.TaskRepos,
-		workflows:        repos.Workflows,
-		messages:         repos.Messages,
-		turns:            repos.Turns,
-		sessions:         repos.Sessions,
-		gitSnapshots:     repos.GitSnapshots,
-		repoEntities:     repos.RepoEntities,
-		executors:        repos.Executors,
-		environments:     repos.Environments,
-		taskEnvironments: repos.TaskEnvironments,
-		reviews:          repos.Reviews,
-		resourceCleanups: repos.ResourceCleanups,
-		eventBus:         eventBus,
-		logger:           log,
-		discoveryConfig:  discoveryConfig,
-		branchFetcher:    newBranchFetcher(log.Zap()),
+		workspaces:        repos.Workspaces,
+		tasks:             repos.Tasks,
+		taskRepos:         repos.TaskRepos,
+		workspaceFolders:  repos.WorkspaceFolders,
+		workflows:         repos.Workflows,
+		messages:          repos.Messages,
+		turns:             repos.Turns,
+		sessions:          repos.Sessions,
+		gitSnapshots:      repos.GitSnapshots,
+		repoEntities:      repos.RepoEntities,
+		repositoryCleanup: repos.RepositoryCleanup,
+		executors:         repos.Executors,
+		environments:      repos.Environments,
+		taskEnvironments:  repos.TaskEnvironments,
+		reviews:           repos.Reviews,
+		resourceCleanups:  repos.ResourceCleanups,
+		eventBus:          eventBus,
+		logger:            log,
+		discoveryConfig:   discoveryConfig,
+		branchFetcher:     newBranchFetcher(log.Zap()),
 	}
 }
 
@@ -280,6 +297,10 @@ func (s *Service) setCleanupDoneForTestHook(ch chan struct{}) {
 // task_repositories row and the worktree appears on next session launch.
 func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 	s.branchMaterializer = m
+}
+
+func (s *Service) SetWorkspaceSourceMaterializer(m WorkspaceSourceMaterializer) {
+	s.workspaceSourceMaterializer = m
 }
 
 // SetAgentBaseBranchPusher wires the live-update push for

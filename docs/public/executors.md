@@ -9,14 +9,14 @@ An executor determines where Kandev creates a task environment and runs `agentct
 
 ## Current support
 
-| Executor | Current status | Workspace | Use it when |
-|---|---|---|---|
-| Worktree | Supported; normal default | Dedicated Git worktree on the Kandev host | Parallel coding on a trusted machine |
-| Local | Supported | The selected checkout, or an explicit folder for a repository-free task | One controlled task must work in that exact folder |
-| Local Docker | Supported when the global Docker runtime is enabled and its daemon is reachable | `/workspace` in a new Docker container | You need a repeatable container boundary |
-| Sprites.dev | Supported, provider-dependent | `/workspace` in a provider sandbox | You need remote compute and accept provider lifecycle/billing |
-| SSH | Available with important repository-setup limitations | A task folder on a trusted SSH host | The task can start in an empty remote folder, or you manage repository materialization separately |
-| Remote Docker | **Not implemented** | None | Do not select or create this type |
+| Executor      | Current status                                                                  | Workspace                                                               | Use it when                                                              |
+| ------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Worktree      | Supported; normal default                                                       | Dedicated Git worktree on the Kandev host                               | Parallel coding on a trusted machine                                     |
+| Local         | Supported                                                                       | The selected checkout, or an explicit folder for a repository-free task | One controlled task must work in that exact folder                       |
+| Local Docker  | Supported when the global Docker runtime is enabled and its daemon is reachable | `/workspace` in a new Docker container                                  | You need a repeatable container boundary                                 |
+| Sprites.dev   | Supported, provider-dependent                                                   | `/workspace` in a provider sandbox                                      | You need remote compute and accept provider lifecycle/billing            |
+| SSH           | Supported for repository sources on a trusted host                              | A task folder on a trusted SSH host                                     | You need a remote host with SSH, SFTP, forwarding, and clone credentials |
+| Remote Docker | **Not implemented**                                                             | None                                                                    | Do not select or create this type                                        |
 
 `mock_remote` also exists in backend models for tests. It is not a product executor.
 
@@ -52,12 +52,12 @@ Profile edits apply when Kandev provisions a launch, but a Docker container or S
 
 Do not treat the two script fields as universal hooks:
 
-| Runtime | Prepare script | Profile cleanup script |
-|---|---|---|
-| Local / Worktree | Runs on the host during preparation. A failure is shown but is non-fatal, so the agent can still start for diagnosis. | Not executed by the executor runtime. Repository-level worktree cleanup is a separate repository setting. |
-| Local Docker | Runs inside the container before `agentctl`. Failure is logged but `agentctl` still starts. | Not executed. |
-| Sprites | Runs inside a newly created sandbox. Failure aborts the launch and destroys that new sandbox. | Runs, with a 60-second limit, only when a live execution is stopped with a task/session archived or deleted reason; failure does not prevent the subsequent destroy attempt. Plain Stop, **Reset Environment**, and profile-page direct destroy do not run this script. |
-| SSH | **Currently not executed.** | **Currently not executed.** |
+| Runtime          | Prepare script                                                                                                        | Profile cleanup script                                                                                                                                                                                                                                                  |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local / Worktree | Runs on the host during preparation. A failure is shown but is non-fatal, so the agent can still start for diagnosis. | Not executed by the executor runtime. Repository-level worktree cleanup is a separate repository setting.                                                                                                                                                               |
+| Local Docker     | Runs inside the container before `agentctl`. Failure is logged but `agentctl` still starts.                           | Not executed.                                                                                                                                                                                                                                                           |
+| Sprites          | Runs inside a newly created sandbox. Failure aborts the launch and destroys that new sandbox.                         | Runs, with a 60-second limit, only when a live execution is stopped with a task/session archived or deleted reason; failure does not prevent the subsequent destroy attempt. Plain Stop, **Reset Environment**, and profile-page direct destroy do not run this script. |
+| SSH              | **Currently not executed.**                                                                                           | **Currently not executed.**                                                                                                                                                                                                                                             |
 
 Keep working prepare scripts noninteractive and idempotent. Kandev resolves supported placeholders and appends its managed branch checkout for Docker and Sprites after the user script. A profile cleanup script must never remove paths outside the environment it owns.
 
@@ -86,9 +86,19 @@ Use `git worktree list --porcelain` in the source repository when diagnosing sta
 
 ## Local
 
-Local runs directly in the selected checkout. It provides no file isolation: concurrent tasks, the user, and other tools can edit the same files and switch the same branch. A requested branch checkout can fail when the checkout is dirty or has an unfinished merge.
+Local runs directly in the selected checkout. It provides no file isolation: concurrent tasks, the user, and other tools can edit the same files. When sources are attached, Local uses each user-owned repository's current checkout; Kandev does not switch its branch.
 
 Use Local for an intentionally shared checkout, a controlled single task, or a repository-free task with an explicit workspace folder. Prefer Worktree for parallel coding. Stop ends the agent process but does not clean the checkout or undo its changes.
+
+## Workspace sources
+
+An idle, non-archived repository-backed task can add sources from its **Files** panel. Repository sources (saved workspace repository, local Git repository, or remote Git repository) are supported on **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Worktree materializes Remote Git from Kandev's owned host cache. Docker, SSH, and Sprites clone local Git sources and therefore require a cloneable origin; Worktree and Local/Local PC can use the host repository directly.
+
+Every repository row records a base branch. Worktree, Docker, SSH, and Sprites may also materialize an existing checkout branch for repository rows. Local/Local PC always uses the repository's current checkout and does not offer or perform a branch switch.
+
+Arbitrary folders are supported only on **Worktree** and **Local/Local PC**. They remain live host paths; Kandev links them into its task workspace and never copies, moves, or deletes their contents. Docker and remote executors do not offer folders and reject a forged folder request. Remote Docker remains unavailable because its runtime is not implemented.
+
+Source batches are atomic: if validation, cloning, or runtime adoption fails, Kandev removes the new records and Kandev-owned entries while preserving existing task contents. Persisted attachments are reapplied after reload, relaunch, or **Reset Environment**; a previously attached folder that later disappears is reported instead of silently skipped. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
 ## Local Docker
 
@@ -183,9 +193,9 @@ The profile editor exposes remote shell and agent-readiness checks. Backend/API 
 
 The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can instead use a stored `GITHUB_TOKEN` or the local `gh auth token`. These transfers write sensitive material under the remote user's home and are best-effort—verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
-### Current repository limitation
+### Repository sources and cleanup
 
-The SSH runtime currently creates `<workdir-root>/tasks/<task-directory>` and a per-session `.kandev/sessions/<session-id>` directory, but it does **not** clone or otherwise materialize attached repositories. It also ignores the profile prepare and cleanup scripts. Therefore repository-backed coding through SSH is not yet a complete supported path. Use it only when an empty remote task directory is sufficient or when another trusted mechanism places the required content there and you have verified the exact path.
+SSH materializes attached repository sources in the remote task directory. It still ignores profile prepare and cleanup scripts. Ensure the remote host has the required Git credentials and can reach every selected remote; folders cannot be attached to SSH tasks.
 
 The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
 

@@ -69,5 +69,6 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-20-repository-provider-origin-identity | [Persist Provider Origin In Repository Identity](2026-07-20-repository-provider-origin-identity.md) | accepted | backend, frontend | 2026-07-20 |
 | 2026-07-21-portable-status-bar-order | [Portable Status Bar Order](2026-07-21-portable-status-bar-order.md) | accepted | backend, frontend, protocol | 2026-07-21 |
 | 2026-07-21-work-item-reference-search | [Backend-normalized work-item references](2026-07-21-work-item-reference-search.md) | accepted | backend, frontend, protocol | 2026-07-21 |
+| 2026-07-22-runtime-mutable-task-workspace-sources | [Runtime-Mutable Task Workspace Sources](2026-07-22-runtime-mutable-task-workspace-sources.md) | accepted | backend, frontend, protocol | 2026-07-22 |
 | 2026-07-24-opt-in-authentication | [Opt-in Authentication and Per-User Workspace Scoping](2026-07-24-opt-in-authentication.md) | accepted | backend, frontend, protocol, security | 2026-07-24 |
 | 2026-07-24-semantic-notification-events | [Semantic notification events come from domain occurrences](2026-07-24-semantic-notification-events.md) | accepted | backend, frontend, desktop | 2026-07-24 |

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -74,6 +76,35 @@ func TestQuickChatRequestBuildRepositoriesAcceptsPluralInput(t *testing.T) {
 	require.Len(t, repos, 2)
 	assert.Equal(t, service.TaskRepositoryInput{RepositoryID: "repo-1", BaseBranch: "main"}, repos[0])
 	assert.Equal(t, service.TaskRepositoryInput{RepositoryID: "repo-2", BaseBranch: "develop"}, repos[1])
+}
+
+func TestWorkspaceSourceHTTPStatusUsesTypedErrors(t *testing.T) {
+	tests := []struct {
+		err  error
+		want int
+	}{
+		{service.ErrInvalidWorkspaceSource, http.StatusBadRequest},
+		{service.ErrWorkspaceSourceConflict, http.StatusConflict},
+		{service.ErrWorkspaceSourceActive, http.StatusConflict},
+		{service.ErrUnsupportedWorkspaceSource, http.StatusUnprocessableEntity},
+		{service.ErrWorkspaceSourceMaterialize, http.StatusUnprocessableEntity},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, workspaceSourceHTTPStatus(tt.err))
+	}
+}
+
+func TestWorkspaceSourceHTTPStatusMapsRepositoryNotFound(t *testing.T) {
+	assert.Equal(t, http.StatusNotFound, workspaceSourceHTTPStatus(fmt.Errorf("wrapped: %w", taskrepository.ErrRepositoryNotFound)))
+}
+
+func TestParseHTTPWorkspaceSourcesPreservesSnakeCaseFields(t *testing.T) {
+	sources, err := parseHTTPWorkspaceSources([]json.RawMessage{json.RawMessage(`{"kind":"repository","repository_id":"repo-1","base_branch":"main","checkout_branch":"feature/x"}`)})
+	require.NoError(t, err)
+	require.Len(t, sources, 1)
+	assert.Equal(t, "repo-1", sources[0].RepositoryID)
+	assert.Equal(t, "main", sources[0].BaseBranch)
+	assert.Equal(t, "feature/x", sources[0].CheckoutBranch)
 }
 
 func TestQuickChatResolveParamsForcesWorktreeForRepositoryContext(t *testing.T) {

@@ -23,6 +23,7 @@ import (
 
 const (
 	sshAgentctlHealthTimeout = 20 * time.Second
+	sshAgentctlLoopbackHost  = "127.0.0.1"
 
 	sshStatusRunning      = "running"
 	sshStatusUnknown      = "unknown"
@@ -41,6 +42,7 @@ type sshSessionState struct {
 	forwarder *SSHPortForwarder
 	pid       int
 	remoteDir string
+	authToken string
 }
 
 // SSHExecutor implements ExecutorBackend for SSH-reachable Linux and macOS hosts.
@@ -202,7 +204,7 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	}
 	r.maybeUploadCredentials(ctx, client, req, platform)
 
-	port, pid, fwd, err := r.startAndForwardAgentctl(ctx, client, agentctlBin, taskDir, sessionDir, req, platform)
+	port, pid, fwd, authToken, err := r.startAndForwardAgentctl(ctx, client, agentctlBin, taskDir, sessionDir, req, platform)
 	if err != nil {
 		return nil, err
 	}
@@ -214,11 +216,12 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		forwarder: fwd,
 		pid:       pid,
 		remoteDir: sessionDir,
+		authToken: authToken,
 	}
 	r.mu.Unlock()
 	released = true // ownership transferred to session state; released on StopInstance
 
-	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, pid, workdir), nil
+	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, pid, workdir, authToken), nil
 }
 
 // prepareRemoteHost runs the steps that are independent of any particular
@@ -283,12 +286,17 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	agentctlBin, taskDir, sessionDir string,
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
-) (int, int, *SSHPortForwarder, error) {
+) (int, int, *SSHPortForwarder, string, error) {
+	nonce, err := generateBootstrapNonce()
+	if err != nil {
+		return 0, 0, nil, "", fmt.Errorf("ssh: generate bootstrap nonce: %w", err)
+	}
+	env := sshAgentctlLaunchEnv(req.Env, nonce)
 	shell := sshShellForRemote(req.Metadata, platform)
-	controlPort, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, r.logger)
+	controlPort, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
 	if err != nil {
 		r.report(req.OnProgress, "Starting agent controller", PrepareStepFailed, err.Error())
-		return 0, 0, nil, err
+		return 0, 0, nil, "", err
 	}
 	r.report(req.OnProgress, "Starting agent controller", PrepareStepCompleted,
 		fmt.Sprintf("pid=%d control_port=%d", pid, controlPort))
@@ -296,11 +304,16 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	// The per-instance server's workspace is the remote task dir, not the
 	// host-side req.WorkspacePath (which is meaningless on the remote).
 	// Passed explicitly so we don't briefly mutate the caller's request.
-	instancePort, ierr := createRemoteAgentInstance(ctx, client, controlPort, taskDir, req, r.logger)
+	authToken, ierr := remoteControlHandshake(ctx, client, controlPort, nonce)
+	if ierr != nil {
+		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
+		return 0, 0, nil, "", ierr
+	}
+	instancePort, ierr := createRemoteAgentInstance(ctx, client, controlPort, taskDir, req, authToken, r.logger)
 	if ierr != nil {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 		r.report(req.OnProgress, "Creating agent instance", PrepareStepFailed, ierr.Error())
-		return 0, 0, nil, ierr
+		return 0, 0, nil, "", ierr
 	}
 	r.report(req.OnProgress, "Creating agent instance", PrepareStepCompleted,
 		fmt.Sprintf("instance_port=%d", instancePort))
@@ -308,16 +321,30 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	fwd, err := StartPortForward(client, instancePort, r.logger)
 	if err != nil {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
-		return 0, 0, nil, fmt.Errorf("ssh: port forward: %w", err)
+		return 0, 0, nil, "", fmt.Errorf("ssh: port forward: %w", err)
 	}
 	if err := waitAgentctlHealthy(ctx, fwd.LocalPort(), sshAgentctlHealthTimeout); err != nil {
 		_ = fwd.Close()
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
-		return 0, 0, nil, fmt.Errorf("ssh: agentctl health: %w", err)
+		return 0, 0, nil, "", fmt.Errorf("ssh: agentctl health: %w", err)
 	}
 	r.report(req.OnProgress, "Connecting to agent controller", PrepareStepCompleted,
 		fmt.Sprintf("local:%d -> remote:%d", fwd.LocalPort(), instancePort))
-	return instancePort, pid, fwd, nil
+	return instancePort, pid, fwd, authToken, nil
+}
+
+func sshAgentctlLaunchEnv(base map[string]string, nonce string) map[string]string {
+	env := make(map[string]string, len(base)+2)
+	for key, value := range base {
+		env[key] = value
+	}
+	// The handshake returns the bearer token to the backend; never pass it to
+	// the launched agent process. SSH reaches both listeners through explicit
+	// loopback direct-tcpip forwards, so it need not expose them remotely.
+	delete(env, "AGENTCTL_AUTH_TOKEN")
+	env["AGENTCTL_BOOTSTRAP_NONCE"] = nonce
+	env["AGENTCTL_LISTEN_HOST"] = sshAgentctlLoopbackHost
+	return env
 }
 
 func (r *SSHExecutor) buildInstance(
@@ -326,17 +353,18 @@ func (r *SSHExecutor) buildInstance(
 	fwd *SSHPortForwarder,
 	taskDir, sessionDir string,
 	port, pid int,
-	workdir string,
+	workdir, authToken string,
 ) *ExecutorInstance {
 	return &ExecutorInstance{
 		InstanceID:  req.InstanceID,
 		TaskID:      req.TaskID,
 		SessionID:   req.SessionID,
 		RuntimeName: r.Name(),
-		Client: agentctl.NewClient("127.0.0.1", fwd.LocalPort(), r.logger,
+		Client: agentctl.NewClient(sshAgentctlLoopbackHost, fwd.LocalPort(), r.logger,
 			agentctl.WithExecutionID(req.InstanceID),
-			agentctl.WithSessionID(req.SessionID)),
+			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(authToken)),
 		WorkspacePath: taskDir,
+		AuthToken:     authToken,
 		Metadata: map[string]interface{}{
 			MetadataKeySSHHost:               target.Host,
 			MetadataKeySSHPort:               strconv.Itoa(target.Port),
@@ -367,10 +395,11 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 		TaskID:      req.TaskID,
 		SessionID:   req.SessionID,
 		RuntimeName: r.Name(),
-		Client: agentctl.NewClient("127.0.0.1", state.forwarder.LocalPort(), r.logger,
+		Client: agentctl.NewClient(sshAgentctlLoopbackHost, state.forwarder.LocalPort(), r.logger,
 			agentctl.WithExecutionID(req.InstanceID),
-			agentctl.WithSessionID(req.SessionID)),
+			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(state.authToken)),
 		WorkspacePath: taskDir,
+		AuthToken:     state.authToken,
 		Metadata: map[string]interface{}{
 			MetadataKeySSHHost:               state.target.Host,
 			MetadataKeySSHPort:               strconv.Itoa(state.target.Port),
@@ -441,6 +470,9 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	if pidStr == "" || portStr == "" || sessionDir == "" || taskDir == "" {
 		return nil // not a resume — proceed with normal create
 	}
+	if err := requireSSHAgentctlAuthToken(req.AuthToken); err != nil {
+		return err
+	}
 
 	// Idempotency: if a previous resume attempt for this InstanceID already
 	// produced live client+forwarder state, return success without dialing
@@ -496,6 +528,7 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		forwarder: fwd,
 		pid:       pid,
 		remoteDir: sessionDir,
+		authToken: req.AuthToken,
 	}
 	r.mu.Unlock()
 
@@ -506,6 +539,13 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		req.Metadata = make(map[string]interface{})
 	}
 	req.Metadata[MetadataKeySSHLocalForwardPort] = strconv.Itoa(fwd.LocalPort())
+	return nil
+}
+
+func requireSSHAgentctlAuthToken(token string) error {
+	if strings.TrimSpace(token) == "" {
+		return errors.New("ssh resume: missing agentctl auth token")
+	}
 	return nil
 }
 

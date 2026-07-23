@@ -283,14 +283,17 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		// no events), plus one tracker per repo subdir.
 		m.workspaceTracker = NewWorkspaceTrackerForRepo(cfg.WorkDir, "", log)
 		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
+		m.workspaceTracker.SetAllowedSourceRoots(cfg.WorkspaceSourceRoots)
 		for _, child := range repoChildren {
 			tr := NewWorkspaceTrackerForRepo(child.path, child.name, log)
 			tr.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, child.name))
+			tr.SetAllowedSourceRoots(cfg.WorkspaceSourceRoots)
 			m.repoTrackers = append(m.repoTrackers, tr)
 		}
 	} else {
 		m.workspaceTracker = NewWorkspaceTracker(cfg.WorkDir, log)
 		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
+		m.workspaceTracker.SetAllowedSourceRoots(cfg.WorkspaceSourceRoots)
 	}
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
@@ -326,6 +329,20 @@ func (m *Manager) setBaseBranches(branches map[string]string) {
 		return
 	}
 	m.cfg.BaseBranches = branches
+}
+
+// SetWorkspaceSourceRoots atomically refreshes the canonical durable-source
+// allowlist used by workspace file operations. Roots are set on every active
+// tracker because rebind/rescan can swap the root tracker live.
+func (m *Manager) SetWorkspaceSourceRoots(roots []string) {
+	m.repoTrackersMu.RLock()
+	trackers := append([]*WorkspaceTracker{m.workspaceTracker}, m.repoTrackers...)
+	m.repoTrackersMu.RUnlock()
+	for _, tracker := range trackers {
+		if tracker != nil {
+			tracker.SetAllowedSourceRoots(roots)
+		}
+	}
 }
 
 // lookupBaseBranch reads the task's recorded base branch for a given
@@ -375,10 +392,17 @@ func scanRepositorySubdirs(workDir string) []repositorySubdir {
 	}
 	var out []repositorySubdir
 	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		candidate := filepath.Join(workDir, entry.Name())
+		// Directory links are how a Local task exposes durable folder and
+		// repository attachments. DirEntry.IsDir is false for a Unix symlink;
+		// Stat follows the owned link and rejects files/broken links.
+		info, err := os.Stat(candidate)
+		if err != nil || !info.IsDir() {
+			continue
+		}
 		if resolveGitIndexPath(candidate) == "" {
 			continue
 		}

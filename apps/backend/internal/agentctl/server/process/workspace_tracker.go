@@ -38,6 +38,10 @@ type WorkspaceTracker struct {
 	workDir      string
 	gitIndexPath string // Cached, validated path to git index file (works with worktrees)
 	logger       *logger.Logger
+	// allowedSourceRoots are canonical roots of durable sources explicitly
+	// attached to this workspace. They are deliberately separate from workDir:
+	// a link may point outside the workspace, but only to one of these roots.
+	allowedSourceRoots []string
 	// repositoryName identifies the repository this tracker covers when the
 	// agent's workspace is a multi-repo task root. Stamped onto every emitted
 	// GitStatusUpdate / FileListUpdate so the frontend can key per-repo state.

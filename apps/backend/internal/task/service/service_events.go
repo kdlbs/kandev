@@ -25,6 +25,25 @@ func (s *Service) PublishTaskUpdated(ctx context.Context, task *models.Task, old
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowIDs...)
 }
 
+// PublishWorkspaceSourcesAdopted publishes the session refresh boundary after
+// a runtime has adopted the materialized workspace. Materializers must call it
+// only after agentctl adoption succeeds; protocol handlers never publish an
+// optimistic success event.
+func (s *Service) PublishWorkspaceSourcesAdopted(ctx context.Context, taskID, workspacePath string, sessionIDs []string) {
+	if s.eventBus == nil {
+		return
+	}
+	for _, sessionID := range sessionIDs {
+		if sessionID == "" {
+			continue
+		}
+		data := map[string]interface{}{"task_id": taskID, "session_id": sessionID, "workspace_path": workspacePath}
+		if err := s.eventBus.Publish(ctx, events.SessionWorkspaceSourcesUpdated, bus.NewEvent(events.SessionWorkspaceSourcesUpdated, "task-service", data)); err != nil {
+			s.logger.Error("failed to publish workspace source adoption", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}
+}
+
 // PublishTaskStateChanged publishes a task.state_changed event for callers
 // that mutate task state outside the normal task service update path.
 func (s *Service) PublishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState) {
@@ -173,6 +192,9 @@ func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType strin
 			data["repository_id"] = repos[0].RepositoryID
 		}
 	}
+	if folders, ok := taskWorkspaceFoldersForEvent(ctx, s, task); ok {
+		data["workspace_folders"] = serializeTaskWorkspaceFolders(folders)
+	}
 	if task.Metadata != nil {
 		data["metadata"] = task.Metadata
 	}
@@ -315,6 +337,36 @@ func serializeTaskRepositories(repos []*models.TaskRepository) []map[string]inte
 			"base_branch":     r.BaseBranch,
 			"checkout_branch": r.CheckoutBranch,
 			"position":        r.Position,
+		})
+	}
+	return out
+}
+
+func taskWorkspaceFoldersForEvent(ctx context.Context, s *Service, task *models.Task) ([]*models.TaskWorkspaceFolder, bool) {
+	if len(task.WorkspaceFolders) > 0 {
+		return task.WorkspaceFolders, true
+	}
+	if s.workspaceFolders == nil {
+		return nil, false
+	}
+	folders, err := s.workspaceFolders.ListTaskWorkspaceFolders(ctx, task.ID)
+	if err != nil {
+		return nil, false
+	}
+	return folders, true
+}
+
+func serializeTaskWorkspaceFolders(folders []*models.TaskWorkspaceFolder) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(folders))
+	for _, folder := range folders {
+		out = append(out, map[string]interface{}{
+			"id":           folder.ID,
+			"task_id":      folder.TaskID,
+			"local_path":   folder.LocalPath,
+			"display_name": folder.DisplayName,
+			"position":     folder.Position,
+			"created_at":   folder.CreatedAt.Format(time.RFC3339),
+			"updated_at":   folder.UpdatedAt.Format(time.RFC3339),
 		})
 	}
 	return out

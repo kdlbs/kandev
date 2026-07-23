@@ -70,25 +70,37 @@ type TaskRepository struct {
 	UpdatedAt    time.Time              `json:"updated_at"`
 }
 
+// TaskWorkspaceFolder represents a non-Git folder associated with a task.
+type TaskWorkspaceFolder struct {
+	ID          string    `json:"id"`
+	TaskID      string    `json:"task_id"`
+	LocalPath   string    `json:"local_path"`
+	DisplayName string    `json:"display_name"`
+	Position    int       `json:"position"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 // Task represents a Kanban task
 type Task struct {
-	ID           string                 `json:"id"`
-	WorkspaceID  string                 `json:"workspace_id"`
-	WorkflowID   string                 `json:"workflow_id"`
-	Title        string                 `json:"title"`
-	Description  string                 `json:"description"`
-	State        TaskState              `json:"state"`
-	Priority     string                 `json:"priority"`
-	Repositories []TaskRepository       `json:"repositories,omitempty"`
-	CreatedBy    string                 `json:"created_by"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
-	StartedAt    *time.Time             `json:"started_at,omitempty"`
-	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	IsEphemeral  bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
-	ParentID     string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
-	Identifier   string                 `json:"identifier,omitempty"`
+	ID               string                 `json:"id"`
+	WorkspaceID      string                 `json:"workspace_id"`
+	WorkflowID       string                 `json:"workflow_id"`
+	Title            string                 `json:"title"`
+	Description      string                 `json:"description"`
+	State            TaskState              `json:"state"`
+	Priority         string                 `json:"priority"`
+	Repositories     []TaskRepository       `json:"repositories,omitempty"`
+	WorkspaceFolders []TaskWorkspaceFolder  `json:"workspace_folders,omitempty"`
+	CreatedBy        string                 `json:"created_by"`
+	CreatedAt        time.Time              `json:"created_at"`
+	UpdatedAt        time.Time              `json:"updated_at"`
+	StartedAt        *time.Time             `json:"started_at,omitempty"`
+	CompletedAt      *time.Time             `json:"completed_at,omitempty"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	IsEphemeral      bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID         string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Identifier       string                 `json:"identifier,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories

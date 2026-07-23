@@ -1,12 +1,30 @@
 package lifecycle
 
 import (
+	"net/http"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 )
+
+func TestSSHControlRequestUsesBearerToken(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/v1/instances", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setSSHControlAuthorization(req, "launch-token")
+	if got := req.Header.Get("Authorization"); got != "Bearer launch-token" {
+		t.Fatalf("Authorization = %q", got)
+	}
+}
+
+func TestRequireSSHAgentctlAuthTokenRejectsEmptyToken(t *testing.T) {
+	if err := requireSSHAgentctlAuthToken(""); err == nil {
+		t.Fatal("expected empty SSH agentctl token to be rejected")
+	}
+}
 
 func TestResolveSSHTarget_ExplicitFields(t *testing.T) {
 	target, err := ResolveSSHTarget(SSHConnConfig{

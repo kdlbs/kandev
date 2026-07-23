@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,12 +17,116 @@ import (
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
+
+type httpWorkspaceSourcesRequest struct {
+	Sources []json.RawMessage `json:"sources"`
+}
+
+type workspaceSourceJSON struct {
+	Kind           string `json:"kind"`
+	RepositoryID   string `json:"repository_id"`
+	LocalPath      string `json:"local_path"`
+	GitHubURL      string `json:"github_url"`
+	RemoteURL      string `json:"remote_url"`
+	Provider       string `json:"provider"`
+	ProviderRepoID string `json:"provider_repo_id"`
+	ProviderOwner  string `json:"provider_owner"`
+	ProviderName   string `json:"provider_name"`
+	BaseBranch     string `json:"base_branch"`
+	CheckoutBranch string `json:"checkout_branch"`
+	DisplayName    string `json:"display_name"`
+}
+
+func (h *TaskHandlers) httpAttachWorkspaceSources(c *gin.Context) {
+	var body httpWorkspaceSourcesRequest
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || len(body.Sources) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sources is required"})
+		return
+	}
+	sources, err := parseHTTPWorkspaceSources(body.Sources)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	result, err := h.service.AttachWorkspaceSources(c.Request.Context(), service.AttachWorkspaceSourcesRequest{TaskID: c.Param("id"), Sources: sources})
+	if err != nil {
+		h.writeWorkspaceSourceError(c, err)
+		return
+	}
+	response := gin.H{"task_id": result.Task.ID, "repositories": result.Task.Repositories, "workspace_folders": result.Task.WorkspaceFolders, "workspace_path": result.WorkspacePath, "session_ids": result.SessionIDs}
+	c.JSON(http.StatusOK, response)
+}
+
+func parseHTTPWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInput, error) {
+	sources := make([]service.WorkspaceSourceInput, 0, len(raw))
+	for _, item := range raw {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(item, &fields); err != nil {
+			return nil, fmt.Errorf("source must be an object")
+		}
+		var kind string
+		if err := json.Unmarshal(fields["kind"], &kind); err != nil {
+			return nil, fmt.Errorf("source kind is required")
+		}
+		allowed := map[string]bool{"kind": true, "local_path": true}
+		switch kind {
+		case string(service.WorkspaceSourceRepository):
+			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
+				allowed[key] = true
+			}
+		case string(service.WorkspaceSourceFolder):
+			allowed["display_name"] = true
+		default:
+			return nil, fmt.Errorf("unsupported workspace source kind %q", kind)
+		}
+		for key := range fields {
+			if !allowed[key] {
+				return nil, fmt.Errorf("field %q is not allowed for %s source", key, kind)
+			}
+		}
+		var source workspaceSourceJSON
+		if err := json.Unmarshal(item, &source); err != nil {
+			return nil, err
+		}
+		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
+	}
+	return sources, nil
+}
+
+func workspaceSourceHTTPStatus(err error) int {
+	switch {
+	case errors.Is(err, service.ErrInvalidWorkspaceSource):
+		return http.StatusBadRequest
+	case errors.Is(err, taskrepo.ErrTaskNotFound), errors.Is(err, taskrepository.ErrRepositoryNotFound), errors.Is(err, service.ErrTaskRepositoryNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, service.ErrWorkspaceSourceConflict), errors.Is(err, service.ErrWorkspaceSourceActive):
+		return http.StatusConflict
+	case errors.Is(err, service.ErrUnsupportedWorkspaceSource), errors.Is(err, service.ErrWorkspaceSourceMaterialize):
+		return http.StatusUnprocessableEntity
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func (h *TaskHandlers) writeWorkspaceSourceError(c *gin.Context, err error) {
+	status := workspaceSourceHTTPStatus(err)
+	if status == http.StatusInternalServerError {
+		h.logger.Error("attach workspace sources failed", zap.Error(err))
+		c.JSON(status, gin.H{"error": "request failed"})
+		return
+	}
+	c.JSON(status, gin.H{"error": err.Error()})
+}
 
 func (h *TaskHandlers) httpListTasks(c *gin.Context) {
 	tasks, err := h.service.ListTasks(c.Request.Context(), c.Param("id"))

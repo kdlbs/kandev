@@ -23,6 +23,10 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setSessionAgentctlStatus: vi.fn(),
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
+    clearLegacyGitStatusEntry: vi.fn(),
+    bumpSessionCommitsRefetch: vi.fn(),
+    bumpWorkspaceFilesRefresh: vi.fn(),
+    reconcileWorkspaceSourcesAdopted: vi.fn(),
     ...overrides,
   };
   return {
@@ -138,6 +142,34 @@ describe("session.state_changed handler", () => {
     );
 
     expect(store.getState().setSessionFailureNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe("session.workspace_sources.updated handler", () => {
+  it("adopts the workspace root and bumps the Files refresh key", () => {
+    const setTaskSession = vi.fn();
+    const bumpWorkspaceFilesRefresh = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "IDLE", worktree_path: "/old" } },
+      },
+      setTaskSession,
+      bumpWorkspaceFilesRefresh,
+    });
+
+    const handler = registerTaskSessionHandlers(store)["session.workspace_sources.updated"]!;
+    handler({
+      id: "msg-workspace-sources",
+      type: "notification",
+      action: "session.workspace_sources.updated",
+      payload: { task_id: "t-1", session_id: "s-1", workspace_path: "/new" },
+    } as never);
+
+    expect(setTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "s-1", worktree_path: "/new" }),
+    );
+    expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
+    expect(store.getState().reconcileWorkspaceSourcesAdopted).toHaveBeenCalledWith(["s-1"]);
   });
 });
 

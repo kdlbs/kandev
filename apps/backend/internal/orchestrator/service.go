@@ -148,6 +148,7 @@ type repoStore interface {
 	UpdateTaskStateIfNotArchived(ctx context.Context, id string, state v1.TaskState) (v1.TaskState, bool, error)
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
+	ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
@@ -668,6 +669,19 @@ func (s *Service) SetOnPrimarySessionSet(fn executor.PrimarySessionSetFunc) {
 // for local/worktree execution and have no local path yet.
 func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.RepoUpdater) {
 	s.executor.SetRepoCloner(cloner, updater)
+}
+
+// RepositoryHostCloner is the narrow host-materialization contract. It returns
+// only the persisted local path; clone credentials remain private to the
+// orchestrator executor pipeline.
+type RepositoryHostCloner interface {
+	EnsureRepositoryCloned(context.Context, *models.Repository) (string, error)
+}
+
+// EnsureRepositoryCloned delegates host cloning through the executor's
+// authenticated clone pipeline.
+func (s *Service) EnsureRepositoryCloned(ctx context.Context, repository *models.Repository) (string, error) {
+	return s.executor.EnsureRepositoryCloned(ctx, repository)
 }
 
 // SetTurnService sets the turn service for tracking conversation turns.

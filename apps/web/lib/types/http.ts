@@ -1,5 +1,6 @@
 import type { ExecutorType } from "./executor";
 import type { UserSettings } from "./http-user-settings";
+import type { TaskRepository, WorkspaceFolder } from "./http-workspace-sources";
 import type {
   AgentProfileId,
   RepositoryId,
@@ -24,6 +25,15 @@ export type {
   UserSettingsResponse,
   UserSettingsUpdatePayload,
 } from "./http-user-settings";
+export type {
+  AttachTaskWorkspaceSourcesRequest,
+  AttachTaskWorkspaceSourcesResponse,
+  TaskRepository,
+  WorkspaceFolder,
+  WorkspaceFolderSourceRequest,
+  WorkspaceRepositorySourceRequest,
+  WorkspaceSourceRequest,
+} from "./http-workspace-sources";
 export * from "./ids";
 export type {
   MoveToStepConfig,
@@ -259,22 +269,6 @@ export type ProcessInfo = {
   output?: ProcessOutputChunk[];
 };
 
-export type TaskRepository = {
-  id: string;
-  task_id: TaskId;
-  repository_id: RepositoryId;
-  base_branch: string;
-  /**
-   * Optional branch to fetch and check out after worktree creation
-   * (e.g. a PR head branch). Empty when no specific branch is requested.
-   */
-  checkout_branch?: string;
-  position: number;
-  metadata?: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-};
-
 /**
  * Returns the primary task repository (lowest Position, first by created_at on
  * tie). Returns undefined for repo-less tasks. Consumers that historically
@@ -303,6 +297,7 @@ export type Task = {
   state: TaskState;
   priority: number;
   repositories?: TaskRepository[];
+  workspace_folders?: WorkspaceFolder[];
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;

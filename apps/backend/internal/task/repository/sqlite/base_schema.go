@@ -322,6 +322,19 @@ func (r *Repository) initTaskSchema() error {
 		UNIQUE(task_id, repository_id, base_branch, checkout_branch)
 	);
 
+	CREATE TABLE IF NOT EXISTS task_workspace_folders (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		local_path TEXT NOT NULL,
+		display_name TEXT NOT NULL,
+		position INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		UNIQUE(task_id, local_path),
+		UNIQUE(task_id, display_name)
+	);
+
 	CREATE TABLE IF NOT EXISTS repository_scripts (
 		id TEXT PRIMARY KEY,
 		repository_id TEXT NOT NULL,
@@ -343,6 +356,7 @@ func (r *Repository) initCoreIndexes() error {
 	CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_task_id ON task_repositories(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_repository_id ON task_repositories(repository_id);
+	CREATE INDEX IF NOT EXISTS idx_task_workspace_folders_task_position ON task_workspace_folders(task_id, position);
 	CREATE INDEX IF NOT EXISTS idx_repositories_workspace_id ON repositories(workspace_id);
 	CREATE INDEX IF NOT EXISTS idx_repository_scripts_repo_id ON repository_scripts(repository_id);
 	`)
