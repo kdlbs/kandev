@@ -181,10 +181,16 @@ func awaitCoalescedResult(
 	ctx context.Context,
 	result <-chan singleflight.Result,
 ) (interface{}, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case completed := <-result:
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if completed.Err != nil {
 			return nil, completed.Err
 		}

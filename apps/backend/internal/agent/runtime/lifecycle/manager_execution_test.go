@@ -16,6 +16,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -51,7 +53,7 @@ func TestErrSessionWorkspaceNotReady_UnrelatedError(t *testing.T) {
 }
 
 func TestGetOrEnsureExecutionLeaderCancellationDoesNotAbortLiveWaiter(t *testing.T) {
-	mgr, _ := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
 		infos: map[string]*WorkspaceInfo{
 			"session-shared": {
 				TaskID: "task-1", SessionID: "session-shared", TaskEnvironmentID: "env-1",
@@ -59,41 +61,64 @@ func TestGetOrEnsureExecutionLeaderCancellationDoesNotAbortLiveWaiter(t *testing
 			},
 		},
 	})
-	coordinator := activity.NewCoordinator(activity.Options{})
-	mgr.SetActivityCoordinator(coordinator)
-	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	backend.entered = make(chan struct{}, 1)
+	backend.barrier = make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(backend.barrier)
+		}
+	}()
+
 	leaderCtx, cancelLeader := context.WithCancel(context.Background())
 	defer cancelLeader()
-	type result struct {
-		caller string
-		err    error
-	}
-	results := make(chan result, 2)
+	leaderResult := make(chan error, 1)
 	go func() {
 		_, err := mgr.GetOrEnsureExecution(leaderCtx, "session-shared")
-		results <- result{caller: "leader", err: err}
+		leaderResult <- err
 	}()
 	select {
-	case <-maintenance.Context().Done():
+	case <-backend.entered:
 	case <-time.After(time.Second):
-		t.Fatal("leader did not reach activity admission")
+		t.Fatal("leader did not reach CreateInstance")
 	}
+
+	followerCtx := &doneObservedContext{
+		Context:  context.Background(),
+		doneRead: make(chan struct{}),
+	}
+	followerResult := make(chan error, 1)
 	go func() {
-		_, err := mgr.GetOrEnsureExecution(context.Background(), "session-shared")
-		results <- result{caller: "follower", err: err}
+		_, err := mgr.GetOrEnsureExecution(followerCtx, "session-shared")
+		followerResult <- err
 	}()
+	select {
+	case <-followerCtx.doneRead:
+	case <-time.After(time.Second):
+		t.Fatal("follower did not join the coalesced execution")
+	}
+
 	cancelLeader()
-	maintenance.Release()
-	for range 2 {
-		got := <-results
-		if got.caller == "leader" && !errors.Is(got.err, context.Canceled) {
-			t.Fatalf("leader error = %v, want context cancellation", got.err)
-		}
-		if got.caller == "follower" && got.err != nil {
-			t.Fatalf("live follower failed after leader cancellation: %v", got.err)
+	if err := <-leaderResult; !errors.Is(err, context.Canceled) {
+		t.Fatalf("leader error = %v, want context cancellation", err)
+	}
+	close(backend.barrier)
+	released = true
+	if err := <-followerResult; err != nil {
+		t.Fatalf("live follower failed after leader cancellation: %v", err)
+	}
+}
+
+func TestAwaitCoalescedResultPrefersCanceledContext(t *testing.T) {
+	for range 100 {
+		ctx, cancel := context.WithCancel(context.Background())
+		result := make(chan singleflight.Result, 1)
+		result <- singleflight.Result{Val: "created"}
+		cancel()
+
+		_, err := awaitCoalescedResult(ctx, result)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("await error = %v, want context cancellation", err)
 		}
 	}
 }
@@ -837,6 +862,17 @@ func TestCreateExecutionResolvesProfileOnceForEnvAndAutoApprove(t *testing.T) {
 }
 
 // --- test helpers ---
+
+type doneObservedContext struct {
+	context.Context
+	doneRead chan struct{}
+	once     sync.Once
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.doneRead) })
+	return c.Context.Done()
+}
 
 type notifyingWorkspaceInfoProvider struct {
 	*mockWorkspaceInfoProvider
