@@ -4,6 +4,7 @@ import type { Repository } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
   initialize: vi.fn(),
+  createDirectory: vi.fn(),
   listDirectory: vi.fn(),
   isMobile: false,
 }));
@@ -13,6 +14,7 @@ vi.mock("@/lib/api/domains/workspace-api", () => ({
 }));
 
 vi.mock("@/lib/api/domains/fs-api", () => ({
+  createDirectory: mocks.createDirectory,
   listDirectory: mocks.listDirectory,
 }));
 
@@ -30,6 +32,7 @@ const REPOSITORY_NAME = "alpha";
 const REPOSITORY_NAME_LABEL = "Repository name";
 const PARENT_DIRECTORY_LABEL = "Parent directory";
 const CREATE_BUTTON_NAME = "Create repository";
+const PROJECTS_PATH = "/work/projects";
 
 const createdRepository = {
   id: "repo-new",
@@ -67,6 +70,7 @@ function renderSurface(
 beforeEach(() => {
   mocks.isMobile = false;
   mocks.initialize.mockReset();
+  mocks.createDirectory.mockReset();
   mocks.listDirectory.mockReset();
   mocks.listDirectory.mockResolvedValue({ path: "/work", parent: "/", entries: [] });
 });
@@ -134,7 +138,7 @@ describe("CreateLocalRepositorySurface", () => {
         return {
           path: "/work",
           parent: "/",
-          entries: [{ name: "projects", path: "/work/projects" }],
+          entries: [{ name: "projects", path: PROJECTS_PATH }],
         };
       }
       return { path, parent: "/work", entries: [] };
@@ -145,7 +149,36 @@ describe("CreateLocalRepositorySurface", () => {
 
     await waitFor(() => {
       expect((screen.getByLabelText(PARENT_DIRECTORY_LABEL) as HTMLInputElement).value).toBe(
-        "/work/projects",
+        PROJECTS_PATH,
+      );
+    });
+  });
+
+  it("creates a folder from the navigator and enters it", async () => {
+    mocks.createDirectory.mockResolvedValue({ path: PROJECTS_PATH });
+    mocks.listDirectory.mockImplementation(async (path: string) => ({
+      path: path || "/work",
+      parent: "/",
+      entries: [],
+      choosable: true,
+    }));
+    renderSurface();
+
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "New folder" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "New folder" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New folder name" }), {
+      target: { value: "projects" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create folder" }));
+
+    await waitFor(() => {
+      expect(mocks.createDirectory).toHaveBeenCalledWith("/work", "projects");
+      expect((screen.getByLabelText(PARENT_DIRECTORY_LABEL) as HTMLInputElement).value).toBe(
+        PROJECTS_PATH,
       );
     });
   });
@@ -192,6 +225,21 @@ describe("CreateLocalRepositorySurface submission", () => {
 
     fireEvent.click(screen.getByRole("button", { name: CREATE_BUTTON_NAME }));
     await waitFor(() => expect(mocks.initialize).toHaveBeenCalledTimes(2));
+  });
+
+  it("clears a submission error when the user corrects the form", async () => {
+    mocks.initialize.mockRejectedValue(new Error("parent directory cannot be accessed"));
+    renderSurface();
+
+    const nameInput = await screen.findByLabelText(REPOSITORY_NAME_LABEL);
+    fireEvent.change(nameInput, { target: { value: REPOSITORY_NAME } });
+    fireEvent.click(screen.getByRole("button", { name: CREATE_BUTTON_NAME }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText(PARENT_DIRECTORY_LABEL), {
+      target: { value: "/work/new-parent" },
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("blocks initialization when no direct-local profile exists", async () => {

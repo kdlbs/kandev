@@ -317,21 +317,28 @@ func canonicalLocalRepositoryParent(parentPath string) (string, error) {
 	if parentPath == "" || !filepath.IsAbs(parentPath) {
 		return "", fmt.Errorf("%w: parent_path must be absolute", ErrInvalidLocalRepositoryInitialization)
 	}
-	canonicalPath, err := filepath.EvalSymlinks(filepath.Clean(parentPath))
+	canonicalPath, err := ensureLocalRepositoryDirectory(filepath.Clean(parentPath))
 	if err != nil {
 		return "", fmt.Errorf("%w: parent directory cannot be accessed", ErrInvalidLocalRepositoryInitialization)
 	}
-	info, err := statLocalRepositoryPath(canonicalPath)
-	if err != nil || !info.IsDir() {
-		return "", fmt.Errorf("%w: parent_path must be an accessible directory", ErrInvalidLocalRepositoryInitialization)
-	}
-	if !localRepositoryParentWritable(info) {
-		return "", fmt.Errorf("%w: parent directory is not writable", ErrInvalidLocalRepositoryInitialization)
-	}
-	if err := validateLocalRepositoryParentChain(canonicalPath); err != nil {
+	if err := validateLocalRepositoryParentDirectory(canonicalPath); err != nil {
 		return "", err
 	}
 	return canonicalPath, nil
+}
+
+func validateLocalRepositoryParentDirectory(canonicalPath string) error {
+	info, err := statLocalRepositoryPath(canonicalPath)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("%w: parent_path must be an accessible directory", ErrInvalidLocalRepositoryInitialization)
+	}
+	if !localRepositoryParentWritable(info) {
+		return fmt.Errorf("%w: parent directory is not writable", ErrInvalidLocalRepositoryInitialization)
+	}
+	if err := validateLocalRepositoryParentChain(canonicalPath); err != nil {
+		return err
+	}
+	return nil
 }
 
 func validateLocalRepositoryParentChain(parentPath string) error {

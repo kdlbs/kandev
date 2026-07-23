@@ -51,6 +51,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/repositories/local-status", h.httpLocalRepositoryStatus)
 	api.GET("/workspaces/:id/repositories/validate", h.httpValidateRepositoryPath)
 	api.GET("/fs/list-dir", h.httpListDirectory)
+	api.POST("/fs/create-dir", h.httpCreateDirectory)
 	api.GET("/repositories/:id", h.httpGetRepository)
 	api.GET("/repositories/:id/branches", h.httpListRepositoryBranches)
 	api.GET("/repositories/:id/active-session-count", h.httpGetRepositoryActiveSessionCount)
@@ -156,14 +157,51 @@ func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to list directory"})
 		return
 	}
-	entries := make([]gin.H, 0, len(result.Entries))
-	for _, e := range result.Entries {
-		entries = append(entries, gin.H{"name": e.Name, "path": e.Path})
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"path":      result.Path,
 		"parent":    result.Parent,
-		"entries":   entries,
+		"entries":   directoryEntriesResponse(result.Entries),
+		"choosable": result.Choosable,
+	})
+}
+
+func directoryEntriesResponse(entries []service.DirectoryEntry) []gin.H {
+	response := make([]gin.H, 0, len(entries))
+	for _, entry := range entries {
+		response = append(response, gin.H{"name": entry.Name, "path": entry.Path})
+	}
+	return response
+}
+
+type httpCreateDirectoryRequest struct {
+	ParentPath string `json:"parent_path"`
+	Name       string `json:"name"`
+}
+
+func (h *RepositoryHandlers) httpCreateDirectory(c *gin.Context) {
+	var body httpCreateDirectoryRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	result, err := h.service.CreateDirectory(c.Request.Context(), body.ParentPath, body.Name)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrDirectoryAlreadyExists):
+			c.JSON(http.StatusConflict, gin.H{"error": "folder already exists"})
+		case errors.Is(err, service.ErrInvalidDirectoryCreation),
+			errors.Is(err, service.ErrInvalidLocalRepositoryInitialization):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder location or name"})
+		default:
+			h.logger.Warn("failed to create directory", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create folder"})
+		}
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"path":      result.Path,
+		"parent":    result.Parent,
+		"entries":   directoryEntriesResponse(result.Entries),
 		"choosable": result.Choosable,
 	})
 }

@@ -287,6 +287,31 @@ func TestHTTPListDirectoryIncludesChoosableContract(t *testing.T) {
 	}
 }
 
+func TestHTTPCreateDirectoryCreatesFolder(t *testing.T) {
+	router, _ := newRepositoryHTTPTestRouter(t)
+	parent := t.TempDir()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/fs/create-dir",
+		strings.NewReader(`{"parent_path":`+strconv.Quote(parent)+`,"name":"projects"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+	wantPath := filepath.Join(parent, "projects")
+	if info, err := os.Stat(wantPath); err != nil || !info.IsDir() {
+		t.Fatalf("created directory %q: info=%v error=%v", wantPath, info, err)
+	}
+	if !strings.Contains(response.Body.String(), strconv.Quote(wantPath)) {
+		t.Fatalf("response missing created path %q: %s", wantPath, response.Body.String())
+	}
+}
+
 func TestHTTPListBranchesRejectsRepositoryFromAnotherWorkspace(t *testing.T) {
 	router, repo, svc := newRepositoryHTTPTestRouterWithService(t)
 	for _, workspaceID := range []string{"ws-a", "ws-b"} {

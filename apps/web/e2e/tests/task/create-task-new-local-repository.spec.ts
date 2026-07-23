@@ -101,7 +101,12 @@ test.describe("Create task with a new local repository", () => {
     backend,
   }) => {
     const repositoryName = "desktop-unborn-main";
-    const repositoryPath = path.join(backend.tmpDir, repositoryName);
+    const repositoryPath = path.join(
+      backend.tmpDir,
+      "missing-manual-parent",
+      "nested",
+      repositoryName,
+    );
     const { executors } = await apiClient.listExecutors();
     const directExecutor = executors.find((executor) =>
       ["local", "local_pc"].includes(executor.type),
@@ -124,6 +129,7 @@ test.describe("Create task with a new local repository", () => {
       /will switch to/i,
     );
     await createRepository(testPage, repositoryName, repositoryPath);
+    expect(fs.statSync(path.dirname(repositoryPath)).isDirectory()).toBe(true);
 
     await expect(testPage.getByTestId("repo-chip-trigger")).toContainText(repositoryName);
     await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main");

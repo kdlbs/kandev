@@ -130,7 +130,9 @@ test.describe("Create task with a new local repository on mobile", () => {
     backend,
   }) => {
     const repositoryName = "mobile-unborn-main";
-    const repositoryPath = path.join(backend.tmpDir, repositoryName);
+    const parentName = "mobile-created-parent";
+    const parentPath = path.join(backend.tmpDir, parentName);
+    const repositoryPath = path.join(parentPath, repositoryName);
     for (let index = 0; index < 18; index += 1) {
       fs.mkdirSync(path.join(backend.tmpDir, `mobile-parent-${String(index).padStart(2, "0")}`));
     }
@@ -160,9 +162,13 @@ test.describe("Create task with a new local repository on mobile", () => {
 
     drawer = await openCreationDrawer(testPage);
     await expectDrawerGeometry(testPage, drawer);
-    await drawer
-      .getByRole("textbox", { name: "Parent directory" })
-      .fill(path.dirname(repositoryPath));
+    const parentInput = drawer.getByRole("textbox", { name: "Parent directory" });
+    await parentInput.fill(backend.tmpDir);
+    await parentInput.press("Enter");
+    await drawer.getByRole("button", { name: "New folder" }).click();
+    await drawer.getByRole("textbox", { name: "New folder name" }).fill(parentName);
+    await drawer.getByRole("button", { name: "Create folder" }).click();
+    await expect(parentInput).toHaveValue(parentPath);
     const nameInput = testPage.getByRole("textbox", { name: "Repository name" });
     await nameInput.fill(repositoryName);
     await expect(testPage.getByTitle(repositoryPath)).toBeVisible();

@@ -1,7 +1,16 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { IconFolder, IconBox, IconChevronRight } from "@tabler/icons-react";
+import {
+  IconBox,
+  IconCheck,
+  IconChevronRight,
+  IconFolder,
+  IconFolderPlus,
+  IconX,
+} from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Input } from "@kandev/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -227,6 +236,7 @@ export function DirectoryBrowserBody({
   loading,
   error,
   onNavigate,
+  onCreateDirectory,
   touchRows = false,
   fillAvailableHeight = false,
 }: {
@@ -234,11 +244,20 @@ export function DirectoryBrowserBody({
   loading: boolean;
   error: string | null;
   onNavigate: (path: string) => void;
+  onCreateDirectory?: (name: string) => Promise<void>;
   touchRows?: boolean;
   fillAvailableHeight?: boolean;
 }) {
   return (
     <div className={cn("flex min-h-0 flex-col", fillAvailableHeight && "flex-1")}>
+      {onCreateDirectory ? (
+        <DirectoryBrowserToolbar
+          key={listing?.path}
+          disabled={!listing || loading}
+          onCreateDirectory={onCreateDirectory}
+          touchRows={touchRows}
+        />
+      ) : null}
       <Breadcrumb path={listing?.path ?? ""} onNavigate={onNavigate} touchRows={touchRows} />
       <Entries
         listing={listing}
@@ -248,6 +267,109 @@ export function DirectoryBrowserBody({
         touchRows={touchRows}
         fillAvailableHeight={fillAvailableHeight}
       />
+    </div>
+  );
+}
+
+function DirectoryBrowserToolbar({
+  disabled,
+  onCreateDirectory,
+  touchRows,
+}: {
+  disabled: boolean;
+  onCreateDirectory: (name: string) => Promise<void>;
+  touchRows: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const createFolder = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName || creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await onCreateDirectory(trimmedName);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create folder");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="shrink-0 border-b border-border bg-muted/10 px-3 py-2">
+      {editing ? (
+        <div className="space-y-1.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <IconFolderPlus className="size-4 shrink-0 text-muted-foreground" />
+            <Input
+              aria-label="New folder name"
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value);
+                setError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void createFolder();
+                } else if (event.key === "Escape") {
+                  setEditing(false);
+                }
+              }}
+              placeholder="Folder name"
+              autoFocus
+              className={cn("min-w-0 flex-1", touchRows && "h-10")}
+            />
+            <Button
+              type="button"
+              size={touchRows ? "icon-lg" : "icon"}
+              className={touchRows ? "size-11" : undefined}
+              onClick={() => void createFolder()}
+              disabled={!name.trim() || creating}
+              aria-label="Create folder"
+              title="Create folder"
+            >
+              <IconCheck />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size={touchRows ? "icon-lg" : "icon"}
+              className={touchRows ? "size-11" : undefined}
+              onClick={() => setEditing(false)}
+              aria-label="Cancel new folder"
+              title="Cancel"
+            >
+              <IconX />
+            </Button>
+          </div>
+          {error ? (
+            <p role="alert" className="pl-6 text-xs text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-medium text-muted-foreground">Folders</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size={touchRows ? "lg" : "sm"}
+            className={touchRows ? "min-h-11" : undefined}
+            onClick={() => setEditing(true)}
+            disabled={disabled}
+          >
+            <IconFolderPlus />
+            New folder
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

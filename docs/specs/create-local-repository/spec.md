@@ -16,10 +16,14 @@ repository on the machine running Kandev, select it, and continue composing the 
 
 - The local repository selector in **Create New Task** exposes a visible **Create new repository**
   action while the task has exactly one repository row.
-- The creation form asks for a repository name and an existing parent folder. It shows the resulting
+- The creation form asks for a repository name and an absolute parent path. It shows the resulting
   target path before confirmation. The name is one platform-native path segment, not a path.
+- A manually entered parent path may contain missing trailing directories. Confirmation creates
+  those directories beneath the nearest accessible, trusted ancestor before initializing the
+  repository.
 - The parent-folder browser lists the filesystem of the machine running Kandev and shares the same
-  directory browsing behavior as the **None** source mode's starting-folder picker.
+  directory browsing behavior as the **None** source mode's starting-folder picker. It also lets
+  the user create and enter one new child folder in the currently displayed directory.
 - Confirmation creates `<parent>/<name>` only when that target does not already exist, initializes a
   local Git repository with unborn default branch `main`, and does not create files or commits.
 - A successfully initialized repository is persisted as a local repository in the active workspace,
@@ -35,7 +39,8 @@ repository on the machine running Kandev, select it, and continue composing the 
 - Initialization is an explicit local-path trust grant for the exact canonical repository path. It
   does not widen automatic discovery roots or grant access to sibling paths.
 - The form remains open with the entered name and parent folder when initialization fails, surfaces
-  an actionable error, and does not select a repository.
+  an actionable error, and does not select a repository. Editing either input or navigating to
+  another folder clears the stale submission error immediately.
 - Closing the creation form before confirmation does not create a directory or repository record.
 - Desktop and mobile provide the same capability. Mobile uses a touch-native picker surface with no
   hover-only action and keeps repository name, target path, errors, and the primary action reachable.
@@ -87,18 +92,34 @@ The backend, not the browser, is authoritative for validation and filesystem cha
   overwritten by this operation.
 - `500 Internal Server Error`: Git initialization or repository persistence fails.
 
+`POST /api/v1/fs/create-dir`
+
+Request:
+
+```json
+{
+  "parent_path": "/home/user/projects",
+  "name": "team"
+}
+```
+
+Response: `201 Created` with the same directory-listing shape as `GET /api/v1/fs/list-dir`, rooted
+at the new folder. Invalid names or inaccessible parents return `400 Bad Request`; an existing child
+returns `409 Conflict`.
+
 ## Permissions
 
 This follows Kandev's trusted-local-user model. The user may initialize a repository under any
-explicitly selected parent directory that the Kandev process can write. The grant is scoped to the
-created canonical target path and the active workspace.
+explicitly selected parent path whose nearest existing ancestor the Kandev process can trust and
+write. Missing trailing directories are created as process-owned directories. The grant is scoped
+to the created canonical target path and the active workspace.
 
 ## Failure Modes
 
 | Condition | Observable behavior |
 | --- | --- |
 | Name is empty, `.`/`..`, or contains a host path separator | Confirmation is disabled client-side and the backend rejects a forged request. |
-| Parent path cannot be read or written | The form stays open, shows an error, and no repository is selected or persisted. |
+| The nearest existing parent ancestor cannot be trusted, read, or written | The form stays open, shows an error, and no repository is selected or persisted. |
 | Target already exists, including an empty directory | The request returns conflict and does not modify the target. |
 | `git` is unavailable or initialization fails | The request fails, no repository row is persisted, and Kandev removes only the target directory created by this request when cleanup is safe. A cleanup failure is logged and the error remains visible. |
 | Repository persistence fails after Git initialization | The request fails and performs the same best-effort cleanup of the request-owned target; no repository row is returned. |
@@ -147,6 +168,13 @@ deleting the task does not delete the repository or its workspace registration.
 - **GIVEN** `/work/projects/alpha` already exists, **WHEN** the user tries to create `alpha` under
   `/work/projects`, **THEN** the UI reports the conflict and Kandev does not modify or register the
   existing path.
+- **GIVEN** `/work` exists but `/work/team/projects` does not, **WHEN** the user enters
+  `/work/team/projects` as the parent and creates `alpha`, **THEN** Kandev creates both missing
+  parent directories and initializes `/work/team/projects/alpha`.
+- **GIVEN** the folder navigator displays `/work`, **WHEN** the user creates a child named `team`,
+  **THEN** `/work/team` is created and the navigator enters that folder on desktop and mobile.
+- **GIVEN** an initialization error is visible, **WHEN** the user edits the name or parent path or
+  navigates to another folder, **THEN** the previous error disappears before the next submission.
 - **GIVEN** an invalid name or unwritable parent, **WHEN** the user confirms, **THEN** the form stays
   open with its inputs intact and no repository is selected.
 - **GIVEN** the creation form is open, **WHEN** the user dismisses it without confirming, **THEN** no

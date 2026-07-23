@@ -1,7 +1,13 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { IconFolderPlus } from "@tabler/icons-react";
+import {
+  IconAlertCircle,
+  IconFolder,
+  IconFolderOpen,
+  IconFolderPlus,
+  IconInfoCircle,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -22,6 +28,7 @@ import { DirectoryBrowserBody, useDirectoryListing } from "@/components/folder-p
 import type { DirectLocalExecutorSelection } from "@/components/task-create-dialog-handlers";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { initializeLocalRepository } from "@/lib/api/domains/workspace-api";
+import { createDirectory } from "@/lib/api/domains/fs-api";
 import type { Repository } from "@/lib/types/http";
 
 export function validateLocalRepositoryName(name: string): string | null {
@@ -78,37 +85,114 @@ function RepositoryLocationFields({
 }: RepositoryLocationFieldsProps) {
   return (
     <>
-      <label className="block space-y-2.5 text-xs font-medium">
+      <label className="block space-y-1.5 text-xs font-medium">
         <span>Repository name</span>
         <Input
           value={name}
           onChange={(event) => onNameChange(event.target.value)}
           placeholder="new-project"
           autoFocus
+          className="h-11 sm:h-8"
         />
       </label>
-      <label className="block space-y-2 text-xs font-medium">
-        <span>Parent directory</span>
-        <Input
-          value={parentPath}
-          onChange={(event) => onParentPathChange(event.target.value)}
-          onBlur={onLoadTypedDirectory}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter") return;
-            event.preventDefault();
-            onLoadTypedDirectory();
-          }}
-          placeholder="/Users/you/Projects"
-          className="font-mono"
-        />
-      </label>
-      <div className="min-w-0 rounded-md border border-border/70 bg-muted/30 px-3 py-2">
-        <p className="text-[11px] text-muted-foreground">Repository destination</p>
-        <p className="truncate font-mono text-xs" title={targetPath || parentPath}>
+      <div className="space-y-1.5">
+        <label htmlFor="local-repository-parent" className="text-xs font-medium">
+          Parent directory
+        </label>
+        <div className="flex min-w-0 items-center gap-2">
+          <Input
+            id="local-repository-parent"
+            value={parentPath}
+            onChange={(event) => onParentPathChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              onLoadTypedDirectory();
+            }}
+            placeholder="/Users/you/Projects"
+            className="h-11 min-w-0 flex-1 font-mono sm:h-8"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-lg"
+            className="size-11 sm:size-8"
+            onClick={onLoadTypedDirectory}
+            disabled={!parentPath}
+            aria-label="Browse parent directory"
+            title="Browse parent directory"
+          >
+            <IconFolderOpen />
+          </Button>
+        </div>
+      </div>
+      <div className="flex min-w-0 items-center gap-2 border-t border-border/70 pt-2 sm:col-span-2">
+        <IconFolder className="size-4 shrink-0 text-muted-foreground" />
+        <span className="shrink-0 text-xs text-muted-foreground">Destination</span>
+        <span className="truncate font-mono text-xs" title={targetPath || parentPath}>
           {targetPath || parentPath || "Loading folder…"}
-        </p>
+        </span>
       </div>
     </>
+  );
+}
+
+type RepositoryFormDetailsProps = RepositoryLocationFieldsProps & {
+  executorSelection: DirectLocalExecutorSelection | null;
+  submitError: string | null;
+};
+
+function RepositoryFormDetails({
+  executorSelection,
+  submitError,
+  ...locationFields
+}: RepositoryFormDetailsProps) {
+  return (
+    <div className="shrink-0 space-y-3 px-4 py-4">
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)]">
+        <RepositoryLocationFields {...locationFields} />
+      </div>
+      <div
+        className={
+          executorSelection
+            ? "flex items-start gap-2 text-xs text-muted-foreground"
+            : "flex items-start gap-2 text-xs text-destructive"
+        }
+      >
+        <IconInfoCircle className="mt-0.5 size-3.5 shrink-0" />
+        <p>{executorNotice(executorSelection)}</p>
+      </div>
+      {submitError ? (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+        >
+          <IconAlertCircle className="mt-0.5 size-3.5 shrink-0" />
+          <p>{submitError}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CreateRepositoryFooter({
+  canSubmit,
+  submitting,
+}: {
+  canSubmit: boolean;
+  submitting: boolean;
+}) {
+  return (
+    <div className="flex shrink-0 justify-end border-t border-border px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <Button
+        type="submit"
+        className="min-h-11 w-full cursor-pointer sm:w-auto sm:min-w-40"
+        disabled={!canSubmit}
+      >
+        <IconFolderPlus className="h-4 w-4" />
+        {submitting ? "Creating…" : "Create repository"}
+      </Button>
+    </div>
   );
 }
 
@@ -129,6 +213,7 @@ function CreateRepositoryForm({
     if (!open) {
       setParentPath("");
       setEditingParentPath(false);
+      setSubmitError(null);
       return;
     }
     if (listing && !editingParentPath) setParentPath(listing.path);
@@ -163,6 +248,7 @@ function CreateRepositoryForm({
   };
 
   const handleDirectoryNavigation = (path: string) => {
+    setSubmitError(null);
     setParentPath(path);
     setEditingParentPath(false);
     void load(path);
@@ -173,48 +259,47 @@ function CreateRepositoryForm({
   };
 
   const handleParentPathChange = (path: string) => {
+    setSubmitError(null);
     setParentPath(path);
     setEditingParentPath(true);
   };
 
+  const handleNameChange = (nextName: string) => {
+    setSubmitError(null);
+    setName(nextName);
+  };
+
+  const handleCreateDirectory = async (folderName: string) => {
+    if (!listing) return;
+    setSubmitError(null);
+    const created = await createDirectory(listing.path, folderName);
+    setParentPath(created.path);
+    setEditingParentPath(false);
+    await load(created.path);
+  };
+
   return (
     <form onSubmit={(event) => void handleSubmit(event)} className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 space-y-3 px-4 pb-3">
-        <RepositoryLocationFields
-          name={name}
-          parentPath={parentPath}
-          targetPath={targetPath}
-          onNameChange={setName}
-          onParentPathChange={handleParentPathChange}
-          onLoadTypedDirectory={loadTypedDirectory}
-        />
-        <p
-          className={
-            executorSelection ? "text-xs text-muted-foreground" : "text-xs text-destructive"
-          }
-        >
-          {executorNotice(executorSelection)}
-        </p>
-        {submitError ? (
-          <p role="alert" className="text-xs text-destructive">
-            {submitError}
-          </p>
-        ) : null}
-      </div>
+      <RepositoryFormDetails
+        name={name}
+        parentPath={parentPath}
+        targetPath={targetPath}
+        executorSelection={executorSelection}
+        submitError={submitError}
+        onNameChange={handleNameChange}
+        onParentPathChange={handleParentPathChange}
+        onLoadTypedDirectory={loadTypedDirectory}
+      />
       <DirectoryBrowserBody
         listing={listing}
         loading={loading}
         error={listingError}
         onNavigate={handleDirectoryNavigation}
+        onCreateDirectory={handleCreateDirectory}
         touchRows
         fillAvailableHeight
       />
-      <div className="shrink-0 border-t border-border px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <Button type="submit" className="min-h-12 w-full cursor-pointer" disabled={!canSubmit}>
-          <IconFolderPlus className="h-4 w-4" />
-          {submitting ? "Creating…" : "Create repository"}
-        </Button>
-      </div>
+      <CreateRepositoryFooter canSubmit={canSubmit} submitting={submitting} />
     </form>
   );
 }
@@ -233,7 +318,9 @@ export function CreateLocalRepositorySurface(props: CreateLocalRepositorySurface
         >
           <DrawerHeader className="shrink-0 border-b border-border text-left">
             <DrawerTitle>Create new repository</DrawerTitle>
-            <DrawerDescription>Choose an existing parent folder on this machine.</DrawerDescription>
+            <DrawerDescription>
+              Choose a folder or enter a new path on this machine.
+            </DrawerDescription>
           </DrawerHeader>
           {form}
         </DrawerContent>
@@ -245,11 +332,13 @@ export function CreateLocalRepositorySurface(props: CreateLocalRepositorySurface
     <Dialog open={props.open} onOpenChange={handleOpenChange}>
       <DialogContent
         data-testid="create-local-repository-dialog"
-        className="flex h-[min(680px,85dvh)] max-w-xl min-w-0 flex-col overflow-hidden p-0"
+        className="flex h-[min(640px,85dvh)] max-w-xl min-w-0 flex-col overflow-hidden p-0"
       >
         <DialogHeader className="shrink-0 border-b border-border px-4 py-3 pr-12">
           <DialogTitle>Create new repository</DialogTitle>
-          <DialogDescription>Choose an existing parent folder on this machine.</DialogDescription>
+          <DialogDescription>
+            Choose a folder or enter a new path on this machine.
+          </DialogDescription>
         </DialogHeader>
         {form}
       </DialogContent>

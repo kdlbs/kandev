@@ -65,6 +65,33 @@ func TestServiceInitializeLocalRepositoryCreatesCommitlessMainRepository(t *test
 	}
 }
 
+func TestServiceInitializeLocalRepositoryCreatesMissingParentDirectories(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	parent := filepath.Join(t.TempDir(), "projects", "team")
+
+	created, err := svc.InitializeLocalRepository(ctx, &InitializeLocalRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "new-project",
+		ParentPath:  parent,
+	})
+	if err != nil {
+		t.Fatalf("InitializeLocalRepository: %v", err)
+	}
+	wantPath := filepath.Join(parent, "new-project")
+	if created.LocalPath != wantPath {
+		t.Fatalf("created path = %q, want %q", created.LocalPath, wantPath)
+	}
+	for _, path := range []string{parent, wantPath, filepath.Join(wantPath, ".git")} {
+		if info, statErr := os.Stat(path); statErr != nil || !info.IsDir() {
+			t.Fatalf("directory %q: info=%v error=%v", path, info, statErr)
+		}
+	}
+}
+
 func TestServiceInitializeLocalRepositoryRejectsInvalidInputWithoutMutation(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -78,7 +105,6 @@ func TestServiceInitializeLocalRepositoryRejectsInvalidInputWithoutMutation(t *t
 		{name: "nested name", repository: "nested/name", parent: func(t *testing.T) string { return t.TempDir() }},
 		{name: "windows nested name", repository: `nested\name`, parent: func(t *testing.T) string { return t.TempDir() }},
 		{name: "relative parent", repository: "new-project", parent: func(t *testing.T) string { return "relative" }},
-		{name: "missing parent", repository: "new-project", parent: func(t *testing.T) string { return filepath.Join(t.TempDir(), "missing") }},
 		{name: "file parent", repository: "new-project", parent: func(t *testing.T) string {
 			path := filepath.Join(t.TempDir(), "file")
 			if err := os.WriteFile(path, []byte("file"), 0o644); err != nil {
