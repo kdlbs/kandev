@@ -69,6 +69,9 @@ No frontend change. ADR 0015's planned manual completion fallback is not current
 - **What:** reconnect-shaped MCP reinitialization still lists and calls the task-only completion tool.
   **File:** `apps/backend/internal/mcp/server/server_test.go` or a focused sibling integration test.
   **How:** use the streamable HTTP test server; avoid a live model dependency.
+- **What:** a signal-gated Kanban step profile selects a runner without selecting Office mode.
+  **File:** `apps/backend/internal/orchestrator/task_operations_test.go`
+  **How:** persist the workspace, workflow, step, task, and session in SQLite; assert the runner and Office projections independently, then launch the created session and verify task-mode discovery guidance.
 
 ## E2E Tests
 

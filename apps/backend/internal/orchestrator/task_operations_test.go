@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -23,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2400,6 +2402,88 @@ func TestStartCreatedSession_AssignedKanbanTaskUsesTaskMode(t *testing.T) {
 	mcpModeCalls := append([]sessionModeCall(nil), agentMgr.mcpModeCalls...)
 	agentMgr.mu.Unlock()
 	require.Empty(t, mcpModeCalls)
+}
+
+func TestIssue1884_StepProfileSignalGateStaysInTaskMode(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	workflowDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	workflowRepo, err := workflowrepo.NewWithDB(workflowDB, workflowDB, testLogger())
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-1884", Name: "Kanban workspace", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-1884", WorkspaceID: "ws-1884", Name: "Kanban workflow", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, workflowRepo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID:                        "step-1884",
+		WorkflowID:                "wf-1884",
+		Name:                      "Planning",
+		AgentProfileID:            "profile-step",
+		AutoAdvanceRequiresSignal: true,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:             "task-1884",
+		WorkspaceID:    "ws-1884",
+		WorkflowID:     "wf-1884",
+		WorkflowStepID: "step-1884",
+		Title:          "Plan the change",
+		Description:    "Produce the implementation plan.",
+		State:          v1.TaskStateInProgress,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-1884", TaskID: "task-1884", State: models.TaskSessionStateCreated,
+		StartedAt: now, UpdatedAt: now,
+	}))
+	seedExecutorRunning(t, repo, "session-1884", "task-1884", "exec-1884")
+
+	projectedTask, err := repo.GetTask(ctx, "task-1884")
+	require.NoError(t, err)
+	assert.Equal(t, "profile-step", projectedTask.AssigneeAgentProfileID,
+		"the step profile should remain available as the runner projection")
+	assert.False(t, projectedTask.IsFromOffice,
+		"a Kanban step profile selects a runner; it does not create Office ownership")
+
+	persistedStep, err := workflowRepo.GetStep(ctx, "step-1884")
+	require.NoError(t, err)
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[persistedStep.ID] = persistedStep
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task-1884"] = &v1.Task{
+		ID: "task-1884", WorkspaceID: "ws-1884", WorkflowID: "wf-1884",
+		Title: "Plan the change", Description: "Produce the implementation plan.",
+		State: v1.TaskStateInProgress,
+	}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	_, err = svc.StartCreatedSession(
+		ctx, "task-1884", "session-1884", "", "Produce the implementation plan.",
+		false, false, true, nil, nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, messages.userMessages, 1)
+	prompt := messages.userMessages[0].content
+	assert.Contains(t, prompt, "KANDEV MCP TOOLS")
+	assert.NotContains(t, prompt, "KANDEV OFFICE MCP TOOLS")
+	assert.Contains(t, prompt, "step_complete_kandev")
+	assert.Contains(t, prompt, "use the client's tool search/discovery with the canonical name")
+
+	agentMgr.mu.Lock()
+	mcpModeCalls := append([]sessionModeCall(nil), agentMgr.mcpModeCalls...)
+	agentMgr.mu.Unlock()
+	assert.Empty(t, mcpModeCalls, "the default task MCP catalog must remain active")
+
+	launchedSession, err := repo.GetTaskSession(ctx, "session-1884")
+	require.NoError(t, err)
+	assert.Equal(t, "profile-step", launchedSession.AgentProfileID)
 }
 
 // --- recordInitialMessage ---

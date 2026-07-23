@@ -416,6 +416,8 @@ Three MCP modes coexist:
 | `ModeConfig` | 29 (workflows + agents + executors) | ~8-10K | Config setup sessions |
 | `ModeOffice` | 9 (plans + ask_user + related tasks + task documents) | ~1-2K | Office agent sessions |
 
+Agent routing and Office ownership are independent. Workflow-level defaults, per-step agent profiles, and `runner` participants select the execution identity only; they never make a Kanban task Office-owned. A task is Office-owned only when it is linked to an Office project or its workflow matches the workspace's Office workflow.
+
 `ModeOffice` includes:
 - 4 plan tools (`create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, `delete_task_plan_kandev`).
 - `ask_user_question_kandev` (only meaningful when the user opens the task in advanced mode).
@@ -620,6 +622,8 @@ There are no TTLs on agent rows, runtime rows, instructions, skills, run history
 - **GIVEN** an office agent in ModeOffice, **WHEN** its first-turn system context is generated, **THEN** every advertised MCP tool is registered in ModeOffice and `step_complete_kandev` is absent.
 
 - **GIVEN** a regular kanban task (non-office), **WHEN** a user starts a session, **THEN** ModeTask is used with the full Kanban MCP surface, including `step_complete_kandev`. No Office CLI capability changes that behavior.
+
+- **GIVEN** a regular Kanban task on a step with a default agent profile, **WHEN** the runner projection resolves that profile, **THEN** the profile selects the execution identity without changing Office ownership or the session's `ModeTask` MCP surface.
 
 - **GIVEN** a Docker executor, **WHEN** the agent runs `$KANDEV_CLI kandev task get`, **THEN** agentctl resolves to `/usr/local/bin/agentctl` (on PATH inside the container), reads env vars, and calls the backend API.
 

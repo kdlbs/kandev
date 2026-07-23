@@ -54,7 +54,6 @@ The tool uses the standard MCP definition without `anthropic/alwaysLoad`. Client
 - If the Kandev MCP transport is temporarily disconnected, the client reports the transport failure and retries its normal connection path. It must not convert the failure into a permanent "tool does not exist" conclusion while the server is reconnecting.
 - If a connected client defers the tool from its active context, the agent uses that client's normal tool-search mechanism to resolve the canonical `step_complete_kandev` name.
 - If reconnect does not recover, the task stays on the current step. The user can retry the agent or move the task through the normal workflow UI; Kandev never auto-advances from a bare halt on a signal-gated step.
-- Unsupported clients ignore the Anthropic metadata and continue using the standard MCP tool definition.
 - A failure to load or call the tool in Office mode is expected and must not trigger reconnect remediation because Office does not own this capability.
 
 ## Persistence Guarantees
@@ -64,6 +63,7 @@ The pending completion signal continues to use `TaskSession.Metadata` as specifi
 ## Scenarios
 
 - **GIVEN** a Kanban task session in `ModeTask`, **WHEN** the client lists or searches tools, **THEN** `step_complete_kandev` is discoverable without vendor-specific eager-load metadata.
+- **GIVEN** a non-Office Kanban workflow step with an agent profile and `auto_advance_requires_signal=true`, **WHEN** its task resolves the step profile as the runner, **THEN** the task remains in `ModeTask`, its first-turn context instructs normal discovery of `step_complete_kandev`, and the task-mode catalog contains the tool.
 - **GIVEN** an Office task session in `ModeOffice`, **WHEN** the client lists tools or receives its first-turn context, **THEN** `step_complete_kandev` is absent.
 - **GIVEN** a task-mode client has connected to Kandev MCP, **WHEN** its MCP connection drops and reconnects, **THEN** the client can list and call `step_complete_kandev` without another user message.
 - **GIVEN** a signal-gated workflow step, **WHEN** the agent finishes without calling the tool, **THEN** the task remains on the current step and no automatic transition runs.
