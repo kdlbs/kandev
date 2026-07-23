@@ -2115,6 +2115,109 @@ func TestService_ArchiveTaskPublishesEventAfterClientDisconnect(t *testing.T) {
 	}
 }
 
+// flakyCancelSessionRepository wraps the real session repository so a test
+// can deterministically simulate CancelActiveTaskSessionsByTaskID failing
+// with a transient error (e.g. the kind of writer-contention timeout the
+// repository's own internal 10s bound produces) on its first N-1 calls and
+// succeeding on the Nth. Test-only: production code has no equivalent hook.
+type flakyCancelSessionRepository struct {
+	*sqliterepo.Repository
+	mu           sync.Mutex
+	failuresLeft int
+	calls        int
+}
+
+func (r *flakyCancelSessionRepository) CancelActiveTaskSessionsByTaskID(
+	ctx context.Context, taskID, reason string,
+) ([]string, time.Time, error) {
+	r.mu.Lock()
+	r.calls++
+	if r.failuresLeft > 0 {
+		r.failuresLeft--
+		r.mu.Unlock()
+		return nil, time.Time{}, errors.New("simulated transient sqlite writer contention timeout")
+	}
+	r.mu.Unlock()
+	return r.Repository.CancelActiveTaskSessionsByTaskID(ctx, taskID, reason)
+}
+
+func (r *flakyCancelSessionRepository) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+// TestService_ArchiveTaskRetriesTransientSessionCancellationFailure is the
+// regression test for the retry loop in finalizeCancelledSessions:
+// CancelActiveTaskSessionsByTaskID is bounded by its own internal timeout,
+// so a lone attempt failing (e.g. to writer contention) used to be swallowed
+// immediately, leaving the archived task's sessions stuck active with no
+// cancellation event ever published. Failing the first two calls and
+// succeeding on the third proves the retry loop keeps trying within its
+// bounded attempt budget and still delivers the session.state_changed event
+// once the underlying write finally succeeds.
+func TestService_ArchiveTaskRetriesTransientSessionCancellationFailure(t *testing.T) {
+	flaky := &flakyCancelSessionRepository{failuresLeft: 2}
+	svc, eventBus, repo := createTestServiceWithSessionsRepo(t, func(repo *sqliterepo.Repository) repository.SessionRepository {
+		flaky.Repository = repo
+		return flaky
+	})
+
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-flaky", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-flaky", TaskID: "task-flaky", State: models.TaskSessionStateRunning,
+		AgentProfileID: "agent-1", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	if err := svc.ArchiveTask(ctx, "task-flaky"); err != nil {
+		t.Fatalf("ArchiveTask returned an error even though the retry loop should have recovered: %v", err)
+	}
+
+	if got, want := flaky.callCount(), 3; got != want {
+		t.Fatalf("CancelActiveTaskSessionsByTaskID call count = %d, want %d (2 failures + 1 success)", got, want)
+	}
+
+	var found *bus.Event
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if ok && data["session_id"] == "session-flaky" {
+			found = evt
+		}
+	}
+	if found == nil {
+		t.Fatal("expected a session.state_changed event for session-flaky after the retry loop recovered, got none")
+	}
+	data := found.Data.(map[string]interface{})
+	if got := data["new_state"]; got != string(models.TaskSessionStateCancelled) {
+		t.Errorf("new_state = %v, want CANCELLED", got)
+	}
+
+	session, err := repo.GetTaskSession(context.Background(), "session-flaky")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateCancelled {
+		t.Errorf("session state = %q, want CANCELLED", session.State)
+	}
+}
+
 // TestService_ArchiveTaskPublishesEventsForAllCancelledSessions is the
 // regression test for the shared-deadline bug: publishSessionsCancelled used
 // to run its per-session GetTaskSession-then-publish work under one deadline

@@ -1222,14 +1222,40 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 // persist on its own. The DB write alone is invisible to any client cache
 // (e.g. an Office task list's "is running" indicator) that's kept fresh
 // exclusively by that event, and would otherwise show a live spinner
-// forever after archive. A cancellation failure is logged and swallowed —
-// ArchiveTask has already committed archived_at, so this is best-effort
-// cleanup, not a reason to fail the archive.
+// forever after archive.
+//
+// CancelActiveTaskSessionsByTaskID is bounded by its own internal 10s
+// timeout, so a single attempt can time out under SQLite writer contention
+// alone — with archived_at already committed by the caller, that would
+// silently leave this task's sessions stuck in an active DB state forever,
+// since nothing else ever re-attempts the cancellation and no
+// session.state_changed event is delivered to clear a client's running
+// indicator. Retrying a small, fixed number of times — each attempt getting
+// its own fresh 10s budget from the repository — meaningfully shrinks that
+// window without making it unbounded. This is deliberately NOT a background
+// reconciliation/sweep system, just closing the immediate race; if every
+// attempt still fails, ArchiveTask has already committed archived_at, so
+// this remains best-effort cleanup and is not a reason to fail the archive.
 func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, activeSessions []*models.TaskSession) {
-	cancelledIDs, cancelledAt, cancelErr := s.sessions.CancelActiveTaskSessionsByTaskID(ctx, taskID, "task archived")
+	const maxCancelAttempts = 3
+	const cancelRetryBackoff = 250 * time.Millisecond
+
+	var cancelledIDs []string
+	var cancelledAt time.Time
+	var cancelErr error
+	for attempt := 1; attempt <= maxCancelAttempts; attempt++ {
+		cancelledIDs, cancelledAt, cancelErr = s.sessions.CancelActiveTaskSessionsByTaskID(ctx, taskID, "task archived")
+		if cancelErr == nil {
+			break
+		}
+		if attempt < maxCancelAttempts {
+			time.Sleep(cancelRetryBackoff)
+		}
+	}
 	if cancelErr != nil {
-		s.logger.Warn("failed to reap active sessions on archive",
+		s.logger.Error("failed to reap active sessions on archive after retries",
 			zap.String("task_id", taskID),
+			zap.Int("attempts", maxCancelAttempts),
 			zap.Error(cancelErr))
 		return
 	}
