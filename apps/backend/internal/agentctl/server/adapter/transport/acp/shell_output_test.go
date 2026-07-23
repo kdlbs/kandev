@@ -524,6 +524,27 @@ func TestNormalizeShellToolUpdateFinalTerminalExitCommitsExactMatchEcho(t *testi
 	require.Equal(t, 0, *payload.ShellExec().Output.ExitCode)
 }
 
+// TestNormalizeShellToolUpdateCommitsEchoStripExactlyOnceForRawOutputOnlyResult
+// is a regression for a review finding: applyFinalShellResult already
+// commits the strict strip when it runs (rawOutput != nil), so the
+// end-of-update pass must not strip a second time on top of an
+// already-normalized value - a raw-only result whose real output legitimately
+// repeats the echoed command text (e.g. "$ cmd\n$ cmd\n") would otherwise lose
+// the second, legitimate occurrence to a redundant re-strip.
+func TestNormalizeShellToolUpdateCommitsEchoStripExactlyOnceForRawOutputOnlyResult(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "cmd"},
+	})
+
+	normalizer.NormalizeShellToolUpdate(payload, nil, nil, "$ cmd\n$ cmd\n")
+
+	require.Equal(t, "$ cmd\n", payload.ShellExec().Output.Stdout)
+}
+
 func shellOutputJSON(t *testing.T, output any) map[string]any {
 	t.Helper()
 	require.NotNil(t, output)

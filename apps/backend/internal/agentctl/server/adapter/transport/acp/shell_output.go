@@ -109,6 +109,15 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 	// the buffer is nothing but the echo, instead of deferring forever with
 	// no further update ever arriving to re-trigger the strict path.
 	isFinal := rawOutput != nil
+	// finalStdoutCommitted tracks whether Stdout already went through a
+	// commit (strict) strip pass earlier in this same call, via
+	// applyFinalShellResult. Re-stripping an already-normalized value below
+	// would eat a second, legitimate occurrence of the command text (e.g.
+	// real output that happens to repeat "$ cmd"). A later terminal_output
+	// field that clobbers Stdout with the provider's raw, unstripped
+	// snapshot (the rawOutput-clobber path) clears the flag, since that raw
+	// value still needs exactly one strip.
+	finalStdoutCommitted := false
 
 	if data, ok := terminalOutputData(meta, "terminal_output_delta"); ok {
 		appendShellStdout(shell, data)
@@ -121,10 +130,12 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 	if rawOutput != nil {
 		applyFinalShellResult(shell, rawOutput)
 		recognized = true
+		finalStdoutCommitted = true
 	}
 	if data, ok := terminalOutputData(meta, "terminal_output"); ok {
 		if rawOutput != nil {
 			replaceShellStdout(shell, data)
+			finalStdoutCommitted = false
 		} else {
 			replaceOrAppendTerminalOutput(shell, data)
 		}
@@ -137,14 +148,13 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 	}
 
 	if shell.Output != nil {
-		if isFinal {
-			// A definitive completion signal arrived in this same update:
-			// commit the strip even if the buffer is nothing but the echo,
-			// and re-apply it last so a terminal_output field processed
-			// above can't clobber an already-stripped stdout with the
-			// provider's raw, unstripped snapshot.
+		switch {
+		case isFinal && !finalStdoutCommitted:
+			// A definitive completion signal arrived, and Stdout hasn't
+			// already been committed-stripped this call: commit now, even
+			// if the buffer is nothing but the echo.
 			shell.Output.Stdout = stripLeadingCommandEcho(shell.Command, shell.Output.Stdout)
-		} else {
+		case !isFinal:
 			shell.Output.Stdout = stripPendingCommandEcho(shell.Command, shell.Output.Stdout)
 		}
 	}
