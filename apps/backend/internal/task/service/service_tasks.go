@@ -1196,8 +1196,12 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		// committed on a detached context, so a client disconnect here must
 		// not also suppress the event lookup below (GetTaskSession per
 		// cancelled session) — event-driven clients need session.state_changed
-		// regardless of whether the archiving caller is still connected.
-		s.publishSessionsCancelled(context.WithoutCancel(ctx), id, activeSessions, cancelledIDs, "task archived", cancelledAt)
+		// regardless of whether the archiving caller is still connected. Bound
+		// it with a timeout to prevent blocking ArchiveTask forever if that
+		// lookup or a synchronous event subscriber stalls.
+		pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		s.publishSessionsCancelled(pubCtx, id, activeSessions, cancelledIDs, "task archived", cancelledAt)
 	}
 
 	// 4. Re-read task for updated archived_at field
