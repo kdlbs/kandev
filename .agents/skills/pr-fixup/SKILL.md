@@ -25,7 +25,7 @@ If `pr-poller` recommends `GitHub access requires approval; planner must surface
 
 ## Available skills and subagents
 
-- **`pr-poller` worker** — Polls CI checks and the 5 review bots until terminal, returns a compact structured report.
+- **`pr-poller` worker** — Polls CI/review state and can use one selected reviewer's exact-head evidence without waiting for unrelated bots.
 - **`verify` worker** — Runs the full verification pipeline and returns a compact pass/fail report before delivery.
 - **`/e2e`** — Read for debugging guidance when E2E tests fail in CI. Covers test patterns, run commands, failure triage, and local reproduction.
 - **`/commit`** — Use for staging and committing fixes with Conventional Commits format.
@@ -61,9 +61,17 @@ Then start with task 1. Mark each task in_progress when you begin it and complet
 
 Mark task 1 as in_progress.
 
-The planner invokes the registered `pr-poller` with the PR number. The worker:
+The planner invokes the registered `pr-poller` with the PR number and, when a
+reviewer is designated for semantic evidence, `selected_reviewer=<GitHub login>`.
+For routine same-repository OpenCode evidence, select
+`${OPENCODE_REVIEW_APP_SLUG}[bot]` only when emitted `trusted_producer=true`
+and external App configuration (enablement, client ID, slug, protected environment,
+environment-only private key, current-repository-only installation, and pull-request write permission) are present. Administrators must create `OPENCODE_REVIEW_ENV_APP_PRIVATE_KEY` only in the protected `opencode-review-trusted` environment, never as a repository/org fallback secret, and restrict environment deployment branches to the protected default branch. Pass that login
+to `scripts/pr-state --trusted-reviewer`; otherwise use normal polling or local
+frontier review. Never use this shortcut for forks, security, or architecture.
+The worker:
 - Fetches the current CI/bot/comment state once
-- Polls (30s cadence, **20 min cap**) until every CI check and every bot (CodeRabbit, Greptile, Claude, OpenCode, cubic) reaches a terminal state
+- Polls (30s cadence, **20 min cap**) until CI and configured-reviewer evidence reach a terminal state, unless selected exact-head evidence is qualified or blocked after CI completes
 - Counts unresolved review threads and bot issue comments
 - Returns a structured report between `=== pr-poller report ===` and `=== end ===` markers
 
@@ -91,11 +99,28 @@ above overrides this rule. The planner does not inspect or resolve conflicts dir
 - `bots.<name>` — `done` / `rate_limited` / `pending` / `timeout` / `unknown`.
   Only `done` and `rate_limited` are clean; surface `timeout`, and treat
   `pending` or `unknown` as incomplete state.
-- `unresolved_review_threads` and `issue_comments_from_bots` — drive steps 3-4.
+- `review_evidence` — contains `reviewer`, `qualification`, `reviewed_head_sha`,
+  `review_state`, `eligibility`, `verdict`, `active_changes_requested`, and
+  `blocked_exact_current_head_reviews`.
+  With a selected reviewer, `qualified` or `blocked` may end polling after CI;
+  `unqualified`/`unknown` requires normal polling or local-review fallback. An
+  active changes request, actionable unresolved thread, or nonzero exact-head
+  blocked-review count always blocks.
+  Qualification needs matching PR-view checks/opening/closing heads plus an API
+  `commit_id` equal to `evidence_head_sha`, `checks_snapshot_complete=true`,
+  never timestamp-only inference. If check snapshot H1 and reviews are H2,
+  treat combined evidence as unknown and retry/fall back. Only approved
+  reviews without blocker signals or COMMENTED reviews with the explicit `<!-- kandev-review: clean -->`
+  marker are eligible. For the configured dedicated OpenCode App
+  producer, require emitted `trusted_producer=true`; displayed check names never qualify.
+  Generic Actions reviews are never sufficient. Dismissed, pending, unknown, and ambiguous comments are
+  not.
+- `unresolved_review_threads` and `actionable_issue_comments_from_bots` — drive steps 3-4.
   Skip to step 5 only when both are known `0`, `ci_failed` is explicitly known
   empty, `ci_pending` is `none`, the merge-conflict gate is known clean, and
-  every bot is `done` or `rate_limited` (still run verify + push if you have
-  fixes from earlier).
+  every configured reviewer is done or `rate_limited` (or an explicitly selected reviewer is
+  `qualified` with no blockers; still run verify + push if you have fixes from
+  earlier).
 
 **E2E CI outlasts the poller.** The pr-poller caps at ~20 minutes. Standard E2E shards plus container shards often run longer. GitHub can expand E2E matrix jobs late, and the shard matrix may appear only after the build job finishes; if pending checks briefly drop near zero and then jump when E2E shards appear, keep treating that as normal pending CI unless a shard reports failure. If the report shows `ci_pending` with only E2E/lint jobs and `ci_failed` is known empty, re-invoke pr-poller once those jobs finish — do not spin a manual `gh pr checks` loop in the parent. If the cap hits with E2E still pending, report "CI in progress" to the user instead of blocking, and include the exact pending shard names from `ci_pending`.
 
@@ -103,81 +128,13 @@ above overrides this rule. The planner does not inspect or resolve conflicts dir
 
 #### Polling Worker Reference
 
-The commands below document what the registered `pr-poller` gathers. They are
-not a planner or remediation-worker fallback. If `pr-poller` cannot be launched,
-stop and report the blocked phase.
-
-```bash
-scripts/pr-state --summary <PR>
-```
-
-Request runtime network approval before the first GitHub helper call; denial, cancellation, or interruption stops the workflow, while transient failures from approved commands use bounded retry.
-
-`scripts/pr-state` accepts flags before or after the PR (`scripts/pr-state --summary <PR>` and `scripts/pr-state <PR> --summary` both work). When parsing output with `jq`, prefer writing the JSON to a temp file first, then running `jq` against that file; this avoids `set -e` surprises and prevents stderr from corrupting a JSON pipe.
-
-Prefer `scripts/pr-state --summary <PR>` for direct polling and `scripts/pr-resolve list <PR>` for review-thread state over raw `gh pr checks`. `gh pr checks` only reports CI/status checks; review bots can open unresolved threads after CI is green, and a checks-only poll will miss that blocker.
-
-By default, `scripts/pr-state` returns comments, reviews, and review threads created after the latest PR head commit only. This is intentional for fixup passes: it keeps old bot summaries and already-addressed historical threads out of the working set. Use `scripts/pr-state --summary --all <PR>` only when you need to audit the full PR history.
-
-The summary output contains:
-
-- `failed_checks` — actionable non-green checks with `name`, `workflow`, `status`, `conclusion`, `run_id`, `job_id`, `details_url`, and `target_url`
-- `pending_checks` — still-running or queued checks with `name`, `workflow`, `status`, `run_id`, `job_id`, `details_url`, and `target_url`
-- `unresolved_review_thread_count` — total unresolved thread count on the PR, including older unresolved threads outside the current-head filter
-- `filtered_review_thread_count` — informational count for the current-head-filtered review-thread view; it can include resolved or historical comments, so do not treat it as a blocker by itself
-- `unresolved_threads` — compact current-head inline review state to triage in this fixup pass
-- `hidden_unresolved_threads` — compact unresolved threads outside the current-head filter when historical unresolved threads exist; treat these as actionable blockers, not ignorable history
-- `errors` — data-gathering failures; treat affected fields as unknown instead of reconstructing them ad hoc
-
-If `scripts/pr-state --summary <PR>` briefly returns `branch:"unknown"` or reports that `gh pr view` failed while `gh pr view <PR>` works directly, treat it as a transient state-resolution issue. Re-run the explicit PR-number command once and fall back to direct `gh pr view <PR>` / targeted `gh run view` checks for that pass instead of assuming the PR state is unavailable.
-
-If `scripts/pr-state --summary <PR>` returns `since: null` with `errors` like `repo` or `since`, but still includes valid `failed_checks`, `pending_checks`, and `unresolved_review_thread_count`, use the check/thread data for that poll and rerun once on the next cadence. Do not discard usable CI state just because head-commit metadata lookup failed.
-
-If `scripts/pr-state --summary <PR>` returns valid `failed_checks` and `pending_checks` but `unresolved_review_thread_count: null` with an error such as `{"source":"review_threads","message":"gh api graphql reviewThreads failed"}`, use the check data for that poll but treat review-thread state as unknown. Do not report review as clean or blocked from that snapshot; rerun `scripts/pr-state --summary <PR>` on the next cadence to recover thread state. Before a final status, retry `scripts/pr-state --summary <PR>` once; if review thread state still errors, run `scripts/pr-resolve list <PR>` directly. Only report "no unresolved review threads" after one of those succeeds.
-
-If `scripts/pr-state --summary <PR>` fails with `jq: Argument list too long`, do not debug the summary script during fixup. Split the fallback checks:
-
-```bash
-gh pr checks <PR>
-scripts/pr-resolve list <PR>
-```
-
-If the checks table is long or mixed with request diagnostics, keep only
-actionable rows:
-
-```bash
-gh pr checks <PR> 2>/dev/null | awk -F '\t' '$2 == "pending" || $2 == "fail" {print}'
-scripts/pr-resolve list <PR>
-```
-
-`gh pr checks` gives CI status only; `scripts/pr-resolve list` is still required for unresolved inline review threads. `gh pr checks` can exit nonzero when checks are pending or failed (for example exit code 8) while still printing usable status rows. Treat its table output as valid state, not automatically as a shell/tool failure; parse the rows for `fail`, `pending`, and `pass`, and avoid `set -e` flows unless you intentionally capture or ignore the exit code.
-
-If `unresolved_review_thread_count` is nonzero but `unresolved_threads` is empty, or if `hidden_unresolved_threads` is non-empty, run `scripts/pr-resolve list <PR>` before acting. Fetch each full body with `scripts/pr-state --comment <comment_id>` or `scripts/pr-resolve show <PR> <THREAD_ID_OR_COMMENT_ID>`; hidden threads can contain valid current blockers even when the current-head filtered view is empty. `pr-state` can briefly report total unresolved count from historical state while current-head unresolved threads are empty; `pr-resolve list` is the authoritative actionable thread set for fixup work. If `scripts/pr-state --summary` reports a nonzero unresolved count but `scripts/pr-resolve show <PR> <THREAD_ID>` says the listed thread is `resolved: true`, treat the summary as stale state. Wait briefly, rerun `scripts/pr-state --summary <PR>`, and do not reply again to an already-resolved thread.
-
-Poll at a 30s cadence with a **20 min cap**. Prefer one-shot `scripts/pr-state --summary <PR>` checks, or a bounded command that can finish naturally, over long inline shell loops. In this environment, a running non-TTY loop may not receive Ctrl-C through `write_stdin`, so avoid `while sleep ...; do ...; done` polling in the main session. Run `sleep 30` and then a fresh `scripts/pr-state --summary <PR>` as separate commands; a combined command can capture blank output. Record wall-clock time around requested sleeps: if less elapsed than requested, treat the wait as interrupted, re-poll, and report the shorter time. Rerun a blank summary before interpreting it.
-
-Stop early if any required check fails. A `queued` or `in_progress` job caused by GitHub runner capacity is pending CI, not a failure: when the requested watch window or cap ends with no failures or unresolved comments, do not make speculative code changes. Report each pending job's exact name and status, plus its `details_url` or Actions run URL. If the user explicitly asks to poll until CI is green, continue past the normal pending-E2E stopping point with bounded one-shot `sleep N; scripts/pr-state --summary <PR>` checks; stop immediately on any `failed_checks`, and continue until `failed_checks: []`, `pending_checks: []`, and `unresolved_review_thread_count: 0`. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up. If you do use `gh pr checks --watch`, keep watching until the command exits; GitHub can expand matrix jobs after an initial aggregate "Build" check passes, so the first green build/lint/test rows are not necessarily terminal.
-
-For E2E-only pending phases, summarize counts before dumping long shard lists into context:
-
-```bash
-scripts/pr-state --summary <PR> > /tmp/prstate-<PR>.json
-jq '{failed_checks, pending_count:(.pending_checks|length), pending_by_workflow:(.pending_checks|group_by(.workflow)|map({workflow:.[0].workflow,count:length,statuses:(map(.status)|unique)})), unresolved_review_thread_count, errors}' /tmp/prstate-<PR>.json
-```
-
-When stopping at the cap, print the exact pending names from the saved snapshot:
-
-```bash
-jq -r '.pending_checks[] | "\(.status) | \(.name)"' /tmp/prstate-<PR>.json
-```
-
-If a user interrupts a long manual poll loop (`sleep`, `gh pr checks`, or `scripts/pr-state`), check for leftover polling processes before switching tasks and terminate only the processes you started.
-
-Use raw mode only when debugging an odd GitHub state:
-
-```bash
-scripts/pr-state <PR>
-```
+Normal routing uses only the compact `pr-poller` report above. Load
+[review-evidence.md](references/review-evidence.md) only when that worker is
+unavailable, its report is incomplete/contradictory, or raw `pr-state` evidence
+must be interpreted during a PR-state incident. It documents bounded polling,
+raw field semantics, and safe fallback diagnostics; it is not a planner or
+remediation-worker polling fallback. If `pr-poller` cannot be launched, stop
+and report the blocked phase.
 
 Mark task 1 as completed.
 
@@ -238,7 +195,7 @@ Mark task 3 as in_progress.
 The planner assigns this section to a remediation implementer with the compact
 thread list and relevant diff scope.
 
-Use the report's `unresolved_review_threads` and `issue_comments_from_bots` counts to know whether there's anything to triage. If both are 0, mark this step completed and move on.
+Use the report's `unresolved_review_threads` and `actionable_issue_comments_from_bots` counts to know whether there's anything to triage. If both are 0, mark this step completed and move on.
 
 Otherwise, fetch the actual comment bodies on demand — one bot or one set at a time, not all at once:
 
@@ -452,12 +409,17 @@ launched, stop and report the blocked phase. Parse the returned report:
   `merge_state_status` is known and not `DIRTY`,
   `local_unmerged_entries: 0`, the complete report establishes `ci_failed` as
   explicitly known empty, `ci_pending: none`, `unresolved_review_threads: 0`,
-  `issue_comments_from_bots: 0`, and every bot row is `done` or
-  `rate_limited`.
+  `actionable_issue_comments_from_bots: 0`, and every configured-reviewer row is done or
+  `rate_limited`; an explicit selected reviewer may replace the last condition
+  only with known, exact-current-head `qualification=qualified`, no active
+  changes request or actionable unresolved thread, and a zero exact-head
+  blocked-review count. Only the dedicated OpenCode App additionally requires `trusted_producer=true`; other explicitly selected reviewers retain generic qualification without App provenance.
 - Treat a clean intermediate state as provisional while any mergeability or
   local-conflict field is `unknown`, `ci_failed: unknown` or any other result
-  is not explicitly known empty, `ci_pending` is not `none`, or any bot row is
-  `pending`, `timeout`, or `unknown`.
+  is not explicitly known empty, or `ci_pending` is not `none`. Unrelated bot
+  rows may remain `pending`, `timeout`, or `unknown` after an explicit selected
+  reviewer is exact-head, complete, terminal/qualified, and all arrived
+  findings are clean; otherwise preserve the normal configured-reviewer provisional gate.
 - If only long-running checks remain in `ci_pending` after full local
   verification is green, `ci_failed` is explicitly known empty, and
   `unresolved_review_threads: 0`, stop at the bounded cap and report the exact

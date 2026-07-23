@@ -15,6 +15,13 @@ OMISSION_NOTICE_RESERVE = 256
 NO_FINDINGS_MARKER = "<!-- opencode-review:no-findings -->"
 DIAGNOSTIC_MARKER = "<!-- opencode-review:diagnostic -->"
 FALLBACK_MARKER = "<!-- opencode-review:fallback-findings -->"
+TRUSTED_CLEAN_MARKER = "<!-- kandev-review: clean -->"
+
+
+def workflow_run_marker() -> str:
+    run_id = required_env("GITHUB_RUN_ID")
+    attempt = required_env("GITHUB_RUN_ATTEMPT")
+    return f"<!-- kandev-review: workflow-run id={run_id} attempt={attempt} -->"
 
 
 def required_env(name: str) -> str:
@@ -108,7 +115,7 @@ def read_status(path: Path) -> int:
 
 
 def parse_findings(raw: str) -> tuple[list[Any] | None, str | None]:
-    match = re.search(r"<opencode_findings>\s*(.*?)\s*</opencode_findings>", raw, re.S)
+    match = re.fullmatch(r"\s*<opencode_findings>\s*(.*?)\s*</opencode_findings>\s*", raw, re.S)
     if not match:
         return None, "No parseable findings block was found."
     payload_text = match.group(1).strip()
@@ -156,6 +163,49 @@ def no_findings_body() -> str:
         f"OpenCode model: `{model}`\n\n"
         f"No suggestions found for commit `{short_sha}`."
     )
+
+
+def terminal_review_body(*, clean: bool, finding_count: int) -> str:
+    short_sha = required_env("HEAD_SHA")[:12]
+    model = required_env("OPENCODE_MODEL")
+    if clean:
+        return (
+            f"{TRUSTED_CLEAN_MARKER}\n{workflow_run_marker()}\n"
+            "**OpenCode review complete**\n\n"
+            "Trusted wrapper parsed an empty findings array.\n\n"
+            f"OpenCode model: `{model}`\n"
+            f"Commit: `{short_sha}`"
+        )
+    return (
+        f"{workflow_run_marker()}\n**OpenCode review requires action**\n\n"
+        f"Trusted wrapper parsed `{finding_count}` finding(s); action required before this review can be clean.\n\n"
+        f"OpenCode model: `{model}`\n"
+        f"Commit: `{short_sha}`"
+    )
+
+
+def post_terminal_review(*, clean: bool, finding_count: int) -> bool:
+    repository = required_env("GITHUB_REPOSITORY")
+    pr_number = required_env("PR_NUMBER")
+    head_sha = required_env("HEAD_SHA")
+    result = gh_api(
+        [
+            "-X",
+            "POST",
+            f"repos/{repository}/pulls/{pr_number}/reviews",
+            "-f",
+            f"commit_id={head_sha}",
+            "-f",
+            "event=COMMENT",
+            "-f",
+            f"body={terminal_review_body(clean=clean, finding_count=finding_count)}",
+        ]
+    )
+    if result.returncode == 0:
+        print("Posted OpenCode terminal pull-request review.")
+        return True
+    print(f"Could not post OpenCode terminal review: {result.stderr.strip()}", file=sys.stderr)
+    return False
 
 
 def fallback_body(rejected: list[dict[str, Any]], overflow: list[dict[str, Any]]) -> tuple[str, int, int]:
@@ -326,9 +376,12 @@ def handle_diagnostic(
             *snippet("OpenCode findings output", raw),
         ],
     )
+    posted_terminal_review = post_terminal_review(clean=False, finding_count=0)
     upsert_issue_comment(DIAGNOSTIC_MARKER, diagnostic_body(reason, status, stdout, stderr))
     print(f"OpenCode did not produce parseable findings: {reason}", file=sys.stderr)
-    return 1 if fail_check else 0
+    if not posted_terminal_review:
+        print("OpenCode terminal diagnostic review could not be posted.", file=sys.stderr)
+    return 1
 
 
 def post_findings(args: argparse.Namespace) -> int:
@@ -357,11 +410,11 @@ def post_findings(args: argparse.Namespace) -> int:
             stdout,
             stderr,
             raw,
-            fail_check=False,
+            fail_check=True,
         )
 
     if not findings:
-        posted_no_findings = upsert_issue_comment(NO_FINDINGS_MARKER, no_findings_body())
+        posted_terminal_review = post_terminal_review(clean=True, finding_count=0)
         append_summary(
             args.summary,
             "OpenCode review",
@@ -372,7 +425,7 @@ def post_findings(args: argparse.Namespace) -> int:
                 *snippet("OpenCode stderr", stderr),
             ],
         )
-        return 0 if posted_no_findings else 1
+        return 0 if posted_terminal_review else 1
 
     changed_paths = set(args.files.read_text(encoding="utf-8").splitlines())
     commentable_lines = None
@@ -427,6 +480,8 @@ def post_findings(args: argparse.Namespace) -> int:
         fallback_comment, fallback_included, fallback_omitted = fallback_body(unplaced_findings, overflow_findings)
         posted_fallback = upsert_issue_comment(FALLBACK_MARKER, fallback_comment)
 
+    posted_terminal_review = post_terminal_review(clean=False, finding_count=len(findings))
+
     summary_lines = [
         f"Parsed findings: `{len(findings)}`",
         f"Inline comments posted: `{posted}`",
@@ -441,7 +496,7 @@ def post_findings(args: argparse.Namespace) -> int:
     summary_lines.extend(["", *snippet("OpenCode stdout", stdout), *snippet("OpenCode stderr", stderr)])
     append_summary(args.summary, "OpenCode review", summary_lines)
     print(f"Posted {posted} OpenCode inline comments; preserved {fallback_included} fallback findings.")
-    return 0 if posted_fallback else 1
+    return 0 if posted_fallback and posted_terminal_review else 1
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -63,7 +63,7 @@ Every delegated assignment must contain:
 
 ```text
 Role: <architect | implementer | test-engineer | qa | code-review | security-auditor |
-       simplify | verify | pr-poller>
+       simplify | verify | pr-poller | spark-explorer | spark-implementer>
 Objective: <one bounded outcome>
 Inputs: <task/spec/plan paths and relevant context>
 Owned files: <specific paths or narrow search targets>
@@ -81,6 +81,12 @@ Constraints:
 - Do not spawn subagents.
 ```
 
+Pass a compact **handoff capsule** to a follow-up worker instead of the parent
+transcript or pasted full specs. Include only: intent/acceptance; base and head
+SHA when applicable; changed files and entry points; named spec/ADR sections;
+risk tags; exact targeted commands/results; and uncertainties. Link the paths
+and named sections the worker must read.
+
 Workers share a mutable checkout unless the runtime explicitly provides an
 isolated worktree. Run them sequentially by default. Parallelize only when
 their owned files do not overlap and neither worker changes shared schemas,
@@ -94,16 +100,80 @@ The planner inherits the strong model selected by the user. Platform mirrors
 pin workers by role:
 
 - Balanced workers: implementation, tests, QA, simplification.
-- Cheap workers: polling and mechanical verification where the platform has a
-  suitable lower-cost model.
+- Cheap workers: polling, including Codex `pr-poller` on Luna/low.
+- Codex `verify` is pinned to GPT-5.3-Codex-Spark/medium for deterministic
+  mechanical verification; this uses Spark's separate quota while
+  `pr-poller` remains the cheap polling role.
 - Frontier workers: architecture, security, and deep code review only.
+- Spark is a Codex-only, opt-in specialist tier: use `spark-explorer` for
+  bounded read-only evidence gathering and `spark-implementer` only for
+  explicit, localized low-risk UI or code edits. It does not replace the
+  balanced, frontier, or cheap tiers outside the Codex `verify` exception, and
+  is not for polling, architecture, security, or deep review.
 
 Do not omit a worker model when omission inherits the planner's model, except
 for OpenCode where this repository intentionally keeps provider choice
 inherited.
 
-## Completion
+## Evidence, Risk Routing, And Completion
+
+The planner derives risk tags from the union of worker reports and its own
+inspection. Use `localized`, `user-flow`, `integration`, `public-contract`,
+`persistence`, `concurrency`, `security`, and `architecture`. An uncertainty
+uses the stronger applicable gate.
+
+| Evidence or risk | Required route |
+| --- | --- |
+| Routine `localized` work | Semantic-review evidence and final `verify`. |
+| `user-flow` with faithful targeted E2E/tests and no integration boundary | Semantic-review evidence and final `verify`; record why QA is skipped. |
+| `integration`, `public-contract`, `persistence`, `concurrency`, important error/recovery behavior, cross-component wiring, or missing faithful independent behavior evidence | `qa`, semantic-review evidence, and final `verify`. |
+| `architecture`, cross-cutting change, or stale, conflicting, incomplete, or unavailable external review evidence | Local frontier `code-review`, plus the applicable QA and final `verify` gates. |
+| `security` | `security-auditor`, local frontier `code-review` when otherwise required, applicable QA, and final `verify`. Generic PR AI review never replaces security audit. |
+
+Semantic-review evidence is either local `code-review` or one qualifying AI PR
+review for routine/non-high-risk work. A qualifying external review: names the
+selected/configured reviewer; has known, complete review and head evidence with
+matching PR-view checks/opening/closing SHA and a complete check snapshot; has
+an API review `commit_id` exactly equal to the stable evidence head (timestamps
+never prove head coverage); is an APPROVED
+review without a blocker signal or a COMMENTED review with the explicit
+`<!-- kandev-review: clean -->` terminal marker; covers changed code and tests;
+for the configured dedicated `${OPENCODE_REVIEW_APP_SLUG}[bot]` OpenCode App, require emitted `trusted_producer=true` on that COMMENTED exact-head record; its raw predicate binds the dedicated-App marker and fixed workflow/run-attempt API, and displayed check names never qualify, so unrelated Actions reviews cannot qualify;
+other explicitly selected reviewers retain the generic exact-head eligibility and blocker gates without App provenance;
+and has no active `CHANGES_REQUESTED`, unresolved blocker, actionable review
+thread, or blocked exact-current-head review from any author. Dismissed,
+pending, unknown, blocked, or ambiguous commented reviews
+never qualify. Do not wait for every configured bot, but do not ignore any
+actionable finding that has arrived. A head change makes prior PR review stale.
+Without a PR, selected reviewer, or complete exact-current-head evidence,
+launch local `code-review`.
+
+`qa` is not universal. Require it when acceptance crosses a meaningful
+integration boundary or the risk matrix says independent behavior evidence is
+needed. It may be skipped only for localized work fully covered by faithful
+targeted tests/E2E with no such tag; record the decision and reason.
 
 The planner accepts a worker result only after checking that its file scope,
 acceptance criteria, and reported verification match the assignment. Any
-follow-up fix is a new worker assignment, not planner execution.
+follow-up remains a bounded worker assignment, not planner execution. Reuse
+the same native agent thread for remediation or re-review when role, change,
+and file scope remain materially the same. Spawn a fresh thread after a major
+redesign, unrelated scope, stale/noisy context, or when independent judgment
+is specifically needed.
+
+The planner's acceptance check is not a substitute for a required quality
+gate. Keep responsibilities separate:
+
+- The planner checks assignment scope, acceptance criteria, and evidence.
+- `code-review` or qualifying PR AI evidence performs semantic diff review.
+- `qa` challenges integrated behavior and edge cases when risk requires it.
+- `verify` mechanically runs the required format, typecheck, test, and lint
+  commands.
+
+For every final remediation affecting code, tests, or config, final `verify`
+is mandatory. Route each finding to a bounded implementer packet, rerun only
+the affected semantic/QA/security checks, and always run final `verify` again.
+PR AI evidence must cover the new head. A focused affected-scenario QA rerun
+is sufficient when it covers the changed risk; do not require a fresh full QA
+pass. Simplification, when used, happens before semantic review so its edits
+are covered.

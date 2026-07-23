@@ -42,17 +42,39 @@ Guidelines:
 - `tools`: smallest sufficient set.
 - `model`: use the current role tier. Claude uses `opus` for
   architecture/security/deep review and `sonnet` for other workers. Codex uses
-  GPT-5.6 Sol, Terra, and Luna for frontier, balanced, and cheap roles. Cursor
-  uses Grok 4.5 for frontier review and Composer 2.5 for normal workers.
+  GPT-5.6 Sol, Terra, and Luna for frontier, balanced, and cheap roles. Codex
+  may additionally use GPT-5.3-Codex-Spark as an opt-in specialist tier, not
+  a replacement for those tiers: read-only bounded exploration or explicit
+  localized low-risk implementation. Codex `verify` is the sole exception:
+  pin it to Spark/medium for deterministic mechanical verification, while
+  `pr-poller` remains Luna/low. Spark is not for polling, architecture,
+  security, or deep review. Cursor uses Grok 4.5 for frontier review and
+  Composer 2.5 for normal workers.
   OpenCode intentionally inherits the configured provider in this repository.
 - `effort`: reasoning depth for Claude source agents; map to Codex
   `model_reasoning_effort` where supported. Kandev role mapping:
   - `high`: `architect`, `code-review`, `security-auditor`
   - `medium`: `implementer`, `test-engineer`, `qa`, `simplify`
   - `low`: `verify`, `pr-poller`
+
+  The list above remains the semantic tier mapping for non-Codex platforms.
+  Codex alone pins its existing `verify` agent to GPT-5.3-Codex-Spark at medium
+  effort; `pr-poller` remains Luna/low.
 - `permissionMode`: read-only/review roles should not accept edits; implementers can accept edits.
 - `skills`: preload only the minimum domain skills needed.
 - Body: input required, workflow, output contract, stop conditions, and "Do not spawn subagents" unless nested delegation is intentional.
+
+Codex-specific Spark roles:
+
+- `spark-explorer`: GPT-5.3-Codex-Spark, medium effort, read-only. Limit it to
+  bounded exploration, call-path tracing, and evidence gathering; explicitly
+  forbid architecture, security, final review, implementation, and edits.
+- `spark-implementer`: GPT-5.3-Codex-Spark, medium effort, workspace-write.
+  Limit it to targeted UI changes or localized low-risk edits with explicit
+  acceptance and exact verification. Require tests/verification and stop for
+  ambiguity, cross-subsystem work, auth/security/workspace isolation,
+  concurrency, persistence/migrations, process/filesystem execution, public
+  contracts, or architectural changes.
 
 ## Platform Choice
 

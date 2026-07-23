@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Verify integrated Kandev work after implementation. Use after spec-driven task waves or before PRs to check wiring, behavior, edge cases, test coverage, and readiness.
+description: Independently verify integration, public-contract, persistence, concurrency, recovery, cross-component, or insufficiently evidenced Kandev changes.
 tools: Bash, Read, Grep, Glob
 model: sonnet
 effort: medium

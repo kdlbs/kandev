@@ -1,5 +1,5 @@
 ---
-description: Verify integrated Kandev work after implementation by tracing wiring, testing happy paths, breaking edge cases, and checking coverage/readiness.
+description: Independently verify Kandev changes with integration, public-contract, persistence, concurrency, recovery, cross-component, or missing faithful behavior evidence.
 mode: subagent
 temperature: 0.1
 permission:

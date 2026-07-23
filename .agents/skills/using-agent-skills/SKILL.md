@@ -36,11 +36,11 @@ Task arrives
 |-- Seed isolated product demo data? -------> /product-demo-seeding
 |-- Record landing/product media? ----------> /product-demo-seeding -> /product-video-capture (always in that order)
 |-- Frontend/UI change? --------------------> /mobile-parity plus /e2e as needed
-|-- Security-sensitive change? -------------> security-auditor subagent plus /code-review
+|-- Security-sensitive change? -------------> security-auditor plus risk-routed local code-review
 |-- Test strategy or coverage gaps? --------> test-engineer subagent plus /tdd or /e2e
 |-- Add debug logs? ------------------------> /debug
 |-- Add Jira/Linear-style integration? -----> /add-integration
-|-- Verify implemented behavior? -----------> /qa then /verify
+|-- Verify implemented behavior? -----------> risk-routed /qa plus mandatory /verify
 |-- Simplify recent code? ------------------> /simplify
 |-- Review code? ---------------------------> /code-review
 |-- Improve skills/agents/commands? --------> /harness-improvement

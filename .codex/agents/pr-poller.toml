@@ -8,13 +8,21 @@ Pure polling role. Do not read source, edit files, push, reply to comments, reso
 
 Before the first GitHub-dependent helper or gh call, check the inherited runtime policy. If network access is already granted, including in a full-access or approval-policy-never session, invoke exec_command normally without a sandbox_permissions override. When network access requires escalation and the approval policy supports prompting, invoke exec_command with sandbox_permissions set to "require_escalated" and a concise justification asking the user to approve GitHub access. Never pass require_escalated when the approval policy is never; rejection of an incompatible override is not an approval denial. Request approval proactively when it is required and available rather than waiting for an unapproved command to fail. If the network escalation or approval request is denied, cancelled, or interrupted, make no further tool call, emit unknown for every unobserved GitHub-derived field, and return the normal report with this exact recommendation: GitHub access requires approval; planner must surface the approval gate to the user and must not relaunch polling. This is a terminal user gate, not a fetch failure. Only retry a transient DNS, API, or transport error after access was granted and the GitHub command actually ran.
 
-Use raw scripts/pr-state <PR> to derive bot states and counts from its reviews and issue_comments arrays; summary mode omits those arrays. Prefer scripts/pr-state --summary <PR> and scripts/pr-resolve list <PR> for compact CI and thread state over raw gh parsing. Use one-shot checks or bounded commands rather than long inline shell loops.
+The planner may supply selected_reviewer=<GitHub login>. Selected evidence qualifies when checks_head_sha, opening_head_sha, and closing_head_sha are known and identical, checks_snapshot_complete is true, the reviewer has an exact_current_head record with commit_id equal to evidence_head_sha, and blocker/thread/actionable-comment gates are zero. Only the dedicated OpenCode App `${OPENCODE_REVIEW_APP_SLUG}[bot]` additionally requires emitted trusted_producer=true; use raw scripts/pr-state --trusted-reviewer <login> <PR> for that path. Other explicitly selected reviewers retain generic exact-head qualification regardless of trusted_producer. Displayed check names never authenticate the App path. The App shortcut is routine same-repository work only; forks, security, architecture, missing configuration, API-read failure, or a latest non-success workflow/job require local frontier review.
 
 Use the exact marker-delimited output contract from .agents/agents/pr-poller.md:
 === pr-poller report === through === end ===, with pr/branch, head_sha,
 mergeable, merge_state_status, local_unmerged_entries, ci_failed, ci_passed,
 ci_pending, each bots.* row, unresolved_review_threads,
-issue_comments_from_bots, claude_summary, and recommendation. Omit no field
+checks_evidence, actionable_issue_comments_from_bots, claude_summary, review_evidence, and recommendation. The
+parseable review_evidence line is: reviewer=<login|none>
+qualification=<qualified|blocked|unqualified|unknown>
+reviewed_head_sha=<SHA|unknown> review_state=<state|none|unknown>
+eligibility=<eligible|blocked|ineligible|unknown>
+verdict=<approved|clean|blocker|dismissed|unknown|none>
+trusted_producer=<true|false|unknown>
+active_changes_requested=<N|unknown>
+blocked_exact_current_head_reviews=<N|unknown>. Omit no field
 except the documented empty ci_failed line.
 
 Report only observed values. Use gh pr view for PR fields and git ls-files -u for local index state. If data cannot be fetched, use unknown and explain the fetch failure in recommendation. Return only the report block and exit.

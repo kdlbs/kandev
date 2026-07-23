@@ -16,8 +16,11 @@ test, integrate, verify, or ship code. Workers do not spawn other workers.
 - **`architect`** - optional frontier-model design reviewer for unusually risky architecture; it is not the default planner.
 - **`implementer`** - implements one assigned task with TDD in the current worktree or an assigned git worktree.
 - **`test-engineer`** - designs or adds focused tests when coverage is unclear, a bug needs a Prove-It regression, or a task is test-heavy.
-- **`qa`** - validates integrated waves against the spec/plan, checks wiring, tests edge cases, and reports readiness.
+- **`qa`** - risk-triggered independent validation for integration boundaries, wiring, and edge cases.
+- **`code-review`** - local frontier semantic review when required by `/planner-orchestration`; qualifying current-head PR AI evidence may cover routine work.
 - **`security-auditor`** - reviews security-sensitive changes such as auth, workspace isolation, filesystem/process execution, integrations, webhooks, secrets, or agent/tool permissions.
+- **`spark-explorer`** - Codex-only opt-in read-only specialist for bounded call-path tracing and evidence gathering; never use it for architecture, security, final review, implementation, or edits.
+- **`spark-implementer`** - Codex-only opt-in specialist for explicit localized low-risk UI or code edits; use the normal implementer for work outside its stop conditions.
 
 If a required worker cannot be launched, stop and report the unavailable role.
 Never execute that worker's phase in the planner session.
@@ -25,7 +28,7 @@ Never execute that worker's phase in the planner session.
 ## Core Flow
 
 ```text
-Intent -> Planner artifacts -> User approval -> Workers by wave -> QA -> Verify -> Report
+Intent -> Planner artifacts -> User approval -> Workers by wave -> Risk-routed evidence -> Verify -> Report
 ```
 
 Do not skip from intent to code unless the user explicitly asks to bypass the process.
@@ -125,7 +128,7 @@ Each task needs:
 - **Verification:** exact targeted command(s).
 - **Files:** specific paths, not broad directories.
 - **Inputs:** spec section, plan section, relevant patterns, and dependencies.
-- **Output contract:** summary of changes, tests run, files touched, blockers, and follow-up risks.
+- **Output contract:** compact handoff capsule: intent/acceptance; base/head SHA when applicable; changed files and entry points; named spec/ADR sections; risk tags; exact targeted commands/results; uncertainties.
 - **Dependencies:** task IDs that must complete first, or `None`.
 
 Independence test:
@@ -190,7 +193,12 @@ For each task:
   `plan.md` unless the work packet explicitly owns that shared file and the
   update is serialized outside parallel execution.
 
-Assign every independent task to an `implementer` worker. Launch implementers in parallel only for tasks in the same wave that do not share mutable files. Use this prompt shape:
+Assign every independent task to the normal `implementer` worker by default.
+Codex may use `spark-implementer` only for an explicit, localized low-risk UI
+or code edit when none of its documented stop conditions apply; if there is
+doubt, use the normal `implementer`. Keep the same file-ownership, wave, TDD,
+and output rules for either role. Launch workers in parallel only for tasks in
+the same wave that do not share mutable files. Use this prompt shape:
 
 ```text
 Task: <title>
@@ -208,7 +216,9 @@ Constraints:
 - Update only the assigned task file; do not edit `plan.md` without explicit,
   serialized shared-plan ownership.
 Output:
-- Summary, files changed, tests run, blockers, risks, and task file status update.
+- Compact handoff capsule (intent/acceptance; base/head SHA when applicable;
+  changed files/entry points; named spec/ADR sections; risk tags; exact
+  targeted commands/results; uncertainties) and task file status update.
 ```
 
 The planner coordinates waves and keeps progress state. Conflict resolution,
@@ -217,18 +227,39 @@ assignments. The planner never handles them inline.
 
 ## Phase 7: Integrate And Verify
 
+Per-task versus per-wave checks are distinct:
+
+- Each assigned `implementer` or `spark-implementer` owns and runs its task's
+  targeted verification. The planner checks the reported evidence; it does not
+  duplicate those tests after every wave.
+- Derive risk tags from worker reports plus planner inspection and apply the
+  `/planner-orchestration` evidence contract. Delegate per-wave `qa` when its
+  risk criteria require independent behavior evidence; record a QA skip and
+  reason for fully covered localized work.
+
 After each wave:
-- Delegate targeted tests for changed backend packages or frontend modules.
 - Delegate conflict resolution and rerun affected tests through an implementer.
 - Update the plan if the task files or wave graph changed.
 
 At the end:
 - Run the `test-engineer` worker when coverage is disputed, missing, or hard to place at the right test level.
-- Run the `qa` worker for integration and behavior verification.
-- Run the `security-auditor` subagent for security-sensitive changes before declaring readiness.
 - Run the `simplify` worker if implementation grew speculative abstractions.
-- Run the `verify` worker for full format, typecheck, tests, and lint.
+- Obtain semantic-review evidence after simplification: local `code-review` for architecture/cross-cutting risk or unavailable, stale, conflicting, or incomplete external evidence; otherwise a qualifying current-head PR AI review may satisfy routine work.
+- Run `qa` only when the central risk criteria require it; record any skip and reason.
+- Run `security-auditor` before declaring readiness when changes are security-sensitive; PR AI review does not replace it.
+- Run mandatory final `verify` for full format, typecheck, tests, and lint.
 - Use `/record` for ADR/spec updates if implementation discovered a durable decision or behavior change.
+
+When PR delivery is in scope, PR AI review may be deferred, but do not claim
+readiness until qualifying current-head semantic-review evidence exists.
+
+Route every review, QA, security, or verification finding to a new bounded
+implementer packet. Reuse the same native thread when its role, change, and
+file scope remain materially the same; otherwise launch a fresh worker for
+independent judgment or stale/noisy context. Rerun only affected semantic,
+QA, and security checks after remediation, require PR AI evidence for the new
+head, and always run final `verify`; the planner's acceptance check is not a
+substitute for these gates.
 
 ## Stop Conditions
 
@@ -246,4 +277,5 @@ Report:
 - Task waves completed and any tasks left.
 - Subagent/worktree branches used, if any.
 - Tests and verification commands run.
+- Semantic-review evidence, risk tags, and QA decision/reason.
 - Known pending checks or risks.
