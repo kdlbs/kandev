@@ -141,7 +141,7 @@ func (s *Service) findExistingSession(ctx context.Context, taskID string) *Ensur
 // not here — keeping findExistingSession a pure lookup.)
 func (s *Service) findOfficeSessionForResume(ctx context.Context, taskID string) *EnsureSessionResponse {
 	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil || task.AssigneeAgentProfileID == "" {
+	if err != nil || !task.IsOfficeOwnedAndAssigned() {
 		return nil
 	}
 	agentID := s.agentForViewer(ctx, task)

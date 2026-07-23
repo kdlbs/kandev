@@ -74,15 +74,18 @@ func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing
 	tests := []struct {
 		name           string
 		officeAssignee string
+		isFromOffice   bool
 		metadata       map[string]interface{}
 		wantMode       string
 	}{
 		{name: "regular task", wantMode: ""},
-		{name: "Office task", officeAssignee: "office-agent", wantMode: McpModeOffice},
+		{name: "Kanban task with runner", officeAssignee: "office-agent", wantMode: ""},
+		{name: "Office task", officeAssignee: "office-agent", isFromOffice: true, wantMode: McpModeOffice},
 		{name: "Config session", metadata: map[string]interface{}{"config_mode": true}, wantMode: McpModeConfig},
 		{
 			name:           "Config session takes precedence for Office task",
 			officeAssignee: "office-agent",
+			isFromOffice:   true,
 			metadata:       map[string]interface{}{"config_mode": true},
 			wantMode:       McpModeConfig,
 		},
@@ -93,6 +96,7 @@ func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing
 			repo := newMockRepository()
 			setupLiveResumeTestFixture(repo)
 			repo.tasks["task-1"].AssigneeAgentProfileID = tt.officeAssignee
+			repo.tasks["task-1"].IsFromOffice = tt.isFromOffice
 			repo.sessions["sess-1"].Metadata = tt.metadata
 
 			var capturedReq *LaunchAgentRequest
@@ -114,6 +118,21 @@ func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing
 				t.Fatalf("McpMode = %q, want %q", capturedReq.McpMode, tt.wantMode)
 			}
 		})
+	}
+}
+
+func TestWriteTaskInProgressForRuntime_KanbanRunnerUpdatesTaskState(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.tasks["task-1"].AssigneeAgentProfileID = "copilot-runner"
+	repo.sessions["sess-1"].State = models.TaskSessionStateRunning
+
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	if err := exec.writeTaskInProgressForRuntime(context.Background(), "task-1", "sess-1"); err != nil {
+		t.Fatalf("writeTaskInProgressForRuntime: %v", err)
+	}
+	if len(repo.updateTaskStateIfNotArchivedCalls) != 1 {
+		t.Fatalf("runtime state writes = %d, want 1", len(repo.updateTaskStateIfNotArchivedCalls))
 	}
 }
 

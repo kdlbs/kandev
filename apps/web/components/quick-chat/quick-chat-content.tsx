@@ -154,7 +154,7 @@ export const QuickChatContent = memo(function QuickChatContent({
   useEffect(() => {
     if (!initialPrompt || !taskId || initialPromptSentFor.current === sessionId) return;
     initialPromptSentFor.current = sessionId;
-    handleSubmit(initialPrompt);
+    handleSubmit({ message: initialPrompt });
     onInitialPromptSent?.();
   }, [initialPrompt, taskId, handleSubmit, onInitialPromptSent, sessionId]);
 

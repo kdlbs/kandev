@@ -1,5 +1,35 @@
-import { describe, it, expect } from "vitest";
-import { QueueFullError, QueueEntryNotFoundError, rethrowQueueError } from "./queue-api";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import type { EntityReference } from "@/lib/types/entity-reference";
+
+const getWebSocketClientMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: getWebSocketClientMock,
+}));
+
+import {
+  QueueFullError,
+  QueueEntryNotFoundError,
+  queueMessage,
+  rethrowQueueError,
+  updateQueuedMessage,
+} from "./queue-api";
+
+const reference: EntityReference = {
+  version: 1,
+  ref: "mention:v1:github:issue:acme%2Frepo:42",
+  provider: "github",
+  kind: "issue",
+  id: "42",
+  key: "acme/repo#42",
+  title: "Fix composer references",
+  url: "https://github.com/acme/repo/issues/42",
+  scope: "acme/repo",
+};
+
+beforeEach(() => {
+  getWebSocketClientMock.mockReset();
+});
 
 describe("rethrowQueueError", () => {
   it("maps queue_full errors to QueueFullError carrying the cap metadata", () => {
@@ -78,5 +108,63 @@ describe("rethrowQueueError", () => {
     }
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).toBe("just a string");
+  });
+});
+
+describe("queue reference payloads", () => {
+  it("forwards entity references through message.queue.add", async () => {
+    const request = vi.fn().mockResolvedValue({ id: "q-1" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await queueMessage({
+      session_id: "session-1",
+      task_id: "task-1",
+      content: "queued reference",
+      entity_references: [reference],
+    });
+
+    expect(request).toHaveBeenCalledWith("message.queue.add", {
+      session_id: "session-1",
+      task_id: "task-1",
+      content: "queued reference",
+      entity_references: [reference],
+    });
+  });
+
+  it("sends an explicit empty reference array when replacing a queued message", async () => {
+    const request = vi.fn().mockResolvedValue({ entry_id: "q-1" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await updateQueuedMessage({
+      session_id: "session-1",
+      entry_id: "q-1",
+      content: "reference removed",
+    } as never);
+
+    expect(request).toHaveBeenCalledWith("message.queue.update", {
+      session_id: "session-1",
+      entry_id: "q-1",
+      content: "reference removed",
+      entity_references: [],
+    });
+  });
+
+  it("forwards surviving references through message.queue.update", async () => {
+    const request = vi.fn().mockResolvedValue({ entry_id: "q-1" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await updateQueuedMessage({
+      session_id: "session-1",
+      entry_id: "q-1",
+      content: "reference kept",
+      entity_references: [reference],
+    });
+
+    expect(request).toHaveBeenCalledWith("message.queue.update", {
+      session_id: "session-1",
+      entry_id: "q-1",
+      content: "reference kept",
+      entity_references: [reference],
+    });
   });
 });

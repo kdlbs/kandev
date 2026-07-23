@@ -431,19 +431,55 @@ func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID stri
 }
 
 func (r *sqliteRepository) UpdateContent(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
+	return r.UpdateContentAndMetadata(ctx, sessionID, entryID, content, attachments, nil, queuedBy)
+}
+
+func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
 	attachmentsJSON, err := marshalAttachments(attachments)
 	if err != nil {
 		return err
 	}
-	var query string
-	args := []interface{}{content, attachmentsJSON, entryID, sessionID}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin update queued tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var selectQuery string
+	selectArgs := []interface{}{entryID, sessionID}
 	if queuedBy != "" {
-		query = `UPDATE queued_messages SET content = ?, attachments_json = ? WHERE id = ? AND session_id = ? AND queued_by = ?`
+		selectQuery = `SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ? AND queued_by = ?`
+		selectArgs = append(selectArgs, queuedBy)
+	} else {
+		selectQuery = `SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?`
+	}
+	var metadataJSON string
+	if err := tx.GetContext(ctx, &metadataJSON, r.db.Rebind(selectQuery), selectArgs...); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrEntryNotFound
+		}
+		return fmt.Errorf("read queued metadata: %w", err)
+	}
+	var metadata map[string]interface{}
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			return fmt.Errorf("unmarshal queued metadata: %w", err)
+		}
+	}
+	metadataJSON, err = marshalMetadata(applyMetadataUpdates(metadata, metadataUpdates))
+	if err != nil {
+		return err
+	}
+
+	var updateQuery string
+	args := []interface{}{content, attachmentsJSON, metadataJSON, entryID, sessionID}
+	if queuedBy != "" {
+		updateQuery = `UPDATE queued_messages SET content = ?, attachments_json = ?, metadata_json = ? WHERE id = ? AND session_id = ? AND queued_by = ?`
 		args = append(args, queuedBy)
 	} else {
-		query = `UPDATE queued_messages SET content = ?, attachments_json = ? WHERE id = ? AND session_id = ?`
+		updateQuery = `UPDATE queued_messages SET content = ?, attachments_json = ?, metadata_json = ? WHERE id = ? AND session_id = ?`
 	}
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	res, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), args...)
 	if err != nil {
 		return fmt.Errorf("update queued: %w", err)
 	}
@@ -454,7 +490,7 @@ func (r *sqliteRepository) UpdateContent(ctx context.Context, sessionID, entryID
 	if n == 0 {
 		return ErrEntryNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *sqliteRepository) DeleteByID(ctx context.Context, sessionID, entryID string) error {

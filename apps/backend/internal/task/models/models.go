@@ -64,6 +64,24 @@ type SearchMessagesOptions struct {
 	Limit int
 }
 
+// PluginMessageFilter defines the filters for the plugin Host data API's
+// message reader (ADR 0047). SessionIDs and TaskIDs narrow by session/task
+// (ORed within each, ANDed across the two — a message must match any
+// requested session AND any requested task when both are set); empty means
+// unconstrained on that axis. Since/Until bound created_at (Since inclusive,
+// Until exclusive); nil means unbounded. Types narrows by message type; empty
+// means all types. Results are ordered oldest-first by (created_at, id) with
+// SQL Limit/Offset pagination.
+type PluginMessageFilter struct {
+	SessionIDs []string
+	TaskIDs    []string
+	Types      []string
+	Since      *time.Time
+	Until      *time.Time
+	Limit      int
+	Offset     int
+}
+
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
@@ -453,6 +471,13 @@ type Task struct {
 	// tasks always come back false. UI callers gate office-only surfaces on
 	// this (e.g. the "Open in office view" topbar link).
 	IsFromOffice bool `json:"is_from_office,omitempty"`
+}
+
+// IsOfficeOwnedAndAssigned reports whether runtime behavior belongs to an
+// Office-owned task with a designated runner. Kanban tasks may also project a
+// runner from their workflow step, but retain normal per-session semantics.
+func (t *Task) IsOfficeOwnedAndAssigned() bool {
+	return t != nil && t.IsFromOffice && t.AssigneeAgentProfileID != ""
 }
 
 // ChildCompletionRow is the compact active-child projection used to decide

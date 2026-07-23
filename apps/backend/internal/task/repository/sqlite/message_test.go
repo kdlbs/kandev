@@ -247,3 +247,103 @@ func TestGetPendingActionsBySessionIDs(t *testing.T) {
 		t.Fatalf("sess-missing should not have a pending action: %#v", got["sess-missing"])
 	}
 }
+
+// insertPluginMsg inserts a fully-specified message row (task_id, type,
+// author, content, created_at all controllable) for ListMessagesForPlugin
+// filter tests.
+func insertPluginMsg(t *testing.T, repo *Repository, id, sessionID, taskID, turnID, authorType, msgType, content string, ts time.Time) {
+	t.Helper()
+	_, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_session_messages
+			(id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at)
+		VALUES (?, ?, ?, ?, ?, '', ?, 0, ?, '{}', ?)
+	`), id, sessionID, taskID, turnID, authorType, content, msgType, ts)
+	if err != nil {
+		t.Fatalf("insert plugin message %s: %v", id, err)
+	}
+}
+
+func TestListMessagesForPlugin(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+
+	seedForMsgTest(t, repo, "task-A", "sess-A", "turn-A")
+	seedForMsgTest(t, repo, "task-B", "sess-B", "turn-B")
+
+	// sess-A / task-A: three messages across three days.
+	insertPluginMsg(t, repo, "a1", "sess-A", "task-A", "turn-A", "user", "message", "day one", base)
+	insertPluginMsg(t, repo, "a2", "sess-A", "task-A", "turn-A", "agent", "message", "day two", base.Add(24*time.Hour))
+	insertPluginMsg(t, repo, "a3", "sess-A", "task-A", "turn-A", "agent", "thinking", "day three", base.Add(48*time.Hour))
+	// sess-B / task-B: one message on day one.
+	insertPluginMsg(t, repo, "b1", "sess-B", "task-B", "turn-B", "user", "message", "other session", base)
+
+	t.Run("by session id", func(t *testing.T) {
+		got, err := repo.ListMessagesForPlugin(ctx, models.PluginMessageFilter{SessionIDs: []string{"sess-A"}})
+		if err != nil {
+			t.Fatalf("ListMessagesForPlugin: %v", err)
+		}
+		if len(got) != 3 || got[0].ID != "a1" || got[2].ID != "a3" {
+			t.Fatalf("got %d messages ordered %v, want a1,a2,a3", len(got), ids(got))
+		}
+	})
+
+	t.Run("by task id", func(t *testing.T) {
+		got, err := repo.ListMessagesForPlugin(ctx, models.PluginMessageFilter{TaskIDs: []string{"task-B"}})
+		if err != nil {
+			t.Fatalf("ListMessagesForPlugin: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "b1" {
+			t.Fatalf("got %v, want [b1]", ids(got))
+		}
+	})
+
+	t.Run("time range excludes out-of-window", func(t *testing.T) {
+		since := base.Add(24 * time.Hour) // inclusive → a2 kept
+		until := base.Add(48 * time.Hour) // exclusive → a3 dropped
+		got, err := repo.ListMessagesForPlugin(ctx, models.PluginMessageFilter{
+			SessionIDs: []string{"sess-A"}, Since: &since, Until: &until,
+		})
+		if err != nil {
+			t.Fatalf("ListMessagesForPlugin: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "a2" {
+			t.Fatalf("got %v, want [a2] (since inclusive, until exclusive)", ids(got))
+		}
+	})
+
+	t.Run("type filter", func(t *testing.T) {
+		got, err := repo.ListMessagesForPlugin(ctx, models.PluginMessageFilter{Types: []string{"thinking"}})
+		if err != nil {
+			t.Fatalf("ListMessagesForPlugin: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "a3" {
+			t.Fatalf("got %v, want [a3]", ids(got))
+		}
+	})
+
+	t.Run("limit and offset paginate in order", func(t *testing.T) {
+		page1, err := repo.ListMessagesForPlugin(ctx, models.PluginMessageFilter{SessionIDs: []string{"sess-A"}, Limit: 2, Offset: 0})
+		if err != nil {
+			t.Fatalf("page1: %v", err)
+		}
+		if len(page1) != 2 || page1[0].ID != "a1" || page1[1].ID != "a2" {
+			t.Fatalf("page1 = %v, want [a1 a2]", ids(page1))
+		}
+		page2, err := repo.ListMessagesForPlugin(ctx, models.PluginMessageFilter{SessionIDs: []string{"sess-A"}, Limit: 2, Offset: 2})
+		if err != nil {
+			t.Fatalf("page2: %v", err)
+		}
+		if len(page2) != 1 || page2[0].ID != "a3" {
+			t.Fatalf("page2 = %v, want [a3]", ids(page2))
+		}
+	})
+}
+
+func ids(msgs []*models.Message) []string {
+	out := make([]string, len(msgs))
+	for i, m := range msgs {
+		out[i] = m.ID
+	}
+	return out
+}

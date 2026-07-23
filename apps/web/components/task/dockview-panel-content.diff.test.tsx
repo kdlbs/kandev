@@ -44,6 +44,7 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 import { renderPanel } from "./dockview-panel-content";
+import { renderPanel as renderSharedPanel } from "./dockview-shared";
 
 describe("dockview diff panel content", () => {
   it("passes repositoryName from panel params into the file-mode diff view", () => {
@@ -54,6 +55,7 @@ describe("dockview diff panel content", () => {
           path: "README.md",
           source: "uncommitted",
           repositoryName: "frontend",
+          prKey: "acme/frontend/42",
         })}
       </>,
     );
@@ -63,6 +65,28 @@ describe("dockview diff panel content", () => {
       filePath: "README.md",
       sourceFilter: "uncommitted",
       fileRepositoryName: "frontend",
+      prKey: "acme/frontend/42",
+    });
+  });
+
+  it("preserves the PR source in the shared dockview renderer", () => {
+    render(
+      <>
+        {renderSharedPanel("preview:file-diff", "diff-viewer", {
+          kind: "file",
+          path: "README.md",
+          source: "pr",
+          repositoryName: "widgets · feat/second",
+          prKey: "acme/widgets/42",
+        })}
+      </>,
+    );
+
+    expect(taskChangesPanel.props).toMatchObject({
+      mode: "file",
+      filePath: "README.md",
+      sourceFilter: "pr",
+      prKey: "acme/widgets/42",
     });
   });
 });

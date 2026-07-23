@@ -49,6 +49,9 @@ export class SessionPage {
   }
 
   // Chat status bar locators
+  appStatusBar() {
+    return this.page.getByTestId("app-status-bar");
+  }
   chatStatusBar() {
     return this.page.getByTestId("chat-status-bar");
   }
@@ -838,6 +841,59 @@ export class SessionPage {
   /** Compact request button in the expanded Review Changes toolbar. */
   reviewRequestWalkthroughButton(): Locator {
     return this.page.getByTestId("review-request-walkthrough");
+  }
+
+  /** Expanded Review dialog shared by the desktop and mobile task layouts. */
+  reviewDialog(): Locator {
+    return this.page.getByRole("dialog", { name: "Review Changes" });
+  }
+
+  /** Current-PR trigger rendered in Review when the task has multiple PRs. */
+  reviewPRSelectorTrigger(): Locator {
+    return this.page.getByTestId("review-pr-selector-trigger");
+  }
+
+  /** Portaled PR selector menu; intentionally page-scoped rather than dialog-scoped. */
+  reviewPRSelectorMenu(): Locator {
+    return this.page.getByTestId("review-pr-selector-menu");
+  }
+
+  /** One PR choice in the expanded Review selector. */
+  reviewPRSelectorItem(owner: string, repo: string, prNumber: number): Locator {
+    return this.page.getByTestId(`review-pr-selector-item-${owner}-${repo}-${prNumber}`);
+  }
+
+  /** Sticky diff header for one file in the expanded Review dialog. */
+  reviewFileHeader(path: string): Locator {
+    return this.reviewDialog().locator(
+      `[data-testid="review-file-header"][data-file-path=${JSON.stringify(path)}]`,
+    );
+  }
+
+  /**
+   * Read visible Review diff text from @pierre/diffs shadow roots.
+   *
+   * Dockview can leave hidden diff surfaces mounted, so scope to the active
+   * Review dialog and ignore zero-size/hidden containers before reading them.
+   */
+  async reviewDiffText(): Promise<string> {
+    return this.reviewDialog().evaluate((dialog) => {
+      const visibleContainers = Array.from(dialog.querySelectorAll("diffs-container")).filter(
+        (container) => {
+          const bounds = container.getBoundingClientRect();
+          const style = window.getComputedStyle(container);
+          return (
+            bounds.width > 0 &&
+            bounds.height > 0 &&
+            style.display !== "none" &&
+            style.visibility !== "hidden"
+          );
+        },
+      );
+      return visibleContainers
+        .map((container) => container.shadowRoot?.textContent ?? "")
+        .join("\n");
+    });
   }
 
   walkthroughLauncher(): Locator {

@@ -6,10 +6,10 @@ import { useResizableInput } from "@/hooks/use-resizable-input";
 import { useChatInputState } from "./use-chat-input-state";
 import type { TipTapInputHandle } from "./tiptap-input";
 import type { ContextItem } from "@/lib/types/context";
-import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
 import type {
+  ChatSubmitPayload,
   ChatSubmitResult,
   MessageAttachment,
   ChatInputContainerHandle,
@@ -42,13 +42,7 @@ type UseChatInputContainerParams = {
   hasContextComments: boolean;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss: (() => void) | undefined;
-  onSubmit: (
-    message: string,
-    reviewComments?: DiffComment[],
-    attachments?: MessageAttachment[],
-    inlineMentions?: ContextFile[],
-    inlineTaskMentions?: import("@/hooks/use-inline-mention").TaskMentionData[],
-  ) => ChatSubmitResult;
+  onSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
 };
 
 function useInputHandle(

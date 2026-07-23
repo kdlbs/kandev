@@ -216,6 +216,75 @@ func TestPluginHostData_Wire_PermissionDeniedPerResource(t *testing.T) {
 	})
 }
 
+// TestPluginHostData_Wire_Messages proves the api_read:messages gate and the
+// content sanitization travel intact over the real transport: an undeclared
+// manifest is denied with the exact wire message, and a declared one reads
+// back conversation content with <kandev-system> blocks stripped.
+func TestPluginHostData_Wire_Messages(t *testing.T) {
+	t.Run("DeniedWithoutCapability", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{})
+		host := dialPluginHostOverWire(t, d.host)
+
+		_, _, err := host.Messages().List(context.Background(), pluginsdk.MessageFilter{}, pluginsdk.Page{})
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok, "expected a gRPC status error, got %v", err)
+		require.Equal(t, codes.PermissionDenied, st.Code())
+		require.Equal(t, "capability 'api_read:messages' not declared", st.Message())
+	})
+
+	t.Run("SucceedsAndStripsSystemContent", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{APIRead: []string{"messages"}})
+		d.messages.messages = []*taskmodels.Message{{
+			ID:            "m1",
+			TaskSessionID: "s1",
+			TaskID:        "t1",
+			AuthorType:    taskmodels.MessageAuthorUser,
+			Content:       "<kandev-system>hidden</kandev-system>Visible text.",
+			Type:          taskmodels.MessageTypeMessage,
+			CreatedAt:     time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC),
+		}}
+		host := dialPluginHostOverWire(t, d.host)
+
+		msgs, _, err := host.Messages().List(context.Background(), pluginsdk.MessageFilter{SessionIDs: []string{"s1"}}, pluginsdk.Page{Limit: 10})
+		require.NoError(t, err)
+		require.Len(t, msgs, 1)
+		require.Equal(t, "Visible text.", msgs[0].Content)
+		require.Equal(t, "user", msgs[0].AuthorType)
+	})
+}
+
+// TestPluginHostData_Wire_InvokeUtilityAgent proves the agent_invoke gate and
+// the one-shot completion round-trip over the real transport: an undeclared
+// manifest is PermissionDenied, and a declared one resolves the configured
+// profile and returns the runner's text.
+func TestPluginHostData_Wire_InvokeUtilityAgent(t *testing.T) {
+	t.Run("DeniedWithoutCapability", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{})
+		host := dialPluginHostOverWire(t, d.host)
+
+		_, err := host.InvokeUtilityAgent(context.Background(), "hi")
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok, "expected a gRPC status error, got %v", err)
+		require.Equal(t, codes.PermissionDenied, st.Code())
+		require.Equal(t, "capability 'agent_invoke' not declared", st.Message())
+	})
+
+	t.Run("Succeeds", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
+		d.utilAgents.agent = &UtilityAgent{Name: "summarizer", AgentID: "claude-acp", Model: "claude-opus-4-8", Enabled: true}
+		d.utilRun.text = "summary text"
+		host := dialPluginHostOverWire(t, d.host)
+
+		got, err := host.InvokeUtilityAgent(context.Background(), "summarize")
+		require.NoError(t, err)
+		require.Equal(t, "summary text", got)
+		require.Equal(t, "claude-acp", d.utilRun.gotAgentType)
+		require.Equal(t, "claude-opus-4-8", d.utilRun.gotModel)
+	})
+}
+
 // TestPluginHostData_Wire_SessionsPagination seeds three sessions and drives
 // two Sessions().List calls over the real broker connection: Page{Limit: 2}
 // must return exactly 2 items plus a non-empty PageInfo.NextCursor, and a

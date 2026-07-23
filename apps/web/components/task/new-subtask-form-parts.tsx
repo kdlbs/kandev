@@ -6,6 +6,7 @@ import { DialogFooter } from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { IconGitBranch, IconLoader2 } from "@tabler/icons-react";
+import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { AgentSelector, ExecutorProfileSelector } from "@/components/task-create-dialog-selectors";
 import type {
   useAgentProfileOptions,
@@ -14,6 +15,7 @@ import type {
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import type { useDialogHandlers } from "@/components/task-create-dialog-handlers";
+import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 import type { Repository } from "@/lib/types/http";
 import type { SubtaskWorkspaceMode, useSubtaskFormState } from "./new-subtask-form-state";
 import {
@@ -94,6 +96,7 @@ export function SelectorsRow({
 
 type PromptZoneProps = {
   promptRef: React.RefObject<HTMLTextAreaElement | null>;
+  promptValue: string;
   contextItems: ReturnType<typeof toContextItems>;
   attachments: ReturnType<typeof useDialogAttachments>;
   isCreating: boolean;
@@ -101,12 +104,16 @@ type PromptZoneProps = {
   isEnhancingPrompt: boolean;
   isUtilityConfigured: boolean;
   handleEnhancePrompt: () => void;
-  setHasPrompt: (v: boolean) => void;
+  pendingResult: UtilityGenerationResult | null;
+  onPromptChange: (value: string) => void;
+  onApplyPending: () => void;
+  onCopyPending: () => Promise<void> | void;
   onSubmitShortcut: (e: React.FormEvent) => void;
 };
 
 export function PromptZone({
   promptRef,
+  promptValue,
   contextItems,
   attachments,
   isCreating,
@@ -114,7 +121,10 @@ export function PromptZone({
   isEnhancingPrompt,
   isUtilityConfigured,
   handleEnhancePrompt,
-  setHasPrompt,
+  pendingResult,
+  onPromptChange,
+  onApplyPending,
+  onCopyPending,
   onSubmitShortcut,
 }: PromptZoneProps) {
   const {
@@ -139,12 +149,13 @@ export function PromptZone({
         <ContextZone items={contextItems} />
         <Textarea
           ref={promptRef}
+          value={promptValue}
           placeholder="What should the agent work on?"
           className="min-w-0 max-w-full field-sizing-fixed wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
           autoFocus
           disabled={inputDisabled}
           data-testid="subtask-prompt-input"
-          onInput={(e) => setHasPrompt((e.target as HTMLTextAreaElement).value.trim().length > 0)}
+          onChange={(event) => onPromptChange(event.target.value)}
           onPaste={handlePaste}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -170,6 +181,11 @@ export function PromptZone({
           tabIndex={-1}
         />
       </div>
+      <PromptResultRecovery
+        pendingResult={pendingResult}
+        onApply={onApplyPending}
+        onCopy={onCopyPending}
+      />
       {isDragging && (
         <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
           <span className="text-sm text-primary font-medium">Drop files here</span>

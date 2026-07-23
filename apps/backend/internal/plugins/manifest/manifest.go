@@ -72,6 +72,9 @@ type Capabilities struct {
 	APIWrite []string `yaml:"api_write,omitempty" json:"api_write,omitempty"`
 	State    bool     `yaml:"state,omitempty" json:"state,omitempty"`
 	Secrets  bool     `yaml:"secrets,omitempty" json:"secrets,omitempty"`
+	// AgentInvoke gates Host.InvokeUtilityAgent (ADR 0048): a one-shot,
+	// non-interactive completion run by the operator-configured utility agent.
+	AgentInvoke bool `yaml:"agent_invoke,omitempty" json:"agent_invoke,omitempty"`
 }
 
 // Webhook is a proxied external webhook endpoint the plugin declares.

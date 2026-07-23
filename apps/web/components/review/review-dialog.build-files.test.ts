@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 import { buildAllFiles, filterPendingDiffCommentsForSession } from "./review-dialog";
+import {
+  reviewDialogSourceKey,
+  resolveReviewTransientState,
+  shouldAutoCloseReviewDialog,
+  usePRKeyedReviewFileSelection,
+  useReviewDialogTransientState,
+  type ReviewTransientState,
+} from "./review-dialog-pr-state";
 import { reviewFileKey } from "./types";
 import type { CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
 import type { Comment } from "@/lib/state/slices/comments";
@@ -9,6 +18,88 @@ const PREVIOUS_PATH = "src/old-name.ts";
 const README_PATH = "README.md";
 const FRONTEND_REPO = "frontend";
 const BACKEND_REPO = "backend";
+const FIRST_PR_KEY = "acme/app/1";
+const SECOND_PR_KEY = "acme/app/2";
+
+describe("Review dialog PR transitions", () => {
+  it("keeps Review open while the selected PR diff is loading", () => {
+    expect(
+      shouldAutoCloseReviewDialog({
+        open: true,
+        previousFileCount: 2,
+        fileCount: 0,
+        prDiffLoading: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("resets file and filter state when the selected PR changes", () => {
+    const current: ReviewTransientState = {
+      sourceKey: FIRST_PR_KEY,
+      selectedFile: "src/first-pr.ts",
+      filter: "first-pr",
+    };
+    expect(resolveReviewTransientState(current, SECOND_PR_KEY)).toEqual({
+      sourceKey: SECOND_PR_KEY,
+      selectedFile: null,
+      filter: "",
+    });
+  });
+
+  it("does not restore stale file and filter state after switching away and back", () => {
+    const { result, rerender } = renderHook(
+      ({ sourceKey }: { sourceKey: string }) => useReviewDialogTransientState(sourceKey),
+      { initialProps: { sourceKey: FIRST_PR_KEY } },
+    );
+
+    act(() => {
+      result.current.setSelectedFile("src/first-pr.ts");
+      result.current.setFilter("first-pr");
+    });
+    rerender({ sourceKey: SECOND_PR_KEY });
+    rerender({ sourceKey: FIRST_PR_KEY });
+
+    expect(result.current.selectedFile).toBeNull();
+    expect(result.current.filter).toBe("");
+  });
+
+  it("resets file and filter state when the session changes under the same PR", () => {
+    const { result, rerender } = renderHook(
+      ({ sessionId }) =>
+        useReviewDialogTransientState(reviewDialogSourceKey(sessionId, FIRST_PR_KEY)),
+      { initialProps: { sessionId: "session-1" } },
+    );
+
+    act(() => {
+      result.current.setSelectedFile("src/first-pr.ts");
+      result.current.setFilter("first-pr");
+    });
+    rerender({ sessionId: "session-2" });
+
+    expect(result.current.selectedFile).toBeNull();
+    expect(result.current.filter).toBe("");
+  });
+
+  it("selects files with the current PR setter after switching PRs", () => {
+    const selectFile = (path: string, setSelectedFile: (value: string | null) => void) =>
+      setSelectedFile(path);
+    const { result, rerender } = renderHook(
+      ({ sourceKey }: { sourceKey: string }) => {
+        const transient = useReviewDialogTransientState(sourceKey);
+        return {
+          ...transient,
+          handleSelectFile: usePRKeyedReviewFileSelection(selectFile, transient.setSelectedFile),
+        };
+      },
+      { initialProps: { sourceKey: FIRST_PR_KEY } },
+    );
+
+    rerender({ sourceKey: SECOND_PR_KEY });
+    act(() => result.current.handleSelectFile("src/second-pr.ts"));
+
+    expect(result.current.selectedFile).toBe("src/second-pr.ts");
+  });
+});
 
 function pendingDiffComment(overrides: Partial<Comment>): Comment {
   return {
@@ -63,8 +154,16 @@ describe("buildAllFiles (review dialog)", () => {
     expect(paths).toEqual(["src/a.ts", "src/b.ts"]);
     expect(result.every((f) => f.source === "committed")).toBe(true);
     expect(result.every((f) => !f.repository_name)).toBe(true);
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "src/a.ts", base_ref: "abc" }),
+        expect.objectContaining({ path: "src/b.ts", base_ref: "abc" }),
+      ]),
+    );
   });
+});
 
+describe("buildAllFiles", () => {
   // Multi-repo: `mergeCumulativeFiles` uses a `<repo>\x00<path>` composite map
   // key and stamps the clean repo-relative path on `file.path`. The displayed
   // path must come from the stamped value, never from the composite key.
@@ -83,6 +182,7 @@ describe("buildAllFiles (review dialog)", () => {
           diff: "@@ -1 +1 @@\n-x\n+y\n",
           repository_name: "frontend",
           path: "src/app.tsx",
+          base_ref: "frontend-base-sha",
         },
         "backend\u0000main.go": {
           status: "modified",
@@ -92,6 +192,7 @@ describe("buildAllFiles (review dialog)", () => {
           diff: "@@ -1 +1,3 @@\n+a\n+b\n+c\n",
           repository_name: "backend",
           path: "main.go",
+          base_ref: "backend-base-sha",
         },
       },
     } as unknown as CumulativeDiff;
@@ -101,6 +202,8 @@ describe("buildAllFiles (review dialog)", () => {
     const byRepo = Object.fromEntries(result.map((f) => [f.repository_name, f]));
     expect(byRepo["frontend"]?.path).toBe("src/app.tsx");
     expect(byRepo["backend"]?.path).toBe("main.go");
+    expect(byRepo["frontend"]).toMatchObject({ base_ref: "frontend-base-sha" });
+    expect(byRepo["backend"]).toMatchObject({ base_ref: "backend-base-sha" });
     // No NUL or composite-key leakage into displayed paths.
     expect(result.every((f) => !f.path.includes("\u0000"))).toBe(true);
   });

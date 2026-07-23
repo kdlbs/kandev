@@ -545,7 +545,7 @@ export function GitLabPageClient({
   const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
 
   return (
-    <div className="h-screen w-full flex flex-col bg-background">
+    <div className="flex h-full min-h-0 w-full flex-col bg-background">
       <PageHeader
         host={host}
         onOpenMobileSidebar={!statusLoading && connected ? onOpenMobileSidebar : undefined}

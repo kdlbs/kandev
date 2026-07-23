@@ -2,6 +2,7 @@ import type React from "react";
 import type { LocalRepository, Repository, Executor, Task } from "@/lib/types/http";
 import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches-by-url";
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
+import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type {
   KanbanMultiState,
@@ -17,6 +18,15 @@ import type {
   useExecutorProfileOptions,
 } from "@/components/task-create-dialog-options";
 import type { useToast } from "@/components/toast-provider";
+
+export type DialogPromptEnhance = {
+  onEnhance: () => void;
+  isLoading: boolean;
+  isConfigured: boolean;
+  pendingResult: UtilityGenerationResult | null;
+  onApplyPending: () => void;
+  onCopyPending: () => Promise<void> | void;
+};
 
 /**
  * One repository row in the task-create form. The form tracks every repo
@@ -429,7 +439,7 @@ export type DialogFormBodyProps = {
       | null;
     onCreated: (rowKey: string, repository: Repository) => void;
   };
-  enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
+  enhance?: DialogPromptEnhance;
   workflowAgentLocked: boolean;
   /** Workspace repositories — driven into the chip row for repo + branch picks. */
   repositories: Repository[];

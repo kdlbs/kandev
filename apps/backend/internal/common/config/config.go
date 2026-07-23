@@ -343,6 +343,11 @@ type FeaturesConfig struct {
 	// construction, HTTP/WS route registration, and frontend nav/route
 	// visibility.
 	Plugins bool `mapstructure:"plugins" json:"plugins"`
+
+	// AppStatusBar gates the global status bar on tablet/desktop and the
+	// corresponding Status drawer on phones. The snake_case mapstructure key
+	// keeps the config and KANDEV_FEATURES_APP_STATUS_BAR environment name aligned.
+	AppStatusBar bool `mapstructure:"app_status_bar" json:"appStatusBar"`
 }
 
 // LoggingConfig holds logging configuration.

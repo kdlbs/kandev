@@ -50,6 +50,13 @@ features:
     dev:  "true"
     e2e:  "true"
 
+  # App status bar. Off until a user opts in; on only in e2e so browser tests
+  # continuously exercise the global surface without changing user defaults.
+  KANDEV_FEATURES_APP_STATUS_BAR:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

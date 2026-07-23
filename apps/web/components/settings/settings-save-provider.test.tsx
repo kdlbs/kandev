@@ -113,6 +113,18 @@ afterEach(() => {
 });
 
 describe("SettingsSaveProvider", () => {
+  it("offsets the standalone save action above the app status bar", async () => {
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor id="appearance" onSave={vi.fn()} />
+      </SettingsSaveProvider>,
+    );
+
+    expect((await screen.findByTestId("settings-floating-save")).className).toContain(
+      "var(--app-status-bar-height)",
+    );
+  });
+
   it("saves dirty contributors in stable order and retries only failures", async () => {
     const calls: string[] = [];
     let failSecond = true;

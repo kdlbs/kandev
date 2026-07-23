@@ -14,6 +14,7 @@ import type {
   SidebarViewDraftApi,
   SidebarTaskPrefsApi,
   TaskCreateLastUsedApi,
+  AppStatusBarOrderApi,
   MCPTaskAgentProfileDefault,
   TaskPendingAction,
   TaskSessionState,
@@ -364,6 +365,7 @@ export type UserSettingsUpdatedPayload = {
   terminal_link_behavior?: string;
   changes_panel_layout?: "flat" | "tree";
   system_metrics_display?: { show_in_topbar?: boolean };
+  app_status_bar_order?: AppStatusBarOrderApi;
   voice_mode?: import("@/lib/types/http-voice").VoiceModeSettings;
   updated_at?: string;
 };

@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -259,20 +261,106 @@ func TestWaitForSessionReady_ContextCancelled(t *testing.T) {
 
 type messageAddSwitchRepo struct {
 	mockRepository
-	tasks      map[string]*models.Task
-	sessions   map[string]*models.TaskSession
-	primaryID  string
-	messages   []*models.Message
-	turns      []*models.Turn
-	getCalls   map[string]int
-	failReload bool
+	tasks        map[string]*models.Task
+	sessions     map[string]*models.TaskSession
+	primaryID    string
+	messages     []*models.Message
+	turns        []*models.Turn
+	getCalls     map[string]int
+	failReload   bool
+	taskGetCalls int
 }
 
 func (r *messageAddSwitchRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
+	r.taskGetCalls++
 	if task, ok := r.tasks[id]; ok {
 		return task, nil
 	}
 	return nil, sql.ErrNoRows
+}
+
+type fakeReferenceSubmissionValidator struct {
+	sessionID      string
+	assertedTaskID string
+	references     []v1.EntityReference
+	err            error
+}
+
+func (v *fakeReferenceSubmissionValidator) ValidateForSubmission(
+	_ context.Context,
+	sessionID, assertedTaskID string,
+	references []v1.EntityReference,
+) ([]v1.EntityReference, error) {
+	v.sessionID = sessionID
+	v.assertedTaskID = assertedTaskID
+	v.references = append([]v1.EntityReference(nil), references...)
+	if v.err != nil {
+		return nil, v.err
+	}
+	return entityrefs.NormalizeForSubmission(references)
+}
+
+func TestWSAddMessagePersistsAuthorizedEntityReferencesAndAgentContext(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{"t1": {ID: "t1", WorkspaceID: "ws1", State: v1.TaskStateInProgress}},
+		sessions: map[string]*models.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: models.TaskSessionStateWaitingForInput, UpdatedAt: now},
+		},
+		primaryID: "s1",
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{Tasks: repo, TaskRepos: repo, Messages: repo, Turns: repo, Sessions: repo}, nil, log, service.RepositoryDiscoveryConfig{})
+	validator := &fakeReferenceSubmissionValidator{}
+	h := NewMessageHandlers(svc, nil, log, validator)
+	reference := v1.EntityReference{
+		Version:  v1.EntityReferenceVersion,
+		Ref:      entityrefs.CanonicalRef("kandev", "task", "ws1", "other"),
+		Provider: "kandev", Kind: "task", ID: "other", Title: "Other task",
+		URL: "/t/other", Scope: "ws1",
+	}
+	req, err := ws.NewRequest("req-ref", ws.ActionMessageAdd, map[string]any{
+		"task_id": "t1", "session_id": "s1", "content": "Check this", "entity_references": []v1.EntityReference{reference},
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Equal(t, "s1", validator.sessionID)
+	require.Equal(t, "t1", validator.assertedTaskID)
+	require.Len(t, repo.messages, 1)
+	stored := repo.messages[0]
+	require.Equal(t, "Check this", sysprompt.StripSystemContent(stored.Content))
+	require.Contains(t, stored.Content, `"entity_references"`)
+	require.Equal(t, []v1.EntityReference{reference}, stored.Metadata["entity_references"])
+}
+
+func TestWSAddMessageRejectsEntityReferencesBeforeTaskMutation(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{"t1": {ID: "t1", WorkspaceID: "ws1", State: v1.TaskStateReview}},
+		sessions: map[string]*models.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: models.TaskSessionStateWaitingForInput, UpdatedAt: now},
+		},
+		primaryID: "s1",
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{Tasks: repo, TaskRepos: repo, Messages: repo, Turns: repo, Sessions: repo}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := NewMessageHandlers(svc, nil, log, &fakeReferenceSubmissionValidator{err: errors.New("wrong workspace")})
+	req, err := ws.NewRequest("req-ref", ws.ActionMessageAdd, map[string]any{
+		"task_id": "t1", "session_id": "s1", "content": "Check this",
+		"entity_references": []v1.EntityReference{{Version: 1, Ref: "bad"}},
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	require.Empty(t, repo.messages)
+	require.Zero(t, repo.taskGetCalls)
 }
 
 func (r *messageAddSwitchRepo) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
@@ -316,6 +404,7 @@ func TestWSAddMessage_CreatedOfficeSessionOmitsCoordinatorTaskControls(t *testin
 	content := runCreatedMessageContextTest(t, &models.Task{
 		ID:                     "t1",
 		State:                  v1.TaskStateInProgress,
+		IsFromOffice:           true,
 		AssigneeAgentProfileID: "office-agent",
 		UpdatedAt:              now,
 	}, &models.TaskSession{
@@ -327,6 +416,24 @@ func TestWSAddMessage_CreatedOfficeSessionOmitsCoordinatorTaskControls(t *testin
 	})
 	assert.NotContains(t, content, "stop_task_kandev",
 		"Office pre-wrap must not persist a task-mode-only tool")
+}
+
+func TestWSAddMessage_CreatedKanbanRunnerIncludesCoordinatorTaskControls(t *testing.T) {
+	now := time.Now().UTC()
+	content := runCreatedMessageContextTest(t, &models.Task{
+		ID:                     "t1",
+		State:                  v1.TaskStateInProgress,
+		AssigneeAgentProfileID: "kanban-runner",
+		UpdatedAt:              now,
+	}, &models.TaskSession{
+		ID:             "s1",
+		TaskID:         "t1",
+		State:          models.TaskSessionStateCreated,
+		AgentProfileID: "profile-1",
+		UpdatedAt:      now,
+	})
+	assert.Contains(t, content, "stop_task_kandev",
+		"Kanban sessions retain coordinator task controls even with a projected runner")
 }
 
 func TestWSAddMessage_CreatedConfigSessionOmitsCoordinatorTaskControls(t *testing.T) {

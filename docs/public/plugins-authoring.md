@@ -161,6 +161,16 @@ type Host interface {
 	Workflows() WorkflowReader
 	AgentProfiles() AgentProfileReader
 	Repositories() RepositoryReader
+
+	// Messages reads historical user/agent conversation content
+	// (capability api_read:messages). kandev-injected system blocks are
+	// stripped; raw system prompts are never returned.
+	Messages() MessageReader
+
+	// InvokeUtilityAgent runs a one-shot completion using this plugin's
+	// selected utility agent (capability agent_invoke). No API key of your
+	// own; FailedPrecondition when no valid enabled agent is selected.
+	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
 }
 ```
 
@@ -191,15 +201,55 @@ The data-reader accessors return typed, paginated readers — e.g.
 `([]Task, *PageInfo, error)` with an opaque `PageInfo.NextCursor` for the
 next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
 `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`, `Repository`,
-`Session`, and filter/page types.
+`Session`, `Message`, and filter/page types.
+
+`host.Messages().List(ctx, MessageFilter{...}, Page{...})` reads historical
+conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
+`TaskIDs`, a `Since`/`Until` `created_at` window (RFC3339; `Since` inclusive,
+`Until` exclusive — the natural way to fetch "yesterday"), and message
+`Types`. Each `Message` carries `id`, `session_id`, `task_id`, `turn_id`,
+`author_type` (`user` or `agent`), `content`, `type`, and `created_at`.
+`content` has kandev's injected `<kandev-system>` blocks stripped — a plugin
+never sees raw system prompts.
+
+`host.InvokeUtilityAgent(ctx, prompt)` runs a one-shot, non-interactive LLM
+completion using the utility agent selected for this plugin in **Settings >
+Plugins > `<plugin>`** (capability `agent_invoke`), and returns its text. Declare
+the selector in `manifest.yaml`:
+
+```yaml
+capabilities:
+  agent_invoke: true
+
+config_schema:
+  type: object
+  properties:
+    utility_agent:
+      type: string
+      format: utility-agent
+      title: Utility Agent
+      description: Agent used for this plugin's LLM calls
+  required: ["utility_agent"]
+```
+
+The picker displays configured built-in and custom agent names but stores the
+selected agent's stable ID. Omit `utility_agent` from `required` only when the
+plugin supports operating without LLM delegation; optional selectors include a
+**Not set** choice. The plugin needs no provider API key because it delegates to
+a kandev-configured agent. A missing, deleted, or disabled selection returns
+gRPC `FailedPrecondition`, so handle that as "ask the operator to configure
+one" rather than a transient failure. This is the LLM step behind, e.g., a
+"summarize yesterday" plugin: read the conversation with `host.Messages()`,
+then summarize it with `host.InvokeUtilityAgent(...)`.
 
 **Capability gating.** Every Host RPC except `GetConfig` and `EmitEvent` is
 checked against your manifest's `capabilities` before the handler runs:
 `GetState`/`SetState`/`DeleteState`/`ListState` require
 `capabilities.state: true`; `GetSecret`/`SetSecret`/`DeleteSecret`/
-`RevealSecret` require `capabilities.secrets: true`; each data-reader
-accessor requires its resource in `capabilities.api_read` (e.g. `tasks`,
-`sessions`, `workspaces`, `workflows`, `agent_profiles`, `repositories`).
+`RevealSecret` require `capabilities.secrets: true`; `InvokeUtilityAgent`
+requires `capabilities.agent_invoke: true`; each data-reader accessor requires
+its resource in `capabilities.api_read` (e.g. `tasks`, `sessions`, `messages`,
+`workspaces`, `workflows`, `agent_profiles`, `repositories`).
 Calling one without the declared capability returns gRPC `PermissionDenied`
 with a message naming the missing capability — declare what you use.
 
@@ -253,7 +303,8 @@ interface PluginRegistry {
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
   // Named slot injection. Initial slots: "task-sidebar", "settings-nav",
   // "main-nav-footer", "chat-input-actions", "chat-top-bar", "main-top-bar",
-  // "plugin-settings" (see "Named slots" below).
+  // "app-status-bar-left", "app-status-bar-right", and "plugin-settings"
+  // (see "Named slots" below).
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
   // WS action handler, bridged into the existing lib/ws dispatch.
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
@@ -345,6 +396,8 @@ plugins at once. Available slots:
 | `chat-input-actions` | Chat composer toolbar, beside the model picker, mic, and send button | `{ taskId, taskTitle, activeSessionId, sessionIds }` |
 | `chat-top-bar` | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
 | `main-top-bar` | Default app top bar (Home / Kanban / Tasks), beside the CPU/DB metrics and the view/display controls | `{ workspaceId, workspaceLabel, currentPage }` |
+| `app-status-bar-left` | Default-left item in the global status surface | `AppStatusBarSlotProps` |
+| `app-status-bar-right` | Default-right item in the global status surface | `AppStatusBarSlotProps` |
 | `plugin-settings` | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }` |
 
 `plugin-settings` is the one exception to "every plugin's component renders":
@@ -417,8 +470,7 @@ example.
 ### Session top bar
 
 Register a `chat-top-bar` component to surface at-a-glance status in the
-session top bar, beside the first-party CPU/DB metrics and the
-document/editor/debug controls. The host passes the current context as
+session top bar, beside first-party document/editor/debug controls. The host passes the current context as
 `slotProps`:
 
 ```ts
@@ -494,6 +546,53 @@ show.
 // inside initialize(registry, host):
 registry.registerComponent("plugin-settings", makeSettingsStatus(host));
 ```
+
+### Global Status bar
+
+Register `app-status-bar-left` or `app-status-bar-right` for app-wide, compact
+status UI. Kandev mounts exactly one presentation: a 24 px bar on tablet and
+desktop, or an in-flow Status drawer section on phone. Keep bar content small;
+render a touch-usable row when `presentation` is `"mobile-drawer"`.
+
+```js
+function StatusContribution({ slotProps }) {
+  const { placement, presentation, activeTaskId } = slotProps ?? {};
+  return host.jsx(
+    "span",
+    { className: presentation === "bar" ? "truncate text-xs" : "block min-h-11 px-3 py-2" },
+    `${placement}: ${activeTaskId ?? "no active task"}`,
+  );
+}
+
+registry.registerComponent("app-status-bar-left", StatusContribution);
+registry.registerComponent("app-status-bar-right", StatusContribution);
+```
+
+Each contribution receives this exact context:
+
+```ts
+type AppStatusBarSlotProps = {
+  placement: "left" | "right";
+  presentation: "bar" | "mobile-drawer";
+  density: "full" | "compact";
+  pathname: string;
+  activeWorkspaceId: string | null;
+  activeTaskId: string | null;
+  activeSessionId: string | null;
+};
+```
+
+The IDs are hints; use `host.store` for full records. Each component registration
+is one opaque item: Kandev does not inspect or separately reorder its children.
+The slot chooses the default side. A user can Cmd-drag (macOS) or Ctrl-drag
+(other desktop platforms) with a mouse across the full bar, and Kandev preserves
+that backend-owned order across reloads, restarts, and plugin disable/enable.
+Phone lists the saved left sequence followed by the saved right sequence and does
+not offer drag ordering. There is no keyboard-arrow, touch, or plugin-priority
+ordering API. Enable, disable, and uninstall update the live surface without a
+reload, and each contribution has its own error boundary. A full-bleed route
+(`topbar: false`) owns its own chrome; mount the host Status trigger there if that
+route should expose Status.
 
 ## Three integration patterns
 

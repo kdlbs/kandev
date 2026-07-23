@@ -11,10 +11,10 @@ type LicenseEntry = {
   repository?: string;
   license_text?: string;
   stale?: boolean;
-  ecosystem: "npm" | "go";
+  ecosystem: "npm" | "go" | "source";
 };
 
-const ECOSYSTEMS = new Set(["npm", "go"]);
+const ECOSYSTEMS = new Set(["npm", "go", "source"]);
 const REQUIRED_FIELDS = ["name", "version", "license", "ecosystem"] as const;
 
 function loadEntries(): LicenseEntry[] | null {

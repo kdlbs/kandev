@@ -93,6 +93,16 @@ describe("mapPRFilesToChangedFiles", () => {
     expect(out.every((f) => f.repository_name === "frontend")).toBe(true);
   });
 
+  it("stamps the exact PR key on every row", () => {
+    const [out] = mapPRFilesToChangedFiles(
+      [diffFile({ filename: "README.md" })],
+      "frontend",
+      "acme/widgets/42",
+    );
+
+    expect(out.prKey).toBe("acme/widgets/42");
+  });
+
   it("defaults repository_name to '' when caller omits it (single-repo path)", () => {
     // Empty string is meaningful: PRFilesGroupedList treats one group with
     // empty name as the single-repo case and skips per-repo sub-headers.

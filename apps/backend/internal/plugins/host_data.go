@@ -27,6 +27,7 @@ import (
 
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	analyticsmodels "github.com/kandev/kandev/internal/analytics/models"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -43,6 +44,7 @@ const (
 	resourceWorkflows     = "workflows"
 	resourceAgentProfiles = "agent_profiles"
 	resourceRepositories  = "repositories"
+	resourceMessages      = "messages"
 )
 
 // apiReadCapability formats resource as the api_read:<resource> capability
@@ -59,6 +61,12 @@ const (
 	defaultPageLimit = 50
 	maxPageLimit     = 200
 )
+
+// maxMessageFilterValues bounds the combined number of session/task/type
+// values a ListMessages filter may carry, keeping the resulting IN(...) bind
+// parameters comfortably under SQLite's SQLITE_MAX_VARIABLE_NUMBER (999 on
+// older builds) with headroom for the since/until/limit/offset params.
+const maxMessageFilterValues = 400
 
 // normalizePageLimit clamps limit to [1, maxPageLimit], defaulting to
 // defaultPageLimit when unset or invalid.
@@ -154,6 +162,15 @@ type sessionCodeStatsSource interface {
 	ListSessionCodeStats(ctx context.Context, filter analyticsmodels.SessionCodeStatsFilter) ([]*analyticsmodels.SessionCodeStats, error)
 }
 
+// messageDataSource is the narrow slice of internal/task/service.Service the
+// Messages().List RPC needs. ListMessagesForPlugin filters by session/task
+// ids and a created_at time range, returning oldest-first with SQL-level
+// limit/offset (Limit is requested as page-limit+1 so the reader can derive
+// HasMore without a second count query).
+type messageDataSource interface {
+	ListMessagesForPlugin(ctx context.Context, filter taskmodels.PluginMessageFilter) ([]*taskmodels.Message, error)
+}
+
 // ── pluginHost accessors ────────────────────────────────────────────────
 //
 // These shadow the Unimplemented* defaults embedded via
@@ -225,6 +242,16 @@ func (h *pluginHost) Repositories() pluginsdk.RepositoryReader {
 	return repositoryReader{host: h}
 }
 
+func (h *pluginHost) Messages() pluginsdk.MessageReader {
+	if !h.capabilities.CanRead(resourceMessages) {
+		return deniedMessageReader{}
+	}
+	if h.messageData == nil {
+		return h.UnimplementedHostData.Messages()
+	}
+	return messageReader{host: h}
+}
+
 // ── Denied readers ──────────────────────────────────────────────────────
 
 type deniedTaskReader struct{}
@@ -273,6 +300,12 @@ type deniedRepositoryReader struct{}
 
 func (deniedRepositoryReader) List(context.Context, string, pluginsdk.Page) ([]pluginsdk.Repository, *pluginsdk.PageInfo, error) {
 	return nil, nil, permissionDenied(apiReadCapability(resourceRepositories))
+}
+
+type deniedMessageReader struct{}
+
+func (deniedMessageReader) List(context.Context, pluginsdk.MessageFilter, pluginsdk.Page) ([]pluginsdk.Message, *pluginsdk.PageInfo, error) {
+	return nil, nil, permissionDenied(apiReadCapability(resourceMessages))
 }
 
 // ── Real readers ────────────────────────────────────────────────────────
@@ -456,6 +489,74 @@ func (r repositoryReader) List(ctx context.Context, workspaceID string, page plu
 	}
 	items, info := paginate(dtos, page)
 	return items, info, nil
+}
+
+type messageReader struct{ host *pluginHost }
+
+// List paginates conversation content at the SQL layer (limit/offset, like
+// sessionReader.CodeStats) rather than fetching everything into memory — a
+// task's transcript can be very large. Since/Until are RFC3339; an
+// unparseable value is a gRPC InvalidArgument. Content is sanitized by
+// messageModelToDTO (kandev-system blocks stripped) before it reaches the
+// plugin.
+func (r messageReader) List(ctx context.Context, filter pluginsdk.MessageFilter, page pluginsdk.Page) ([]pluginsdk.Message, *pluginsdk.PageInfo, error) {
+	// Each session/task/type value becomes its own SQL bind parameter; cap
+	// their combined count well under SQLite's host-parameter limit
+	// (~500-999) so a large filter fails fast with a clear InvalidArgument
+	// instead of a cryptic "too many SQL variables" at query execution.
+	if n := len(filter.SessionIDs) + len(filter.TaskIDs) + len(filter.Types); n > maxMessageFilterValues {
+		return nil, nil, invalidArgument(fmt.Sprintf("message filter has %d session/task/type values, max %d", n, maxMessageFilterValues))
+	}
+	since, err := parseFilterTime(filter.Since, "since")
+	if err != nil {
+		return nil, nil, err
+	}
+	until, err := parseFilterTime(filter.Until, "until")
+	if err != nil {
+		return nil, nil, err
+	}
+	limit := normalizePageLimit(page.Limit)
+	offset := pageOffset(page.Cursor)
+
+	messages, err := r.host.messageData.ListMessagesForPlugin(ctx, taskmodels.PluginMessageFilter{
+		SessionIDs: filter.SessionIDs,
+		TaskIDs:    filter.TaskIDs,
+		Types:      filter.Types,
+		Since:      since,
+		Until:      until,
+		Limit:      limit + 1,
+		Offset:     offset,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	hasMore := len(messages) > limit
+	if hasMore {
+		messages = messages[:limit]
+	}
+	dtos := make([]pluginsdk.Message, len(messages))
+	for i, m := range messages {
+		dtos[i] = messageModelToDTO(m)
+	}
+	info := &pluginsdk.PageInfo{HasMore: hasMore}
+	if hasMore {
+		info.NextCursor = strconv.Itoa(offset + limit)
+	}
+	return dtos, info, nil
+}
+
+// parseFilterTime parses an optional RFC3339 filter bound, returning a gRPC
+// InvalidArgument error naming the field when a non-nil value doesn't parse.
+func parseFilterTime(value *string, field string) (*time.Time, error) {
+	if value == nil || *value == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(time.RFC3339, *value)
+	if err != nil {
+		return nil, invalidArgument(fmt.Sprintf("%s must be RFC3339: %v", field, err))
+	}
+	return &t, nil
 }
 
 // ── Fetch/filter/sort helpers (v1 scoping: ADR 0043(a) "global-with-hook") ─
@@ -855,6 +956,28 @@ func agentProfileDTOToSDK(p agentsettingsdto.AgentProfileDTO) pluginsdk.AgentPro
 		Name:        p.Name,
 		Model:       p.Model,
 		Mode:        p.Mode,
+	}
+}
+
+// messageModelToDTO maps a stored message to the Go-native Message DTO. It
+// strips kandev-injected <kandev-system> blocks from content via
+// sysprompt.StripSystemContent — the same sanitization the message.added bus
+// event applies — so a plugin never sees raw system prompts. Type defaults to
+// "message" (matching Message.ToAPI and the repository) when empty.
+func messageModelToDTO(m *taskmodels.Message) pluginsdk.Message {
+	msgType := string(m.Type)
+	if msgType == "" {
+		msgType = string(taskmodels.MessageTypeMessage)
+	}
+	return pluginsdk.Message{
+		ID:         m.ID,
+		SessionID:  m.TaskSessionID,
+		TaskID:     m.TaskID,
+		TurnID:     m.TurnID,
+		AuthorType: string(m.AuthorType),
+		Content:    sysprompt.StripSystemContent(m.Content),
+		Type:       msgType,
+		CreatedAt:  m.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }
 

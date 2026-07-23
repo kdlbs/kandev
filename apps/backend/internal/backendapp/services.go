@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -118,7 +119,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, workflowSvc, taskSvc, log)
 	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if pluginsSvc != nil {
-		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics))
+		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc)
 	}
 	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
 
@@ -140,7 +141,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
 	}
 
-	return &Services{
+	services := &Services{
 		Task:         taskSvc,
 		User:         userSvc,
 		Editor:       editorSvc,
@@ -163,7 +164,17 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Office: nil,
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
-	}, agentSettingsController, nil
+	}
+	mentionComponents, err := newMentionComponents(
+		taskSvc,
+		taskSvc,
+		builtinMentionProviders(services, repos.Task)...,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	services.Mentions = mentionComponents
+	return services, agentSettingsController, nil
 }
 
 // loadCustomTUIAgents loads user-defined TUI agents from the database into the registry.
@@ -551,6 +562,38 @@ func (a slackHostUtilityAdapter) ExecutePromptWithMCP(
 		ResponseTokens: res.ResponseTokens,
 		DurationMs:     res.DurationMs,
 	}, nil
+}
+
+// pluginsHostUtilityAdapter adapts *hostutility.Manager to the plugins
+// package's utilityRunner interface (Host.InvokeUtilityAgent, ADR 0048),
+// returning just the response text. Lives here for the same cycle-avoidance
+// reason as slackHostUtilityAdapter — internal/plugins must not import the
+// agent runtime.
+type pluginsHostUtilityAdapter struct {
+	mgr *hostutility.Manager
+}
+
+func (a pluginsHostUtilityAdapter) ExecutePrompt(ctx context.Context, agentType, model, mode, prompt string) (string, error) {
+	res, err := a.mgr.ExecutePrompt(ctx, agentType, model, mode, prompt)
+	if err != nil {
+		return "", err
+	}
+	return res.Response, nil
+}
+
+type pluginsUtilityAgentAdapter struct {
+	svc *utilityservice.Service
+}
+
+func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string) (*plugins.UtilityAgent, error) {
+	agent, err := a.svc.GetAgentByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, utilityservice.ErrAgentNotFound) {
+			return nil, plugins.ErrUtilityAgentNotFound
+		}
+		return nil, err
+	}
+	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, Enabled: agent.Enabled}, nil
 }
 
 // workflowProviderAdapter adapts task service to workflow service's WorkflowProvider interface.

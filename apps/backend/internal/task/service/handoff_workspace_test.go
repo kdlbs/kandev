@@ -379,6 +379,10 @@ func (r *phase4TaskRepo) ListTasksForAutoArchive(context.Context) ([]*models.Tas
 	r.panicNotUsed("ListTasksForAutoArchive")
 	return nil, nil
 }
+func (r *phase4TaskRepo) ListArchivedTasksWithActiveSessions(context.Context) ([]string, error) {
+	r.panicNotUsed("ListArchivedTasksWithActiveSessions")
+	return nil, nil
+}
 func (r *phase4TaskRepo) ListExpiredQuickChatTasks(context.Context, time.Time) ([]*models.Task, error) {
 	r.panicNotUsed("ListExpiredQuickChatTasks")
 	return nil, nil

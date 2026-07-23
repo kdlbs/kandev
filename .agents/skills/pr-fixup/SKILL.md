@@ -16,12 +16,11 @@ bounded implementer assignment. It does not run GitHub, test, edit, commit, or
 push commands directly. If a required worker is unavailable, stop and report
 the blocked phase.
 
-Each worker uses only the procedure for its assigned phase: `pr-poller` gathers
-state, a remediation implementer handles CI logs/code/comments, `verify` runs
-checks and reports failures, and a delivery implementer commits or pushes an
-already verified result. Workers never invoke one another.
+Each worker uses only its assigned phase: polling, remediation, verification, or delivery.
+Workers never invoke one another.
+If `pr-poller` recommends `GitHub access requires approval; planner must surface the approval gate to the user and must not relaunch polling.`, show the gate and stop. Do not switch tools or treat denied, cancelled, or interrupted approval as a transient fetch failure.
 
-> **GitHub tool selection:** This skill uses `gh` CLI commands by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools) for PR checks, comments, replies, and reviews. Some operations (reactions, resolving threads, fetching CI logs) may not be available in all environments — skip gracefully.
+> **GitHub tool selection:** This skill uses `gh` CLI commands by default. After access is approved, if `gh` is unavailable or a request fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools) for PR checks, comments, replies, and reviews. An approval denial, cancellation, or interruption is the terminal gate above, not a reason to switch tools. Some operations (reactions, resolving threads, fetching CI logs) may not be available in all environments — skip gracefully.
 > **Helper scripts location:** `scripts/pr-state`, `scripts/pr-resolve`, and `scripts/run-quiet` are at the worktree root (`<worktree>/scripts/...`), not under `.agents/skills/pr-fixup/scripts/`.
 
 ## Available skills and subagents
@@ -78,15 +77,15 @@ index state. Treat the gate as clean only when `mergeable: MERGEABLE`,
 `local_unmerged_entries: 0`. If any field reports a conflict, assign a bounded
 implementer to load `references/merge-conflicts.md`, resolve it, and return
 targeted verification before continuing. If any gate field is `unknown`,
-re-poll instead of taking a clean-state shortcut. The planner does not inspect
-or resolve conflicts directly.
+re-poll instead of taking a clean-state shortcut. The terminal approval gate
+above overrides this rule. The planner does not inspect or resolve conflicts directly.
 
 **Parse the report.** The fields you care about:
 
 - `ci_failed` — non-empty list of `{name, run_id, conclusion, url}`.
   `ci_failed: unknown` means CI collection failed, blocks clean state, and
-  requires re-polling. Omission is known empty only when the complete report
-  parsed successfully and its recommendation reports no fetch failure.
+  requires re-polling after an approved fetch failure. The terminal approval
+  gate overrides this rule. Omission is known empty only after a complete report.
 - `ci_pending` — anything still running when the 20-min cap hit. Only `none` is
   a known non-pending state.
 - `bots.<name>` — `done` / `rate_limited` / `pending` / `timeout` / `unknown`.
@@ -112,7 +111,7 @@ stop and report the blocked phase.
 scripts/pr-state --summary <PR>
 ```
 
-If this command, `scripts/pr-resolve`, or another GitHub helper fails with a transient DNS/network error, retry the parent command with the runtime's required network escalation; treat state as unknown until it succeeds.
+Request runtime network approval before the first GitHub helper call; denial, cancellation, or interruption stops the workflow, while transient failures from approved commands use bounded retry.
 
 `scripts/pr-state` accepts flags before or after the PR (`scripts/pr-state --summary <PR>` and `scripts/pr-state <PR> --summary` both work). When parsing output with `jq`, prefer writing the JSON to a temp file first, then running `jq` against that file; this avoids `set -e` surprises and prevents stderr from corrupting a JSON pipe.
 

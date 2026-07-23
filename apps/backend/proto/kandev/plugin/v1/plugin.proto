@@ -78,6 +78,19 @@ service Host {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListSessionCodeStats(ListSessionCodeStatsRequest) returns (ListSessionCodeStatsResponse);
 
+  // Conversation content — capability api_read:messages. Historical
+  // user/agent message content for a session or task, filterable by a time
+  // range (e.g. "yesterday"). Content is sanitized: kandev-injected
+  // <kandev-system> blocks are stripped, exactly like the message.added bus
+  // event — raw system prompts are never exposed to plugins.
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+
+  // Utility agent — capability agent_invoke. Runs a one-shot, non-interactive
+  // completion using the operator-configured "utility agent" profile (Settings
+  // > System), so a plugin can delegate a lightweight LLM step without holding
+  // its own API key. FailedPrecondition when no utility agent is configured.
+  rpc InvokeUtilityAgent(InvokeUtilityAgentRequest) returns (InvokeUtilityAgentResponse);
+
   // Writes — capability api_write:<resource>. Declared now for a stable
   // contract; handlers land in a later phase (not implemented by this RPC
   // addition). Route through service methods so the corresponding task.*
@@ -382,6 +395,49 @@ message ListSessionCodeStatsRequest {
 message ListSessionCodeStatsResponse {
   repeated SessionCodeStats stats = 1;
   PageInfo page_info = 2;
+}
+
+// ── Messages (conversation content) ──────────────────────────────────────────
+// One user/agent message in a session's transcript. content has kandev's
+// injected <kandev-system> blocks stripped; raw system content is never sent.
+// author_type is "user" or "agent" (there is no "system" author — system
+// context is inline markup that is removed at read time). type is the message
+// kind ("message", "content", "tool_call", "thinking", ...).
+message Message {
+  string id = 1;
+  string session_id = 2;
+  string task_id = 3;
+  string turn_id = 4;
+  string author_type = 5; // "user" | "agent"
+  string content = 6;     // <kandev-system> blocks stripped
+  string type = 7;        // "message" default; see MessageType
+  string created_at = 8;  // RFC3339
+}
+message MessageFilter {
+  repeated string session_ids = 1; // empty → not constrained by session
+  repeated string task_ids = 2;    // empty → not constrained by task
+  optional string since = 3;       // RFC3339 inclusive lower bound on created_at
+  optional string until = 4;       // RFC3339 exclusive upper bound on created_at
+  repeated string types = 5;       // empty → all message types
+}
+message ListMessagesRequest {
+  MessageFilter filter = 1;
+  Page page = 2;
+}
+message ListMessagesResponse {
+  repeated Message messages = 1;
+  PageInfo page_info = 2;
+}
+
+// ── Utility agent invocation (agent_invoke) ──────────────────────────────────
+// A one-shot completion delegated to the operator-configured utility agent.
+// Adding fields here (e.g. a future system_prompt or max_tokens) is the
+// forward-compatible extension path — the SDK method stays source-stable.
+message InvokeUtilityAgentRequest {
+  string prompt = 1;
+}
+message InvokeUtilityAgentResponse {
+  string text = 1;
 }
 
 // ── Writes (phase 2; api_write) ──────────────────────────────────────────────

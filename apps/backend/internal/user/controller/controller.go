@@ -82,6 +82,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		TerminalFontSize:            req.TerminalFontSize,
 		ChangesPanelLayout:          req.ChangesPanelLayout,
 		SystemMetricsDisplay:        req.SystemMetricsDisplay,
+		AppStatusBarOrder:           req.AppStatusBarOrder,
 		VoiceMode:                   req.VoiceMode,
 	})
 	if err != nil {

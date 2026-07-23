@@ -160,7 +160,7 @@ export function PassthroughToolbar({
         <CommentsPanel
           comments={pendingComments}
           openFile={openFile}
-          onSend={() => handleSendMessage("")}
+          onSend={() => handleSendMessage({ message: "" })}
         />
       )}
 

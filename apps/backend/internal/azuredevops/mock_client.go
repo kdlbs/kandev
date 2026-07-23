@@ -113,7 +113,18 @@ func (c *MockClient) ListPullRequests(_ context.Context, filter PullRequestFilte
 			items = append(items, pr)
 		}
 	}
-	return &PullRequestPage{Items: items, Count: len(items), Skip: filter.Skip, Top: filter.Top}, nil
+	top := filter.Top
+	if top <= 0 || top > 100 {
+		top = defaultPRPageSize
+	}
+	if filter.Skip >= len(items) {
+		return &PullRequestPage{Skip: filter.Skip, Top: top}, nil
+	}
+	items = items[filter.Skip:]
+	if len(items) > top {
+		items = items[:top]
+	}
+	return &PullRequestPage{Items: items, Count: len(items), Skip: filter.Skip, Top: top}, nil
 }
 
 func (c *MockClient) GetPullRequest(_ context.Context, _, _ string, id int) (*PullRequest, error) {
