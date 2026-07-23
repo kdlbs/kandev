@@ -368,25 +368,34 @@
   );
 }
 
+.task-sidebar-scroll-root [data-slot="scroll-area-scrollbar"] {
+  z-index: 1;
+  background: transparent;
+}
+
+.task-sidebar-scroll-root [data-slot="scroll-area-thumb"] {
+  background: var(--scrollbar-thumb);
+}
+
+.task-sidebar-scroll-root [data-slot="scroll-area-thumb"]:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
 @media (hover: hover) and (pointer: fine) {
-  .task-sidebar-scroll {
-    scrollbar-color: transparent transparent;
+  .task-sidebar-scroll-root [data-slot="scroll-area-scrollbar"] {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
   }
 
-  .task-sidebar-scroll:is(:hover, :focus-within) {
+  .task-sidebar-scroll-root:is(:hover, :focus-within) .task-sidebar-scroll {
     mask-image: none;
     -webkit-mask-image: none;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
-  .task-sidebar-scroll::-webkit-scrollbar-track,
-  .task-sidebar-scroll::-webkit-scrollbar-thumb {
-    background: transparent;
-  }
-
-  .task-sidebar-scroll:is(:hover, :focus-within)::-webkit-scrollbar-thumb {
-    background: var(--scrollbar-thumb);
-    background-clip: padding-box;
+  .task-sidebar-scroll-root:is(:hover, :focus-within) [data-slot="scroll-area-scrollbar"] {
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 

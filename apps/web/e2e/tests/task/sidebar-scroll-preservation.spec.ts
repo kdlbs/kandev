@@ -42,27 +42,44 @@ test.describe("sidebar scrolling", () => {
       timeout: 10_000,
     });
 
+    const overlayGeometry = await scrollContainer.evaluate((element) => {
+      // Headless Chromium uses platform overlay scrollbars, while desktop
+      // WebViews can reserve a native gutter. Force that platform mode so the
+      // regression is deterministic in CI.
+      element.style.scrollbarGutter = "stable";
+      const row = element.querySelector<HTMLElement>("[data-testid='sidebar-task-item']");
+      if (!row) throw new Error("Expected a rendered sidebar task row");
+      const containerRect = element.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      return {
+        rowRightGap: containerRect.right - rowRect.right,
+      };
+    });
+    expect(overlayGeometry.rowRightGap).toBeLessThanOrEqual(1);
+
     await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "true");
+    const overlayScrollbar = session.sidebar.locator(
+      "[data-slot='scroll-area-scrollbar'][data-orientation='vertical']",
+    );
+    await expect(overlayScrollbar).toBeAttached();
     const restingStyles = await scrollContainer.evaluate((element) => {
       const styles = getComputedStyle(element);
       return {
         maskImage: styles.maskImage,
-        scrollbarColor: styles.getPropertyValue("scrollbar-color"),
       };
     });
     expect(restingStyles.maskImage).toContain("linear-gradient");
-    expect(restingStyles.scrollbarColor).toContain("rgba(0, 0, 0, 0)");
+    await expect(overlayScrollbar).toHaveCSS("opacity", "0");
 
     await scrollContainer.hover();
     const hoverStyles = await scrollContainer.evaluate((element) => {
       const styles = getComputedStyle(element);
       return {
         maskImage: styles.maskImage,
-        scrollbarColor: styles.getPropertyValue("scrollbar-color"),
       };
     });
     expect(hoverStyles.maskImage).toBe("none");
-    expect(hoverStyles.scrollbarColor).not.toBe(restingStyles.scrollbarColor);
+    await expect(overlayScrollbar).toHaveCSS("opacity", "1");
 
     await scrollContainer.evaluate((element) => {
       element.scrollTop = element.scrollHeight;

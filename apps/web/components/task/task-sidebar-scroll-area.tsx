@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { PanelBody } from "./panel-primitives";
+import { ScrollArea } from "@kandev/ui/scroll-area";
 
 const SCROLL_END_TOLERANCE_PX = 1;
 
@@ -38,15 +38,19 @@ export function TaskSidebarScrollArea({ children }: { children: ReactNode }) {
   }, [updateScrollCue]);
 
   return (
-    <PanelBody
-      ref={scrollRef}
-      className="task-sidebar-scroll p-0"
-      data-can-scroll-down={canScrollDown}
-      data-testid="task-sidebar-scroll"
+    <ScrollArea
+      type="always"
+      className="task-sidebar-scroll-root min-h-0 flex-1 bg-card text-card-foreground"
+      viewportProps={{
+        ref: scrollRef,
+        className: "task-sidebar-scroll",
+        "data-can-scroll-down": canScrollDown,
+        "data-testid": "task-sidebar-scroll",
+      }}
     >
       <div ref={contentRef} className="space-y-4">
         {children}
       </div>
-    </PanelBody>
+    </ScrollArea>
   );
 }
