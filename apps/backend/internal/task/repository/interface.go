@@ -52,6 +52,13 @@ type TaskRepository interface {
 	// Returns whether the row was updated.
 	UnarchiveTask(ctx context.Context, id string) (bool, error)
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)
+	// ListArchivedTasksWithActiveSessions returns the IDs of archived tasks
+	// (archived_at IS NOT NULL) that still have at least one task_sessions
+	// row in an active DB state (CREATED/STARTING/RUNNING/WAITING_FOR_INPUT).
+	// Candidate list for the periodic reconciliation sweep that recovers
+	// sessions left stranded when finalizeCancelledSessions's bounded
+	// in-line retry was exhausted by sustained SQLite writer contention.
+	ListArchivedTasksWithActiveSessions(ctx context.Context) ([]string, error)
 	ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error)
 	DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error)
 	// CountOpenWatcherCreatedTasks returns the number of open watcher-created

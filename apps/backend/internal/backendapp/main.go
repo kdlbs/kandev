@@ -751,6 +751,7 @@ func startGatewayAndServe(
 	}
 
 	services.Task.StartAutoArchiveLoop(ctx)
+	services.Task.StartArchivedSessionReconciliationLoop(ctx)
 	services.Task.StartQuickChatExpirationLoop(ctx)
 
 	// ============================================
