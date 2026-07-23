@@ -1852,11 +1852,12 @@ func TestSetSessionStartingAllowsTerminalResumeWithoutTaskPromotion(t *testing.T
 	require.Empty(t, taskRepo.stateWrites)
 }
 
-// Sessions cancelled by an archive (Service.ArchiveTask or the cascade
-// archive path) carry a distinct ErrorMessage; unlike an explicit user/
-// coordinator stop, these must recover into STARTING like a Failed session so
-// Resume works normally once the task is unarchived (bug: "Can't resume this
-// un-archived task").
+// TestSetSessionStartingAllowsArchiveCancelledResumeWithoutPromotion covers
+// sessions cancelled by an archive (Service.ArchiveTask or the cascade
+// archive path), which carry a distinct ErrorMessage; unlike an explicit
+// user/coordinator stop, these must recover into STARTING like a Failed
+// session so Resume works normally once the task is unarchived (bug:
+// "Can't resume this un-archived task").
 func TestSetSessionStartingAllowsArchiveCancelledResumeWithoutPromotion(t *testing.T) {
 	for _, reason := range []string{models.SessionArchiveCancelReason, models.SessionArchiveTreeCancelReason} {
 		t.Run(reason, func(t *testing.T) {

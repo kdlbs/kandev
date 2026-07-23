@@ -2553,11 +2553,11 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 	})
 }
 
-// updateSessionStarting's fallback path (no onSessionStarting callback wired)
-// must mirror Service.setSessionStarting: an archive-cancelled session (the
-// resume path treats CANCELLED as an expected, resumable terminal state) may
-// recover into STARTING like a Failed session, but an ordinary/explicit
-// cancellation must stay rejected.
+// TestUpdateSessionStarting_ArchiveCancelledSessionRecovers proves
+// updateSessionStarting's fallback path (no onSessionStarting callback
+// wired) mirrors Service.setSessionStarting: an archive-cancelled session
+// (the resume path treats CANCELLED as an expected, resumable terminal
+// state) may recover into STARTING like a Failed session.
 func TestUpdateSessionStarting_ArchiveCancelledSessionRecovers(t *testing.T) {
 	for _, reason := range []string{models.SessionArchiveCancelReason, models.SessionArchiveTreeCancelReason} {
 		t.Run(reason, func(t *testing.T) {
@@ -2585,6 +2585,10 @@ func TestUpdateSessionStarting_ArchiveCancelledSessionRecovers(t *testing.T) {
 	}
 }
 
+// TestUpdateSessionStarting_OrdinaryCancelledSessionStaysRejected is the
+// counterpart to TestUpdateSessionStarting_ArchiveCancelledSessionRecovers:
+// an ordinary/explicit cancellation (no archive-cancel reason) must stay
+// rejected as superseded, never silently promoted back into STARTING.
 func TestUpdateSessionStarting_OrdinaryCancelledSessionStaysRejected(t *testing.T) {
 	repo := newMockRepository()
 	executor := newTestExecutor(t, &mockAgentManager{}, repo)
