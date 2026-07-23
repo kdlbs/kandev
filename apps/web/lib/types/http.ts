@@ -751,10 +751,7 @@ export type StepPortable = {
   pull_from_step_position?: number;
 };
 
-export type ImportWorkflowsResult = {
-  created: string[];
-  skipped: string[];
-};
+export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
 
 // Helper function to check if a step has a specific on_enter action
 export function stepHasOnEnterAction(
