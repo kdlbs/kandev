@@ -15,6 +15,10 @@ updates through the existing task/session data flow, and finish with desktop, mo
 SSH coverage. The plan preserves `task_repositories` for Git behavior and introduces a separate
 folder attachment relation, as required by
 [ADR-2026-07-22-runtime-mutable-task-workspace-sources](../../decisions/2026-07-22-runtime-mutable-task-workspace-sources.md).
+The active UX delta extracts the task-create source-mode presentation into a controlled shared
+selector, presents **Local** and **Remote** modes inside Add sources, and combines **Add sources**
+with **Open workspace folder** in one Files-toolbar action menu without changing the durable source
+union or materialization contract.
 
 ---
 
@@ -114,11 +118,18 @@ folder attachment relation, as required by
   `task-create-dialog-workspace-repo-chips.tsx`, `task-create-dialog-remote-repo-chip.tsx`,
   `task-create-dialog-remote-repo-chips.tsx`, and `folder-picker.tsx` into
   `components/workspace-source-picker/` without changing the task-create dialog behavior.
+- Generalize `task-create-dialog-source-mode.tsx` into a controlled segmented source-mode
+  presentation with configurable options, labels, and stable test IDs. Task creation keeps
+  **Repo / Remote / None** and its existing state transitions; Add sources uses **Local / Remote**
+  and owns separate batch state.
 - Add typed mixed rows (`repository`, `remote_repository`, `folder`) and a
-  `useWorkspaceSourcePickerState` hook. Each **Add source** action chooses a row kind; rows retain
-  independent repository, branch, provider metadata, and folder validation state so one submission
-  can mix source kinds on Local/Worktree. Executor capability removes the folder choice on
-  container/remote tasks.
+  `useWorkspaceSourcePickerState` hook. The **Local** mode reuses the combined saved/discovered
+  repository selector and exposes a local-folder/manual-path affordance when supported. The
+  **Remote** mode reuses provider-backed and pasted-URL controls. Mode switching changes available
+  add controls without removing configured rows, so one submission can mix source kinds on
+  Local/Worktree. Executor capability removes the folder affordance on container/remote tasks.
+- Decouple reusable remote-row presentation from create-task-only `DialogFormState`; keep branch,
+  provider metadata, discovery, validation, and payload conversion owned by the consuming dialog.
 - Add `attachTaskWorkspaceSources` to `lib/api/domains/kanban-api.ts`, source types to
   `lib/types/http.ts` and the kanban slice, and unit-tested payload/error normalization.
 - Once backend runtime support lands, delete the non-Worktree multi-repository disable resolver and
@@ -127,14 +138,20 @@ folder attachment relation, as required by
 
 ### Files panel surface and live state
 
-- Add an **Add sources** toolbar action to `file-browser-toolbar.tsx`, threaded through
-  `file-browser.tsx`, `files-panel.tsx`, `task-files-panel.tsx`, and their hooks. Show it only for
-  non-archived repository-backed tasks; disable it with a visible explanation while a turn/tool call
-  is active or source state is still loading.
+- Replace the separate **Add sources** and **Open workspace folder** toolbar controls with one
+  labeled/icon **Workspace actions** trigger in `file-browser-toolbar.tsx`, threaded through
+  `file-browser.tsx`, `files-panel.tsx`, `task-files-panel.tsx`, and their hooks. Its dropdown menu
+  contains both actions. Keep the trigger enabled whenever opening the workspace folder is valid;
+  disable only the **Add sources** row for archived/non-repository tasks, active turns/tool calls,
+  or loading source state, and render the reason as visible menu copy.
 - Build `components/task/add-workspace-sources/` around the shared picker. Desktop uses a Dialog;
   phone uses a full-height Drawer with fixed header/footer, `min-h-0` internal scrolling,
   `100dvh` sizing, safe-area bottom padding, and a single submit action. Preserve keyboard focus,
-  Enter behavior, dismissal, pending state, per-source errors, and retryable batch contents.
+  Enter behavior, dismissal, pending state, per-source errors, retryable batch contents, and rows
+  configured in inactive Local/Remote modes.
+- Coordinate Radix menu close autofocus before opening the controlled Dialog/Drawer so dismissal
+  returns focus to the workspace-actions trigger. On phones, use the existing responsive
+  `DropdownMenu` bottom-sheet treatment rather than introducing a second action-menu drawer.
 - Subscribe to `task.updated` for repository/folder state and
   `session.workspace_sources_updated` for the adopted workspace root. Update the kanban/session
   slices, reset the file-tree cache for affected environment/session IDs, and let existing
@@ -146,19 +163,26 @@ folder attachment relation, as required by
 
 ### Mobile design contract
 
-- **Desktop outcome:** a compact Files toolbar action opens a multi-row dialog and refreshes the
-  workspace tree after one atomic submission.
-- **Mobile entry point:** the Files tab toolbar exposes the same named action; it does not depend on
-  hover, context click, or the desktop dockview panel menu.
-- **Hierarchy and primary action:** source rows and their validation own the scroll body; Cancel and
-  **Add sources** stay fixed in the footer, with submit as the sole primary action.
-- **Presentation rationale:** source attachment is temporary but can contain several searchable,
-  branch-aware rows, so a full-height Drawer is less cramped than an inset menu and avoids stacking
-  popovers over the Files workbench.
+- **Desktop outcome:** one compact labeled/icon Files-toolbar trigger opens a dropdown with **Add
+  sources** and **Open workspace folder**. Selecting Add sources opens the multi-row dialog and
+  refreshes the workspace tree after one atomic submission.
+- **Mobile entry point:** the same workspace-actions trigger is visible in the Files toolbar with an
+  actual 44px touch target. The shared responsive DropdownMenu becomes a short inset bottom-sheet
+  action menu; it does not depend on hover, context click, or desktop Dockview chrome.
+- **Hierarchy and primary action:** the action menu chooses between workspace actions. The Add
+  sources surface then shows a shared **Local / Remote** segmented selector, while configured rows
+  and validation own the single scroll body. Cancel and **Add sources** stay fixed in the footer,
+  with submit as the sole primary action.
+- **Presentation rationale:** the two workspace actions are a short temporary choice, so they fit
+  the shared inset menu. Source attachment can contain several searchable, branch-aware rows, so it
+  continues into a full-height Drawer rather than stacking the full form inside that menu.
 - **Shared versus responsive:** source state, validation, payload construction, and API calls are
-  shared; only Dialog/Drawer composition and toolbar hitbox treatment differ.
+  shared. The source-mode switch is controlled presentation reused by task creation and Add sources;
+  each dialog keeps its own state semantics. Only Dialog/Drawer composition, responsive menu
+  treatment, and toolbar hitbox treatment differ.
 - **Geometry:** one internal vertical scroll owner, dynamic viewport height, safe-area clearance,
-  contained repository popovers/drawers, and no document horizontal overflow.
+  44px phone trigger/mode/menu rows, contained repository popovers/drawers, and no document
+  horizontal overflow.
 
 ---
 
@@ -191,21 +215,33 @@ folder attachment relation, as required by
   task/session event merges, and file-tree cache reset.  
   **File:** focused `*.test.ts(x)` files beside the new picker, API helper, toolbar, and WS handlers.  
   **How:** Vitest and Testing Library.
+- **What:** the shared source-mode presentation keeps task-create labels/test IDs while Add sources
+  renders Local/Remote, preserves mixed rows across mode switches, and provides 44px mobile options.
+  **File:** `task-create-dialog-repo-chips.test.tsx`,
+  `add-workspace-sources-dialog.test.tsx`, and a focused shared-mode component test.
+  **How:** Testing Library controlled-state and responsive-geometry assertions.
+- **What:** one workspace-actions trigger exposes both actions, keeps Open workspace folder enabled
+  when Add sources is disabled, shows the disabled reason, and hands focus to/from the source
+  surface.
+  **File:** a focused test beside `file-browser-toolbar.tsx`.
+  **How:** Testing Library menu interaction and callback assertions.
 
 ## E2E Tests
 
 - **Scenario:** GIVEN an idle one-repository worktree task, WHEN a desktop user adds a second local
-  repository and a plain folder, THEN both top-level entries appear and only the repository appears
-  in Changes.  
+  repository and a plain folder through **Workspace actions → Add sources → Local**, THEN both
+  top-level entries appear and only the repository appears in Changes.
   **File:** `apps/web/e2e/tests/task/add-workspace-sources.spec.ts`.  
-  **What to verify:** dialog flow, atomic success, Files refresh, repository-aware UI, and persistence
-  after reload.
+  **What to verify:** both menu actions, open-folder request routing, shared Local selector, Remote
+  mode switching with row preservation, dialog flow, atomic success, Files refresh,
+  repository-aware UI, and persistence after reload.
 - **Scenario:** GIVEN the Files tab on a Pixel 5 viewport, WHEN the user opens the full-height source
-  picker and attaches two sources, THEN the same task value is delivered without horizontal
-  overflow.  
+  picker through the workspace-actions bottom-sheet menu and attaches two sources across Local and
+  Remote, THEN the same task value is delivered without horizontal overflow.
   **File:** `apps/web/e2e/tests/task/mobile-add-workspace-sources.spec.ts`.  
-  **What to verify:** 44px entry point, internal scroll, fixed safe-area footer, submit outcome,
-  dismissal/focus return, and document containment.
+  **What to verify:** 44px trigger/menu/mode rows, both actions, open-folder request routing,
+  internal scroll, fixed safe-area footer, submit outcome, dismissal/focus return, and document
+  containment.
 - **Scenario:** GIVEN a Docker task, WHEN a remote repository is attached, THEN it is readable inside
   the running container; the folder source kind is absent and a forged folder request is rejected.  
   **File:** `apps/web/e2e/tests/docker/add-workspace-sources.spec.ts`.  
@@ -247,3 +283,13 @@ Wave 5 (parallel):
 Wave 6:
 
 - [x] [Task 10: Final verification](task-10-final-verification.md)
+
+Wave 7 (parallel UX delta):
+
+- [x] [Task 11: Shared Local and Remote selector](task-11-shared-local-remote-selector.md)
+- [x] [Task 12: Unified Files workspace actions](task-12-unified-files-workspace-actions.md)
+
+Wave 8 (parallel after Tasks 11 and 12):
+
+- [x] [Task 13: UX delta end-to-end coverage](task-13-ux-delta-e2e.md)
+- [x] [Task 14: UX terminology documentation](task-14-ux-terminology-documentation.md)

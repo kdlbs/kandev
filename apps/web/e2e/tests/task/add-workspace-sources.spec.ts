@@ -45,6 +45,7 @@ test.describe("Attach local workspace sources", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     test.setTimeout(120_000);
     const { repositoryPath, folderPath } = createSourceDirectories(backend.tmpDir);
@@ -67,11 +68,28 @@ test.describe("Attach local workspace sources", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
     await session.clickTab("Files");
 
-    const addSources = testPage.getByTestId("files-add-sources");
+    const workspaceActions = testPage.getByTestId("files-workspace-actions");
+    await expect(workspaceActions).toBeEnabled();
+    await workspaceActions.click();
+    const addSources = testPage.getByRole("menuitem", { name: "Add sources" });
+    const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
     await expect(addSources).toBeEnabled();
-    await addSources.click();
+    await expect(openFolder).toBeEnabled();
+    if (!task.session_id) throw new Error("task creation did not return a session id");
+    await Promise.all([
+      testPage.waitForRequest(
+        (request) =>
+          request.method() === "POST" &&
+          request.url().endsWith(`/api/v1/task-sessions/${task.session_id}/open-folder`),
+      ),
+      openFolder.click(),
+    ]);
+    await expect(openFolder).not.toBeVisible();
+    await workspaceActions.click();
+    await testPage.getByRole("menuitem", { name: "Add sources" }).click();
     const dialog = testPage.getByTestId("add-workspace-sources-dialog");
     await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("source-mode-local")).toHaveAttribute("aria-checked", "true");
     await dialog.getByRole("button", { name: "Local Git repository" }).click();
     await dialog.getByRole("button", { name: "Local folder" }).click();
     const rows = dialog.getByTestId("workspace-source-row");
@@ -89,6 +107,14 @@ test.describe("Attach local workspace sources", () => {
       backend.tmpDir,
       folderPath,
     );
+    await dialog.getByTestId("source-mode-remote").click();
+    await expect(rows).toHaveCount(2);
+    await prCapture.screenshot("workspace-actions-local-remote", {
+      caption:
+        "Desktop Add sources dialog after switching to Remote with configured Local rows preserved",
+    });
+    await dialog.getByTestId("source-mode-local").click();
+    await expect(rows).toHaveCount(2);
     await dialog.getByTestId("add-workspace-sources-submit").click();
     await expect(dialog).not.toBeVisible();
 
@@ -162,12 +188,14 @@ test.describe("Attach local workspace sources", () => {
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await session.clickTab("Files");
 
-    const action = testPage.getByTestId("files-add-sources");
+    const workspaceActions = testPage.getByTestId("files-workspace-actions");
+    await expect(workspaceActions).toBeEnabled();
+    await workspaceActions.click();
+    const action = testPage.getByRole("menuitem", { name: "Add sources" });
     await expect(action).toBeDisabled();
-    const tooltipTrigger = action.locator("..");
-    await tooltipTrigger.focus();
-    await expect(testPage.getByRole("tooltip")).toContainText(
+    await expect(action).toContainText(
       "Wait for the active turn or tool call to finish before adding sources.",
     );
+    await expect(testPage.getByRole("menuitem", { name: "Open workspace folder" })).toBeEnabled();
   });
 });

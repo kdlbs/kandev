@@ -170,7 +170,7 @@ Before starting, document:
 
 ### Add sources after creation
 
-For an idle, non-archived repository-backed task, use **Files → Add sources** to add a saved workspace repository, local Git repository, remote Git repository, or arbitrary local folder. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer.
+For an idle, non-archived repository-backed task, use **Files → Workspace actions → Add sources**. Its **Local** mode shares task creation's saved/discovered local-repository selector and offers local folders when the executor supports them; its **Remote** mode uses provider-backed repositories or pasted repository URLs. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer.
 
 Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Folder sources are live host grants and work only on **Worktree** and **Local/Local PC**; they are unavailable to Docker and remote runtimes. Remote Docker remains unimplemented. Local Git sources need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use host repositories directly.
 

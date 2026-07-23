@@ -97,6 +97,30 @@ function renderInProvider(ui: Parameters<typeof render>[0]) {
 
 // eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("RepoChipsRow", () => {
+  it("keeps the compact Repo, Remote, and None source-mode controls and test IDs", () => {
+    const onToggleRemote = vi.fn();
+    const onToggleNoRepository = vi.fn();
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        onToggleRemote={onToggleRemote}
+        onToggleNoRepository={onToggleNoRepository}
+      />,
+    );
+
+    expect(screen.getByTestId("source-mode-workspace").textContent).toBe("Repo");
+    expect(screen.getByTestId("source-mode-remote").textContent).toBe("Remote");
+    expect(screen.getByTestId("source-mode-scratch").textContent).toBe("None");
+    expect(screen.getByTestId("source-mode-workspace").className).not.toContain("min-h-11");
+    fireEvent.click(screen.getByTestId("source-mode-remote"));
+    expect(onToggleRemote).toHaveBeenCalledOnce();
+  });
+
   it("renders one chip per row plus an Add button", () => {
     renderInProvider(
       <RepoChipsRow

@@ -30,6 +30,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   apiClient,
   seedData,
   backend,
+  prCapture,
 }) => {
   test.setTimeout(120_000);
   const gitEnv = makeGitEnv(backend.tmpDir);
@@ -60,13 +61,49 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
   await testPage.getByRole("button", { name: "Files" }).tap();
-  const entryPoint = testPage.getByTestId("files-add-sources");
+  const entryPoint = testPage.getByTestId("files-workspace-actions");
   await expect(entryPoint).toBeVisible();
   await expect(entryPoint).toBeEnabled();
   const entryBox = await entryPoint.boundingBox();
   expect(entryBox).not.toBeNull();
   expect(entryBox!.height).toBeGreaterThanOrEqual(44);
   await entryPoint.tap();
+  const addSources = testPage.getByRole("menuitem", { name: "Add sources" });
+  const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
+  const actionMenu = addSources.locator("xpath=ancestor::*[@role='menu'][1]");
+  await actionMenu.evaluate((element) =>
+    Promise.all(
+      element
+        .getAnimations({ subtree: true })
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ),
+  );
+  const [menuBox, addSourcesBox, openFolderBox] = await Promise.all([
+    actionMenu.boundingBox(),
+    addSources.boundingBox(),
+    openFolder.boundingBox(),
+  ]);
+  const menuViewport = testPage.viewportSize();
+  if (!menuBox || !addSourcesBox || !openFolderBox || !menuViewport) {
+    throw new Error("mobile workspace actions menu has no layout box");
+  }
+  expect(menuBox.x).toBeGreaterThanOrEqual(8);
+  expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(menuViewport.width - 8);
+  expect(menuViewport.height - (menuBox.y + menuBox.height)).toBeGreaterThanOrEqual(7);
+  expect(addSourcesBox.height).toBeGreaterThanOrEqual(44);
+  expect(openFolderBox.height).toBeGreaterThanOrEqual(44);
+  if (!task.session_id) throw new Error("task creation did not return a session id");
+  await Promise.all([
+    testPage.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        request.url().endsWith(`/api/v1/task-sessions/${task.session_id}/open-folder`),
+    ),
+    openFolder.tap(),
+  ]);
+  await expect(openFolder).not.toBeVisible();
+  await entryPoint.tap();
+  await testPage.getByRole("menuitem", { name: "Add sources" }).tap();
 
   const drawer = testPage.getByTestId("add-workspace-sources-drawer");
   await expect(drawer).toBeVisible();
@@ -86,6 +123,14 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   );
   expect(scrollOwners).toBe(1);
 
+  const localMode = drawer.getByTestId("source-mode-local");
+  const remoteMode = drawer.getByTestId("source-mode-remote");
+  const [localModeBox, remoteModeBox] = await Promise.all([
+    localMode.boundingBox(),
+    remoteMode.boundingBox(),
+  ]);
+  expect(localModeBox?.height).toBeGreaterThanOrEqual(44);
+  expect(remoteModeBox?.height).toBeGreaterThanOrEqual(44);
   await drawer.getByRole("button", { name: "Local Git repository" }).tap();
   await drawer.getByRole("button", { name: "Local folder" }).tap();
   const rows = drawer.getByTestId("workspace-source-row");
@@ -103,6 +148,14 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     backend.tmpDir,
     folderPath,
   );
+  await remoteMode.tap();
+  await expect(rows).toHaveCount(2);
+  await prCapture.screenshot("workspace-actions-local-remote", {
+    caption:
+      "Pixel 5 Add sources drawer after switching to Remote with configured Local rows preserved",
+  });
+  await localMode.tap();
+  await expect(rows).toHaveCount(2);
 
   const footer = drawer.locator("div.border-t").last();
   const submit = drawer.getByTestId("add-workspace-sources-submit");
