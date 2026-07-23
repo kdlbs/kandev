@@ -119,9 +119,13 @@ func TestParseCodexSubagentFrameMalformedCollectionsAreSafe(t *testing.T) {
 }
 
 func codexCollaborationMeta(tool string, receivers any) map[string]any {
+	return codexCollaborationMetaFrom(tool, "thread-main", receivers)
+}
+
+func codexCollaborationMetaFrom(tool, sender string, receivers any) map[string]any {
 	return map[string]any{"codex": map[string]any{"collaboration": map[string]any{
 		"tool":              tool,
-		"senderThreadId":    "thread-main",
+		"senderThreadId":    sender,
 		"receiverThreadIds": receivers,
 	}}}
 }

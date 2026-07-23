@@ -55,6 +55,19 @@ func codexSubagentSignalFromMeta(meta map[string]any) codexSubagentSignal {
 	return codexSubagentSignalNone
 }
 
+func codexSenderThreadID(meta map[string]any) string {
+	codex, ok := nestedMap(meta, "codex")
+	if !ok {
+		return ""
+	}
+	collaboration, ok := nestedMap(codex, "collaboration")
+	if !ok {
+		return ""
+	}
+	senderThreadID, _ := collaboration["senderThreadId"].(string)
+	return senderThreadID
+}
+
 func codexCollaborationSignal(collaboration map[string]any) bool {
 	tool, _ := collaboration["tool"].(string)
 	return tool == codexCollaborationSpawnAgent

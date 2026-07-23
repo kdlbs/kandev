@@ -480,13 +480,13 @@ func TestCodexSubagentCorrelationPressureRetainsDelayedMatch(t *testing.T) {
 	if event := a.convertToolCallUpdate("session-1", delayed); event.Type != streams.EventTypeToolCall {
 		t.Fatalf("delayed first event type = %q", event.Type)
 	}
-	for i := 0; i < maxCodexSubagentCorrelations+20; i++ {
-		id := "paired-" + strconv.Itoa(i)
+	for i := 0; i < maxCodexCompletedSubagentCorrelations+20; i++ {
+		id := "live-" + strconv.Itoa(i)
 		a.convertToolCallUpdate("session-1", codexCollaborationToolCall(id, "child-"+strconv.Itoa(i), "running"))
-		a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild(id, "child-"+strconv.Itoa(i)))
 	}
-	if got := len(a.codexSubagentCorrelations); got != maxCodexSubagentCorrelations {
-		t.Fatalf("correlation count = %d, want bounded %d", got, maxCodexSubagentCorrelations)
+	wantLive := maxCodexCompletedSubagentCorrelations + 21
+	if got := len(a.codexSubagentCorrelations); got != wantLive {
+		t.Fatalf("live correlation count = %d, want %d retained until completion", got, wantLive)
 	}
 	delayedEvent := a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild("delayed", "delayed-child"))
 	if delayedEvent.Type != streams.EventTypeToolUpdate {
@@ -503,6 +503,32 @@ func TestCodexSubagentCorrelationPressureRetainsDelayedMatch(t *testing.T) {
 	}
 }
 
+func TestCodexCompletedTombstonesAreBoundedOldestFirst(t *testing.T) {
+	a := newCodexCorrelationTestAdapter()
+	total := maxCodexCompletedSubagentCorrelations + 20
+	for i := 0; i < total; i++ {
+		id := "paired-" + strconv.Itoa(i)
+		childID := "child-" + strconv.Itoa(i)
+		a.convertToolCallUpdate("session-1", codexCollaborationToolCall(id, childID, "running"))
+		a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild(id, childID))
+	}
+	if got := a.codexCompletedCorrelationCountLocked(); got != maxCodexCompletedSubagentCorrelations {
+		t.Fatalf("completed tombstones = %d, want %d", got, maxCodexCompletedSubagentCorrelations)
+	}
+	oldest := codexSubagentCorrelationKey{sessionID: "session-1", toolCallID: "paired-0", childSessionID: "child-0"}
+	if a.codexSubagentCorrelations[oldest] != nil {
+		t.Fatal("oldest completed tombstone survived deterministic pruning")
+	}
+	newest := codexSubagentCorrelationKey{
+		sessionID:      "session-1",
+		toolCallID:     "paired-" + strconv.Itoa(total-1),
+		childSessionID: "child-" + strconv.Itoa(total-1),
+	}
+	if a.codexSubagentCorrelations[newest] == nil {
+		t.Fatal("newest completed tombstone was pruned")
+	}
+}
+
 func TestCodexCorrelationSameToolIDDifferentChildCreatesNewCard(t *testing.T) {
 	a := newCodexCorrelationTestAdapter()
 	first := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("reused", "child-a", "running"))
@@ -514,6 +540,12 @@ func TestCodexCorrelationSameToolIDDifferentChildCreatesNewCard(t *testing.T) {
 	if second.Type != streams.EventTypeToolCall {
 		t.Fatalf("different child event type = %q, want tool_call", second.Type)
 	}
+	if first.ToolCallID == second.ToolCallID {
+		t.Fatalf("sibling emitted IDs collide at %q", first.ToolCallID)
+	}
+	if first.ToolCallID != "reused" {
+		t.Fatalf("first child ID = %q, want unchanged wire ID", first.ToolCallID)
+	}
 	if got := second.NormalizedPayload.SubagentTask().ChildSessionID; got != "child-b" {
 		t.Fatalf("different child ID = %q", got)
 	}
@@ -522,11 +554,41 @@ func TestCodexCorrelationSameToolIDDifferentChildCreatesNewCard(t *testing.T) {
 	if lateFirst.Type != streams.EventTypeToolUpdate {
 		t.Fatalf("same-child replay type = %q, want tool_update", lateFirst.Type)
 	}
-	if active := a.activeToolCalls["reused"]; codexSubagentChildID(active) != "child-b" {
-		t.Fatalf("late child-a replay replaced active child: %q", codexSubagentChildID(active))
+	if lateFirst.ToolCallID != first.ToolCallID {
+		t.Fatalf("late first child ID = %q, want %q", lateFirst.ToolCallID, first.ToolCallID)
+	}
+	secondActivity := a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild("reused", "child-b"))
+	if secondActivity.ToolCallID != second.ToolCallID {
+		t.Fatalf("second activity ID = %q, want %q", secondActivity.ToolCallID, second.ToolCallID)
+	}
+	for id, childID := range map[string]string{first.ToolCallID: "child-a", second.ToolCallID: "child-b"} {
+		if active := a.activeToolCalls[id]; codexSubagentChildID(active) != childID {
+			t.Fatalf("active payload %q child = %q, want %q", id, codexSubagentChildID(active), childID)
+		}
 	}
 	if got := a.codexCorrelationSiblingCountLocked("session-1", "reused"); got != 2 {
 		t.Fatalf("correlation sibling count = %d, want 2", got)
+	}
+
+	firstResult := a.convertToolCallResultUpdate(
+		"session-1",
+		codexCollaborationResultUpdate("reused", "child-a", toolStatusCompleted),
+	)
+	secondResult := a.convertToolCallResultUpdate(
+		"session-1",
+		codexCollaborationResultUpdate("reused", "child-b", toolStatusCompleted),
+	)
+	if firstResult.ToolCallID != first.ToolCallID || secondResult.ToolCallID != second.ToolCallID {
+		t.Fatalf(
+			"result IDs = %q/%q, want %q/%q",
+			firstResult.ToolCallID,
+			secondResult.ToolCallID,
+			first.ToolCallID,
+			second.ToolCallID,
+		)
+	}
+	if a.activeToolCalls[first.ToolCallID] != nil || a.activeToolCalls[second.ToolCallID] != nil {
+		t.Fatal("terminal sibling results did not clear their independent active entries")
 	}
 }
 
@@ -541,19 +603,25 @@ func TestCodexCorrelationMissingChildFallbackIsUnambiguousOnly(t *testing.T) {
 		t.Fatalf("fallback lost known child ID: %q", got)
 	}
 
-	// The correlation is now fully matched. A later child-less spawn with the
-	// same tool ID is unsafe to attach and must create a new card.
-	newUnknown := a.convertToolCallUpdate("session-1", codexChildlessCollaborationToolCall("fallback"))
-	if newUnknown.Type != streams.EventTypeToolCall {
-		t.Fatalf("child-less frame after completed tombstone = %q, want tool_call", newUnknown.Type)
+	// The correlation is now fully matched. A later overlapping or replayed
+	// child-less frame still belongs to the sole compatible child.
+	replayed := a.convertToolCallUpdate("session-1", codexChildlessCollaborationToolCall("fallback"))
+	if replayed.Type != streams.EventTypeToolUpdate {
+		t.Fatalf("child-less frame after completed tombstone = %q, want tool_update", replayed.Type)
+	}
+	if replayed.ToolCallID != missingActivity.ToolCallID {
+		t.Fatalf("replayed child-less ID = %q, want %q", replayed.ToolCallID, missingActivity.ToolCallID)
 	}
 
 	// The reverse ordering is also safe: a sole incomplete child-less spawn
 	// adopts the child identity from its matching activity and is re-keyed.
-	a.convertToolCallUpdate("session-1", codexChildlessCollaborationToolCall("reverse"))
+	childless := a.convertToolCallUpdate("session-1", codexChildlessCollaborationToolCall("reverse"))
 	reverse := a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild("reverse", "child-c"))
 	if reverse.Type != streams.EventTypeToolUpdate {
 		t.Fatalf("reverse fallback type = %q, want tool_update", reverse.Type)
+	}
+	if reverse.ToolCallID != childless.ToolCallID {
+		t.Fatalf("re-keyed child ID changed from %q to %q", childless.ToolCallID, reverse.ToolCallID)
 	}
 	knownKey := codexSubagentCorrelationKey{
 		sessionID:      "session-1",
@@ -562,6 +630,34 @@ func TestCodexCorrelationMissingChildFallbackIsUnambiguousOnly(t *testing.T) {
 	}
 	if a.codexSubagentCorrelations[knownKey] == nil {
 		t.Fatal("reverse fallback was not re-keyed to the discovered child")
+	}
+}
+
+func TestCodexSiblingNestedChildrenUseEmittedParentIDs(t *testing.T) {
+	a := newCodexCorrelationTestAdapter()
+	first := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("reused", "child-a", "running"))
+	second := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("reused", "child-b", "running"))
+
+	nestedA := codexCollaborationToolCallFrom("nested-a", "child-a", "grandchild-a", "running")
+	nestedAEvent := a.convertToolCallUpdate("session-1", nestedA)
+	if nestedAEvent.ParentToolCallID != first.ToolCallID {
+		t.Fatalf("nested child-a parent = %q, want %q", nestedAEvent.ParentToolCallID, first.ToolCallID)
+	}
+	nestedB := codexCollaborationToolCallFrom("nested-b", "child-b", "grandchild-b", "running")
+	nestedBEvent := a.convertToolCallUpdate("session-1", nestedB)
+	if nestedBEvent.ParentToolCallID != second.ToolCallID {
+		t.Fatalf("nested child-b parent = %q, want %q", nestedBEvent.ParentToolCallID, second.ToolCallID)
+	}
+
+	nestedBActivity := a.convertToolCallUpdate(
+		"session-1",
+		codexStartedActivityToolCallForChild("nested-b", "grandchild-b"),
+	)
+	if nestedBActivity.ToolCallID != nestedBEvent.ToolCallID {
+		t.Fatalf("nested child update ID = %q, want %q", nestedBActivity.ToolCallID, nestedBEvent.ToolCallID)
+	}
+	if nestedBActivity.ParentToolCallID != second.ToolCallID {
+		t.Fatalf("nested child update parent = %q, want %q", nestedBActivity.ParentToolCallID, second.ToolCallID)
 	}
 }
 
@@ -578,6 +674,40 @@ func TestCodexCorrelationMissingChildDoesNotChooseAmongChildren(t *testing.T) {
 	}
 	if got := a.codexCorrelationSiblingCountLocked("session-1", "ambiguous"); got != 3 {
 		t.Fatalf("ambiguous correlation count = %d, want 3", got)
+	}
+}
+
+func TestCodexSiblingEmittedIDsAvoidEncodedAndArbitraryCollisions(t *testing.T) {
+	a := newCodexCorrelationTestAdapter()
+	first := a.convertToolCallUpdate(
+		"session-1",
+		codexCollaborationToolCall("wire~codex-subagent~", "child/雪", "running"),
+	)
+	second := a.convertToolCallUpdate(
+		"session-1",
+		codexCollaborationToolCall("wire~codex-subagent~", "child~two", "running"),
+	)
+	if first.ToolCallID == second.ToolCallID {
+		t.Fatalf("encoded sibling IDs collide at %q", first.ToolCallID)
+	}
+
+	// A later arbitrary ACP wire ID may equal an ID generated for an earlier
+	// sibling. The session reservation prevents the two persisted cards from
+	// sharing an emitted ID, and that fallback remains stable for updates.
+	collidingWireID := second.ToolCallID
+	third := a.convertToolCallUpdate(
+		"session-1",
+		codexCollaborationToolCall(collidingWireID, "child-three", "running"),
+	)
+	if third.ToolCallID == collidingWireID || third.ToolCallID == first.ToolCallID {
+		t.Fatalf("arbitrary wire collision was not escaped: %q", third.ToolCallID)
+	}
+	thirdUpdate := a.convertToolCallUpdate(
+		"session-1",
+		codexStartedActivityToolCallForChild(collidingWireID, "child-three"),
+	)
+	if thirdUpdate.ToolCallID != third.ToolCallID {
+		t.Fatalf("escaped ID changed on update: %q/%q", third.ToolCallID, thirdUpdate.ToolCallID)
 	}
 }
 
@@ -664,6 +794,9 @@ func TestCodexCorrelationDoesNotChangeOtherAgents(t *testing.T) {
 	if first.Type != streams.EventTypeToolCall || second.Type != streams.EventTypeToolCall {
 		t.Fatalf("non-Codex event types = %q/%q, want unchanged tool_call behavior", first.Type, second.Type)
 	}
+	if first.ToolCallID != "same-id" || second.ToolCallID != "same-id" {
+		t.Fatalf("non-Codex tool call IDs changed: %q/%q", first.ToolCallID, second.ToolCallID)
+	}
 	if len(a.codexSubagentCorrelations) != 0 {
 		t.Fatal("non-Codex tool calls must not populate Codex correlation state")
 	}
@@ -693,6 +826,10 @@ func codexStartedActivityToolCallForChild(toolCallID, childID string) *acp.Sessi
 }
 
 func codexCollaborationToolCall(toolCallID, childID, status string) *acp.SessionUpdateToolCall {
+	return codexCollaborationToolCallFrom(toolCallID, "thread-main", childID, status)
+}
+
+func codexCollaborationToolCallFrom(toolCallID, senderID, childID, status string) *acp.SessionUpdateToolCall {
 	return &acp.SessionUpdateToolCall{
 		ToolCallId: acp.ToolCallId(toolCallID),
 		Kind:       "other",
@@ -700,6 +837,20 @@ func codexCollaborationToolCall(toolCallID, childID, status string) *acp.Session
 		Status:     toolStatusInProgress,
 		RawInput: map[string]any{
 			"prompt": "Audit the adapter",
+			"agentsStates": map[string]any{
+				childID: map[string]any{"status": status},
+			},
+		},
+		Meta: codexCollaborationMetaFrom(codexCollaborationSpawnAgent, senderID, []any{childID}),
+	}
+}
+
+func codexCollaborationResultUpdate(toolCallID, childID, status string) *acp.SessionToolCallUpdate {
+	toolStatus := acp.ToolCallStatus(status)
+	return &acp.SessionToolCallUpdate{
+		ToolCallId: acp.ToolCallId(toolCallID),
+		Status:     &toolStatus,
+		RawInput: map[string]any{
 			"agentsStates": map[string]any{
 				childID: map[string]any{"status": status},
 			},

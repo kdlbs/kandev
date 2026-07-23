@@ -172,9 +172,13 @@ type Adapter struct {
 	activeToolCalls map[string]*streams.NormalizedPayload
 	// codexSubagentCorrelations deduplicates the collaboration and activity
 	// tool_call frames codex-acp emits for one logical child, keyed by session,
-	// tool-call ID, and child session ID. Entries are bounded and cleared
-	// whenever the adapter changes sessions.
+	// wire tool-call ID, and child session ID. Incomplete entries are retained
+	// until completion or session cleanup so delayed lifecycle frames cannot
+	// split a live card; only completed tombstones are bounded. Emitted-ID
+	// reservations are intentionally retained for the session so a pruned
+	// tombstone's ID cannot be reused by a later card.
 	codexSubagentCorrelations map[codexSubagentCorrelationKey]*codexSubagentCorrelation
+	codexEmittedToolCallIDs   map[string]map[string]*codexSubagentCorrelation
 	codexSubagentSequence     uint64
 
 	// Active Monitor tools, keyed by sessionID -> taskID -> toolCallID.
