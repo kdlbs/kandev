@@ -7,10 +7,9 @@ description: Implement changes using Test-Driven Development (Red-Green-Refactor
 
 ## Execution Context
 
-The user-started primary session delegates TDD
-work to an `implementer` or `test-engineer` worker and does not continue below.
-An explicitly assigned worker follows this procedure and does not spawn other
-workers.
+The planner may apply TDD directly for small scoped work; delegate substantial,
+cross-component, or independently test-heavy work. A worker follows this
+procedure for its one packet and does not spawn workers.
 
 Implement code changes using strict Red-Green-Refactor. Iron law: **no production code without a failing test first.**
 

@@ -7,11 +7,9 @@ description: Stage and commit changes using Conventional Commits. Use when there
 
 ## Planner Entry
 
-The user-started primary session delegates full
-verification to `verify`, then delegates staging and committing the verified
-checkout to an `implementer` worker. It does not run Git commands directly. The
-commit worker must receive the successful verification result and must not spawn
-other workers.
+The planner may stage and commit routine verified changes directly. It still
+requires a successful delegated `verify` result for code, tests, or config;
+delegate delivery only when scope or isolation makes that worthwhile.
 
 Create a git commit following this project's Conventional Commits convention. These messages are used by git-cliff (`cliff.toml`) to auto-generate changelogs and release notes. PRs are squash-merged, so the PR title becomes the commit on `main` — CI validates it via `pr-title.yml`.
 

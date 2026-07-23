@@ -9,12 +9,10 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 
 ## Planner Entry
 
-The user-started primary session coordinates this
-workflow by delegating polling to `pr-poller`, code/comment remediation to an
-`implementer`, full checks to `verify`, and commit/push actions to a final
-bounded implementer assignment. It does not run GitHub, test, edit, commit, or
-push commands directly. If a required worker is unavailable, stop and report
-the blocked phase.
+The planner keeps long polling on cheap `pr-poller` and final full checks on
+Spark `verify`, but may directly triage/reply to threads and make a small
+scope-preserving fixup with focused checks. Delegate broad remediation or noisy
+work when it has positive ROI.
 
 Each worker uses only its assigned phase: polling, remediation, verification, or delivery.
 Workers never invoke one another.

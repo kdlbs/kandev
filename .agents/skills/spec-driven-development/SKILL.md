@@ -10,8 +10,9 @@ Use this as the default development workflow for non-trivial features and behavi
 ## Planner And Workers
 
 The user-started primary session owns planning,
-delegation, progress, approvals, and user communication. It does not implement,
-test, integrate, verify, or ship code. Workers do not spawn other workers.
+architecture, planning, integration judgment, delegation, and user
+communication. Large feature-plan implementation stays worker-driven; small
+scoped work may be direct under `/planner-orchestration`. Workers do not spawn.
 
 - **`architect`** - optional frontier-model design reviewer for unusually risky architecture; it is not the default planner.
 - **`implementer`** - implements one assigned task with TDD in the current worktree or an assigned git worktree.
@@ -164,8 +165,8 @@ Parallelize only when safe:
 
 If the active harness's native subagent tools and git worktrees are available,
 the planner may request one worktree per independent task. Worktree creation,
-branch operations, and integration are bounded implementer assignments; the
-planner does not run Git commands itself.
+branch operations, and integration are delegated when their isolation benefit
+is material; the planner may handle a small routine Git step directly.
 
 The assigned setup worker may use:
 
@@ -221,9 +222,9 @@ Output:
   targeted commands/results; uncertainties) and task file status update.
 ```
 
-The planner coordinates waves and keeps progress state. Conflict resolution,
-branch integration, and follow-up fixes are new bounded `implementer`
-assignments. The planner never handles them inline.
+The planner coordinates waves and keeps progress state. Delegate substantial
+conflict resolution, integration, and follow-up fixes; handle only small scoped
+ones directly under `/planner-orchestration`.
 
 ## Phase 7: Integrate And Verify
 

@@ -93,17 +93,23 @@ When a Kandev system message references an MCP tool that is not visible in the a
 
 ### Planner and Worker Execution
 
-The user-started primary session is the planner. It may clarify intent, read
-repository context, create planning artifacts, delegate bounded work, review
-results, and report status. It must not implement or edit application, test, or
-harness code; run tests or verification; commit or push changes; or create PRs.
+The user-started primary session is the planner and default architect: it owns
+clarification, architecture, specs, plans, task decomposition, integration
+judgment, and user communication. It may directly perform small scoped work
+when one clear concern touches a few localized files, has no useful isolation or
+parallelism benefit, and has quick bounded verification. Follow the applicable
+skill, protect unrelated dirty changes, and obtain delegated Spark `verify`
+before delivery when code, tests, or config changed.
 
-All execution must be delegated through the current coding harness's native
-subagent tools. Never use Kandev MCP task/session APIs as a delegation fallback.
-Each delegated worker executes one bounded work packet and must not spawn other
-agents. If native delegation is unavailable, stop and report that limitation.
-Detailed work-packet and model-selection rules live in the
-`planner-orchestration` skill.
+Delegate only when it has positive ROI or independent evidence is essential:
+broad/unknown exploration, substantial plan tasks, large/cross-component work,
+parallel packets, long/noisy E2E or debugging, exceptional specialist review,
+and final full `verify`. Keep long PR monitoring on cheap `pr-poller`.
+Delegation is not default ceremony: weigh context reload and coordination cost.
+Each delegated worker executes one bounded packet and does not spawn agents.
+Never use Kandev MCP task/session APIs as a delegation fallback. The architect
+agent is only for a user-requested independent architecture second opinion.
+Detailed routing lives in `planner-orchestration`.
 
 ### Kandev Task Creation
 

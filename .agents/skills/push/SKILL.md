@@ -7,10 +7,9 @@ description: Push an already verified and committed branch. With --fixup, return
 
 ## Planner Entry
 
-The user-started primary session delegates any
-required verification and commit first, then assigns the push to an
-`implementer` worker. With `--fixup`, the planner coordinates `/pr-fixup`
-workers after the push. It does not run Git or GitHub commands directly.
+The planner may push a routine verified commit directly. With `--fixup`, it
+keeps long monitoring on delegated `pr-poller`; delegate delivery only when it
+has a material isolation or coordination benefit.
 
 An explicitly assigned push worker pushes only the already verified and
 committed branch and does not spawn other workers.

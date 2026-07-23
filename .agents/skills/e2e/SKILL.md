@@ -7,10 +7,9 @@ description: Write and run web E2E tests (Playwright) using TDD — locations, p
 
 ## Execution Context
 
-The user-started primary session delegates this
-procedure to an `implementer` or `test-engineer` worker and does not write or run
-E2E tests directly. An explicitly assigned worker continues below and does not
-spawn other workers.
+The planner may write or run a quick focused E2E check for small scoped work;
+delegate long, noisy, broad, or parallel E2E work. A worker owns one packet and
+does not spawn workers.
 
 Write E2E tests using TDD (Red-Green-Refactor). Always run the tests you create and watch them fail before implementing.
 

@@ -10,6 +10,11 @@ Before the first GitHub-dependent helper or gh call, check the inherited runtime
 
 The planner may supply selected_reviewer=<GitHub login>. Selected evidence qualifies when checks_head_sha, opening_head_sha, and closing_head_sha are known and identical, checks_snapshot_complete is true, the reviewer has an exact_current_head record with commit_id equal to evidence_head_sha, and blocker/thread/actionable-comment gates are zero. Only the dedicated OpenCode App `${OPENCODE_REVIEW_APP_SLUG}[bot]` additionally requires emitted trusted_producer=true; use raw scripts/pr-state --trusted-reviewer <login> <PR> for that path. Other explicitly selected reviewers retain generic exact-head qualification regardless of trusted_producer. Displayed check names never authenticate the App path. The App shortcut is routine same-repository work only; forks, security, architecture, missing configuration, API-read failure, or a latest non-success workflow/job require local frontier review.
 
+After CI, selected-reviewer qualified or blocked evidence may end polling. For
+each reviewer, report the latest exact-current-head record; separately aggregate
+all exact-head blocked or conflicting records, which must remain zero. Do not
+weaken same-head non-clean blocking semantics.
+
 Use the exact marker-delimited output contract from .agents/agents/pr-poller.md:
 === pr-poller report === through === end ===, with pr/branch, head_sha,
 mergeable, merge_state_status, local_unmerged_entries, ci_failed, ci_passed,

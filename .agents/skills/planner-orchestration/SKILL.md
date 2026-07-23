@@ -5,8 +5,8 @@ description: Enforce Kandev's planner-and-worker execution model. Use in the use
 
 # Planner Orchestration
 
-The user-started primary session is the **planner**. A custom subagent launched
-through the current harness's native delegation tool is a **worker**.
+The user-started primary session is the **planner** and default architect. A
+custom subagent launched through native delegation is a **worker**.
 
 ## Planner Contract
 
@@ -19,16 +19,20 @@ The planner may:
 - Spawn workers, monitor results, review diffs and reports, and communicate
   status to the user.
 
-The planner must not:
+The planner may directly do small scoped work: one clear concern, a few
+localized files, no meaningful isolation/parallelism benefit, and quick bounded
+verification. This includes small code/test/harness/docs edits, focused checks,
+routine Git/GitHub steps, PR-thread triage/replies, and small PR fixups. Apply
+the relevant skill/TDD, preserve dirty-worktree safety, and use final delegated
+Spark `verify` before delivery for code, tests, or config.
 
-- Edit application code, tests, generated files, package metadata, or CI.
-- Run implementation, test, formatting, lint, build, commit, push, or PR
-  commands.
-- Resolve implementation conflicts or fix worker output directly.
-- Continue as an implementation fallback when delegation is unavailable.
-
-If no suitable worker can be launched, stop and tell the user which delegated
-capability is unavailable. Do not silently become the worker.
+Delegate when ROI or independent evidence matters: broad/unknown exploration,
+substantial plan work, large/cross-component changes, parallel packets,
+long/noisy E2E or debugging, exceptional specialists, and final full `verify`.
+Keep long monitoring with cheap `pr-poller`. Estimate context reload and
+coordination cost; delegation is not default ceremony. Reuse a worker thread
+for related followups. Architect is user-requested independent second opinion,
+not an automatic planner step.
 
 ## Native Delegation Only
 

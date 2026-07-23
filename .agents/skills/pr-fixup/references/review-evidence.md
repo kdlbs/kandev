@@ -52,9 +52,17 @@ pending/failing rows. Keep only actionable rows and retain `pr-resolve` for
 threads:
 
 ```bash
-gh pr checks <PR> 2>/dev/null | awk -F '\t' '$2 == "pending" || $2 == "fail" {print}'
+checks_file=/tmp/pr-checks-<PR>.txt
+if gh pr checks <PR> >"$checks_file" 2>"${checks_file}.err"; then status=0; else status=$?; fi
+printf 'gh pr checks exit=%s\n' "$status"
+cat "$checks_file"
+test -s "${checks_file}.err" && cat "${checks_file}.err" >&2
+awk -F '\t' '$2 == "pending" || $2 == "fail" {print}' "$checks_file"
 scripts/pr-resolve list <PR>
 ```
+
+Transport/collection failure leaves checks unknown. Parseable pending/failing
+rows remain usable when `gh pr checks` exits 8; never hide diagnostics in a pipe.
 
 When `hidden_unresolved_threads` exists or total unresolved count exceeds the
 visible list, fetch each body with `scripts/pr-state --comment <comment_id>` or

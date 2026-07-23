@@ -9,7 +9,9 @@ Systematic bug fixing: reproduce the problem, find the root cause, apply a minim
 
 ## Planner Entry
 
-In the user-started primary session:
+For small, clear bugs, the planner may perform the bounded reproduction, TDD
+fix, and focused checks directly. Delegate broad diagnosis, large fixes, or
+independent work. In the user-started primary session:
 
 1. Delegate reproduction and root-cause diagnosis to an `implementer` worker
    with production edits forbidden. It may create or update only the minimal

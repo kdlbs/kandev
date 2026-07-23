@@ -7,10 +7,9 @@ description: Create a PR from an already verified, committed, and pushed branch.
 
 ## Planner Entry
 
-The user-started primary session delegates
-verification, commit, push, and PR creation as separate bounded implementer
-assignments, then coordinates `/pr-fixup` unless draft mode was requested. It
-does not run repository-host commands directly.
+The planner may create a routine PR directly after verification, commit, and
+push. It delegates only substantial delivery work; ready PR monitoring remains
+with `pr-poller`/`pr-fixup` when long-running.
 
 An explicitly assigned PR worker creates the PR only after receiving the
 verified, committed, and pushed branch state. It does not spawn other workers.
