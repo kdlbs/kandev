@@ -102,6 +102,13 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 	}
 	shell := payload.ShellExec()
 	recognized := false
+	// isFinal tracks whether THIS update carries a definitive completion
+	// signal - either a raw result payload or a reported exit code (the ACP
+	// terminal extension can finalize a command with only the latter, no
+	// rawOutput at all). Either signal means the strip must commit even if
+	// the buffer is nothing but the echo, instead of deferring forever with
+	// no further update ever arriving to re-trigger the strict path.
+	isFinal := rawOutput != nil
 
 	if data, ok := terminalOutputData(meta, "terminal_output_delta"); ok {
 		appendShellStdout(shell, data)
@@ -126,15 +133,16 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 	if exitCode, ok := terminalExitCode(meta); ok {
 		ensureShellOutput(shell).ExitCode = intPtr(exitCode)
 		recognized = true
+		isFinal = true
 	}
 
 	if shell.Output != nil {
-		if rawOutput != nil {
-			// A final result arrived in this same update: commit the strip
-			// even if the buffer is nothing but the echo, and re-apply it
-			// last so a terminal_output field processed above (line ~118)
-			// can't clobber applyFinalShellResult's already-stripped stdout
-			// with the provider's raw, unstripped snapshot.
+		if isFinal {
+			// A definitive completion signal arrived in this same update:
+			// commit the strip even if the buffer is nothing but the echo,
+			// and re-apply it last so a terminal_output field processed
+			// above can't clobber an already-stripped stdout with the
+			// provider's raw, unstripped snapshot.
 			shell.Output.Stdout = stripLeadingCommandEcho(shell.Command, shell.Output.Stdout)
 		} else {
 			shell.Output.Stdout = stripPendingCommandEcho(shell.Command, shell.Output.Stdout)

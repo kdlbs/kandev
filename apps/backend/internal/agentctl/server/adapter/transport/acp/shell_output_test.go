@@ -493,6 +493,37 @@ func TestNormalizeShellToolUpdateFinalRawOutputSurvivesTerminalOutputClobber(t *
 	require.Empty(t, payload.ShellExec().Output.Stdout)
 }
 
+// TestNormalizeShellToolUpdateFinalTerminalExitCommitsExactMatchEcho is a
+// regression for a review finding: a command can also be finalized purely by
+// a terminal_exit exit-code frame with no rawOutput at all (the ACP terminal
+// extension's own exit reporting). An exit-code-only completion is just as
+// final as a rawOutput-bearing one, so an exact-match echo must collapse to
+// empty here too - not stay deferred forever with no further update ever
+// arriving to re-trigger the strict path.
+func TestNormalizeShellToolUpdateFinalTerminalExitCommitsExactMatchEcho(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "cmd"},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{
+			"terminal_output": map[string]any{"data": "$ cmd"},
+			"terminal_exit":   map[string]any{"exit_code": 0},
+		},
+		nil,
+		nil,
+	)
+
+	require.Empty(t, payload.ShellExec().Output.Stdout)
+	require.NotNil(t, payload.ShellExec().Output.ExitCode)
+	require.Equal(t, 0, *payload.ShellExec().Output.ExitCode)
+}
+
 func shellOutputJSON(t *testing.T, output any) map[string]any {
 	t.Helper()
 	require.NotNil(t, output)
