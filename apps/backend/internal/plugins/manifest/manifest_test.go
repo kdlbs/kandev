@@ -441,6 +441,49 @@ func TestParseKeybindingCombo_RejectsUnknownModifier(t *testing.T) {
 	}
 }
 
+// "control" and "super" are undocumented aliases for ctrl/cmd that the
+// backend used to accept even though docs/plans/plugins/PLUGIN-API.md only
+// documents mod|ctrl|cmd|meta|alt|option|shift. Dropped for consistency with
+// the public contract and the frontend parser.
+func TestParseKeybindingCombo_RejectsUndocumentedModifierAliases(t *testing.T) {
+	for _, combo := range []string{"control+k", "super+k"} {
+		err := parseKeybindingCombo(combo)
+		if err == nil {
+			t.Fatalf("parseKeybindingCombo(%q) expected error, got nil", combo)
+		}
+		if !strings.Contains(err.Error(), "unknown token") {
+			t.Fatalf("parseKeybindingCombo(%q) error = %q, want substring %q", combo, err.Error(), "unknown token")
+		}
+	}
+}
+
+// A manifest default like "mod+shift+slash" or "shift+1" is stored/compared
+// against KeyboardEvent.key, but a physically-held Shift means the browser
+// reports the shifted character ("?", "!") instead of the token validated
+// here — so the combo could never actually dispatch. Reject it at
+// registration time instead.
+func TestParseKeybindingCombo_RejectsShiftWithAlteredKey(t *testing.T) {
+	for _, combo := range []string{"shift+1", "mod+shift+slash", "shift+9", "shift+minus"} {
+		err := parseKeybindingCombo(combo)
+		if err == nil {
+			t.Fatalf("parseKeybindingCombo(%q) expected error, got nil", combo)
+		}
+		if !strings.Contains(err.Error(), "shift") {
+			t.Fatalf("parseKeybindingCombo(%q) error = %q, want substring %q", combo, err.Error(), "shift")
+		}
+	}
+}
+
+// Shift is fine with letters (case is normalized before matching), named
+// keys, and function keys, since Shift doesn't change their KeyboardEvent.key.
+func TestParseKeybindingCombo_AllowsShiftWithUnaffectedKeys(t *testing.T) {
+	for _, combo := range []string{"shift+k", "mod+shift+tab", "shift+arrowup", "ctrl+shift+f1"} {
+		if err := parseKeybindingCombo(combo); err != nil {
+			t.Errorf("parseKeybindingCombo(%q) unexpected error: %v", combo, err)
+		}
+	}
+}
+
 func TestHasUIBundle_TrueWhenBundleSet(t *testing.T) {
 	m := validManifest(t)
 	m.UI.Bundle = "/ui/bundle.js"

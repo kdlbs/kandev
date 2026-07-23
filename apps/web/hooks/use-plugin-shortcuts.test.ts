@@ -6,10 +6,14 @@ import { pluginRegistry } from "@/lib/plugins/registry";
 
 let mockOverrides: StoredShortcutOverrides = {};
 let mockItems: PluginRecord[] = [];
+const mockToggleAppSidebar = vi.fn();
 
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({
-    getState: () => ({ userSettings: { keyboardShortcuts: mockOverrides } }),
+    getState: () => ({
+      userSettings: { keyboardShortcuts: mockOverrides },
+      toggleAppSidebar: mockToggleAppSidebar,
+    }),
   }),
 }));
 
@@ -18,6 +22,7 @@ vi.mock("@/hooks/domains/plugins/use-plugins", () => ({
 }));
 
 import { usePluginShortcuts } from "./use-plugin-shortcuts";
+import { useAppShortcuts } from "./use-app-shortcuts";
 
 const PLUGIN_ID = "session-cost";
 
@@ -60,6 +65,7 @@ describe("usePluginShortcuts", () => {
   beforeEach(() => {
     mockOverrides = {};
     mockItems = [];
+    mockToggleAppSidebar.mockClear();
   });
 
   afterEach(() => {
@@ -162,5 +168,100 @@ describe("usePluginShortcuts", () => {
     pressKey("k", { ctrlKey: true, shiftKey: true });
 
     expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe("usePluginShortcuts handler exceptions", () => {
+  beforeEach(() => {
+    mockOverrides = {};
+    mockItems = [];
+    mockToggleAppSidebar.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    pluginRegistry.unregisterPlugin("plugin-a");
+    pluginRegistry.unregisterPlugin("plugin-b");
+  });
+
+  it("logs and continues past a throwing handler so later handlers still run", () => {
+    mockItems = [
+      makePlugin({
+        id: "plugin-a",
+        display_name: "Plugin A",
+        ui: { keybindings: [{ id: "open", default: "mod+j", description: "Open" }] },
+      }),
+      makePlugin({
+        id: "plugin-b",
+        display_name: "Plugin B",
+        ui: { keybindings: [{ id: "open", default: "mod+j", description: "Open" }] },
+      }),
+    ];
+    const secondHandler = vi.fn();
+    pluginRegistry.forPlugin("plugin-a").registerKeybinding("open", () => {
+      throw new Error("boom");
+    });
+    pluginRegistry.forPlugin("plugin-b").registerKeybinding("open", secondHandler);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    renderHook(() => usePluginShortcuts());
+    expect(() => pressKey("j", { ctrlKey: true })).not.toThrow();
+
+    expect(secondHandler).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("plugin-a"),
+      expect.any(Error),
+    );
+
+    consoleErrorSpy.mockRestore();
+  });
+});
+
+describe("core vs plugin shortcut precedence", () => {
+  beforeEach(() => {
+    mockOverrides = {};
+    mockItems = [];
+    mockToggleAppSidebar.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  it("fires only the core action when a combo matches both a core shortcut and a plugin keybinding", () => {
+    mockOverrides = { TOGGLE_SIDEBAR: { key: "b", modifiers: { ctrlOrCmd: true } } };
+    mockItems = [
+      makePlugin({
+        ui: { keybindings: [{ id: "open", default: "mod+b", description: "Open" }] },
+      }),
+    ];
+    const pluginHandler = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("open", pluginHandler);
+
+    renderHook(() => {
+      useAppShortcuts();
+      usePluginShortcuts();
+    });
+    const event = pressKey("b", { ctrlKey: true });
+
+    expect(mockToggleAppSidebar).toHaveBeenCalledTimes(1);
+    expect(pluginHandler).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("still fires the plugin handler for a plugin-only combo (no core shortcut match)", () => {
+    mockItems = [withToggleKeybinding()];
+    const handler = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", handler);
+
+    renderHook(() => {
+      useAppShortcuts();
+      usePluginShortcuts();
+    });
+    pressKey("k", { ctrlKey: true, shiftKey: true });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(mockToggleAppSidebar).not.toHaveBeenCalled();
   });
 });

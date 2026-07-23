@@ -187,6 +187,9 @@ export function GlobalCommands() {
 
   useRegisterCommands(commands);
   useKeyboardShortcut(quickChatShortcut, handleOpenQuickChat);
+  // Order matters: useAppShortcuts (core) must register its capture-phase
+  // keydown listener before usePluginShortcuts so core shortcuts win when a
+  // combo matches both — see the precedence note on each hook.
   useAppShortcuts();
   usePluginShortcuts();
 

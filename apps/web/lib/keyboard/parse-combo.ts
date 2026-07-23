@@ -10,34 +10,65 @@
  * throwing) since it also runs against values that already passed backend
  * validation.
  *
+ * The accepted modifier vocabulary — `mod|ctrl|cmd|meta|alt|option|shift` —
+ * matches the public contract in `docs/plans/plugins/PLUGIN-API.md` exactly.
+ * "control"/"super" are deliberately NOT accepted (kept in lockstep with the
+ * backend validator, which also rejects them).
+ *
  * `mod` maps to `ctrlOrCmd` in the `KeyboardShortcut` shape — `matchesShortcut`
  * already resolves `ctrlOrCmd` to Cmd on macOS / Ctrl elsewhere, so no
  * separate platform branch is needed here.
+ *
+ * Combos pairing `shift` with a key whose printable character Shift would
+ * alter (digits, symbols — see `SHIFT_ALTERED_KEY_TOKENS`) are rejected: the
+ * combo is matched against `KeyboardEvent.key`, but a physically-held Shift
+ * means the browser reports the shifted character ("!", "?") instead of the
+ * unshifted token, so the combo could never actually dispatch. This mirrors
+ * the backend validator's `shiftAlteredKeys` rejection.
  */
 import type { Key, KeyboardShortcut } from "./constants";
 
-type ModifierToken =
-  | "mod"
-  | "ctrl"
-  | "control"
-  | "cmd"
-  | "meta"
-  | "super"
-  | "alt"
-  | "option"
-  | "shift";
+type ModifierToken = "mod" | "ctrl" | "cmd" | "meta" | "alt" | "option" | "shift";
 
 const MODIFIER_TOKENS: Record<ModifierToken, keyof NonNullable<KeyboardShortcut["modifiers"]>> = {
   mod: "ctrlOrCmd",
   ctrl: "ctrl",
-  control: "ctrl",
   cmd: "cmd",
   meta: "cmd",
-  super: "cmd",
   alt: "alt",
   option: "alt",
   shift: "shift",
 };
+
+/**
+ * Non-modifier key tokens whose reported `KeyboardEvent.key` changes when
+ * Shift is held (e.g. "1" -> "!", "slash" -> "?"). Must stay in sync with the
+ * backend's `shiftAlteredKeys` in
+ * `apps/backend/internal/plugins/manifest/validate.go`.
+ */
+const SHIFT_ALTERED_KEY_TOKENS = new Set<string>([
+  "comma",
+  "period",
+  "slash",
+  "backslash",
+  "semicolon",
+  "quote",
+  "minus",
+  "equal",
+  "bracketleft",
+  "bracketright",
+  "backquote",
+  "0",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+]);
 
 /** Named-key tokens mapped to their `KeyboardEvent.key` equivalent. */
 const NAMED_KEY_TOKENS: Record<string, string> = {
@@ -91,8 +122,9 @@ function resolveKeyToken(token: string): Key | null {
 
 /**
  * Parses a combo string like "mod+shift+k" into a `KeyboardShortcut`.
- * Returns null when the combo is empty, contains an unknown token, or does
- * not contain exactly one non-modifier key token.
+ * Returns null when the combo is empty, contains an unknown token, does not
+ * contain exactly one non-modifier key token, or pairs `shift` with a key
+ * whose reported character shift would alter (see `SHIFT_ALTERED_KEY_TOKENS`).
  */
 export function parseCombo(combo: string): KeyboardShortcut | null {
   if (!combo || !combo.trim()) return null;
@@ -100,6 +132,7 @@ export function parseCombo(combo: string): KeyboardShortcut | null {
   const tokens = combo.split("+").map((token) => token.trim().toLowerCase());
   const modifiers: NonNullable<KeyboardShortcut["modifiers"]> = {};
   let key: Key | null = null;
+  let keyToken: string | null = null;
 
   for (const token of tokens) {
     if (!token) return null;
@@ -113,9 +146,11 @@ export function parseCombo(combo: string): KeyboardShortcut | null {
     if (!resolvedKey) return null;
     if (key !== null) return null; // more than one non-modifier key token
     key = resolvedKey;
+    keyToken = token;
   }
 
-  if (key === null) return null;
+  if (key === null || keyToken === null) return null;
+  if (modifiers.shift && SHIFT_ALTERED_KEY_TOKENS.has(keyToken)) return null;
 
   return Object.keys(modifiers).length > 0 ? { key, modifiers } : { key };
 }

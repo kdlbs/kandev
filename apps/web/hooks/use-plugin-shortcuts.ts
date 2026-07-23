@@ -27,6 +27,16 @@ import {
  * order) — the first plugin to call `registerKeybinding` for that combo
  * wins; later handlers for the same event still run since this dispatches
  * to every match, not just the first.
+ *
+ * Core-vs-plugin precedence: a combo that matches both a core shortcut and a
+ * plugin keybinding must fire exactly one action, with core winning. Core
+ * dispatchers (e.g. `useAppShortcuts`) call `event.preventDefault()` on a
+ * match, and this hook bails out immediately when `event.defaultPrevented`
+ * is already true — so plugins never shadow a built-in. This only works
+ * because `useAppShortcuts()` is mounted (and therefore has its capture-phase
+ * listener registered) before `usePluginShortcuts()` — see
+ * `components/global-commands.tsx`. Keep that ordering when adding new core
+ * dispatchers.
  */
 export function usePluginShortcuts(): void {
   const appStore = useAppStoreApi();
@@ -44,6 +54,10 @@ export function usePluginShortcuts(): void {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      // A core dispatcher already handled this combo (and called
+      // preventDefault) — core wins, so bail out without invoking any
+      // plugin handler for the same keypress.
+      if (event.defaultPrevented) return;
       if (isEditableKeydownTarget(event)) return;
 
       const overrides = appStore.getState().userSettings
@@ -64,6 +78,11 @@ export function usePluginShortcuts(): void {
  * order — registration order — so when two plugins bind the same combo, the
  * plugin that called `registerKeybinding` first runs first (both still run;
  * this only fixes the order, it does not stop at the first match).
+ *
+ * Each handler invocation is isolated in its own try/catch: a throwing
+ * handler is logged (with the offending plugin/keybinding id) and does not
+ * abort the loop, so one broken plugin can't prevent other plugins bound to
+ * the same combo from running.
  */
 function dispatchMatchingPluginShortcuts(
   event: KeyboardEvent,
@@ -84,6 +103,10 @@ function dispatchMatchingPluginShortcuts(
     if (!matchesShortcut(event, shortcut)) continue;
 
     event.preventDefault();
-    handler(event);
+    try {
+      handler(event);
+    } catch (err) {
+      console.error(`[plugin:${pluginId}] keybinding "${id}" handler threw an error:`, err);
+    }
   }
 }

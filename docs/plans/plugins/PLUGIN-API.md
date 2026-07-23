@@ -182,7 +182,10 @@ interface PluginRegistry {
   // Combo grammar (manifest `default` and any user override): `+`-separated
   // tokens, one of the modifiers `mod|ctrl|cmd|meta|alt|option|shift`
   // (repeatable) plus exactly one key token. `mod` resolves to Cmd on macOS
-  // and Ctrl elsewhere (⌘/Ctrl).
+  // and Ctrl elsewhere (⌘/Ctrl). `shift` may not be combined with a digit or
+  // symbol key (e.g. `shift+1`, `shift+slash`) — Shift changes the character
+  // a browser reports for those keys, so the combo could never dispatch; both
+  // the manifest validator and the frontend parser reject it.
   registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
 }
 ```

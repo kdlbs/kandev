@@ -40,16 +40,19 @@ var keybindingIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // (case-insensitive; matched after lowercasing). "mod" is the
 // platform-agnostic primary modifier (Cmd on macOS, Ctrl elsewhere) that the
 // frontend dispatcher resolves at runtime; the rest are explicit aliases.
+// This set must match the public contract in docs/plans/plugins/PLUGIN-API.md
+// and the frontend parser (apps/web/lib/keyboard/parse-combo.ts) exactly —
+// "control" and "super" are deliberately NOT accepted here even though they'd
+// be easy aliases, because the documented grammar only lists
+// mod|ctrl|cmd|meta|alt|option|shift.
 var keybindingModifiers = map[string]bool{
-	"mod":     true,
-	"ctrl":    true,
-	"control": true,
-	"cmd":     true,
-	"meta":    true,
-	"super":   true,
-	"alt":     true,
-	"option":  true,
-	"shift":   true,
+	"mod":    true,
+	"ctrl":   true,
+	"cmd":    true,
+	"meta":   true,
+	"alt":    true,
+	"option": true,
+	"shift":  true,
 }
 
 // keybindingKeys are the accepted non-modifier key tokens in a keybinding
@@ -78,6 +81,32 @@ func buildKeybindingKeySet() map[string]bool {
 	}
 	for i := 1; i <= 12; i++ {
 		keys[fmt.Sprintf("f%d", i)] = true
+	}
+	return keys
+}
+
+// shiftAlteredKeys are non-modifier key tokens whose printable character
+// changes when Shift is physically held on a standard keyboard layout (e.g.
+// "1" reports as "!", "slash" reports as "?"). The frontend dispatcher
+// matches a combo against `KeyboardEvent.key`, so a stored default like
+// "shift+1" or "mod+shift+slash" can never fire: Shift held down means the
+// browser reports the shifted character, not the token validated here.
+// Rejected at registration time so plugin authors get an actionable error
+// instead of a keybinding that silently never dispatches. Letters are exempt
+// because matching lowercases both sides; named/function keys are exempt
+// because Shift doesn't change their `KeyboardEvent.key`. Must be kept in
+// sync with the frontend's SHIFT_ALTERED_KEY_TOKENS in
+// apps/web/lib/keyboard/parse-combo.ts.
+var shiftAlteredKeys = buildShiftAlteredKeySet()
+
+func buildShiftAlteredKeySet() map[string]bool {
+	keys := map[string]bool{
+		"comma": true, "period": true, "slash": true, "backslash": true,
+		"semicolon": true, "quote": true, "minus": true, "equal": true,
+		"bracketleft": true, "bracketright": true, "backquote": true,
+	}
+	for c := '0'; c <= '9'; c++ {
+		keys[string(c)] = true
 	}
 	return keys
 }
@@ -319,9 +348,11 @@ func validateKeybindingID(id string, seen map[string]bool) []error {
 // "mod+shift+k": tokens are split on "+", trimmed of surrounding whitespace,
 // and lowercased. Every token but exactly one must be a recognized modifier
 // (keybindingModifiers); the remaining single token must be a recognized key
-// (keybindingKeys). It returns an error describing the first problem found;
-// it does not return a normalized struct because validation is currently the
-// only caller.
+// (keybindingKeys). It also rejects combos pairing the shift modifier with a
+// key whose reported character shift would alter (see shiftAlteredKeys) since
+// such a combo can never actually dispatch. It returns an error describing
+// the first problem found; it does not return a normalized struct because
+// validation is currently the only caller.
 func parseKeybindingCombo(combo string) error {
 	if strings.TrimSpace(combo) == "" {
 		return errors.New("default combo must not be empty")
@@ -329,12 +360,16 @@ func parseKeybindingCombo(combo string) error {
 	rawTokens := strings.Split(combo, "+")
 	var keyToken string
 	keyCount := 0
+	hasShift := false
 	for _, raw := range rawTokens {
 		token := strings.ToLower(strings.TrimSpace(raw))
 		if token == "" {
 			return fmt.Errorf("default combo %q has an empty token", combo)
 		}
 		if keybindingModifiers[token] {
+			if token == "shift" {
+				hasShift = true
+			}
 			continue
 		}
 		if !keybindingKeys[token] {
@@ -348,6 +383,9 @@ func parseKeybindingCombo(combo string) error {
 	}
 	if keyCount > 1 {
 		return fmt.Errorf("default combo %q must include exactly one non-modifier key, found more than one (last: %q)", combo, keyToken)
+	}
+	if hasShift && shiftAlteredKeys[keyToken] {
+		return fmt.Errorf("default combo %q: shift+%q is not supported because Shift changes the character reported for this key; remove shift or bind a different key", combo, keyToken)
 	}
 	return nil
 }
