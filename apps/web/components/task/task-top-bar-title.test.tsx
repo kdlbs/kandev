@@ -7,7 +7,9 @@ const mockRename = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 vi.mock("@kandev/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipContent: ({ children }: { children: React.ReactNode }) => (
+    <div role="tooltip">{children}</div>
+  ),
 }));
 
 vi.mock("@/hooks/use-task-actions", () => ({
@@ -44,11 +46,20 @@ describe("TaskTopBarTitle — idle state", () => {
     expect(getTitle().getAttribute("tabindex")).toBe("0");
   });
 
+  it("shows the full title and edit hint in the tooltip when renameable", () => {
+    render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
+
+    expect(screen.getByRole("tooltip").textContent).toBe(
+      "My taskDouble-click to edit (or press Enter)",
+    );
+  });
+
   it("keeps the breadcrumb aria-disabled and unfocusable when the task is archived", () => {
     render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" isArchived />);
 
     expect(getTitle().getAttribute("aria-disabled")).toBe("true");
     expect(getTitle().getAttribute("tabindex")).toBeNull();
+    expect(screen.getByRole("tooltip").textContent).toBe("My task");
   });
 
   it("does not enter edit mode when the task is archived", () => {
@@ -65,6 +76,7 @@ describe("TaskTopBarTitle — idle state", () => {
     fireEvent.doubleClick(getTitle());
 
     expect(queryInput()).toBeNull();
+    expect(screen.getByRole("tooltip").textContent).toBe("My task");
   });
 });
 
