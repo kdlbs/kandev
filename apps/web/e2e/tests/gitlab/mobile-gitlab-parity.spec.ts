@@ -71,6 +71,18 @@ test.describe("Mobile GitLab parity", () => {
 
     await panel.getByRole("button", { name: "Unlink merge request" }).tap();
     await expect(testPage.getByTestId("mr-topbar-button")).toHaveCount(0);
+    await expect(testPage.getByTestId("mobile-mr-review-panel")).toHaveCount(0);
+    await expect(testPage.getByTestId("session-chat")).toBeVisible();
+    await expect(testPage.getByRole("button", { name: "Chat", exact: true })).toHaveClass(
+      /text-primary/,
+    );
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          "window.__KANDEV_E2E_STORE__?.getState().mobileSession.activePanelBySessionId[window.__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? '']",
+        ),
+      )
+      .toBe("chat");
   });
 
   test("watch controls remain touch sized and persist a pause", async ({

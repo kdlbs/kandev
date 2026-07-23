@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import type { EntityReference } from "@/lib/types/entity-reference";
 
 const queueApiMock = vi.hoisted(() => {
   class QueueEntryNotFoundError extends Error {}
@@ -39,6 +40,17 @@ import { useQueue } from "./use-queue";
 
 const SESSION_ID = "sess-1";
 const TASK_ID = "task-1";
+const reference: EntityReference = {
+  version: 1,
+  ref: "mention:v1:github:issue:acme%2Frepo:42",
+  provider: "github",
+  kind: "issue",
+  id: "42",
+  key: "acme/repo#42",
+  title: "Fix composer references",
+  url: "https://github.com/acme/repo/issues/42",
+  scope: "acme/repo",
+};
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
@@ -136,5 +148,48 @@ describe("useQueue", () => {
     document.dispatchEvent(new Event("visibilitychange"));
 
     expect(queueApiMock.getQueueStatus).not.toHaveBeenCalled();
+  });
+
+  it("queues structured references with busy-agent messages", async () => {
+    queueApiMock.queueMessage.mockResolvedValue(entry());
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.queueMessage.mockClear();
+
+    await act(async () => {
+      await result.current.queue({
+        taskId: TASK_ID,
+        content: "queued reference",
+        entityReferences: [reference],
+      } as never);
+    });
+
+    expect(queueApiMock.queueMessage).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      content: "queued reference",
+      model: undefined,
+      plan_mode: undefined,
+      attachments: undefined,
+      entity_references: [reference],
+    });
+  });
+
+  it("replaces queued reference metadata with an explicit empty array", async () => {
+    queueApiMock.updateQueuedMessage.mockResolvedValue({ entry_id: "q-1" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+
+    await act(async () => {
+      await result.current.editEntry("q-1", "reference removed", undefined, [] as never);
+    });
+
+    expect(queueApiMock.updateQueuedMessage).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      entry_id: "q-1",
+      content: "reference removed",
+      attachments: undefined,
+      entity_references: [],
+    });
   });
 });

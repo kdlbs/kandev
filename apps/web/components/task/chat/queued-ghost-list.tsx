@@ -12,6 +12,7 @@ import { stripSystemTags } from "@/lib/utils/system-tags";
 import { useQueue } from "@/hooks/domains/session/use-queue";
 import { isWorkflowQueuedMessage, QueuedGhostMessage } from "./queued-ghost-message";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import type { EntityReference } from "@/lib/types/entity-reference";
 
 const HEAD_PREVIEW_MAX = 80;
 
@@ -72,7 +73,12 @@ type QueueAffordanceProps = {
 type QueuePanelHandlerArgs = {
   clearAll: () => Promise<void>;
   drainNext: () => Promise<void>;
-  editEntry: (entryId: string, content: string) => Promise<void>;
+  editEntry: (
+    entryId: string,
+    content: string,
+    attachments?: undefined,
+    entityReferences?: EntityReference[],
+  ) => Promise<void>;
   removeEntry: (entryId: string) => Promise<void>;
 };
 
@@ -83,8 +89,8 @@ function useQueuePanelHandlers({
   removeEntry,
 }: QueuePanelHandlerArgs) {
   const handleSave = useCallback(
-    async (entryId: string, content: string) => {
-      await editEntry(entryId, content);
+    async (entryId: string, content: string, entityReferences: EntityReference[]) => {
+      await editEntry(entryId, content, undefined, entityReferences);
     },
     [editEntry],
   );
@@ -272,7 +278,7 @@ type QueuePanelProps = {
   onClose: () => void;
   onClear: () => void;
   onDrain: () => void;
-  onSave: (entryId: string, content: string) => Promise<void>;
+  onSave: (entryId: string, content: string, entityReferences: EntityReference[]) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
 };
 
@@ -317,7 +323,7 @@ function QueuePanel({
             entry={entry}
             index={index}
             canEdit={canUserEditEntry(entry)}
-            onSave={(content) => onSave(entry.id, content)}
+            onSave={(content, entityReferences) => onSave(entry.id, content, entityReferences)}
             onRemove={() => onRemove(entry.id)}
           />
         ))}

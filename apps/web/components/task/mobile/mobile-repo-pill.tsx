@@ -8,6 +8,7 @@ import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { MobileReposSection, useTaskRepoCount } from "./mobile-repos-section";
 
 const COMPACT_VIEWPORT_PX = 360;
+const EMPTY_REPOSITORIES = Object.freeze([]);
 
 /** Returns true once the viewport is narrower than the compact threshold. */
 function useIsCompactViewport(): boolean {
@@ -24,7 +25,9 @@ function useIsCompactViewport(): boolean {
 
 function useTaskActiveRepoName(taskId: string | null, workspaceId: string | null): string | null {
   const workspaceRepos = useAppStore((s) =>
-    workspaceId ? (s.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
+    workspaceId
+      ? (s.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_REPOSITORIES)
+      : EMPTY_REPOSITORIES,
   );
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const activeRepoId = useAppStore((s) =>

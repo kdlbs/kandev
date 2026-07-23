@@ -141,7 +141,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
 	}
 
-	return &Services{
+	services := &Services{
 		Task:         taskSvc,
 		User:         userSvc,
 		Editor:       editorSvc,
@@ -164,7 +164,17 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Office: nil,
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
-	}, agentSettingsController, nil
+	}
+	mentionComponents, err := newMentionComponents(
+		taskSvc,
+		taskSvc,
+		builtinMentionProviders(services, repos.Task)...,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	services.Mentions = mentionComponents
+	return services, agentSettingsController, nil
 }
 
 // loadCustomTUIAgents loads user-defined TUI agents from the database into the registry.

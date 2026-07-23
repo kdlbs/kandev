@@ -403,7 +403,7 @@ func isNewerCheck(a, b CheckRun) bool {
 // non-empty pull_request.merged_at; promote those to the "merged" state so the
 // UI renders the purple merged icon instead of the red closed one.
 func convertSearchItemToPR(
-	number int, title, htmlURL, state, authorLogin, repositoryURL, mergedAt string,
+	id int64, nodeID string, number int, title, htmlURL, state, authorLogin, repositoryURL, mergedAt string,
 	draft bool, createdAt, updatedAt time.Time,
 ) *PR {
 	owner, repo := parseRepoURL(repositoryURL)
@@ -411,6 +411,8 @@ func convertSearchItemToPR(
 		state = prStateMerged
 	}
 	return &PR{
+		ID:          id,
+		NodeID:      nodeID,
 		Number:      number,
 		Title:       title,
 		HTMLURL:     htmlURL,
@@ -482,6 +484,8 @@ func buildSearchQuery(typeQualifier, filter, customQuery string) string {
 
 // issueSearchItem is an issue item from the GitHub search API.
 type issueSearchItem struct {
+	ID            int64     `json:"id"`
+	NodeID        string    `json:"node_id"`
 	Number        int       `json:"number"`
 	Title         string    `json:"title"`
 	Body          string    `json:"body"`
@@ -517,6 +521,8 @@ func convertSearchItemToIssue(item issueSearchItem) *Issue {
 		assignees[i] = a.Login
 	}
 	issue := &Issue{
+		ID:          item.ID,
+		NodeID:      item.NodeID,
 		Number:      item.Number,
 		Title:       item.Title,
 		Body:        item.Body,

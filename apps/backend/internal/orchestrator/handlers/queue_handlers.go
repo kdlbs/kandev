@@ -5,10 +5,12 @@ import (
 	"errors"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -19,6 +21,7 @@ const (
 	queueErrorCodeEntryNotFound = "entry_not_found"
 	queueErrorCodeSessionBusy   = "session_busy"
 	queueErrorCodeNotPromptable = "session_not_promptable"
+	queueInvalidReferences      = "Invalid entity references"
 
 	// Payload field names — extracted to satisfy goconst (≥3 occurrences).
 	fieldSessionID = "session_id"
@@ -30,9 +33,9 @@ const (
 // QueueService is the surface the handlers depend on. Real implementation lives
 // in messagequeue.Service.
 type QueueService interface {
-	QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
+	QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error)
 	AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, bool, error)
-	UpdateMessage(ctx context.Context, sessionID, entryID, content string, attachments []messagequeue.MessageAttachment, queuedBy string) error
+	UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []messagequeue.MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error
 	RemoveEntry(ctx context.Context, sessionID, entryID string) error
 	CancelAll(ctx context.Context, sessionID string) (int, error)
 	GetStatus(ctx context.Context, sessionID string) *messagequeue.QueueStatus
@@ -44,23 +47,31 @@ type QueueDrainer interface {
 
 // QueueHandlers handles WebSocket message-queue operations.
 type QueueHandlers struct {
-	queueService QueueService
-	queueDrainer QueueDrainer
-	eventBus     bus.EventBus
-	logger       *logger.Logger
+	queueService       QueueService
+	queueDrainer       QueueDrainer
+	eventBus           bus.EventBus
+	logger             *logger.Logger
+	referenceValidator entityrefs.SubmissionValidator
 }
 
 // NewQueueHandlers creates a new QueueHandlers instance.
-func NewQueueHandlers(queueService QueueService, eventBus bus.EventBus, log *logger.Logger, drainer ...QueueDrainer) *QueueHandlers {
-	var queueDrainer QueueDrainer
-	if len(drainer) > 0 {
-		queueDrainer = drainer[0]
+func NewQueueHandlers(
+	queueService QueueService,
+	eventBus bus.EventBus,
+	log *logger.Logger,
+	queueDrainer QueueDrainer,
+	validators ...entityrefs.SubmissionValidator,
+) *QueueHandlers {
+	var referenceValidator entityrefs.SubmissionValidator
+	if len(validators) > 0 {
+		referenceValidator = validators[0]
 	}
 	return &QueueHandlers{
-		queueService: queueService,
-		queueDrainer: queueDrainer,
-		eventBus:     eventBus,
-		logger:       log.WithFields(zap.String("component", "queue-handlers")),
+		queueService:       queueService,
+		queueDrainer:       queueDrainer,
+		eventBus:           eventBus,
+		logger:             log.WithFields(zap.String("component", "queue-handlers")),
+		referenceValidator: referenceValidator,
 	}
 }
 
@@ -76,13 +87,14 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 }
 
 type wsQueueMessageRequest struct {
-	SessionID   string                           `json:"session_id"`
-	TaskID      string                           `json:"task_id"`
-	Content     string                           `json:"content"`
-	Model       string                           `json:"model,omitempty"`
-	PlanMode    bool                             `json:"plan_mode,omitempty"`
-	Attachments []messagequeue.MessageAttachment `json:"attachments,omitempty"`
-	UserID      string                           `json:"user_id,omitempty"`
+	SessionID        string                           `json:"session_id"`
+	TaskID           string                           `json:"task_id"`
+	Content          string                           `json:"content"`
+	Model            string                           `json:"model,omitempty"`
+	PlanMode         bool                             `json:"plan_mode,omitempty"`
+	Attachments      []messagequeue.MessageAttachment `json:"attachments,omitempty"`
+	EntityReferences []v1.EntityReference             `json:"entity_references,omitempty"`
+	UserID           string                           `json:"user_id,omitempty"`
 }
 
 func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -107,6 +119,11 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if req.UserID == messagequeue.QueuedByAgent {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "user_id may not impersonate the agent identity", nil)
 	}
+	references, err := h.validateSubmittedReferences(ctx, req.SessionID, req.TaskID, req.EntityReferences)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, queueInvalidReferences, nil)
+	}
+	req.EntityReferences = references
 
 	// Default empty user_id to QueuedByUser so the entry has a non-empty owner;
 	// the UpdateMessage handler relies on this so its filter against agent
@@ -115,7 +132,8 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if queuedBy == "" {
 		queuedBy = messagequeue.QueuedByUser
 	}
-	queued, err := h.queueService.QueueMessage(ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments)
+	metadata := orchestrator.NewUserMessageMeta().WithEntityReferences(req.EntityReferences).ToMap()
+	queued, err := h.queueService.QueueMessageWithMetadata(ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
 			status := h.queueService.GetStatus(ctx, req.SessionID)
@@ -214,11 +232,12 @@ func (h *QueueHandlers) wsGetQueueStatus(ctx context.Context, msg *ws.Message) (
 }
 
 type wsUpdateMessageRequest struct {
-	SessionID   string                           `json:"session_id"`
-	EntryID     string                           `json:"entry_id"`
-	Content     string                           `json:"content"`
-	Attachments []messagequeue.MessageAttachment `json:"attachments,omitempty"`
-	UserID      string                           `json:"user_id,omitempty"`
+	SessionID        string                           `json:"session_id"`
+	EntryID          string                           `json:"entry_id"`
+	Content          string                           `json:"content"`
+	Attachments      []messagequeue.MessageAttachment `json:"attachments,omitempty"`
+	EntityReferences []v1.EntityReference             `json:"entity_references,omitempty"`
+	UserID           string                           `json:"user_id,omitempty"`
 }
 
 func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -250,6 +269,12 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	if req.UserID == messagequeue.QueuedByAgent {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "user_id may not impersonate the agent identity", nil)
 	}
+	referencesProvided := req.EntityReferences != nil
+	references, err := h.validateSubmittedReferences(ctx, req.SessionID, "", req.EntityReferences)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, queueInvalidReferences, nil)
+	}
+	req.EntityReferences = references
 	// Default empty user_id to QueuedByUser so the UpdateContent guard always
 	// runs against a non-empty owner. Agent entries (queued_by="agent") then
 	// fail the filter, mirroring the canEdit UI gate at the WS layer.
@@ -257,7 +282,15 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	if queuedBy == "" {
 		queuedBy = messagequeue.QueuedByUser
 	}
-	if err := h.queueService.UpdateMessage(ctx, req.SessionID, req.EntryID, req.Content, req.Attachments, queuedBy); err != nil {
+	var metadataUpdates map[string]interface{}
+	if referencesProvided {
+		var referenceMetadata interface{}
+		if len(req.EntityReferences) > 0 {
+			referenceMetadata = req.EntityReferences
+		}
+		metadataUpdates = map[string]interface{}{messagequeue.MetadataEntityReferences: referenceMetadata}
+	}
+	if err := h.queueService.UpdateMessageWithMetadata(ctx, req.SessionID, req.EntryID, req.Content, req.Attachments, metadataUpdates, queuedBy); err != nil {
 		if errors.Is(err, messagequeue.ErrEntryNotFound) {
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
 		}
@@ -266,6 +299,20 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 
 	h.publishStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
+}
+
+func (h *QueueHandlers) validateSubmittedReferences(
+	ctx context.Context,
+	sessionID, taskID string,
+	references []v1.EntityReference,
+) ([]v1.EntityReference, error) {
+	if len(references) == 0 {
+		return nil, nil
+	}
+	if h.referenceValidator == nil {
+		return nil, entityrefs.ErrUnauthorizedReference
+	}
+	return h.referenceValidator.ValidateForSubmission(ctx, sessionID, taskID, references)
 }
 
 func firstInvalidDeliveryMode(attachments []messagequeue.MessageAttachment) int {

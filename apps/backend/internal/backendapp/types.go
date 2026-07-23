@@ -97,4 +97,6 @@ type Services struct {
 	// but always constructed (non-nil) when initialization succeeds so
 	// tests/tools can exercise it directly.
 	Plugins *plugins.Service
+	// Mentions owns the provider registry shared by # search and submission authorization.
+	Mentions *MentionComponents
 }

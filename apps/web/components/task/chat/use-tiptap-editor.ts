@@ -10,9 +10,7 @@ import History from "@tiptap/extension-history";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
-import { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import { Extension, isNodeEmpty } from "@tiptap/core";
+import { Extension } from "@tiptap/core";
 import { useHistoryKeymap } from "./tiptap-editor-history";
 import Code from "@tiptap/extension-code";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
@@ -20,13 +18,22 @@ import { common, createLowlight } from "lowlight";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import { getChatDraftContent, setChatDraftContent } from "@/lib/local-storage";
-import { getMarkdownText, textToHtml, handleEditorPaste } from "./tiptap-helpers";
+import {
+  extractEntityReferences,
+  getMarkdownText,
+  textToHtml,
+  handleEditorPaste,
+} from "./tiptap-helpers";
 import { CodeBlockView } from "./tiptap-code-block-view";
+import { DynamicPlaceholder, updateDynamicPlaceholder } from "./tiptap-dynamic-placeholder";
+import { EntityReferenceNode } from "./tiptap-entity-reference-extension";
 import { ContextMention } from "./tiptap-mention-extension";
 import { SlashCommandNode } from "./tiptap-slash-command-extension";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { SlashCommand } from "./slash-command-types";
+import type { EntityReference } from "@/lib/types/entity-reference";
+import type { MessageHistoryEntry } from "./message-history";
 
 export type TipTapInputHandle = {
   focus: () => void;
@@ -39,69 +46,11 @@ export type TipTapInputHandle = {
   insertText: (text: string, from: number, to: number) => void;
   getMentions: () => ContextFile[];
   getTaskMentions: () => TaskMentionData[];
+  getEntityReferences: () => EntityReference[];
 };
 
 const lowlightInstance = createLowlight(common);
 export const TIPTAP_EDITOR_TEXT_SIZE_CLASS = "text-base leading-relaxed lg:text-sm";
-
-/**
- * Custom Placeholder extension that reads the current placeholder from
- * editor.storage instead of from the captured options object. TipTap's
- * extension.options is a getter returning a fresh object each call, so the
- * built-in Placeholder plugin's closure captures a stale options snapshot.
- * This wrapper uses editor.storage.dynamicPlaceholder.text as the live source.
- */
-const DynamicPlaceholder = Extension.create({
-  name: "dynamicPlaceholder",
-
-  addStorage() {
-    return { text: "" };
-  },
-
-  addProseMirrorPlugins() {
-    const editor = this.editor;
-    return [
-      new Plugin({
-        key: new PluginKey("dynamicPlaceholder"),
-        props: {
-          decorations: ({ doc, selection }) => {
-            if (!editor.isEditable && !editor.isEmpty) return null;
-            const { anchor } = selection;
-            const decorations: InstanceType<typeof Decoration>[] = [];
-            const isEmptyDoc = editor.isEmpty;
-            doc.descendants((node: ProseMirrorNode, pos: number) => {
-              const hasAnchor = anchor >= pos && anchor <= pos + node.nodeSize;
-              const isEmpty = !node.isLeaf && isNodeEmpty(node);
-              if (hasAnchor && isEmpty) {
-                const classes = ["is-empty"];
-                if (isEmptyDoc) classes.push("is-editor-empty");
-                decorations.push(
-                  Decoration.node(pos, pos + node.nodeSize, {
-                    class: classes.join(" "),
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    "data-placeholder": (editor.storage as any).dynamicPlaceholder.text,
-                  }),
-                );
-              }
-              return false;
-            });
-            return DecorationSet.create(doc, decorations);
-          },
-        },
-      }),
-    ];
-  },
-});
-
-/** Update the dynamic placeholder text and trigger a redecoration. Extracted to a
- *  standalone function so that the eslint react-hooks/immutability rule does not
- *  flag it as a mutation of the `editor` hook argument. */
-function updateDynamicPlaceholder(ed: ReturnType<typeof useEditor>, text: string) {
-  if (!ed) return;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (ed.storage as any).dynamicPlaceholder.text = text;
-  ed.view.dispatch(ed.state.tr);
-}
 
 type UseTipTapEditorOptions = {
   value: string;
@@ -121,6 +70,8 @@ type UseTipTapEditorOptions = {
   mentionSuggestion: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   slashSuggestion: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  entityReferenceSuggestion?: any;
   slashCommands: readonly SlashCommand[];
   /** True when a slash/@ suggestion menu is open with selectable items. Enter
    *  must defer to the suggestion plugin so the highlighted item is inserted
@@ -129,7 +80,7 @@ type UseTipTapEditorOptions = {
   /** Returns the user's previous messages for this session, newest-first. The
    *  caller maintains the actual list; the editor reads it on each keypress so
    *  ArrowUp/ArrowDown navigate the latest history without prop churn. */
-  getHistory: () => readonly string[];
+  getHistory: () => readonly MessageHistoryEntry[];
   /** Open the Ctrl+R fuzzy search overlay. The overlay lives in the parent
    *  component (so it can position itself relative to the editor) — the editor
    *  only knows when to open it. */
@@ -192,11 +143,13 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
   };
 }
 
-function buildEditorExtensions(args: {
+export function buildEditorExtensions(args: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mentionSuggestion: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   slashSuggestion: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  entityReferenceSuggestion?: any;
   submitKeymap: Extension;
   historyKeymap: Extension;
 }) {
@@ -214,8 +167,13 @@ function buildEditorExtensions(args: {
     }).configure({ lowlight: lowlightInstance }),
     DynamicPlaceholder,
     SlashCommandNode,
+    EntityReferenceNode,
     ContextMention.configure({
-      suggestions: [args.mentionSuggestion, args.slashSuggestion],
+      suggestions: [
+        args.mentionSuggestion,
+        args.slashSuggestion,
+        ...(args.entityReferenceSuggestion ? [args.entityReferenceSuggestion] : []),
+      ],
     }),
     args.submitKeymap,
     args.historyKeymap,
@@ -285,6 +243,7 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
     extensions: buildEditorExtensions({
       mentionSuggestion: opts.mentionSuggestion,
       slashSuggestion: opts.slashSuggestion,
+      entityReferenceSuggestion: opts.entityReferenceSuggestion,
       submitKeymap: SubmitKeymap,
       historyKeymap: historyController.extension,
     }),
@@ -587,6 +546,7 @@ function useEditorImperativeHandle(
         });
         return mentions;
       },
+      getEntityReferences: () => (editor ? extractEntityReferences(editor.getJSON()) : []),
     }),
     [editor, onChange, isSyncingRef],
   );

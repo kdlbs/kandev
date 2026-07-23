@@ -3,7 +3,10 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { MessageSendError } from "@/lib/chat/message-send-error";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useQueue } from "./domains/session/use-queue";
-import type { MessageAttachment } from "@/components/task/chat/chat-input-container";
+import type {
+  ChatSubmitPayload,
+  MessageAttachment,
+} from "@/components/task/chat/chat-input-container";
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { PlanComment } from "@/lib/state/slices/comments";
 import { toBlockquote } from "@/lib/state/slices/comments/format";
@@ -11,6 +14,7 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 import type { CustomPrompt, Message } from "@/lib/types/http";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { AppState } from "@/lib/state/store";
+import type { EntityReference } from "@/lib/types/entity-reference";
 import {
   collectPromptReferenceExpansions,
   formatPromptReferenceExpansions,
@@ -154,6 +158,7 @@ type SendMessagePayload = {
   hasReviewComments?: boolean;
   attachments?: MessageAttachment[];
   contextFilesMeta?: Array<{ path: string; name: string }>;
+  entityReferences?: EntityReference[];
 };
 
 export async function sendMessageRequest(
@@ -176,6 +181,7 @@ export async function sendMessageRequest(
     hasReviewComments,
     attachments,
     contextFilesMeta,
+    entityReferences,
   } = payload;
   const hasAttachments = attachments && attachments.length > 0;
 
@@ -190,6 +196,7 @@ export async function sendMessageRequest(
       ...(hasReviewComments && { has_review_comments: true }),
       ...(hasAttachments && { attachments }),
       ...(contextFilesMeta && { context_files: contextFilesMeta }),
+      ...(entityReferences && { entity_references: entityReferences }),
     },
     hasAttachments ? 30000 : 10000,
   );
@@ -227,13 +234,7 @@ export function useMessageHandler({
   );
 
   const handleSendMessage = useCallback(
-    async (
-      message: string,
-      attachments?: MessageAttachment[],
-      hasReviewComments?: boolean,
-      inlineMentions?: ContextFile[],
-      inlineTaskMentions?: TaskMentionData[],
-    ) => {
+    async (payload: ChatSubmitPayload) => {
       if (!taskId || !resolvedSessionId) {
         const error = new MessageSendError(
           "no-active-session",
@@ -244,9 +245,9 @@ export function useMessageHandler({
       }
 
       const { finalMessage, allContextFiles } = buildFinalMessage(
-        message,
-        inlineMentions,
-        inlineTaskMentions,
+        payload.message,
+        payload.inlineMentions,
+        payload.inlineTaskMentions,
       );
       const modelToSend = activeModel && activeModel !== sessionModel ? activeModel : undefined;
       const realFiles = allContextFiles.filter(
@@ -256,14 +257,21 @@ export function useMessageHandler({
         realFiles.length > 0 ? realFiles.map((f) => ({ path: f.path, name: f.name })) : undefined;
 
       if (isAgentBusy) {
-        const queueAttachments = attachments?.map((att) => ({
+        const queueAttachments = payload.attachments?.map((att) => ({
           type: att.type,
           data: att.data,
           mime_type: att.mime_type,
           name: att.name,
           delivery_mode: att.delivery_mode,
         }));
-        await queue(taskId, finalMessage, modelToSend, planModeEnabled, queueAttachments);
+        await queue({
+          taskId,
+          content: finalMessage,
+          model: modelToSend,
+          planMode: planModeEnabled,
+          attachments: queueAttachments,
+          entityReferences: payload.entityReferences,
+        });
         return;
       }
 
@@ -276,9 +284,10 @@ export function useMessageHandler({
         finalMessage,
         modelToSend,
         planMode: planModeEnabled,
-        hasReviewComments,
-        attachments,
+        hasReviewComments: !!payload.reviewComments?.length,
+        attachments: payload.attachments,
         contextFilesMeta,
+        entityReferences: payload.entityReferences,
       });
       if (created && created.id && created.session_id) {
         storeApi.getState().addMessage(created);

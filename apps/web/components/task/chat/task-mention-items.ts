@@ -4,21 +4,23 @@ import type { AppState } from "@/lib/state/store";
 type TaskLike = AppState["kanban"]["tasks"][number];
 
 function buildWorkflowNameMap(state: AppState): Map<string, string> {
-  const m = new Map<string, string>();
-  for (const w of state.workflows.items) m.set(w.id, w.name);
-  for (const [wfId, snap] of Object.entries(state.kanbanMulti.snapshots)) {
-    if (!m.has(wfId) && snap.workflowName) m.set(wfId, snap.workflowName);
+  const names = new Map<string, string>();
+  for (const workflow of state.workflows.items) names.set(workflow.id, workflow.name);
+  for (const [workflowId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
+    if (!names.has(workflowId) && snapshot.workflowName) {
+      names.set(workflowId, snapshot.workflowName);
+    }
   }
-  return m;
+  return names;
 }
 
 function buildStepTitleMap(state: AppState): Map<string, string> {
-  const m = new Map<string, string>();
-  for (const s of state.kanban.steps) m.set(s.id, s.title);
-  for (const snap of Object.values(state.kanbanMulti.snapshots)) {
-    for (const s of snap.steps ?? []) m.set(s.id, s.title);
+  const titles = new Map<string, string>();
+  for (const step of state.kanban.steps) titles.set(step.id, step.title);
+  for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
+    for (const step of snapshot.steps ?? []) titles.set(step.id, step.title);
   }
-  return m;
+  return titles;
 }
 
 function toMentionItem(
@@ -61,17 +63,14 @@ export function buildTaskMentionItems(
   };
 
   if (state.kanban.workflowId) {
-    // Guard against stale tasks left over from a previous workflow: only add
-    // entries whose workflowStepId belongs to the current workflow's steps,
-    // since we tag them with state.kanban.workflowId here.
-    const activeStepIds = new Set(state.kanban.steps.map((s) => s.id));
-    for (const t of state.kanban.tasks) {
-      if (activeStepIds.size > 0 && !activeStepIds.has(t.workflowStepId)) continue;
-      addTask(t, state.kanban.workflowId);
+    const activeStepIds = new Set(state.kanban.steps.map((step) => step.id));
+    for (const task of state.kanban.tasks) {
+      if (activeStepIds.size > 0 && !activeStepIds.has(task.workflowStepId)) continue;
+      addTask(task, state.kanban.workflowId);
     }
   }
-  for (const [wfId, snap] of Object.entries(state.kanbanMulti.snapshots)) {
-    for (const t of snap.tasks) addTask(t, wfId);
+  for (const [workflowId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
+    for (const task of snapshot.tasks) addTask(task, workflowId);
   }
 
   return items;
