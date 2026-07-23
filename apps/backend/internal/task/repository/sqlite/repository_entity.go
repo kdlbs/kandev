@@ -174,6 +174,30 @@ func (r *Repository) GetRepositoryByProviderInfo(ctx context.Context, workspaceI
 	return repository, err
 }
 
+// GetRepositoryByLocalPath finds a live repository by workspace and canonical
+// local_path. Returns nil, nil if not found. Mirrors GetRepositoryByProviderInfo
+// so local-path resolution can do the same lookup-then-create as provider-URL
+// resolution instead of trusting a possibly-stale in-memory snapshot.
+func (r *Repository) GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error) {
+	repository := &models.Repository{}
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_owner,
+		       provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script, copy_files, created_at, updated_at, deleted_at
+		FROM repositories
+		WHERE workspace_id = ? AND local_path = ? AND local_path != '' AND deleted_at IS NULL
+		ORDER BY created_at ASC
+		LIMIT 1
+	`), workspaceID, localPath).Scan(
+		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
+		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderHost, &repository.ProviderOwner, &repository.ProviderName, &repository.RemoteURL,
+		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.WorktreeBranchTemplate, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CopyFiles, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return repository, err
+}
+
 // CreateRepositoryScript creates a new repository script
 func (r *Repository) CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error {
 	if script.ID == "" {

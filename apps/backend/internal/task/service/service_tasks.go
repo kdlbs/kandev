@@ -612,9 +612,12 @@ func pathAtOrInsideRoot(path, root string) bool {
 }
 
 // resolveRepoInputLocal handles the LocalPath branch of resolveRepoInput.
-// Looks the path up in the workspace snapshot; on miss, calls
-// CreateRepository (and reports created=true). Extracted to keep
-// resolveRepoInput inside the cyclomatic-complexity budget.
+// Looks the path up in the workspace snapshot first; on miss, delegates to
+// FindOrCreateRepositoryByLocalPath, which re-checks the canonical path
+// against the database immediately before inserting (see repoResolveMu) so a
+// second resolver racing this one onto the same on-disk repo reuses its row
+// instead of creating a sibling duplicate. Extracted to keep resolveRepoInput
+// inside the cyclomatic-complexity budget.
 func (s *Service) resolveRepoInputLocal(
 	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput,
 	repoByPath map[string]*models.Repository, baseBranch string,
@@ -651,22 +654,30 @@ func (s *Service) resolveRepoInputLocal(
 				defaultBranch = probedBranch
 			}
 		}
-		createdRepo, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
+		// identityPath is left empty when canonicalization failed: there is no
+		// reliable identity to dedupe against in that case, so
+		// FindOrCreateRepositoryByLocalPath always creates — same as prior
+		// behavior for that edge case.
+		var identityPath string
+		if pathErr == nil {
+			identityPath = canonicalPath
+		}
+		resolved, wasCreated, resolveErr := s.FindOrCreateRepositoryByLocalPath(ctx, workspaceID, identityPath, &CreateRepositoryRequest{
 			WorkspaceID:   workspaceID,
 			Name:          name,
 			SourceType:    "local",
 			LocalPath:     repoInput.LocalPath,
 			DefaultBranch: defaultBranch,
 		})
-		if createErr != nil {
-			return "", "", false, createErr
+		if resolveErr != nil {
+			return "", "", false, resolveErr
 		}
-		repo = createdRepo
+		repo = resolved
 		if repoByPath != nil {
 			repoByPath[repoInput.LocalPath] = repo
 			repoByPath[repo.LocalPath] = repo
 		}
-		created = true
+		created = wasCreated
 	} else {
 		replacement, replacementCreated, replaceErr := s.replaceTaskWorktreeRepositoryMatch(ctx, workspaceID, repo)
 		if replaceErr != nil {
