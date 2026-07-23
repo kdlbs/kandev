@@ -67,6 +67,115 @@ func seedTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessi
 	}
 }
 
+func TestCreateStartSession_KanbanRunnerCreatesDistinctSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-kanban", Name: "Kanban", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-kanban", WorkspaceID: "ws-kanban", Name: "Kanban", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-kanban"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-kanban", WorkspaceID: "ws-kanban", WorkflowID: "wf-kanban", WorkflowStepID: "step-kanban",
+		Title: "Kanban task", State: v1.TaskStateInProgress, AssigneeAgentProfileID: "copilot-runner",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "existing-session", TaskID: "task-kanban", AgentProfileID: "copilot-runner",
+		State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create existing session: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-kanban")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.IsFromOffice {
+		t.Fatal("kanban task unexpectedly projected as office-owned")
+	}
+	if task.AssigneeAgentProfileID != "copilot-runner" {
+		t.Fatalf("runner = %q, want copilot-runner", task.AssigneeAgentProfileID)
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	isOffice, err := svc.lookupOfficeTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("lookup office task: %v", err)
+	}
+	if isOffice {
+		t.Fatal("kanban task with a runner was classified as office-owned")
+	}
+	sessionID, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	if err != nil {
+		t.Fatalf("create start session: %v", err)
+	}
+	if sessionID == "existing-session" {
+		t.Fatal("kanban launch reused the running runner session instead of creating a distinct session")
+	}
+}
+
+func TestCreateStartSession_OfficeRunnerReusesPersistentSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-office", Name: "Office", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-office", WorkspaceID: "ws-office", Name: "Office", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-office-start"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-office", WorkspaceID: "ws-office", WorkflowID: "wf-office", WorkflowStepID: "step-office-start",
+		Title: "Office task", State: v1.TaskStateInProgress, ProjectID: "office-project", AssigneeAgentProfileID: "copilot-runner",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "existing-office-session", TaskID: "task-office", AgentProfileID: "copilot-runner",
+		State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create existing session: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-office")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if !task.IsFromOffice {
+		t.Fatal("office task was not projected as office-owned")
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	isOffice, err := svc.lookupOfficeTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("lookup office task: %v", err)
+	}
+	if !isOffice {
+		t.Fatal("office-owned assigned task was not classified as office")
+	}
+	sessionID, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	if err != nil {
+		t.Fatalf("create start session: %v", err)
+	}
+	if sessionID != "existing-office-session" {
+		t.Fatalf("office launch session = %q, want existing-office-session", sessionID)
+	}
+}
+
 func newCoordinatorStopTestService(
 	repo repoStore,
 	taskRepo scheduler.TaskRepository,

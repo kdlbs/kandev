@@ -144,7 +144,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
               aria-hidden={panel.isOpen}
               tabIndex={panel.isOpen ? -1 : undefined}
               className={cn(
-                "fixed bottom-6 right-6 z-50 h-12 w-12 cursor-pointer rounded-full shadow-lg",
+                "fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 h-12 w-12 cursor-pointer rounded-full shadow-lg",
                 panel.isOpen && "pointer-events-none opacity-0",
               )}
               aria-label="Configuration Chat"

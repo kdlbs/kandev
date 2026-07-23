@@ -1069,6 +1069,31 @@ func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Tas
 	return r.scanTasks(rows)
 }
 
+// ListArchivedTasksWithActiveSessions returns the IDs of archived tasks that
+// still have at least one task_sessions row in an active DB state
+// (CREATED/STARTING/RUNNING/WAITING_FOR_INPUT). This is the candidate list
+// for the periodic reconciliation sweep (see
+// service.StartArchivedSessionReconciliationLoop): finalizeCancelledSessions
+// bounds its session-cancellation retry to a handful of attempts, so
+// sustained SQLite writer contention can exhaust it and leave an archived
+// task's sessions stuck active with no session.state_changed event ever
+// delivered. The sweep re-derives this list every pass, so a later attempt
+// recovers the task once the contention clears.
+func (r *Repository) ListArchivedTasksWithActiveSessions(ctx context.Context) ([]string, error) {
+	var ids []string
+	err := r.ro.SelectContext(ctx, &ids, `
+		SELECT DISTINCT t.id
+		FROM tasks t
+		JOIN task_sessions ts ON ts.task_id = t.id
+		WHERE t.archived_at IS NOT NULL
+			AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+	`)
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 // ListExpiredQuickChatTasks returns quick-chat tasks whose last task/session
 // activity is older than cutoff. Active sessions are excluded so in-use chats
 // are never deleted by the idle sweeper.

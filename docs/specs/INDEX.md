@@ -120,6 +120,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
+| [app-status-bar](ui/app-status-bar.md) | draft |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
 | [agent-message-comments](ui/agent-message-comments.md) | shipped |

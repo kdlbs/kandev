@@ -73,6 +73,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontSize            *int
 	ChangesPanelLayout          *string
 	SystemMetricsDisplay        *models.SystemMetricsDisplaySettings
+	AppStatusBarOrder           *models.AppStatusBarOrder
 	VoiceMode                   *models.VoiceModeSettings
 }
 
@@ -247,6 +248,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	}
 	if req.SystemMetricsDisplay != nil {
 		settings.SystemMetricsDisplay = *req.SystemMetricsDisplay
+	}
+	if req.AppStatusBarOrder != nil {
+		settings.AppStatusBarOrder = *req.AppStatusBarOrder
 	}
 	if req.TerminalFontFamily != nil {
 		settings.TerminalFontFamily = strings.TrimSpace(*req.TerminalFontFamily)
@@ -607,6 +611,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"terminal_font_size":              settings.TerminalFontSize,
 		"changes_panel_layout":            settings.ChangesPanelLayout,
 		"system_metrics_display":          settings.SystemMetricsDisplay,
+		"app_status_bar_order":            settings.AppStatusBarOrder,
 		"voice_mode":                      settings.VoiceMode,
 		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
 	}

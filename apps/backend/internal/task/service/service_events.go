@@ -39,6 +39,92 @@ func (s *Service) PublishTaskDeleted(ctx context.Context, task *models.Task) {
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
 }
 
+// Field names shared by every session.state_changed publish in this file —
+// extracted to satisfy goconst without borrowing unrelated constants.
+const (
+	sessionEventFieldTaskID    = "task_id"
+	sessionEventFieldSessionID = "session_id"
+	sessionEventFieldUpdatedAt = "updated_at"
+	sessionEventFieldName      = "name"
+)
+
+// publishSessionsCancelled publishes a session.state_changed event for each
+// session in cancelledSessions — the full rows CancelActiveTaskSessionsByTaskID's
+// UPDATE ... RETURNING already produced. The event's old_state is a
+// best-effort hint from snapshot (the pre-cancellation session list a
+// caller already had in hand) — used only for logging/diagnostics — while
+// every other field, including new_state, comes directly from the returned
+// row.
+//
+// This used to re-read each session via GetTaskSession after the UPDATE
+// committed, which raced: if that lookup failed or timed out after commit,
+// the CANCELLED transition was permanent but its event was silently lost
+// (see the now-closed "Cancelled events escape reconciliation" review
+// thread, PR #1891 comment 3638052588). Building the payload straight from
+// cancelledSessions closes that gap structurally — there is no longer a
+// separate post-commit read to race, so a session in cancelledSessions can
+// no longer "vanish" between the write and the publish.
+//
+// ctx is expected to be detached-but-unbounded (callers typically pass a
+// context.WithoutCancel derivative with no deadline of its own): each
+// session in cancelledSessions gets its own independent 10-second timeout
+// around the Publish call below, rather than the whole batch sharing one
+// deadline. That way a single slow synchronous event subscriber can only
+// ever starve its own session's publish, not the events for every session
+// that comes after it in cancelledSessions.
+//
+// CancelActiveTaskSessionsByTaskID is a repository-level DB write with no
+// event of its own; without this, any client cache kept fresh exclusively by
+// session.state_changed (e.g. an Office task list's "is running" indicator)
+// never learns the session left RUNNING/WAITING_FOR_INPUT and spins forever.
+func (s *Service) publishSessionsCancelled(
+	ctx context.Context,
+	taskID string,
+	snapshot []*models.TaskSession,
+	cancelledSessions []*models.TaskSession,
+	reason string,
+) {
+	if s.eventBus == nil {
+		return
+	}
+	oldStateByID := make(map[string]models.TaskSessionState, len(snapshot))
+	for _, sess := range snapshot {
+		if sess != nil {
+			oldStateByID[sess.ID] = sess.State
+		}
+	}
+	for _, sess := range cancelledSessions {
+		sessCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		data := map[string]interface{}{
+			sessionEventFieldTaskID:    taskID,
+			sessionEventFieldSessionID: sess.ID,
+			"old_state":                string(oldStateByID[sess.ID]),
+			"new_state":                string(sess.State),
+			"error_message":            reason,
+			"agent_profile_id":         sess.AgentProfileID,
+			"agent_profile_snapshot":   sess.AgentProfileSnapshot,
+			"is_passthrough":           sess.IsPassthrough,
+			sessionEventFieldUpdatedAt: sess.UpdatedAt.Format(time.RFC3339Nano),
+			sessionEventFieldName:      sess.Name,
+		}
+		if sess.ReviewStatus != models.ReviewStatusNone {
+			data["review_status"] = string(sess.ReviewStatus)
+		}
+		if len(sess.Metadata) > 0 {
+			data["session_metadata"] = sess.Metadata
+		}
+		if sess.TaskEnvironmentID != "" {
+			data["task_environment_id"] = sess.TaskEnvironmentID
+		}
+		event := bus.NewEvent(events.TaskSessionStateChanged, "task-service", data)
+		if err := s.eventBus.Publish(sessCtx, events.TaskSessionStateChanged, event); err != nil {
+			s.logger.Error("failed to publish session cancellation event",
+				zap.String(sessionEventFieldTaskID, taskID), zap.String(sessionEventFieldSessionID, sess.ID), zap.Error(err))
+		}
+		cancel()
+	}
+}
+
 // publishTaskEvent publishes task events to the event bus
 func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, oldWorkflowIDs ...string) {
 	s.publishTaskEventWithExtra(ctx, eventType, task, oldState, nil, oldWorkflowIDs...)

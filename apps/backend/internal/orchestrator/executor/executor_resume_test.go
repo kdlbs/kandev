@@ -120,6 +120,21 @@ func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing
 	}
 }
 
+func TestWriteTaskInProgressForRuntime_KanbanRunnerUpdatesTaskState(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.tasks["task-1"].AssigneeAgentProfileID = "copilot-runner"
+	repo.sessions["sess-1"].State = models.TaskSessionStateRunning
+
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	if err := exec.writeTaskInProgressForRuntime(context.Background(), "task-1", "sess-1"); err != nil {
+		t.Fatalf("writeTaskInProgressForRuntime: %v", err)
+	}
+	if len(repo.updateTaskStateIfNotArchivedCalls) != 1 {
+		t.Fatalf("runtime state writes = %d, want 1", len(repo.updateTaskStateIfNotArchivedCalls))
+	}
+}
+
 // TestResumeSession_LiveAgentReturnsAlreadyRunning ensures ResumeSession returns
 // ErrExecutionAlreadyRunning instead of killing the live agent subprocess when
 // a live agent is already registered for the session.

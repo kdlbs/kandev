@@ -29,8 +29,16 @@ type UseUtilityAgentGeneratorOptions = {
   taskDescription?: string;
 };
 
+export type UtilityGenerationResult = {
+  content: string;
+  callId?: string;
+  durationMs?: number;
+};
+
+type ResultDelivery = (result: UtilityGenerationResult) => boolean | Promise<boolean>;
+
 type GenerateOptions = {
-  onSuccess?: (content: string) => void;
+  onSuccess?: ResultDelivery;
   // Additional context for PR description
   commitLog?: string;
   diffSummary?: string;
@@ -105,24 +113,27 @@ export function useUtilityAgentGenerator({
       setGenerating((prev) => new Set(prev).add(type));
       try {
         const resp = await executeUtilityPrompt(buildRequest(type, options));
-        clearType(type);
-        if (resp.success && resp.response) {
-          const response = resp.response;
-          requestAnimationFrame(() => options?.onSuccess?.(response));
-        } else {
+        if (!resp.success || !resp.response) {
           toast({
             title: "Generation failed",
             description: resp.error || "Failed to generate content",
             variant: "error",
           });
+          return;
         }
+        await options?.onSuccess?.({
+          content: resp.response,
+          callId: resp.call_id,
+          durationMs: resp.duration_ms,
+        });
       } catch (error) {
-        clearType(type);
         toast({
           title: "Generation failed",
           description: error instanceof Error ? error.message : "Unknown error",
           variant: "error",
         });
+      } finally {
+        clearType(type);
       }
     },
     [sessionId, buildRequest, clearType, toast],
@@ -136,18 +147,36 @@ function useGeneratorCallbacks(
   generating: Set<GeneratorType>,
 ) {
   const generateCommitMessage = useCallback(
-    (onSuccess: (message: string) => void) => generate("commit-message", { onSuccess }),
+    (onSuccess: (message: string) => void) =>
+      generate("commit-message", {
+        onSuccess: (result) => {
+          onSuccess(result.content);
+          return true;
+        },
+      }),
     [generate],
   );
 
   const generateCommitDescription = useCallback(
-    (onSuccess: (description: string) => void) => generate("commit-description", { onSuccess }),
+    (onSuccess: (description: string) => void) =>
+      generate("commit-description", {
+        onSuccess: (result) => {
+          onSuccess(result.content);
+          return true;
+        },
+      }),
     [generate],
   );
 
   const generatePRTitle = useCallback(
     (onSuccess: (title: string) => void, extra?: { commitLog?: string; diffSummary?: string }) =>
-      generate("pr-title", { onSuccess, ...extra }),
+      generate("pr-title", {
+        ...extra,
+        onSuccess: (result) => {
+          onSuccess(result.content);
+          return true;
+        },
+      }),
     [generate],
   );
 
@@ -155,12 +184,19 @@ function useGeneratorCallbacks(
     (
       onSuccess: (description: string) => void,
       extra?: { commitLog?: string; diffSummary?: string },
-    ) => generate("pr-description", { onSuccess, ...extra }),
+    ) =>
+      generate("pr-description", {
+        ...extra,
+        onSuccess: (result) => {
+          onSuccess(result.content);
+          return true;
+        },
+      }),
     [generate],
   );
 
   const enhancePrompt = useCallback(
-    (userPrompt: string, onSuccess: (enhanced: string) => void) =>
+    (userPrompt: string, onSuccess: ResultDelivery) =>
       generate(ENHANCE_PROMPT, { onSuccess, userPrompt }),
     [generate],
   );

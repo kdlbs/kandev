@@ -18,6 +18,7 @@ import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executo
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { ExecutorProfile } from "@/lib/types/http";
+import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { buildHandoffInitialState, type HandoffPreset } from "./handoff-types";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
@@ -166,25 +167,53 @@ function useHandoffAutoSummarize(
   }, [handoff, contextValue, onContextChange]);
 }
 
-function useSessionPromptEnhancer(
+export function useSessionPromptController(
   promptRef: RefObject<HTMLTextAreaElement | null>,
+  promptValue: string,
+  setPromptValue: (value: string) => void,
   setHasPrompt: (value: boolean) => void,
+  taskId: string,
 ) {
+  const { toast } = useToast();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({ sessionId: null });
-
-  const handleEnhancePrompt = useCallback(() => {
-    const current = promptRef.current?.value?.trim();
-    if (!current) return;
-
-    enhancePrompt(current, (enhanced) => {
-      if (promptRef.current) {
-        promptRef.current.value = enhanced;
-        setHasPrompt(true);
+  const latestPromptValueRef = useRef(promptValue);
+  latestPromptValueRef.current = promptValue;
+  const promptResultDelivery = usePromptResultDelivery({
+    scopeKey: `new-session:${taskId}`,
+    getCurrent: () => latestPromptValueRef.current,
+    apply: (value) => {
+      if (!promptRef.current) {
+        return false;
       }
-    });
-  }, [enhancePrompt, promptRef, setHasPrompt]);
 
-  return { handleEnhancePrompt, isEnhancingPrompt };
+      setPromptValue(value);
+      setHasPrompt(value.trim().length > 0);
+      return true;
+    },
+  });
+
+  const handleEnhancePrompt = useCallback(async () => {
+    const current = latestPromptValueRef.current;
+    if (!current.trim()) return;
+    const generation = promptResultDelivery.captureScope();
+
+    await enhancePrompt(current, (enhanced) => {
+      const delivered = promptResultDelivery.deliver(current, enhanced, generation);
+      if (delivered) {
+        toast({ description: "Enhanced prompt applied.", variant: "success" });
+      }
+
+      return delivered;
+    });
+  }, [enhancePrompt, promptResultDelivery, toast]);
+
+  return {
+    handleEnhancePrompt,
+    isEnhancingPrompt,
+    pendingResult: promptResultDelivery.pendingResult,
+    applyPending: promptResultDelivery.applyPending,
+    copyPending: promptResultDelivery.copyPending,
+  };
 }
 
 function shouldDisableSubmit(
@@ -338,6 +367,28 @@ function NewSessionForm({
   const [hasPrompt, setHasPrompt] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [promptValue, setPromptValue] = useState("");
+  const latestPromptValueRef = useRef(promptValue);
+  latestPromptValueRef.current = promptValue;
+  const controlledPromptRef = useMemo<RefObject<HTMLTextAreaElement | null>>(
+    () => ({
+      get current() {
+        if (!promptRef.current) {
+          return null;
+        }
+
+        return {
+          get value() {
+            return latestPromptValueRef.current;
+          },
+          set value(value: string) {
+            setPromptValue(value);
+          },
+        } as HTMLTextAreaElement;
+      },
+    }),
+    [],
+  );
   const busySignal = Number(isCreating) + Number(isSummarizing);
   const isBusyState = busySignal > 0;
   const {
@@ -365,12 +416,10 @@ function NewSessionForm({
     selectedProfileId,
     setSelectedProfileId,
   });
-  const { handleEnhancePrompt, isEnhancingPrompt } = useSessionPromptEnhancer(
-    promptRef,
-    setHasPrompt,
-  );
+  const { handleEnhancePrompt, isEnhancingPrompt, pendingResult, applyPending, copyPending } =
+    useSessionPromptController(promptRef, promptValue, setPromptValue, setHasPrompt, taskId);
   const handleContextChange = useSessionContextChange({
-    promptRef,
+    promptRef: controlledPromptRef,
     initialPrompt,
     summarize,
     toast,
@@ -380,7 +429,7 @@ function NewSessionForm({
   useHandoffAutoSummarize(handoff, handoffInitial?.contextValue ?? "blank", handleContextChange);
 
   const handleSubmit = useSessionLaunchSubmit({
-    promptRef,
+    promptRef: controlledPromptRef,
     taskId,
     selectedProfileId,
     executorId,
@@ -425,6 +474,7 @@ function NewSessionForm({
       />
       <SessionPromptField
         promptRef={promptRef}
+        promptValue={promptValue}
         contextItems={contextItems}
         isBusy={isBusyState}
         isDragging={isDragging}
@@ -433,12 +483,18 @@ function NewSessionForm({
         hasProfiles={profileSelection.hasProfiles}
         isUtilityConfigured={isUtilityConfigured}
         isEnhancingPrompt={isEnhancingPrompt}
+        pendingResult={pendingResult}
         fileInputRef={fileInputRef}
-        onPromptInput={() => setHasPrompt(!!promptRef.current?.value?.trim())}
+        onPromptChange={(value) => {
+          setPromptValue(value);
+          setHasPrompt(value.trim().length > 0);
+        }}
         onPaste={handlePaste}
         onSubmit={handleSubmit}
         onAttachClick={handleAttachClick}
         onEnhancePrompt={handleEnhancePrompt}
+        onApplyPending={applyPending}
+        onCopyPending={copyPending}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -520,8 +576,8 @@ export function NewSessionDialog({
   const executorProfile = useTaskExecutorProfile(taskId, open);
   const handoffLabel = handoffProfileLabel(agentProfiles, handoff);
   const formKey = handoff
-    ? `${open}-${handoff.sourceSessionId}-${handoff.targetProfileId}`
-    : `${open}`;
+    ? `${taskId}-${open}-${handoff.sourceSessionId}-${handoff.targetProfileId}`
+    : `${taskId}-${open}`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

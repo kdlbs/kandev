@@ -4,6 +4,7 @@ import type { UserSettingsUpdatedPayload } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
   parseChangesPanelLayout,
+  parseAppStatusBarOrder,
   parseSystemMetricsDisplay,
   taskCreateLastUsedHasValue,
   parseVoiceMode,
@@ -35,6 +36,10 @@ function buildUserSettingsState(state: AppState, payload: UserSettingsUpdatedPay
     defaultUtilityAgentId: payload.default_utility_agent_id || null,
     keyboardShortcuts: payload.keyboard_shortcuts ?? {},
     changesPanelLayout: parseChangesPanelLayout(payload.changes_panel_layout),
+    appStatusBarOrder:
+      payload.app_status_bar_order === undefined
+        ? state.userSettings.appStatusBarOrder
+        : parseAppStatusBarOrder(payload.app_status_bar_order),
     systemMetricsDisplay: parseSystemMetricsDisplay(payload.system_metrics_display),
     voiceMode: parseVoiceMode(payload.voice_mode),
     loaded: true,

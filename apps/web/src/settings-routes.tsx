@@ -183,7 +183,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/system/feature-toggles": () => (
     <SystemPageShell
       title="Feature Toggles"
-      description="Enable or disable experimental and diagnostic Kandev features."
+      description="Manage Kandev feature and diagnostic switches."
     >
       <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
     </SystemPageShell>

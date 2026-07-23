@@ -601,6 +601,24 @@ func TestWSAddMessage_CreatedTaskSessionCanonicalizesStaleTaskContext(t *testing
 	assert.Equal(t, 1, strings.Count(content, sysprompt.TagStart))
 }
 
+func TestWSAddMessage_CreatedKanbanRunnerIncludesCoordinatorTaskControls(t *testing.T) {
+	now := time.Now().UTC()
+	content := runCreatedMessageContextTest(t, &models.Task{
+		ID:                     "t1",
+		State:                  v1.TaskStateInProgress,
+		AssigneeAgentProfileID: "kanban-runner",
+		UpdatedAt:              now,
+	}, &models.TaskSession{
+		ID:             "s1",
+		TaskID:         "t1",
+		State:          models.TaskSessionStateCreated,
+		AgentProfileID: "profile-1",
+		UpdatedAt:      now,
+	}, "Do the work")
+	assert.Contains(t, content, "stop_task_kandev",
+		"Kanban sessions retain coordinator task controls even with a projected runner")
+}
+
 func TestWSAddMessage_CreatedConfigSessionOmitsCoordinatorTaskControls(t *testing.T) {
 	now := time.Now().UTC()
 	content := runCreatedMessageContextTest(t, &models.Task{
