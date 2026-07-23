@@ -97,8 +97,8 @@ When a Kandev system message references an MCP tool that is not visible in the a
 ### Planner and Worker Execution
 
 The user-started primary session is the planner and default architect: it owns
-clarification, architecture, specs, plans, task decomposition, integration
-judgment, and user communication. It may directly perform small scoped work
+clarification, first-pass investigation, architecture, specs, plans, task
+decomposition, integration judgment, and user communication. It may directly perform small scoped work
 when one clear concern touches a few localized files, has no useful isolation or
 parallelism benefit, and has quick bounded verification. Follow the applicable
 skill, protect unrelated dirty changes, and obtain delegated Spark `verify`
@@ -111,6 +111,8 @@ broad/unknown exploration, substantial plan tasks, large/cross-component work,
 parallel packets, long/noisy E2E or debugging, exceptional specialist review,
 and final change-aware `verify`. Keep long PR monitoring on cheap `pr-poller`.
 Delegation is not default ceremony: weigh context reload and coordination cost.
+Do not delegate routine log/session inspection, call-path mapping, reproduction,
+waiting, or status reporting; investigate and report those directly first.
 Each delegated worker executes one bounded packet and does not spawn agents.
 Never use Kandev MCP task/session APIs as a delegation fallback. The architect
 agent is only for a user-requested independent architecture second opinion.

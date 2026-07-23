@@ -9,34 +9,16 @@ Systematic bug fixing: reproduce the problem, find the root cause, apply a minim
 
 ## Planner Entry
 
-For small, clear bugs, the planner may perform the bounded reproduction, TDD
-fix, and focused checks directly. Delegate broad diagnosis, large fixes, or
-independent work. In the user-started primary session:
-
-1. Delegate reproduction and root-cause diagnosis to an `implementer` worker
-   with production edits forbidden. It may create or update only the minimal
-   failing regression test when that test path is explicitly owned. This
-   diagnosis packet explicitly overrides the generic implementer workflow:
-   reproduce and trace, return evidence and root cause, do not patch production
-   code, and do not continue to Phase 3.
-2. Review the evidence and present the root cause to the user.
-3. Delegate the minimal production patch to an `implementer` worker. It
-   preserves or completes the diagnosis regression test and runs green targeted
-   verification without duplicating that test unnecessarily.
-4. Apply `/planner-orchestration` risk routing: for PR delivery, obtain
-   qualifying current-head PR AI semantic evidence, always run final `verify`,
-   and use local QA/review/security agents only for exceptional routes.
-
-Stop after dispatching and coordinating these assignments. Do not continue into
-the direct fix procedure below. A diagnostic worker performs phases 0-2 and
-returns evidence and root cause. It returns a red-test result when it owns a
-test path; otherwise it returns concrete reproduction evidence and a proposed
-regression-test scenario/path. Production code remains forbidden, and
-diagnostic instrumentation is test-only when owned or non-mutating. It must
-not continue to Phase 3. A fix implementer performs the minimal production
-patch, preserves or completes that regression test without unnecessary
-duplication, and runs targeted tests. No worker performs planner phases 4-5 or
-spawns other workers.
+For small, clear bugs, the planner performs the bounded reproduction,
+root-cause trace, TDD fix, and focused checks directly. It does not delegate
+first-pass logs, sessions, call-path mapping, or reproduction just because the
+issue is unfamiliar. Delegate only a concrete post-triage question requiring
+independent evidence, or a broad, large, or cross-component fix. A diagnostic
+worker may own an explicitly named regression test but not production edits; a
+patch worker owns the minimal production change and targeted verification.
+Apply `/planner-orchestration` risk routing: for PR delivery, obtain qualifying
+current-head PR AI semantic evidence, always run final `verify`, and use local
+QA/review/security agents only for exceptional routes. Workers do not spawn.
 
 ## Available skills and subagents
 

@@ -28,7 +28,10 @@ Spark `verify` after commit and before push for code, tests, or config. Supply
 the `/commit` hook receipt so changed-scope verification avoids only proven
 duplicate hook work.
 
-Delegate when ROI or independent evidence matters: broad/unknown exploration,
+The planner performs initial log/session inspection, call-path tracing, and
+reproduction directly. Do not delegate that first pass, waiting, or status
+relays. Delegate when ROI or independent evidence matters: broad/unknown exploration
+after local triage,
 substantial plan work, large/cross-component changes, parallel packets,
 long/noisy E2E or debugging, exceptional specialists, and final change-aware
 `verify`. Keep long monitoring with cheap `pr-poller`. Estimate context reload and

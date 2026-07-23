@@ -7,9 +7,9 @@ alwaysApply: false
 # Kandev PR Fixup
 
 Use `.agents/skills/pr-fixup/SKILL.md` for PR fixups. In a user-started primary
-session, delegate polling, remediation, verification, and delivery as separate
-bounded assignments. The commands below are worker procedures, not a fallback
-for the primary planner.
+session, directly triage small thread sets and scope-preserving fixes. Delegate
+only genuinely long polling or broad remediation; post-commit `verify` remains
+the separate final gate.
 
 If `pr-poller` reports that GitHub access requires approval, surface that gate
 to the user and stop. Do not relaunch polling after approval is denied,
