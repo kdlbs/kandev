@@ -353,11 +353,21 @@ func openIsolatedPostgresMultiConn(t *testing.T, dsn string, maxConns int) *sqlx
 		}
 	})
 
-	sep := "?"
-	if strings.Contains(dsn, "?") {
-		sep = "&"
+	// dsn is either a URL ("postgres://user:pass@host/db?sslmode=...") or a
+	// libpq keyword/value string ("host=... port=... sslmode=disable" —
+	// what CI's KANDEV_TEST_POSTGRES_DSN uses). Appending "?options=..." to
+	// the latter corrupts the last keyword's value instead of adding a new
+	// one, so the two forms need different separators.
+	var scopedDSN string
+	if strings.Contains(dsn, "://") {
+		sep := "?"
+		if strings.Contains(dsn, "?") {
+			sep = "&"
+		}
+		scopedDSN = dsn + sep + "options=" + url.QueryEscape("-c search_path="+schema)
+	} else {
+		scopedDSN = dsn + " options='-c search_path=" + schema + "'"
 	}
-	scopedDSN := dsn + sep + "options=" + url.QueryEscape("-c search_path="+schema)
 	db, err := sqlx.Open("pgx", scopedDSN)
 	if err != nil {
 		t.Fatalf("open postgres (scoped, %d conns): %v", maxConns, err)
